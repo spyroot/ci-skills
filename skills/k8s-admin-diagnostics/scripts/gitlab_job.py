@@ -11,9 +11,8 @@ def main() -> int:
     )
     cli.add_argument(
         "--job-url",
-        required=True,
         metavar="URL",
-        help="full HTTPS URL for one GitLab job",
+        help="full HTTPS URL for one GitLab job (required unless --describe)",
     )
     cli.add_argument("--search", metavar="TEXT", help="case-insensitive text filter")
     return execute(cli.parse_args(), collect_gitlab_job)

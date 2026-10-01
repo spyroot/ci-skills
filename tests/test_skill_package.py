@@ -86,7 +86,7 @@ def test_docs_define_gitlab_token_file_storage_contract():
 
     assert "gitlab.token_file" in combined
     assert "GITLAB_TOKEN" in combined
-    assert "~/.config/ci-skills/" in combined
+    assert "~/.ci-skills/" in combined
     assert "outside this repository" in combined
     assert "no fallback" in combined.casefold()
     assert "token =" not in combined

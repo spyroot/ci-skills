@@ -713,6 +713,8 @@ def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]
             {
                 "execution_host": target.sources.execution_host,
                 "captured_at": datetime.now(timezone.utc).isoformat(),
+                "target_file": str(target.source_file) if target.source_file else None,
+                "target_source": target.source_kind,
                 "tested_revision": target.tested_revision,
                 "skill": target.skill,
                 "consuming_project": (target.skill or {}).get("consuming_project"),

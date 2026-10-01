@@ -8,11 +8,13 @@ import os
 import socket
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .access import access_evidence, check_access, dry_run_access
+from .catalog import PROJECT_DIR, TARGET_FILENAME, describe
 from .credentials import bind_sources
 from .portable import portable
 from .report import emit
@@ -27,21 +29,110 @@ from .status import (
 )
 from .target import Target, TargetError, load_target
 
+# The documented per-host location. Keeping it here rather than in each script
+# means one answer to "where does the target live", and the script-interface
+# rule that a value the host already knows is not a required argument.
+# Rendered from the declared protocol so help text cannot drift from behaviour.
+# Rendered from the declared protocol so help text cannot drift from behaviour.
+DEFAULT_TARGET = f"~/{PROJECT_DIR}/{TARGET_FILENAME}"
+
+
+def _target_candidates() -> list[tuple[str, Path]]:
+    """Return the target search path, in declared order."""
+    candidates: list[tuple[str, Path]] = []
+    configured = (os.environ.get("CI_SKILLS_TARGET") or "").strip()
+    if configured:
+        candidates.append(("env:CI_SKILLS_TARGET", Path(configured).expanduser()))
+    candidates.append(("project", Path(PROJECT_DIR) / TARGET_FILENAME))
+    candidates.append(("user", Path(DEFAULT_TARGET).expanduser()))
+    return candidates
+
+
+def resolve_target(explicit: str | None) -> tuple[Path, str]:
+    """Resolve the target file and say which declared source supplied it.
+
+    First match wins. An explicit path that does not exist is an error rather
+    than a fallback: silently reading a different target than the one asked for
+    is how a command ends up aimed at the wrong cluster.
+    """
+    if explicit:
+        path = Path(explicit).expanduser()
+        if not path.is_file():
+            raise TargetError(f"target_file_missing:{path}")
+        return path, "argv:--target"
+    for source, path in _target_candidates():
+        if path.is_file():
+            return path, source
+    searched = ", ".join(str(path) for _source, path in _target_candidates())
+    raise TargetError(
+        "no_target_file. This skill RESOLVES a target; it cannot create one. "
+        "Copy target.toml.template to "
+        f"{DEFAULT_TARGET} and fill in your authorities, or have the calling "
+        "project supply one via --target or CI_SKILLS_TARGET. "
+        f"Searched: {searched}"
+    )
+
+
+def output_mode(args: argparse.Namespace) -> str:
+    """Choose the output format, defaulting to JSON for a non-terminal reader.
+
+    An agent should not have to discover `--json`. A human at a terminal wants
+    the summary; anything reading a pipe wants the machine-readable document,
+    and that is the overwhelmingly common case for this skill. So the default
+    follows the reader: a TTY gets `human`, a pipe or file gets `json`. The
+    three flags remain explicit overrides in both directions, `--human`
+    included, so a person piping into a pager still has a way to ask.
+    """
+    if args.json:
+        return "json"
+    if args.yaml:
+        return "yaml"
+    if getattr(args, "human", False):
+        return "human"
+    try:
+        interactive = sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        interactive = False
+    return "human" if interactive else "json"
+
 
 def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description=description,
-        epilog="Example: %(prog)s --target ~/.config/ci-skills/target.toml --json",
+        epilog=(
+            "Output: a terminal gets the human summary; a pipe or file gets "
+            "versioned JSON, so no flag is needed when a program reads this. "
+            "Force it with --json, --yaml or --human. "
+            "Exit 0 = PASS or DRY_RUN, 2 = BLOCKED or PARTIAL. "
+            "Run --describe for this command's machine-readable contract, or "
+            "see tools.json for the whole skill. "
+            f"Target resolves in order: --target, CI_SKILLS_TARGET, "
+            f"./{PROJECT_DIR}/{TARGET_FILENAME}, {DEFAULT_TARGET}. "
+            "Example: %(prog)s --json"
+        ),
     )
     result.add_argument(
         "--target",
-        required=True,
         metavar="PATH",
-        help="explicit nonsecret TOML target file",
+        default=None,
+        help=(
+            "nonsecret TOML target file "
+            f"(default: {DEFAULT_TARGET}, override with CI_SKILLS_TARGET)"
+        ),
     )
     modes = result.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print versioned JSON")
     modes.add_argument("--yaml", action="store_true", help="print versioned YAML")
+    modes.add_argument(
+        "--human",
+        action="store_true",
+        help="print the human summary even when stdout is not a terminal",
+    )
+    result.add_argument(
+        "--describe",
+        action="store_true",
+        help="print this command's machine-readable contract and exit",
+    )
     result.add_argument(
         "--dry-run",
         action="store_true",
@@ -98,9 +189,18 @@ def execute(
         if collect is None
         else kinds.get(collect.__name__, collect.__name__)
     )
+    if getattr(args, "describe", False):
+        contract = describe(Path(sys.argv[0]).name)
+        sys.stdout.write(json.dumps(contract, indent=2, sort_keys=True) + "\n")
+        return 0
     source = "target"
     try:
-        target = load_target(args.target)
+        target_path, target_source = resolve_target(args.target)
+        target = replace(
+            load_target(target_path),
+            source_file=target_path,
+            source_kind=target_source,
+        )
         publication = bool(getattr(args, "publication", False))
         if not args.dry_run:
             target = bind_sources(target, revision=getattr(args, "revision", None))
@@ -165,7 +265,7 @@ def execute(
                 encoding="utf-8",
             )
             os.replace(partial, destination)
-        mode = "json" if args.json else "yaml" if args.yaml else "human"
+        mode = output_mode(args)
         sys.stdout.write(emit(data, mode, getattr(args, "output_dir", None)))
         return exit_code(data["status"])
     except (

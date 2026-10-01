@@ -7,7 +7,6 @@ from core.cli import execute, parser
 def main() -> int:
     cli = parser(
         "Check every selected authority; dry run never counts as access.",
-        output_dir=False,
     )
     cli.add_argument(
         "--publication",

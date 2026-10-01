@@ -74,7 +74,13 @@ def _token_source(
 
 def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ...]]:
     """Pin the effective kubeconfig path set without assuming an auth type."""
-    if target.kubernetes.kubeconfig is not None:
+    if target.kubernetes.kubeconfigs:
+        # A declared search path needs no environment export, so a cold run
+        # cannot silently fall through to a different cluster's default
+        # kubeconfig.
+        paths = tuple(path.resolve() for path in target.kubernetes.kubeconfigs)
+        reference = "target:kubernetes.kubeconfigs"
+    elif target.kubernetes.kubeconfig is not None:
         paths = (target.kubernetes.kubeconfig.resolve(),)
         reference = f"file:{paths[0]}"
     elif "KUBECONFIG" in os.environ:

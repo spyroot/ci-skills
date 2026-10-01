@@ -3,7 +3,30 @@
 The installed skill contains instructions and code. Each execution host
 supplies a nonsecret target file and its own credentials. The target file
 identifies one exact GitHub repository, GitLab origin, Kubernetes context, and
-API server. Use `--target PATH`; no target location is assumed.
+API server.
+
+## Where the target file comes from
+
+Four declared places, first match wins, and the winner is reported back in
+every report as `target_file` and `target_source`:
+
+| # | Scope | Where | Source name |
+| --- | --- | --- | --- |
+| 1 | one command | `--target PATH` | `argv:--target` |
+| 2 | one environment | `$CI_SKILLS_TARGET` | `env:CI_SKILLS_TARGET` |
+| 3 | one project | `./.ci-skills/target.toml` | `project` |
+| 4 | one user | `~/.ci-skills/target.toml` | `user` |
+
+One cluster means filling in tier 4 once; many clusters mean tier 2 or tier 3,
+one target per cluster. A `--target` that does not exist is an error, never a
+fallback to a lower tier — a silent fallback would aim the run somewhere the
+caller did not ask for. `target.toml.template` in the repository root is the
+file to copy, and `core.catalog.TARGET_PROTOCOL` is the declaration this table
+and `tools.json` are both rendered from.
+
+This skill resolves; it does not provision. It creates no target file, mints no
+token and fetches no kubeconfig. Putting them there is the operator's job, or
+an explicit step in the calling project's own instructions.
 
 ## Effective credential sources
 
@@ -15,8 +38,14 @@ API server. Use `--target PATH`; no target location is assumed.
 - GitLab uses an explicit `gitlab.token_file`, then the effective
   `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable.
   Otherwise, the selected host's `glab` credential store is used.
-- Kubernetes uses an explicit `kubernetes.kubeconfig`, `KUBECONFIG`, or the
-  default kubeconfig. The selected context resolves the user and cluster.
+- Kubernetes uses an explicit `kubernetes.kubeconfigs` search path, then an
+  explicit `kubernetes.kubeconfig` single file, then `KUBECONFIG`, then the
+  default kubeconfig. Declare one of the first two: the default is usually a
+  DIFFERENT cluster, so a cold run aims elsewhere and only the server
+  comparison catches it. Use `kubeconfigs` when the context and the credential
+  live in separate files — a CA-verified overlay plus the file holding the
+  token — which needs no environment variable. The selected context resolves
+  the user and cluster.
   The user may use an embedded token, `tokenFile`, client certificate and
   key, or an exec provider. No separate token file is assumed.
 
@@ -32,11 +61,11 @@ Example nonsecret target:
 [github]
 host = "github.com"
 repository = "owner/repository"
-# token_file = "/home/operator/.config/ci-skills/github.token"
+# token_file = "/home/operator/.ci-skills/credentials/github.token"
 
 [gitlab]
 url = "https://gitlab.example.com"
-# token_file = "/home/operator/.config/ci-skills/gitlab.token"
+# token_file = "/home/operator/.ci-skills/credentials/gitlab.token"
 
 [kubernetes]
 context = "admin-context"

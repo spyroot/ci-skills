@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -29,6 +30,9 @@ from .target import Target, kubernetes_label
 # healthy cluster as a timeout, and the access gate read the timeout as a
 # denial, so list reads carry their own larger bound.
 LIST_TIMEOUT_SECONDS = 120
+
+# The window an event read covers when the caller names none.
+DEFAULT_WINDOW = timedelta(hours=1)
 
 
 def _read_json(
@@ -304,6 +308,27 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
     return result
 
 
+# A relative window is what an operator actually asks for -- "the last five
+# minutes" -- and computing an RFC3339 pair by hand is where the mistake goes.
+RELATIVE_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
+RELATIVE_PATTERN = re.compile(r"\A(\d+)([smhd])\Z")
+
+
+def parse_window(value: str) -> timedelta:
+    """Parse a relative duration such as `5m`, `90s`, `2h` or `7d`."""
+    # Not lowercased: `1M` most likely means one month, which this does not
+    # support, so it must be refused rather than read as one minute.
+    match = RELATIVE_PATTERN.match(value.strip())
+    if not match:
+        raise ValueError(
+            "--last must be a count and unit, one of s, m, h, d (for example 5m)"
+        )
+    amount = int(match.group(1))
+    if amount <= 0:
+        raise ValueError("--last must be a positive duration")
+    return timedelta(**{RELATIVE_UNITS[match.group(2)]: amount})
+
+
 def _timestamp(value: str) -> datetime:
     candidate = value.replace("Z", "+00:00")
     stamp = datetime.fromisoformat(candidate)
@@ -313,8 +338,16 @@ def _timestamp(value: str) -> datetime:
 
 
 def collect_events(target: Target, args: Any) -> dict[str, Any]:
+    last = getattr(args, "last", None)
+    if last and (args.from_time or args.to_time):
+        raise ValueError("--last cannot be combined with --from or --to")
     end = _timestamp(args.to_time) if args.to_time else datetime.now(timezone.utc)
-    start = _timestamp(args.from_time) if args.from_time else end - timedelta(hours=1)
+    if last:
+        start = end - parse_window(last)
+    elif args.from_time:
+        start = _timestamp(args.from_time)
+    else:
+        start = end - DEFAULT_WINDOW
     if start > end:
         raise ValueError("--from must not be after --to")
     data, errors = _batch(
@@ -567,6 +600,8 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
 
 
 def collect_gitlab_job(target: Target, args: Any) -> dict[str, Any]:
+    if not getattr(args, "job_url", None):
+        raise ValueError("--job-url is required; see --describe for the contract")
     parsed = urlsplit(args.job_url)
     if (
         parsed.scheme != "https"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -400,3 +401,46 @@ def test_publication_blocks_when_the_target_declares_no_required_checks(
 
     assert result.returncode == 2
     assert data["surfaces"]["github"]["reason"] == "required_checks_not_declared"
+
+
+def test_the_written_receipt_carries_no_path_from_this_host(
+    fake_access_tools,
+    live_target_file,
+    tmp_path,
+):
+    """Every path-bearing field must be declared, not only the ones we remember.
+
+    `target_file` was added to the receipt without being added to
+    `PATH_VALUE_FIELDS`, so the committable form carried an absolute home
+    directory path. Asserting the absence of the host's own prefix catches the
+    next field too, rather than the one field already fixed.
+    """
+    receipt_path = tmp_path / "written" / "receipt.json"
+
+    result = run_script(
+        "access_check.py",
+        "--target",
+        live_target_file,
+        "--revision",
+        TEST_REVISION,
+        "--publication",
+        "--receipt-out",
+        receipt_path,
+        "--json",
+        fake_bin=fake_access_tools,
+        env={
+            "FAKE_GH_ADMIN": "true",
+            "FAKE_GH_REQUIRED_CONTEXTS": "portable-required-check",
+        },
+    )
+    data = parse_json_output(result)
+    body = receipt_path.read_text(encoding="utf-8")
+    written = json.loads(body)
+
+    assert result.returncode == 0
+    assert data["status"] == "PASS"
+    # The captured form names the real path; the written one may not.
+    assert data["target_file"] == str(live_target_file)
+    assert str(tmp_path) not in body
+    assert written["target_file"].startswith("path:")
+    assert written["target_source"] == "argv:--target"

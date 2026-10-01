@@ -22,6 +22,11 @@ def main() -> int:
         metavar="NAME|all",
         help="filter namespace (default: all)",
     )
+    cli.add_argument(
+        "--last",
+        metavar="DURATION",
+        help="relative window ending now, e.g. 5m, 90s, 2h, 7d; not with --from/--to",
+    )
     cli.add_argument("--kind", metavar="KIND", help="filter involved object kind")
     cli.add_argument("--object", metavar="NAME", help="filter involved object name")
     cli.add_argument("--reason", metavar="TEXT", help="case-insensitive reason filter")
