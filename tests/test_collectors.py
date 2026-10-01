@@ -92,6 +92,7 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
         "deployments": [],
         "statefulsets": [],
         "daemonsets": [],
+        "replicasets": [],
     }
 
     def fake_run(argv, **_kwargs):
@@ -301,13 +302,15 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
 
     result = collect.collect_cilium(_target(target_file), args)
 
-    assert result["status"] == "PASS"
+    assert result["status"] == "PARTIAL"
     rows = {row["name"]: row for row in result["records"]}
     assert rows["cilium-ready"]["status"] == "UNKNOWN"
     assert rows["cilium-ready"]["exit_status"] == 1
     assert rows["cilium-ready"]["reason"] == "transport"
     assert rows["cilium-not-ready"]["status"] == "UNKNOWN"
     assert rows["cilium-not-ready"]["exit_status"] is None
+    assert {"source": "cilium-ready", "reason": "transport"} in result["errors"]
+    assert {"source": "cilium-not-ready", "reason": "agent_not_ready"} in result["errors"]
     assert len(exec_calls) == 1
     exec_call = exec_calls[0]
     assert "-t" not in exec_call
