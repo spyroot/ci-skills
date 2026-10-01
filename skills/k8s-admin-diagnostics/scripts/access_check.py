@@ -4,7 +4,9 @@ from core.cli import execute, parser
 
 
 def main() -> int:
-    args = parser("Check every selected authority; dry run never counts as access.", output_dir=False).parse_args()
+    cli = parser("Check every selected authority; dry run never counts as access.", output_dir=False)
+    cli.add_argument("--publication", action="store_true", help="also require GitHub repository administration before configuring checks")
+    args = cli.parse_args()
     return execute(args)
 
 

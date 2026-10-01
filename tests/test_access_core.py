@@ -20,6 +20,28 @@ def _access_modules() -> tuple[Any, Any]:
     return import_script_module("core.access"), import_script_module("core.runtime")
 
 
+def _write_token_target(tmp_path: Path, token_file: Path) -> Path:
+    """Write one target file that points at a GitLab token file."""
+    path = tmp_path / "target-with-token.toml"
+    path.write_text(
+        (
+            "[github]\n"
+            'host = "github.example.test"\n'
+            'repository = "unit/repo"\n'
+            "\n"
+            "[gitlab]\n"
+            'url = "https://gitlab.example.test"\n'
+            f'token_file = "{token_file}"\n'
+            "\n"
+            "[kubernetes]\n"
+            'context = "unit-context"\n'
+            'server = "https://api.cluster.example.test:6443"\n'
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _fake_access_runner(runtime: Any, scenario: str) -> tuple[Any, list[tuple[str, ...]]]:
     """Return a fake command runner and a call journal for one scenario."""
     calls: list[tuple[str, ...]] = []
@@ -215,6 +237,118 @@ def test_dry_run_access_lists_probes_without_calling_live_tools(monkeypatch, tar
     ]
     assert "GET /user is_admin" in report["surfaces"]["gitlab"]["probes"]
     assert "pods/exec" in report["surfaces"]["kubernetes"]["probes"]
+
+
+def test_gitlab_access_uses_token_file_only_as_subprocess_environment(monkeypatch, tmp_path):
+    """GitLab token-file contents are passed in memory and never enter reports."""
+    access, runtime = _access_modules()
+    token = "unit-token-value"
+    token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
+    token_file.parent.mkdir()
+    token_file.write_text(token + "\n", encoding="utf-8")
+    target = _load_target(_write_token_target(tmp_path, token_file))
+    observed_envs: list[dict[str, str] | None] = []
+
+    def fake_run(argv, **kwargs):
+        command = tuple(str(part) for part in argv)
+        observed_envs.append(kwargs.get("env"))
+        assert token not in command
+        if command[:4] == ("glab", "auth", "status", "--hostname"):
+            return runtime.CommandResult(command, 0, "", "")
+        if command[-1] == "user":
+            return runtime.CommandResult(
+                command,
+                0,
+                json.dumps(
+                    {
+                        "username": "unit-gl",
+                        "is_admin": True,
+                        "web_url": "https://gitlab.example.test/unit-gl",
+                    }
+                ),
+                "",
+            )
+        if command[-1] == "runners/all?per_page=1":
+            return runtime.CommandResult(command, 0, json.dumps([{"id": 1}]), "")
+        return runtime.CommandResult(command, 99, "", "unexpected call")
+
+    monkeypatch.setattr(access, "run_command", fake_run)
+
+    surface = access.gitlab_access(target)
+
+    assert surface.status == "PASS"
+    assert observed_envs
+    assert all(env and env.get("GITLAB_TOKEN") == token for env in observed_envs)
+    assert token not in json.dumps(surface.as_dict())
+    assert str(token_file) not in json.dumps(surface.as_dict())
+
+
+def test_gitlab_access_without_token_file_uses_glab_host_profile(monkeypatch, target_file):
+    """Omitting token_file preserves glab's selected host profile behavior."""
+    access, runtime = _access_modules()
+    observed_envs: list[dict[str, str] | None] = []
+
+    def fake_run(argv, **kwargs):
+        command = tuple(str(part) for part in argv)
+        observed_envs.append(kwargs.get("env"))
+        if command[:4] == ("glab", "auth", "status", "--hostname"):
+            return runtime.CommandResult(command, 0, "", "")
+        if command[-1] == "user":
+            return runtime.CommandResult(
+                command,
+                0,
+                json.dumps(
+                    {
+                        "username": "unit-gl",
+                        "is_admin": True,
+                        "web_url": "https://gitlab.example.test/unit-gl",
+                    }
+                ),
+                "",
+            )
+        if command[-1] == "runners/all?per_page=1":
+            return runtime.CommandResult(command, 0, json.dumps([{"id": 1}]), "")
+        return runtime.CommandResult(command, 99, "", "unexpected call")
+
+    monkeypatch.setattr(access, "run_command", fake_run)
+
+    surface = access.gitlab_access(_load_target(target_file))
+
+    assert surface.status == "PASS"
+    assert all(not env or "GITLAB_TOKEN" not in env for env in observed_envs)
+
+
+@pytest.mark.parametrize(
+    ("token_body", "expected_reason"),
+    ((None, "token_file_missing"), ("", "token_file_empty"), ("   \n", "token_file_empty")),
+)
+def test_gitlab_access_blocks_missing_or_empty_token_file(
+    monkeypatch,
+    tmp_path,
+    token_body,
+    expected_reason,
+):
+    """A configured token_file must exist and contain one nonempty token."""
+    access, _runtime = _access_modules()
+    token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
+    token_file.parent.mkdir()
+    if token_body is not None:
+        token_file.write_text(token_body, encoding="utf-8")
+    target = _load_target(_write_token_target(tmp_path, token_file))
+    calls = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(tuple(str(part) for part in argv))
+        pytest.fail("missing or empty token_file must block before glab runs")
+
+    monkeypatch.setattr(access, "run_command", fake_run)
+
+    surface = access.gitlab_access(target)
+
+    assert surface.status == "BLOCKED"
+    assert surface.reason == expected_reason
+    assert surface.identity is None
+    assert calls == []
 
 
 def test_kubectl_argv_binds_context_and_optional_kubeconfig(tmp_path, target_file):

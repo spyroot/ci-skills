@@ -8,14 +8,15 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from .access import glab_argv, kubectl_argv
+from .access import gitlab_env, glab_argv, kubectl_argv
 from .report import report
-from .runtime import error_class, run_command, sanitize
+from .runtime import error_class, run_command, run_command_tail, sanitize
+from .status import PASS, UNKNOWN
 from .target import Target
 
 
-def _read_json(command: list[str]) -> tuple[Any | None, str | None]:
-    result = run_command(command)
+def _read_json(command: list[str], *, env: dict[str, str] | None = None) -> tuple[Any | None, str | None]:
+    result = run_command(command, env=env)
     if result.returncode:
         return None, error_class(result)
     try:
@@ -36,6 +37,27 @@ def _meta(item: dict[str, Any]) -> dict[str, Any]:
 
 def _search(value: dict[str, Any], needle: str | None) -> bool:
     return not needle or needle.casefold() in json.dumps(value, ensure_ascii=False).casefold()
+
+
+def _matches_selector(labels: dict[str, str], selector: dict[str, Any]) -> bool:
+    """Match a DaemonSet's declared Pod selector without guessing labels."""
+    if not selector:
+        return False
+    if any(labels.get(key) != value for key, value in selector.get("matchLabels", {}).items()):
+        return False
+    for expression in selector.get("matchExpressions", []):
+        key, operator, values = expression.get("key"), expression.get("operator"), expression.get("values", [])
+        if operator == "In" and labels.get(key) not in values:
+            return False
+        if operator == "NotIn" and labels.get(key) in values:
+            return False
+        if operator == "Exists" and key not in labels:
+            return False
+        if operator == "DoesNotExist" and key in labels:
+            return False
+        if operator not in {"In", "NotIn", "Exists", "DoesNotExist"}:
+            return False
+    return True
 
 
 def _batch(target: Target, resources: dict[str, tuple[str, bool]]) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
@@ -179,12 +201,14 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
         for event in data.get(source, []):
             meta = _meta(event)
             obj = event.get("regarding") or event.get("involvedObject") or {}
-            timestamp = (event.get("eventTime") or event.get("lastTimestamp") or
-                         event.get("firstTimestamp") or meta.get("creationTimestamp"))
-            if not timestamp:
+            first_source = event.get("eventTime") or event.get("firstTimestamp") or meta.get("creationTimestamp")
+            last_source = ((event.get("series") or {}).get("lastObservedTime") or
+                           event.get("lastTimestamp") or event.get("deprecatedLastTimestamp") or first_source)
+            if not last_source:
                 continue
             try:
-                event_time = _timestamp(timestamp)
+                event_time = _timestamp(last_source)
+                first_time = _timestamp(first_source) if first_source else event_time
             except ValueError:
                 errors.append({"source": source, "reason": "invalid_event_timestamp"})
                 continue
@@ -202,6 +226,7 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
                 continue
             row = {
                 "timestamp": event_time.isoformat(), "namespace": namespace,
+                "first_timestamp": first_time.isoformat(), "last_timestamp": event_time.isoformat(),
                 "kind": obj.get("kind"), "name": obj.get("name"), "object_uid": obj.get("uid"),
                 "reason": reason, "type": event.get("type"),
                 "message": sanitize(event.get("note") or event.get("message") or "", 1000),
@@ -234,10 +259,22 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
             namespace = namespaces[0]
     else:
         namespace = args.namespace
+    selected = [item for item in daemonsets if _meta(item).get("namespace") == namespace
+                and _meta(item).get("name") == "cilium"]
+    if len(selected) != 1:
+        errors.append({"source": "daemonsets", "reason": "cilium_daemonset_missing"})
+    selector = selected[0].get("spec", {}).get("selector", {}) if selected else {}
+    if selected and not selector:
+        errors.append({"source": "daemonsets", "reason": "cilium_selector_missing"})
     agent_pods = [item for item in data.get("pods", []) if _meta(item).get("namespace") == namespace
-                  and (_meta(item).get("labels") or {}).get("k8s-app") == "cilium"
+                  and _matches_selector(_meta(item).get("labels") or {}, selector)
                   and (not args.node or item.get("spec", {}).get("nodeName") == args.node)]
     rows: list[dict[str, Any]] = []
+    if not agent_pods:
+        errors.append({"source": "pods", "reason": "cilium_agent_pods_missing"})
+        rows.append({"namespace": namespace, "name": "cilium-agent", "node": args.node,
+                     "pod_uid": None, "status": UNKNOWN, "reason": "no_matching_agent_pods",
+                     "command": ["cilium-health", "status", "-o", "json"], "exit_status": None})
     def health(pod: dict[str, Any]) -> dict[str, Any]:
         meta = _meta(pod)
         node = pod.get("spec", {}).get("nodeName")
@@ -246,7 +283,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
         command = ["cilium-health", "status", "-o", "json"]
         row = {"namespace": namespace, "name": meta.get("name"), "pod_uid": meta.get("uid"),
                "node": node, "phase": pod.get("status", {}).get("phase"),
-               "ready": ready, "command": command, "status": "UNKNOWN", "exit_status": None,
+               "ready": ready, "command": command, "status": UNKNOWN, "exit_status": None,
                "health": None}
         if not ready:
             return row
@@ -257,13 +294,13 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
             return row
         try:
             row["health"] = json.loads(result.stdout)
-            row["status"] = "PASS"
+            row["status"] = PASS
         except json.JSONDecodeError:
             row["reason"] = "invalid_health_json"
         return row
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(agent_pods)))) as pool:
         for row in pool.map(health, agent_pods):
-            if row["status"] == "UNKNOWN":
+            if row["status"] == UNKNOWN:
                 errors.append({"source": str(row["name"]), "reason": row.get("reason") or "agent_not_ready"})
             if _search(row, args.search):
                 rows.append(row)
@@ -292,9 +329,10 @@ def collect_gitlab_job(target: Target, args: Any) -> dict[str, Any]:
     if not marker or not job_id.isdecimal() or not prefix.strip("/"):
         raise ValueError("job URL must contain a project path and numeric job ID")
     project = prefix.strip("/")
+    credential = gitlab_env(target)
     encoded = quote(project, safe="")
     base = f"projects/{encoded}"
-    job, error = _read_json(glab_argv(target, f"{base}/jobs/{job_id}"))
+    job, error = _read_json(glab_argv(target, f"{base}/jobs/{job_id}"), env=credential)
     if error or not isinstance(job, dict):
         return report("gitlab_job", target.gitlab.url, {"job_url": args.job_url, "search": args.search}, [], [{"source": "job", "reason": error or "invalid_response"}])
     pipeline_id = (job.get("pipeline") or {}).get("id")
@@ -306,7 +344,7 @@ def collect_gitlab_job(target: Target, args: Any) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
     errors: list[dict[str, str]] = []
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = {pool.submit(_read_json, glab_argv(target, endpoint)): name
+        futures = {pool.submit(_read_json, glab_argv(target, endpoint), env=credential): name
                    for name, endpoint in endpoints.items() if endpoint}
         for future in as_completed(futures):
             value, problem = future.result()
@@ -314,12 +352,12 @@ def collect_gitlab_job(target: Target, args: Any) -> dict[str, Any]:
                 errors.append({"source": futures[future], "reason": problem})
             else:
                 metadata[futures[future]] = value
-    trace_result = run_command(glab_argv(target, f"{base}/jobs/{job_id}/trace"), timeout=30)
+    trace_result = run_command_tail(glab_argv(target, f"{base}/jobs/{job_id}/trace"), timeout=30, env=credential)
     if trace_result.returncode:
         errors.append({"source": "trace", "reason": error_class(trace_result)})
         trace = ""
     else:
-        trace = sanitize("\n".join(trace_result.stdout.splitlines()[-200:]), 64000)
+        trace = sanitize(trace_result.stdout, 64000)
     row = {
         "job_id": job.get("id"), "name": job.get("name"), "status": job.get("status"),
         "created_at": job.get("created_at"), "started_at": job.get("started_at"),

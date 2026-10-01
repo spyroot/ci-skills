@@ -9,6 +9,7 @@ from typing import Any
 
 from .access import check_access, dry_run_access
 from .report import emit
+from .status import PASS, exit_code
 from .target import Target, TargetError, load_target
 
 
@@ -27,7 +28,9 @@ def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentPar
 def execute(args: argparse.Namespace, collect: Callable[[Target, argparse.Namespace], dict[str, Any]] | None = None) -> int:
     try:
         target = load_target(args.target)
-        gate = dry_run_access(target) if args.dry_run else check_access(target)
+        publication = bool(getattr(args, "publication", False))
+        gate = (dry_run_access(target, publication=publication) if args.dry_run
+                else check_access(target, publication=publication))
         if args.dry_run and collect is not None:
             probes = {
                 "collect_storage": ["concurrent node, Pod, PVC/PV, StorageClass, CSI, attachment, controller reads"],
@@ -38,13 +41,13 @@ def execute(args: argparse.Namespace, collect: Callable[[Target, argparse.Namesp
             gate["collection_probes"] = probes.get(collect.__name__, [])
             gate["filters"] = {key: value for key, value in vars(args).items()
                                if key not in {"target", "json", "yaml", "dry_run", "output_dir"}}
-        if collect is None or args.dry_run or gate["status"] != "PASS":
+        if collect is None or args.dry_run or gate["status"] != PASS:
             data = gate
         else:
             data = collect(target, args)
         mode = "json" if args.json else "yaml" if args.yaml else "human"
         sys.stdout.write(emit(data, mode, getattr(args, "output_dir", None)))
-        return 0 if data["status"] == "PASS" or data["status"] == "DRY_RUN" else 2
+        return exit_code(data["status"])
     except (TargetError, RuntimeError, ValueError, OSError) as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 2

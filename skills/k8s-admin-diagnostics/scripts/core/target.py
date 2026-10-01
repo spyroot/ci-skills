@@ -17,12 +17,14 @@ class TargetError(ValueError):
 class GitHubTarget:
     host: str
     repository: str
+    token_file: Path | None = None
 
 
 @dataclass(frozen=True)
 class GitLabTarget:
     url: str
     host: str
+    token_file: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -78,9 +80,24 @@ def _https_url(value: str, key: str) -> tuple[str, str]:
     return value.rstrip("/"), parsed.netloc.lower()
 
 
+def _optional_file(table: dict[str, object], key: str, skill_root: Path) -> Path | None:
+    value = table.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise TargetError(f"{key} must be a nonempty path when supplied")
+    path = Path(value).expanduser().resolve()
+    if path.is_relative_to(skill_root):
+        raise TargetError(f"{key} must be stored outside the installed skill")
+    return path
+
+
 def load_target(path: str | Path) -> Target:
     """Parse one operator-selected TOML file; never search for hidden profiles."""
     source = Path(path).expanduser()
+    skill_root = Path(__file__).resolve().parents[2]
+    if source.resolve().is_relative_to(skill_root):
+        raise TargetError("target file must be stored outside the installed skill")
     try:
         with source.open("rb") as handle:
             data = tomllib.load(handle)
@@ -89,7 +106,7 @@ def load_target(path: str | Path) -> Target:
     if set(data) != {"github", "gitlab", "kubernetes"}:
         raise TargetError("target must contain github, gitlab, and kubernetes tables only")
 
-    github = _table(data["github"], "github", {"host", "repository"})
+    github = _table(data["github"], "github", {"host", "repository", "token_file"})
     github_host = _string(github, "host").lower()
     if "." not in github_host or "/" in github_host or ":" in github_host:
         raise TargetError("github.host must be a full hostname")
@@ -97,20 +114,17 @@ def load_target(path: str | Path) -> Target:
     if len(repository.split("/")) != 2 or any(not part for part in repository.split("/")):
         raise TargetError("github.repository must be owner/repository")
 
-    gitlab = _table(data["gitlab"], "gitlab", {"url"})
+    gitlab = _table(data["gitlab"], "gitlab", {"url", "token_file"})
     gitlab_url, gitlab_host = _https_url(_string(gitlab, "url"), "gitlab.url")
 
     kubernetes = _table(data["kubernetes"], "kubernetes", {"context", "server", "kubeconfig"})
     server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
-    kubeconfig_value = kubernetes.get("kubeconfig")
-    if kubeconfig_value is not None and (
-        not isinstance(kubeconfig_value, str) or not kubeconfig_value.strip()
-    ):
-        raise TargetError("kubernetes.kubeconfig must be a nonempty path when supplied")
-    kubeconfig = Path(kubeconfig_value).expanduser() if kubeconfig_value else None
+    kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
     return Target(
-        github=GitHubTarget(host=github_host, repository=repository),
-        gitlab=GitLabTarget(url=gitlab_url, host=gitlab_host),
+        github=GitHubTarget(host=github_host, repository=repository,
+                            token_file=_optional_file(github, "token_file", skill_root)),
+        gitlab=GitLabTarget(url=gitlab_url, host=gitlab_host,
+                            token_file=_optional_file(gitlab, "token_file", skill_root)),
         kubernetes=KubernetesTarget(
             context=_string(kubernetes, "context"),
             server=server,

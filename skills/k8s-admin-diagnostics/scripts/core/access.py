@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 from .runtime import CommandResult, error_class, run_command
+from .status import BLOCKED, DRY_RUN, PASS
 from .target import Target
 
 
@@ -39,6 +41,30 @@ def glab_argv(target: Target, endpoint: str) -> list[str]:
     return ["glab", "api", "--hostname", target.gitlab.host, "--method", "GET", endpoint]
 
 
+def _token_file(path: Path | None, variable: str) -> dict[str, str] | None:
+    """Load one selected host token into a child environment, never a report."""
+    if path is None:
+        return None
+    try:
+        if not path.is_file() or path.stat().st_size > 4096:
+            raise ValueError("credential_file_unavailable")
+        token = path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("credential_file_unavailable") from exc
+    if not token or any(character.isspace() for character in token):
+        raise ValueError("credential_file_invalid")
+    return {variable: token}
+
+
+def github_env(target: Target) -> dict[str, str] | None:
+    variable = "GH_TOKEN" if target.github.host == "github.com" else "GH_ENTERPRISE_TOKEN"
+    return _token_file(target.github.token_file, variable)
+
+
+def gitlab_env(target: Target) -> dict[str, str] | None:
+    return _token_file(target.gitlab.token_file, "GITLAB_TOKEN")
+
+
 def _json(result: CommandResult) -> Any:
     if result.returncode:
         raise ValueError(error_class(result))
@@ -49,20 +75,26 @@ def _json(result: CommandResult) -> Any:
 
 
 def _blocked(name: str, target: str, observed: list[str], reason: str, next_step: str) -> Surface:
-    return Surface(name, "BLOCKED", None, target, observed, next_step, reason)
+    return Surface(name, BLOCKED, None, target, observed, next_step, reason)
 
 
 def github_access(target: Target) -> Surface:
     host = target.github.host
     repo = target.github.repository
     observed: list[str] = []
-    auth = run_command(["gh", "auth", "status", "--hostname", host])
+    try:
+        credential = github_env(target)
+    except ValueError as exc:
+        return _blocked("github", f"{host}/{repo}", observed, str(exc), "Provide a readable, nonempty GitHub token file outside the skill.")
+    if credential:
+        observed.append("token_file_read")
+    auth = run_command(["gh", "auth", "status", "--hostname", host], env=credential)
     if auth.returncode:
         return _blocked("github", f"{host}/{repo}", observed, error_class(auth), "Authenticate gh for the selected host.")
     observed.append("authenticated_host")
     try:
-        user = _json(run_command(["gh", "api", "--hostname", host, "user"]))
-        repository = _json(run_command(["gh", "api", "--hostname", host, f"repos/{repo}"]))
+        user = _json(run_command(["gh", "api", "--hostname", host, "user"], env=credential))
+        repository = _json(run_command(["gh", "api", "--hostname", host, f"repos/{repo}"], env=credential))
         if not isinstance(user, dict) or not isinstance(repository, dict):
             raise TypeError("invalid_response")
         if repository.get("full_name", "").lower() != repo.lower():
@@ -73,40 +105,46 @@ def github_access(target: Target) -> Surface:
     except (ValueError, TypeError) as exc:
         return _blocked("github", f"{host}/{repo}", observed, str(exc), "Check gh API authentication and repository access for this host.")
     observed += ["identity_read", "repository_read"]
-    return Surface("github", "PASS", login, f"{host}/{repo}", observed, None)
+    return Surface("github", PASS, login, f"{host}/{repo}", observed, None)
 
 
 def github_publication_access(target: Target) -> Surface:
     """Extra check before changing required-check settings for publication."""
     base = github_access(target)
-    if base.status != "PASS":
+    if base.status != PASS:
         return base
     result = run_command([
         "gh", "api", "--hostname", target.github.host,
         f"repos/{target.github.repository}/branches/main/protection",
-    ])
+    ], env=github_env(target))
     # Unprotected repositories return 404, so the repository permissions API is authoritative.
     info = run_command([
         "gh", "api", "--hostname", target.github.host,
         f"repos/{target.github.repository}", "--jq", ".permissions.admin",
-    ])
+    ], env=github_env(target))
     if info.returncode or info.stdout.strip().lower() != "true":
         return _blocked("github", base.target, base.observed_capability, "admin_required", "Use a repository administrator identity to configure and read back the required check.")
     capabilities = base.observed_capability + ["repository_admin"]
     if not result.returncode:
         capabilities.append("protection_read")
-    return Surface("github", "PASS", base.identity, base.target, capabilities, None)
+    return Surface("github", PASS, base.identity, base.target, capabilities, None)
 
 
 def gitlab_access(target: Target) -> Surface:
     host = target.gitlab.host
     observed: list[str] = []
-    auth = run_command(["glab", "auth", "status", "--hostname", host])
+    try:
+        credential = gitlab_env(target)
+    except ValueError as exc:
+        return _blocked("gitlab", target.gitlab.url, observed, str(exc), "Provide a readable, nonempty GitLab token file outside the skill.")
+    if credential:
+        observed.append("token_file_read")
+    auth = run_command(["glab", "auth", "status", "--hostname", host], env=credential)
     if auth.returncode:
         return _blocked("gitlab", target.gitlab.url, observed, error_class(auth), "Authenticate glab for this exact GitLab FQDN.")
     observed.append("authenticated_host")
     try:
-        user = _json(run_command(glab_argv(target, "user")))
+        user = _json(run_command(glab_argv(target, "user"), env=credential))
         if not isinstance(user, dict) or user.get("is_admin") is not True:
             raise ValueError("instance_admin_required")
         web_url = user.get("web_url")
@@ -116,13 +154,13 @@ def gitlab_access(target: Target) -> Surface:
         if not isinstance(identity, str) or not identity:
             raise ValueError("missing_identity")
         observed.append("instance_admin_identity")
-        runners = _json(run_command(glab_argv(target, "runners/all?per_page=1")))
+        runners = _json(run_command(glab_argv(target, "runners/all?per_page=1"), env=credential))
         if not isinstance(runners, list):
             raise TypeError("runner_api_invalid_response")
     except (ValueError, TypeError) as exc:
         return _blocked("gitlab", target.gitlab.url, observed, str(exc), "Use an instance administrator credential with runner API access on the selected host.")
     observed.append("instance_runner_api_read")
-    return Surface("gitlab", "PASS", identity, target.gitlab.url, observed, None)
+    return Surface("gitlab", PASS, identity, target.gitlab.url, observed, None)
 
 
 def cilium_namespace(target: Target) -> str:
@@ -131,7 +169,7 @@ def cilium_namespace(target: Target) -> str:
     matches = sorted({
         item.get("metadata", {}).get("namespace")
         for item in items if isinstance(item, dict)
-        and item.get("metadata", {}).get("name", "").startswith("cilium")
+        and item.get("metadata", {}).get("name") == "cilium"
         and item.get("metadata", {}).get("namespace")
     })
     if len(matches) != 1:
@@ -144,6 +182,17 @@ def kubernetes_access(target: Target) -> Surface:
     server = target.kubernetes.server
     observed: list[str] = []
     try:
+        if target.kubernetes.kubeconfig:
+            path = target.kubernetes.kubeconfig
+            if not path.is_file():
+                raise ValueError("kubeconfig_unavailable")
+            try:
+                with path.open("rb") as handle:
+                    if not handle.read(1):
+                        raise ValueError("kubeconfig_empty")
+            except OSError as exc:
+                raise ValueError("kubeconfig_unreadable") from exc
+            observed.append("kubeconfig_read")
         config = _json(run_command(kubectl_argv(target, "config", "view", "-o", "json")))
         if not isinstance(config, dict):
             raise TypeError("invalid_context_response")
@@ -191,27 +240,30 @@ def kubernetes_access(target: Target) -> Surface:
         observed.append("cilium_pods_exec")
     except (ValueError, KeyError, TypeError, IndexError) as exc:
         return _blocked("kubernetes", f"{name} -> {server}", observed, str(exc), "Verify the exact context, API TLS, cluster admin RBAC, and Cilium exec permission.")
-    return Surface("kubernetes", "PASS", identity, f"{name} -> {server}", observed, None)
+    return Surface("kubernetes", PASS, identity, f"{name} -> {server}", observed, None)
 
 
-def check_access(target: Target) -> dict[str, Any]:
+def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]:
     """Probe independent authorities concurrently, then fail closed on any denial."""
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = [pool.submit(check, target) for check in (github_access, gitlab_access, kubernetes_access)]
+        github_check = github_publication_access if publication else github_access
+        futures = [pool.submit(check, target) for check in (github_check, gitlab_access, kubernetes_access)]
         surfaces = [future.result() for future in futures]
     return {
         "schema_version": "1.0",
         "kind": "access_check",
-        "status": "PASS" if all(item.status == "PASS" for item in surfaces) else "BLOCKED",
+        "status": PASS if all(item.status == PASS for item in surfaces) else BLOCKED,
+        "publication": publication,
         "surfaces": {item.name: item.as_dict() for item in surfaces},
     }
 
 
-def dry_run_access(target: Target) -> dict[str, Any]:
+def dry_run_access(target: Target, *, publication: bool = False) -> dict[str, Any]:
     return {
-        "schema_version": "1.0", "kind": "access_check", "status": "DRY_RUN",
+        "schema_version": "1.0", "kind": "access_check", "status": DRY_RUN,
+        "publication": publication,
         "surfaces": {
-            "github": {"target": f"{target.github.host}/{target.github.repository}", "probes": ["gh auth status", "gh api user", "gh api repository"]},
+            "github": {"target": f"{target.github.host}/{target.github.repository}", "probes": ["gh auth status", "gh api user", "gh api repository", *(["repository admin"] if publication else [])]},
             "gitlab": {"target": target.gitlab.url, "probes": ["glab auth status", "GET /user is_admin", "GET /runners/all"]},
             "kubernetes": {"target": f"{target.kubernetes.context} -> {target.kubernetes.server}", "probes": ["context server", "TLS API version", "auth whoami", "cluster wildcard", "clusterrolebinding admin", "Cilium namespace", "pods/exec"]},
         },

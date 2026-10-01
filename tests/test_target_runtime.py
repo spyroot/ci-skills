@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 
 import pytest
 from conftest import import_script_module
@@ -19,6 +20,35 @@ def test_load_target_accepts_exact_nonsecret_authorities(target_file):
     assert target.kubernetes.context == "unit-context"
     assert target.kubernetes.server == "https://api.cluster.example.test:6443"
     assert target.kubernetes.kubeconfig is None
+
+
+def test_load_target_accepts_optional_gitlab_token_file_path(tmp_path):
+    """The target may point at a host-local token file without storing a token."""
+    token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
+    token_file.parent.mkdir()
+    token_file.write_text("unit-token-value\n", encoding="utf-8")
+    target_path = tmp_path / "target.toml"
+    target_path.write_text(
+        (
+            "[github]\n"
+            'host = "github.example.test"\n'
+            'repository = "unit/repo"\n'
+            "\n"
+            "[gitlab]\n"
+            'url = "https://gitlab.example.test"\n'
+            f'token_file = "{token_file}"\n'
+            "\n"
+            "[kubernetes]\n"
+            'context = "unit-context"\n'
+            'server = "https://api.cluster.example.test:6443"\n'
+        ),
+        encoding="utf-8",
+    )
+
+    target = import_script_module("core.target").load_target(target_path)
+
+    assert target.gitlab.token_file == token_file
+    assert not hasattr(target.gitlab, "token")
 
 
 @pytest.mark.parametrize(
@@ -69,6 +99,38 @@ def test_load_target_accepts_exact_nonsecret_authorities(target_file):
                 'server = "https://api.cluster.example.test:6443"\n'
             ),
             "HTTPS origin",
+        ),
+        (
+            (
+                "[github]\n"
+                'host = "github.example.test"\n'
+                'repository = "unit/repo"\n'
+                "\n"
+                "[gitlab]\n"
+                'url = "https://gitlab.example.test"\n'
+                'token = "inline-token-value"\n'
+                "\n"
+                "[kubernetes]\n"
+                'context = "unit-context"\n'
+                'server = "https://api.cluster.example.test:6443"\n'
+            ),
+            "unsupported fields",
+        ),
+        (
+            (
+                "[github]\n"
+                'host = "github.example.test"\n'
+                'repository = "unit/repo"\n'
+                "\n"
+                "[gitlab]\n"
+                'url = "https://gitlab.example.test"\n'
+                'token_file = "inline-token-value"\n'
+                "\n"
+                "[kubernetes]\n"
+                'context = "unit-context"\n'
+                'server = "https://api.cluster.example.test:6443"\n'
+            ),
+            "token_file",
         ),
     ),
 )
@@ -127,6 +189,38 @@ def test_run_command_uses_argument_vector_and_noninteractive_environment(monkeyp
     assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
     assert captured["kwargs"]["env"]["GH_PROMPT_DISABLED"] == "1"
     assert captured["kwargs"]["env"]["GLAB_NO_PROMPT"] == "1"
+
+
+def test_run_command_tail_keeps_only_bounded_stdout_tail():
+    """Trace collection keeps recent lines without retaining full command output."""
+    runtime = import_script_module("core.runtime")
+
+    result = runtime.run_command_tail(
+        [
+            sys.executable,
+            "-c",
+            "for index in range(12): print(f'line {index}')",
+        ],
+        max_lines=5,
+        max_bytes=1000,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines() == [
+        "line 7",
+        "line 8",
+        "line 9",
+        "line 10",
+        "line 11",
+    ]
+
+
+def test_run_command_tail_rejects_unbounded_limits():
+    """Tail limits must stay positive so a trace cannot request full output."""
+    runtime = import_script_module("core.runtime")
+
+    with pytest.raises(ValueError, match="tail limits"):
+        runtime.run_command_tail(["tool"], max_lines=0)
 
 
 @pytest.mark.parametrize(

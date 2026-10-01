@@ -17,7 +17,7 @@ SCRIPT_CASES = (
 @pytest.mark.parametrize(
     ("script_name", "specific_flags"),
     (
-        ("access_check.py", ()),
+        ("access_check.py", ("--publication",)),
         ("gitlab_job.py", ("--job-url", "--search")),
         ("storage_report.py", ("--namespace", "--node", "--storage-class", "--phase", "--search")),
         (

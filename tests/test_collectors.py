@@ -16,6 +16,28 @@ def _target(path: Path) -> Any:
     return import_script_module("core.target").load_target(path)
 
 
+def _write_gitlab_token_target(tmp_path: Path, token_file: Path) -> Path:
+    """Write a target file with a GitLab token-file pointer."""
+    path = tmp_path / "target-with-token.toml"
+    path.write_text(
+        (
+            "[github]\n"
+            'host = "github.example.test"\n'
+            'repository = "unit/repo"\n'
+            "\n"
+            "[gitlab]\n"
+            'url = "https://gitlab.example.test"\n'
+            f'token_file = "{token_file}"\n'
+            "\n"
+            "[kubernetes]\n"
+            'context = "unit-context"\n'
+            'server = "https://api.cluster.example.test:6443"\n'
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _command_result(runtime: Any, argv: tuple[str, ...], payload: Any, code: int = 0):
     """Create a command result with JSON stdout unless a string is supplied."""
     stdout = payload if isinstance(payload, str) else json.dumps(payload)
@@ -237,6 +259,66 @@ def test_event_trace_rejects_naive_and_reversed_time_bounds(target_file):
         )
 
 
+def test_event_trace_uses_series_last_observed_time_inside_window(
+    monkeypatch,
+    target_file,
+):
+    """A repeated event stays visible when its series update is in the window."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    events = {
+        "events": [],
+        "events.events.k8s.io": [
+            {
+                "metadata": {
+                    "namespace": "jobs",
+                    "name": "runner-pod.abc",
+                    "creationTimestamp": "2026-10-01T09:00:00Z",
+                },
+                "regarding": {
+                    "kind": "Pod",
+                    "namespace": "jobs",
+                    "name": "runner-pod",
+                    "uid": "pod-series",
+                },
+                "eventTime": "2026-10-01T09:00:00Z",
+                "series": {
+                    "lastObservedTime": "2026-10-01T10:05:00Z",
+                    "count": 7,
+                },
+                "reason": "FailedScheduling",
+                "note": "selected series update",
+                "type": "Warning",
+            }
+        ],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": events[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="jobs",
+        kind="Pod",
+        object="runner-pod",
+        reason="Failed",
+        search="series",
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PASS"
+    assert result["summary"]["record_count"] == 1
+    row = result["records"][0]
+    assert row["timestamp"] == "2026-10-01T10:05:00+00:00"
+    assert row["first_timestamp"] == "2026-10-01T09:00:00+00:00"
+    assert row["last_timestamp"] == "2026-10-01T10:05:00+00:00"
+
+
 def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
     monkeypatch,
     target_file,
@@ -249,6 +331,7 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
         "daemonsets": [
             {
                 "metadata": {"namespace": "kube-system", "name": "cilium"},
+                "spec": {"selector": {"matchLabels": {"k8s-app": "cilium"}}},
                 "status": {"desiredNumberScheduled": 2, "numberReady": 1},
             }
         ],
@@ -326,6 +409,116 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
     )
 
 
+def test_cilium_status_uses_daemonset_selector_for_agent_pods(
+    monkeypatch,
+    target_file,
+):
+    """Agent discovery follows the DaemonSet selector, not a fixed label."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    resources = {
+        "daemonsets": [
+            {
+                "metadata": {"namespace": "networking", "name": "cilium"},
+                "spec": {
+                    "selector": {
+                        "matchLabels": {"app.kubernetes.io/name": "cilium-agent"}
+                    }
+                },
+                "status": {"desiredNumberScheduled": 1, "numberReady": 1},
+            }
+        ],
+        "pods": [
+            {
+                "metadata": {
+                    "namespace": "networking",
+                    "name": "cilium-selected",
+                    "uid": "pod-selected",
+                    "labels": {"app.kubernetes.io/name": "cilium-agent"},
+                },
+                "spec": {"nodeName": "worker-a"},
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }
+        ],
+        "deployments": [],
+        "ciliumnodes.cilium.io": [],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        if "exec" in command:
+            return runtime.CommandResult(
+                command,
+                0,
+                json.dumps({"local": {"host-primary-address": "10.0.0.10"}}),
+                "",
+            )
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": resources[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(namespace="networking", node=None, search=None)
+
+    result = collect.collect_cilium(_target(target_file), args)
+
+    assert result["status"] == "PASS"
+    assert result["summary"]["record_count"] == 1
+    assert result["records"][0]["name"] == "cilium-selected"
+    assert result["records"][0]["status"] == "PASS"
+
+
+def test_cilium_status_reports_partial_for_explicit_namespace_with_zero_pods(
+    monkeypatch,
+    target_file,
+):
+    """An explicit namespace with no agent Pods is a diagnostic error."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    resources = {
+        "daemonsets": [
+            {
+                "metadata": {"namespace": "networking", "name": "cilium"},
+                "spec": {"selector": {"matchLabels": {"app": "cilium"}}},
+                "status": {"desiredNumberScheduled": 1, "numberReady": 1},
+            }
+        ],
+        "pods": [
+            {
+                "metadata": {
+                    "namespace": "networking",
+                    "name": "cilium-one",
+                    "labels": {"app": "cilium"},
+                },
+                "spec": {"nodeName": "worker-a"},
+                "status": {"phase": "Running"},
+            }
+        ],
+        "deployments": [],
+        "ciliumnodes.cilium.io": [],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": resources[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(namespace="missing", node=None, search=None)
+
+    result = collect.collect_cilium(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["summary"]["record_count"] == 1
+    assert {"source": "daemonsets", "reason": "cilium_daemonset_missing"} in result["errors"]
+    assert {"source": "pods", "reason": "cilium_agent_pods_missing"} in result["errors"]
+    placeholder = result["records"][0]
+    assert placeholder["status"] == "UNKNOWN"
+    assert placeholder["reason"] == "no_matching_agent_pods"
+
+
 def test_gitlab_job_rejects_job_url_from_different_fqdn(target_file):
     """A job URL from another host cannot reuse the selected target access."""
     collect = import_script_module("core.collect")
@@ -340,14 +533,22 @@ def test_gitlab_job_rejects_job_url_from_different_fqdn(target_file):
 
 def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
     monkeypatch,
-    target_file,
+    tmp_path,
 ):
     """Job collection keeps only a bounded sanitized trace tail."""
     collect = import_script_module("core.collect")
     runtime = import_script_module("core.runtime")
+    token = "unit-token-value"
+    token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
+    token_file.parent.mkdir()
+    token_file.write_text(token + "\n", encoding="utf-8")
+    trace_calls = []
+    run_envs: list[dict[str, str] | None] = []
 
     def fake_run(argv, **_kwargs):
         command = tuple(str(part) for part in argv)
+        run_envs.append(_kwargs.get("env"))
+        assert token not in command
         endpoint = command[-1]
         if endpoint == "projects/unit%2Frepo/jobs/123":
             return _command_result(
@@ -367,23 +568,23 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
             return _command_result(runtime, command, {"id": 77, "status": "failed"})
         if endpoint == "runners/9":
             return _command_result(runtime, command, {"id": 9, "description": "runner-a"})
-        if endpoint == "projects/unit%2Frepo/jobs/123/trace":
-            trace = "\n".join([f"line {index}" for index in range(250)])
-            return runtime.CommandResult(
-                command,
-                0,
-                trace + "\npassword=topsecret\n",
-                "",
-            )
         return runtime.CommandResult(command, 1, "", "unexpected endpoint")
 
+    def fake_tail(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        assert token not in command
+        trace_calls.append((command, _kwargs))
+        trace = "\n".join([f"line {index}" for index in range(250)])
+        return runtime.CommandResult(command, 0, trace + "\npassword=topsecret\n", "")
+
     monkeypatch.setattr(collect, "run_command", fake_run)
+    monkeypatch.setattr(collect, "run_command_tail", fake_tail)
     args = SimpleNamespace(
         job_url="https://gitlab.example.test/unit/repo/-/jobs/123",
         search="selected",
     )
 
-    result = collect.collect_gitlab_job(_target(target_file), args)
+    result = collect.collect_gitlab_job(_target(_write_gitlab_token_target(tmp_path, token_file)), args)
 
     assert result["status"] == "PASS"
     assert result["summary"]["record_count"] == 1
@@ -394,3 +595,10 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
     assert "topsecret" not in row["trace_tail"]
     assert "password=[REDACTED]" in row["trace_tail"]
     assert row["trace_tail"].splitlines()[0] == "line 51"
+    assert run_envs
+    assert all(env and env.get("GITLAB_TOKEN") == token for env in run_envs)
+    assert len(trace_calls) == 1
+    assert trace_calls[0][0][-1] == "projects/unit%2Frepo/jobs/123/trace"
+    assert trace_calls[0][1]["env"]["GITLAB_TOKEN"] == token
+    assert token not in json.dumps(result)
+    assert str(token_file) not in json.dumps(result)
