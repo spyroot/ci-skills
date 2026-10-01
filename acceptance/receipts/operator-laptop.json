@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-01T18:40:45.599712+00:00",
+  "captured_at": "2026-10-01T18:47:03.005848+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -27,7 +27,7 @@
           "source": "cilium-b7w9g"
         }
       ],
-      "readback_sha256": "0b4454889c698acf89b67274e3bc9b64ce87dccc447bd33ca6dcfb2546384e9d",
+      "readback_sha256": "c190997816456ba87ae89157bf71f8eb74b302c9060d4fc059a58b087920a653",
       "record_count": 9,
       "status": "PARTIAL"
     },
@@ -35,15 +35,15 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "337e4778f4db9543ac4fc1b3a3a9238b657355ea3f16693ec6b8e55e54d7ff14",
-      "record_count": 1831,
+      "readback_sha256": "74ff0b1f0e1df5b6d18a272314d6ee9cd3fad0f2529cfbb7b531fd8935ec4694",
+      "record_count": 1669,
       "status": "PASS"
     },
     "storage_report": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "0da9c323ba772b75ca56a6cf6b145dac36bceecab80d309fe400654f004ed71d",
+      "readback_sha256": "0214dfc2705eb9020a8e3cfc217065f9585a2b8be7c0e745ca3d41078e12b5be",
       "record_count": 65,
       "resource_counts": {
         "attachments": 33,
@@ -52,7 +52,7 @@
         "daemonsets": 41,
         "deployments": 189,
         "nodes": 9,
-        "pods": 636,
+        "pods": 635,
         "pvcs": 57,
         "pvs": 65,
         "replicasets": 504,
@@ -71,11 +71,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "8c2a01459d6d1b1d3e3bde82ad45ce392c5d970972e3f0c8cbbc23ee0abc572e",
+    "digest": "4cec4ca70fb157e72f95c6ca85ffc7a3d8c59ff955555a3c2fd8afbaf99bf388",
     "file_count": 20,
     "revision": {
       "source": "git_head",
-      "value": "586487b8b826a523e1095a95a13519c7a52e68c0",
+      "value": "f162308c3d19762d4dc624dfa5647646c3f20d18",
       "verified": true
     }
   },
@@ -164,5 +164,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "586487b8b826a523e1095a95a13519c7a52e68c0"
+  "tested_revision": "f162308c3d19762d4dc624dfa5647646c3f20d18"
 }
