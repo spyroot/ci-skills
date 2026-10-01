@@ -49,7 +49,7 @@ is found, the error names every path it searched and the template to copy.
 
 ## After you clone
 
-Four steps. The whole point of the third is that you do it once and no command
+Five steps. The whole point of the third is that you do it once and no command
 afterwards needs an argument.
 
 **1. Install the tools.** Python 3.11 or newer with PyYAML, plus `gh`, `glab`
@@ -97,6 +97,33 @@ python3 skills/k8s-admin-diagnostics/scripts/access_check.py --publication
 receipt names the effective credential source and identity for each one. That
 is the answer to "which credential am I using" — read it rather than searching
 the host.
+
+**5. Install it where your agent looks.** Steps 1 to 4 make the commands work
+in a shell. An agent finds the skill only once it is installed into that
+runtime's skills directory:
+
+```bash
+python tools/install_k8s_admin_diagnostics.py --dry-run --json   # the plan
+python tools/install_k8s_admin_diagnostics.py --json             # ~/.codex/skills
+python tools/install_k8s_admin_diagnostics.py --skills-dir ~/.claude/skills --json
+```
+
+The default destination is `$CODEX_HOME/skills/k8s-admin-diagnostics`, or
+`~/.codex/skills/k8s-admin-diagnostics` when `CODEX_HOME` is unset; pass
+`--skills-dir PATH` for any other runtime. It refuses to overwrite an existing
+destination, requires a clean checkout of the skill subtree so the revision it
+reports is verified against the source bytes, and reports the installed digest
+— which is the value to compare against the `skill.digest` in any later report.
+It also accepts `--yaml` and `--help`.
+
+A Codex session can install the merged skill straight from GitHub instead:
+
+```text
+Install the skill from https://github.com/spyroot/ci-skills/tree/main/skills/k8s-admin-diagnostics
+```
+
+Either way, each execution host still needs its own credentials and its own
+target file — installation grants nothing.
 
 ## If you are an agent
 
