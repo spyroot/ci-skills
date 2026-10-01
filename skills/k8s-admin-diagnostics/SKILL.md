@@ -1,33 +1,117 @@
 ---
 name: k8s-admin-diagnostics
-description: Collect read-only GitLab CI, Kubernetes storage, event, and Cilium evidence after GitHub, GitLab, and cluster administrator access checks.
+description: Collect read-only GitLab CI, Kubernetes storage, event, and Cilium evidence after proving GitHub, GitLab, and cluster administrator access. Reports which credential it actually used, so no credential hunting is needed.
+metadata:
+  manifest: tools.json
+  first_call: scripts/access_check.py
+  default_output: json when stdout is not a terminal
+  read_only: true
 ---
 
 # Kubernetes admin diagnostics
 
-Use this skill to diagnose Kubernetes-backed CI, storage, and network
-symptoms. Commands run on the computer or runner where invoked. Installation
-provides no credentials or API permissions.
+Diagnose a Kubernetes-backed CI, storage or network symptom. Every command is
+read-only: none logs in, changes context, grants a role, or mutates anything.
 
-1. Obtain the operator's nonsecret `--target PATH` TOML file. Run
-   `scripts/access_check.py --target PATH --json --publication` on the actual
-   execution host. Add `--job-url URL` for a selected GitLab job. Pass the
-   exact source commit as `--revision SHA` if the installed copy has no Git
-   metadata. Read [access.md](references/access.md) for the live contract.
-   `DRY_RUN` is a plan, never access evidence.
-2. For a CI job, run `scripts/gitlab_job.py --target PATH --job-url URL --json`.
-   Start with its actual job interval, Pod identity, node, and runner details.
-3. Run `scripts/storage_report.py`, `scripts/event_trace.py`, and
-   `scripts/cilium_status.py` concurrently when inputs are independent. Use
-   their native filters to preserve identities and timing.
-4. Correlate results by job time, Pod UID, node, PVC, and event reason. Mark
-   conclusions **confirmed** by direct read-back, **correlated** by matching
-   time and identity, or **unverified** when evidence is missing or expired.
-   Preserve `UNKNOWN` when agent health cannot run.
-5. Use `--output-dir PATH` only when persistent paired JSON and human reports
-   are requested. Review artifacts before sharing; events and traces may
-   contain sensitive data.
+## 1. First call is always the access check
 
-Every live invocation resolves the same credential sources and target for its
-access gate and collector. The gate runs real storage, event, and Cilium reads,
-including non-TTY health. No command logs in, changes context, or grants roles.
+Run this before anything else, every time:
+
+    scripts/access_check.py --publication
+
+Do not go looking for credentials. This one call resolves them and tells you
+what it used:
+
+- `PASS` — `credential_sources` names the effective source per authority and
+  `surfaces.<name>.identity` the identity read back. You now know what you are
+  authenticated as. Stop searching; proceed.
+- `BLOCKED` — `surfaces.<name>.reason` names what failed and `next_step` what
+  to do. Report that; do not try other credentials.
+
+Access is resolved from declared locations, first match wins, and the match is
+reported. The chain per authority is in `tools.json` under `access_protocol`,
+and [references/access.md](references/access.md) is the full contract.
+The one trap worth knowing: with no Kubernetes location declared, resolution
+ends at `~/.kube/config`, which is usually a *different* cluster — so a target
+that declares `kubernetes.kubeconfigs` is how you avoid aiming elsewhere.
+
+Provisioning access is not this skill's job. If a kubeconfig has to be fetched
+or minted first, that belongs to the calling project's own instructions.
+
+## 2. Read the manifest, not five help texts
+
+`tools.json` beside this file is the machine-readable contract: every command,
+its purpose, when to use it, the authorities it needs, its options, and a
+symptom-to-command routing table. `<command> --describe` prints one command's
+contract as JSON and needs no credentials.
+
+Routing, in short:
+
+| You need | Command |
+| --- | --- |
+| proof of access, before trusting anything | `access_check.py` |
+| a named CI job's own facts | `gitlab_job.py --job-url URL` |
+| why a volume or claim is stuck | `storage_report.py` |
+| what the cluster said during an interval | `event_trace.py --last 15m` |
+| connectivity, or CNI health per node | `cilium_status.py` |
+
+## 3. One interface, not five
+
+Every command accepts `--target`, `--json`, `--yaml`, `--human`, `--dry-run`,
+`--revision`, `--output-dir` and `--describe`. A command that filters records
+accepts `--search`; one scoped to a namespace accepts `--namespace`; one
+reading a time range accepts `--last`, `--from` and `--to`. Learn the tier
+once and it holds everywhere.
+
+`--target` resolves in four declared places — the argument, then
+`$CI_SKILLS_TARGET`, then `./.ci-skills/target.toml`, then
+`~/.ci-skills/target.toml` — and every report says which it used as
+`target_source`. One cluster means setting the last one once; many clusters
+mean the environment variable or a per-project file. The common case takes no
+arguments at all. Output needs no flag either: a terminal gets the human
+summary, a pipe or file gets versioned JSON.
+
+Prefer a native filter over a shell pipeline — `--namespace`, `--node`,
+`--reason`, `--search`, `--last` — because a pipeline discards the identity and
+timing you will need to correlate. `--last 15m` beats computing an RFC3339
+pair; pass the job's own interval when correlating a job.
+
+## 4. Read the status honestly
+
+- `PASS` — every selected authority and live check passed.
+- `PARTIAL` with `access_proven: true` — the read worked and a component is
+  unhealthy. That is usually the finding, not an obstacle. Say which component.
+- `BLOCKED` — see `blocking_live_checks` and the surface `reason`.
+- `DRY_RUN` — a probe plan. Never access evidence.
+- `UNKNOWN` — a per-item reading could not be taken. Preserve it; do not
+  coerce it to a failure or a pass.
+- An event read returning zero records with zero errors means the events aged
+  out of the cluster, not that the read failed. Say "unverified, evidence
+  expired".
+
+Exit 0 is `PASS` or `DRY_RUN`; exit 2 is `BLOCKED` or `PARTIAL`.
+
+## 5. Correlate, then state your confidence
+
+Correlate by job time, Pod UID, node, claim and event reason. Mark each
+conclusion **confirmed** by direct read-back, **correlated** by matching time
+and identity, or **unverified** when evidence is missing or expired.
+
+Every report carries the gate that authorized it: `access.profile`, the
+identities, the credential sources, the execution host, and `skill.digest`.
+That digest is identical across every report from one installed copy, and each
+carries a `receipt_sha256` tying it to its gate — cross-check and cite them,
+and several reports become one audit trail.
+
+`skill.revision.verified` is `false` for an installed copy, because a commit
+SHA cannot be verified where it is claimed. Treat it as a claim; the digest is
+the provenance.
+
+## 6. Persisting evidence
+
+Nothing is written unless you ask. `--output-dir PATH` writes paired JSON and
+text. For an artifact that will be kept or committed, use `access_check.py
+--receipt-out PATH` instead: only that form digests absolute host paths, and
+the captured form names credential locations under someone's home directory.
+Review any artifact before sharing — event messages and job traces can carry
+sensitive text.

@@ -1,0 +1,283 @@
+{
+  "access_protocol": {
+    "github": [
+      {
+        "source": "target:github.token_file",
+        "when": "the target declares a token file"
+      },
+      {
+        "source": "env:GH_TOKEN or GITHUB_TOKEN",
+        "when": "set, and github.host is github.com"
+      },
+      {
+        "source": "env:GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN",
+        "when": "set, and github.host is anything other than github.com"
+      },
+      {
+        "source": "gh-credential-store:<host>",
+        "when": "gh holds a credential for the exact host"
+      }
+    ],
+    "gitlab": [
+      {
+        "source": "target:gitlab.token_file",
+        "when": "the target declares a token file"
+      },
+      {
+        "source": "env:GITLAB_TOKEN, GITLAB_ACCESS_TOKEN or OAUTH_TOKEN",
+        "when": "set"
+      },
+      {
+        "source": "glab-credential-store:<host>",
+        "when": "glab holds a credential for the exact FQDN"
+      }
+    ],
+    "kubernetes": [
+      {
+        "source": "target:kubernetes.kubeconfigs",
+        "when": "the target declares the search path; needs no environment"
+      },
+      {
+        "source": "target:kubernetes.kubeconfig",
+        "when": "the target declares one file"
+      },
+      {
+        "source": "env:KUBECONFIG",
+        "when": "set; its own path order is honoured"
+      },
+      {
+        "source": "kubectl-default:~/.kube/config",
+        "when": "nothing above applies"
+      }
+    ],
+    "no_search": "Do not hunt for credentials. Run access_check.py once: if it passes, the report names the effective source for each authority and you are done. If it blocks, the surface reason names what to fix.",
+    "rule": "first match wins; the resolved source is reported in credential_sources",
+    "warning": "The last Kubernetes entry is usually a DIFFERENT cluster from the one you want. Declare kubernetes.kubeconfigs in the target so a cold run cannot silently aim elsewhere."
+  },
+  "authorities": [
+    "github",
+    "gitlab",
+    "kubernetes"
+  ],
+  "capability_options": {
+    "filters_records": {
+      "--search": "case-insensitive text filter over the returned records"
+    },
+    "namespaced": {
+      "--namespace": "one namespace, or `all`; `auto` where the command discovers it"
+    },
+    "node_scoped": {
+      "--node": "restrict to one node name"
+    },
+    "time_ranged": {
+      "--from": "inclusive RFC3339 start",
+      "--last": "relative window ending now: 5m, 90s, 2h, 7d",
+      "--to": "inclusive RFC3339 end"
+    }
+  },
+  "commands": {
+    "access_check.py": {
+      "capabilities": [],
+      "options": [
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--job-url",
+        "--json",
+        "--output-dir",
+        "--publication",
+        "--receipt-out",
+        "--revision",
+        "--target",
+        "--yaml"
+      ],
+      "purpose": "Prove access to every selected authority and emit one receipt.",
+      "report_kind": "access_check",
+      "required_options": [],
+      "requires_authorities": [
+        "github",
+        "gitlab",
+        "kubernetes"
+      ],
+      "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
+      "use_when": "Before trusting any other command, and whenever you need evidence that a host really had the access it claims."
+    },
+    "cilium_status.py": {
+      "capabilities": [
+        "filters_records",
+        "namespaced",
+        "node_scoped"
+      ],
+      "options": [
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--namespace",
+        "--node",
+        "--output-dir",
+        "--revision",
+        "--search",
+        "--target",
+        "--yaml"
+      ],
+      "purpose": "Aggregate Cilium agent, operator and node health by real exec.",
+      "report_kind": "cilium_status",
+      "required_options": [],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "One record per agent, with health from a non-TTY exec; UNKNOWN where it could not run.",
+      "use_when": "Connectivity is suspect, or a node's CNI may differ from its Ready condition."
+    },
+    "event_trace.py": {
+      "capabilities": [
+        "filters_records",
+        "namespaced",
+        "time_ranged"
+      ],
+      "options": [
+        "--describe",
+        "--dry-run",
+        "--from",
+        "--human",
+        "--json",
+        "--kind",
+        "--last",
+        "--namespace",
+        "--object",
+        "--output-dir",
+        "--reason",
+        "--revision",
+        "--search",
+        "--target",
+        "--to",
+        "--yaml"
+      ],
+      "purpose": "Return a time-ordered event trace from both event APIs.",
+      "report_kind": "event_trace",
+      "required_options": [],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "One record per event, deduplicated across both APIs, oldest first.",
+      "use_when": "You need what the cluster said during an interval. Pass the interval; a zero count with zero errors means the events aged out, not that the read failed."
+    },
+    "gitlab_job.py": {
+      "capabilities": [
+        "filters_records"
+      ],
+      "options": [
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--job-url",
+        "--json",
+        "--output-dir",
+        "--revision",
+        "--search",
+        "--target",
+        "--yaml"
+      ],
+      "purpose": "Read one CI job with its pipeline, runner and bounded trace.",
+      "report_kind": "gitlab_job",
+      "required_options": [
+        "--job-url"
+      ],
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "returns": "One record: job, pipeline, runner, and the last 200 trace lines, sanitized.",
+      "use_when": "A named job failed and you need its own facts, not the cluster's."
+    },
+    "storage_report.py": {
+      "capabilities": [
+        "filters_records",
+        "namespaced",
+        "node_scoped"
+      ],
+      "options": [
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--namespace",
+        "--node",
+        "--output-dir",
+        "--phase",
+        "--revision",
+        "--search",
+        "--storage-class",
+        "--target",
+        "--yaml"
+      ],
+      "purpose": "Correlate claims, volumes, attachments, pods and controllers.",
+      "report_kind": "storage_report",
+      "required_options": [],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "One record per claim or standalone volume, with its pods, attachments and controllers.",
+      "use_when": "A workload will not start or a volume looks stuck, and you need the chain."
+    }
+  },
+  "default_output": "json when stdout is not a terminal, human when it is",
+  "exit_codes": {
+    "0": "PASS or an explicitly marked DRY_RUN",
+    "2": "BLOCKED or PARTIAL, or an input that could not be used"
+  },
+  "kind": "skill_manifest",
+  "read_only": true,
+  "routing": {
+    "a named CI job failed": "gitlab_job.py",
+    "a volume or claim is stuck": "storage_report.py",
+    "connectivity or CNI health": "cilium_status.py",
+    "prove access first": "access_check.py",
+    "what the cluster said during an interval": "event_trace.py"
+  },
+  "schema_version": "1.0",
+  "skill": "k8s-admin-diagnostics",
+  "status_values": {
+    "BLOCKED": "an authority or a required read failed; see blocking_live_checks",
+    "DRY_RUN": "a probe plan only, never access evidence",
+    "PARTIAL": "the read completed and a component is unhealthy; see access_proven",
+    "PASS": "every selected authority and live check passed",
+    "UNKNOWN": "a per-item reading could not be taken, preserved rather than coerced"
+  },
+  "target_protocol": [
+    {
+      "location": "the path given",
+      "scope": "one command",
+      "source": "argv:--target",
+      "when": "passed; a missing file is an error, never a fallback"
+    },
+    {
+      "location": "$CI_SKILLS_TARGET",
+      "scope": "one environment",
+      "source": "env:CI_SKILLS_TARGET",
+      "when": "set and the file exists"
+    },
+    {
+      "location": "./.ci-skills/target.toml",
+      "scope": "one project",
+      "source": "project",
+      "when": "present in the working directory"
+    },
+    {
+      "location": "~/.ci-skills/target.toml",
+      "scope": "one user",
+      "source": "user",
+      "when": "present; the documented default"
+    }
+  ],
+  "universal_options": {
+    "--describe": "this command's machine-readable contract, then exit",
+    "--dry-run": "list planned probes without contacting any API; never access evidence",
+    "--human": "human summary even when stdout is not a terminal",
+    "--json": "versioned JSON document",
+    "--output-dir": "write paired JSON and text reports; nothing is persisted without it",
+    "--revision": "exact source commit of the installed copy, recorded as a claim",
+    "--target": "nonsecret TOML naming the exact authorities; defaults to the per-host location",
+    "--yaml": "versioned YAML document"
+  }
+}
