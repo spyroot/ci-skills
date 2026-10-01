@@ -12,6 +12,8 @@ The installed skill contains instructions and executable code. It contains no ta
 
 A private token file can be provisioned once from an existing secure store into the per-computer credential directory with user-only file permissions. Never copy credentials into the GitHub repository or installed skill. The skill reads the named file at runtime; no private project path is embedded in its code or documentation. Token values are never placed in reports or command arguments.
 
+File mode passes the GitLab token to `glab` as `GITLAB_TOKEN` in the child process environment. An explicit missing, empty, or unreadable token file has no fallback to a CLI profile. Keep every token file outside this repository and the installed skill.
+
 Example nonsecret target file:
 
 ```toml
