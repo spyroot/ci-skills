@@ -540,7 +540,7 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
     runtime = import_script_module("core.runtime")
     token = "unit-token-value"
     token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
-    token_file.parent.mkdir()
+    token_file.parent.mkdir(parents=True)
     token_file.write_text(token + "\n", encoding="utf-8")
     trace_calls = []
     run_envs: list[dict[str, str] | None] = []

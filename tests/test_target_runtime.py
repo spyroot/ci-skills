@@ -25,7 +25,7 @@ def test_load_target_accepts_exact_nonsecret_authorities(target_file):
 def test_load_target_accepts_optional_gitlab_token_file_path(tmp_path):
     """The target may point at a host-local token file without storing a token."""
     token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
-    token_file.parent.mkdir()
+    token_file.parent.mkdir(parents=True)
     token_file.write_text("unit-token-value\n", encoding="utf-8")
     target_path = tmp_path / "target.toml"
     target_path.write_text(

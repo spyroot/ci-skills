@@ -147,7 +147,7 @@ def _fake_access_runner(runtime: Any, scenario: str) -> tuple[Any, list[tuple[st
                                 {
                                     "metadata": {
                                         "namespace": "kube-system",
-                                        "name": "cilium-agent",
+                                        "name": "cilium",
                                     }
                                 }
                             ]
@@ -244,7 +244,7 @@ def test_gitlab_access_uses_token_file_only_as_subprocess_environment(monkeypatc
     access, runtime = _access_modules()
     token = "unit-token-value"
     token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
-    token_file.parent.mkdir()
+    token_file.parent.mkdir(parents=True)
     token_file.write_text(token + "\n", encoding="utf-8")
     target = _load_target(_write_token_target(tmp_path, token_file))
     observed_envs: list[dict[str, str] | None] = []
@@ -320,7 +320,11 @@ def test_gitlab_access_without_token_file_uses_glab_host_profile(monkeypatch, ta
 
 @pytest.mark.parametrize(
     ("token_body", "expected_reason"),
-    ((None, "token_file_missing"), ("", "token_file_empty"), ("   \n", "token_file_empty")),
+    (
+        (None, "credential_file_unavailable"),
+        ("", "credential_file_invalid"),
+        ("   \n", "credential_file_invalid"),
+    ),
 )
 def test_gitlab_access_blocks_missing_or_empty_token_file(
     monkeypatch,
@@ -331,7 +335,7 @@ def test_gitlab_access_blocks_missing_or_empty_token_file(
     """A configured token_file must exist and contain one nonempty token."""
     access, _runtime = _access_modules()
     token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
-    token_file.parent.mkdir()
+    token_file.parent.mkdir(parents=True)
     if token_body is not None:
         token_file.write_text(token_body, encoding="utf-8")
     target = _load_target(_write_token_target(tmp_path, token_file))

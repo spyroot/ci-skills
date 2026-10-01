@@ -86,7 +86,10 @@ def _optional_file(table: dict[str, object], key: str, skill_root: Path) -> Path
         return None
     if not isinstance(value, str) or not value.strip():
         raise TargetError(f"{key} must be a nonempty path when supplied")
-    path = Path(value).expanduser().resolve()
+    selected = Path(value).expanduser()
+    if key == "token_file" and not selected.is_absolute():
+        raise TargetError("token_file must be an absolute path")
+    path = selected.resolve()
     if path.is_relative_to(skill_root):
         raise TargetError(f"{key} must be stored outside the installed skill")
     return path
