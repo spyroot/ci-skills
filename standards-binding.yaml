@@ -18,6 +18,7 @@ spec:
     - provider-escalation
     - bash-shell-standards
     - helm-ci-standards
+    - policy-authority-standards
   providers: []
   projectAdditions:
     - TEAM_GUIDE.md

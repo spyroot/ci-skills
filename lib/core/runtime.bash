@@ -25,12 +25,12 @@ ci_log() {
   local level=$1 component=$2 event=$3 message=$4 line timestamp
   local rank=0 minimum=0
   case $level in
-    debug) rank=0 ;; info) rank=1 ;; warning) rank=2 ;; error) rank=3 ;;
-    *) return "$CI_EXIT_USAGE" ;;
+  debug) rank=0 ;; info) rank=1 ;; warning) rank=2 ;; error) rank=3 ;;
+  *) return "$CI_EXIT_USAGE" ;;
   esac
   case ${CI_LOG_LEVEL:-info} in
-    debug) minimum=0 ;; info) minimum=1 ;; warning) minimum=2 ;;
-    error) minimum=3 ;; *) return "$CI_EXIT_USAGE" ;;
+  debug) minimum=0 ;; info) minimum=1 ;; warning) minimum=2 ;;
+  error) minimum=3 ;; *) return "$CI_EXIT_USAGE" ;;
   esac
   ((rank >= minimum)) || return 0
   timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ') || return
@@ -48,25 +48,29 @@ ci_log() {
   fi
 }
 
-# Summary: Load the complete first line of a selected credential file.
+# Summary: Load the single token line from a selected credential file.
 # Arguments: file path, output variable name.
 # Stdout: none. Stderr: classified failure without credential content.
-# Returns: 0, usage, missing file, or blocked empty credential.
+# Returns: 0, usage, missing input, or invalid credential data.
 ci_token_from_file() {
-  local path=$1 output_name=$2 value=''
+  local path=$1 output_name=$2 value='' extra='' extra_status=0
   [[ $output_name =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return "$CI_EXIT_USAGE"
-  [[ -r $path ]] || ci_fail "$CI_EXIT_MISSING" \
+  [[ -f $path && -r $path ]] || ci_fail "$CI_EXIT_MISSING" \
     'credential file is unreadable' 'Provide a readable --token-file path.' || return $?
-  if IFS= read -r value <"$path"; then
-    :
-  elif [[ -z $value ]]; then
-    ci_fail "$CI_EXIT_MISSING" 'credential file is empty' \
-      'Provide a non-empty --token-file.'
-    return $?
-  fi
+  {
+    IFS= read -r value || :
+    IFS= read -r extra || extra_status=$?
+  } <"$path"
   value=${value%$'\r'}
   [[ -n $value ]] || ci_fail "$CI_EXIT_MISSING" \
     'credential file is empty' 'Provide a non-empty --token-file.' || return $?
+  if ((extra_status == 0)) || [[ -n $extra ]]; then
+    ci_fail "$CI_EXIT_DATA" 'credential file has multiple lines' \
+      'Provide one token value in the selected file.'
+    return $?
+  fi
+  [[ ${#value} -le 4096 ]] || ci_fail "$CI_EXIT_DATA" \
+    'credential value is too long' 'Check the selected token file.' || return $?
   printf -v "$output_name" '%s' "$value"
 }
 

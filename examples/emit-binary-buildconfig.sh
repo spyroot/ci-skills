@@ -27,22 +27,26 @@ name='' namespace='' source_sha='' dockerfile='' image=''
 pull_secret='' push_secret='' source_label_key=''
 while (($#)); do
   case $1 in
-    --help) usage; exit 0 ;;
-    --dry-run) shift ;;
-    --name|--namespace|--source-sha|--dockerfile|--image|--pull-secret|--push-secret|--source-label-key)
-      (($# >= 2)) || fail "missing value for $1"
-      case $1 in
-        --name) name=$2 ;;
-        --namespace) namespace=$2 ;;
-        --source-sha) source_sha=$2 ;;
-        --dockerfile) dockerfile=$2 ;;
-        --image) image=$2 ;;
-        --pull-secret) pull_secret=$2 ;;
-        --push-secret) push_secret=$2 ;;
-        --source-label-key) source_label_key=$2 ;;
-      esac
-      shift 2 ;;
-    *) fail "unknown argument: $1" ;;
+  --help)
+    usage
+    exit 0
+    ;;
+  --dry-run) shift ;;
+  --name | --namespace | --source-sha | --dockerfile | --image | --pull-secret | --push-secret | --source-label-key)
+    (($# >= 2)) || fail "missing value for $1"
+    case $1 in
+    --name) name=$2 ;;
+    --namespace) namespace=$2 ;;
+    --source-sha) source_sha=$2 ;;
+    --dockerfile) dockerfile=$2 ;;
+    --image) image=$2 ;;
+    --pull-secret) pull_secret=$2 ;;
+    --push-secret) push_secret=$2 ;;
+    --source-label-key) source_label_key=$2 ;;
+    esac
+    shift 2
+    ;;
+  *) fail "unknown argument: $1" ;;
   esac
 done
 

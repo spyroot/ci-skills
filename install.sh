@@ -36,27 +36,46 @@ ci_install_main() {
   local destination='' mode=dry-run explicit_dry_run=false confirm=''
   local timeout='' seconds='' fingerprint='' started=$SECONDS help=false
   CI_LOG_FORMAT=text CI_LOG_LEVEL=info CI_LOG_FILE='' CI_RUN_ID=''
-  if (($# == 0)); then ci_install_help >&2; return "$CI_EXIT_USAGE"; fi
+  if (($# == 0)); then
+    ci_install_help >&2
+    return "$CI_EXIT_USAGE"
+  fi
   while (($#)); do
     case $1 in
-      --destination|--confirm-install|--timeout|--log-format|--log-level|--log-file|--run-id)
-        (($# >= 2)) || return "$CI_EXIT_USAGE"
-        case $1 in
-          --destination) destination=$2 ;; --confirm-install) confirm=$2 ;;
-          --timeout) timeout=$2 ;; --log-format) CI_LOG_FORMAT=$2 ;;
-          --log-level) CI_LOG_LEVEL=$2 ;; --log-file) CI_LOG_FILE=$2 ;;
-          --run-id) CI_RUN_ID=$2 ;;
-        esac
-        shift 2 ;;
-      --dry-run) [[ $mode != apply ]] || return "$CI_EXIT_USAGE";
-        explicit_dry_run=true; shift ;;
-      --apply) [[ $explicit_dry_run == false ]] || return "$CI_EXIT_USAGE";
-        mode=apply; shift ;;
-      --help|-h) help=true; shift ;;
-      *) ci_fail "$CI_EXIT_USAGE" "unknown argument: $1" 'See --help.'; return $? ;;
+    --destination | --confirm-install | --timeout | --log-format | --log-level | --log-file | --run-id)
+      (($# >= 2)) || return "$CI_EXIT_USAGE"
+      case $1 in
+      --destination) destination=$2 ;; --confirm-install) confirm=$2 ;;
+      --timeout) timeout=$2 ;; --log-format) CI_LOG_FORMAT=$2 ;;
+      --log-level) CI_LOG_LEVEL=$2 ;; --log-file) CI_LOG_FILE=$2 ;;
+      --run-id) CI_RUN_ID=$2 ;;
+      esac
+      shift 2
+      ;;
+    --dry-run)
+      [[ $mode != apply ]] || return "$CI_EXIT_USAGE"
+      explicit_dry_run=true
+      shift
+      ;;
+    --apply)
+      [[ $explicit_dry_run == false ]] || return "$CI_EXIT_USAGE"
+      mode=apply
+      shift
+      ;;
+    --help | -h)
+      help=true
+      shift
+      ;;
+    *)
+      ci_fail "$CI_EXIT_USAGE" "unknown argument: $1" 'See --help.'
+      return $?
+      ;;
     esac
   done
-  [[ $help == false ]] || { ci_install_help; return 0; }
+  [[ $help == false ]] || {
+    ci_install_help
+    return 0
+  }
   [[ $CI_LOG_FORMAT == text || $CI_LOG_FORMAT == json ]] || return "$CI_EXIT_USAGE"
   [[ $CI_LOG_LEVEL =~ ^(debug|info|warning|error)$ ]] || return "$CI_EXIT_USAGE"
   if [[ -z $destination ]]; then

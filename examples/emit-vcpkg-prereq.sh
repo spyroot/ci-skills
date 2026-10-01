@@ -28,21 +28,25 @@ name='' namespace='' base_image='' vcpkg_ref=''
 zip_package='' unzip_package='' pull_secret=''
 while (($#)); do
   case $1 in
-    --help) usage; exit 0 ;;
-    --dry-run) shift ;;
-    --name|--namespace|--base-image|--vcpkg-ref|--zip-package|--unzip-package|--pull-secret)
-      (($# >= 2)) || fail "missing value for $1"
-      case $1 in
-        --name) name=$2 ;;
-        --namespace) namespace=$2 ;;
-        --base-image) base_image=$2 ;;
-        --vcpkg-ref) vcpkg_ref=$2 ;;
-        --zip-package) zip_package=$2 ;;
-        --unzip-package) unzip_package=$2 ;;
-        --pull-secret) pull_secret=$2 ;;
-      esac
-      shift 2 ;;
-    *) fail "unknown argument: $1" ;;
+  --help)
+    usage
+    exit 0
+    ;;
+  --dry-run) shift ;;
+  --name | --namespace | --base-image | --vcpkg-ref | --zip-package | --unzip-package | --pull-secret)
+    (($# >= 2)) || fail "missing value for $1"
+    case $1 in
+    --name) name=$2 ;;
+    --namespace) namespace=$2 ;;
+    --base-image) base_image=$2 ;;
+    --vcpkg-ref) vcpkg_ref=$2 ;;
+    --zip-package) zip_package=$2 ;;
+    --unzip-package) unzip_package=$2 ;;
+    --pull-secret) pull_secret=$2 ;;
+    esac
+    shift 2
+    ;;
+  *) fail "unknown argument: $1" ;;
   esac
 done
 
