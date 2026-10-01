@@ -63,22 +63,60 @@ and individual results.
   permissions, and perform the storage and event resource reads. Cilium
   diagnostics require a real non-TTY `cilium-health` command on a ready agent.
 
+The gate proves access, not cluster health -- this skill exists to be run ON a
+degraded cluster. A denial (`authentication`, `authorization`, `missing_tool`)
+always blocks. Any other read failure blocks a single-shot collector; Cilium is
+read per agent, so one agent failing while others answer is that agent's state,
+and the capability counts as proven when at least one real agent returned a
+health response that carries `local` or `nodes`. Parseable JSON is not a health
+response. Each live check reports `access_proven` beside its own `status`, and
+the receipt lists `blocking_live_checks`.
+
+Agents are discovered through the `cilium` DaemonSet's own selector, resolved
+from the one cluster-wide listing that also resolves the namespace. A name
+prefix would also match `cilium-operator-*` and `cilium-envoy-*`, which carry
+no health endpoint.
+
+The executed code is identified by a content digest of the skill tree, not by a
+commit SHA: a SHA cannot be verified where it is claimed, and an installed copy
+has no Git metadata at all. A revision is reported `verified` only when it came
+from a clean subtree in the repository that tracks this skill; `--revision` is
+recorded as a claim, and the invoking project's `CI_COMMIT_SHA` is kept in its
+own `consuming_project` field so it can never be mistaken for the skill's.
+
+Required status checks are compared against the set declared as
+`github.required_checks` in the target file, by exact equality. Any nonempty
+read-back used to pass, so protection requiring only an unrelated check
+satisfied the gate; an absent declaration now blocks rather than accepting
+anything. The declared set must be a subset of what protection requires, so
+extra protection is not a failure.
+
+Each kubeconfig is digested when sources are bound, and the digest is
+re-checked before every Kubernetes command. Pinning the filename is not pinning
+the target: the server is verified once, then each later command reopens that
+mutable path. This is detect-and-block, not an atomic pin -- a file swapped
+between the check and the command's own open is still possible -- and it closes
+the case that actually happens, a login rewriting the kubeconfig mid-run.
+
+The base gate runs before every collector. The expanded bundle runs in
+`access_check.py`, and every report names which one it passed in
+`access.profile`, so neither is implied for the other. A collector report also
+carries `access`: the identities, credential sources, targets, execution host,
+skill digest and a `receipt_sha256` of the gate that authorized it.
+
+`--receipt-out PATH` writes the committable form, with every absolute host path
+replaced by a digest token. That is what makes a real receipt publishable: the
+captured form names credential locations under the operator's home directory.
+`tools/check_live_acceptance.py` compares committed receipts against
+`acceptance/expected.toml` and refuses one that is missing, stale, from an
+undeclared executor or identity, aimed at different targets, missing a required
+live check, carrying an unproven one, or produced by a different skill digest.
+The validate workflow runs it unconditionally.
+
 `PASS` requires all selected live checks. Missing, invalid, expired,
 wrong-target, or unauthorized credentials block. A mock, file-existence
 check, login-status message, dry run, or receipt from another host is not
 live acceptance evidence.
-
-The gate proves access, not cluster health. This skill exists to be run on a
-degraded cluster, so an unhealthy component must not block the diagnostics
-that would explain it. A collector that failed to READ blocks:
-`authentication`, `authorization`, `transport`, `timeout`, `invalid_json`,
-`missing_tool`. A collector that read successfully while reporting an
-unhealthy component does not block, provided the capability it proves was
-demonstrated at least once — for Cilium, the non-TTY `cilium-health` command
-must have returned parseable status from a real agent. Each live check carries
-`access_proven` beside its own `status`, and the receipt lists
-`blocking_live_checks`, so a `PARTIAL` collector is never confused with a
-blocked gate.
 
 Cluster-wide list reads carry their own bound, `collect.LIST_TIMEOUT_SECONDS`.
 Measured on one target cluster, a whole-cluster event list was 7.7 MB and

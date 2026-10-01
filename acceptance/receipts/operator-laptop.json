@@ -1,0 +1,167 @@
+{
+  "blocking_live_checks": [],
+  "captured_at": "2026-10-01T18:29:36.584184+00:00",
+  "consuming_project": {
+    "commit": null,
+    "source": null
+  },
+  "credential_sources": {
+    "github": "gh-credential-store:github.com",
+    "gitlab": "file:path:2ccda27d0866",
+    "kubernetes": "env:KUBECONFIG"
+  },
+  "execution_host": "mac.lan",
+  "kind": "access_check",
+  "live_checks": {
+    "cilium_status": {
+      "access_proven": true,
+      "agent_health": {
+        "passed": 8,
+        "total": 9
+      },
+      "ciliumnode_count": 9,
+      "error_count": 1,
+      "errors": [
+        {
+          "reason": "agent_not_ready",
+          "source": "cilium-b7w9g"
+        }
+      ],
+      "readback_sha256": "caf68d3d55e935de3be564e6bf2630f7ddf8f585ae1f630d97072769520188fe",
+      "record_count": 9,
+      "status": "PARTIAL"
+    },
+    "event_trace": {
+      "access_proven": true,
+      "error_count": 0,
+      "errors": [],
+      "readback_sha256": "9ab31efba8d74ba1573a649c690d5adf0a11aea38f886d61c7cd14519a109b7c",
+      "record_count": 1894,
+      "status": "PASS"
+    },
+    "storage_report": {
+      "access_proven": true,
+      "error_count": 0,
+      "errors": [],
+      "readback_sha256": "dfc86c0822d9ea859d86c1115e4f26a49362d1f320b008cab87773b2c106d688",
+      "record_count": 65,
+      "resource_counts": {
+        "attachments": 33,
+        "csidrivers": 4,
+        "csinodes": 9,
+        "daemonsets": 41,
+        "deployments": 189,
+        "nodes": 9,
+        "pods": 636,
+        "pvcs": 57,
+        "pvs": 65,
+        "replicasets": 504,
+        "statefulsets": 14,
+        "storageclasses": 8
+      },
+      "status": "PASS"
+    }
+  },
+  "publication": true,
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "a67c2ac138cd6001ecf29ce3355e4ee277b83201d9f9337ad6aa323ea2b45476",
+    "file_count": 20,
+    "revision": {
+      "source": "git_head",
+      "value": "a46551912b2c657c44b58ec7d26d4d312d28dd57",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "surfaces": {
+    "github": {
+      "credential_source": "gh-credential-store:github.com",
+      "details": {
+        "required_checks": [
+          "validate"
+        ]
+      },
+      "identity": "spyroot",
+      "name": "github",
+      "next_step": null,
+      "observed_capability": [
+        "authenticated_host",
+        "identity_read",
+        "repository_read",
+        "repository_admin",
+        "protection_read",
+        "required_checks_read"
+      ],
+      "reason": null,
+      "status": "PASS",
+      "target": "github.com/spyroot/ci-skills"
+    },
+    "gitlab": {
+      "credential_source": "file:path:2ccda27d0866",
+      "details": null,
+      "identity": "spyroot",
+      "name": "gitlab",
+      "next_step": null,
+      "observed_capability": [
+        "token_file_read",
+        "authenticated_host",
+        "instance_admin_identity",
+        "instance_runner_api_read"
+      ],
+      "reason": null,
+      "status": "PASS",
+      "target": "https://gitlab.dcloud.run"
+    },
+    "kubernetes": {
+      "credential_source": "env:KUBECONFIG",
+      "details": {
+        "api_server": "https://api.ww-cai-cisco-live.dcloud.local:6443",
+        "auth_mechanism": {
+          "source": "selected kubeconfig user entry",
+          "type": "embedded-token"
+        },
+        "cilium_health_pod": "cilium-8p7t4",
+        "context": "ww-cai-verified",
+        "kubeconfig_files": [
+          "path:273977e8392f",
+          "path:f73adaea0685"
+        ],
+        "user_entry": "kube:admin/api-ww-cai-cisco-live-dcloud-local:6443"
+      },
+      "identity": "kube:admin",
+      "name": "kubernetes",
+      "next_step": null,
+      "observed_capability": [
+        "context_server_match",
+        "tls_api_reachable",
+        "effective_identity",
+        "cluster_wildcard",
+        "clusterrolebinding_create",
+        "clusterrolebinding_update",
+        "clusterrolebinding_delete",
+        "clusterrole_bind",
+        "cilium_namespace:cilium",
+        "cilium_pods_exec",
+        "cilium_health_exec"
+      ],
+      "reason": null,
+      "status": "PASS",
+      "target": "ww-cai-verified -> https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "targets": {
+    "github": "github.com/spyroot/ci-skills",
+    "gitlab": "https://gitlab.dcloud.run",
+    "kubernetes": {
+      "context": "ww-cai-verified",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "tested_revision": "a46551912b2c657c44b58ec7d26d4d312d28dd57"
+}

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .access import check_access, dry_run_access
+from .access import access_evidence, check_access, dry_run_access
 from .credentials import bind_sources
 from .portable import portable
 from .report import emit
@@ -127,6 +127,13 @@ def execute(
                 for key, value in vars(args).items()
                 if key not in {"target", "json", "yaml", "dry_run", "output_dir"}
             }
+        # Only access_check.py runs the expanded bundle, so every report names
+        # which gate it actually passed rather than the docs implying one.
+        gate["profile"] = (
+            "dry_run"
+            if args.dry_run
+            else ("full_live_access_check" if live_checks else "base_access_check")
+        )
         if live_checks and not args.dry_run and gate["status"] == PASS:
             from .live import collect_live_checks
 
@@ -136,6 +143,7 @@ def execute(
         else:
             source = collect.__name__
             data = collect(target, args)
+            data["access"] = access_evidence(gate)
         receipt_out = getattr(args, "receipt_out", None)
         if receipt_out:
             # The committable form: produced by code, never by hand-editing, so

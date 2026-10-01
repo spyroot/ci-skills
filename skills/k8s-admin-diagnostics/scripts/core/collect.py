@@ -13,7 +13,7 @@ from .cilium import HEALTH_COMMAND, agent_selector, matches_selector, valid_heal
 from .report import report
 from .runtime import error_class, run_command, run_command_tail, sanitize
 from .status import PASS, UNKNOWN
-from .target import Target
+from .target import Target, kubernetes_label
 
 # A cluster-wide list read is legitimately slow and several run concurrently.
 # Measured on one target cluster: `kubectl get events -A -o json` was 7.7 MB and
@@ -261,7 +261,7 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
     inventory = {key: len(data.get(key, [])) for key in resources}
     result = report(
         "storage_report",
-        target.kubernetes.context,
+        kubernetes_label(target),
         {
             "namespace": args.namespace,
             "node": args.node,
@@ -382,7 +382,7 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
     )
     return report(
         "event_trace",
-        target.kubernetes.context,
+        kubernetes_label(target),
         {
             "from": start.isoformat(),
             "to": end.isoformat(),
@@ -524,7 +524,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     rows.sort(key=lambda row: (row["node"] or "", row["name"] or ""))
     result = report(
         "cilium_status",
-        target.kubernetes.context,
+        kubernetes_label(target),
         {
             "namespace": namespace,
             "node": args.node,

@@ -156,6 +156,7 @@ def live_target_file(tmp_path: Path) -> Path:
             "[github]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
+            'required_checks = ["portable-required-check"]\n'
             "\n"
             "[gitlab]\n"
             'url = "https://gitlab.example.test"\n'
@@ -174,7 +175,7 @@ def test_access_check_publication_pass_reports_admin_and_required_check_receipt(
     fake_access_tools,
     live_target_file,
 ):
-    """Publication mode accepts any nonempty required-check read-back."""
+    """Publication mode requires every check the target declares."""
     result = run_script(
         "access_check.py",
         "--target",
@@ -273,3 +274,129 @@ def test_access_check_publication_blocks_when_required_checks_are_empty(
     assert data["status"] == "BLOCKED"
     assert data["surfaces"]["github"]["status"] == "BLOCKED"
     assert data["surfaces"]["github"]["reason"] == "required_checks_missing"
+
+
+def test_publication_blocks_when_only_an_unrelated_check_is_required(
+    fake_access_tools,
+    live_target_file,
+):
+    """The defect: any nonempty set used to pass, so the declared one was moot."""
+    result = run_script(
+        "access_check.py",
+        "--target",
+        live_target_file,
+        "--revision",
+        TEST_REVISION,
+        "--publication",
+        "--json",
+        fake_bin=fake_access_tools,
+        env={
+            "FAKE_GH_ADMIN": "true",
+            "FAKE_GH_REQUIRED_CONTEXTS": "some-unrelated-check",
+        },
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 2
+    assert data["status"] == "BLOCKED"
+    assert data["surfaces"]["github"]["reason"] == (
+        "required_checks_incomplete:portable-required-check"
+    )
+
+
+def test_publication_accepts_extra_checks_beyond_the_declared_set(
+    fake_access_tools,
+    live_target_file,
+):
+    """Declared is a subset: more protection than asked for is not a failure."""
+    result = run_script(
+        "access_check.py",
+        "--target",
+        live_target_file,
+        "--revision",
+        TEST_REVISION,
+        "--publication",
+        "--json",
+        fake_bin=fake_access_tools,
+        env={
+            "FAKE_GH_ADMIN": "true",
+            "FAKE_GH_REQUIRED_CONTEXTS": "portable-required-check,extra-check",
+        },
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 0
+    assert data["surfaces"]["github"]["details"]["required_checks"] == [
+        "extra-check",
+        "portable-required-check",
+    ]
+
+
+def test_a_declared_check_is_matched_exactly_not_by_substring(
+    fake_access_tools,
+    live_target_file,
+):
+    """`invalidate-cache` must never satisfy a declared `validate`."""
+    result = run_script(
+        "access_check.py",
+        "--target",
+        live_target_file,
+        "--revision",
+        TEST_REVISION,
+        "--publication",
+        "--json",
+        fake_bin=fake_access_tools,
+        env={
+            "FAKE_GH_ADMIN": "true",
+            "FAKE_GH_REQUIRED_CONTEXTS": "portable-required-check-extended",
+        },
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 2
+    assert data["surfaces"]["github"]["reason"].startswith("required_checks_incomplete")
+
+
+def test_publication_blocks_when_the_target_declares_no_required_checks(
+    fake_access_tools,
+    tmp_path,
+):
+    """An absent declaration must refuse, not fall back to accepting anything."""
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = tmp_path / "undeclared.toml"
+    target.write_text(
+        (
+            "[github]\n"
+            'host = "github.example.test"\n'
+            'repository = "unit/repo"\n'
+            "\n"
+            "[gitlab]\n"
+            'url = "https://gitlab.example.test"\n'
+            "\n"
+            "[kubernetes]\n"
+            'context = "unit-context"\n'
+            'server = "https://api.cluster.example.test:6443"\n'
+            f'kubeconfig = "{kubeconfig}"\n'
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_script(
+        "access_check.py",
+        "--target",
+        target,
+        "--revision",
+        TEST_REVISION,
+        "--publication",
+        "--json",
+        fake_bin=fake_access_tools,
+        env={
+            "FAKE_GH_ADMIN": "true",
+            "FAKE_GH_REQUIRED_CONTEXTS": "portable-required-check",
+        },
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 2
+    assert data["surfaces"]["github"]["reason"] == "required_checks_not_declared"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from .cilium import (
     ready_agent_pods,
     valid_health,
 )
-from .credentials import Sources
+from .credentials import Sources, assert_kubeconfig_unchanged
 from .runtime import CommandResult, error_class, run_command
 from .status import BLOCKED, DRY_RUN, PASS
 from .target import Target
@@ -40,6 +41,7 @@ class Surface:
 
 def kubectl_argv(target: Target, *args: str) -> list[str]:
     """Bind every Kubernetes command to the supplied context and optional file."""
+    assert_kubeconfig_unchanged(target.sources)
     command = ["kubectl"]
     sources = target.sources if isinstance(target.sources, Sources) else None
     if sources and len(sources.kubeconfig_files) == 1:
@@ -258,6 +260,31 @@ def github_publication_access(target: Target) -> Surface:
             base.observed_capability,
             "required_checks_missing",
             "Configure and read back at least one required main-branch status check.",
+            base.credential_source,
+        )
+    # Any nonempty set used to pass, so protection requiring only an unrelated
+    # check satisfied the gate while the intended one was absent. The expected
+    # set is declared in the target file and compared by exact equality: a
+    # substring test would accept `invalidate-cache` for `validate`, and an
+    # intersection test would accept one declared check out of several.
+    expected = set(target.github.required_checks)
+    if not expected:
+        return _blocked(
+            "github",
+            base.target,
+            base.observed_capability,
+            "required_checks_not_declared",
+            "Declare github.required_checks in the target file.",
+            base.credential_source,
+        )
+    missing = sorted(expected - set(names))
+    if missing:
+        return _blocked(
+            "github",
+            base.target,
+            base.observed_capability,
+            "required_checks_incomplete:" + ",".join(missing),
+            "Require every declared status check on the protected branch.",
             base.credential_source,
         )
     return Surface(
@@ -632,6 +659,34 @@ def kubernetes_access(target: Target) -> Surface:
         credential_source=source,
         details=details,
     )
+
+
+def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
+    """Summarize the gate that authorized one collector run.
+
+    A collector report used to replace the gate result entirely, so it carried
+    no identities, no credential-source references, no execution host and no
+    tested revision -- a Kubernetes report named its target only by context.
+    A fixed subset is attached instead of the whole receipt, which would
+    re-embed the credential paths, and `receipt_sha256` lets the full receipt be
+    matched byte for byte when one was also written.
+    """
+    body = json.dumps(gate, sort_keys=True, default=str).encode("utf-8")
+    surfaces = gate.get("surfaces") or {}
+    return {
+        "profile": gate.get("profile"),
+        "status": gate.get("status"),
+        "captured_at": gate.get("captured_at"),
+        "execution_host": gate.get("execution_host"),
+        "skill": gate.get("skill"),
+        "consuming_project": gate.get("consuming_project"),
+        "credential_sources": gate.get("credential_sources"),
+        "targets": gate.get("targets"),
+        "identities": {
+            name: surface.get("identity") for name, surface in surfaces.items()
+        },
+        "receipt_sha256": hashlib.sha256(body).hexdigest(),
+    }
 
 
 def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]:
