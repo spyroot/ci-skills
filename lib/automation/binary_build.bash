@@ -71,25 +71,38 @@ ci_binary_build_main() {
   local spec='' source_repo='' commit='' label='' context='' manifest=''
   local fields='' repo_root='' tree='' plan='' fingerprint='' help=false
   CI_LOG_FORMAT=text CI_LOG_LEVEL=info CI_LOG_FILE='' CI_RUN_ID=''
-  if (($# == 0)); then ci_binary_build_help >&2; return "$CI_EXIT_USAGE"; fi
+  if (($# == 0)); then
+    ci_binary_build_help >&2
+    return "$CI_EXIT_USAGE"
+  fi
   while (($#)); do
     case $1 in
-      --spec|--source-repo|--source-commit|--commit-label|--context|--log-format|--log-level|--log-file|--run-id)
-        (($# >= 2)) || ci_fail "$CI_EXIT_USAGE" "$1 needs a value" 'See --help.' || return $?
-        case $1 in
-          --spec) spec=$2 ;; --source-repo) source_repo=$2 ;;
-          --source-commit) commit=$2 ;; --commit-label) label=$2 ;;
-          --context) context=$2 ;; --log-format) CI_LOG_FORMAT=$2 ;;
-          --log-level) CI_LOG_LEVEL=$2 ;; --log-file) CI_LOG_FILE=$2 ;;
-          --run-id) CI_RUN_ID=$2 ;;
-        esac
-        shift 2 ;;
-      --dry-run) shift ;;
-      --help|-h) help=true; shift ;;
-      *) ci_fail "$CI_EXIT_USAGE" "unknown argument: $1" 'See --help.'; return $? ;;
+    --spec | --source-repo | --source-commit | --commit-label | --context | --log-format | --log-level | --log-file | --run-id)
+      (($# >= 2)) || ci_fail "$CI_EXIT_USAGE" "$1 needs a value" 'See --help.' || return $?
+      case $1 in
+      --spec) spec=$2 ;; --source-repo) source_repo=$2 ;;
+      --source-commit) commit=$2 ;; --commit-label) label=$2 ;;
+      --context) context=$2 ;; --log-format) CI_LOG_FORMAT=$2 ;;
+      --log-level) CI_LOG_LEVEL=$2 ;; --log-file) CI_LOG_FILE=$2 ;;
+      --run-id) CI_RUN_ID=$2 ;;
+      esac
+      shift 2
+      ;;
+    --dry-run) shift ;;
+    --help | -h)
+      help=true
+      shift
+      ;;
+    *)
+      ci_fail "$CI_EXIT_USAGE" "unknown argument: $1" 'See --help.'
+      return $?
+      ;;
     esac
   done
-  [[ $help == false ]] || { ci_binary_build_help; return 0; }
+  [[ $help == false ]] || {
+    ci_binary_build_help
+    return 0
+  }
   [[ -n $spec && -n $source_repo && -n $commit && -n $label ]] ||
     ci_fail "$CI_EXIT_USAGE" 'spec, source repo, source commit, and commit label are required' \
       'Supply all required arguments shown by --help.' || return $?
