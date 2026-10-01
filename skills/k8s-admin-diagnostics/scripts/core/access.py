@@ -681,6 +681,12 @@ def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
         "status": gate.get("status"),
         "captured_at": gate.get("captured_at"),
         "execution_host": gate.get("execution_host"),
+        # Which declared location the target came from. Without it a collector
+        # report names the authorities but not what selected them, so a reader
+        # cannot tell a project target from the user default -- and the
+        # protocol's promise is that every report names its own source.
+        "target_file": gate.get("target_file"),
+        "target_source": gate.get("target_source"),
         "skill": gate.get("skill"),
         "consuming_project": gate.get("consuming_project"),
         "credential_sources": gate.get("credential_sources"),

@@ -987,6 +987,8 @@ def test_access_evidence_carries_what_a_reader_needs_to_check_the_run():
         "skill": {"digest": "d" * 64, "revision": {"value": None}},
         "consuming_project": {"commit": None, "source": None},
         "credential_sources": {"github": "env:GH_TOKEN"},
+        "target_file": "/unit/home/.ci-skills/target.toml",
+        "target_source": "user",
         "targets": {"kubernetes": {"server": "https://api.unit.test:6443"}},
         "surfaces": {
             "github": {"identity": "unit-gh"},
@@ -1003,6 +1005,9 @@ def test_access_evidence_carries_what_a_reader_needs_to_check_the_run():
     assert evidence["targets"]["kubernetes"]["server"] == "https://api.unit.test:6443"
     assert evidence["skill"]["digest"] == "d" * 64
     assert len(evidence["receipt_sha256"]) == 64
+    # A collector report must name its own target source, like the gate does.
+    assert evidence["target_file"] == "/unit/home/.ci-skills/target.toml"
+    assert evidence["target_source"] == "user"
 
 
 def test_the_receipt_digest_identifies_the_gate_it_came_from():
