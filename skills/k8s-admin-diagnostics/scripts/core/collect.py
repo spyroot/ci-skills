@@ -16,6 +16,7 @@ from .reads import (
     HEALTH_COMMAND,
     STORAGE_READS,
     matches_selector,
+    read_resources,
 )
 from . import runtime
 from .runtime import error_class, read_json as _read_json, run_command_tail, sanitize
@@ -38,19 +39,11 @@ def _search(value: dict[str, Any], needle: str | None) -> bool:
 
 
 def _batch(target: Target, resources: dict[str, tuple[str, bool]]) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
-    data: dict[str, list[dict[str, Any]]] = {}
-    errors: list[dict[str, str]] = []
-    with ThreadPoolExecutor(max_workers=min(10, len(resources))) as pool:
-        futures = {
-            pool.submit(_read_json, kubectl_argv(target, "get", resource, *(["-A"] if namespaced else []), "-o", "json")): key
-            for key, (resource, namespaced) in resources.items()
-        }
-        for future in as_completed(futures):
-            key = futures[future]
-            value, error = future.result()
-            data[key] = _items(value)
-            if error:
-                errors.append({"source": key, "reason": error})
+    """Read the requested resources through the one shared read mechanism."""
+    results = read_resources(target, resources)
+    data = {key: _items(value) for key, (value, _error) in results.items()}
+    errors = [{"source": key, "reason": error}
+              for key, (_value, error) in sorted(results.items()) if error]
     return data, errors
 
 

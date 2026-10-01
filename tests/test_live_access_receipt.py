@@ -196,12 +196,11 @@ def test_cilium_health_exec_tries_every_ready_agent(target_file, monkeypatch):
             json.dumps({"local": {"name": "unit-node"}, "nodes": [{"name": "peer"}]}), "",
         )
 
-    monkeypatch.setattr(liveaccess, "cilium_namespace", lambda _target: "cilium")
-    monkeypatch.setattr(liveaccess, "read_resources",
-                        lambda *_a, **_k: _cilium_reads(("cilium-aaa", "cilium-bbb")))
     monkeypatch.setattr(liveaccess, "run_command", fake_run)
 
-    check = liveaccess.cilium_health_exec(_target(target_file))
+    check = liveaccess.cilium_health_exec(
+        _target(target_file), _cilium_reads(("cilium-aaa", "cilium-bbb")),
+    )
 
     assert check["status"] == status.PASS
     assert attempted == ["cilium-aaa", "cilium-bbb"]
@@ -214,31 +213,25 @@ def test_cilium_health_exec_blocks_when_no_agent_answers(target_file, monkeypatc
     """Permission to exec is not acceptance evidence when the command fails."""
     liveaccess, _receipt, runtime, status = _modules()
 
-    monkeypatch.setattr(liveaccess, "cilium_namespace", lambda _target: "cilium")
-    monkeypatch.setattr(liveaccess, "read_resources",
-                        lambda *_a, **_k: _cilium_reads(("cilium-aaa",)))
     monkeypatch.setattr(
         liveaccess, "run_command",
         lambda argv, **_k: runtime.CommandResult(tuple(argv), 0, "not json", ""),
     )
 
-    check = liveaccess.cilium_health_exec(_target(target_file))
+    check = liveaccess.cilium_health_exec(_target(target_file), _cilium_reads(("cilium-aaa",)))
 
     assert check["status"] == status.BLOCKED
     assert check["detail"] == "no_ready_agent_answered_health"
     assert check["evidence"]["attempts"] == [{"pod": "cilium-aaa", "reason": "invalid_health_json"}]
 
 
-def test_cilium_health_exec_blocks_when_no_agent_is_ready(target_file, monkeypatch):
+def test_cilium_health_exec_blocks_when_no_agent_is_ready(target_file):
     """A cluster with no ready agent cannot produce collector evidence either."""
     liveaccess, _receipt, _runtime, status = _modules()
     reads = _cilium_reads(("cilium-aaa",))
     reads["pods"][0]["items"][0]["status"]["conditions"][0]["status"] = "False"
 
-    monkeypatch.setattr(liveaccess, "cilium_namespace", lambda _target: "cilium")
-    monkeypatch.setattr(liveaccess, "read_resources", lambda *_a, **_k: reads)
-
-    check = liveaccess.cilium_health_exec(_target(target_file))
+    check = liveaccess.cilium_health_exec(_target(target_file), reads)
 
     assert check["status"] == status.BLOCKED
     assert check["detail"] == "no_ready_cilium_agent"
@@ -348,3 +341,114 @@ def test_verify_skips_deeper_reads_when_a_surface_is_blocked(target_file, monkey
     assert called == []
     assert built["status"] == status.BLOCKED
     assert built["blocking"]["blocked_surfaces"] == ["kubernetes"]
+
+
+def test_cilium_health_exec_stops_at_the_attempt_cap(target_file, monkeypatch):
+    """A cluster whose health is broken everywhere reports instead of grinding."""
+    liveaccess, _receipt, runtime, status = _modules()
+    attempted: list[str] = []
+
+    def fake_run(argv, **_kwargs):
+        argv = list(argv)
+        attempted.append(argv[argv.index("exec") + 1])
+        return runtime.CommandResult(tuple(argv), 1, "", "error: timed out")
+
+    monkeypatch.setattr(liveaccess, "run_command", fake_run)
+    names = tuple(f"cilium-{index}" for index in range(liveaccess.MAX_HEALTH_ATTEMPTS + 3))
+
+    check = liveaccess.cilium_health_exec(_target(target_file), _cilium_reads(names))
+
+    assert liveaccess.MAX_HEALTH_ATTEMPTS == 3
+    assert len(attempted) == liveaccess.MAX_HEALTH_ATTEMPTS
+    assert check["status"] == status.BLOCKED
+    assert check["detail"] == "no_ready_agent_answered_health"
+    assert len(check["evidence"]["attempts"]) == liveaccess.MAX_HEALTH_ATTEMPTS
+    assert check["evidence"]["agents_ready"] == len(names)
+
+
+def test_cilium_health_exec_blocks_an_empty_or_absent_selector(target_file, monkeypatch):
+    """A selector that would claim every Pod must never reach an exec."""
+    liveaccess, _receipt, runtime, status = _modules()
+    called: list[str] = []
+    monkeypatch.setattr(
+        liveaccess, "run_command",
+        lambda argv, **_k: called.append("exec") or runtime.CommandResult(tuple(argv), 0, "{}", ""),
+    )
+
+    for selector in ({}, {"matchLabels": {}}, None):
+        reads = _cilium_reads(("cilium-aaa",))
+        spec = reads["daemonsets"][0]["items"][0]["spec"]
+        if selector is None:
+            spec.pop("selector")
+        else:
+            spec["selector"] = selector
+
+        check = liveaccess.cilium_health_exec(_target(target_file), reads)
+
+        assert check["status"] == status.BLOCKED, selector
+        assert check["detail"] == "cilium_daemonset_selector_missing", selector
+    assert called == []
+
+
+def test_live_reads_are_reused_by_the_cilium_check(target_file, monkeypatch):
+    """One run lists each cluster-wide resource once, not three times."""
+    liveaccess, _receipt, runtime, _status = _modules()
+    listed: list[str] = []
+
+    def fake_read_json(argv, env=None, timeout=None):
+        argv = list(argv)
+        listed.append(argv[argv.index("get") + 1])
+        return {"items": []}, None
+
+    monkeypatch.setattr(import_script_module("core.reads"), "read_json", fake_read_json)
+    monkeypatch.setattr(
+        liveaccess, "run_command",
+        lambda argv, **_k: runtime.CommandResult(tuple(argv), 0, "{}", ""),
+    )
+
+    _checks, results = liveaccess.kubernetes_live_reads(_target(target_file))
+    liveaccess.cilium_health_exec(_target(target_file), results)
+
+    assert listed.count("daemonsets") == 1
+    assert listed.count("pods") == 1
+
+
+def test_tested_revision_requires_a_repository_that_tracks_the_skill(tmp_path):
+    """An installed copy must not borrow an enclosing repository's commit."""
+    _liveaccess, receipt, _runtime, _status = _modules()
+
+    assert receipt.tested_revision()["commit"]
+
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert receipt.tested_revision(plain)["detail"] == "not_a_tracked_checkout"
+
+    import subprocess
+
+    enclosing = tmp_path / "other"
+    (enclosing / "copy").mkdir(parents=True)
+    (enclosing / "copy" / "SKILL.md").write_text("---\nname: x\n---\n", encoding="utf-8")
+    (enclosing / "unrelated.txt").write_text("x\n", encoding="utf-8")
+    for command in (["init", "-q"], ["add", "unrelated.txt"],
+                    ["-c", "user.email=u@e", "-c", "user.name=u", "commit", "-qm", "x"]):
+        subprocess.run(["git", "-C", str(enclosing), *command], check=True,
+                       capture_output=True)
+
+    reported = receipt.tested_revision(enclosing / "copy")
+    assert reported["commit"] is None
+    assert reported["detail"] == "not_a_tracked_checkout"
+
+
+def test_cluster_wide_lists_get_their_own_larger_timeout(target_file, monkeypatch):
+    """A slow but healthy list must not be classified as a timeout."""
+    reads = import_script_module("core.reads")
+    seen: list[int] = []
+
+    monkeypatch.setattr(
+        reads, "read_json",
+        lambda argv, env=None, timeout=None: (seen.append(timeout), ({"items": []}, None))[1],
+    )
+    reads.read_resources(_target(target_file), {"events": ("events", True)})
+
+    assert reads.LIST_TIMEOUT_SECONDS > 25
+    assert seen == [reads.LIST_TIMEOUT_SECONDS]

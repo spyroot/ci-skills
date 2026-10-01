@@ -19,6 +19,13 @@ from .target import Target
 
 HEALTH_COMMAND = ("cilium-health", "status", "-o", "json")
 
+# A cluster-wide list is legitimately slow -- an event list on a busy cluster is
+# several megabytes -- and several run concurrently. The default per-command
+# bound would classify a healthy cluster as a timeout, which reads as a denial,
+# so list reads get their own larger bound. Measured: one event list was 7.7 MB
+# and ~20s on its own.
+LIST_TIMEOUT_SECONDS = 120
+
 STORAGE_READS: dict[str, tuple[str, bool]] = {
     "nodes": ("nodes", False),
     "pods": ("pods", True),
@@ -80,6 +87,7 @@ def read_resources(
     resources: dict[str, tuple[str, bool]],
     *,
     max_workers: int = 10,
+    timeout: int = LIST_TIMEOUT_SECONDS,
 ) -> dict[str, tuple[Any | None, str | None]]:
     """Read every requested resource concurrently, keyed by the caller's alias."""
     if not resources:
@@ -87,7 +95,8 @@ def read_resources(
     results: dict[str, tuple[Any | None, str | None]] = {}
     with ThreadPoolExecutor(max_workers=min(max_workers, len(resources))) as pool:
         futures = {
-            pool.submit(read_json, resource_argv(target, resource, namespaced)): key
+            pool.submit(read_json, resource_argv(target, resource, namespaced),
+                        timeout=timeout): key
             for key, (resource, namespaced) in resources.items()
         }
         for future in as_completed(futures):
@@ -96,7 +105,14 @@ def read_resources(
 
 
 def matches_selector(labels: dict[str, str], selector: dict[str, Any]) -> bool:
-    """Evaluate a label selector's equality and expression terms."""
+    """Evaluate a label selector's equality and expression terms.
+
+    An absent or empty selector matches NOTHING. A selector that selected every
+    Pod would make a caller exec into unrelated workloads, so the empty case
+    fails closed rather than widening.
+    """
+    if not selector or not (selector.get("matchLabels") or selector.get("matchExpressions")):
+        return False
     for key, value in (selector.get("matchLabels") or {}).items():
         if labels.get(key) != value:
             return False
@@ -131,7 +147,10 @@ def agent_selector(daemonsets: list[dict[str, Any]], namespace: str) -> dict[str
     ]
     if len(selected) != 1:
         return None
-    return (selected[0].get("spec") or {}).get("selector") or None
+    selector = (selected[0].get("spec") or {}).get("selector") or None
+    if selector and not (selector.get("matchLabels") or selector.get("matchExpressions")):
+        return None
+    return selector
 
 
 def ready_agent_pods(

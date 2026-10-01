@@ -602,3 +602,41 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
     assert trace_calls[0][1]["env"]["GITLAB_TOKEN"] == token
     assert token not in json.dumps(result)
     assert str(token_file) not in json.dumps(result)
+
+
+@pytest.mark.parametrize("selector", ({}, {"matchLabels": {}}))
+def test_cilium_status_never_execs_without_a_usable_selector(monkeypatch, target_file, selector):
+    """A cilium DaemonSet with no usable selector must not exec every ready Pod."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    execs: list[str] = []
+
+    ready = {"phase": "Running", "conditions": [{"type": "Ready", "status": "True"}]}
+    payloads = {
+        "daemonsets": {"items": [{"metadata": {"namespace": "networking", "name": "cilium"},
+                                  "spec": {"selector": selector}}]},
+        "pods": {"items": [
+            {"metadata": {"namespace": "networking", "name": "unrelated-database-0",
+                          "labels": {"app": "db"}}, "status": ready},
+            {"metadata": {"namespace": "networking", "name": "cilium-operator-abc",
+                          "labels": {"name": "cilium-operator"}}, "status": ready},
+        ]},
+    }
+
+    def fake_run(argv, **_kwargs):
+        argv = list(argv)
+        if "exec" in argv:
+            execs.append(argv[argv.index("exec") + 1])
+            return runtime.CommandResult(tuple(argv), 0, "{}", "")
+        resource = argv[argv.index("get") + 1] if "get" in argv else ""
+        return runtime.CommandResult(
+            tuple(argv), 0, json.dumps(payloads.get(resource, {"items": []})), "",
+        )
+
+    monkeypatch.setattr(runtime, "run_command", fake_run)
+    result = collect.collect_cilium(
+        _target(target_file), SimpleNamespace(namespace="networking", node=None, search=None),
+    )
+
+    assert execs == []
+    assert result["status"] != "PASS"

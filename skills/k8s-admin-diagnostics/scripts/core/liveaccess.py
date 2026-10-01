@@ -22,7 +22,6 @@ from urllib.parse import quote, urlsplit
 from . import receipt
 from .access import (
     check_access,
-    cilium_namespace,
     gitlab_env,
     glab_argv,
     kubectl_argv,
@@ -42,8 +41,14 @@ from .target import Target
 MAX_HEALTH_ATTEMPTS = 3
 
 
-def kubernetes_live_reads(target: Target) -> list[dict[str, Any]]:
-    """Perform every read the collectors need and record each one's result."""
+def kubernetes_live_reads(
+    target: Target,
+) -> tuple[list[dict[str, Any]], dict[str, tuple[Any | None, str | None]]]:
+    """Perform every read the collectors need and record each one's result.
+
+    Returns the checks and the raw results, so a later check reuses these
+    cluster-wide lists instead of fetching them again.
+    """
     union = collector_reads()
     results = read_resources(target, {key: (key, namespaced)
                                       for key, (_r, namespaced, _s) in union.items()})
@@ -58,10 +63,13 @@ def kubernetes_live_reads(target: Target) -> list[dict[str, Any]]:
             evidence={"resource": resource, "serves": list(serves),
                       "item_count": len(items) if isinstance(items, list) else None},
         ))
-    return sorted(checks, key=lambda item: item["name"])
+    return sorted(checks, key=lambda item: item["name"]), results
 
 
-def cilium_health_exec(target: Target) -> dict[str, Any]:
+def cilium_health_exec(
+    target: Target,
+    reads: dict[str, tuple[Any | None, str | None]] | None = None,
+) -> dict[str, Any]:
     """Execute the real non-TTY health command on a ready agent.
 
     This is the check an `auth can-i create pods/exec` answer cannot stand in
@@ -71,22 +79,26 @@ def cilium_health_exec(target: Target) -> dict[str, Any]:
     into, and attempts are capped so a cluster whose health is broken
     everywhere reports instead of serially timing out on every agent.
     """
-    try:
-        namespace = cilium_namespace(target)
-    except (ValueError, KeyError, TypeError, IndexError) as exc:
-        return receipt.live_check("cilium_health_exec", "kubernetes", BLOCKED, detail=str(exc))
-
-    reads = read_resources(target, {"daemonsets": ("daemonsets", True), "pods": ("pods", True)})
-    daemonsets, daemonset_error = reads["daemonsets"]
-    pods, pod_error = reads["pods"]
+    if reads is None:
+        reads = read_resources(target, {"daemonsets": ("daemonsets", True),
+                                        "pods": ("pods", True)})
+    daemonsets, daemonset_error = reads.get("daemonsets", (None, "not_attempted"))
+    pods, pod_error = reads.get("pods", (None, "not_attempted"))
     if daemonset_error or pod_error:
         return receipt.live_check("cilium_health_exec", "kubernetes", BLOCKED,
-                                  detail=daemonset_error or pod_error,
-                                  evidence={"namespace": namespace})
+                                  detail=daemonset_error or pod_error)
 
-    selector = agent_selector(
-        (daemonsets or {}).get("items") or [] if isinstance(daemonsets, dict) else [], namespace,
-    )
+    items = (daemonsets or {}).get("items") or [] if isinstance(daemonsets, dict) else []
+    namespaces = sorted({
+        (item.get("metadata") or {}).get("namespace") for item in items
+        if (item.get("metadata") or {}).get("name") == "cilium"
+        and (item.get("metadata") or {}).get("namespace")
+    })
+    if len(namespaces) != 1:
+        return receipt.live_check("cilium_health_exec", "kubernetes", BLOCKED,
+                                  detail="cilium_namespace_not_unique")
+    namespace = namespaces[0]
+    selector = agent_selector(items, namespace)
     if selector is None:
         return receipt.live_check("cilium_health_exec", "kubernetes", BLOCKED,
                                   detail="cilium_daemonset_selector_missing",
@@ -226,8 +238,9 @@ def verify(
     # Only exercise the deeper live reads once the surface they belong to is
     # authorized; otherwise every read repeats the same denial.
     if surfaces.get("kubernetes", {}).get("status") == PASS:
-        checks.extend(kubernetes_live_reads(target))
-        checks.append(cilium_health_exec(target))
+        read_checks, results = kubernetes_live_reads(target)
+        checks.extend(read_checks)
+        checks.append(cilium_health_exec(target, results))
     if job_url and surfaces.get("gitlab", {}).get("status") == PASS:
         checks.extend(gitlab_job_access(target, job_url))
 

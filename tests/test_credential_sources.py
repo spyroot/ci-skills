@@ -253,3 +253,92 @@ def test_unresolvable_context_blocks_instead_of_defaulting(tmp_path, monkeypatch
 
     resolved = credsource.resolve_sources(target, {})
     assert resolved["kubernetes"]["kind"] == credsource.UNRESOLVED
+
+
+def test_the_profile_probe_blanks_the_token_variables_it_would_shadow(tmp_path, monkeypatch):
+    """An ambient token must not make an empty stored profile look populated."""
+    credsource, runtime = _modules()
+    seen: dict[str, dict[str, str] | None] = {}
+
+    def fake_run(argv, *, env=None, **_kwargs):
+        seen["env"] = env
+        return runtime.CommandResult(tuple(argv), 0, "Logged in to h account u (keyring)", "")
+
+    monkeypatch.setattr(credsource, "run_command", fake_run)
+    target = _target(_write_target(tmp_path))
+
+    credsource.resolve_github_source(target, {})
+    assert seen["env"] == {"GH_ENTERPRISE_TOKEN": "", "GITHUB_ENTERPRISE_TOKEN": ""}
+
+    credsource.resolve_gitlab_source(target, {})
+    assert seen["env"] == {name: "" for name in credsource.GITLAB_ENV}
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    (
+        ("  Logged in to github.com account u (keyring)", "keyring"),
+        ("  Logged in to github.com account u (secure-storage)", "secure_storage"),
+        ("  Logged in to github.com account u (insecure-storage)", "insecure_storage"),
+        ("  Logged in to github.com account u (oauth_token)", None),
+        ("  Token found in operating system keyring", "keyring"),
+        # glab prints this on every success; it must not be read as the store.
+        ("  Git operations for gitlab.example.test configured to use https protocol.", None),
+    ),
+)
+def test_the_store_is_read_only_from_the_login_line(line, expected):
+    """Store detection is anchored, so unrelated boilerplate cannot match."""
+    credsource, _ = _modules()
+
+    assert credsource._named_store(line) == expected
+
+
+def test_an_unrecognised_store_is_a_profile_not_a_guess(tmp_path, monkeypatch):
+    """Exit 0 with no recognisable store resolves, but is not classified."""
+    credsource, runtime = _modules()
+    monkeypatch.setattr(
+        credsource, "run_command",
+        lambda argv, **_k: runtime.CommandResult(
+            tuple(argv), 0, "Logged in to github.example.test account u", "",
+        ),
+    )
+    source = credsource.resolve_github_source(_target(_write_target(tmp_path)), {})
+
+    assert source.kind == credsource.CLI_PROFILE
+    assert source.reference == "gh_profile:github.example.test"
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    (
+        ({}, "kubectl_default"),
+        ({"KUBECONFIG": "   "}, "kubectl_default"),
+        ({"KUBECONFIG": "/unit/a.yaml"}, "env:KUBECONFIG"),
+    ),
+)
+def test_selected_by_reports_what_actually_chose_the_search_path(environ, expected, tmp_path):
+    """A whitespace-only KUBECONFIG is not a selection, and an explicit
+    environ is not overridden by the ambient one."""
+    credsource, _ = _modules()
+
+    assert credsource._selected_by(_target(_write_target(tmp_path)), environ) == expected
+
+
+def test_an_unresolved_kubernetes_source_still_names_the_files_searched(tmp_path, monkeypatch):
+    """The one failure this field diagnoses must say where it looked."""
+    credsource, runtime = _modules()
+    first = tmp_path / "a.yaml"
+    first.write_text("apiVersion: v1\nkind: Config\n", encoding="utf-8")
+    monkeypatch.setattr(
+        credsource, "run_command",
+        lambda argv, **_k: runtime.CommandResult(
+            tuple(argv), 0, json.dumps({"contexts": [], "clusters": [], "users": []}), "",
+        ),
+    )
+
+    resolved = credsource.resolve_sources(
+        _target(_write_target(tmp_path)), {"KUBECONFIG": str(first)},
+    )
+
+    assert resolved["kubernetes"]["kind"] == credsource.UNRESOLVED
+    assert resolved["kubernetes"]["considered"] == [str(first)]

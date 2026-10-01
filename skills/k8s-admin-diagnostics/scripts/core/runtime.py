@@ -159,13 +159,14 @@ def read_json(
     command: Sequence[str],
     *,
     env: dict[str, str] | None = None,
+    timeout: int = 25,
 ) -> tuple[Any | None, str | None]:
     """Run one command and parse its JSON, returning a classified error instead.
 
     The single JSON-reading adapter for both the collectors and the access
     gate, so a read cannot succeed in one and fail in the other.
     """
-    result = run_command(command, env=env)
+    result = run_command(command, env=env, timeout=timeout)
     if result.returncode:
         return None, error_class(result)
     try:

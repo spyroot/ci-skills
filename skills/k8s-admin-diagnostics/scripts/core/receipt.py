@@ -127,14 +127,16 @@ def build(
         }
     )
     failed_checks = sorted({item["name"] for item in checks if item.get("status") != PASS})
+    # Not every surface has a deeper check to contribute -- GitHub's evidence is
+    # its surface gate -- so the floor is that a surface appears at all. A
+    # receipt built with no checks cannot pass.
     checked = {item.get("surface") for item in checks}
     blocked_surfaces = sorted(
         {
             *(name for name, surface in surfaces.items()
               if not isinstance(surface, dict) or surface.get("status") != PASS),
             *(name for name in REQUIRED_SURFACES if name not in surfaces),
-            # A surface that contributed no live check was not exercised, so it
-            # cannot carry a pass.
+            # A surface with no recorded check was not exercised at all.
             *(name for name in REQUIRED_SURFACES if name not in checked),
         }
     )

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -107,15 +108,39 @@ def _profile_source(tool: str, host: str, env_names: tuple[str, ...]) -> tuple[s
     result = run_command([tool, "auth", "status", "--hostname", host], env=probe)
     if result.returncode:
         return None
-    text = f"{result.stdout}\n{result.stderr}".lower()
-    for store, reference in (
-        ("secure-storage", "secure_storage"),
-        ("keyring", "keyring"),
-        ("config", "config_file"),
-    ):
-        if store in text:
-            return CREDENTIAL_STORE, f"{tool}:{reference}:{host}"
-    return CLI_PROFILE, f"{tool}_profile:{host}"
+    store = _named_store(f"{result.stdout}\n{result.stderr}")
+    if store is None:
+        return CLI_PROFILE, f"{tool}_profile:{host}"
+    return CREDENTIAL_STORE, f"{tool}:{store}:{host}"
+
+
+def _named_store(text: str) -> str | None:
+    """Read the store from the status line that reports the login, only.
+
+    Matching the whole body is unsound: an unrelated line like glab's "Git
+    operations ... configured to use https protocol" contains "config", and
+    "insecure-storage" contains "secure-storage". Both clients name the store
+    in a parenthetical on the line that reports being logged in, so only that
+    parenthetical is read, and an unrecognised one is not guessed at.
+    """
+    for line in text.splitlines():
+        lowered = line.lower()
+        if "logged in" not in lowered and "token found" not in lowered:
+            continue
+        candidates = re.findall(r"\(([^)]*)\)", line)
+        if "token found" in lowered and not candidates:
+            candidates = [lowered.split("token found", 1)[1]]
+        for candidate in candidates:
+            value = candidate.strip().lower()
+            if "insecure-storage" in value or "insecure storage" in value:
+                return "insecure_storage"
+            if "secure-storage" in value or "secure storage" in value:
+                return "secure_storage"
+            if "keyring" in value or "keychain" in value:
+                return "keyring"
+            if "config" in value:
+                return "config_file"
+    return None
 
 
 def resolve_github_source(target: Target, environ: dict[str, str] | None = None) -> CredentialSource:
@@ -337,7 +362,10 @@ def resolve_sources(
         try:
             resolved[surface] = resolver(target, environ).as_dict()
         except CredentialSourceError as exc:
+            considered = ([str(path) for path in kubeconfig_search_path(target, environ)]
+                          if surface == "kubernetes" else [])
             resolved[surface] = CredentialSource(
                 surface=surface, kind=UNRESOLVED, reference=str(exc),
+                considered=considered,
             ).as_dict()
     return resolved
