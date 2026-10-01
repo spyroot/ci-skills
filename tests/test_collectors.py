@@ -469,6 +469,57 @@ def test_event_trace_uses_series_last_observed_time_inside_window(
     assert row["timestamp"] == "2026-10-01T10:05:00+00:00"
     assert row["first_timestamp"] == "2026-10-01T09:00:00+00:00"
     assert row["last_timestamp"] == "2026-10-01T10:05:00+00:00"
+    assert row["count"] == 7
+
+
+def test_event_trace_prefers_deprecated_count_before_core_count(
+    monkeypatch,
+    target_file,
+):
+    """Event count preserves events.k8s.io deprecatedCount before generic count."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    event = {
+        "metadata": {
+            "namespace": "jobs",
+            "name": "runner-pod.counts",
+            "creationTimestamp": "2026-10-01T10:01:00Z",
+        },
+        "regarding": {
+            "kind": "Pod",
+            "namespace": "jobs",
+            "name": "runner-pod",
+            "uid": "pod-counts",
+        },
+        "eventTime": "2026-10-01T10:02:00Z",
+        "deprecatedCount": 5,
+        "count": 2,
+        "reason": "FailedScheduling",
+        "note": "selected deprecated count",
+        "type": "Warning",
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        assert resource == "events.events.k8s.io"
+        return _command_result(runtime, command, {"items": [event]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="jobs",
+        kind="Pod",
+        object="runner-pod",
+        reason="Failed",
+        search="deprecated count",
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PASS"
+    assert result["records"][0]["count"] == 5
 
 
 def test_event_trace_reports_malformed_event_items_as_partial(
@@ -523,11 +574,109 @@ def test_event_trace_reports_malformed_event_items_as_partial(
     assert calls == ["events.events.k8s.io"]
 
 
-def test_event_trace_falls_back_when_events_v1_is_unavailable(
+@pytest.mark.parametrize(
+    "invalid_field",
+    (
+        {"series": ["unexpected"]},
+        {"series": []},
+        {"regarding": "unexpected"},
+        {"eventTime": 123},
+        {"reason": ["unexpected"]},
+        {"note": {"unexpected": True}},
+    ),
+)
+def test_event_trace_reports_malformed_nested_fields_as_partial(
+    monkeypatch,
+    target_file,
+    invalid_field,
+):
+    """Bad nested Event evidence must not escape the structured report."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    event = {
+        "metadata": {"name": "runner-pod.abc", "namespace": "jobs"},
+        "regarding": {"kind": "Pod", "name": "runner-pod", "namespace": "jobs"},
+        "eventTime": "2026-10-01T10:02:00Z",
+        "reason": "FailedScheduling",
+        "note": "scheduling failure",
+    }
+    event.update(invalid_field)
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        assert command[command.index("get") + 1] == "events.events.k8s.io"
+        return _command_result(runtime, command, {"items": [event]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="all",
+        kind=None,
+        object=None,
+        reason=None,
+        search=None,
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"] == []
+    assert result["errors"] == [
+        {"source": "events_v1", "reason": "invalid_event_record"}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected_reason"),
+    (
+        ("InternalError: apiserver failed while listing events", "command_failed"),
+        ("Error from server (TooManyRequests): rate limited", "command_failed"),
+    ),
+)
+def test_event_trace_does_not_fallback_on_preferred_api_server_failure(
+    monkeypatch,
+    target_file,
+    stderr,
+    expected_reason,
+):
+    """Generic preferred API failures and throttling are not compatibility gaps."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    calls: list[str] = []
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        calls.append(resource)
+        if resource != "events.events.k8s.io":
+            raise AssertionError(f"unexpected fallback read: {resource}")
+        return runtime.CommandResult(command, 1, "", stderr)
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="all",
+        kind=None,
+        object=None,
+        reason=None,
+        search=None,
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"] == []
+    assert result["errors"] == [{"source": "events_v1", "reason": expected_reason}]
+    assert calls == ["events.events.k8s.io"]
+
+
+def test_event_trace_falls_back_and_records_compatibility_reason(
     monkeypatch,
     target_file,
 ):
-    """A cluster without events.k8s.io/v1 uses the compatible core API once."""
+    """Exact preferred resource absence may use the compatible core API once."""
     collect = import_script_module("core.collect")
     runtime = import_script_module("core.runtime")
     calls: list[str] = []
@@ -544,6 +693,7 @@ def test_event_trace_falls_back_when_events_v1_is_unavailable(
             "uid": "pod-fallback",
         },
         "lastTimestamp": "2026-10-01T10:05:00Z",
+        "count": 4,
         "reason": "FailedScheduling",
         "message": "read from core fallback",
         "type": "Warning",
@@ -554,7 +704,12 @@ def test_event_trace_falls_back_when_events_v1_is_unavailable(
         resource = command[command.index("get") + 1]
         calls.append(resource)
         if resource == "events.events.k8s.io":
-            return runtime.CommandResult(command, 1, "", "resource type unavailable")
+            return runtime.CommandResult(
+                command,
+                1,
+                "",
+                'the server does not have a resource type "events.events.k8s.io"',
+            )
         return _command_result(runtime, command, {"items": [core_event]})
 
     monkeypatch.setattr(collect, "run_command", fake_run)
@@ -570,8 +725,12 @@ def test_event_trace_falls_back_when_events_v1_is_unavailable(
 
     result = collect.collect_events(_target(target_file), args)
 
-    assert result["status"] == "PASS"
+    assert result["status"] == "PARTIAL"
+    assert result["errors"] == [
+        {"source": "events_v1", "reason": "compatibility_fallback"}
+    ]
     assert result["records"][0]["source"] == "core_events"
+    assert result["records"][0]["count"] == 4
     assert calls == ["events.events.k8s.io", "events"]
 
 

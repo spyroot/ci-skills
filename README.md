@@ -79,7 +79,8 @@ no report file is written.
   and controllers. Filters: `--namespace NAME|all`, `--node NAME`,
   `--storage-class NAME`, `--phase Pending|Bound|Lost|Released|Failed|all`,
   and `--search TEXT`.
-- `event_trace.py` reads both Kubernetes event APIs and accepts `--from`,
+- `event_trace.py` reads `events.k8s.io/v1`, using core events only when that
+  API resource is unavailable. A fallback is reported as `PARTIAL`. It accepts `--from`,
   `--to`, `--namespace`, `--kind`, `--object`, `--reason`, and `--search`.
   Its default window is the previous hour.
 - `cilium_status.py` reads Cilium resources and executes non-TTY health on
