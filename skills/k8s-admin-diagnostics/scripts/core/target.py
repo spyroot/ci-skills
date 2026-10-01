@@ -90,7 +90,7 @@ def _https_url(value: str, key: str) -> tuple[str, str]:
     return value.rstrip("/"), parsed.netloc.lower()
 
 
-def kubernetes_label(target: "Target") -> str:
+def kubernetes_label(target: Target) -> str:
     """Name a Kubernetes target by context AND server.
 
     A context name alone does not say which cluster was read, so a report
