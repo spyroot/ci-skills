@@ -2,21 +2,15 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
+
+from conftest import REPO_ROOT, load_module
 
 
 def _installer():
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "tools"
-        / "install_k8s_admin_diagnostics.py"
+    return load_module(
+        "skill_installer", REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"
     )
-    spec = importlib.util.spec_from_file_location("skill_installer", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _source(tmp_path: Path) -> Path:
