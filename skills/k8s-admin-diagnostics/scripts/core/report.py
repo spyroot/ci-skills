@@ -62,6 +62,8 @@ def human(data: dict[str, Any]) -> str:
             "volume",
             "reason",
             "message",
+            "classification",
+            "action",
             "pod_uid",
         )
         parts = [f"{key}={item[key]}" for key in fields if item.get(key) is not None]

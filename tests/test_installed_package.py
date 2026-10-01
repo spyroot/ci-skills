@@ -31,6 +31,55 @@ ENTRYPOINT_CASES = (
     ("cilium_status.py", (), "cilium_status"),
 )
 
+NODE_ENTRYPOINT_CASES = (
+    ("cilium_node.py", "cilium_node"),
+    ("ceph_kernel.py", "ceph_kernel"),
+)
+
+FAKE_NODE_SUDO = """#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+
+
+def emit(value):
+    print(json.dumps(value))
+    raise SystemExit(0)
+
+
+if args[:2] == ["-n", "crictl"]:
+    cargs = args[2:]
+    if cargs == ["ps", "--output", "json"]:
+        emit({
+            "containers": [{
+                "id": "0123456789abcdef",
+                "metadata": {"name": "cilium-agent"},
+                "state": "CONTAINER_RUNNING",
+            }],
+        })
+    if cargs[:5] == ["exec", "--sync", "--timeout", "30", "0123456789abcdef"]:
+        command = cargs[5:]
+        if command == ["cilium-dbg", "status", "--verbose", "--output", "json"]:
+            emit({"cilium": {"state": "Ok"}})
+        if command == ["cilium-health", "status", "--verbose", "--output", "json"]:
+            emit({"local": {"name": "node-a"}, "nodes": []})
+    raise SystemExit(98)
+
+if args[:2] == ["-n", "journalctl"]:
+    jargs = args[2:]
+    if "-k" in jargs and "--output=json" in jargs:
+        print(json.dumps({
+            "__REALTIME_TIMESTAMP": "1760000000000000",
+            "MESSAGE": "libceph: mon0 connection refused",
+            "PRIORITY": "3",
+        }))
+        raise SystemExit(0)
+    raise SystemExit(98)
+
+raise SystemExit(127)
+"""
+
 
 FAKE_NATIVE_TOOLS = """#!/usr/bin/env python3
 import json
@@ -242,6 +291,52 @@ def _write_target(tmp_path: Path, kubeconfig: Path) -> Path:
     return target
 
 
+def _install_skill(tmp_path: Path) -> Path:
+    installed = tmp_path / "installed" / "k8s-admin-diagnostics"
+    installer = load_module(
+        "skill_installer", REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"
+    )
+    installation = installer.install(SKILL_ROOT, installed.parent, dry_run=False)
+    assert installation["status"] == "PASS"
+    assert installation["algorithm"] == "sha256-tree-v1"
+    assert installation["revision"]["verified"] is True
+    return installed
+
+
+def _run_installed_node_script(
+    installed: Path,
+    script_name: str,
+    args: tuple[str, ...],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """Run an installed node script while forcing the Linux-only branch."""
+    wrapper = (
+        "import pathlib, runpy, sys\n"
+        "script = pathlib.Path(sys.argv[1])\n"
+        "sys.path.insert(0, str(script.parent))\n"
+        "sys.platform = 'linux'\n"
+        "sys.argv = [str(script), *sys.argv[2:]]\n"
+        "runpy.run_path(str(script), run_name='__main__')\n"
+    )
+    return subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            wrapper,
+            str(installed / "scripts" / script_name),
+            *args,
+        ],
+        check=False,
+        capture_output=True,
+        cwd=cwd,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+
+
 @pytest.mark.parametrize(
     ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
 )
@@ -256,16 +351,9 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     kind,
 ):
     """Every installed script renders normal machine output outside the repo."""
-    installed = tmp_path / "installed" / "k8s-admin-diagnostics"
+    installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
-    installer = load_module(
-        "skill_installer", REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"
-    )
-    installation = installer.install(SKILL_ROOT, installed.parent, dry_run=False)
-    assert installation["status"] == "PASS"
-    assert installation["algorithm"] == "sha256-tree-v1"
-    assert installation["revision"]["verified"] is True
     for tool in ("gh", "glab", "kubectl"):
         install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
     kubeconfig = tmp_path / "kubeconfig"
@@ -305,3 +393,169 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     assert data["kind"] == kind
     assert data["status"] == "PASS"
     assert str(REPO_ROOT) not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
+)
+@pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
+def test_installed_node_entrypoints_dry_run_from_unrelated_cwd(
+    tmp_path,
+    mode,
+    loader,
+    script_name,
+    kind,
+):
+    """Node-local entrypoints smoke without target, revision, or source PYTHONPATH."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update({"HOME": str(tmp_path / "home"), "LC_ALL": "C"})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / script_name),
+            "--dry-run",
+            mode,
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data: dict[str, Any] = loader(result.stdout)
+
+    assert result.returncode == 0
+    assert data["kind"] == kind
+    assert data["status"] == "DRY_RUN"
+    assert data["probes"]
+    assert str(REPO_ROOT) not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
+)
+@pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
+def test_installed_node_entrypoints_normal_smoke_with_fake_native_tools(
+    tmp_path,
+    fake_bin,
+    mode,
+    loader,
+    script_name,
+    kind,
+):
+    """Installed node entrypoints run normally with fake sudo/native tools."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    install_executable(fake_bin, "sudo", FAKE_NODE_SUDO)
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "LC_ALL": "C",
+            "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+        }
+    )
+
+    result = _run_installed_node_script(
+        installed,
+        script_name,
+        (mode,),
+        cwd=unrelated,
+        env=env,
+    )
+    data: dict[str, Any] = loader(result.stdout)
+
+    assert result.returncode == 0
+    assert data["kind"] == kind
+    assert data["status"] == "PASS"
+    assert data["summary"]["record_count"] == 1
+    assert str(REPO_ROOT) not in result.stdout
+
+
+@pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
+def test_installed_node_entrypoints_report_missing_native_dependency(
+    tmp_path,
+    script_name,
+    kind,
+):
+    """Missing sudo/native access is a structured BLOCKED report."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    empty_path = tmp_path / "empty-bin"
+    unrelated.mkdir()
+    empty_path.mkdir()
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "LC_ALL": "C",
+            "PATH": str(empty_path),
+        }
+    )
+
+    result = _run_installed_node_script(
+        installed,
+        script_name,
+        ("--json",),
+        cwd=unrelated,
+        env=env,
+    )
+    data = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert data["kind"] == kind
+    assert data["status"] == "BLOCKED"
+    assert data["errors"]
+    assert "missing_tool" in json.dumps(data["errors"])
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
+)
+@pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
+def test_installed_node_entrypoints_invalid_args_are_structured(
+    tmp_path,
+    mode,
+    loader,
+    script_name,
+    kind,
+):
+    """Parser failures emit structured stdout and exit 2."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update({"HOME": str(tmp_path / "home"), "LC_ALL": "C"})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / script_name),
+            "--target",
+            "target.toml",
+            mode,
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data: dict[str, Any] = loader(result.stdout)
+
+    assert result.returncode == 2
+    assert result.stderr == ""
+    assert data["kind"] == kind
+    assert data["status"] == "BLOCKED"
+    assert data["errors"] == [{"source": "arguments", "reason": "invalid_arguments"}]

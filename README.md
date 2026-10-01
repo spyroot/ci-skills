@@ -63,7 +63,7 @@ skill. The commands never log in, grant roles, or change the active context.
 
 ## Commands
 
-Every command accepts `--target PATH`, `--revision SHA`, `--json`, `--yaml`,
+The API commands accept `--target PATH`, `--revision SHA`, `--json`, `--yaml`,
 `--dry-run`, and `--help`. Pass a full source commit SHA with `--revision`
 when the installed copy has no Git metadata. Reports also accept
 `--output-dir PATH` to write paired JSON and text files. Without that option,
@@ -84,6 +84,30 @@ no report file is written.
   Its default window is the previous hour.
 - `cilium_status.py` reads Cilium resources and executes non-TTY health on
   ready agents. It accepts `--namespace NAME|auto`, `--node`, and `--search`.
+
+The node-local commands run on the selected Linux node with noninteractive
+`sudo -n`. They require local `crictl` or `journalctl`, and do not require
+the API target file:
+
+- `cilium_node.py --json` reads the local running `cilium-agent` container
+  through CRI, then collects `cilium-dbg status --verbose --output json` and
+  `cilium-health status --verbose --output json` concurrently. If no agent is
+  running, it records the stopped Cilium containers.
+- `ceph_kernel.py --json` reads the previous three minutes of kernel journal
+  entries matching `libceph|rbd|ceph`. Each record has a UTC timestamp,
+  priority, classification, and machine-readable recommended action. It
+  performs no recovery action. The window is the previous three minutes, with
+  bounded output; a limit hit is reported as `PARTIAL`.
+
+The kernel classifier emits action codes for observed blocklisting, auth
+failure, connectivity timeout, and I/O errors. Other priority 0–3 entries
+receive `review_ceph_kernel_event`; informational entries have no action.
+The action code is a prompt for investigation, not a claimed root cause.
+
+Both accept `--yaml`, `--dry-run`, and `--help`. Exit code 0 means the node
+read succeeded or a dry run was requested; code 2 means incomplete evidence.
+These node reads supplement the three-surface API receipt; they do not
+replace it.
 
 The base access gate -- all three authorities, including a real non-TTY
 `cilium-health` exec on a selector-discovered ready agent -- runs before every

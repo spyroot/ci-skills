@@ -27,6 +27,11 @@ provides no credentials or API permissions.
 5. Use `--output-dir PATH` only when persistent paired JSON and human reports
    are requested. Review artifacts before sharing; events and traces may
    contain sensitive data.
+6. On a selected Linux node, run `scripts/cilium_node.py --json` to inspect
+   the local CRI `cilium-agent` without a TTY. Run
+   `scripts/ceph_kernel.py --json` for recent Ceph/RBD kernel messages and
+   action codes. These node-local commands use `sudo -n`, require no API
+   target file, and do not establish the three-surface access receipt.
 
 Every live invocation resolves the same credential sources and target for its
 access gate and collector. The gate runs real storage, event, and Cilium reads,
