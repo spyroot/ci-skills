@@ -10,6 +10,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from .cilium import (
+    HEALTH_COMMAND,
+    agent_selector,
+    ready_agent_pods,
+    valid_health,
+)
 from .credentials import Sources
 from .runtime import CommandResult, error_class, run_command
 from .status import BLOCKED, DRY_RUN, PASS
@@ -334,7 +340,13 @@ def gitlab_access(target: Target) -> Surface:
     )
 
 
-def cilium_namespace(target: Target) -> str:
+def cilium_discovery(target: Target) -> tuple[str, dict[str, Any]]:
+    """Resolve the agent namespace and its DaemonSet selector in ONE read.
+
+    The selector comes from the same listing that resolves the namespace; a
+    second namespaced read would issue an extra API call and give the preflight
+    its own discovery path, which is how it came to disagree with the collector.
+    """
     data = _json(
         run_command(
             kubectl_argv(target, "get", "daemonsets", "--all-namespaces", "-o", "json"),
@@ -355,7 +367,11 @@ def cilium_namespace(target: Target) -> str:
     )
     if len(matches) != 1:
         raise ValueError("cilium_namespace_not_unique")
-    return matches[0]
+    namespace = matches[0]
+    selector = agent_selector(items, namespace)
+    if selector is None:
+        raise ValueError("cilium_agent_selector_missing")
+    return namespace, selector
 
 
 def _credential_path(value: str, target: Target) -> Path:
@@ -543,7 +559,7 @@ def kubernetes_access(target: Target) -> Surface:
             if result.returncode:
                 raise ValueError(label + "_denied")
             observed.append(label)
-        namespace = cilium_namespace(target)
+        namespace, agent_pod_selector = cilium_discovery(target)
         observed.append("cilium_namespace:" + namespace)
         result = run_command(
             kubectl_argv(
@@ -562,21 +578,13 @@ def kubernetes_access(target: Target) -> Surface:
         )
         if not isinstance(pods, dict) or not isinstance(pods.get("items"), list):
             raise TypeError("invalid_cilium_pod_list")
-        ready = [
-            pod
-            for pod in pods["items"]
-            if isinstance(pod, dict)
-            and isinstance(pod.get("metadata"), dict)
-            and pod["metadata"].get("name", "").startswith("cilium-")
-            and any(
-                condition.get("type") == "Ready" and condition.get("status") == "True"
-                for condition in pod.get("status", {}).get("conditions", [])
-                if isinstance(condition, dict)
-            )
-        ]
+        # Agents come from the DaemonSet's own selector, the same discovery the
+        # collector uses. A name prefix also matches cilium-operator-* and
+        # cilium-envoy-*, which carry no health endpoint.
+        ready = ready_agent_pods(pods["items"], agent_pod_selector, namespace)
         if not ready:
             raise ValueError("cilium_ready_pod_missing")
-        pod_name = ready[0]["metadata"]["name"]
+        pod_name = (ready[0].get("metadata") or {}).get("name")
         health_result = run_command(
             kubectl_argv(
                 target,
@@ -585,10 +593,7 @@ def kubernetes_access(target: Target) -> Surface:
                 "exec",
                 pod_name,
                 "--",
-                "cilium-health",
-                "status",
-                "-o",
-                "json",
+                *HEALTH_COMMAND,
             ),
             timeout=30,
             env=kubernetes_env(target),
@@ -596,7 +601,8 @@ def kubernetes_access(target: Target) -> Surface:
         if health_result.returncode:
             raise ValueError("cilium_health_exec_failed")
         health = _json(health_result)
-        if not isinstance(health, dict):
+        # Parseable JSON is not a health response.
+        if not valid_health(health):
             raise TypeError("invalid_cilium_health_response")
         observed.append("cilium_health_exec")
         details["cilium_health_pod"] = pod_name

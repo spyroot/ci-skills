@@ -134,7 +134,19 @@ def run_command_tail(
                 cap = max_bytes if tail is stdout_tail else 4096
                 if len(tail) > cap:
                     del tail[:-cap]
-    process.wait()
+    # A child can close both pipes and stay alive. Waiting without the
+    # remaining deadline returned success well past the timeout, so completion
+    # is bounded too, then the child is killed and reaped.
+    remaining = deadline - time.monotonic()
+    try:
+        process.wait(timeout=max(remaining, 0))
+    except subprocess.TimeoutExpired:
+        expired = True
+        process.kill()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
     stdout = stdout_tail.decode("utf-8", errors="replace")
     stderr = stderr_tail.decode("utf-8", errors="replace")
     return CommandResult(

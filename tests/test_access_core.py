@@ -231,7 +231,12 @@ def _fake_access_runner(
                                     "metadata": {
                                         "namespace": "kube-system",
                                         "name": "cilium",
-                                    }
+                                    },
+                                    "spec": {
+                                        "selector": {
+                                            "matchLabels": {"k8s-app": "cilium"}
+                                        }
+                                    },
                                 }
                             ]
                         }
@@ -246,14 +251,27 @@ def _fake_access_runner(
                                 {
                                     "metadata": {
                                         "namespace": "kube-system",
-                                        "name": "cilium-ready",
+                                        "name": "cilium-operator-ready",
+                                        "labels": {"name": "cilium-operator"},
                                     },
                                     "status": {
                                         "conditions": [
                                             {"type": "Ready", "status": "True"}
                                         ]
                                     },
-                                }
+                                },
+                                {
+                                    "metadata": {
+                                        "namespace": "kube-system",
+                                        "name": "cilium-ready",
+                                        "labels": {"k8s-app": "cilium"},
+                                    },
+                                    "status": {
+                                        "conditions": [
+                                            {"type": "Ready", "status": "True"}
+                                        ]
+                                    },
+                                },
                             ]
                         }
                     ),
@@ -263,7 +281,7 @@ def _fake_access_runner(
                     return completed(command, 1, stderr="connection refused")
                 return completed(
                     command,
-                    stdout=json.dumps({"local": {"status": "reachable"}}),
+                    stdout=json.dumps({"local": {"name": "unit-node"}, "nodes": []}),
                 )
             return completed(command, 99, stderr="unexpected kubectl call")
 

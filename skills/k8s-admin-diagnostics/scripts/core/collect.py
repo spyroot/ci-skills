@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 
 from .access import gitlab_env, glab_argv, kubectl_argv, kubernetes_env
+from .cilium import HEALTH_COMMAND, agent_selector, matches_selector, valid_health
 from .report import report
 from .runtime import error_class, run_command, run_command_tail, sanitize
 from .status import PASS, UNKNOWN
@@ -62,34 +63,6 @@ def _search(value: dict[str, Any], needle: str | None) -> bool:
         not needle
         or needle.casefold() in json.dumps(value, ensure_ascii=False).casefold()
     )
-
-
-def _matches_selector(labels: dict[str, str], selector: dict[str, Any]) -> bool:
-    """Match a DaemonSet's declared Pod selector without guessing labels."""
-    if not selector:
-        return False
-    if any(
-        labels.get(key) != value
-        for key, value in selector.get("matchLabels", {}).items()
-    ):
-        return False
-    for expression in selector.get("matchExpressions", []):
-        key, operator, values = (
-            expression.get("key"),
-            expression.get("operator"),
-            expression.get("values", []),
-        )
-        if operator == "In" and labels.get(key) not in values:
-            return False
-        if operator == "NotIn" and labels.get(key) in values:
-            return False
-        if operator == "Exists" and key not in labels:
-            return False
-        if operator == "DoesNotExist" and key in labels:
-            return False
-        if operator not in {"In", "NotIn", "Exists", "DoesNotExist"}:
-            return False
-    return True
 
 
 def _batch(
@@ -464,14 +437,14 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     ]
     if len(selected) != 1:
         errors.append({"source": "daemonsets", "reason": "cilium_daemonset_missing"})
-    selector = selected[0].get("spec", {}).get("selector", {}) if selected else {}
+    selector = agent_selector(data.get("daemonsets", []), namespace) or {}
     if selected and not selector:
         errors.append({"source": "daemonsets", "reason": "cilium_selector_missing"})
     agent_pods = [
         item
         for item in data.get("pods", [])
         if _meta(item).get("namespace") == namespace
-        and _matches_selector(_meta(item).get("labels") or {}, selector)
+        and matches_selector(_meta(item).get("labels") or {}, selector)
         and (not args.node or item.get("spec", {}).get("nodeName") == args.node)
     ]
     rows: list[dict[str, Any]] = []
@@ -485,7 +458,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
                 "pod_uid": None,
                 "status": UNKNOWN,
                 "reason": "no_matching_agent_pods",
-                "command": ["cilium-health", "status", "-o", "json"],
+                "command": list(HEALTH_COMMAND),
                 "exit_status": None,
             }
         )
@@ -497,7 +470,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
             condition.get("type") == "Ready" and condition.get("status") == "True"
             for condition in pod.get("status", {}).get("conditions", [])
         )
-        command = ["cilium-health", "status", "-o", "json"]
+        command = list(HEALTH_COMMAND)
         row = {
             "namespace": namespace,
             "name": meta.get("name"),
@@ -524,10 +497,17 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
             row["reason"] = error_class(result)
             return row
         try:
-            row["health"] = json.loads(result.stdout)
-            row["status"] = PASS
+            decoded = json.loads(result.stdout)
         except json.JSONDecodeError:
             row["reason"] = "invalid_health_json"
+            return row
+        # A successful exec that returned parseable JSON has still not proved
+        # the agent answered: null, [] and a bare string all parse.
+        if not valid_health(decoded):
+            row["reason"] = "invalid_health_response"
+            return row
+        row["health"] = decoded
+        row["status"] = PASS
         return row
 
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(agent_pods)))) as pool:
