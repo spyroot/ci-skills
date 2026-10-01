@@ -540,7 +540,7 @@ def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
         ("k8s_tls_skip_verify", "kubernetes", "tls_verification_disabled"),
         ("k8s_not_admin", "kubernetes", "cluster_wildcard_denied"),
         ("k8s_exec_denied", "kubernetes", "pods_exec_denied"),
-        ("k8s_health_failed", "kubernetes", "transport"),
+        ("k8s_health_failed", "kubernetes", "cilium_health_exec_failed"),
     ),
 )
 def test_check_access_blocks_each_required_surface(

@@ -19,6 +19,7 @@ still needs its own credentials and target file.
 
 Install Python 3.11 or newer, PyYAML, `gh`, `glab`, and `kubectl` on the
 execution host. Supply a nonsecret TOML file through `--target PATH`:
+The suggested local location is `~/.config/ci-skills/target.toml`.
 
 ```toml
 [github]
