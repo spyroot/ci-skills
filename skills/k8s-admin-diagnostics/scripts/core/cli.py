@@ -14,7 +14,13 @@ from pathlib import Path
 from typing import Any
 
 from .access import access_evidence, check_access, dry_run_access
-from .catalog import PROJECT_DIR, TARGET_FILENAME, describe
+from .catalog import (
+    COMMAND_BY_KIND,
+    PROJECT_DIR,
+    TARGET_FILENAME,
+    describe,
+    missing_required_options,
+)
 from .credentials import bind_sources
 from .portable import portable
 from .report import emit
@@ -32,9 +38,20 @@ from .target import Target, TargetError, load_target
 # The documented per-host location. Keeping it here rather than in each script
 # means one answer to "where does the target live", and the script-interface
 # rule that a value the host already knows is not a required argument.
-# Rendered from the declared protocol so help text cannot drift from behaviour.
-# Rendered from the declared protocol so help text cannot drift from behaviour.
+# Composed from the catalog's own directory and filename constants, so help
+# text, the no-target error and the search path cannot name different places.
 DEFAULT_TARGET = f"~/{PROJECT_DIR}/{TARGET_FILENAME}"
+
+
+# Which report kind each collector produces. Module scope so the catalog test
+# can prove every one of them is a declared command.
+COLLECTOR_KINDS = {
+    "collect_storage": "storage_report",
+    "collect_events": "event_trace",
+    "collect_cilium": "cilium_status",
+    "collect_gitlab_job": "gitlab_job",
+}
+ACCESS_CHECK_KIND = "access_check"
 
 
 def _target_candidates() -> list[tuple[str, Path]]:
@@ -43,7 +60,11 @@ def _target_candidates() -> list[tuple[str, Path]]:
     configured = (os.environ.get("CI_SKILLS_TARGET") or "").strip()
     if configured:
         candidates.append(("env:CI_SKILLS_TARGET", Path(configured).expanduser()))
-    candidates.append(("project", Path(PROJECT_DIR) / TARGET_FILENAME))
+    # Absolute, deliberately. A relative candidate reports `target_file` as
+    # ".ci-skills/target.toml", which identifies no file: it means a different
+    # place for every caller, it tells a receipt's reader nothing, and the
+    # no-target error would not say where it actually looked.
+    candidates.append(("project", Path.cwd() / PROJECT_DIR / TARGET_FILENAME))
     candidates.append(("user", Path(DEFAULT_TARGET).expanduser()))
     return candidates
 
@@ -162,13 +183,18 @@ def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> i
         "errors": [{"source": source, "reason": sanitize(reason, 240)}],
         "summary": {"record_count": 0, "error_count": 1},
     }
-    if getattr(args, "json", False) or getattr(args, "yaml", False):
+    # The reader rule applies to a failure too. A program piping a cold run
+    # hits the no-target error FIRST, so emitting only a stderr line there made
+    # the one shape a caller cannot parse the one it meets first -- and it
+    # contradicted the default_output contract the manifest publishes.
+    mode = output_mode(args)
+    if mode == "human":
+        print(f"BLOCKED: {data['errors'][0]['reason']}", file=sys.stderr)
+    else:
         try:
-            sys.stdout.write(emit(data, "yaml" if args.yaml else "json"))
+            sys.stdout.write(emit(data, mode))
         except (RuntimeError, OSError):
             sys.stdout.write(json.dumps(data, sort_keys=True) + "\n")
-    else:
-        print(f"BLOCKED: {data['errors'][0]['reason']}", file=sys.stderr)
     return 2
 
 
@@ -178,21 +204,35 @@ def execute(
     *,
     live_checks: bool = False,
 ) -> int:
-    kinds = {
-        "collect_storage": "storage_report",
-        "collect_events": "event_trace",
-        "collect_cilium": "cilium_status",
-        "collect_gitlab_job": "gitlab_job",
-    }
     kind = (
-        "access_check"
+        ACCESS_CHECK_KIND
         if collect is None
-        else kinds.get(collect.__name__, collect.__name__)
+        else COLLECTOR_KINDS.get(collect.__name__, collect.__name__)
     )
+    # The catalog is keyed by script name, but a command must not learn its own
+    # identity from argv[0]: a symlink, a wrapper or a renamed installed copy
+    # would then print another command's contract, or raise KeyError where every
+    # other path returns a structured envelope. The report kind IS the identity.
+    # `.get`, because a caller may pass a collector this catalog does not
+    # declare. Every real command's kind IS declared -- COLLECTOR_KINDS is
+    # checked against the catalog by test -- so this only keeps an undeclared
+    # one from raising where every other path returns an envelope.
+    script = COMMAND_BY_KIND.get(kind)
     if getattr(args, "describe", False):
-        contract = describe(Path(sys.argv[0]).name)
+        if script is None:
+            return _failure(args, kind, "arguments", f"no declared contract for {kind}")
+        contract = describe(script)
         sys.stdout.write(json.dumps(contract, indent=2, sort_keys=True) + "\n")
         return 0
+    missing = missing_required_options(script, args) if script else []
+    if missing:
+        # Enforced here rather than by argparse because --describe must answer
+        # without it, and enforced BEFORE the access gate because a forgotten
+        # argument is not an access failure: reporting it as one sends the
+        # reader to the wrong authority.
+        return _failure(
+            args, kind, "arguments", f"{', '.join(missing)} is required; see --describe"
+        )
     source = "target"
     try:
         target_path, target_source = resolve_target(args.target)

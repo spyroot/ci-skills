@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from .catalog import GITLAB_VARIABLES, github_variables
 from .cilium import (
     HEALTH_COMMAND,
     agent_selector,
@@ -82,16 +83,15 @@ def _token_file(path: Path | None, variable: str) -> dict[str, str] | None:
 def github_env(target: Target) -> dict[str, str | None] | None:
     if isinstance(target.sources, Sources):
         return target.sources.github.environment
-    variable = (
-        "GH_TOKEN" if target.github.host == "github.com" else "GH_ENTERPRISE_TOKEN"
+    return _token_file(
+        target.github.token_file, github_variables(target.github.host)[0]
     )
-    return _token_file(target.github.token_file, variable)
 
 
 def gitlab_env(target: Target) -> dict[str, str | None] | None:
     if isinstance(target.sources, Sources):
         return {**target.sources.gitlab.environment, "GITLAB_HOST": target.gitlab.host}
-    return _token_file(target.gitlab.token_file, "GITLAB_TOKEN")
+    return _token_file(target.gitlab.token_file, GITLAB_VARIABLES[0])
 
 
 def kubernetes_env(target: Target) -> dict[str, str | None] | None:

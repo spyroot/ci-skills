@@ -11,6 +11,10 @@ from conftest import REPO_ROOT
 SKILL_ROOT = REPO_ROOT / "skills" / "k8s-admin-diagnostics"
 REQUIRED_PACKAGE_PATHS = (
     "SKILL.md",
+    # Declared by SKILL.md's own frontmatter as the manifest, and step 2 of the
+    # instructions is reading it, so an install without it ships a skill that
+    # points at a contract that is not there.
+    "tools.json",
     "references/access.md",
     "scripts/access_check.py",
     "scripts/gitlab_job.py",

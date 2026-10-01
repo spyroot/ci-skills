@@ -14,33 +14,36 @@ what lets a caller learn one interface instead of five.
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
 
 import pytest
-from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module
+from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
 
 CATALOG = import_script_module("core.catalog")
+CLI = import_script_module("core.cli")
+RENDER = load_module("render_manifest", REPO_ROOT / "tools" / "render_manifest.py")
 MANIFEST_PATH = SCRIPT_ROOT.parent / "tools.json"
-OPTION_PATTERN = re.compile(r"(--[a-z][a-z0-9-]*)")
 
 
 def _actual_options(script: str) -> set[str]:
-    """Read the options a command really accepts, from its own --help."""
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT_ROOT / script), "--help"],
-        capture_output=True,
-        check=True,
-        text=True,
-        timeout=30,
+    """Read the options a command really accepts, from its own parser.
+
+    Not from `--help`: the epilog names `--json`, `--yaml`, `--human`,
+    `--describe` and `--target` as prose, and argparse renders the epilog after
+    the options block, so a text scan counted those five as accepted whether
+    argparse defined them or not -- five of the eight universal options were
+    exempt from this gate. A parser object carries no prose.
+    """
+    module = load_module(
+        f"entrypoint_{script.removesuffix('.py')}", SCRIPT_ROOT / script
     )
-    found = set(OPTION_PATTERN.findall(result.stdout))
-    # argparse always offers --help; the epilog mentions flags as prose.
-    epilog = result.stdout.split("options:", 1)[-1]
-    return {option for option in found if option != "--help"} & set(
-        OPTION_PATTERN.findall(epilog)
-    )
+    found: set[str] = set()
+    for action in module.build_parser()._actions:
+        found.update(
+            option for option in action.option_strings if option.startswith("--")
+        )
+    return found - {"--help"}
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.COMMANDS))
@@ -107,11 +110,14 @@ def test_every_command_describes_itself_without_credentials():
 
 
 def test_the_rendered_manifest_matches_the_module():
-    """`tools.json` is generated, so a stale copy must fail rather than mislead."""
-    rendered = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    """`tools.json` is generated, so a stale copy must fail rather than mislead.
 
-    assert rendered == json.loads(json.dumps(CATALOG.manifest())), (
-        "tools.json is stale; re-render it from core.catalog"
+    Byte equality, matching `tools/render_manifest.py --check`. Comparing parsed
+    JSON here while the tool compared bytes let a hand-reindented manifest be
+    current to one authority and stale to the other.
+    """
+    assert MANIFEST_PATH.read_text(encoding="utf-8") == RENDER.render(REPO_ROOT), (
+        "tools.json is stale; run tools/render_manifest.py"
     )
 
 
@@ -147,4 +153,90 @@ def test_the_kubernetes_chain_prefers_the_target_over_the_ambient_default():
 
 def test_the_manifest_is_committed_and_valid_json():
     assert MANIFEST_PATH.is_file(), "tools.json must ship with the skill"
-    assert MANIFEST_PATH.relative_to(REPO_ROOT)
+    assert json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))["kind"] == (
+        "skill_manifest"
+    )
+
+
+def test_every_report_kind_the_cli_can_produce_is_a_declared_command():
+    """`--describe` and required options are looked up by kind, so each must exist.
+
+    The lookup tolerates an undeclared kind rather than raising, which is right
+    for a caller-supplied collector but would hide a real command falling out of
+    the catalog. This is what closes that.
+    """
+    produced = {CLI.ACCESS_CHECK_KIND, *CLI.COLLECTOR_KINDS.values()}
+
+    assert produced == set(CATALOG.COMMAND_BY_KIND)
+    for kind in produced:
+        assert CATALOG.COMMAND_BY_KIND[kind] in CATALOG.COMMANDS
+
+
+def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
+    """A declared variable the code ignores is worse than no declaration.
+
+    The protocol named `GH_TOKEN` for an Enterprise host while `bind_sources`
+    read only `GH_ENTERPRISE_TOKEN` there, so a caller could set exactly the
+    variable the manifest named and still be told the credential store was used.
+    """
+    credentials = import_script_module("core.credentials")
+    target_mod = import_script_module("core.target")
+    target = target_mod.load_target(target_file)  # host: github.example.test
+
+    declared = {
+        step["source"]: step["when"] for step in CATALOG.ACCESS_PROTOCOL["github"]
+    }
+    enterprise = "env:" + " or ".join(CATALOG.GITHUB_ENTERPRISE_VARIABLES)
+    dotcom = "env:" + " or ".join(CATALOG.GITHUB_DOTCOM_VARIABLES)
+
+    assert enterprise in declared
+    assert CATALOG.GITHUB_DOTCOM_HOST in declared[dotcom]
+    # The declaration says a non-dotcom host uses the Enterprise variables.
+    assert CATALOG.github_variables(target.github.host) == (
+        CATALOG.GITHUB_ENTERPRISE_VARIABLES
+    )
+    assert CATALOG.github_variables(CATALOG.GITHUB_DOTCOM_HOST) == (
+        CATALOG.GITHUB_DOTCOM_VARIABLES
+    )
+    assert credentials.github_variables is CATALOG.github_variables
+
+
+def test_the_declared_gitlab_variables_are_the_ones_resolved():
+    """One list, consumed by the binder and published by the manifest."""
+    credentials = import_script_module("core.credentials")
+    access = import_script_module("core.access")
+    declared = [step["source"] for step in CATALOG.ACCESS_PROTOCOL["gitlab"]]
+
+    for name in CATALOG.GITLAB_VARIABLES:
+        assert any(name in source for source in declared), name
+    assert credentials.GITLAB_VARIABLES is CATALOG.GITLAB_VARIABLES
+    assert access.GITLAB_VARIABLES is CATALOG.GITLAB_VARIABLES
+
+
+def test_the_declared_target_protocol_is_the_chain_the_code_searches():
+    """`TARGET_PROTOCOL` is published, so reordering it must not be free."""
+    declared = [step["source"] for step in CATALOG.TARGET_PROTOCOL]
+    searched = [
+        "argv:--target",
+        *(source for source, _path in CLI._target_candidates()),
+    ]
+
+    # No CI_SKILLS_TARGET in this environment, so that tier is absent from the
+    # live chain; the remaining order must be exactly the declared one.
+    assert [step for step in declared if step != "env:CI_SKILLS_TARGET"] == searched
+    assert [step["location"] for step in CATALOG.TARGET_PROTOCOL][2:] == [
+        f"./{CATALOG.PROJECT_DIR}/{CATALOG.TARGET_FILENAME}",
+        f"~/{CATALOG.PROJECT_DIR}/{CATALOG.TARGET_FILENAME}",
+    ]
+
+
+def test_a_declared_required_option_is_enforced_before_any_authority():
+    """`required_options` is published, so it has to be what actually blocks."""
+    import argparse
+
+    args = argparse.Namespace(job_url=None)
+
+    assert CATALOG.missing_required_options("gitlab_job.py", args) == ["--job-url"]
+    assert CATALOG.missing_required_options("storage_report.py", args) == []
+    args.job_url = "https://gitlab.example.test/g/p/-/jobs/1"
+    assert CATALOG.missing_required_options("gitlab_job.py", args) == []

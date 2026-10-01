@@ -7,11 +7,11 @@
       },
       {
         "source": "env:GH_TOKEN or GITHUB_TOKEN",
-        "when": "set, for github.com and *.ghe.com"
+        "when": "set, and github.host is github.com"
       },
       {
         "source": "env:GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN",
-        "when": "set, for an Enterprise Server host"
+        "when": "set, and github.host is anything other than github.com"
       },
       {
         "source": "gh-credential-store:<host>",

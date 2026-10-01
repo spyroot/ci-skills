@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-01T22:15:19.294830+00:00",
+  "captured_at": "2026-10-01T22:35:26.460447+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -31,7 +31,7 @@
           "source": "cilium-c8qtx"
         }
       ],
-      "readback_sha256": "a83c9f102f98fc6f04ada4bfaca16a8fbfe1d249607606781b145c1ada1b6352",
+      "readback_sha256": "461bf0d2d9e120eb655aebf2513236f9f0261efc2f7a9f82c9a561e0973bbb21",
       "record_count": 9,
       "status": "PARTIAL"
     },
@@ -39,15 +39,15 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "3546234e4f40fa6dfd04392f4ebf165769d0e28e16fc69cfa7da40f81f15afa7",
-      "record_count": 750,
+      "readback_sha256": "4a4f59510bc524f33c7c4515ce31ed49f8a5624088d53878cf1a680d664d46a6",
+      "record_count": 959,
       "status": "PASS"
     },
     "storage_report": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "fb774900743374fa940f0f5609856e222d95d1f162aa05f22ca42ac49bf3e308",
+      "readback_sha256": "ab801a6bc449fdca091225b4186da89b47e86e9442c89bbd1e41774ede35c52d",
       "record_count": 65,
       "resource_counts": {
         "attachments": 25,
@@ -56,7 +56,7 @@
         "daemonsets": 41,
         "deployments": 187,
         "nodes": 9,
-        "pods": 623,
+        "pods": 624,
         "pvcs": 57,
         "pvs": 65,
         "replicasets": 502,
@@ -75,12 +75,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "969b93016d8c0b4a7f532e4b727b35445a03cb51d750b3da8c8babd71776a328",
+    "digest": "8a4f81094905c28cf058d0be72ba6db1b8f88d0ca44de75a2a7456d06f8bbc91",
     "file_count": 22,
     "revision": {
       "detail": "skill_subtree_dirty",
       "source": "git_head",
-      "value": "953a0a02a9b382358f8f75037d335c2e1c732e8a",
+      "value": "a8f3741142c75bbc4dac15b7f7ee4d4f227f5b83",
       "verified": false
     }
   },
@@ -171,5 +171,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "953a0a02a9b382358f8f75037d335c2e1c732e8a"
+  "tested_revision": "a8f3741142c75bbc4dac15b7f7ee4d4f227f5b83"
 }

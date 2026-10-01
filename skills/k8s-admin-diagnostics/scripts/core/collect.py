@@ -338,11 +338,14 @@ def _timestamp(value: str) -> datetime:
 
 
 def collect_events(target: Target, args: Any) -> dict[str, Any]:
+    # `is not None`, not truthiness: `--last ""` was supplied, so it is an input
+    # error. Treating it as absent silently returned the default hour, which is
+    # the opposite of how every other value of this option is checked.
     last = getattr(args, "last", None)
-    if last and (args.from_time or args.to_time):
+    if last is not None and (args.from_time or args.to_time):
         raise ValueError("--last cannot be combined with --from or --to")
     end = _timestamp(args.to_time) if args.to_time else datetime.now(timezone.utc)
-    if last:
+    if last is not None:
         start = end - parse_window(last)
     elif args.from_time:
         start = _timestamp(args.from_time)

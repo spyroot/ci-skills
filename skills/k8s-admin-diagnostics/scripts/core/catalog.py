@@ -58,6 +58,27 @@ CAPABILITY_OPTIONS: dict[str, dict[str, str]] = {
 
 AUTHORITIES = ("github", "gitlab", "kubernetes")
 
+# The token variables each client honours, most preferred first. Declared here
+# because three places need the same answer -- source binding, the unbound
+# single-authority path, and the published protocol -- and they disagreed: the
+# protocol named GH_TOKEN for an Enterprise host while the code read only
+# GH_ENTERPRISE_TOKEN there, so a caller could set exactly the variable the
+# manifest named and still be told the credential store was used.
+GITHUB_DOTCOM_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN")
+GITHUB_ENTERPRISE_VARIABLES = ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+GITLAB_VARIABLES = ("GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN")
+GITHUB_DOTCOM_HOST = "github.com"
+
+
+def github_variables(host: str) -> tuple[str, ...]:
+    """Return the token variables that apply to one GitHub host."""
+    return (
+        GITHUB_DOTCOM_VARIABLES
+        if host == GITHUB_DOTCOM_HOST
+        else GITHUB_ENTERPRISE_VARIABLES
+    )
+
+
 # The access protocol, declared once. FIRST MATCH WINS, and the match is
 # reported back in `credential_sources`, so a caller resolves credentials by
 # making one call and reading the answer -- never by searching the host in
@@ -75,12 +96,12 @@ ACCESS_PROTOCOL: dict[str, Any] = {
             "when": "the target declares a token file",
         },
         {
-            "source": "env:GH_TOKEN or GITHUB_TOKEN",
-            "when": "set, for github.com and *.ghe.com",
+            "source": "env:" + " or ".join(GITHUB_DOTCOM_VARIABLES),
+            "when": f"set, and github.host is {GITHUB_DOTCOM_HOST}",
         },
         {
-            "source": "env:GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN",
-            "when": "set, for an Enterprise Server host",
+            "source": "env:" + " or ".join(GITHUB_ENTERPRISE_VARIABLES),
+            "when": f"set, and github.host is anything other than {GITHUB_DOTCOM_HOST}",
         },
         {
             "source": "gh-credential-store:<host>",
@@ -93,7 +114,9 @@ ACCESS_PROTOCOL: dict[str, Any] = {
             "when": "the target declares a token file",
         },
         {
-            "source": "env:GITLAB_TOKEN, GITLAB_ACCESS_TOKEN or OAUTH_TOKEN",
+            "source": "env:"
+            + ", ".join(GITLAB_VARIABLES[:-1])
+            + f" or {GITLAB_VARIABLES[-1]}",
             "when": "set",
         },
         {
@@ -239,6 +262,27 @@ EXIT_CODES = {
     "0": "PASS or an explicitly marked DRY_RUN",
     "2": "BLOCKED or PARTIAL, or an input that could not be used",
 }
+
+
+# One command's identity is its report kind, not the name it was invoked under.
+COMMAND_BY_KIND: dict[str, str] = {
+    entry["kind"]: script for script, entry in COMMANDS.items()
+}
+
+
+def missing_required_options(script: str, args: Any) -> list[str]:
+    """Return the declared required options this invocation did not supply.
+
+    `required_options` is published in `tools.json`, so it has to be the thing
+    that is actually enforced. argparse cannot do it: `--describe` must answer
+    with no other argument. Enforcing it from the declaration keeps one rule.
+    """
+    missing = []
+    for option in COMMANDS[script].get("required_options", ()):
+        destination = option.removeprefix("--").replace("-", "_")
+        if not getattr(args, destination, None):
+            missing.append(option)
+    return missing
 
 
 def options_for(script: str) -> dict[str, str]:
