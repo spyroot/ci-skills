@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-import re
 import socket
-import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
+from .provenance import ProvenanceError, skill_identity
 from .target import Target, TargetError
 
 
@@ -95,36 +95,18 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
     ), paths
 
 
-def resolve_revision(explicit: str | None) -> str:
-    """Use an exact supplied/CI revision or the source repository HEAD."""
-    for value in (
-        explicit,
-        os.environ.get("CI_COMMIT_SHA"),
-        os.environ.get("GITHUB_SHA"),
-    ):
-        if value:
-            if not re.fullmatch(r"[0-9a-fA-F]{40}", value):
-                raise TargetError("tested_revision must be a full commit SHA")
-            return value.lower()
+def resolve_skill_identity(explicit: str | None) -> dict[str, Any]:
+    """Identify the executed skill by digest, with the revision as a claim.
+
+    Replaces format-only revision resolution: a 40-hex string proves nothing
+    about the code that ran, and `CI_COMMIT_SHA` belongs to whatever project
+    invoked the skill, not to the skill. See `core.provenance`.
+    """
     skill_root = Path(__file__).resolve().parents[2]
-    repo_root = skill_root.parents[1]
-    if (
-        repo_root / ".git"
-    ).exists() and repo_root / "skills" / skill_root.name == skill_root:
-        result = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-        if result.returncode == 0 and re.fullmatch(
-            r"[0-9a-fA-F]{40}", result.stdout.strip()
-        ):
-            return result.stdout.strip().lower()
-    raise TargetError(
-        "tested_revision unavailable; pass --revision with the exact source commit"
-    )
+    try:
+        return skill_identity(skill_root, explicit)
+    except ProvenanceError as exc:
+        raise TargetError(str(exc)) from exc
 
 
 def bind_sources(target: Target, *, revision: str | None = None) -> Target:
@@ -146,4 +128,10 @@ def bind_sources(target: Target, *, revision: str | None = None) -> Target:
     )
     kube, files = _kubernetes_source(target)
     sources = Sources(github, gitlab, kube, files, socket.getfqdn())
-    return replace(target, sources=sources, tested_revision=resolve_revision(revision))
+    identity = resolve_skill_identity(revision)
+    return replace(
+        target,
+        sources=sources,
+        skill=identity,
+        tested_revision=identity["revision"]["value"],
+    )

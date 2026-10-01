@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .access import check_access, dry_run_access
 from .credentials import bind_sources
+from .portable import portable
 from .report import emit
-from .runtime import sanitize
+from .runtime import redact_tree, sanitize
 from .status import BLOCKED, PASS, exit_code
 from .target import Target, TargetError, load_target
 
@@ -133,6 +136,20 @@ def execute(
         else:
             source = collect.__name__
             data = collect(target, args)
+        receipt_out = getattr(args, "receipt_out", None)
+        if receipt_out:
+            # The committable form: produced by code, never by hand-editing, so
+            # a receipt that reaches a public repository cannot carry a host
+            # path.
+            destination = Path(receipt_out).expanduser()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            partial = destination.with_name(f".{destination.name}.partial")
+            partial.write_text(
+                json.dumps(portable(redact_tree(data)), indent=2, sort_keys=True)
+                + "\n",
+                encoding="utf-8",
+            )
+            os.replace(partial, destination)
         mode = "json" if args.json else "yaml" if args.yaml else "human"
         sys.stdout.write(emit(data, mode, getattr(args, "output_dir", None)))
         return exit_code(data["status"])

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import tomllib
@@ -41,6 +42,7 @@ class Target:
     kubernetes: KubernetesTarget
     sources: object | None = field(default=None, repr=False, compare=False)
     tested_revision: str | None = None
+    skill: dict[str, Any] | None = None
 
 
 def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:

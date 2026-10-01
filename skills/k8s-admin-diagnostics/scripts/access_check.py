@@ -19,6 +19,11 @@ def main() -> int:
         metavar="URL",
         help="also verify one exact GitLab job, pipeline, runner, and trace",
     )
+    cli.add_argument(
+        "--receipt-out",
+        metavar="PATH",
+        help="also write the committable receipt, with host paths digested",
+    )
     args = cli.parse_args()
     return execute(args, live_checks=True)
 

@@ -656,6 +656,8 @@ def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]
                 "execution_host": target.sources.execution_host,
                 "captured_at": datetime.now(timezone.utc).isoformat(),
                 "tested_revision": target.tested_revision,
+                "skill": target.skill,
+                "consuming_project": (target.skill or {}).get("consuming_project"),
                 "credential_sources": {
                     "github": target.sources.github.reference,
                     "gitlab": target.sources.gitlab.reference,

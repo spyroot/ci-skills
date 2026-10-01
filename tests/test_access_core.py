@@ -340,7 +340,14 @@ def test_check_access_receipt_records_metadata_and_resolved_sources(
     assert report["status"] == "PASS"
     assert report["execution_host"]
     assert report["captured_at"]
-    assert report["tested_revision"] == TEST_REVISION
+    # Running inside this checkout, the revision comes from Git and is marked
+    # verified; the operator's --revision is only a claim and must not win.
+    assert report["skill"]["algorithm"] == "sha256-tree-v1"
+    assert len(report["skill"]["digest"]) == 64
+    assert report["skill"]["file_count"] > 0
+    assert report["skill"]["revision"]["source"] == "git_head"
+    assert report["tested_revision"] != TEST_REVISION
+    assert report["consuming_project"]["commit"] is None
     assert report["targets"] == {
         "github": "github.example.test/unit/repo",
         "gitlab": "https://gitlab.example.test",

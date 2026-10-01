@@ -27,24 +27,9 @@ jobs:
           fi
           git cat-file -e "${base_sha}^{commit}"
 
-          changed_count=0
-          non_markdown_count=0
-          while IFS= read -r -d '' path; do
-            changed_count=$((changed_count + 1))
-            case "${path,,}" in
-              *.md | *.markdown) ;;
-              *) non_markdown_count=$((non_markdown_count + 1)) ;;
-            esac
-          done < <(
-            git diff --name-only --diff-filter=ACMR -z \
-              "${base_sha}...${GITHUB_SHA}"
-          )
-
-          {
-            printf 'base_sha=%s\n' "$base_sha"
-            printf 'changed_count=%s\n' "$changed_count"
-            printf 'non_markdown_count=%s\n' "$non_markdown_count"
-          } >> "$GITHUB_OUTPUT"
+          python tools/classify_changed_paths.py \
+            --root . --base "$base_sha" --head "$GITHUB_SHA" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Diff hygiene
         env:

@@ -15,15 +15,18 @@ from .target import Target
 # An access gate proves access, not cluster health. This skill exists to be run
 # ON a degraded cluster, so a component that is itself unhealthy must not block
 # the gate that lets the diagnostics run. These reasons describe an observed
-# workload state; every other reason -- authentication, authorization,
-# missing_tool, transport, timeout, invalid_json -- is a failure to READ and
-# still blocks.
+# workload state. A DENIAL -- authentication, authorization, missing_tool --
+# always blocks. Any other read failure blocks a single-shot collector; for
+# Cilium, which reads per agent, it is that agent's state if others answered.
 COMPONENT_STATE_REASONS = frozenset(
     {
         "agent_not_ready",
         "no_matching_agent_pods",
     }
 )
+
+# A denial is never cluster state, however many other reads succeeded.
+DENIAL_REASONS = frozenset({"authentication", "authorization", "missing_tool"})
 
 
 def _access_proven(name: str, evidence: dict[str, Any]) -> bool:
@@ -38,12 +41,18 @@ def _access_proven(name: str, evidence: dict[str, Any]) -> bool:
     if evidence.get("status") != PARTIAL:
         return False
     reasons = {error.get("reason") for error in evidence.get("errors", [])}
-    if not reasons or not reasons <= COMPONENT_STATE_REASONS:
+    if not reasons or reasons & DENIAL_REASONS:
         return False
     if name == "cilium_status":
-        # The non-TTY health command must have returned parseable status from a
-        # real agent; otherwise nothing proved the exec capability.
+        # Cilium is read per agent, so it has redundancy the other collectors
+        # do not: one agent timing out or erroring while others answer is that
+        # agent's state, not a denial. The capability is proven when at least
+        # one real agent returned parseable health and nothing was denied.
         return (evidence.get("agent_health") or {}).get("passed", 0) >= 1
+    # A single-shot collector has no second attempt to fall back on, so any
+    # reason outside the known component states blocks.
+    if not reasons <= COMPONENT_STATE_REASONS:
+        return False
     return evidence.get("record_count", 0) >= 1
 
 
