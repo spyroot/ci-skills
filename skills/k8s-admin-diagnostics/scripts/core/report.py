@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .runtime import sanitize
+from .runtime import redact_tree, sanitize
 from .status import PARTIAL, PASS
 
 
@@ -120,15 +121,24 @@ def human(data: dict[str, Any]) -> str:
 
 
 def emit(data: dict[str, Any], mode: str, output_dir: str | None = None) -> str:
-    """Render one in-memory collection and optionally persist paired reports."""
+    """Render one in-memory collection and optionally persist paired reports.
+
+    Redaction happens HERE, once, before anything is serialized or written, so
+    every output path is covered: the returned JSON, YAML and human text, and
+    both files under an output directory. Redacting inside one renderer would
+    leave the others raw.
+    """
+    data = redact_tree(data)
     pretty_json = json.dumps(data, indent=2, sort_keys=True) + "\n"
     human_text = human(data)
     if output_dir:
         destination = Path(output_dir).expanduser()
         destination.mkdir(parents=True, exist_ok=True)
         stem = data.get("kind", "report")
-        (destination / f"{stem}.json").write_text(pretty_json, encoding="utf-8")
-        (destination / f"{stem}.txt").write_text(human_text, encoding="utf-8")
+        for name, body in ((f"{stem}.json", pretty_json), (f"{stem}.txt", human_text)):
+            temporary = destination / f".{name}.partial"
+            temporary.write_text(body, encoding="utf-8")
+            os.replace(temporary, destination / name)
     if mode == "json":
         return pretty_json
     if mode == "yaml":

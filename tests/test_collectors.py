@@ -950,3 +950,67 @@ def test_gitlab_job_uses_effective_gitlab_env_token_for_all_reads(
     assert result["status"] == "PASS"
     assert observed_envs
     assert token not in json.dumps(result)
+
+
+def test_a_kubernetes_report_identifies_the_api_server_not_only_the_context(
+    monkeypatch, target_file
+):
+    """A context name alone does not say which cluster was read."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    monkeypatch.setattr(
+        runtime,
+        "run_command",
+        lambda argv, **_k: runtime.CommandResult(
+            tuple(argv), 0, json.dumps({"items": []}), ""
+        ),
+    )
+
+    report = collect.collect_storage(
+        _target(target_file),
+        SimpleNamespace(
+            namespace="all", node=None, storage_class=None, phase="all", search=None
+        ),
+    )
+
+    assert report["target"] == ("unit-context -> https://api.cluster.example.test:6443")
+
+
+def test_access_evidence_carries_what_a_reader_needs_to_check_the_run():
+    """A collector report used to keep none of this."""
+    access = import_script_module("core.access")
+    gate = {
+        "status": "PASS",
+        "profile": "base_access_check",
+        "captured_at": "2026-06-01T00:00:00+00:00",
+        "execution_host": "unit-host",
+        "skill": {"digest": "d" * 64, "revision": {"value": None}},
+        "consuming_project": {"commit": None, "source": None},
+        "credential_sources": {"github": "env:GH_TOKEN"},
+        "targets": {"kubernetes": {"server": "https://api.unit.test:6443"}},
+        "surfaces": {
+            "github": {"identity": "unit-gh"},
+            "kubernetes": {"identity": "unit-admin"},
+        },
+    }
+
+    evidence = access.access_evidence(gate)
+
+    assert evidence["profile"] == "base_access_check"
+    assert evidence["execution_host"] == "unit-host"
+    assert evidence["identities"] == {"github": "unit-gh", "kubernetes": "unit-admin"}
+    assert evidence["credential_sources"] == {"github": "env:GH_TOKEN"}
+    assert evidence["targets"]["kubernetes"]["server"] == "https://api.unit.test:6443"
+    assert evidence["skill"]["digest"] == "d" * 64
+    assert len(evidence["receipt_sha256"]) == 64
+
+
+def test_the_receipt_digest_identifies_the_gate_it_came_from():
+    """Two different gates must not share a correlator."""
+    access = import_script_module("core.access")
+    first = access.access_evidence({"status": "PASS", "execution_host": "a"})
+    again = access.access_evidence({"status": "PASS", "execution_host": "a"})
+    other = access.access_evidence({"status": "PASS", "execution_host": "b"})
+
+    assert first["receipt_sha256"] == again["receipt_sha256"]
+    assert first["receipt_sha256"] != other["receipt_sha256"]

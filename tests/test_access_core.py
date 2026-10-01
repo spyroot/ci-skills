@@ -231,7 +231,12 @@ def _fake_access_runner(
                                     "metadata": {
                                         "namespace": "kube-system",
                                         "name": "cilium",
-                                    }
+                                    },
+                                    "spec": {
+                                        "selector": {
+                                            "matchLabels": {"k8s-app": "cilium"}
+                                        }
+                                    },
                                 }
                             ]
                         }
@@ -246,14 +251,27 @@ def _fake_access_runner(
                                 {
                                     "metadata": {
                                         "namespace": "kube-system",
-                                        "name": "cilium-ready",
+                                        "name": "cilium-operator-ready",
+                                        "labels": {"name": "cilium-operator"},
                                     },
                                     "status": {
                                         "conditions": [
                                             {"type": "Ready", "status": "True"}
                                         ]
                                     },
-                                }
+                                },
+                                {
+                                    "metadata": {
+                                        "namespace": "kube-system",
+                                        "name": "cilium-ready",
+                                        "labels": {"k8s-app": "cilium"},
+                                    },
+                                    "status": {
+                                        "conditions": [
+                                            {"type": "Ready", "status": "True"}
+                                        ]
+                                    },
+                                },
                             ]
                         }
                     ),
@@ -263,7 +281,7 @@ def _fake_access_runner(
                     return completed(command, 1, stderr="connection refused")
                 return completed(
                     command,
-                    stdout=json.dumps({"local": {"status": "reachable"}}),
+                    stdout=json.dumps({"local": {"name": "unit-node"}, "nodes": []}),
                 )
             return completed(command, 99, stderr="unexpected kubectl call")
 
@@ -322,7 +340,21 @@ def test_check_access_receipt_records_metadata_and_resolved_sources(
     assert report["status"] == "PASS"
     assert report["execution_host"]
     assert report["captured_at"]
-    assert report["tested_revision"] == TEST_REVISION
+    # Running inside this checkout, the revision comes from Git and is marked
+    # verified; the operator's --revision is only a claim and must not win.
+    assert report["skill"]["algorithm"] == "sha256-tree-v1"
+    assert len(report["skill"]["digest"]) == 64
+    assert report["skill"]["file_count"] > 0
+    assert report["skill"]["revision"]["source"] == "git_head"
+    assert report["tested_revision"] != TEST_REVISION
+    # The invoking project's commit is recorded separately, never as the
+    # skill's revision. It is set under CI and absent on a workstation, so the
+    # assertion is on the SEPARATION, not on the field being empty;
+    # test_provenance.py pins the values with an explicit environment.
+    consuming = report["consuming_project"]
+    assert set(consuming) == {"commit", "source"}
+    assert consuming["source"] is None or consuming["source"].startswith("env:")
+    assert report["skill"]["revision"]["source"] == "git_head"
     assert report["targets"] == {
         "github": "github.example.test/unit/repo",
         "gitlab": "https://gitlab.example.test",

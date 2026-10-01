@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import tomllib
@@ -18,6 +19,10 @@ class GitHubTarget:
     host: str
     repository: str
     token_file: Path | None = None
+    # Which status checks protection must require. Declared by the operator,
+    # because the expected check name is project-specific and this skill is
+    # deliberately project-neutral.
+    required_checks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,7 @@ class Target:
     kubernetes: KubernetesTarget
     sources: object | None = field(default=None, repr=False, compare=False)
     tested_revision: str | None = None
+    skill: dict[str, Any] | None = None
 
 
 def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:
@@ -84,6 +90,32 @@ def _https_url(value: str, key: str) -> tuple[str, str]:
     return value.rstrip("/"), parsed.netloc.lower()
 
 
+def kubernetes_label(target: Target) -> str:
+    """Name a Kubernetes target by context AND server.
+
+    A context name alone does not say which cluster was read, so a report
+    labelled with it cannot be checked against the verified target.
+    """
+    return f"{target.kubernetes.context} -> {target.kubernetes.server}"
+
+
+def _optional_names(table: dict[str, object], key: str) -> tuple[str, ...]:
+    """Read an optional list of exact, nonempty names."""
+    value = table.get(key)
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not value:
+        raise TargetError(f"{key} must be a nonempty list when supplied")
+    names: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise TargetError(f"{key} entries must be nonempty strings")
+        names.append(item.strip())
+    if len(set(names)) != len(names):
+        raise TargetError(f"{key} entries must be unique")
+    return tuple(names)
+
+
 def _optional_file(table: dict[str, object], key: str, skill_root: Path) -> Path | None:
     value = table.get(key)
     if value is None:
@@ -115,7 +147,11 @@ def load_target(path: str | Path) -> Target:
             "target must contain github, gitlab, and kubernetes tables only"
         )
 
-    github = _table(data["github"], "github", {"host", "repository", "token_file"})
+    github = _table(
+        data["github"],
+        "github",
+        {"host", "repository", "token_file", "required_checks"},
+    )
     github_host = _string(github, "host").lower()
     if "." not in github_host or "/" in github_host or ":" in github_host:
         raise TargetError("github.host must be a full hostname")
@@ -138,6 +174,7 @@ def load_target(path: str | Path) -> Target:
             host=github_host,
             repository=repository,
             token_file=_optional_file(github, "token_file", skill_root),
+            required_checks=_optional_names(github, "required_checks"),
         ),
         gitlab=GitLabTarget(
             url=gitlab_url,

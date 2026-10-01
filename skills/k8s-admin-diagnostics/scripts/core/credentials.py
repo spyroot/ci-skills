@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
-import re
 import socket
-import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
+from .provenance import ProvenanceError, skill_identity
 from .target import Target, TargetError
 
 
@@ -25,6 +26,12 @@ class Sources:
     kubernetes: CredentialSource
     kubeconfig_files: tuple[Path, ...]
     execution_host: str
+    # Content digests captured at bind time. Pinning the FILENAME is not
+    # pinning the target: the gate verifies the server, then every later
+    # command reopens the same mutable path and re-resolves the context by
+    # name, so a file rewritten in between would redirect the commands with no
+    # second comparison.
+    kubeconfig_digests: tuple[str, ...] = ()
 
 
 def _file_token(path: Path) -> str:
@@ -95,36 +102,49 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
     ), paths
 
 
-def resolve_revision(explicit: str | None) -> str:
-    """Use an exact supplied/CI revision or the source repository HEAD."""
-    for value in (
-        explicit,
-        os.environ.get("CI_COMMIT_SHA"),
-        os.environ.get("GITHUB_SHA"),
-    ):
-        if value:
-            if not re.fullmatch(r"[0-9a-fA-F]{40}", value):
-                raise TargetError("tested_revision must be a full commit SHA")
-            return value.lower()
+def resolve_skill_identity(explicit: str | None) -> dict[str, Any]:
+    """Identify the executed skill by digest, with the revision as a claim.
+
+    Replaces format-only revision resolution: a 40-hex string proves nothing
+    about the code that ran, and `CI_COMMIT_SHA` belongs to whatever project
+    invoked the skill, not to the skill. See `core.provenance`.
+    """
     skill_root = Path(__file__).resolve().parents[2]
-    repo_root = skill_root.parents[1]
-    if (
-        repo_root / ".git"
-    ).exists() and repo_root / "skills" / skill_root.name == skill_root:
-        result = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-        if result.returncode == 0 and re.fullmatch(
-            r"[0-9a-fA-F]{40}", result.stdout.strip()
-        ):
-            return result.stdout.strip().lower()
-    raise TargetError(
-        "tested_revision unavailable; pass --revision with the exact source commit"
-    )
+    try:
+        return skill_identity(skill_root, explicit)
+    except ProvenanceError as exc:
+        raise TargetError(str(exc)) from exc
+
+
+def kubeconfig_digests(paths: tuple[Path, ...]) -> tuple[str, ...]:
+    """Digest each kubeconfig's bytes, in search-path order."""
+    digests: list[str] = []
+    for path in paths:
+        try:
+            digests.append(hashlib.sha256(path.read_bytes()).hexdigest())
+        except OSError as exc:
+            raise TargetError(f"kubeconfig_unreadable:{path}") from exc
+    return tuple(digests)
+
+
+def assert_kubeconfig_unchanged(sources: object) -> None:
+    """Refuse a kubeconfig that changed after it was verified.
+
+    Called immediately before each Kubernetes command is built, in the thread
+    that builds it, so the refusal propagates out of the collector and blocks.
+    Raising it inside the per-resource read path would be caught there and
+    degraded into a PARTIAL report with silently missing resources.
+
+    This is detect-and-block, not an atomic pin: a file swapped between this
+    check and the command's own open is still possible. It closes the
+    non-adversarial case that actually happens -- a login rewriting the
+    kubeconfig mid-invocation.
+    """
+    if not isinstance(sources, Sources) or not sources.kubeconfig_digests:
+        return
+    current = kubeconfig_digests(sources.kubeconfig_files)
+    if current != sources.kubeconfig_digests:
+        raise TargetError("kubeconfig_changed_during_invocation")
 
 
 def bind_sources(target: Target, *, revision: str | None = None) -> Target:
@@ -145,5 +165,18 @@ def bind_sources(target: Target, *, revision: str | None = None) -> Target:
         f"glab-credential-store:{target.gitlab.host}",
     )
     kube, files = _kubernetes_source(target)
-    sources = Sources(github, gitlab, kube, files, socket.getfqdn())
-    return replace(target, sources=sources, tested_revision=resolve_revision(revision))
+    sources = Sources(
+        github,
+        gitlab,
+        kube,
+        files,
+        socket.getfqdn(),
+        kubeconfig_digests(files),
+    )
+    identity = resolve_skill_identity(revision)
+    return replace(
+        target,
+        sources=sources,
+        skill=identity,
+        tested_revision=identity["revision"]["value"],
+    )

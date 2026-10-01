@@ -9,10 +9,19 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 
 from .access import gitlab_env, glab_argv, kubectl_argv, kubernetes_env
+from .cilium import (
+    AGENT_DAEMONSET,
+    HEALTH_COMMAND,
+    agent_selector,
+    health_detail,
+    is_ready,
+    matches_selector,
+    valid_health,
+)
 from .report import report
 from .runtime import error_class, run_command, run_command_tail, sanitize
 from .status import PASS, UNKNOWN
-from .target import Target
+from .target import Target, kubernetes_label
 
 # A cluster-wide list read is legitimately slow and several run concurrently.
 # Measured on one target cluster: `kubectl get events -A -o json` was 7.7 MB and
@@ -62,34 +71,6 @@ def _search(value: dict[str, Any], needle: str | None) -> bool:
         not needle
         or needle.casefold() in json.dumps(value, ensure_ascii=False).casefold()
     )
-
-
-def _matches_selector(labels: dict[str, str], selector: dict[str, Any]) -> bool:
-    """Match a DaemonSet's declared Pod selector without guessing labels."""
-    if not selector:
-        return False
-    if any(
-        labels.get(key) != value
-        for key, value in selector.get("matchLabels", {}).items()
-    ):
-        return False
-    for expression in selector.get("matchExpressions", []):
-        key, operator, values = (
-            expression.get("key"),
-            expression.get("operator"),
-            expression.get("values", []),
-        )
-        if operator == "In" and labels.get(key) not in values:
-            return False
-        if operator == "NotIn" and labels.get(key) in values:
-            return False
-        if operator == "Exists" and key not in labels:
-            return False
-        if operator == "DoesNotExist" and key in labels:
-            return False
-        if operator not in {"In", "NotIn", "Exists", "DoesNotExist"}:
-            return False
-    return True
 
 
 def _batch(
@@ -288,7 +269,7 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
     inventory = {key: len(data.get(key, [])) for key in resources}
     result = report(
         "storage_report",
-        target.kubernetes.context,
+        kubernetes_label(target),
         {
             "namespace": args.namespace,
             "node": args.node,
@@ -409,7 +390,7 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
     )
     return report(
         "event_trace",
-        target.kubernetes.context,
+        kubernetes_label(target),
         {
             "from": start.isoformat(),
             "to": end.isoformat(),
@@ -437,7 +418,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     daemonsets = [
         item
         for item in data.get("daemonsets", [])
-        if _meta(item).get("name", "").startswith("cilium")
+        if _meta(item).get("name", "").startswith(AGENT_DAEMONSET)
     ]
     namespaces = sorted(
         {
@@ -460,18 +441,18 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
         item
         for item in daemonsets
         if _meta(item).get("namespace") == namespace
-        and _meta(item).get("name") == "cilium"
+        and _meta(item).get("name") == AGENT_DAEMONSET
     ]
     if len(selected) != 1:
         errors.append({"source": "daemonsets", "reason": "cilium_daemonset_missing"})
-    selector = selected[0].get("spec", {}).get("selector", {}) if selected else {}
+    selector = agent_selector(data.get("daemonsets", []), namespace) or {}
     if selected and not selector:
         errors.append({"source": "daemonsets", "reason": "cilium_selector_missing"})
     agent_pods = [
         item
         for item in data.get("pods", [])
         if _meta(item).get("namespace") == namespace
-        and _matches_selector(_meta(item).get("labels") or {}, selector)
+        and matches_selector(_meta(item).get("labels") or {}, selector)
         and (not args.node or item.get("spec", {}).get("nodeName") == args.node)
     ]
     rows: list[dict[str, Any]] = []
@@ -485,7 +466,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
                 "pod_uid": None,
                 "status": UNKNOWN,
                 "reason": "no_matching_agent_pods",
-                "command": ["cilium-health", "status", "-o", "json"],
+                "command": list(HEALTH_COMMAND),
                 "exit_status": None,
             }
         )
@@ -493,11 +474,8 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     def health(pod: dict[str, Any]) -> dict[str, Any]:
         meta = _meta(pod)
         node = pod.get("spec", {}).get("nodeName")
-        ready = any(
-            condition.get("type") == "Ready" and condition.get("status") == "True"
-            for condition in pod.get("status", {}).get("conditions", [])
-        )
-        command = ["cilium-health", "status", "-o", "json"]
+        ready = is_ready(pod)
+        command = list(HEALTH_COMMAND)
         row = {
             "namespace": namespace,
             "name": meta.get("name"),
@@ -524,10 +502,18 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
             row["reason"] = error_class(result)
             return row
         try:
-            row["health"] = json.loads(result.stdout)
-            row["status"] = PASS
+            decoded = json.loads(result.stdout)
         except json.JSONDecodeError:
             row["reason"] = "invalid_health_json"
+            return row
+        # A successful exec that returned parseable JSON has still not proved
+        # the agent answered: null, [] and a bare string all parse.
+        if not valid_health(decoded):
+            row["reason"] = "invalid_health_response"
+            return row
+        row["health"] = decoded
+        row["health_detail"] = health_detail(decoded)
+        row["status"] = PASS
         return row
 
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(agent_pods)))) as pool:
@@ -544,7 +530,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     rows.sort(key=lambda row: (row["node"] or "", row["name"] or ""))
     result = report(
         "cilium_status",
-        target.kubernetes.context,
+        kubernetes_label(target),
         {
             "namespace": namespace,
             "node": args.node,

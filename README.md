@@ -70,7 +70,13 @@ no report file is written.
 - `cilium_status.py` reads Cilium resources and executes non-TTY health on
   ready agents. It accepts `--namespace NAME|auto`, `--node`, and `--search`.
 
-The full access gate runs before every live collector. Exit code 0 means
+The base access gate -- all three authorities, including a real non-TTY
+`cilium-health` exec on a selector-discovered ready agent -- runs before every
+collector, and a failure blocks it. The expanded bundle, which adds the
+storage, event and Cilium collector reads, runs in `access_check.py`. Every
+report names the gate it actually passed: a collector report in
+`access.profile`, and an `access_check.py` receipt in top-level `profile`. So
+neither form is implied for the other. Exit code 0 means
 `PASS` or an explicitly marked `DRY_RUN`; code 2 means `BLOCKED` or
 `PARTIAL`. JSON and YAML failures emit a structured error report on stdout.
 An unavailable agent health result is `UNKNOWN` and makes its report partial.

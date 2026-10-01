@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -10,7 +11,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .credentials import Sources
+from .cilium import (
+    HEALTH_COMMAND,
+    agent_selector,
+    ready_agent_pods,
+    valid_health,
+)
+from .credentials import Sources, assert_kubeconfig_unchanged
 from .runtime import CommandResult, error_class, run_command
 from .status import BLOCKED, DRY_RUN, PASS
 from .target import Target
@@ -34,6 +41,7 @@ class Surface:
 
 def kubectl_argv(target: Target, *args: str) -> list[str]:
     """Bind every Kubernetes command to the supplied context and optional file."""
+    assert_kubeconfig_unchanged(target.sources)
     command = ["kubectl"]
     sources = target.sources if isinstance(target.sources, Sources) else None
     if sources and len(sources.kubeconfig_files) == 1:
@@ -254,6 +262,31 @@ def github_publication_access(target: Target) -> Surface:
             "Configure and read back at least one required main-branch status check.",
             base.credential_source,
         )
+    # Any nonempty set used to pass, so protection requiring only an unrelated
+    # check satisfied the gate while the intended one was absent. The expected
+    # set is declared in the target file and compared by exact equality: a
+    # substring test would accept `invalidate-cache` for `validate`, and an
+    # intersection test would accept one declared check out of several.
+    expected = set(target.github.required_checks)
+    if not expected:
+        return _blocked(
+            "github",
+            base.target,
+            base.observed_capability,
+            "required_checks_not_declared",
+            "Declare github.required_checks in the target file.",
+            base.credential_source,
+        )
+    missing = sorted(expected - set(names))
+    if missing:
+        return _blocked(
+            "github",
+            base.target,
+            base.observed_capability,
+            "required_checks_incomplete:" + ",".join(missing),
+            "Require every declared status check on the protected branch.",
+            base.credential_source,
+        )
     return Surface(
         "github",
         PASS,
@@ -334,7 +367,13 @@ def gitlab_access(target: Target) -> Surface:
     )
 
 
-def cilium_namespace(target: Target) -> str:
+def cilium_discovery(target: Target) -> tuple[str, dict[str, Any]]:
+    """Resolve the agent namespace and its DaemonSet selector in ONE read.
+
+    The selector comes from the same listing that resolves the namespace; a
+    second namespaced read would issue an extra API call and give the preflight
+    its own discovery path, which is how it came to disagree with the collector.
+    """
     data = _json(
         run_command(
             kubectl_argv(target, "get", "daemonsets", "--all-namespaces", "-o", "json"),
@@ -355,7 +394,11 @@ def cilium_namespace(target: Target) -> str:
     )
     if len(matches) != 1:
         raise ValueError("cilium_namespace_not_unique")
-    return matches[0]
+    namespace = matches[0]
+    selector = agent_selector(items, namespace)
+    if selector is None:
+        raise ValueError("cilium_agent_selector_missing")
+    return namespace, selector
 
 
 def _credential_path(value: str, target: Target) -> Path:
@@ -543,7 +586,7 @@ def kubernetes_access(target: Target) -> Surface:
             if result.returncode:
                 raise ValueError(label + "_denied")
             observed.append(label)
-        namespace = cilium_namespace(target)
+        namespace, agent_pod_selector = cilium_discovery(target)
         observed.append("cilium_namespace:" + namespace)
         result = run_command(
             kubectl_argv(
@@ -562,21 +605,13 @@ def kubernetes_access(target: Target) -> Surface:
         )
         if not isinstance(pods, dict) or not isinstance(pods.get("items"), list):
             raise TypeError("invalid_cilium_pod_list")
-        ready = [
-            pod
-            for pod in pods["items"]
-            if isinstance(pod, dict)
-            and isinstance(pod.get("metadata"), dict)
-            and pod["metadata"].get("name", "").startswith("cilium-")
-            and any(
-                condition.get("type") == "Ready" and condition.get("status") == "True"
-                for condition in pod.get("status", {}).get("conditions", [])
-                if isinstance(condition, dict)
-            )
-        ]
+        # Agents come from the DaemonSet's own selector, the same discovery the
+        # collector uses. A name prefix also matches cilium-operator-* and
+        # cilium-envoy-*, which carry no health endpoint.
+        ready = ready_agent_pods(pods["items"], agent_pod_selector, namespace)
         if not ready:
             raise ValueError("cilium_ready_pod_missing")
-        pod_name = ready[0]["metadata"]["name"]
+        pod_name = (ready[0].get("metadata") or {}).get("name")
         health_result = run_command(
             kubectl_argv(
                 target,
@@ -585,10 +620,7 @@ def kubernetes_access(target: Target) -> Surface:
                 "exec",
                 pod_name,
                 "--",
-                "cilium-health",
-                "status",
-                "-o",
-                "json",
+                *HEALTH_COMMAND,
             ),
             timeout=30,
             env=kubernetes_env(target),
@@ -596,7 +628,8 @@ def kubernetes_access(target: Target) -> Surface:
         if health_result.returncode:
             raise ValueError("cilium_health_exec_failed")
         health = _json(health_result)
-        if not isinstance(health, dict):
+        # Parseable JSON is not a health response.
+        if not valid_health(health):
             raise TypeError("invalid_cilium_health_response")
         observed.append("cilium_health_exec")
         details["cilium_health_pod"] = pod_name
@@ -628,6 +661,37 @@ def kubernetes_access(target: Target) -> Surface:
     )
 
 
+def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
+    """Summarize the gate that authorized one collector run.
+
+    A collector report used to replace the gate result entirely, so it carried
+    no identities, no credential-source references, no execution host and no
+    tested revision -- a Kubernetes report named its target only by context.
+    A fixed subset is attached instead of the whole receipt, which would
+    re-embed the credential paths. `receipt_sha256` is a correlator for the gate
+    object this run produced -- two reports from one gate carry the same value
+    and two gates never do. It is deliberately NOT a match against a written
+    receipt: `--receipt-out` writes the portable, redacted form, so the bytes
+    would never agree.
+    """
+    body = json.dumps(gate, sort_keys=True, default=str).encode("utf-8")
+    surfaces = gate.get("surfaces") or {}
+    return {
+        "profile": gate.get("profile"),
+        "status": gate.get("status"),
+        "captured_at": gate.get("captured_at"),
+        "execution_host": gate.get("execution_host"),
+        "skill": gate.get("skill"),
+        "consuming_project": gate.get("consuming_project"),
+        "credential_sources": gate.get("credential_sources"),
+        "targets": gate.get("targets"),
+        "identities": {
+            name: surface.get("identity") for name, surface in surfaces.items()
+        },
+        "receipt_sha256": hashlib.sha256(body).hexdigest(),
+    }
+
+
 def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]:
     """Probe independent authorities concurrently, then fail closed on any denial."""
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -650,6 +714,8 @@ def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]
                 "execution_host": target.sources.execution_host,
                 "captured_at": datetime.now(timezone.utc).isoformat(),
                 "tested_revision": target.tested_revision,
+                "skill": target.skill,
+                "consuming_project": (target.skill or {}).get("consuming_project"),
                 "credential_sources": {
                     "github": target.sources.github.reference,
                     "gitlab": target.sources.gitlab.reference,
