@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 from conftest import REPO_ROOT, SCRIPT_ROOT, load_module

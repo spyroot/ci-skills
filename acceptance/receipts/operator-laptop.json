@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-01T18:29:36.584184+00:00",
+  "captured_at": "2026-10-01T18:40:45.599712+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -27,7 +27,7 @@
           "source": "cilium-b7w9g"
         }
       ],
-      "readback_sha256": "caf68d3d55e935de3be564e6bf2630f7ddf8f585ae1f630d97072769520188fe",
+      "readback_sha256": "0b4454889c698acf89b67274e3bc9b64ce87dccc447bd33ca6dcfb2546384e9d",
       "record_count": 9,
       "status": "PARTIAL"
     },
@@ -35,15 +35,15 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "9ab31efba8d74ba1573a649c690d5adf0a11aea38f886d61c7cd14519a109b7c",
-      "record_count": 1894,
+      "readback_sha256": "337e4778f4db9543ac4fc1b3a3a9238b657355ea3f16693ec6b8e55e54d7ff14",
+      "record_count": 1831,
       "status": "PASS"
     },
     "storage_report": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "dfc86c0822d9ea859d86c1115e4f26a49362d1f320b008cab87773b2c106d688",
+      "readback_sha256": "0da9c323ba772b75ca56a6cf6b145dac36bceecab80d309fe400654f004ed71d",
       "record_count": 65,
       "resource_counts": {
         "attachments": 33,
@@ -62,6 +62,7 @@
       "status": "PASS"
     }
   },
+  "profile": "full_live_access_check",
   "publication": true,
   "schema_version": "1.0",
   "skill": {
@@ -70,11 +71,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "a67c2ac138cd6001ecf29ce3355e4ee277b83201d9f9337ad6aa323ea2b45476",
+    "digest": "8c2a01459d6d1b1d3e3bde82ad45ce392c5d970972e3f0c8cbbc23ee0abc572e",
     "file_count": 20,
     "revision": {
       "source": "git_head",
-      "value": "a46551912b2c657c44b58ec7d26d4d312d28dd57",
+      "value": "586487b8b826a523e1095a95a13519c7a52e68c0",
       "verified": true
     }
   },
@@ -163,5 +164,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "a46551912b2c657c44b58ec7d26d4d312d28dd57"
+  "tested_revision": "586487b8b826a523e1095a95a13519c7a52e68c0"
 }
