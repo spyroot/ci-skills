@@ -6,7 +6,7 @@ metadata:
   name: ci-skills
 spec:
   source:
-    localPath: /Users/spyroot/dev/standards
+    localPath: ~/dev/standards
     repository: https://github.com/spyroot/standards
     revision: dca62dec9bdb93af1c75aa58504f3ea2463e186c
   requiredContracts:

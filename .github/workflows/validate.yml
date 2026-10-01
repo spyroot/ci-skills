@@ -50,7 +50,7 @@ jobs:
         run: python -m pip install yamllint==1.38.0
 
       - name: YAML validation
-        run: yamllint .github/workflows/validate.yml
+        run: yamllint .github/workflows/validate.yml standards-binding.yaml
 
       - name: Markdown validation
         run: >-
