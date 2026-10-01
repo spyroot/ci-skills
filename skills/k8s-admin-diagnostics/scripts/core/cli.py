@@ -17,7 +17,14 @@ from .credentials import bind_sources
 from .portable import portable
 from .report import emit
 from .runtime import redact_tree, sanitize
-from .status import BLOCKED, PASS, exit_code
+from .status import (
+    BLOCKED,
+    PASS,
+    PROFILE_BASE,
+    PROFILE_DRY_RUN,
+    PROFILE_FULL,
+    exit_code,
+)
 from .target import Target, TargetError, load_target
 
 
@@ -130,9 +137,9 @@ def execute(
         # Only access_check.py runs the expanded bundle, so every report names
         # which gate it actually passed rather than the docs implying one.
         gate["profile"] = (
-            "dry_run"
+            PROFILE_DRY_RUN
             if args.dry_run
-            else ("full_live_access_check" if live_checks else "base_access_check")
+            else (PROFILE_FULL if live_checks else PROFILE_BASE)
         )
         if live_checks and not args.dry_run and gate["status"] == PASS:
             from .live import collect_live_checks

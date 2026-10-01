@@ -192,3 +192,39 @@ def test_emit_leaves_no_partial_file_behind(tmp_path):
         "storage_report.json",
         "storage_report.txt",
     ]
+
+
+@pytest.mark.parametrize(
+    "value",
+    ([SECRET], {"primary": SECRET}, (SECRET,), [[SECRET]], {"a": {"b": SECRET}}),
+)
+def test_a_container_under_a_secret_named_key_is_replaced_whole(value):
+    """The key is the evidence, whatever shape the value happens to be."""
+    result = _runtime().redact_tree({"GITLAB_TOKEN": value})
+
+    assert SECRET not in json.dumps(result)
+    assert result == {"GITLAB_TOKEN": "[REDACTED]"}
+
+
+@pytest.mark.parametrize(
+    "document",
+    (
+        "token: |\n  {}\nnext: ok\n",
+        "api_key: >\n  {}\n",
+        "  password: |-\n    {}\n",
+        "secret: |2\n  {}\n",
+    ),
+)
+def test_a_yaml_block_scalar_value_is_redacted(document):
+    """The value sits on the following lines, which a \\S+ match cannot reach."""
+    result = _runtime().redact(document.format(SECRET))
+
+    assert SECRET not in result
+    assert "[REDACTED]" in result
+
+
+def test_a_block_scalar_redaction_stops_at_the_next_key():
+    """Redacting the block must not swallow the rest of the document."""
+    result = _runtime().redact(f"token: |\n  {SECRET}\nnext: ok\n")
+
+    assert "next: ok" in result

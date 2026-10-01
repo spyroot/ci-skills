@@ -28,6 +28,11 @@ COMPONENT_STATE_REASONS = frozenset(
 # A denial is never cluster state, however many other reads succeeded.
 DENIAL_REASONS = frozenset({"authentication", "authorization", "missing_tool"})
 
+# `collect_cilium` reports per-agent failures under the agent's Pod name and
+# list-read or discovery failures under the batch key. Only the former have the
+# redundancy that makes one failure tolerable.
+CILIUM_REPORT_SOURCES = frozenset({"daemonsets", "pods", "operators", "ciliumnodes"})
+
 
 def _access_proven(name: str, evidence: dict[str, Any]) -> bool:
     """Decide whether one collector demonstrated access, health aside.
@@ -40,14 +45,22 @@ def _access_proven(name: str, evidence: dict[str, Any]) -> bool:
         return True
     if evidence.get("status") != PARTIAL:
         return False
-    reasons = {error.get("reason") for error in evidence.get("errors", [])}
+    errors = evidence.get("errors") or []
+    reasons = {error.get("reason") for error in errors}
     if not reasons or reasons & DENIAL_REASONS:
         return False
     if name == "cilium_status":
-        # Cilium is read per agent, so it has redundancy the other collectors
-        # do not: one agent timing out or erroring while others answer is that
-        # agent's state, not a denial. The capability is proven when at least
-        # one real agent returned parseable health and nothing was denied.
+        # One agent failing while others answer is that agent's state. A failed
+        # LIST read is not: it means the report itself is incomplete, so
+        # `ciliumnode_count: 0` would otherwise certify access. Only per-agent
+        # reasons are excused, and only when a real agent answered.
+        report_level = {
+            error.get("reason")
+            for error in errors
+            if error.get("source") in CILIUM_REPORT_SOURCES
+        }
+        if not report_level <= COMPONENT_STATE_REASONS:
+            return False
         return (evidence.get("agent_health") or {}).get("passed", 0) >= 1
     # A single-shot collector has no second attempt to fall back on, so any
     # reason outside the known component states blocks.

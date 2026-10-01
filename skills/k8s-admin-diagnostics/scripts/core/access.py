@@ -668,8 +668,11 @@ def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
     no identities, no credential-source references, no execution host and no
     tested revision -- a Kubernetes report named its target only by context.
     A fixed subset is attached instead of the whole receipt, which would
-    re-embed the credential paths, and `receipt_sha256` lets the full receipt be
-    matched byte for byte when one was also written.
+    re-embed the credential paths. `receipt_sha256` is a correlator for the gate
+    object this run produced -- two reports from one gate carry the same value
+    and two gates never do. It is deliberately NOT a match against a written
+    receipt: `--receipt-out` writes the portable, redacted form, so the bytes
+    would never agree.
     """
     body = json.dumps(gate, sort_keys=True, default=str).encode("utf-8")
     surfaces = gate.get("surfaces") or {}

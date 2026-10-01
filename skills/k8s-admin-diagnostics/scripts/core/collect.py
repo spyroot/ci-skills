@@ -9,7 +9,15 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 
 from .access import gitlab_env, glab_argv, kubectl_argv, kubernetes_env
-from .cilium import HEALTH_COMMAND, agent_selector, matches_selector, valid_health
+from .cilium import (
+    AGENT_DAEMONSET,
+    HEALTH_COMMAND,
+    agent_selector,
+    health_detail,
+    is_ready,
+    matches_selector,
+    valid_health,
+)
 from .report import report
 from .runtime import error_class, run_command, run_command_tail, sanitize
 from .status import PASS, UNKNOWN
@@ -410,7 +418,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     daemonsets = [
         item
         for item in data.get("daemonsets", [])
-        if _meta(item).get("name", "").startswith("cilium")
+        if _meta(item).get("name", "").startswith(AGENT_DAEMONSET)
     ]
     namespaces = sorted(
         {
@@ -433,7 +441,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
         item
         for item in daemonsets
         if _meta(item).get("namespace") == namespace
-        and _meta(item).get("name") == "cilium"
+        and _meta(item).get("name") == AGENT_DAEMONSET
     ]
     if len(selected) != 1:
         errors.append({"source": "daemonsets", "reason": "cilium_daemonset_missing"})
@@ -466,10 +474,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     def health(pod: dict[str, Any]) -> dict[str, Any]:
         meta = _meta(pod)
         node = pod.get("spec", {}).get("nodeName")
-        ready = any(
-            condition.get("type") == "Ready" and condition.get("status") == "True"
-            for condition in pod.get("status", {}).get("conditions", [])
-        )
+        ready = is_ready(pod)
         command = list(HEALTH_COMMAND)
         row = {
             "namespace": namespace,
@@ -507,6 +512,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
             row["reason"] = "invalid_health_response"
             return row
         row["health"] = decoded
+        row["health_detail"] = health_detail(decoded)
         row["status"] = PASS
         return row
 

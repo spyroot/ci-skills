@@ -30,6 +30,12 @@ import tomllib
 
 SCHEMA_VERSION = "1.0"
 RECEIPT_KIND = "access_check"
+REQUIRED_EXPECTATIONS = (
+    "targets",
+    "required_live_checks",
+    "required_checks",
+    "max_receipt_age_days",
+)
 
 
 class AcceptanceError(RuntimeError):
@@ -45,6 +51,12 @@ def _load_expected(path: Path) -> dict[str, Any]:
     executors = data.get("executors") or []
     if not isinstance(executors, list) or not executors:
         raise AcceptanceError("no_executors_declared")
+    # Every guarantee is mandatory. Left optional, the gate stays green while
+    # dropping one key from this file silently stops it checking that any live
+    # check ran -- the gate would exist and prove nothing.
+    for key in REQUIRED_EXPECTATIONS:
+        if not data.get(key):
+            raise AcceptanceError(f"expectation_not_declared:{key}")
     return data
 
 
@@ -147,7 +159,9 @@ def _check_receipt(
     # A receipt that still carries a credential value must never be accepted.
     from_runtime = _redactor()
     body = json.dumps(receipt, sort_keys=True)
-    if from_runtime is not None and from_runtime(body) != body:
+    if from_runtime is None:
+        problems.append(f"{name}:sanitization_check_unavailable")
+    elif from_runtime(body) != body:
         problems.append(f"{name}:receipt_not_sanitized")
 
     return problems

@@ -102,7 +102,9 @@ The base gate runs before every collector. The expanded bundle runs in
 `access_check.py`, and every report names which one it passed in
 `access.profile`, so neither is implied for the other. A collector report also
 carries `access`: the identities, credential sources, targets, execution host,
-skill digest and a `receipt_sha256` of the gate that authorized it.
+skill digest and a `receipt_sha256` correlating it to the gate that authorized
+it. An `access_check.py` receipt carries `profile` at the top level instead,
+since it IS the gate rather than a report authorized by one.
 
 `--receipt-out PATH` writes the committable form, with every absolute host path
 replaced by a digest token. That is what makes a real receipt publishable: the

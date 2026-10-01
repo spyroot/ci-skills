@@ -34,6 +34,12 @@ _NAME = (
 )
 
 _SECRET_PATTERNS = (
+    # A YAML block scalar carries its value on the indented lines that follow,
+    # which a \\S+ match cannot reach: the key line was redacted and the value
+    # was not.
+    re.compile(
+        rf"(?im)^(\s*{_NAME}\s*:\s*[|>][-+0-9]*\s*$)(?:\n(?:[ \t]+\S.*|[ \t]*)$)+",
+    ),
     re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer|basic)\s+)\S+"),
     # NAME=value and name: value. A quoted value is handled by the next pattern,
     # which must run first, so this one refuses to start on a quote.
@@ -99,10 +105,7 @@ def redact_tree(value: Any) -> Any:
     if isinstance(value, dict):
         return {
             redact(str(key)): (
-                "[REDACTED]"
-                if is_secret_name(str(key))
-                and not isinstance(item, (dict, list, tuple))
-                else redact_tree(item)
+                "[REDACTED]" if is_secret_name(str(key)) else redact_tree(item)
             )
             for key, item in value.items()
         }

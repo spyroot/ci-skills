@@ -1,9 +1,9 @@
 """Tests for the live-check half of the access receipt.
 
-Two rules are pinned here. A failure to READ blocks the gate. A successful read
-that reports an unhealthy component does not, because this skill exists to be
-run on a degraded cluster — but the capability it proves must still have been
-demonstrated at least once.
+Three rules are pinned here. A DENIAL always blocks. A failure to READ blocks a
+single-shot collector. For Cilium, which reads per agent, one agent's failure is
+that agent's state when another answered -- but a failed LIST read is not, since
+it means the report itself is incomplete.
 """
 
 from __future__ import annotations
@@ -167,3 +167,50 @@ def test_cluster_wide_list_reads_use_a_bound_sized_for_a_real_cluster(monkeypatc
 
     assert collect.LIST_TIMEOUT_SECONDS > 25
     assert seen == [collect.LIST_TIMEOUT_SECONDS]
+
+
+@pytest.mark.parametrize(
+    "reason",
+    (
+        "transport",
+        "timeout",
+        "invalid_json",
+        "invalid_health_response",
+        "command_failed",
+    ),
+)
+def test_a_per_agent_failure_is_excused_when_another_agent_answered(reason):
+    """Per-agent redundancy is the whole basis of the Cilium exemption."""
+    live, status = _live()
+    evidence = _cilium(
+        status.PARTIAL, [{"source": "cilium-abc", "reason": reason}], passed=1
+    )
+
+    assert live._access_proven("cilium_status", evidence) is True
+
+
+@pytest.mark.parametrize("source", ("daemonsets", "pods", "operators", "ciliumnodes"))
+@pytest.mark.parametrize("reason", ("transport", "timeout", "invalid_json"))
+def test_a_failed_list_read_still_blocks_however_many_agents_answered(source, reason):
+    """A list read has no redundancy: the report is simply incomplete.
+
+    Without this, a failed `ciliumnodes` read certifies access while the
+    receipt reports `ciliumnode_count: 0`.
+    """
+    live, status = _live()
+    evidence = _cilium(
+        status.PARTIAL, [{"source": source, "reason": reason}], passed=7, total=9
+    )
+
+    assert live._access_proven("cilium_status", evidence) is False
+
+
+@pytest.mark.parametrize("reason", ("authentication", "authorization", "missing_tool"))
+def test_a_denial_is_never_excused_by_a_successful_agent(reason):
+    """The owner's specific fear: one good agent masking a denial."""
+    live, status = _live()
+    evidence = _cilium(
+        status.PARTIAL, [{"source": "cilium-abc", "reason": reason}], passed=7
+    )
+
+    assert live._access_proven("cilium_status", evidence) is False
