@@ -11,13 +11,16 @@ import platform
 import resource
 import shlex
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+
+from source_identity import source_identity
+
+HARNESS_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _digest(value: Any) -> str:
@@ -30,30 +33,22 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(body).hexdigest()
 
 
-def _git(root: Path, *arguments: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), *arguments],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    if result.returncode:
-        raise RuntimeError("source_git_read_failed")
-    return result.stdout.strip()
-
-
 def _source(root: Path, revision: str) -> Path:
     root = root.resolve()
     scripts = root / "skills" / "k8s-admin-diagnostics" / "scripts"
     if not scripts.is_dir():
         raise RuntimeError("skill_scripts_missing")
-    if _git(root, "rev-parse", "HEAD").lower() != revision.lower():
-        raise RuntimeError("source_revision_mismatch")
-    if _git(root, "status", "--porcelain", "--", str(scripts.parent)):
-        raise RuntimeError("skill_source_dirty")
+    source_identity(root, revision, scripts.parent)
     sys.path.insert(0, str(scripts))
     return scripts
+
+
+def _harness(arguments: argparse.Namespace) -> dict[str, Any]:
+    return source_identity(
+        HARNESS_ROOT,
+        arguments.harness_sha,
+        HARNESS_ROOT / "benchmarks",
+    )
 
 
 def _source_kind(reference: str | None) -> str | None:
@@ -125,6 +120,7 @@ def _preflight(arguments: argparse.Namespace) -> dict[str, Any]:
         "schema_version": "1.0",
         "kind": "event_trace_benchmark_preflight",
         "status": gate.get("status"),
+        "harness": _harness(arguments),
         "source": _skill(target),
         "identity": _identity(target, Path(arguments.target)),
         "access": {
@@ -241,12 +237,12 @@ def _sample(arguments: argparse.Namespace) -> dict[str, Any]:
         "schema_version": "1.0",
         "kind": "event_trace_benchmark_sample",
         "status": result.get("status"),
+        "harness": _harness(arguments),
         "source": _skill(target),
         "identity": _identity(target, Path(arguments.target)),
         "measurement": {
             "wall_seconds": wall_seconds,
             "cpu_seconds": _cpu_seconds(before, after),
-            "max_process_rss_kib": max(after[0].ru_maxrss, after[1].ru_maxrss),
             "collector_json_bytes": len(compact),
             "record_count": len(result.get("records", [])),
             "error_count": len(result.get("errors", [])),
@@ -268,6 +264,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("operation", choices=("preflight", "sample"))
     parser.add_argument("--source-root", required=True, metavar="PATH")
     parser.add_argument("--revision", required=True, metavar="SHA")
+    parser.add_argument("--harness-sha", required=True, metavar="SHA")
     parser.add_argument("--target", required=True, metavar="PATH")
     parser.add_argument("--from", dest="from_time", metavar="RFC3339")
     parser.add_argument("--to", dest="to_time", metavar="RFC3339")
@@ -287,6 +284,7 @@ def main() -> int:
                 "status": "DRY_RUN",
                 "operation": arguments.operation,
                 "revision": arguments.revision.lower(),
+                "harness_revision": arguments.harness_sha.lower(),
                 "fixed_time_bounds": bool(arguments.from_time and arguments.to_time),
             }
         elif platform.system() != "Linux" or not os.environ.get(
