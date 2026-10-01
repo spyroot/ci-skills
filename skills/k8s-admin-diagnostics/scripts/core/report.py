@@ -1,0 +1,67 @@
+"""Versioned evidence reports and paired human/machine rendering."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+def report(kind: str, target: str, filters: dict[str, Any], records: list[dict[str, Any]], errors: list[dict[str, str]]) -> dict[str, Any]:
+    return {
+        "schema_version": "1.0", "kind": kind,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "target": target, "filters": filters, "records": records,
+        "errors": errors, "status": "PARTIAL" if errors else "PASS",
+        "summary": {"record_count": len(records), "error_count": len(errors)},
+    }
+
+
+def human(data: dict[str, Any]) -> str:
+    lines = [
+        f"{data.get('kind', 'diagnostic')}: {data.get('status', 'UNKNOWN')}",
+        f"Target: {data.get('target', 'unknown')}",
+        f"Records: {len(data.get('records', []))}",
+    ]
+    for item in data.get("records", []):
+        fields = ("timestamp", "namespace", "kind", "name", "node", "nodes", "phase",
+                  "status", "storage_class", "volume", "reason", "message", "pod_uid")
+        parts = [f"{key}={item[key]}" for key in fields if item.get(key) is not None]
+        lines.append("  " + "  ".join(parts)[:240])
+    if data.get("inventory"):
+        lines.append("Inventory: " + ", ".join(
+            f"{key}={value}" for key, value in sorted(data["inventory"].items())
+        ))
+    for error in data.get("errors", []):
+        lines.append(f"Error: {error.get('source')}: {error.get('reason')}")
+    if data.get("kind") == "access_check":
+        lines = [f"Access: {data.get('status', 'UNKNOWN')}"]
+        for name, surface in data.get("surfaces", {}).items():
+            lines.append(f"  {name}: {surface.get('status', 'DRY_RUN')} {surface.get('target', '')}")
+            if surface.get("reason"):
+                lines.append(f"    reason: {surface['reason']}")
+            if surface.get("next_step"):
+                lines.append(f"    next: {surface['next_step']}")
+    return "\n".join(lines) + "\n"
+
+
+def emit(data: dict[str, Any], mode: str, output_dir: str | None = None) -> str:
+    """Render one in-memory collection and optionally persist paired reports."""
+    pretty_json = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    human_text = human(data)
+    if output_dir:
+        destination = Path(output_dir).expanduser()
+        destination.mkdir(parents=True, exist_ok=True)
+        stem = data.get("kind", "report")
+        (destination / f"{stem}.json").write_text(pretty_json, encoding="utf-8")
+        (destination / f"{stem}.txt").write_text(human_text, encoding="utf-8")
+    if mode == "json":
+        return pretty_json
+    if mode == "yaml":
+        try:
+            import yaml
+        except ImportError as exc:
+            raise RuntimeError("PyYAML is required for --yaml") from exc
+        return yaml.safe_dump(data, sort_keys=True, allow_unicode=True)
+    return human_text
