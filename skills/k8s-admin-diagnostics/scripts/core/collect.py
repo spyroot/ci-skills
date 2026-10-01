@@ -312,18 +312,45 @@ def _timestamp(value: str) -> datetime:
     return stamp.astimezone(timezone.utc)
 
 
+def _event_data(
+    target: Target,
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
+    """Read the stable Event API once, with core/v1 as compatibility fallback."""
+    preferred_key = "events_v1"
+    preferred, error = _read_json(
+        kubectl_argv(target, "get", "events.events.k8s.io", "-A", "-o", "json"),
+        env=kubernetes_env(target),
+    )
+    if not error:
+        try:
+            return {preferred_key: _items(preferred)}, []
+        except (ValueError, TypeError) as exc:
+            return {preferred_key: []}, [{"source": preferred_key, "reason": str(exc)}]
+    if error != "command_failed":
+        return {preferred_key: []}, [{"source": preferred_key, "reason": error}]
+
+    core_key = "core_events"
+    core, core_error = _read_json(
+        kubectl_argv(target, "get", "events", "-A", "-o", "json"),
+        env=kubernetes_env(target),
+    )
+    if not core_error:
+        try:
+            return {core_key: _items(core)}, []
+        except (ValueError, TypeError) as exc:
+            core_error = str(exc)
+    return {preferred_key: [], core_key: []}, [
+        {"source": preferred_key, "reason": error},
+        {"source": core_key, "reason": core_error or "command_failed"},
+    ]
+
+
 def collect_events(target: Target, args: Any) -> dict[str, Any]:
     end = _timestamp(args.to_time) if args.to_time else datetime.now(timezone.utc)
     start = _timestamp(args.from_time) if args.from_time else end - timedelta(hours=1)
     if start > end:
         raise ValueError("--from must not be after --to")
-    data, errors = _batch(
-        target,
-        {
-            "core_events": ("events", True),
-            "events_v1": ("events.events.k8s.io", True),
-        },
-    )
+    data, errors = _event_data(target)
     rows: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
     for source in ("core_events", "events_v1"):

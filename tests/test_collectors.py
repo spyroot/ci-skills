@@ -346,10 +346,13 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
             }
         ],
     }
+    events["events.events.k8s.io"] = events["events"] + events["events.events.k8s.io"]
+    calls: list[str] = []
 
     def fake_run(argv, **_kwargs):
         command = tuple(str(part) for part in argv)
         resource = command[command.index("get") + 1]
+        calls.append(resource)
         return _command_result(runtime, command, {"items": events[resource]})
 
     monkeypatch.setattr(collect, "run_command", fake_run)
@@ -373,6 +376,7 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
     assert [row["timestamp"] for row in result["records"]] == sorted(
         row["timestamp"] for row in result["records"]
     )
+    assert calls == ["events.events.k8s.io"]
 
 
 def test_event_trace_rejects_naive_and_reversed_time_bounds(target_file):
@@ -491,9 +495,12 @@ def test_event_trace_reports_malformed_event_items_as_partial(
         ],
     }
 
+    calls: list[str] = []
+
     def fake_run(argv, **_kwargs):
         command = tuple(str(part) for part in argv)
         resource = command[command.index("get") + 1]
+        calls.append(resource)
         return _command_result(runtime, command, {"items": events[resource]})
 
     monkeypatch.setattr(collect, "run_command", fake_run)
@@ -512,8 +519,130 @@ def test_event_trace_reports_malformed_event_items_as_partial(
     assert result["status"] == "PARTIAL"
     assert result["records"] == []
     reasons = {error["source"]: error["reason"] for error in result["errors"]}
-    assert reasons["core_events"] == "invalid_list_response"
-    assert reasons["events_v1"] == "invalid_list_response"
+    assert reasons == {"events_v1": "invalid_list_response"}
+    assert calls == ["events.events.k8s.io"]
+
+
+def test_event_trace_falls_back_when_events_v1_is_unavailable(
+    monkeypatch,
+    target_file,
+):
+    """A cluster without events.k8s.io/v1 uses the compatible core API once."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    calls: list[str] = []
+    core_event = {
+        "metadata": {
+            "namespace": "jobs",
+            "name": "runner-pod.fallback",
+            "creationTimestamp": "2026-10-01T10:05:00Z",
+        },
+        "involvedObject": {
+            "kind": "Pod",
+            "namespace": "jobs",
+            "name": "runner-pod",
+            "uid": "pod-fallback",
+        },
+        "lastTimestamp": "2026-10-01T10:05:00Z",
+        "reason": "FailedScheduling",
+        "message": "read from core fallback",
+        "type": "Warning",
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        calls.append(resource)
+        if resource == "events.events.k8s.io":
+            return runtime.CommandResult(command, 1, "", "resource type unavailable")
+        return _command_result(runtime, command, {"items": [core_event]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="jobs",
+        kind="Pod",
+        object="runner-pod",
+        reason="Failed",
+        search="fallback",
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PASS"
+    assert result["records"][0]["source"] == "core_events"
+    assert calls == ["events.events.k8s.io", "events"]
+
+
+def test_event_trace_does_not_hide_preferred_api_access_denial(
+    monkeypatch,
+    target_file,
+):
+    """Authentication and authorization failures block without substitution."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    calls: list[str] = []
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        calls.append(command[command.index("get") + 1])
+        return runtime.CommandResult(command, 1, "", "Forbidden")
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="all",
+        kind=None,
+        object=None,
+        reason=None,
+        search=None,
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["errors"] == [{"source": "events_v1", "reason": "authorization"}]
+    assert calls == ["events.events.k8s.io"]
+
+
+def test_event_trace_reports_both_errors_when_fallback_is_malformed(
+    monkeypatch,
+    target_file,
+):
+    """An unavailable preferred API and malformed fallback both remain visible."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    calls: list[str] = []
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        calls.append(resource)
+        if resource == "events.events.k8s.io":
+            return runtime.CommandResult(command, 1, "", "resource type unavailable")
+        return _command_result(runtime, command, {})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="all",
+        kind=None,
+        object=None,
+        reason=None,
+        search=None,
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["errors"] == [
+        {"source": "events_v1", "reason": "command_failed"},
+        {"source": "core_events", "reason": "invalid_list_response"},
+    ]
+    assert calls == ["events.events.k8s.io", "events"]
 
 
 def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
