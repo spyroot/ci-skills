@@ -1,0 +1,24 @@
+---
+# Project repository: https://github.com/spyroot/ci-skills
+apiVersion: standards.spyroot.dev/v1alpha1
+kind: ProjectStandardsBinding
+metadata:
+  name: ci-skills
+spec:
+  source:
+    localPath: /Users/spyroot/dev/standards
+    repository: https://github.com/spyroot/standards
+    revision: dca62dec9bdb93af1c75aa58504f3ea2463e186c
+  requiredContracts:
+    - ci
+    - unit-testing
+    - smoke-testing
+    - blockers
+    - agent-workspace
+    - automation
+    - project-consumer
+    - provider-escalation
+  providers: []
+  projectAdditions:
+    - TEAM_GUIDE.md
+  exceptions: []
