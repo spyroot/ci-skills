@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -79,6 +80,13 @@ def _command_source(*argv: str) -> str:
         'kind = "command"\n'
         f"argv = [{', '.join(_toml_string(part) for part in argv)}]\n"
     )
+
+
+def _argv_digest(*argv: str | Path) -> str:
+    """Return the command provenance digest used by project bindings."""
+    return hashlib.sha256(
+        json.dumps([str(part) for part in argv], separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def _write_binding(
@@ -362,6 +370,9 @@ def test_command_source_returns_absolute_path_and_records_provenance(
     runtime = import_script_module("core.runtime")
     target = _write_target(tmp_path)
     kubeconfig = _write_kubeconfig(tmp_path / "generated" / "kubeconfig")
+    executable = tmp_path / "bin" / "unit-kubeconfig-source"
+    executable.parent.mkdir()
+    which_calls: list[str] = []
     binding = _write_binding(
         tmp_path / "binding.toml",
         target=target.name,
@@ -369,17 +380,24 @@ def test_command_source_returns_absolute_path_and_records_provenance(
     )
     calls: list[tuple[tuple[str, ...], dict[str, Any]]] = []
 
+    def fake_which(command: str) -> str | None:
+        which_calls.append(command)
+        return str(executable)
+
     def fake_run_command_tail(argv: list[str], **kwargs: Any) -> Any:
         calls.append((tuple(argv), kwargs))
         return runtime.CommandResult(tuple(argv), 0, f"{kubeconfig}\n", "")
 
+    monkeypatch.setattr(project_binding.shutil, "which", fake_which)
     monkeypatch.setattr(project_binding, "run_command_tail", fake_run_command_tail)
 
     resolved = project_binding.load_project_binding(binding)
 
+    digest = _argv_digest(executable.resolve(), "--project", "alpha")
+    assert which_calls == ["unit-kubeconfig-source"]
     assert calls == [
         (
-            ("unit-kubeconfig-source", "--project", "alpha"),
+            (str(executable.resolve()), "--project", "alpha"),
             {"timeout": 30, "max_bytes": 4096, "max_lines": 2, "cwd": tmp_path},
         )
     ]
@@ -387,8 +405,46 @@ def test_command_source_returns_absolute_path_and_records_provenance(
     assert resolved.target_reference == f"binding:{binding.resolve()}"
     assert resolved.kubernetes_source_reference == (
         f"binding:{binding.resolve()}#1:"
-        f"command:unit-kubeconfig-source -> file:{kubeconfig.resolve()}"
+        f"command:{executable.resolve()}#argv-sha256:{digest}"
+        f" -> file:{kubeconfig.resolve()}"
     )
+
+
+def test_command_source_digest_changes_when_argv_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The command source digest covers the full argument vector."""
+    project_binding = _project_binding()
+    target = _write_target(tmp_path)
+    executable = tmp_path / "bin" / "unit-kubeconfig-source"
+    executable.parent.mkdir()
+    alpha = _write_binding(
+        tmp_path / "alpha.toml",
+        target=target.name,
+        sources=_command_source("unit-kubeconfig-source", "--project", "alpha"),
+    )
+    beta = _write_binding(
+        tmp_path / "beta.toml",
+        target=target.name,
+        sources=_command_source("unit-kubeconfig-source", "--project", "beta"),
+    )
+
+    monkeypatch.setattr(
+        project_binding.shutil,
+        "which",
+        lambda command: (
+            str(executable) if command == "unit-kubeconfig-source" else None
+        ),
+    )
+
+    alpha_resolved = project_binding.load_project_binding(alpha, dry_run=True)
+    beta_resolved = project_binding.load_project_binding(beta, dry_run=True)
+
+    alpha_digest = _argv_digest(executable.resolve(), "--project", "alpha")
+    beta_digest = _argv_digest(executable.resolve(), "--project", "beta")
+    assert alpha_digest != beta_digest
+    assert f"#argv-sha256:{alpha_digest}" in alpha_resolved.kubernetes_source_reference
+    assert f"#argv-sha256:{beta_digest}" in beta_resolved.kubernetes_source_reference
 
 
 def test_dry_run_never_executes_project_command(
@@ -397,24 +453,34 @@ def test_dry_run_never_executes_project_command(
     """Dry-run reports the command source without executing it."""
     project_binding = _project_binding()
     target = _write_target(tmp_path)
+    executable = tmp_path / "scripts" / "project-cluster"
     binding = _write_binding(
         tmp_path / "binding.toml",
         target=target.name,
         sources=_command_source("./scripts/project-cluster"),
     )
+    run_calls: list[tuple[Any, ...]] = []
+
+    def fake_which(command: str) -> str | None:
+        assert command == str(executable.resolve())
+        return str(executable)
 
     def unexpected_command(*_args: Any, **_kwargs: Any) -> Any:
+        run_calls.append(_args)
         raise AssertionError("dry run executed credential resolver")
 
+    monkeypatch.setattr(project_binding.shutil, "which", fake_which)
     monkeypatch.setattr(project_binding, "run_command_tail", unexpected_command)
 
     resolved = project_binding.load_project_binding(binding, dry_run=True)
 
+    digest = _argv_digest(executable.resolve())
+    assert run_calls == []
     assert resolved.kubernetes.kubeconfig is None
     assert resolved.target_reference == f"binding:{binding.resolve()}"
     assert resolved.kubernetes_source_reference == (
         f"binding:{binding.resolve()}#1:"
-        f"command:{tmp_path / 'scripts' / 'project-cluster'}"
+        f"command:{executable.resolve()}#argv-sha256:{digest}"
     )
 
 

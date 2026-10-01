@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -61,8 +64,16 @@ def _source_path(
         command = argv.copy()
         if "/" in command[0]:
             command[0] = str(_path(command[0], base))
+        executable = shutil.which(command[0])
+        if executable is None:
+            raise TargetError("binding_command_unavailable")
+        command[0] = str(Path(executable).resolve())
+        digest = hashlib.sha256(
+            json.dumps(command, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        provenance = f"command:{command[0]}#argv-sha256:{digest}"
         if dry_run:
-            return None, f"command:{command[0]}"
+            return None, provenance
         result = run_command_tail(
             command, timeout=30, max_bytes=4096, max_lines=2, cwd=base
         )
@@ -74,7 +85,7 @@ def _source_path(
         path = Path(lines[0]).expanduser()
         if not path.is_absolute():
             raise TargetError("binding_command_path_not_absolute")
-        return path.resolve(), f"command:{command[0]} -> file:{path.resolve()}"
+        return path.resolve(), f"{provenance} -> file:{path.resolve()}"
     raise TargetError("binding_source_kind_invalid")
 
 

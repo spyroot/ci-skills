@@ -37,6 +37,14 @@ server = "https://api.cluster.example.com:6443"
 kubeconfig = "/absolute/path/to/project/kubeconfig"
 ```
 
+If a project declares several explicit kubeconfig files, replace
+`kubeconfig` with `kubeconfigs = ["/absolute/first", "/absolute/second"]`.
+The skill reads each declared file and selects the **sole** file whose named
+context resolves to the declared API server. No match, more than one match,
+or an unreadable/malformed candidate blocks. The receipt identifies the
+selected candidate index and file source. The list does not use the ambient
+current context or `KUBECONFIG`.
+
 Credential values do not belong in the target. GitHub and GitLab select their
 effective token file, named environment variable, or host-specific CLI store
 as described in [access.md](access.md). Kubernetes authenticates through the
@@ -75,6 +83,12 @@ or unset environment variable advances to the next declared source. A source
 that exists but is unreadable, invalid, or fails blocks without trying another
 source. A command source never falls through after it runs. `--dry-run` plans
 a command source without invoking it or claiming access.
+
+The command-returned file is borrowed from the project. The skill reads it but
+does not delete it; a helper that creates a temporary file needs an external
+owner to clean that file after the diagnostic command finishes. The receipt
+records the resolved executable and a digest of its full argument vector, so
+different project selections cannot share indistinguishable provenance.
 
 The local receipt records the selected source and absolute path, never token
 values or kubeconfig contents. The access gate verifies that the context

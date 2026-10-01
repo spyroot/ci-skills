@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .access import access_evidence, check_access, dry_run_access
+from .argument_parser import StructuredParser
 from .credentials import bind_sources
 from .portable import portable
 from .project_binding import resolve_target
@@ -30,7 +31,7 @@ from .target import Target, TargetError
 
 
 def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(
+    result = StructuredParser(
         description=description,
         epilog=(
             "Example: %(prog)s --json; target lookup: --target, CI_SKILLS_TARGET, "

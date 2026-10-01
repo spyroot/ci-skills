@@ -64,6 +64,10 @@ def portable_reference(value: str) -> str:
         selector, _, path = value.partition(" -> file:")
         return f"{portable_reference(selector)} -> file:path:{path_token(path)}"
     scheme, separator, remainder = value.partition(":")
+    if scheme == "command" and remainder.startswith("/"):
+        path, marker, digest = remainder.partition("#argv-sha256:")
+        suffix = f"#argv-sha256:{digest}" if marker else ""
+        return f"command:path:{path_token(path)}{suffix}"
     if separator and remainder.startswith("/"):
         return f"{scheme}:path:{path_token(remainder)}"
     if value.startswith("/"):

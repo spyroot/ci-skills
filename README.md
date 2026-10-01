@@ -31,7 +31,8 @@ storage, event, and Cilium evidence. Its commands use `gh`, `glab`, and
    deliberately before an upgrade.
 3. In the consuming project, create `./.ci-skills/target.toml` with the exact
    GitHub repository, GitLab origin, Kubernetes context, API server, and
-   kubeconfig. Use the complete nonsecret example in
+   kubeconfig source. A target can declare one `kubeconfig` or an explicit
+   `kubeconfigs` candidate list. Use the complete nonsecret example in
    [project-binding.md](skills/k8s-admin-diagnostics/references/project-binding.md).
    `~/.ci-skills/target.toml` is the user fallback. An explicit `--target PATH`
    or `CI_SKILLS_TARGET=PATH` takes precedence over both. A project that

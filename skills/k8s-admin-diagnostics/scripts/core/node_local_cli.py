@@ -8,49 +8,14 @@ import socket
 import sys
 from datetime import datetime, timezone
 
+from .argument_parser import StructuredParser
 from .node_local import JOURNAL_SINCE, collect_ceph_kernel, collect_cilium_node
 from .report import emit
 from .status import BLOCKED, DRY_RUN, exit_code
 
 
-class NodeParser(argparse.ArgumentParser):
-    """Keep controlled argument failures in the requested output format."""
-
-    requested: list[str]
-
-    def parse_args(self, args=None, namespace=None):
-        self.requested = list(sys.argv[1:] if args is None else args)
-        return super().parse_args(args, namespace)
-
-    def error(self, message: str) -> None:
-        data = {
-            "schema_version": "1.0",
-            "kind": self.prog.removesuffix(".py"),
-            "status": BLOCKED,
-            "captured_at": datetime.now(timezone.utc).isoformat(),
-            "execution_host": socket.getfqdn(),
-            "target": socket.getfqdn(),
-            "records": [],
-            "errors": [{"source": "arguments", "reason": "invalid_arguments"}],
-            "summary": {"record_count": 0, "error_count": 1},
-            "safe_next_step": "Check --help and correct the arguments.",
-        }
-        mode = (
-            "json"
-            if "--json" in self.requested
-            else "yaml"
-            if "--yaml" in self.requested
-            else "human"
-        )
-        try:
-            print(emit(data, mode), end="")
-        except RuntimeError:
-            print(emit(data, "json"), end="")
-        raise SystemExit(2)
-
-
-def parser(kind: str) -> argparse.ArgumentParser:
-    result = NodeParser(
+def parser(kind: str) -> StructuredParser:
+    result = StructuredParser(
         prog=f"{kind}.py",
         description=f"Collect {kind} evidence on the current Linux node. Audience: human and agent.",
         epilog="Example: %(prog)s --json (run on the selected node)",
