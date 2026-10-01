@@ -347,7 +347,14 @@ def test_check_access_receipt_records_metadata_and_resolved_sources(
     assert report["skill"]["file_count"] > 0
     assert report["skill"]["revision"]["source"] == "git_head"
     assert report["tested_revision"] != TEST_REVISION
-    assert report["consuming_project"]["commit"] is None
+    # The invoking project's commit is recorded separately, never as the
+    # skill's revision. It is set under CI and absent on a workstation, so the
+    # assertion is on the SEPARATION, not on the field being empty;
+    # test_provenance.py pins the values with an explicit environment.
+    consuming = report["consuming_project"]
+    assert set(consuming) == {"commit", "source"}
+    assert consuming["source"] is None or consuming["source"].startswith("env:")
+    assert report["skill"]["revision"]["source"] == "git_head"
     assert report["targets"] == {
         "github": "github.example.test/unit/repo",
         "gitlab": "https://gitlab.example.test",
