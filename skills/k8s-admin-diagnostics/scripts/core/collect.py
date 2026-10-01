@@ -357,7 +357,7 @@ def collect_gitlab_job(target: Target, args: Any) -> dict[str, Any]:
         errors.append({"source": "trace", "reason": error_class(trace_result)})
         trace = ""
     else:
-        trace = sanitize(trace_result.stdout, 64000)
+        trace = sanitize("\n".join(trace_result.stdout.splitlines()[-200:]), 64000)
     row = {
         "job_id": job.get("id"), "name": job.get("name"), "status": job.get("status"),
         "created_at": job.get("created_at"), "started_at": job.get("started_at"),
