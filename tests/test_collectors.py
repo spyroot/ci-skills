@@ -44,6 +44,121 @@ def _command_result(runtime: Any, argv: tuple[str, ...], payload: Any, code: int
     return runtime.CommandResult(argv, code, stdout, "")
 
 
+def _empty_storage_payloads() -> dict[str, Any]:
+    """Return valid empty Kubernetes list responses for every storage resource."""
+    return {
+        "nodes": {"items": []},
+        "pods": {"items": []},
+        "persistentvolumeclaims": {"items": []},
+        "persistentvolumes": {"items": []},
+        "storageclasses": {"items": []},
+        "csidrivers": {"items": []},
+        "csinodes": {"items": []},
+        "volumeattachments": {"items": []},
+        "deployments": {"items": []},
+        "statefulsets": {"items": []},
+        "daemonsets": {"items": []},
+        "replicasets": {"items": []},
+    }
+
+
+def test_storage_report_records_malformed_list_envelopes_as_errors(
+    monkeypatch,
+    target_file,
+):
+    """Malformed Kubernetes list envelopes must not become an empty PASS."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    payloads = _empty_storage_payloads()
+    payloads.update(
+        {
+            "persistentvolumeclaims": None,
+            "persistentvolumes": {},
+            "volumeattachments": {"items": {"name": "not-a-list"}},
+        }
+    )
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, payloads[resource])
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        namespace="all",
+        node=None,
+        storage_class=None,
+        phase="all",
+        search=None,
+    )
+
+    result = collect.collect_storage(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["summary"]["record_count"] == 0
+    reasons = {error["source"]: error["reason"] for error in result["errors"]}
+    assert reasons["pvcs"] == "invalid_list_response"
+    assert reasons["pvs"] == "invalid_list_response"
+    assert reasons["attachments"] == "invalid_list_response"
+
+
+@pytest.mark.parametrize(
+    ("phase", "expected_volume"),
+    (("Released", "pv-released"), ("Failed", "pv-failed")),
+)
+def test_storage_report_includes_orphaned_pvs_for_phase_filters(
+    monkeypatch,
+    target_file,
+    phase,
+    expected_volume,
+):
+    """Standalone PVs without remaining PVCs are still first-class records."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    payloads = _empty_storage_payloads()
+    payloads["persistentvolumes"] = {
+        "items": [
+            {
+                "metadata": {"name": "pv-released"},
+                "spec": {
+                    "storageClassName": "slow",
+                    "claimRef": {"namespace": "old", "name": "gone"},
+                },
+                "status": {"phase": "Released"},
+            },
+            {
+                "metadata": {"name": "pv-failed"},
+                "spec": {"storageClassName": "broken"},
+                "status": {"phase": "Failed"},
+            },
+        ]
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, payloads[resource])
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        namespace="all",
+        node=None,
+        storage_class=None,
+        phase=phase,
+        search=None,
+    )
+
+    result = collect.collect_storage(_target(target_file), args)
+
+    assert result["status"] == "PASS"
+    assert [row["volume"] for row in result["records"]] == [expected_volume]
+    row = result["records"][0]
+    assert row["name"] == expected_volume
+    assert row["namespace"] is None
+    assert row["phase"] == phase
+    assert row["pv_phase"] == phase
+
+
 def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
     monkeypatch,
     target_file,
@@ -55,7 +170,11 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
         "nodes": [{"metadata": {"name": "worker-a"}}],
         "pods": [
             {
-                "metadata": {"namespace": "app", "name": "selected-pod", "uid": "pod-a"},
+                "metadata": {
+                    "namespace": "app",
+                    "name": "selected-pod",
+                    "uid": "pod-a",
+                },
                 "spec": {
                     "nodeName": "worker-a",
                     "volumes": [
@@ -68,7 +187,9 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
                 "metadata": {"namespace": "app", "name": "other-pod", "uid": "pod-b"},
                 "spec": {
                     "nodeName": "worker-b",
-                    "volumes": [{"persistentVolumeClaim": {"claimName": "claim-other"}}],
+                    "volumes": [
+                        {"persistentVolumeClaim": {"claimName": "claim-other"}}
+                    ],
                 },
                 "status": {"phase": "Running"},
             },
@@ -107,7 +228,10 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
         "volumeattachments": [
             {
                 "metadata": {"name": "attach-selected"},
-                "spec": {"source": {"persistentVolumeName": "pv-selected"}, "nodeName": "worker-a"},
+                "spec": {
+                    "source": {"persistentVolumeName": "pv-selected"},
+                    "nodeName": "worker-a",
+                },
                 "status": {"attached": True},
             }
         ],
@@ -155,7 +279,11 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
     events = {
         "events": [
             {
-                "metadata": {"namespace": "jobs", "creationTimestamp": "2026-10-01T10:05:00Z"},
+                "metadata": {
+                    "namespace": "jobs",
+                    "name": "runner-pod.later",
+                    "creationTimestamp": "2026-10-01T10:05:00Z",
+                },
                 "involvedObject": {
                     "kind": "Pod",
                     "namespace": "jobs",
@@ -168,7 +296,11 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
                 "type": "Warning",
             },
             {
-                "metadata": {"namespace": "jobs", "creationTimestamp": "2026-10-01T10:02:00Z"},
+                "metadata": {
+                    "namespace": "jobs",
+                    "name": "runner-pod.earlier",
+                    "creationTimestamp": "2026-10-01T10:02:00Z",
+                },
                 "involvedObject": {
                     "kind": "Pod",
                     "namespace": "jobs",
@@ -181,8 +313,16 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
                 "type": "Warning",
             },
             {
-                "metadata": {"namespace": "jobs", "creationTimestamp": "2026-10-01T10:04:00Z"},
-                "involvedObject": {"kind": "Pod", "namespace": "jobs", "name": "runner-pod"},
+                "metadata": {
+                    "namespace": "jobs",
+                    "name": "runner-pod.pulled",
+                    "creationTimestamp": "2026-10-01T10:04:00Z",
+                },
+                "involvedObject": {
+                    "kind": "Pod",
+                    "namespace": "jobs",
+                    "name": "runner-pod",
+                },
                 "lastTimestamp": "2026-10-01T10:04:00Z",
                 "reason": "Pulled",
                 "message": "selected but wrong reason",
@@ -190,8 +330,16 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
         ],
         "events.events.k8s.io": [
             {
-                "metadata": {"namespace": "other", "creationTimestamp": "2026-10-01T10:03:00Z"},
-                "regarding": {"kind": "Pod", "namespace": "other", "name": "runner-pod"},
+                "metadata": {
+                    "namespace": "other",
+                    "name": "runner-pod.other",
+                    "creationTimestamp": "2026-10-01T10:03:00Z",
+                },
+                "regarding": {
+                    "kind": "Pod",
+                    "namespace": "other",
+                    "name": "runner-pod",
+                },
                 "eventTime": "2026-10-01T10:03:00Z",
                 "reason": "FailedScheduling",
                 "note": "selected but wrong namespace",
@@ -319,6 +467,55 @@ def test_event_trace_uses_series_last_observed_time_inside_window(
     assert row["last_timestamp"] == "2026-10-01T10:05:00+00:00"
 
 
+def test_event_trace_reports_malformed_event_items_as_partial(
+    monkeypatch,
+    target_file,
+):
+    """Malformed event list items must be recorded as evidence errors."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    events = {
+        "events": [
+            {
+                "metadata": {"namespace": "jobs"},
+                "reason": "FailedScheduling",
+                "message": "missing involved object and timestamps",
+            }
+        ],
+        "events.events.k8s.io": [
+            {
+                "metadata": {"namespace": "jobs"},
+                "regarding": {"kind": "Pod"},
+                "note": "missing object name and event time",
+            }
+        ],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": events[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="jobs",
+        kind="Pod",
+        object="runner-pod",
+        reason=None,
+        search=None,
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"] == []
+    reasons = {error["source"]: error["reason"] for error in result["errors"]}
+    assert reasons["core_events"] == "invalid_list_response"
+    assert reasons["events_v1"] == "invalid_list_response"
+
+
 def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
     monkeypatch,
     target_file,
@@ -369,7 +566,9 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
                 "status": {"readyReplicas": 1},
             }
         ],
-        "ciliumnodes.cilium.io": [{"metadata": {"name": "worker-a"}, "status": {"ipam": {}}}],
+        "ciliumnodes.cilium.io": [
+            {"metadata": {"name": "worker-a"}, "status": {"ipam": {}}}
+        ],
     }
 
     def fake_run(argv, **_kwargs):
@@ -393,7 +592,9 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
     assert rows["cilium-not-ready"]["status"] == "UNKNOWN"
     assert rows["cilium-not-ready"]["exit_status"] is None
     assert {"source": "cilium-ready", "reason": "transport"} in result["errors"]
-    assert {"source": "cilium-not-ready", "reason": "agent_not_ready"} in result["errors"]
+    assert {"source": "cilium-not-ready", "reason": "agent_not_ready"} in result[
+        "errors"
+    ]
     assert len(exec_calls) == 1
     exec_call = exec_calls[0]
     assert "-t" not in exec_call
@@ -512,7 +713,9 @@ def test_cilium_status_reports_partial_for_explicit_namespace_with_zero_pods(
 
     assert result["status"] == "PARTIAL"
     assert result["summary"]["record_count"] == 1
-    assert {"source": "daemonsets", "reason": "cilium_daemonset_missing"} in result["errors"]
+    assert {"source": "daemonsets", "reason": "cilium_daemonset_missing"} in result[
+        "errors"
+    ]
     assert {"source": "pods", "reason": "cilium_agent_pods_missing"} in result["errors"]
     placeholder = result["records"][0]
     assert placeholder["status"] == "UNKNOWN"
@@ -567,7 +770,9 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
         if endpoint == "projects/unit%2Frepo/pipelines/77":
             return _command_result(runtime, command, {"id": 77, "status": "failed"})
         if endpoint == "runners/9":
-            return _command_result(runtime, command, {"id": 9, "description": "runner-a"})
+            return _command_result(
+                runtime, command, {"id": 9, "description": "runner-a"}
+            )
         return runtime.CommandResult(command, 1, "", "unexpected endpoint")
 
     def fake_tail(argv, **_kwargs):
@@ -584,7 +789,9 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
         search="selected",
     )
 
-    result = collect.collect_gitlab_job(_target(_write_gitlab_token_target(tmp_path, token_file)), args)
+    result = collect.collect_gitlab_job(
+        _target(_write_gitlab_token_target(tmp_path, token_file)), args
+    )
 
     assert result["status"] == "PASS"
     assert result["summary"]["record_count"] == 1
@@ -602,3 +809,144 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
     assert trace_calls[0][1]["env"]["GITLAB_TOKEN"] == token
     assert token not in json.dumps(result)
     assert str(token_file) not in json.dumps(result)
+
+
+def test_gitlab_job_records_malformed_nested_api_responses(
+    monkeypatch,
+    target_file,
+):
+    """Pipeline and runner detail responses must be schema-checked."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        endpoint = command[-1]
+        if endpoint == "projects/unit%2Frepo/jobs/123":
+            return _command_result(
+                runtime,
+                command,
+                {
+                    "id": 123,
+                    "name": "selected-job",
+                    "status": "failed",
+                    "pipeline": {"id": 77},
+                    "runner": {"id": 9},
+                },
+            )
+        if endpoint == "projects/unit%2Frepo/pipelines/77":
+            return _command_result(runtime, command, [])
+        if endpoint == "runners/9":
+            return _command_result(runtime, command, {"items": []})
+        return runtime.CommandResult(command, 1, "", "unexpected endpoint")
+
+    def fake_tail(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        return runtime.CommandResult(command, 0, "selected trace line\n", "")
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    monkeypatch.setattr(collect, "run_command_tail", fake_tail)
+    args = SimpleNamespace(
+        job_url="https://gitlab.example.test/unit/repo/-/jobs/123",
+        search="selected",
+    )
+
+    result = collect.collect_gitlab_job(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    reasons = {error["source"]: error["reason"] for error in result["errors"]}
+    assert reasons["pipeline"] == "invalid_response"
+    assert reasons["runner"] == "invalid_response"
+    row = result["records"][0]
+    assert row["pipeline"] is None
+    assert row["runner"] is None
+
+
+def test_gitlab_job_uses_effective_gitlab_env_token_for_all_reads(
+    monkeypatch,
+    tmp_path,
+):
+    """Ambient GitLab tokens must be resolved and reused for every job read."""
+    collect = import_script_module("core.collect")
+    credentials = import_script_module("core.credentials")
+    runtime = import_script_module("core.runtime")
+    token = "env-gitlab-token-value"
+    for name in (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+        "GITLAB_TOKEN",
+        "GITLAB_ACCESS_TOKEN",
+        "OAUTH_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GITLAB_TOKEN", token)
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target_path = tmp_path / "target.toml"
+    target_path.write_text(
+        (
+            "[github]\n"
+            'host = "github.example.test"\n'
+            'repository = "unit/repo"\n'
+            "\n"
+            "[gitlab]\n"
+            'url = "https://gitlab.example.test"\n'
+            "\n"
+            "[kubernetes]\n"
+            'context = "unit-context"\n'
+            'server = "https://api.cluster.example.test:6443"\n'
+            f'kubeconfig = "{kubeconfig}"\n'
+        ),
+        encoding="utf-8",
+    )
+    target = credentials.bind_sources(_target(target_path), revision="a" * 40)
+    observed_envs: list[dict[str, str] | None] = []
+
+    def require_env(kwargs: dict[str, Any]) -> None:
+        env = kwargs.get("env")
+        observed_envs.append(env)
+        assert env and env.get("GITLAB_TOKEN") == token
+
+    def fake_run(argv, **kwargs):
+        command = tuple(str(part) for part in argv)
+        require_env(kwargs)
+        endpoint = command[-1]
+        if endpoint == "projects/unit%2Frepo/jobs/123":
+            return _command_result(
+                runtime,
+                command,
+                {
+                    "id": 123,
+                    "name": "selected-job",
+                    "status": "failed",
+                    "pipeline": {"id": 77},
+                    "runner": {"id": 9},
+                },
+            )
+        if endpoint == "projects/unit%2Frepo/pipelines/77":
+            return _command_result(runtime, command, {"id": 77, "status": "failed"})
+        if endpoint == "runners/9":
+            return _command_result(
+                runtime, command, {"id": 9, "description": "runner-a"}
+            )
+        return runtime.CommandResult(command, 1, "", "unexpected endpoint")
+
+    def fake_tail(argv, **kwargs):
+        command = tuple(str(part) for part in argv)
+        require_env(kwargs)
+        return runtime.CommandResult(command, 0, "selected trace line\n", "")
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    monkeypatch.setattr(collect, "run_command_tail", fake_tail)
+    args = SimpleNamespace(
+        job_url="https://gitlab.example.test/unit/repo/-/jobs/123",
+        search="selected",
+    )
+
+    result = collect.collect_gitlab_job(target, args)
+
+    assert result["status"] == "PASS"
+    assert observed_envs
+    assert token not in json.dumps(result)

@@ -1,20 +1,24 @@
 # Kubernetes admin diagnostics skill
 
-`k8s-admin-diagnostics` collects read-only GitHub, GitLab CI, Kubernetes storage, event, and Cilium evidence. Each command uses native `gh`, `glab`, and `kubectl` clients and prints a human summary by default. JSON and YAML are available for automation.
+`k8s-admin-diagnostics` collects read-only GitHub, GitLab CI, Kubernetes
+storage, event, and Cilium evidence. Its commands use `gh`, `glab`, and
+`kubectl`. They print human summaries by default and support JSON and YAML.
 
 ## Install
 
-Ask Codex to install this GitHub skill:
+Ask Codex to install the skill from the repository:
 
 ```text
 Install the skill from https://github.com/spyroot/ci-skills/tree/main/skills/k8s-admin-diagnostics
 ```
 
-The skill becomes available in the next Codex turn. Installation copies instructions and scripts; each computer still needs its own credentials and target file.
+The skill becomes available in the next Codex turn. Each execution host
+still needs its own credentials and target file.
 
 ## Prerequisites and target
 
-Install Python 3.11 or newer, PyYAML, `gh`, `glab`, and `kubectl` on the execution host. Authenticate the selected hosts through their CLI profiles or private token files, and provide a Kubernetes credential through `KUBECONFIG`, the default kubeconfig, or an explicit path. Keep the nonsecret target at `~/.config/ci-skills/target.toml` or another explicit `--target PATH` outside the skill:
+Install Python 3.11 or newer, PyYAML, `gh`, `glab`, and `kubectl` on the
+execution host. Supply a nonsecret TOML file through `--target PATH`:
 
 ```toml
 [github]
@@ -23,33 +27,58 @@ repository = "owner/repository"
 
 [gitlab]
 url = "https://gitlab.example.com"
-# token_file = "/home/operator/.config/ci-skills/credentials/gitlab.token"
+# token_file = "/home/operator/.config/ci-skills/gitlab.token"
 
 [kubernetes]
 context = "admin-context"
 server = "https://api.cluster.example.com:6443"
-# kubeconfig = "/home/operator/.config/ci-skills/credentials/kubeconfig"
+# kubeconfig = "/home/operator/.kube/config"
 ```
 
-Keep the target and credential files outside this repository and installed skill. [The storage and gate plan](skills/k8s-admin-diagnostics/references/access.md) defines each required file, where it lives, how it is used, and what verifies it. No command logs in, grants a role, changes the active context, or writes to the cluster.
+For GitHub and GitLab, an explicit token file takes precedence, followed by
+the effective token environment variable, then the selected host's CLI
+credential store. Kubernetes uses the explicit kubeconfig, `KUBECONFIG`, or
+the default kubeconfig. Its selected user may authenticate with an embedded
+token, `tokenFile`, client certificate and key, or exec provider. See
+[access.md](skills/k8s-admin-diagnostics/references/access.md) for the checks.
+
+Keep the target and credential files outside the repository and installed
+skill. The commands never log in, grant roles, or change the active context.
 
 ## Commands
 
-Run from the installed skill's `scripts` directory, or pass its absolute path:
+Every command accepts `--target PATH`, `--revision SHA`, `--json`, `--yaml`,
+`--dry-run`, and `--help`. Pass a full source commit SHA with `--revision`
+when the installed copy has no Git metadata. Reports also accept
+`--output-dir PATH` to write paired JSON and text files. Without that option,
+no report file is written.
 
-| Script | Required input | Filters and behavior |
-|---|---|---|
-| `access_check.py` | `--target PATH` | Checks GitHub identity and repository, GitLab instance administration and runner API, Kubernetes context, TLS, identity, wildcard administration, and Cilium exec permission. Add `--publication` to require GitHub repository administration before configuring required checks. |
-| `gitlab_job.py` | `--target PATH --job-url URL` | `--search TEXT`; reads job, pipeline, runner, and last 200 trace lines from the selected GitLab FQDN. |
-| `storage_report.py` | `--target PATH` | `--namespace NAME|all`, `--node NAME`, `--storage-class NAME`, `--phase Pending|Bound|Lost|Released|Failed|all`, `--search TEXT`; reads storage and workload resources concurrently and correlates claims to Pods and attachments. |
-| `event_trace.py` | `--target PATH` | `--from RFC3339`, `--to RFC3339`, `--namespace NAME|all`, `--kind KIND`, `--object NAME`, `--reason TEXT`, `--search TEXT`; returns a time-ordered event trace. Defaults to the previous hour. |
-| `cilium_status.py` | `--target PATH` | `--namespace NAME|auto`, `--node NAME`, `--search TEXT`; aggregates DaemonSet, operator, CiliumNode, and concurrent non-TTY agent health. |
-| `tools/check_project_neutrality.py` | `--root PATH` | Checks every versioned or pending path and byte for the prohibited project marker. |
+- `access_check.py` checks the three selected authorities and runs the
+  storage, event, and Cilium collector reads. `--publication` also requires
+  repository admin permission and read-back of required branch checks.
+  `--job-url URL` also checks that job, pipeline, runner, and trace.
+- `gitlab_job.py --job-url URL` reads a selected job, pipeline, runner, and
+  bounded trace. It accepts `--search TEXT`.
+- `storage_report.py` correlates PVCs, standalone PVs, Pods, attachments,
+  and controllers. Filters: `--namespace NAME|all`, `--node NAME`,
+  `--storage-class NAME`, `--phase Pending|Bound|Lost|Released|Failed|all`,
+  and `--search TEXT`.
+- `event_trace.py` reads both Kubernetes event APIs and accepts `--from`,
+  `--to`, `--namespace`, `--kind`, `--object`, `--reason`, and `--search`.
+  Its default window is the previous hour.
+- `cilium_status.py` reads Cilium resources and executes non-TTY health on
+  ready agents. It accepts `--namespace NAME|auto`, `--node`, and `--search`.
 
-Every report accepts mutually exclusive `--json` and `--yaml`, plus `--dry-run`, `--help`, and optional `--output-dir PATH`. An output directory receives paired `.json` and `.txt` reports from one collection. Without one, nothing is persisted. `--dry-run` lists probes and never counts as a live pass. The neutrality gate accepts `--json`, `--yaml`, and `--help`.
-
-The gate runs before each live report. If any surface is blocked, the collector does not run. A command returns 0 for `PASS` or `DRY_RUN`, 2 for `BLOCKED` or `PARTIAL` diagnostics. An unavailable agent health reading is `UNKNOWN` and makes the Cilium report `PARTIAL`. All report objects include `schema_version`, `kind`, `status`, target, filters, records, errors, and summary where applicable.
+The full access gate runs before every live collector. Exit code 0 means
+`PASS` or an explicitly marked `DRY_RUN`; code 2 means `BLOCKED` or
+`PARTIAL`. JSON and YAML failures emit a structured error report on stdout.
+An unavailable agent health result is `UNKNOWN` and makes its report partial.
 
 ## Validation
 
-GitHub Actions runs CLI and filter tests, Ruff, skill checks, and the all-file neutrality scan. A passing CI check verifies code behavior with mocked authorities. Run `access_check.py` on every intended execution host to verify real access there; another computer needs its own gate receipt.
+The `validate` workflow checks workflow/YAML and Markdown syntax, diff
+hygiene, secrets, Ruff lint and format, package behavior, and mocked denial
+paths. Its package smoke runs every installed entrypoint from outside the
+source tree. Mocked CI is code evidence; the live access receipt must come
+from each intended execution host. Use the exact target and tested revision
+there, and retain the sanitized receipt only after all required checks pass.

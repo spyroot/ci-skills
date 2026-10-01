@@ -39,7 +39,9 @@ def test_human_gitlab_report_includes_matching_trace_tail():
         "kind": "gitlab_job",
         "status": "PASS",
         "target": "https://gitlab.example.test",
-        "records": [{"job_id": 123, "name": "selected-job", "trace_tail": "selected trace line"}],
+        "records": [
+            {"job_id": 123, "name": "selected-job", "trace_tail": "selected trace line"}
+        ],
         "errors": [],
     }
 

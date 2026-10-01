@@ -13,8 +13,18 @@ from pathlib import Path
 def scan(root: Path) -> dict[str, object]:
     marker = (b"GALI" + b"LEO").lower()
     result = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        capture_output=True, check=False,
+        [
+            "git",
+            "-C",
+            str(root),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
+        capture_output=True,
+        check=False,
     )
     if result.returncode:
         raise RuntimeError("cannot inventory repository paths")
@@ -29,18 +39,29 @@ def scan(root: Path) -> dict[str, object]:
         if marker in raw.lower():
             violations.append(relative + ":path")
         try:
-            content = os.fsencode(os.readlink(path)) if path.is_symlink() else path.read_bytes()
+            content = (
+                os.fsencode(os.readlink(path))
+                if path.is_symlink()
+                else path.read_bytes()
+            )
         except OSError as exc:
             raise RuntimeError(f"cannot scan {relative}") from exc
         if marker in content.lower():
             violations.append(relative + ":content")
-    return {"schema_version": "1.0", "kind": "project_neutrality", "status": "FAIL" if violations else "PASS",
-            "files_scanned": count, "violations": violations}
+    return {
+        "schema_version": "1.0",
+        "kind": "project_neutrality",
+        "status": "FAIL" if violations else "PASS",
+        "files_scanned": count,
+        "violations": violations,
+    }
 
 
 def main() -> int:
-    cli = argparse.ArgumentParser(description="Scan every tracked and pending repository file, including dotfiles.",
-                                  epilog="Example: check_project_neutrality.py --root . --json")
+    cli = argparse.ArgumentParser(
+        description="Scan every tracked and pending repository file, including dotfiles.",
+        epilog="Example: check_project_neutrality.py --root . --json",
+    )
     cli.add_argument("--root", required=True, metavar="PATH", help="repository root")
     modes = cli.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print JSON")
@@ -52,9 +73,12 @@ def main() -> int:
             print(json.dumps(data, indent=2, sort_keys=True))
         elif args.yaml:
             import yaml
+
             print(yaml.safe_dump(data, sort_keys=True), end="")
         else:
-            print(f"Project neutrality: {data['status']} ({data['files_scanned']} files)")
+            print(
+                f"Project neutrality: {data['status']} ({data['files_scanned']} files)"
+            )
             for finding in data["violations"]:
                 print(f"  {finding}")
         return 0 if data["status"] == "PASS" else 1

@@ -134,7 +134,9 @@ def test_load_target_accepts_optional_gitlab_token_file_path(tmp_path):
         ),
     ),
 )
-def test_load_target_rejects_ambiguous_or_secret_authorities(tmp_path, content, message):
+def test_load_target_rejects_ambiguous_or_secret_authorities(
+    tmp_path, content, message
+):
     """Bad target files fail before any live command can use the wrong surface."""
     path = tmp_path / "target.toml"
     path.write_text(content, encoding="utf-8")
@@ -147,11 +149,7 @@ def test_load_target_rejects_ambiguous_or_secret_authorities(tmp_path, content, 
 def test_runtime_sanitizes_secret_like_output_and_bounds_text():
     """External command output is redacted before it enters diagnostics."""
     runtime = import_script_module("core.runtime")
-    private_key = (
-        "-----BEGIN PRIVATE KEY-----\n"
-        "abc123\n"
-        "-----END PRIVATE KEY-----"
-    )
+    private_key = "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----"
     text = (
         "Authorization: Bearer abc.def\n"
         "api_key=abc123\n"

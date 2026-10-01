@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -39,6 +39,8 @@ class Target:
     github: GitHubTarget
     gitlab: GitLabTarget
     kubernetes: KubernetesTarget
+    sources: object | None = field(default=None, repr=False, compare=False)
+    tested_revision: str | None = None
 
 
 def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:
@@ -47,7 +49,9 @@ def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:
         raise TargetError(f"{name} must be a TOML table")
     unknown = set(value) - keys
     if unknown:
-        raise TargetError(f"{name} contains unsupported fields: {', '.join(sorted(unknown))}")
+        raise TargetError(
+            f"{name} contains unsupported fields: {', '.join(sorted(unknown))}"
+        )
     return value
 
 
@@ -107,27 +111,39 @@ def load_target(path: str | Path) -> Target:
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise TargetError(f"target file is unavailable or invalid: {source}") from exc
     if set(data) != {"github", "gitlab", "kubernetes"}:
-        raise TargetError("target must contain github, gitlab, and kubernetes tables only")
+        raise TargetError(
+            "target must contain github, gitlab, and kubernetes tables only"
+        )
 
     github = _table(data["github"], "github", {"host", "repository", "token_file"})
     github_host = _string(github, "host").lower()
     if "." not in github_host or "/" in github_host or ":" in github_host:
         raise TargetError("github.host must be a full hostname")
     repository = _string(github, "repository")
-    if len(repository.split("/")) != 2 or any(not part for part in repository.split("/")):
+    if len(repository.split("/")) != 2 or any(
+        not part for part in repository.split("/")
+    ):
         raise TargetError("github.repository must be owner/repository")
 
     gitlab = _table(data["gitlab"], "gitlab", {"url", "token_file"})
     gitlab_url, gitlab_host = _https_url(_string(gitlab, "url"), "gitlab.url")
 
-    kubernetes = _table(data["kubernetes"], "kubernetes", {"context", "server", "kubeconfig"})
+    kubernetes = _table(
+        data["kubernetes"], "kubernetes", {"context", "server", "kubeconfig"}
+    )
     server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
     kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
     return Target(
-        github=GitHubTarget(host=github_host, repository=repository,
-                            token_file=_optional_file(github, "token_file", skill_root)),
-        gitlab=GitLabTarget(url=gitlab_url, host=gitlab_host,
-                            token_file=_optional_file(gitlab, "token_file", skill_root)),
+        github=GitHubTarget(
+            host=github_host,
+            repository=repository,
+            token_file=_optional_file(github, "token_file", skill_root),
+        ),
+        gitlab=GitLabTarget(
+            url=gitlab_url,
+            host=gitlab_host,
+            token_file=_optional_file(gitlab, "token_file", skill_root),
+        ),
         kubernetes=KubernetesTarget(
             context=_string(kubernetes, "context"),
             server=server,

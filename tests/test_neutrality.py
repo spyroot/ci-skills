@@ -35,7 +35,9 @@ def test_neutrality_scan_passes_clean_tracked_and_dot_files(tmp_path):
     _init_repo(root)
     (root / "README.md").write_text("portable skill\n", encoding="utf-8")
     (root / ".config-note").write_text("still neutral\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(root), "add", "."], check=True, capture_output=True
+    )
 
     result = _run_neutrality(root, "--json")
     data = json.loads(result.stdout)
@@ -53,7 +55,9 @@ def test_neutrality_scan_rejects_marker_in_path_and_file_bytes(tmp_path):
     _init_repo(root)
     (root / f"{marker}-path.txt").write_text("neutral body\n", encoding="utf-8")
     (root / ".hidden").write_text(marker.upper(), encoding="utf-8")
-    subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(root), "add", "."], check=True, capture_output=True
+    )
 
     result = _run_neutrality(root, "--json")
     data = json.loads(result.stdout)

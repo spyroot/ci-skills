@@ -44,7 +44,11 @@ def _validate_skill_package(root: Path) -> dict[str, str]:
     description = frontmatter.get("description")
     if not isinstance(description, str) or not description.strip():
         raise ValueError("skill description is required")
-    missing = [relative for relative in REQUIRED_PACKAGE_PATHS if not (root / relative).is_file()]
+    missing = [
+        relative
+        for relative in REQUIRED_PACKAGE_PATHS
+        if not (root / relative).is_file()
+    ]
     if missing:
         raise ValueError(f"missing package paths: {', '.join(missing)}")
     skill_text = skill_file.read_text(encoding="utf-8")
@@ -66,11 +70,7 @@ def test_skill_package_validation_rejects_malformed_package(tmp_path):
     root = tmp_path / "broken-skill"
     root.mkdir()
     (root / "SKILL.md").write_text(
-        "---\n"
-        "name: other-name\n"
-        "description: broken\n"
-        "---\n"
-        "# Broken\n",
+        "---\nname: other-name\ndescription: broken\n---\n# Broken\n",
         encoding="utf-8",
     )
 

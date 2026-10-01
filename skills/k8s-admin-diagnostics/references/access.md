@@ -1,50 +1,76 @@
-# Per-computer access and storage plan
+# Per-computer access and evidence
 
-The installed skill contains instructions and executable code. It contains no target, token, or kubeconfig. Every computer or runner supplies its own configuration and credentials. A CLI/keychain profile or an explicit private token file may authenticate GitHub and GitLab; when a token file is selected, a missing or unreadable file blocks access without fallback.
+The installed skill contains instructions and code. Each execution host
+supplies a nonsecret target file and its own credentials. The target file
+identifies one exact GitHub repository, GitLab origin, Kubernetes context, and
+API server. Use `--target PATH`; no target location is assumed.
 
-| File or store | Location | Purpose | Gate |
-|---|---|---|---|
-| `SKILL.md` and `scripts/` | `~/.codex/skills/k8s-admin-diagnostics/` after installation | Codex instructions and reusable diagnostics | Package validation in GitHub Actions checks frontmatter, name, references, entrypoints, and `--help`. |
-| `target.toml` | Operator-selected `--target PATH`; recommended `~/.config/ci-skills/target.toml`, outside the installed skill | Nonsecret exact GitHub, GitLab, and Kubernetes authorities and optional credential paths | Target parser rejects unknown fields, credentials in TOML, invalid hosts/URLs, and paths inside the skill. |
-| GitHub token | `gh` host profile/keychain, or optional `github.token_file` outside the skill | Authenticates the selected GitHub host | File mode reads a nonempty token into the child process only; both modes require host auth, identity API, and exact repository API reads. |
-| GitLab token | `glab` host profile, or optional `gitlab.token_file`; recommended `~/.config/ci-skills/credentials/gitlab.token` | Authenticates the exact GitLab FQDN | File mode reads a nonempty token into the child process only; both modes require host auth, admin identity, and runner API reads. |
-| Kubeconfig | Optional `kubernetes.kubeconfig` path outside the skill; otherwise `KUBECONFIG` or kubectl default | Selects Kubernetes credentials and context | Explicit file must be readable and nonempty; API context, TLS, identity, and authorization checks prove effective access. |
+## Effective credential sources
 
-A private token file can be provisioned once from an existing secure store into the per-computer credential directory with user-only file permissions. Never copy credentials into the GitHub repository or installed skill. The skill reads the named file at runtime; no private project path is embedded in its code or documentation. Token values are never placed in reports or command arguments.
+- GitHub uses an explicit `github.token_file` from the target, then the
+  effective `GH_TOKEN` or `GITHUB_TOKEN` environment variable on github.com.
+  Enterprise hosts use `GH_ENTERPRISE_TOKEN` or
+  `GITHUB_ENTERPRISE_TOKEN`. Otherwise, the selected host's `gh` credential
+  store is used.
+- GitLab uses an explicit `gitlab.token_file`, then the effective
+  `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable.
+  Otherwise, the selected host's `glab` credential store is used.
+- Kubernetes uses an explicit `kubernetes.kubeconfig`, `KUBECONFIG`, or the
+  default kubeconfig. The selected context resolves the user and cluster.
+  The user may use an embedded token, `tokenFile`, client certificate and
+  key, or an exec provider. No separate token file is assumed.
 
-File mode passes the GitLab token to `glab` as `GITLAB_TOKEN` in the child process environment. An explicit missing, empty, or unreadable token file has no fallback to a CLI profile. Keep every token file outside this repository and the installed skill.
+An explicit missing or unreadable file blocks. The gate selects sources once
+and passes the same sources to every collector. It records source references,
+not token values, private keys, or raw kubeconfig contents. Keep credentials
+outside this repository and the installed skill.
 
-Example nonsecret target file:
+Example nonsecret target:
 
 ```toml
 [github]
 host = "github.com"
 repository = "owner/repository"
-# token_file = "/home/operator/.config/ci-skills/credentials/github.token"
+# token_file = "/home/operator/.config/ci-skills/github.token"
 
 [gitlab]
 url = "https://gitlab.example.com"
-token_file = "/home/operator/.config/ci-skills/credentials/gitlab.token"
+# token_file = "/home/operator/.config/ci-skills/gitlab.token"
 
 [kubernetes]
 context = "admin-context"
 server = "https://api.cluster.example.com:6443"
-kubeconfig = "/home/operator/.config/ci-skills/credentials/kubeconfig"
+# kubeconfig = "/home/operator/.kube/config"
 ```
 
-## Gates
+## Mandatory live gate
 
-| Gate | Implementation | Pass condition |
-|---|---|---|
-| Package | `tests/test_skill_package.py`, `.github/workflows/validate.yml` | Valid metadata and package layout; every script accepts `--help`. |
-| Project neutrality | `tools/check_project_neutrality.py` | Every tracked or pending path and byte, including dotfiles, is free of the prohibited project marker. |
-| Target and storage | `scripts/core/target.py`, `scripts/core/access.py` | Explicit TOML parses; selected token and kubeconfig files are readable, nonempty, and outside the installed skill. |
-| GitHub read | `scripts/core/access.py` | `gh auth status` for selected host, authenticated identity, exact repository read. |
-| GitHub publication | `access_check.py --publication` | GitHub read gate plus repository admin permission, before configuring or verifying a required check. |
-| GitLab admin | `scripts/core/access.py` | `glab auth status` for exact FQDN, `GET /user` with `is_admin: true` and matching host, successful `GET /runners/all`. Group Owner alone does not pass. |
-| Kubernetes admin | `scripts/core/access.py` | Named context resolves to exact HTTPS server; TLS verification and `/version` work; effective user, cluster wildcard, role-binding administration, role bind, and Cilium `pods/exec` checks pass. |
-| Collector | `scripts/core/cli.py` | All three access surfaces pass before any live diagnostic collection. Partial data returns a nonzero status. |
-| Exact-head CI | `.github/workflows/validate.yml` and protected `main` | Package, neutrality, Ruff, and mocked denial/filter/CLI tests pass on the exact pull request head; required `validate` check is enforced. |
-| Per-host receipt | `access_check.py --target PATH --json` | A real `PASS` is recorded on each intended host; dry run and another host's receipt do not count. |
+Run `access_check.py --target PATH --json --publication` on each intended
+execution host. Supply `--revision SHA` for an installed copy without Git
+metadata, and `--job-url URL` when verifying a requested job. The receipt
+identifies the execution host, time, revision, sources, targets, identities,
+and individual results.
 
-The gate never logs in, grants roles, changes context, or silently falls back to another host. Failed checks stop live collection. It reports each surface's `PASS` or `BLOCKED`, identity when verified, target, observed capabilities, and safe next step. `--dry-run` reports planned probes as `DRY_RUN` and never proves access.
+- GitHub: authenticate the selected host, read back the identity and exact
+  repository. Publication mode also requires repository administration and
+  read-back of nonempty required status checks on the protected main branch.
+- GitLab: authenticate the exact origin, read back an identity with
+  `is_admin: true` and matching host, and read the instance runner API.
+  A selected job also requires the job, pipeline, runner, and trace reads.
+- Kubernetes: match the context to the exact HTTPS API server with TLS
+  verification, read back the effective identity, check administrator
+  permissions, and perform the storage and event resource reads. Cilium
+  diagnostics require a real non-TTY `cilium-health` command on a ready agent.
+
+`PASS` requires all selected live checks. Missing, invalid, expired,
+wrong-target, or unauthorized credentials block. A mock, file-existence
+check, login-status message, dry run, or receipt from another host is not
+live acceptance evidence.
+
+## Automated gates
+
+The `validate` workflow checks package layout, all installed entrypoints from
+an unrelated working directory, workflow/YAML and Markdown syntax, diff
+hygiene, secret scanning, Ruff lint and format, and mocked behavior. CI proves
+code behavior at its tested commit. The per-host live receipt proves actual
+access and resource reads on that host.

@@ -21,8 +21,13 @@ class CommandResult:
 
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer|basic)\s+)\S+"),
-    re.compile(r"(?i)\b((?:access[_-]?token|api[_-]?key|password|secret)\s*[:=]\s*)\S+"),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
+    re.compile(
+        r"(?i)\b((?:access[_-]?token|api[_-]?key|password|secret)\s*[:=]\s*)\S+"
+    ),
+    re.compile(
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+        re.DOTALL,
+    ),
 )
 
 
@@ -30,7 +35,12 @@ def sanitize(value: str, limit: int = 1000) -> str:
     """Remove common credential forms and bound untrusted report text."""
     result = value
     for pattern in _SECRET_PATTERNS:
-        result = pattern.sub(lambda match: match.group(1) + "[REDACTED]" if match.lastindex else "[REDACTED]", result)
+        result = pattern.sub(
+            lambda match: (
+                match.group(1) + "[REDACTED]" if match.lastindex else "[REDACTED]"
+            ),
+            result,
+        )
     return result[:limit]
 
 
@@ -38,7 +48,7 @@ def run_command(
     argv: Sequence[str],
     *,
     timeout: int = 25,
-    env: dict[str, str] | None = None,
+    env: dict[str, str | None] | None = None,
 ) -> CommandResult:
     """Execute an argument vector without a shell or interactive prompts."""
     command = tuple(str(part) for part in argv)
@@ -60,17 +70,31 @@ def run_command(
     return CommandResult(command, result.returncode, result.stdout, result.stderr)
 
 
-def _environment(overrides: dict[str, str] | None) -> dict[str, str]:
+def _environment(overrides: dict[str, str | None] | None) -> dict[str, str]:
     environment = os.environ.copy()
-    environment.update({"GH_PROMPT_DISABLED": "1", "GLAB_NO_PROMPT": "1", "KUBECTL_EXTERNAL_DIFF": "false"})
+    environment.update(
+        {
+            "GH_PROMPT_DISABLED": "1",
+            "GLAB_NO_PROMPT": "1",
+            "KUBECTL_EXTERNAL_DIFF": "false",
+        }
+    )
     if overrides:
-        environment.update(overrides)
+        for name, value in overrides.items():
+            if value is None:
+                environment.pop(name, None)
+            else:
+                environment[name] = value
     return environment
 
 
 def run_command_tail(
-    argv: Sequence[str], *, timeout: int = 30, max_bytes: int = 65536,
-    max_lines: int = 200, env: dict[str, str] | None = None,
+    argv: Sequence[str],
+    *,
+    timeout: int = 30,
+    max_bytes: int = 65536,
+    max_lines: int = 200,
+    env: dict[str, str | None] | None = None,
 ) -> CommandResult:
     """Stream a command and retain only bounded stdout/stderr tail bytes."""
     if max_bytes <= 0 or max_lines <= 0:
@@ -78,8 +102,11 @@ def run_command_tail(
     command = tuple(str(part) for part in argv)
     try:
         process = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL, env=_environment(env),
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            env=_environment(env),
         )
     except FileNotFoundError:
         return CommandResult(command, 127, "", "command unavailable")
@@ -110,8 +137,12 @@ def run_command_tail(
     process.wait()
     stdout = stdout_tail.decode("utf-8", errors="replace")
     stderr = stderr_tail.decode("utf-8", errors="replace")
-    return CommandResult(command, 124 if expired else process.returncode,
-                         "\n".join(stdout.splitlines()[-max_lines:]), stderr)
+    return CommandResult(
+        command,
+        124 if expired else process.returncode,
+        "\n".join(stdout.splitlines()[-max_lines:]),
+        stderr,
+    )
 
 
 def error_class(result: CommandResult) -> str:
@@ -125,6 +156,10 @@ def error_class(result: CommandResult) -> str:
         return "authentication"
     if "forbidden" in detail or "403" in detail or "permission" in detail:
         return "authorization"
-    if "could not resolve" in detail or "connection refused" in detail or "no such host" in detail:
+    if (
+        "could not resolve" in detail
+        or "connection refused" in detail
+        or "no such host" in detail
+    ):
         return "transport"
     return "command_failed"
