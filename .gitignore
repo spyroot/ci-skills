@@ -1,0 +1,12 @@
+.DS_Store
+docs/.DS_Store
+docs/**/.DS_Store
+templates/.DS_Store
+templates/**/.DS_Store
+AGENTS.md
+CODEX_HANDOFF.md
+TEAM_GUIDE.md
+CLAUDE*.md
+CODEX*.md
+.internal/
+.idea/
