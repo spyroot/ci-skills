@@ -20,7 +20,8 @@ API server. Use `--target PATH`; no target location is assumed.
   The user may use an embedded token, `tokenFile`, client certificate and
   key, or an exec provider. No separate token file is assumed.
 
-An explicit missing or unreadable file blocks. The gate selects sources once
+An explicit missing or unreadable file blocks with no fallback to a different
+credential. The gate selects sources once
 and passes the same sources to every collector. It records source references,
 not token values, private keys, or raw kubeconfig contents. Keep credentials
 outside this repository and the installed skill.
