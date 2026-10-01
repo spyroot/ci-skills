@@ -47,17 +47,31 @@ if tool == "glab":
         emit([{"id": 1}])
     raise SystemExit(98)
 
+CONFIG = {
+    "contexts": [{
+        "name": "unit-context",
+        "context": {"cluster": "cluster-a", "user": "unit-user"},
+    }],
+    "clusters": [{
+        "name": "cluster-a",
+        "cluster": {"server": "https://api.cluster.example.test:6443"},
+    }],
+    "users": [{"name": "unit-user", "user": {"token": "REDACTED"}}],
+}
+
+AGENT = "cilium-unit0"
+
 if tool == "kubectl":
+    # The credential-source resolution asks one file what it defines, with no
+    # --context, before any context-bound call is made.
+    if "--context" not in args:
+        if args[2:] == ["config", "view", "-o", "json"]:
+            emit(CONFIG)
+        raise SystemExit(98)
     context_index = args.index("--context")
     kargs = args[context_index + 2:]
     if kargs == ["config", "view", "-o", "json"]:
-        emit({
-            "contexts": [{"name": "unit-context", "context": {"cluster": "cluster-a"}}],
-            "clusters": [{
-                "name": "cluster-a",
-                "cluster": {"server": "https://api.cluster.example.test:6443"},
-            }],
-        })
+        emit(CONFIG)
     if kargs == ["get", "--raw=/version"]:
         emit({"major": "1", "minor": "32"})
     if kargs == ["auth", "whoami", "-o", "json"]:
@@ -67,6 +81,19 @@ if tool == "kubectl":
         raise SystemExit(0)
     if kargs == ["get", "daemonsets", "--all-namespaces", "-o", "json"]:
         emit({"items": [{"metadata": {"namespace": "kube-system", "name": "cilium"}}]})
+    if kargs == ["get", "pods", "-n", "kube-system", "-o", "json"]:
+        emit({"items": [{
+            "metadata": {"name": AGENT, "namespace": "kube-system", "uid": "uid-0"},
+            "spec": {"nodeName": "unit-node"},
+            "status": {"phase": "Running",
+                       "conditions": [{"type": "Ready", "status": "True"}]},
+        }]})
+    if kargs == ["-n", "kube-system", "exec", AGENT, "--",
+                 "cilium-health", "status", "-o", "json"]:
+        emit({"local": {"name": "unit-node"}, "nodes": [{"name": "unit-node"}]})
+    # Every remaining collector read is a plain list the gate only has to reach.
+    if kargs[0] == "get" and kargs[-2:] == ["-o", "json"]:
+        emit({"items": []})
     raise SystemExit(98)
 
 raise SystemExit(127)

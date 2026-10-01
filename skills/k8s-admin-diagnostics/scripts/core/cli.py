@@ -7,7 +7,8 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
-from .access import check_access, dry_run_access
+from .access import dry_run_access
+from .liveaccess import verify
 from .report import emit
 from .status import PASS, exit_code
 from .target import Target, TargetError, load_target
@@ -29,8 +30,12 @@ def execute(args: argparse.Namespace, collect: Callable[[Target, argparse.Namesp
     try:
         target = load_target(args.target)
         publication = bool(getattr(args, "publication", False))
+        # The live gate resolves the effective credential source for each
+        # authority and performs the collectors' own reads, so a collector can
+        # never run on a credential the gate did not verify.
         gate = (dry_run_access(target, publication=publication) if args.dry_run
-                else check_access(target, publication=publication))
+                else verify(target, job_url=getattr(args, "job_url", None),
+                            publication=publication))
         if args.dry_run and collect is not None:
             probes = {
                 "collect_storage": ["concurrent node, Pod, PVC/PV, StorageClass, CSI, attachment, controller reads"],

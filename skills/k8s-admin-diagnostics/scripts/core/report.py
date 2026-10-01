@@ -77,7 +77,42 @@ def human(data: dict[str, Any]) -> str:
                 lines.append(f"    reason: {surface['reason']}")
             if surface.get("next_step"):
                 lines.append(f"    next: {surface['next_step']}")
+    if data.get("kind") == "access_receipt":
+        lines = _receipt_lines(data)
     return "\n".join(lines) + "\n"
+
+
+def _receipt_lines(data: dict[str, Any]) -> list[str]:
+    """Render the receipt: host, sources, identities, then each live check."""
+    host = data.get("execution_host") or {}
+    revision = data.get("tested_revision") or {}
+    lines = [
+        f"Access receipt: {data.get('status', 'UNKNOWN')}",
+        f"Host: {host.get('hostname', 'unknown')} ({host.get('system')} {host.get('machine')})",
+        f"Observed: {data.get('observed_at', 'unknown')}",
+        f"Revision: {revision.get('commit') or 'not_a_git_checkout'}"
+        + (" (dirty)" if revision.get("dirty") else ""),
+    ]
+    for name, source in sorted((data.get("credential_sources") or {}).items()):
+        lines.append(f"  source {name}: {source.get('kind')} -> {source.get('reference')}")
+        if source.get("shadowed"):
+            lines.append("    shadowed: " + ", ".join(source["shadowed"]))
+        mechanism = (source.get("detail") or {}).get("authentication_mechanism")
+        if mechanism:
+            detail = source["detail"]
+            lines.append(
+                f"    context={detail.get('context')} user={detail.get('user_entry')}"
+                f" mechanism={mechanism} selected_by={detail.get('selected_by')}"
+            )
+    for name, identity in sorted((data.get("identities") or {}).items()):
+        lines.append(f"  identity {name}: {identity}")
+    for check in data.get("live_checks", []):
+        lines.append(f"  {check.get('status')} {check.get('name')}: {check.get('detail')}")
+    blocking = data.get("blocking") or {}
+    for label, items in sorted(blocking.items()):
+        if items:
+            lines.append(f"Blocking {label}: " + ", ".join(items))
+    return lines
 
 
 def emit(data: dict[str, Any], mode: str, output_dir: str | None = None) -> str:

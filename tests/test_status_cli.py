@@ -44,8 +44,8 @@ def test_cli_execute_uses_shared_exit_mapping(
 
     monkeypatch.setattr(
         cli,
-        "check_access",
-        lambda _target, publication=False: {"status": status.PASS},
+        "verify",
+        lambda _target, job_url=None, publication=False: {"status": status.PASS},
     )
     monkeypatch.setattr(cli, "emit", lambda data, _mode, _output_dir: json.dumps(data))
 

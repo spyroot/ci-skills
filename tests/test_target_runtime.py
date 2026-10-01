@@ -9,7 +9,7 @@ import pytest
 from conftest import import_script_module
 
 
-def test_load_target_accepts_exact_nonsecret_authorities(target_file):
+def test_load_target_accepts_exact_nonsecret_authorities(target_file, unit_kubeconfig):
     """A target file supplies all live authorities without secret material."""
     target = import_script_module("core.target").load_target(target_file)
 
@@ -19,6 +19,22 @@ def test_load_target_accepts_exact_nonsecret_authorities(target_file):
     assert target.gitlab.host == "gitlab.example.test"
     assert target.kubernetes.context == "unit-context"
     assert target.kubernetes.server == "https://api.cluster.example.test:6443"
+    assert target.kubernetes.kubeconfig == unit_kubeconfig.resolve()
+
+
+def test_load_target_leaves_omitted_kubeconfig_unset(tmp_path):
+    """An omitted kubeconfig parses as None so KUBECONFIG or the default applies."""
+    path = tmp_path / "target.toml"
+    path.write_text(
+        '[github]\nhost = "github.example.test"\nrepository = "unit/repo"\n\n'
+        '[gitlab]\nurl = "https://gitlab.example.test"\n\n'
+        '[kubernetes]\ncontext = "unit-context"\n'
+        'server = "https://api.cluster.example.test:6443"\n',
+        encoding="utf-8",
+    )
+
+    target = import_script_module("core.target").load_target(path)
+
     assert target.kubernetes.kubeconfig is None
 
 

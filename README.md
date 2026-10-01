@@ -39,7 +39,7 @@ Run from the installed skill's `scripts` directory, or pass its absolute path:
 
 | Script | Required input | Filters and behavior |
 |---|---|---|
-| `access_check.py` | `--target PATH` | Checks GitHub identity and repository, GitLab instance administration and runner API, Kubernetes context, TLS, identity, wildcard administration, and Cilium exec permission. Add `--publication` to require GitHub repository administration before configuring required checks. |
+| `access_check.py` | `--target PATH` | Resolves the effective credential source for each surface, then checks GitHub identity and repository, GitLab instance administration and runner API, Kubernetes context, TLS, identity and wildcard administration, performs every resource read the collectors need, and runs the real non-TTY Cilium health command. Prints one `access_receipt`. Add `--publication` to require GitHub repository administration before configuring required checks. |
 | `gitlab_job.py` | `--target PATH --job-url URL` | `--search TEXT`; reads job, pipeline, runner, and last 200 trace lines from the selected GitLab FQDN. |
 | `storage_report.py` | `--target PATH` | `--namespace NAME|all`, `--node NAME`, `--storage-class NAME`, `--phase Pending|Bound|Lost|Released|Failed|all`, `--search TEXT`; reads storage and workload resources concurrently and correlates claims to Pods and attachments. |
 | `event_trace.py` | `--target PATH` | `--from RFC3339`, `--to RFC3339`, `--namespace NAME|all`, `--kind KIND`, `--object NAME`, `--reason TEXT`, `--search TEXT`; returns a time-ordered event trace. Defaults to the previous hour. |
@@ -48,8 +48,8 @@ Run from the installed skill's `scripts` directory, or pass its absolute path:
 
 Every report accepts mutually exclusive `--json` and `--yaml`, plus `--dry-run`, `--help`, and optional `--output-dir PATH`. An output directory receives paired `.json` and `.txt` reports from one collection. Without one, nothing is persisted. `--dry-run` lists probes and never counts as a live pass. The neutrality gate accepts `--json`, `--yaml`, and `--help`.
 
-The gate runs before each live report. If any surface is blocked, the collector does not run. A command returns 0 for `PASS` or `DRY_RUN`, 2 for `BLOCKED` or `PARTIAL` diagnostics. An unavailable agent health reading is `UNKNOWN` and makes the Cilium report `PARTIAL`. All report objects include `schema_version`, `kind`, `status`, target, filters, records, errors, and summary where applicable.
+The gate runs before each live report, on the computer or runner you invoke it from. It passes only when every required credential source resolves to an effective source and every required live check succeeds; a saved CLI login is not sufficient, because an environment token overrides it. If anything blocks, the collector does not run and the receipt names what blocked. A command returns 0 for `PASS` or `DRY_RUN`, 2 for `BLOCKED` or `PARTIAL` diagnostics. An unavailable agent health reading is `UNKNOWN` and makes the Cilium report `PARTIAL`. All report objects include `schema_version`, `kind`, `status`, target, filters, records, errors, and summary where applicable.
 
 ## Validation
 
-GitHub Actions runs CLI and filter tests, Ruff, skill checks, and the all-file neutrality scan. A passing CI check verifies code behavior with mocked authorities. Run `access_check.py` on every intended execution host to verify real access there; another computer needs its own gate receipt.
+GitHub Actions runs CLI and filter tests, Ruff, skill checks, and the all-file neutrality scan. A passing CI check verifies code behavior with mocked authorities, which is never acceptance evidence for access. Run `access_check.py` on every intended execution host to verify real access there and keep its `access_receipt`; a mock, a dry run, and another computer's receipt do not count.

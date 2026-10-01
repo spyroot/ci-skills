@@ -39,8 +39,32 @@ def import_script_module(module_name: str) -> ModuleType:
     return import_module(module_name)
 
 
+UNIT_CONTEXT = "unit-context"
+UNIT_USER = "unit-user"
+UNIT_CLUSTER = "cluster-a"
+UNIT_SERVER = "https://api.cluster.example.test:6443"
+
+
 @pytest.fixture
-def target_file(tmp_path: Path) -> Path:
+def unit_kubeconfig(tmp_path: Path) -> Path:
+    """Provide a kubeconfig file the credential-source gate can resolve.
+
+    The gate requires an effective source, so a target with no resolvable
+    kubeconfig blocks. The fake kubectl answers `config view`, so this file only
+    has to exist and be nonempty; it carries no credential.
+    """
+    path = tmp_path / "kubeconfig"
+    path.write_text(
+        "apiVersion: v1\n"
+        "kind: Config\n"
+        f"current-context: {UNIT_CONTEXT}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+@pytest.fixture
+def target_file(tmp_path: Path, unit_kubeconfig: Path) -> Path:
     """Provide one explicit nonsecret target contract for CLI tests."""
     path = tmp_path / "target.toml"
     path.write_text(
@@ -53,8 +77,9 @@ def target_file(tmp_path: Path) -> Path:
             'url = "https://gitlab.example.test"\n'
             "\n"
             "[kubernetes]\n"
-            'context = "unit-context"\n'
-            'server = "https://api.cluster.example.test:6443"\n'
+            f'context = "{UNIT_CONTEXT}"\n'
+            f'server = "{UNIT_SERVER}"\n'
+            f'kubeconfig = "{unit_kubeconfig}"\n'
         ),
         encoding="utf-8",
     )
