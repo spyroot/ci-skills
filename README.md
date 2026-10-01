@@ -6,7 +6,22 @@ storage, event, and Cilium evidence. Its commands use `gh`, `glab`, and
 
 ## Install
 
-Ask Codex to install the skill from the repository:
+From a checkout of this repository, run the bundled installer:
+
+```sh
+python tools/install_k8s_admin_diagnostics.py --dry-run --json
+python tools/install_k8s_admin_diagnostics.py --json
+```
+
+It copies the skill into `$CODEX_HOME/skills/k8s-admin-diagnostics`, or
+`~/.codex/skills/k8s-admin-diagnostics` when `CODEX_HOME` is unset. It blocks
+if that destination already exists and reports the installed file digest.
+Installation requires a clean checkout of the skill subtree so the reported
+revision is verified against the source bytes.
+Use `--skills-dir PATH` for another Codex skills directory. The command also
+accepts `--yaml` and `--help`.
+
+Codex can also install the merged skill directly from GitHub:
 
 ```text
 Install the skill from https://github.com/spyroot/ci-skills/tree/main/skills/k8s-admin-diagnostics

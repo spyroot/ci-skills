@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,7 +11,7 @@ from typing import Any
 
 import pytest
 import yaml
-from conftest import REPO_ROOT, install_executable
+from conftest import REPO_ROOT, install_executable, load_module
 
 SKILL_ROOT = REPO_ROOT / "skills" / "k8s-admin-diagnostics"
 
@@ -260,7 +259,13 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     installed = tmp_path / "installed" / "k8s-admin-diagnostics"
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
-    shutil.copytree(SKILL_ROOT, installed)
+    installer = load_module(
+        "skill_installer", REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"
+    )
+    installation = installer.install(SKILL_ROOT, installed.parent, dry_run=False)
+    assert installation["status"] == "PASS"
+    assert installation["algorithm"] == "sha256-tree-v1"
+    assert installation["revision"]["verified"] is True
     for tool in ("gh", "glab", "kubectl"):
         install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
     kubeconfig = tmp_path / "kubeconfig"
