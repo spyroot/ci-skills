@@ -684,6 +684,7 @@ def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
         "skill": gate.get("skill"),
         "consuming_project": gate.get("consuming_project"),
         "credential_sources": gate.get("credential_sources"),
+        "target_selection": gate.get("target_selection"),
         "targets": gate.get("targets"),
         "identities": {
             name: surface.get("identity") for name, surface in surfaces.items()
@@ -721,6 +722,7 @@ def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]
                     "gitlab": target.sources.gitlab.reference,
                     "kubernetes": target.sources.kubernetes.reference,
                 },
+                "target_selection": target.target_reference,
                 "targets": {
                     "github": f"{target.github.host}/{target.github.repository}",
                     "gitlab": target.gitlab.url,
@@ -740,6 +742,7 @@ def dry_run_access(target: Target, *, publication: bool = False) -> dict[str, An
         "kind": "access_check",
         "status": DRY_RUN,
         "publication": publication,
+        "target_selection": target.target_reference,
         "surfaces": {
             "github": {
                 "target": f"{target.github.host}/{target.github.repository}",

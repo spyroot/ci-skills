@@ -4,67 +4,72 @@
 storage, event, and Cilium evidence. Its commands use `gh`, `glab`, and
 `kubectl`. They print human summaries by default and support JSON and YAML.
 
-## Install
+## Start here
 
-From a checkout of this repository, run the bundled installer:
+1. On the intended execution host, provide Python 3.11 or newer with PyYAML,
+   plus `gh`, `glab`, `kubectl`, and `oc`. Use the host's project Python
+   environment. Configure credentials through the selected files, named
+   environment variables, or CLI credential stores; do not put credential
+   values in the target TOML.
+2. Check out the merged repository and run the installer from its root:
 
-```sh
-python tools/install_k8s_admin_diagnostics.py --dry-run --json
-python tools/install_k8s_admin_diagnostics.py --json
-```
+   ```sh
+   git clone https://github.com/spyroot/ci-skills.git
+   cd ci-skills
+   python3 -m venv .venv
+   . .venv/bin/activate
+   python -m pip install 'PyYAML>=6,<7'
+   python tools/install_k8s_admin_diagnostics.py --dry-run --json
+   python tools/install_k8s_admin_diagnostics.py --json
+   ```
 
-It copies the skill into `$CODEX_HOME/skills/k8s-admin-diagnostics`, or
-`~/.codex/skills/k8s-admin-diagnostics` when `CODEX_HOME` is unset. It blocks
-if that destination already exists and reports the installed file digest.
-Installation requires a clean checkout of the skill subtree so the reported
-revision is verified against the source bytes.
-Use `--skills-dir PATH` for another Codex skills directory. The command also
-accepts `--yaml` and `--help`.
+   The installer requires a clean skill subtree and reports its verified
+   revision and digest. It installs into
+   `$CODEX_HOME/skills/k8s-admin-diagnostics` or, when `CODEX_HOME` is unset,
+   `~/.codex/skills/k8s-admin-diagnostics`. Use `--skills-dir PATH` for another
+   destination. An existing destination blocks replacement; remove or move it
+   deliberately before an upgrade.
+3. In the consuming project, create `./.ci-skills/target.toml` with the exact
+   GitHub repository, GitLab origin, Kubernetes context, API server, and
+   kubeconfig. Use the complete nonsecret example in
+   [project-binding.md](skills/k8s-admin-diagnostics/references/project-binding.md).
+   `~/.ci-skills/target.toml` is the user fallback. An explicit `--target PATH`
+   or `CI_SKILLS_TARGET=PATH` takes precedence over both. A project that
+   generates kubeconfig with its own helper can declare an explicit binding
+   there; the skill does not assume a helper name.
+4. From the consuming project, inspect the plan, then run the live access gate
+   on that same execution host:
 
-Codex can also install the merged skill directly from GitHub:
+   ```sh
+   skills_dir="${CODEX_HOME:-$HOME/.codex}/skills"
+   diagnostics="$skills_dir/k8s-admin-diagnostics/scripts/access_check.py"
+   python "$diagnostics" --dry-run --json
+   python "$diagnostics" --json
+   ```
 
-```text
-Install the skill from https://github.com/spyroot/ci-skills/tree/main/skills/k8s-admin-diagnostics
-```
+   If installation used `--skills-dir PATH`, set `skills_dir` to that path.
 
-The skill becomes available in the next Codex turn. Each execution host
-still needs its own credentials and target file.
+   The live receipt must report `status: PASS`, the selected target source,
+   and individual GitHub, GitLab, and Kubernetes results. Add `--publication`
+   after declaring the repository's actual required checks in the target.
+   Use `--receipt-out PATH` when a sanitized, portable receipt is needed.
 
-## Prerequisites and target
+The target file may be project-local but must contain no credential values.
+Keep tokens, kubeconfigs, and private keys out of tracked files. The commands
+never log in, grant roles, or change the active context. See
+[access.md](skills/k8s-admin-diagnostics/references/access.md) for effective
+credential selection and live check details.
 
-Install Python 3.11 or newer, PyYAML, `gh`, `glab`, and `kubectl` on the
-execution host. Supply a nonsecret TOML file through `--target PATH`:
-The suggested local location is `~/.config/ci-skills/target.toml`.
-
-```toml
-[github]
-host = "github.com"
-repository = "owner/repository"
-
-[gitlab]
-url = "https://gitlab.example.com"
-# token_file = "/home/operator/.config/ci-skills/gitlab.token"
-
-[kubernetes]
-context = "admin-context"
-server = "https://api.cluster.example.com:6443"
-# kubeconfig = "/home/operator/.kube/config"
-```
-
-For GitHub and GitLab, an explicit token file takes precedence, followed by
-the effective token environment variable, then the selected host's CLI
-credential store. Kubernetes uses the explicit kubeconfig, `KUBECONFIG`, or
-the default kubeconfig. Its selected user may authenticate with an embedded
-token, `tokenFile`, client certificate and key, or exec provider. See
-[access.md](skills/k8s-admin-diagnostics/references/access.md) for the checks.
-
-Keep the target and credential files outside the repository and installed
-skill. The commands never log in, grant roles, or change the active context.
+Codex can also install the merged skill directly from GitHub using
+`https://github.com/spyroot/ci-skills/tree/main/skills/k8s-admin-diagnostics`.
+The skill becomes available in the next Codex turn; installing it provides no
+credentials or API access.
 
 ## Commands
 
-The API commands accept `--target PATH`, `--revision SHA`, `--json`, `--yaml`,
-`--dry-run`, and `--help`. Pass a full source commit SHA with `--revision`
+The API commands accept `--binding PATH` or `--target PATH`, `--revision SHA`,
+`--json`, `--yaml`, `--dry-run`, and `--help`. Pass a full source commit SHA with
+`--revision`
 when the installed copy has no Git metadata. Reports also accept
 `--output-dir PATH` to write paired JSON and text files. Without that option,
 no report file is written.
@@ -84,6 +89,23 @@ no report file is written.
   Its default window is the previous hour.
 - `cilium_status.py` reads Cilium resources and executes non-TTY health on
   ready agents. It accepts `--namespace NAME|auto`, `--node`, and `--search`.
+- `ceph_cluster.py --namespace NAME` reads Ceph status, OSD tree, inactive PGs,
+  and OSD/monitor Pods through `oc` on the same pinned target. `--operator`
+  and `--conf` select the operator deployment and in-Pod Ceph config;
+  `--node`, `--ready all|true|false`, and `--condition TYPE=STATUS` filter
+  the Pod view.
+
+For example, on the selected OpenShift execution host:
+
+```sh
+python ~/.codex/skills/k8s-admin-diagnostics/scripts/ceph_cluster.py \
+  --namespace openshift-storage --node worker-a --ready false --json
+```
+
+The JSON report includes `status`, `condition`, `health`, `actions`, and Pod
+records. A failed query produces `PARTIAL` with an error, never an empty
+successful result. Use `--condition PodScheduled=False` to inspect a specific
+Pod condition.
 
 The node-local commands run on the selected Linux node with noninteractive
 `sudo -n`. They require local `crictl` or `journalctl`, and do not require
@@ -109,22 +131,11 @@ read succeeded or a dry run was requested; code 2 means incomplete evidence.
 These node reads supplement the three-surface API receipt; they do not
 replace it.
 
-The base access gate -- all three authorities, including a real non-TTY
-`cilium-health` exec on a selector-discovered ready agent -- runs before every
-collector, and a failure blocks it. The expanded bundle, which adds the
-storage, event and Cilium collector reads, runs in `access_check.py`. Every
-report names the gate it actually passed: a collector report in
-`access.profile`, and an `access_check.py` receipt in top-level `profile`. So
-neither form is implied for the other. Exit code 0 means
-`PASS` or an explicitly marked `DRY_RUN`; code 2 means `BLOCKED` or
-`PARTIAL`. JSON and YAML failures emit a structured error report on stdout.
-An unavailable agent health result is `UNKNOWN` and makes its report partial.
-
-A collector that could not read blocks the gate. One that read successfully
-while reporting an unhealthy component does not, as long as the capability it
-proves was demonstrated at least once — the skill has to be usable on the
-degraded cluster it exists to diagnose. Each live check reports
-`access_proven` next to its own `status`.
+The three-surface base access gate runs before every API collector;
+`access_check.py` runs the expanded bundle. Exit code 0 means `PASS` or a
+marked `DRY_RUN`; code 2 means `BLOCKED` or `PARTIAL`. See
+[access.md](skills/k8s-admin-diagnostics/references/access.md) for evidence
+profiles, health interpretation, and the live receipt contract.
 
 ## Validation
 

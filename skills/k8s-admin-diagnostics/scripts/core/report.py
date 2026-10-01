@@ -57,6 +57,9 @@ def human(data: dict[str, Any]) -> str:
             "node",
             "nodes",
             "phase",
+            "role",
+            "osd_id",
+            "ready",
             "status",
             "storage_class",
             "volume",
@@ -107,6 +110,14 @@ def human(data: dict[str, Any]) -> str:
                 f"{key}={value}" for key, value in sorted(data["inventory"].items())
             )
         )
+    if data.get("kind") == "ceph_cluster":
+        lines.append(f"Ceph health: {data.get('health', 'UNKNOWN')}")
+        lines.append(f"Inactive PGs: {len(data.get('inactive_pgs', []))}")
+        lines.append(
+            f"OSDs down: {sum(item.get('status') == 'down' for item in data.get('osds', []))}"
+        )
+        for action in data.get("actions", []):
+            lines.append(f"Action: {action}")
     for error in data.get("errors", []):
         lines.append(f"Error: {error.get('source')}: {error.get('reason')}")
     if data.get("kind") == "access_check":

@@ -15,6 +15,7 @@ from typing import Any
 from .access import access_evidence, check_access, dry_run_access
 from .credentials import bind_sources
 from .portable import portable
+from .project_binding import resolve_target
 from .report import emit
 from .runtime import redact_tree, sanitize
 from .status import (
@@ -25,19 +26,27 @@ from .status import (
     PROFILE_FULL,
     exit_code,
 )
-from .target import Target, TargetError, load_target
+from .target import Target, TargetError
 
 
 def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         description=description,
-        epilog="Example: %(prog)s --target ~/.config/ci-skills/target.toml --json",
+        epilog=(
+            "Example: %(prog)s --json; target lookup: --target, CI_SKILLS_TARGET, "
+            "./.ci-skills/target.toml, ~/.ci-skills/target.toml"
+        ),
     )
-    result.add_argument(
+    selection = result.add_mutually_exclusive_group()
+    selection.add_argument(
         "--target",
-        required=True,
         metavar="PATH",
         help="explicit nonsecret TOML target file",
+    )
+    selection.add_argument(
+        "--binding",
+        metavar="PATH",
+        help="explicit project binding for target and ordered kubeconfig sources",
     )
     modes = result.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print versioned JSON")
@@ -92,6 +101,7 @@ def execute(
         "collect_events": "event_trace",
         "collect_cilium": "cilium_status",
         "collect_gitlab_job": "gitlab_job",
+        "collect_ceph_cluster": "ceph_cluster",
     }
     kind = (
         "access_check"
@@ -100,7 +110,9 @@ def execute(
     )
     source = "target"
     try:
-        target = load_target(args.target)
+        target = resolve_target(
+            args.target, getattr(args, "binding", None), dry_run=args.dry_run
+        )
         publication = bool(getattr(args, "publication", False))
         if not args.dry_run:
             target = bind_sources(target, revision=getattr(args, "revision", None))
@@ -127,12 +139,17 @@ def execute(
                     "job, pipeline, runner API reads",
                     "bounded job trace read",
                 ],
+                "collect_ceph_cluster": [
+                    "concurrent Ceph status, OSD tree, inactive PG and OSD/monitor Pod reads",
+                    "node, Ready and Pod condition filtering",
+                ],
             }
             gate["collection_probes"] = probes.get(collect.__name__, [])
             gate["filters"] = {
                 key: value
                 for key, value in vars(args).items()
-                if key not in {"target", "json", "yaml", "dry_run", "output_dir"}
+                if key
+                not in {"target", "binding", "json", "yaml", "dry_run", "output_dir"}
             }
         # Only access_check.py runs the expanded bundle, so every report names
         # which gate it actually passed rather than the docs implying one.

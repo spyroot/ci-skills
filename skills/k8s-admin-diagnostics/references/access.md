@@ -3,7 +3,9 @@
 The installed skill contains instructions and code. Each execution host
 supplies a nonsecret target file and its own credentials. The target file
 identifies one exact GitHub repository, GitLab origin, Kubernetes context, and
-API server. Use `--target PATH`; no target location is assumed.
+API server. Prefer the project binding described in
+[project-binding.md](project-binding.md); an explicit `--target PATH` must
+declare its kubeconfig.
 
 ## Effective credential sources
 
@@ -15,8 +17,10 @@ API server. Use `--target PATH`; no target location is assumed.
 - GitLab uses an explicit `gitlab.token_file`, then the effective
   `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable.
   Otherwise, the selected host's `glab` credential store is used.
-- Kubernetes uses an explicit `kubernetes.kubeconfig`, `KUBECONFIG`, or the
-  default kubeconfig. The selected context resolves the user and cluster.
+- Kubernetes uses an explicit `kubernetes.kubeconfig` or the kubeconfig source
+  declared by the project binding. The selected context resolves the user and
+  cluster. A binding can name an environment variable; no global fallback is
+  inferred.
   The user may use an embedded token, `tokenFile`, client certificate and
   key, or an exec provider. No separate token file is assumed.
 
@@ -26,28 +30,14 @@ and passes the same sources to every collector. It records source references,
 not token values, private keys, or raw kubeconfig contents. Keep credentials
 outside this repository and the installed skill.
 
-Example nonsecret target:
-
-```toml
-[github]
-host = "github.com"
-repository = "owner/repository"
-# token_file = "/home/operator/.config/ci-skills/github.token"
-
-[gitlab]
-url = "https://gitlab.example.com"
-# token_file = "/home/operator/.config/ci-skills/gitlab.token"
-
-[kubernetes]
-context = "admin-context"
-server = "https://api.cluster.example.com:6443"
-# kubeconfig = "/home/operator/.kube/config"
-```
+The canonical target example and four-tier selection order are in
+[project-binding.md](project-binding.md).
 
 ## Mandatory live gate
 
-Run `access_check.py --target PATH --json --publication` on each intended
-execution host. Supply `--revision SHA` for an installed copy without Git
+Run `access_check.py --json` on each intended execution host. Add
+`--publication` when the target declares the actual required checks. Supply
+`--revision SHA` for an installed copy without Git
 metadata, and `--job-url URL` when verifying a requested job. The receipt
 identifies the execution host, time, revision, sources, targets, identities,
 and individual results.
@@ -120,11 +110,8 @@ wrong-target, or unauthorized credentials block. A mock, file-existence
 check, login-status message, dry run, or receipt from another host is not
 live acceptance evidence.
 
-Cluster-wide list reads carry their own bound, `collect.LIST_TIMEOUT_SECONDS`.
-Measured on one target cluster, a whole-cluster event list was 7.7 MB and
-about 20 seconds on its own with up to ten such reads running concurrently;
-the default per-command bound reported that healthy cluster as a timeout, and
-the gate then read the timeout as a denial.
+Cluster-wide list reads carry their own bound,
+`collect.LIST_TIMEOUT_SECONDS`.
 
 ## Automated gates
 

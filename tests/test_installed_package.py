@@ -29,6 +29,11 @@ ENTRYPOINT_CASES = (
         "event_trace",
     ),
     ("cilium_status.py", (), "cilium_status"),
+    (
+        "ceph_cluster.py",
+        ("--namespace", "rook-ceph", "--node", "worker-a", "--ready", "true"),
+        "ceph_cluster",
+    ),
 )
 
 NODE_ENTRYPOINT_CASES = (
@@ -266,6 +271,33 @@ if tool == "kubectl":
         emit({"items": resources.get(resource, [])})
     raise SystemExit(98)
 
+if tool == "oc":
+    if "--context" not in args or "-n" not in args:
+        raise SystemExit(98)
+    if "exec" in args:
+        if "-s" in args:
+            emit({"health": {"status": "HEALTH_OK"}})
+        if "osd" in args and "tree" in args:
+            emit({"nodes": [{"type": "osd", "id": 0, "name": "osd.0", "status": "up"}]})
+        if "pg" in args and "dump_stuck" in args:
+            emit({"pg_stats": []})
+    if "get" in args and "pods" in args:
+        emit({
+            "items": [{
+                "metadata": {
+                    "namespace": "rook-ceph",
+                    "name": "rook-ceph-osd-0",
+                    "labels": {"app": "rook-ceph-osd", "ceph-osd-id": "0"},
+                },
+                "spec": {"nodeName": "worker-a"},
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }],
+        })
+    raise SystemExit(98)
+
 raise SystemExit(127)
 """
 
@@ -354,7 +386,7 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
-    for tool in ("gh", "glab", "kubectl"):
+    for tool in ("gh", "glab", "kubectl", "oc"):
         install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")

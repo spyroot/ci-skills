@@ -76,16 +76,9 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
     """Pin the effective kubeconfig path set without assuming an auth type."""
     if target.kubernetes.kubeconfig is not None:
         paths = (target.kubernetes.kubeconfig.resolve(),)
-        reference = f"file:{paths[0]}"
-    elif "KUBECONFIG" in os.environ:
-        parts = os.environ["KUBECONFIG"].split(os.pathsep)
-        if any(not part for part in parts):
-            raise TargetError("kubeconfig_source_empty")
-        paths = tuple(Path(part).expanduser().resolve() for part in parts)
-        reference = "env:KUBECONFIG"
+        reference = target.kubernetes_source_reference or f"file:{paths[0]}"
     else:
-        paths = (Path.home() / ".kube" / "config",)
-        reference = f"kubectl-default:{paths[0].resolve()}"
+        raise TargetError("kubeconfig_source_unresolved")
     if not paths:
         raise TargetError("kubeconfig_source_empty")
     for path in paths:

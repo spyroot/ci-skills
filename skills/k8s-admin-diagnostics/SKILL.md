@@ -1,6 +1,6 @@
 ---
 name: k8s-admin-diagnostics
-description: Collect read-only GitLab CI, Kubernetes storage, event, and Cilium evidence after GitHub, GitLab, and cluster administrator access checks.
+description: Collect read-only GitLab CI, Kubernetes storage, Ceph, event, and Cilium evidence using an explicit per-project target and credential binding.
 ---
 
 # Kubernetes admin diagnostics
@@ -9,13 +9,18 @@ Use this skill to diagnose Kubernetes-backed CI, storage, and network
 symptoms. Commands run on the computer or runner where invoked. Installation
 provides no credentials or API permissions.
 
-1. Obtain the operator's nonsecret `--target PATH` TOML file. Run
-   `scripts/access_check.py --target PATH --json --publication` on the actual
-   execution host. Add `--job-url URL` for a selected GitLab job. Pass the
+1. Resolve the invoking project's target in order: explicit `--target`,
+   `CI_SKILLS_TARGET`, `./.ci-skills/target.toml`, then
+   `~/.ci-skills/target.toml`. Read
+   [project-binding.md](references/project-binding.md) for the full protocol
+   and optional project command binding. Run `scripts/access_check.py`
+   with `--json` on the actual execution host. Add `--publication` when the
+   target declares the repository's actual required checks. Add
+   `--job-url URL` for a selected GitLab job. Pass the
    exact source commit as `--revision SHA` if the installed copy has no Git
    metadata. Read [access.md](references/access.md) for the live contract.
    `DRY_RUN` is a plan, never access evidence.
-2. For a CI job, run `scripts/gitlab_job.py --target PATH --job-url URL --json`.
+2. For a CI job, run `scripts/gitlab_job.py --job-url URL --json`.
    Start with its actual job interval, Pod identity, node, and runner details.
 3. Run `scripts/storage_report.py`, `scripts/event_trace.py`, and
    `scripts/cilium_status.py` concurrently when inputs are independent. Use
@@ -32,6 +37,10 @@ provides no credentials or API permissions.
    `scripts/ceph_kernel.py --json` for recent Ceph/RBD kernel messages and
    action codes. These node-local commands use `sudo -n`, require no API
    target file, and do not establish the three-surface access receipt.
+7. For a selected Rook Ceph deployment, run `scripts/ceph_cluster.py`
+   with `--namespace NAME --json`; add `--node`, `--ready`, or
+   `--condition` to narrow the OSD and monitor Pod view. Its Ceph status,
+   OSD tree, inactive PGs, and Pod reads share the pinned project target.
 
 Every live invocation resolves the same credential sources and target for its
 access gate and collector. The gate runs real storage, event, and Cilium reads,

@@ -31,9 +31,11 @@ PATH_VALUE_FIELDS = (
     "token_file",
     "kubeconfig",
     "credential_source",
+    "target_selection",
 )
 PATH_LIST_FIELDS = ("kubeconfig_files",)
 PATH_MAP_FIELDS = ("credential_sources",)
+COMMAND_MAP_FIELDS = ("queries",)
 
 
 def path_token(path: str) -> str:
@@ -48,12 +50,34 @@ def portable_reference(value: str) -> str:
     carries no path, such as `env:GITLAB_TOKEN` or
     `gh-credential-store:github.com`, is returned unchanged.
     """
+    if value.startswith("binding:"):
+        binding, mark, selected = value.removeprefix("binding:").partition("#")
+        if mark:
+            index, separator, source = selected.partition(":")
+            if separator:
+                return (
+                    f"binding:path:{path_token(binding)}#{index}:"
+                    f"{portable_reference(source)}"
+                )
+        return f"binding:path:{path_token(binding)}"
+    if " -> file:" in value:
+        selector, _, path = value.partition(" -> file:")
+        return f"{portable_reference(selector)} -> file:path:{path_token(path)}"
     scheme, separator, remainder = value.partition(":")
     if separator and remainder.startswith("/"):
         return f"{scheme}:path:{path_token(remainder)}"
     if value.startswith("/"):
         return f"path:{path_token(value)}"
     return value
+
+
+def portable_command(argv: list[Any]) -> list[Any]:
+    """Hide the host kubeconfig path in a recorded command argument vector."""
+    result = list(argv)
+    for index, item in enumerate(result[:-1]):
+        if item == "--kubeconfig" and isinstance(result[index + 1], str):
+            result[index + 1] = f"path:{path_token(result[index + 1])}"
+    return result
 
 
 def portable(value: Any, *, key: str | None = None) -> Any:
@@ -65,6 +89,8 @@ def portable(value: Any, *, key: str | None = None) -> Any:
             name: (
                 {inner: portable_reference(item) for inner, item in child.items()}
                 if name in PATH_MAP_FIELDS and isinstance(child, dict)
+                else {inner: portable_command(item) for inner, item in child.items()}
+                if name in COMMAND_MAP_FIELDS and isinstance(child, dict)
                 else [portable_reference(item) for item in child]
                 if name in PATH_LIST_FIELDS and isinstance(child, list)
                 else portable(child, key=name)
