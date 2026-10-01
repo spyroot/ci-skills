@@ -9,8 +9,42 @@ from types import SimpleNamespace
 from typing import Any
 
 from .collect import collect_cilium, collect_events, collect_gitlab_job, collect_storage
-from .status import BLOCKED, PASS
+from .status import BLOCKED, PARTIAL, PASS
 from .target import Target
+
+# An access gate proves access, not cluster health. This skill exists to be run
+# ON a degraded cluster, so a component that is itself unhealthy must not block
+# the gate that lets the diagnostics run. These reasons describe an observed
+# workload state; every other reason -- authentication, authorization,
+# missing_tool, transport, timeout, invalid_json -- is a failure to READ and
+# still blocks.
+COMPONENT_STATE_REASONS = frozenset(
+    {
+        "agent_not_ready",
+        "no_matching_agent_pods",
+    }
+)
+
+
+def _access_proven(name: str, evidence: dict[str, Any]) -> bool:
+    """Decide whether one collector demonstrated access, health aside.
+
+    A read that failed blocks. A read that succeeded while reporting an
+    unhealthy component does not, provided the capability it exists to prove was
+    demonstrated at least once.
+    """
+    if evidence.get("status") == PASS:
+        return True
+    if evidence.get("status") != PARTIAL:
+        return False
+    reasons = {error.get("reason") for error in evidence.get("errors", [])}
+    if not reasons or not reasons <= COMPONENT_STATE_REASONS:
+        return False
+    if name == "cilium_status":
+        # The non-TTY health command must have returned parseable status from a
+        # real agent; otherwise nothing proved the exec capability.
+        return (evidence.get("agent_health") or {}).get("passed", 0) >= 1
+    return evidence.get("record_count", 0) >= 1
 
 
 def _evidence(result: dict[str, Any]) -> dict[str, Any]:
@@ -97,8 +131,13 @@ def collect_live_checks(
                     "errors": [{"source": name, "reason": "collector_runtime_failure"}],
                     "readback_sha256": None,
                 }
+    for name, evidence in checks.items():
+        evidence["access_proven"] = _access_proven(name, evidence)
     receipt["live_checks"] = checks
     receipt["status"] = (
-        PASS if all(check["status"] == PASS for check in checks.values()) else BLOCKED
+        PASS if all(check["access_proven"] for check in checks.values()) else BLOCKED
+    )
+    receipt["blocking_live_checks"] = sorted(
+        name for name, check in checks.items() if not check["access_proven"]
     )
     return receipt

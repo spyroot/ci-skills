@@ -14,11 +14,21 @@ from .runtime import error_class, run_command, run_command_tail, sanitize
 from .status import PASS, UNKNOWN
 from .target import Target
 
+# A cluster-wide list read is legitimately slow and several run concurrently.
+# Measured on one target cluster: `kubectl get events -A -o json` was 7.7 MB and
+# about 20 seconds on its own. The default per-command bound reported that
+# healthy cluster as a timeout, and the access gate read the timeout as a
+# denial, so list reads carry their own larger bound.
+LIST_TIMEOUT_SECONDS = 120
+
 
 def _read_json(
-    command: list[str], *, env: dict[str, str | None] | None = None
+    command: list[str],
+    *,
+    env: dict[str, str | None] | None = None,
+    timeout: int = LIST_TIMEOUT_SECONDS,
 ) -> tuple[Any | None, str | None]:
-    result = run_command(command, env=env)
+    result = run_command(command, env=env, timeout=timeout)
     if result.returncode:
         return None, error_class(result)
     try:

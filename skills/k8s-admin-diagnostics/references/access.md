@@ -68,6 +68,24 @@ wrong-target, or unauthorized credentials block. A mock, file-existence
 check, login-status message, dry run, or receipt from another host is not
 live acceptance evidence.
 
+The gate proves access, not cluster health. This skill exists to be run on a
+degraded cluster, so an unhealthy component must not block the diagnostics
+that would explain it. A collector that failed to READ blocks:
+`authentication`, `authorization`, `transport`, `timeout`, `invalid_json`,
+`missing_tool`. A collector that read successfully while reporting an
+unhealthy component does not block, provided the capability it proves was
+demonstrated at least once — for Cilium, the non-TTY `cilium-health` command
+must have returned parseable status from a real agent. Each live check carries
+`access_proven` beside its own `status`, and the receipt lists
+`blocking_live_checks`, so a `PARTIAL` collector is never confused with a
+blocked gate.
+
+Cluster-wide list reads carry their own bound, `collect.LIST_TIMEOUT_SECONDS`.
+Measured on one target cluster, a whole-cluster event list was 7.7 MB and
+about 20 seconds on its own with up to ten such reads running concurrently;
+the default per-command bound reported that healthy cluster as a timeout, and
+the gate then read the timeout as a denial.
+
 ## Automated gates
 
 The `validate` workflow checks package layout, all installed entrypoints from

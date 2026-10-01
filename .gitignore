@@ -1,0 +1,6 @@
+# Python bytecode caches. Without this they reach `git add` and the neutrality
+# gate, which scans untracked files too.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/

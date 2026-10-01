@@ -75,6 +75,12 @@ The full access gate runs before every live collector. Exit code 0 means
 `PARTIAL`. JSON and YAML failures emit a structured error report on stdout.
 An unavailable agent health result is `UNKNOWN` and makes its report partial.
 
+A collector that could not read blocks the gate. One that read successfully
+while reporting an unhealthy component does not, as long as the capability it
+proves was demonstrated at least once — the skill has to be usable on the
+degraded cluster it exists to diagnose. Each live check reports
+`access_proven` next to its own `status`.
+
 ## Validation
 
 The `validate` workflow checks workflow/YAML and Markdown syntax, diff
