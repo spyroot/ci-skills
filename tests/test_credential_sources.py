@@ -40,14 +40,74 @@ def _write_target(tmp_path, *, github_token=None, gitlab_token=None, kubeconfig=
     return path
 
 
-def test_github_profile_is_effective_when_no_environment_token(tmp_path):
-    """With no environment token the stored gh profile is the effective source."""
-    credsource, _ = _modules()
+def test_github_profile_resolves_to_the_store_the_client_names(tmp_path, monkeypatch):
+    """With no environment token the source is the store gh itself reports."""
+    credsource, runtime = _modules()
+    monkeypatch.setattr(
+        credsource, "run_command",
+        lambda argv, **_k: runtime.CommandResult(
+            tuple(argv), 0,
+            "github.example.test\n  Logged in to github.example.test account u (keyring)\n", "",
+        ),
+    )
     source = credsource.resolve_github_source(_target(_write_target(tmp_path)), {})
 
-    assert source.kind == credsource.CLI_PROFILE
-    assert source.reference == "gh_profile:github.example.test"
+    assert source.kind == credsource.CREDENTIAL_STORE
+    assert source.reference == "gh:keyring:github.example.test"
     assert source.shadowed == []
+
+
+def test_github_is_unresolved_when_the_client_holds_no_credential(tmp_path, monkeypatch):
+    """No environment token and no stored credential is unresolved, not a default."""
+    credsource, runtime = _modules()
+    monkeypatch.setattr(
+        credsource, "run_command",
+        lambda argv, **_k: runtime.CommandResult(tuple(argv), 1, "", "not logged in"),
+    )
+    target = _target(_write_target(tmp_path))
+
+    with pytest.raises(credsource.CredentialSourceError):
+        credsource.resolve_github_source(target, {})
+    assert credsource.resolve_sources(target, {})["github"]["kind"] == credsource.UNRESOLVED
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    (
+        ("github.com", ("GH_TOKEN", "GITHUB_TOKEN")),
+        ("tenant.ghe.com", ("GH_TOKEN", "GITHUB_TOKEN")),
+        ("GitHub.Com", ("GH_TOKEN", "GITHUB_TOKEN")),
+        ("ghe.example.test", ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")),
+    ),
+)
+def test_github_env_names_follow_the_clients_host_classes(host, expected):
+    """gh honours GH_TOKEN for github.com and any ghe.com subdomain only."""
+    credsource, _ = _modules()
+
+    assert credsource.github_env_names(host) == expected
+
+
+def test_a_ghe_com_token_file_is_injected_into_the_variable_gh_honours(tmp_path):
+    """The injected variable must match the host class, or gh ignores the file."""
+    credsource, _ = _modules()
+    access = import_script_module("core.access")
+    token = tmp_path / "github.token"
+    token.write_text("unit\n", encoding="utf-8")
+    path = tmp_path / "target.toml"
+    path.write_text(
+        '[github]\nhost = "tenant.ghe.com"\nrepository = "unit/repo"\n'
+        f'token_file = "{token}"\n\n'
+        '[gitlab]\nurl = "https://gitlab.example.test"\n\n'
+        '[kubernetes]\ncontext = "unit-context"\n'
+        'server = "https://api.cluster.example.test:6443"\n',
+        encoding="utf-8",
+    )
+    target = _target(path)
+
+    source = credsource.resolve_github_source(target, {})
+
+    assert source.detail["injected_as"] == "GH_TOKEN"
+    assert set(access.github_env(target)) == {"GH_TOKEN"}
 
 
 @pytest.mark.parametrize("variable", ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"))
@@ -139,6 +199,38 @@ def test_kubernetes_source_records_context_user_and_mechanism(tmp_path, monkeypa
     assert source.detail["user_entry"] == "unit-user"
     assert source.detail["authentication_mechanism"] == "exec_plugin"
     assert source.detail["selected_by"] == "target.kubernetes.kubeconfig"
+
+
+def test_context_and_user_are_attributed_across_merged_files(tmp_path, monkeypatch):
+    """kubectl merges its search path, so a split context and user must resolve."""
+    credsource, runtime = _modules()
+    first, second = tmp_path / "a.yaml", tmp_path / "b.yaml"
+    for path in (first, second):
+        path.write_text("apiVersion: v1\nkind: Config\n", encoding="utf-8")
+    payloads = {
+        str(first): {"contexts": [], "clusters": [],
+                     "users": [{"name": "unit-user", "user": {"token": "REDACTED"}}]},
+        str(second): {"contexts": [{"name": "unit-context",
+                                    "context": {"cluster": "cluster-a", "user": "unit-user"}}],
+                      "clusters": [{"name": "cluster-a", "cluster": {"server": "https://x:6443"}}],
+                      "users": []},
+    }
+
+    def fake_run(argv, **_kwargs):
+        argv = list(argv)
+        body = payloads[argv[argv.index("--kubeconfig") + 1]]
+        return runtime.CommandResult(tuple(argv), 0, json.dumps(body), "")
+
+    monkeypatch.setattr(credsource, "run_command", fake_run)
+    source = credsource.resolve_kubernetes_source(
+        _target(_write_target(tmp_path)), {"KUBECONFIG": f"{first}:{second}"},
+    )
+
+    assert source.detail["context_from"] == str(second)
+    assert source.detail["user_from"] == str(first)
+    assert source.detail["authentication_mechanism"] == "bearer_token"
+    assert source.detail["merged_contributors"] == [str(first)]
+    assert source.shadowed == []
 
 
 def test_unresolvable_context_blocks_instead_of_defaulting(tmp_path, monkeypatch):

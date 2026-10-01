@@ -16,7 +16,6 @@ collector run can never be authenticated by different credentials.
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -29,59 +28,36 @@ from .access import (
     kubectl_argv,
 )
 from .credsource import resolve_sources
-
-# Reused rather than reimplemented: one JSON-reading adapter for both the
-# collectors and this gate, so a read cannot succeed here and fail there.
-from .collect import _read_json as read_json
-from .runtime import error_class, run_command, run_command_tail, sanitize
+from .reads import (
+    HEALTH_COMMAND,
+    agent_selector,
+    collector_reads,
+    read_resources,
+    ready_agent_pods,
+)
+from .runtime import error_class, read_json, run_command, run_command_tail
 from .status import BLOCKED, PASS
 from .target import Target
 
-HEALTH_COMMAND = ("cilium-health", "status", "-o", "json")
-
-# The union of every resource the three Kubernetes collectors read, tagged with
-# the collector each one serves. Mirrors the maps in collect.py.
-COLLECTOR_READS: dict[str, tuple[str, bool, tuple[str, ...]]] = {
-    "nodes": ("nodes", False, ("storage",)),
-    "pods": ("pods", True, ("storage", "cilium")),
-    "pvcs": ("persistentvolumeclaims", True, ("storage",)),
-    "pvs": ("persistentvolumes", False, ("storage",)),
-    "storageclasses": ("storageclasses", False, ("storage",)),
-    "csidrivers": ("csidrivers", False, ("storage",)),
-    "csinodes": ("csinodes", False, ("storage",)),
-    "attachments": ("volumeattachments", False, ("storage",)),
-    "deployments": ("deployments", True, ("storage", "cilium")),
-    "statefulsets": ("statefulsets", True, ("storage",)),
-    "daemonsets": ("daemonsets", True, ("storage", "cilium")),
-    "replicasets": ("replicasets", True, ("storage",)),
-    "core_events": ("events", True, ("events",)),
-    "events_v1": ("events.events.k8s.io", True, ("events",)),
-    "ciliumnodes": ("ciliumnodes.cilium.io", False, ("cilium",)),
-}
+MAX_HEALTH_ATTEMPTS = 3
 
 
 def kubernetes_live_reads(target: Target) -> list[dict[str, Any]]:
     """Perform every read the collectors need and record each one's result."""
+    union = collector_reads()
+    results = read_resources(target, {key: (key, namespaced)
+                                      for key, (_r, namespaced, _s) in union.items()})
     checks: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=min(10, len(COLLECTOR_READS))) as pool:
-        futures = {
-            pool.submit(
-                read_json,
-                kubectl_argv(target, "get", resource, *(["-A"] if namespaced else []), "-o", "json"),
-            ): (key, resource, collectors)
-            for key, (resource, namespaced, collectors) in COLLECTOR_READS.items()
-        }
-        for future in as_completed(futures):
-            key, resource, collectors = futures[future]
-            value, error = future.result()
-            items = value.get("items") if isinstance(value, dict) else None
-            checks.append(receipt.live_check(
-                f"kubernetes_read:{key}", "kubernetes",
-                BLOCKED if error else PASS,
-                detail=error or f"{resource} readable",
-                evidence={"resource": resource, "serves": list(collectors),
-                          "item_count": len(items) if isinstance(items, list) else None},
-            ))
+    for resource, (_r, _namespaced, serves) in union.items():
+        value, error = results.get(resource, (None, "not_attempted"))
+        items = value.get("items") if isinstance(value, dict) else None
+        checks.append(receipt.live_check(
+            f"kubernetes_read:{resource}", "kubernetes",
+            BLOCKED if error else PASS,
+            detail=error or f"{resource} readable",
+            evidence={"resource": resource, "serves": list(serves),
+                      "item_count": len(items) if isinstance(items, list) else None},
+        ))
     return sorted(checks, key=lambda item: item["name"])
 
 
@@ -90,34 +66,41 @@ def cilium_health_exec(target: Target) -> dict[str, Any]:
 
     This is the check an `auth can-i create pods/exec` answer cannot stand in
     for: permission to exec is not proof that the command runs and returns
-    parseable health. A cluster with no ready agent blocks, because the Cilium
-    collector cannot produce evidence there either.
+    parseable health. Agents are selected by the `cilium` DaemonSet's own
+    selector, so `cilium-operator-*` and `cilium-envoy-*` are never execed
+    into, and attempts are capped so a cluster whose health is broken
+    everywhere reports instead of serially timing out on every agent.
     """
     try:
         namespace = cilium_namespace(target)
     except (ValueError, KeyError, TypeError, IndexError) as exc:
         return receipt.live_check("cilium_health_exec", "kubernetes", BLOCKED, detail=str(exc))
 
-    pods, error = read_json(kubectl_argv(target, "get", "pods", "-n", namespace, "-o", "json"))
-    if error or not isinstance(pods, dict):
+    reads = read_resources(target, {"daemonsets": ("daemonsets", True), "pods": ("pods", True)})
+    daemonsets, daemonset_error = reads["daemonsets"]
+    pods, pod_error = reads["pods"]
+    if daemonset_error or pod_error:
         return receipt.live_check("cilium_health_exec", "kubernetes", BLOCKED,
-                                  detail=error or "invalid_pod_response")
-    ready = [
-        item for item in pods.get("items") or []
-        if isinstance(item, dict)
-        and (item.get("metadata") or {}).get("name", "").startswith("cilium-")
-        and any(condition.get("type") == "Ready" and condition.get("status") == "True"
-                for condition in (item.get("status") or {}).get("conditions") or [])
-    ]
+                                  detail=daemonset_error or pod_error,
+                                  evidence={"namespace": namespace})
+
+    selector = agent_selector(
+        (daemonsets or {}).get("items") or [] if isinstance(daemonsets, dict) else [], namespace,
+    )
+    if selector is None:
+        return receipt.live_check("cilium_health_exec", "kubernetes", BLOCKED,
+                                  detail="cilium_daemonset_selector_missing",
+                                  evidence={"namespace": namespace})
+    ready = ready_agent_pods(
+        (pods or {}).get("items") or [] if isinstance(pods, dict) else [], selector, namespace,
+    )
     if not ready:
         return receipt.live_check("cilium_health_exec", "kubernetes", BLOCKED,
                                   detail="no_ready_cilium_agent",
                                   evidence={"namespace": namespace})
-    # Exec access is a property of the cluster, not of one pod: a single agent
-    # can be evicted or time out while the permission is intact, so try each
-    # ready agent and block only when none answers.
+
     attempts: list[dict[str, Any]] = []
-    for candidate in ready:
+    for candidate in ready[:MAX_HEALTH_ATTEMPTS]:
         pod = (candidate.get("metadata") or {}).get("name")
         result = run_command(
             kubectl_argv(target, "-n", namespace, "exec", pod, "--", *HEALTH_COMMAND), timeout=30,
@@ -139,13 +122,15 @@ def cilium_health_exec(target: Target) -> dict[str, Any]:
                       "local_node": local,
                       "peer_count": len(peers) if isinstance(peers, list) else None,
                       "agents_attempted": len(attempts) + 1,
-                      "agents_ready": len(ready)},
+                      "agents_ready": len(ready),
+                      "attempt_cap": MAX_HEALTH_ATTEMPTS},
         )
     return receipt.live_check(
         "cilium_health_exec", "kubernetes", BLOCKED,
         detail="no_ready_agent_answered_health",
         evidence={"namespace": namespace, "command": list(HEALTH_COMMAND),
-                  "agents_ready": len(ready), "attempts": attempts},
+                  "agents_ready": len(ready), "attempt_cap": MAX_HEALTH_ATTEMPTS,
+                  "attempts": attempts},
     )
 
 
@@ -212,7 +197,7 @@ def gitlab_job_access(target: Target, job_url: str) -> list[dict[str, Any]]:
         checks.append(receipt.live_check(
             "gitlab_trace_access", "gitlab", PASS, detail="trace readable",
             evidence={"line_count": len(lines),
-                      "tail": sanitize(lines[-1], 200) if lines else ""},
+                      "tail": lines[-1] if lines else ""},
         ))
     return checks
 

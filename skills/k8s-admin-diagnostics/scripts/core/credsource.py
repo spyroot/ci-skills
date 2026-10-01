@@ -27,6 +27,7 @@ from .target import Target
 ENVIRONMENT = "environment"
 TOKEN_FILE = "token_file"
 CLI_PROFILE = "cli_profile"
+CREDENTIAL_STORE = "credential_store"
 KUBECONFIG = "kubeconfig"
 UNRESOLVED = "unresolved"
 
@@ -78,15 +79,50 @@ def _present_env(names: tuple[str, ...], environ: dict[str, str]) -> list[str]:
     return [name for name in names if (environ.get(name) or "").strip()]
 
 
-def _github_env_names(host: str) -> tuple[str, ...]:
-    return GITHUB_ENV_DEFAULT if host == "github.com" else GITHUB_ENV_ENTERPRISE
+def github_env_names(host: str) -> tuple[str, ...]:
+    """Return the token variables gh honours for one host, in its own order.
+
+    gh applies GH_TOKEN/GITHUB_TOKEN to github.com *and to any ghe.com
+    subdomain*; GH_ENTERPRISE_TOKEN is only for a GitHub Enterprise Server
+    host. Getting this split wrong injects a selected token file into a
+    variable gh ignores, so the gate would report `token_file` while gh
+    authenticated from somewhere else.
+    """
+    normalized = host.lower()
+    if normalized == "github.com" or normalized.endswith(".ghe.com"):
+        return GITHUB_ENV_DEFAULT
+    return GITHUB_ENV_ENTERPRISE
+
+
+def _profile_source(tool: str, host: str, env_names: tuple[str, ...]) -> tuple[str, str] | None:
+    """Ask the client itself where its stored credential lives.
+
+    Returns (kind, reference), or None when the client holds no credential for
+    the host, so an absent profile is unresolved rather than an asserted
+    default. The token line is never read; only the store the status line
+    names. The known token variables are blanked for the probe so an ambient
+    one cannot make an empty profile look populated.
+    """
+    probe = {name: "" for name in env_names}
+    result = run_command([tool, "auth", "status", "--hostname", host], env=probe)
+    if result.returncode:
+        return None
+    text = f"{result.stdout}\n{result.stderr}".lower()
+    for store, reference in (
+        ("secure-storage", "secure_storage"),
+        ("keyring", "keyring"),
+        ("config", "config_file"),
+    ):
+        if store in text:
+            return CREDENTIAL_STORE, f"{tool}:{reference}:{host}"
+    return CLI_PROFILE, f"{tool}_profile:{host}"
 
 
 def resolve_github_source(target: Target, environ: dict[str, str] | None = None) -> CredentialSource:
     """Resolve which credential authenticates the selected GitHub host."""
     environ = os.environ if environ is None else environ
     host = target.github.host
-    env_names = _github_env_names(host)
+    env_names = github_env_names(host)
     present = _present_env(env_names, environ)
     considered = ["target:github.token_file", *(f"env:{name}" for name in env_names), f"gh_profile:{host}"]
 
@@ -106,8 +142,12 @@ def resolve_github_source(target: Target, environ: dict[str, str] | None = None)
             shadowed=[f"env:{name}" for name in present[1:]] + [f"gh_profile:{host}"],
             detail={"host": host},
         )
+    profile = _profile_source("gh", host, env_names)
+    if profile is None:
+        raise CredentialSourceError(f"github_credential_unresolved:{host}")
+    kind, reference = profile
     return CredentialSource(
-        surface="github", kind=CLI_PROFILE, reference=f"gh_profile:{host}",
+        surface="github", kind=kind, reference=reference,
         considered=considered, shadowed=[], detail={"host": host},
     )
 
@@ -133,8 +173,12 @@ def resolve_gitlab_source(target: Target, environ: dict[str, str] | None = None)
             shadowed=[f"env:{name}" for name in present[1:]] + [f"glab_profile:{host}"],
             detail={"host": host},
         )
+    profile = _profile_source("glab", host, GITLAB_ENV)
+    if profile is None:
+        raise CredentialSourceError(f"gitlab_credential_unresolved:{host}")
+    kind, reference = profile
     return CredentialSource(
-        surface="gitlab", kind=CLI_PROFILE, reference=f"glab_profile:{host}",
+        surface="gitlab", kind=kind, reference=reference,
         considered=considered, shadowed=[], detail={"host": host},
     )
 
@@ -206,35 +250,42 @@ def resolve_kubernetes_source(
 ) -> CredentialSource:
     """Resolve the kubeconfig files, context, user entry, server and mechanism.
 
-    Raises CredentialSourceError when no readable file supplies the context, so
-    an unresolved credential blocks instead of falling through to a default.
+    kubectl MERGES the files on its search path, so attribution is two-pass:
+    read every parsable file first, then attribute the context to the first
+    file that defines it and its user entry to the first file that defines
+    that. A one-pass walk reports `kubeconfig_user_unresolved` for the
+    legitimate layout where a later file holds the context and an earlier one
+    holds the user.
+
+    Raises CredentialSourceError when no parsable file supplies the context or
+    its user, so an unresolved credential blocks instead of falling through to
+    a default.
     """
     context = target.kubernetes.context
     files = kubeconfig_search_path(target, environ)
     considered = [str(path) for path in files]
-    readable: list[str] = []
-    context_file: str | None = None
-    user_file: str | None = None
-    user_name: str | None = None
-    cluster_name: str | None = None
 
+    parsed: list[tuple[str, dict[str, Any]]] = []
+    unparsable: list[str] = []
     for path in files:
         if not path.is_file():
             continue
-        readable.append(str(path))
         names = _config_names(path, context)
-        if not names:
-            continue
-        if context_file is None and context in names["contexts"]:
-            context_file = str(path)
-            selected = names["selected"]
-            user_name = selected.get("user")
-            cluster_name = selected.get("cluster")
-        if user_file is None and user_name and user_name in names["users"]:
-            user_file = str(path)
+        if names:
+            parsed.append((str(path), names))
+        else:
+            unparsable.append(str(path))
 
+    context_file = next((path for path, names in parsed if context in names["contexts"]), None)
     if context_file is None:
         raise CredentialSourceError(f"kubeconfig_context_unresolved:{context}")
+    selected = next(names["selected"] for path, names in parsed if path == context_file)
+    user_name = selected.get("user")
+    cluster_name = selected.get("cluster")
+
+    user_file = next(
+        (path for path, names in parsed if user_name and user_name in names["users"]), None,
+    )
     if user_name and user_file is None:
         raise CredentialSourceError(f"kubeconfig_user_unresolved:{user_name}")
 
@@ -243,10 +294,14 @@ def resolve_kubernetes_source(
     return CredentialSource(
         surface="kubernetes", kind=KUBECONFIG, reference=context_file,
         considered=considered,
-        shadowed=[path for path in readable if path != context_file],
+        # A merged file is a contributor, not an overridden source, so it is
+        # not reported as shadowed the way an unused token variable is.
+        shadowed=[],
         detail={
             "search_path": considered,
-            "readable": readable,
+            "parsable": [path for path, _names in parsed],
+            "unparsable": unparsable,
+            "merged_contributors": [path for path, _names in parsed if path != context_file],
             "context": context,
             "context_from": context_file,
             "user_entry": user_name,
@@ -254,12 +309,17 @@ def resolve_kubernetes_source(
             "cluster_entry": cluster_name,
             "server": target.kubernetes.server,
             "authentication_mechanism": mechanism,
-            "selected_by": (
-                "target.kubernetes.kubeconfig" if target.kubernetes.kubeconfig is not None
-                else ("env:KUBECONFIG" if (environ or os.environ).get("KUBECONFIG") else "kubectl_default")
-            ),
+            "selected_by": _selected_by(target, environ),
         },
     )
+
+
+def _selected_by(target: Target, environ: dict[str, str] | None) -> str:
+    """Name what chose the kubeconfig search path."""
+    if target.kubernetes.kubeconfig is not None:
+        return "target.kubernetes.kubeconfig"
+    source = os.environ if environ is None else environ
+    return "env:KUBECONFIG" if (source.get("KUBECONFIG") or "").strip() else "kubectl_default"
 
 
 def resolve_sources(
@@ -267,16 +327,17 @@ def resolve_sources(
     environ: dict[str, str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Resolve all three surfaces, reporting an unresolved one rather than raising."""
-    resolved: dict[str, dict[str, Any]] = {
-        "github": resolve_github_source(target, environ).as_dict(),
-        "gitlab": resolve_gitlab_source(target, environ).as_dict(),
+    resolvers = {
+        "github": resolve_github_source,
+        "gitlab": resolve_gitlab_source,
+        "kubernetes": resolve_kubernetes_source,
     }
-    try:
-        resolved["kubernetes"] = resolve_kubernetes_source(target, environ).as_dict()
-    except CredentialSourceError as exc:
-        resolved["kubernetes"] = CredentialSource(
-            surface="kubernetes", kind=UNRESOLVED, reference=str(exc),
-            considered=[str(path) for path in kubeconfig_search_path(target, environ)],
-            detail={"context": target.kubernetes.context, "server": target.kubernetes.server},
-        ).as_dict()
+    resolved: dict[str, dict[str, Any]] = {}
+    for surface, resolver in resolvers.items():
+        try:
+            resolved[surface] = resolver(target, environ).as_dict()
+        except CredentialSourceError as exc:
+            resolved[surface] = CredentialSource(
+                surface=surface, kind=UNRESOLVED, reference=str(exc),
+            ).as_dict()
     return resolved

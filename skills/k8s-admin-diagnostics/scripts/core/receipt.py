@@ -19,12 +19,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .runtime import run_command, sanitize
+from .runtime import run_command, sanitize_tree
 from .status import BLOCKED, PASS
 from .target import Target
 
 SCHEMA_VERSION = "1.0"
 KIND = "access_receipt"
+
+# A receipt that omits a surface proves nothing about it, so the key set is
+# closed rather than whatever the caller happened to pass.
+REQUIRED_SURFACES = ("github", "gitlab", "kubernetes")
 
 
 def observed_at() -> str:
@@ -49,11 +53,18 @@ def execution_host() -> dict[str, Any]:
 
 def tested_revision(root: Path | None = None) -> dict[str, Any]:
     """Describe the skill revision under test, or say it is not a checkout."""
-    base = Path(__file__).resolve().parents[3] if root is None else root
+    base = Path(__file__).resolve().parents[2] if root is None else root
+    # An installed copy can sit anywhere, including inside an unrelated
+    # repository whose HEAD is not this skill's revision. Containment is not
+    # enough to tell those apart; only a repository that TRACKS the skill's own
+    # files is reporting this skill's revision.
+    tracked = run_command(
+        ["git", "-C", str(base), "ls-files", "--error-unmatch", "SKILL.md"],
+    )
     head = run_command(["git", "-C", str(base), "rev-parse", "HEAD"])
-    if head.returncode:
+    if tracked.returncode or head.returncode:
         return {"repository": str(base), "commit": None, "dirty": None,
-                "detail": "not_a_git_checkout"}
+                "detail": "not_a_tracked_checkout"}
     status = run_command(["git", "-C", str(base), "status", "--porcelain"])
     branch = run_command(["git", "-C", str(base), "rev-parse", "--abbrev-ref", "HEAD"])
     return {
@@ -87,7 +98,9 @@ def live_check(
         "surface": surface,
         "status": status,
         "detail": detail,
-        "evidence": sanitize(evidence, 400) if isinstance(evidence, str) else evidence,
+        # Redaction belongs at the boundary: a field added later is sanitized
+        # without the caller having to remember to ask.
+        "evidence": sanitize_tree(evidence, 400),
     }
 
 
@@ -107,13 +120,23 @@ def build(
     never report PASS on the strength of a login-status message alone.
     """
     unresolved = sorted(
-        name for name, source in sources.items()
-        if not isinstance(source, dict) or source.get("kind") in (None, "unresolved")
+        {
+            *(name for name, source in sources.items()
+              if not isinstance(source, dict) or source.get("kind") in (None, "unresolved")),
+            *(name for name in REQUIRED_SURFACES if name not in sources),
+        }
     )
     failed_checks = sorted({item["name"] for item in checks if item.get("status") != PASS})
+    checked = {item.get("surface") for item in checks}
     blocked_surfaces = sorted(
-        name for name, surface in surfaces.items()
-        if not isinstance(surface, dict) or surface.get("status") != PASS
+        {
+            *(name for name, surface in surfaces.items()
+              if not isinstance(surface, dict) or surface.get("status") != PASS),
+            *(name for name in REQUIRED_SURFACES if name not in surfaces),
+            # A surface that contributed no live check was not exercised, so it
+            # cannot carry a pass.
+            *(name for name in REQUIRED_SURFACES if name not in checked),
+        }
     )
     status = PASS if not (unresolved or failed_checks or blocked_surfaces) else BLOCKED
     return {

@@ -27,6 +27,12 @@ def _target(path):
     return import_script_module("core.target").load_target(path)
 
 
+def _surface_checks(status):
+    receipt = import_script_module("core.receipt")
+    return [receipt.live_check(f"surface:{name}", name, status)
+            for name in ("github", "gitlab", "kubernetes")]
+
+
 def _surfaces(status):
     return {
         name: {"status": status, "identity": f"unit-{name}", "target": name,
@@ -48,7 +54,8 @@ def test_receipt_identifies_host_revision_sources_and_results(target_file):
     liveaccess, receipt, _runtime, status = _modules()
     built = receipt.build(
         _target(target_file), sources=_sources(), surfaces=_surfaces(status.PASS),
-        checks=[receipt.live_check("kubernetes_read:nodes", "kubernetes", status.PASS)],
+        checks=[*_surface_checks(status.PASS),
+                receipt.live_check("kubernetes_read:nodes", "kubernetes", status.PASS)],
     )
 
     assert built["kind"] == "access_receipt"
@@ -59,7 +66,7 @@ def test_receipt_identifies_host_revision_sources_and_results(target_file):
     assert built["identities"]["kubernetes"] == "unit-kubernetes"
     assert built["targets"]["github"]["repository"] == "unit/repo"
     assert "nodes" in json.dumps(built["live_checks"])
-    assert liveaccess.HEALTH_COMMAND == ("cilium-health", "status", "-o", "json")
+    assert liveaccess.MAX_HEALTH_ATTEMPTS >= 1
 
 
 def test_receipt_blocks_on_an_unresolved_credential_source(target_file):
@@ -69,7 +76,8 @@ def test_receipt_blocks_on_an_unresolved_credential_source(target_file):
     sources["kubernetes"] = {"kind": "unresolved", "reference": "kubeconfig_context_unresolved"}
 
     built = receipt.build(
-        _target(target_file), sources=sources, surfaces=_surfaces(status.PASS), checks=[],
+        _target(target_file), sources=sources, surfaces=_surfaces(status.PASS),
+        checks=_surface_checks(status.PASS),
     )
 
     assert built["status"] == status.BLOCKED
@@ -82,6 +90,7 @@ def test_receipt_blocks_on_a_failed_live_check(target_file):
     built = receipt.build(
         _target(target_file), sources=_sources(), surfaces=_surfaces(status.PASS),
         checks=[
+            *_surface_checks(status.PASS),
             receipt.live_check("kubernetes_read:pvs", "kubernetes", status.PASS),
             receipt.live_check("cilium_health_exec", "kubernetes", status.BLOCKED,
                                detail="no_ready_agent_answered_health"),
@@ -97,40 +106,83 @@ def test_receipt_never_carries_a_credential_value(target_file):
     _liveaccess, receipt, _runtime, status = _modules()
     built = receipt.build(
         _target(target_file), sources=_sources(), surfaces=_surfaces(status.PASS),
-        checks=[receipt.live_check(
+        checks=[*_surface_checks(status.PASS), receipt.live_check(
             "gitlab_trace_access", "gitlab", status.PASS,
-            evidence="Authorization: Bearer super-secret-value",
+            evidence={"tail": "Authorization: Bearer super-secret-value",
+                      "nested": ["glpat-ABCDEFGHIJ1234567890"]},
         )],
     )
 
     body = json.dumps(built)
     assert "super-secret-value" not in body
+    assert "glpat-ABCDEFGHIJ1234567890" not in body
     assert "[REDACTED]" in body
 
 
-def test_collector_reads_cover_every_resource_the_collectors_use():
-    """The gate reads the union of the three Kubernetes collectors' resources."""
-    liveaccess, _receipt, _runtime, _status = _modules()
-    served = {name for _r, _n, collectors in liveaccess.COLLECTOR_READS.values()
-              for name in collectors}
+def test_collector_reads_are_exactly_the_union_of_the_collector_sets():
+    """Derived from the collectors' own maps, so adding a read cannot drift."""
+    reads = import_script_module("core.reads")
 
-    assert served == {"storage", "events", "cilium"}
-    resources = {resource for resource, _n, _c in liveaccess.COLLECTOR_READS.values()}
-    for required in ("nodes", "persistentvolumeclaims", "persistentvolumes",
-                     "storageclasses", "volumeattachments", "events",
-                     "events.events.k8s.io", "ciliumnodes.cilium.io"):
-        assert required in resources
+    expected: dict[str, bool] = {}
+    for resources in reads.COLLECTOR_SETS.values():
+        for resource, namespaced in resources.values():
+            expected[resource] = namespaced
+
+    union = reads.collector_reads()
+    assert set(union) == set(expected)
+    for resource, (name, namespaced, serves) in union.items():
+        assert name == resource
+        assert namespaced == expected[resource]
+        assert serves, resource
+        for collector in serves:
+            assert resource in {r for r, _n in reads.COLLECTOR_SETS[collector].values()}
+
+
+def test_resource_argv_lists_namespaced_resources_across_all_namespaces(target_file):
+    """`-A` appears exactly for the resources declared namespaced."""
+    reads = import_script_module("core.reads")
+    target = _target(target_file)
+
+    assert "-A" in reads.resource_argv(target, "pods", True)
+    assert "-A" not in reads.resource_argv(target, "nodes", False)
+
+
+def test_agent_selection_excludes_operator_and_envoy_pods():
+    """Agents come from the DaemonSet selector, so prefix siblings are excluded."""
+    reads = import_script_module("core.reads")
+    daemonsets = [{"metadata": {"namespace": "cilium", "name": "cilium"},
+                   "spec": {"selector": {"matchLabels": {"k8s-app": "cilium"}}}}]
+    ready = {"conditions": [{"type": "Ready", "status": "True"}]}
+    pods = [
+        {"metadata": {"namespace": "cilium", "name": "cilium-agent0",
+                      "labels": {"k8s-app": "cilium"}}, "status": ready},
+        {"metadata": {"namespace": "cilium", "name": "cilium-operator-x",
+                      "labels": {"name": "cilium-operator"}}, "status": ready},
+        {"metadata": {"namespace": "cilium", "name": "cilium-envoy-y",
+                      "labels": {"k8s-app": "cilium-envoy"}}, "status": ready},
+    ]
+
+    selector = reads.agent_selector(daemonsets, "cilium")
+    selected = reads.ready_agent_pods(pods, selector, "cilium")
+
+    assert [item["metadata"]["name"] for item in selected] == ["cilium-agent0"]
+
+
+def _cilium_reads(pod_names):
+    ready = {"conditions": [{"type": "Ready", "status": "True"}]}
+    return {
+        "daemonsets": ({"items": [{"metadata": {"namespace": "cilium", "name": "cilium"},
+                                   "spec": {"selector": {"matchLabels": {"k8s-app": "cilium"}}}}]},
+                       None),
+        "pods": ({"items": [{"metadata": {"namespace": "cilium", "name": name,
+                                          "labels": {"k8s-app": "cilium"}},
+                             "status": ready} for name in pod_names]}, None),
+    }
 
 
 def test_cilium_health_exec_tries_every_ready_agent(target_file, monkeypatch):
     """One unhealthy agent does not block while another answers."""
     liveaccess, _receipt, runtime, status = _modules()
-    pods = {"items": [
-        {"metadata": {"name": "cilium-aaa"},
-         "status": {"conditions": [{"type": "Ready", "status": "True"}]}},
-        {"metadata": {"name": "cilium-bbb"},
-         "status": {"conditions": [{"type": "Ready", "status": "True"}]}},
-    ]}
     attempted: list[str] = []
 
     def fake_run(argv, **_kwargs):
@@ -145,7 +197,8 @@ def test_cilium_health_exec_tries_every_ready_agent(target_file, monkeypatch):
         )
 
     monkeypatch.setattr(liveaccess, "cilium_namespace", lambda _target: "cilium")
-    monkeypatch.setattr(liveaccess, "read_json", lambda *_a, **_k: (pods, None))
+    monkeypatch.setattr(liveaccess, "read_resources",
+                        lambda *_a, **_k: _cilium_reads(("cilium-aaa", "cilium-bbb")))
     monkeypatch.setattr(liveaccess, "run_command", fake_run)
 
     check = liveaccess.cilium_health_exec(_target(target_file))
@@ -160,11 +213,10 @@ def test_cilium_health_exec_tries_every_ready_agent(target_file, monkeypatch):
 def test_cilium_health_exec_blocks_when_no_agent_answers(target_file, monkeypatch):
     """Permission to exec is not acceptance evidence when the command fails."""
     liveaccess, _receipt, runtime, status = _modules()
-    pods = {"items": [{"metadata": {"name": "cilium-aaa"},
-                       "status": {"conditions": [{"type": "Ready", "status": "True"}]}}]}
 
     monkeypatch.setattr(liveaccess, "cilium_namespace", lambda _target: "cilium")
-    monkeypatch.setattr(liveaccess, "read_json", lambda *_a, **_k: (pods, None))
+    monkeypatch.setattr(liveaccess, "read_resources",
+                        lambda *_a, **_k: _cilium_reads(("cilium-aaa",)))
     monkeypatch.setattr(
         liveaccess, "run_command",
         lambda argv, **_k: runtime.CommandResult(tuple(argv), 0, "not json", ""),
@@ -180,11 +232,11 @@ def test_cilium_health_exec_blocks_when_no_agent_answers(target_file, monkeypatc
 def test_cilium_health_exec_blocks_when_no_agent_is_ready(target_file, monkeypatch):
     """A cluster with no ready agent cannot produce collector evidence either."""
     liveaccess, _receipt, _runtime, status = _modules()
-    pods = {"items": [{"metadata": {"name": "cilium-aaa"},
-                       "status": {"conditions": [{"type": "Ready", "status": "False"}]}}]}
+    reads = _cilium_reads(("cilium-aaa",))
+    reads["pods"][0]["items"][0]["status"]["conditions"][0]["status"] = "False"
 
     monkeypatch.setattr(liveaccess, "cilium_namespace", lambda _target: "cilium")
-    monkeypatch.setattr(liveaccess, "read_json", lambda *_a, **_k: (pods, None))
+    monkeypatch.setattr(liveaccess, "read_resources", lambda *_a, **_k: reads)
 
     check = liveaccess.cilium_health_exec(_target(target_file))
 

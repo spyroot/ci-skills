@@ -122,7 +122,7 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": inventory[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    monkeypatch.setattr(import_script_module("core.runtime"), "run_command", fake_run)
     args = SimpleNamespace(
         namespace="app",
         node="worker-a",
@@ -204,7 +204,7 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": events[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    monkeypatch.setattr(import_script_module("core.runtime"), "run_command", fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -298,7 +298,7 @@ def test_event_trace_uses_series_last_observed_time_inside_window(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": events[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    monkeypatch.setattr(import_script_module("core.runtime"), "run_command", fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -380,7 +380,7 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": resources[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    monkeypatch.setattr(import_script_module("core.runtime"), "run_command", fake_run)
     args = SimpleNamespace(namespace="auto", node=None, search=None)
 
     result = collect.collect_cilium(_target(target_file), args)
@@ -459,7 +459,7 @@ def test_cilium_status_uses_daemonset_selector_for_agent_pods(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": resources[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    monkeypatch.setattr(import_script_module("core.runtime"), "run_command", fake_run)
     args = SimpleNamespace(namespace="networking", node=None, search=None)
 
     result = collect.collect_cilium(_target(target_file), args)
@@ -505,7 +505,7 @@ def test_cilium_status_reports_partial_for_explicit_namespace_with_zero_pods(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": resources[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    monkeypatch.setattr(import_script_module("core.runtime"), "run_command", fake_run)
     args = SimpleNamespace(namespace="missing", node=None, search=None)
 
     result = collect.collect_cilium(_target(target_file), args)
@@ -577,7 +577,7 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
         trace = "\n".join([f"line {index}" for index in range(250)])
         return runtime.CommandResult(command, 0, trace + "\npassword=topsecret\n", "")
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    monkeypatch.setattr(import_script_module("core.runtime"), "run_command", fake_run)
     monkeypatch.setattr(collect, "run_command_tail", fake_tail)
     args = SimpleNamespace(
         job_url="https://gitlab.example.test/unit/repo/-/jobs/123",

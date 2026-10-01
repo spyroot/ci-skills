@@ -40,8 +40,6 @@ def import_script_module(module_name: str) -> ModuleType:
 
 
 UNIT_CONTEXT = "unit-context"
-UNIT_USER = "unit-user"
-UNIT_CLUSTER = "cluster-a"
 UNIT_SERVER = "https://api.cluster.example.test:6443"
 
 

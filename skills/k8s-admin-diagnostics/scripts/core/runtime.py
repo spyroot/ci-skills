@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import selectors
@@ -9,6 +10,7 @@ import subprocess
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,13 @@ _SECRET_PATTERNS = (
     re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer|basic)\s+)\S+"),
     re.compile(r"(?i)\b((?:access[_-]?token|api[_-]?key|password|secret)\s*[:=]\s*)\S+"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
+    # Provider token formats carry no surrounding key, so a value pasted into a
+    # CI trace would otherwise pass the assignment patterns above untouched.
+    re.compile(r"\bglpat-[A-Za-z0-9_.-]{10,}"),
+    re.compile(r"\bgl(?:ptt|soat|rt|cbt|dt|ft)-[A-Za-z0-9_.-]{10,}"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+"),
 )
 
 
@@ -32,6 +41,22 @@ def sanitize(value: str, limit: int = 1000) -> str:
     for pattern in _SECRET_PATTERNS:
         result = pattern.sub(lambda match: match.group(1) + "[REDACTED]" if match.lastindex else "[REDACTED]", result)
     return result[:limit]
+
+
+def sanitize_tree(value: Any, limit: int = 1000) -> Any:
+    """Sanitize every string inside a nested structure, keys included.
+
+    Evidence reaching a report is often a dict of API fields, so redaction has
+    to happen at the boundary rather than at each call site; a new field added
+    later is then sanitized without anyone remembering to ask for it.
+    """
+    if isinstance(value, str):
+        return sanitize(value, limit)
+    if isinstance(value, dict):
+        return {sanitize(str(key), limit): sanitize_tree(item, limit) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [sanitize_tree(item, limit) for item in value]
+    return value
 
 
 def run_command(
@@ -128,3 +153,22 @@ def error_class(result: CommandResult) -> str:
     if "could not resolve" in detail or "connection refused" in detail or "no such host" in detail:
         return "transport"
     return "command_failed"
+
+
+def read_json(
+    command: Sequence[str],
+    *,
+    env: dict[str, str] | None = None,
+) -> tuple[Any | None, str | None]:
+    """Run one command and parse its JSON, returning a classified error instead.
+
+    The single JSON-reading adapter for both the collectors and the access
+    gate, so a read cannot succeed in one and fail in the other.
+    """
+    result = run_command(command, env=env)
+    if result.returncode:
+        return None, error_class(result)
+    try:
+        return json.loads(result.stdout), None
+    except json.JSONDecodeError:
+        return None, "invalid_json"

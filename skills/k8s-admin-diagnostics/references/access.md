@@ -42,10 +42,19 @@ entry, and a `KUBECONFIG` list overrides the default kubeconfig, so the gate
 resolves the *effective* source rather than finding a credential somewhere.
 `scripts/core/credsource.py` records, per surface, the resolved reference — an
 absolute path, a named environment variable, or a credential-store reference —
-every source it considered, and every source present but shadowed. For
-Kubernetes it also records which file supplied the context, which supplied the
+every source it considered, and every source present but shadowed. A stored
+profile is not assumed: the client itself is asked (`gh auth status`,
+`glab auth status`) with the token variables blanked, the store it names
+becomes the reference, and a host the client holds no credential for is
+`unresolved`. The host class follows the client's own rule, so a `*.ghe.com`
+host resolves and injects `GH_TOKEN` rather than `GH_ENTERPRISE_TOKEN`.
+
+For Kubernetes it records which file supplied the context, which supplied the
 user entry, the cluster entry, the API server, and the authentication
 mechanism, read through `kubectl config view` so no credential value is seen.
+Attribution models kubectl's merge: every parsable file on the search path is
+read first, so a context in one file and its user entry in another both
+resolve instead of producing a false blocker.
 
 The collectors run behind that same resolution and the same selected targets,
 so a gate pass and a collector run cannot be authenticated by different
@@ -62,9 +71,16 @@ trace.
 One receipt (`scripts/core/receipt.py`, kind `access_receipt`) identifies the
 execution host, the observation time, the revision under test, the credential
 sources, the targets, the verified identities, and each individual live-check
-result with sanitized read-back evidence. It never carries a token value, a
-private key, or raw credential-bearing kubeconfig contents. `--output-dir`
-writes it as paired `access_receipt.json` and `access_receipt.txt`.
+result with sanitized read-back evidence. Redaction happens at that boundary,
+so every string in every evidence field is covered rather than each call site
+remembering to ask. The revision is reported only when the repository actually
+tracks the skill's own files; an installed copy inside an unrelated checkout
+reports `not_a_tracked_checkout` rather than borrowing that repository's
+commit.
+
+The receipt never carries a token value, a private key, or raw
+credential-bearing kubeconfig contents. `--output-dir` writes it as paired
+`access_receipt.json` and `access_receipt.txt`.
 
 PASS requires every required credential source to be resolved and every
 required live check to succeed. Missing, unreadable, invalid, expired,
@@ -82,10 +98,10 @@ and another computer's receipt are not acceptance evidence.
 | GitLab admin | `scripts/core/access.py` | `glab auth status` for exact FQDN, `GET /user` with `is_admin: true` and matching host, successful `GET /runners/all`. Group Owner alone does not pass. |
 | Kubernetes admin | `scripts/core/access.py` | Named context resolves to exact HTTPS server; TLS verification and `/version` work; effective user, cluster wildcard, role-binding administration, role bind, and Cilium `pods/exec` checks pass. |
 | Credential source | `scripts/core/credsource.py` | Every required surface resolves to one effective source, with shadowed sources named. For Kubernetes the context, user entry, server and authentication mechanism resolve. An unresolvable context or user blocks. |
-| Collector reads | `scripts/core/liveaccess.py` | Every resource the three Kubernetes collectors read is reachable on this host. |
-| Cilium health | `scripts/core/liveaccess.py` | The real non-TTY `cilium-health status -o json` returns parseable status from a ready agent. Each ready agent is tried; `pods/exec` permission alone does not pass. |
+| Collector reads | `scripts/core/liveaccess.py` | Every resource the three Kubernetes collectors read is reachable on this host. The set is derived from `scripts/core/reads.py`, which the collectors themselves consume, so the gate cannot certify a different list than they use. |
+| Cilium health | `scripts/core/liveaccess.py` | The real non-TTY `cilium-health status -o json` returns parseable status from a ready agent. Agents are selected by the `cilium` DaemonSet's own selector, so `cilium-operator-*` and `cilium-envoy-*` are excluded; up to `MAX_HEALTH_ATTEMPTS` ready agents are tried. `pods/exec` permission alone does not pass. |
 | Job diagnostics | `scripts/core/liveaccess.py` | When a job URL is in scope, the job, its pipeline, its runner and its trace all read back from the exact selected FQDN. |
-| Receipt | `scripts/core/receipt.py` | One `access_receipt` names the execution host, time, tested revision, credential sources, targets, identities and every individual live-check result, with no credential value. |
+| Receipt | `scripts/core/receipt.py` | One `access_receipt` names the execution host, time, tested revision, credential sources, targets, identities and every individual live-check result, with no credential value. A required surface that is absent, unresolved, or contributed no live check blocks. |
 | Collector | `scripts/core/cli.py` | All three access surfaces pass, every credential source resolves, and every live check passes before any live diagnostic collection. Partial data returns a nonzero status. |
 | Exact-head CI | `.github/workflows/validate.yml` and protected `main` | Package, neutrality, Ruff, and mocked denial/filter/CLI tests pass on the exact pull request head; required `validate` check is enforced. |
 | Per-host receipt | `access_check.py --target PATH --json` | A real `PASS` is recorded on each intended host; dry run and another host's receipt do not count. |

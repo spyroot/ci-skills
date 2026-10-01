@@ -57,8 +57,11 @@ def _token_file(path: Path | None, variable: str) -> dict[str, str] | None:
 
 
 def github_env(target: Target) -> dict[str, str] | None:
-    variable = "GH_TOKEN" if target.github.host == "github.com" else "GH_ENTERPRISE_TOKEN"
-    return _token_file(target.github.token_file, variable)
+    # One host-class rule, shared with the credential-source resolution, so the
+    # variable we inject is always the one gh honours for this host.
+    from .credsource import github_env_names
+
+    return _token_file(target.github.token_file, github_env_names(target.github.host)[0])
 
 
 def gitlab_env(target: Target) -> dict[str, str] | None:

@@ -10,19 +10,17 @@ from urllib.parse import quote, urlsplit
 
 from .access import gitlab_env, glab_argv, kubectl_argv
 from .report import report
-from .runtime import error_class, run_command, run_command_tail, sanitize
+from .reads import (
+    CILIUM_READS,
+    EVENT_READS,
+    HEALTH_COMMAND,
+    STORAGE_READS,
+    matches_selector,
+)
+from . import runtime
+from .runtime import error_class, read_json as _read_json, run_command_tail, sanitize
 from .status import PASS, UNKNOWN
 from .target import Target
-
-
-def _read_json(command: list[str], *, env: dict[str, str] | None = None) -> tuple[Any | None, str | None]:
-    result = run_command(command, env=env)
-    if result.returncode:
-        return None, error_class(result)
-    try:
-        return json.loads(result.stdout), None
-    except json.JSONDecodeError:
-        return None, "invalid_json"
 
 
 def _items(value: Any) -> list[dict[str, Any]]:
@@ -37,27 +35,6 @@ def _meta(item: dict[str, Any]) -> dict[str, Any]:
 
 def _search(value: dict[str, Any], needle: str | None) -> bool:
     return not needle or needle.casefold() in json.dumps(value, ensure_ascii=False).casefold()
-
-
-def _matches_selector(labels: dict[str, str], selector: dict[str, Any]) -> bool:
-    """Match a DaemonSet's declared Pod selector without guessing labels."""
-    if not selector:
-        return False
-    if any(labels.get(key) != value for key, value in selector.get("matchLabels", {}).items()):
-        return False
-    for expression in selector.get("matchExpressions", []):
-        key, operator, values = expression.get("key"), expression.get("operator"), expression.get("values", [])
-        if operator == "In" and labels.get(key) not in values:
-            return False
-        if operator == "NotIn" and labels.get(key) in values:
-            return False
-        if operator == "Exists" and key not in labels:
-            return False
-        if operator == "DoesNotExist" and key in labels:
-            return False
-        if operator not in {"In", "NotIn", "Exists", "DoesNotExist"}:
-            return False
-    return True
 
 
 def _batch(target: Target, resources: dict[str, tuple[str, bool]]) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
@@ -78,14 +55,7 @@ def _batch(target: Target, resources: dict[str, tuple[str, bool]]) -> tuple[dict
 
 
 def collect_storage(target: Target, args: Any) -> dict[str, Any]:
-    resources = {
-        "nodes": ("nodes", False), "pods": ("pods", True), "pvcs": ("persistentvolumeclaims", True),
-        "pvs": ("persistentvolumes", False), "storageclasses": ("storageclasses", False),
-        "csidrivers": ("csidrivers", False), "csinodes": ("csinodes", False),
-        "attachments": ("volumeattachments", False), "deployments": ("deployments", True),
-        "statefulsets": ("statefulsets", True), "daemonsets": ("daemonsets", True),
-        "replicasets": ("replicasets", True),
-    }
+    resources = STORAGE_READS
     data, errors = _batch(target, resources)
     pv_by_name = {_meta(item).get("name"): item for item in data.get("pvs", [])}
     attachments: dict[str, list[dict[str, Any]]] = {}
@@ -192,9 +162,7 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
     start = _timestamp(args.from_time) if args.from_time else end - timedelta(hours=1)
     if start > end:
         raise ValueError("--from must not be after --to")
-    data, errors = _batch(target, {
-        "core_events": ("events", True), "events_v1": ("events.events.k8s.io", True),
-    })
+    data, errors = _batch(target, EVENT_READS)
     rows: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
     for source in ("core_events", "events_v1"):
@@ -245,10 +213,7 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
 
 
 def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
-    data, errors = _batch(target, {
-        "daemonsets": ("daemonsets", True), "pods": ("pods", True),
-        "operators": ("deployments", True), "ciliumnodes": ("ciliumnodes.cilium.io", False),
-    })
+    data, errors = _batch(target, CILIUM_READS)
     daemonsets = [item for item in data.get("daemonsets", []) if _meta(item).get("name", "").startswith("cilium")]
     namespaces = sorted({_meta(item).get("namespace") for item in daemonsets if _meta(item).get("namespace")})
     if args.namespace == "auto":
@@ -267,27 +232,27 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     if selected and not selector:
         errors.append({"source": "daemonsets", "reason": "cilium_selector_missing"})
     agent_pods = [item for item in data.get("pods", []) if _meta(item).get("namespace") == namespace
-                  and _matches_selector(_meta(item).get("labels") or {}, selector)
+                  and matches_selector(_meta(item).get("labels") or {}, selector)
                   and (not args.node or item.get("spec", {}).get("nodeName") == args.node)]
     rows: list[dict[str, Any]] = []
     if not agent_pods:
         errors.append({"source": "pods", "reason": "cilium_agent_pods_missing"})
         rows.append({"namespace": namespace, "name": "cilium-agent", "node": args.node,
                      "pod_uid": None, "status": UNKNOWN, "reason": "no_matching_agent_pods",
-                     "command": ["cilium-health", "status", "-o", "json"], "exit_status": None})
+                     "command": list(HEALTH_COMMAND), "exit_status": None})
     def health(pod: dict[str, Any]) -> dict[str, Any]:
         meta = _meta(pod)
         node = pod.get("spec", {}).get("nodeName")
         ready = any(condition.get("type") == "Ready" and condition.get("status") == "True"
                     for condition in pod.get("status", {}).get("conditions", []))
-        command = ["cilium-health", "status", "-o", "json"]
+        command = list(HEALTH_COMMAND)
         row = {"namespace": namespace, "name": meta.get("name"), "pod_uid": meta.get("uid"),
                "node": node, "phase": pod.get("status", {}).get("phase"),
                "ready": ready, "command": command, "status": UNKNOWN, "exit_status": None,
                "health": None}
         if not ready:
             return row
-        result = run_command(kubectl_argv(target, "-n", namespace, "exec", meta.get("name"), "--", *command), timeout=30)
+        result = runtime.run_command(kubectl_argv(target, "-n", namespace, "exec", meta.get("name"), "--", *command), timeout=30)
         row["exit_status"] = result.returncode
         if result.returncode:
             row["reason"] = error_class(result)

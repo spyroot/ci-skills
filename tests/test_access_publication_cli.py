@@ -60,6 +60,24 @@ CONFIG = {
 }
 
 AGENT = "cilium-unit0"
+AGENT_LABELS = {"k8s-app": "cilium"}
+READY = {"conditions": [{"type": "Ready", "status": "True"}]}
+CILIUM_DS = {
+    "metadata": {"namespace": "kube-system", "name": "cilium"},
+    "spec": {"selector": {"matchLabels": AGENT_LABELS}},
+}
+AGENT_POD = {
+    "metadata": {"name": AGENT, "namespace": "kube-system", "uid": "uid-0",
+                 "labels": AGENT_LABELS},
+    "spec": {"nodeName": "unit-node"},
+    "status": dict(READY, phase="Running"),
+}
+# A prefix sibling that is NOT an agent: the gate must not exec into it.
+OPERATOR_POD = {
+    "metadata": {"name": "cilium-operator-unit", "namespace": "kube-system",
+                 "labels": {"name": "cilium-operator"}},
+    "status": dict(READY, phase="Running"),
+}
 
 if tool == "kubectl":
     # The credential-source resolution asks one file what it defines, with no
@@ -81,30 +99,47 @@ if tool == "kubectl":
         raise SystemExit(0)
     if kargs == ["get", "daemonsets", "--all-namespaces", "-o", "json"]:
         emit({"items": [{"metadata": {"namespace": "kube-system", "name": "cilium"}}]})
-    if kargs == ["get", "pods", "-n", "kube-system", "-o", "json"]:
-        emit({"items": [{
-            "metadata": {"name": AGENT, "namespace": "kube-system", "uid": "uid-0"},
-            "spec": {"nodeName": "unit-node"},
-            "status": {"phase": "Running",
-                       "conditions": [{"type": "Ready", "status": "True"}]},
-        }]})
+    if kargs == ["get", "daemonsets", "-A", "-o", "json"]:
+        emit({"items": [CILIUM_DS]})
+    if kargs == ["get", "pods", "-A", "-o", "json"]:
+        emit({"items": [AGENT_POD, OPERATOR_POD]})
     if kargs == ["-n", "kube-system", "exec", AGENT, "--",
                  "cilium-health", "status", "-o", "json"]:
         emit({"local": {"name": "unit-node"}, "nodes": [{"name": "unit-node"}]})
-    # Every remaining collector read is a plain list the gate only has to reach.
+    # Named explicitly so an unexpected resource or a missing -A fails loudly
+    # instead of being absorbed by a catch-all.
     if kargs[0] == "get" and kargs[-2:] == ["-o", "json"]:
-        emit({"items": []})
+        resource = kargs[1]
+        namespaced = kargs[2:3] == ["-A"]
+        if (resource, namespaced) in EXPECTED_READS:
+            emit({"items": []})
+        print(f"unexpected read: {resource} namespaced={namespaced}", file=sys.stderr)
+        raise SystemExit(97)
     raise SystemExit(98)
 
 raise SystemExit(127)
 """
 
 
+def _expected_reads() -> str:
+    """Render the collectors' declared reads into the fake tool's source."""
+    from conftest import import_script_module
+
+    reads = import_script_module("core.reads")
+    pairs = sorted(
+        {(resource, namespaced)
+         for resources in reads.COLLECTOR_SETS.values()
+         for resource, namespaced in resources.values()}
+    )
+    return "EXPECTED_READS = " + repr(set(pairs)) + "\n"
+
+
 @pytest.fixture
 def fake_access_tools(fake_bin):
     """Install fake native CLIs used by publication-mode tests."""
+    body = FAKE_ACCESS_TOOLS.replace("AGENT = ", _expected_reads() + "AGENT = ", 1)
     for tool in ("gh", "glab", "kubectl"):
-        install_executable(fake_bin, tool, FAKE_ACCESS_TOOLS)
+        install_executable(fake_bin, tool, body)
     return fake_bin
 
 
@@ -129,6 +164,16 @@ def test_access_check_publication_pass_reports_admin_receipt(
     assert data["publication"] is True
     assert "repository_admin" in data["surfaces"]["github"]["observed_capability"]
     assert "protection_read" in data["surfaces"]["github"]["observed_capability"]
+    assert data["kind"] == "access_receipt"
+    assert set(data["credential_sources"]) == {"github", "gitlab", "kubernetes"}
+    assert data["credential_sources"]["kubernetes"]["detail"]["context"] == "unit-context"
+    assert data["credential_sources"]["kubernetes"]["detail"]["user_entry"] == "unit-user"
+    names = {check["name"]: check for check in data["live_checks"]}
+    assert names["cilium_health_exec"]["status"] == "PASS"
+    assert names["cilium_health_exec"]["evidence"]["pod"] == "cilium-unit0"
+    assert names["cilium_health_exec"]["evidence"]["agents_ready"] == 1
+    assert "kubernetes_read:persistentvolumeclaims" in names
+    assert data["execution_host"]["hostname"]
 
 
 def test_access_check_publication_denies_non_admin_identity(

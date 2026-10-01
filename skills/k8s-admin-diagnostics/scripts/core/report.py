@@ -90,7 +90,7 @@ def _receipt_lines(data: dict[str, Any]) -> list[str]:
         f"Access receipt: {data.get('status', 'UNKNOWN')}",
         f"Host: {host.get('hostname', 'unknown')} ({host.get('system')} {host.get('machine')})",
         f"Observed: {data.get('observed_at', 'unknown')}",
-        f"Revision: {revision.get('commit') or 'not_a_git_checkout'}"
+        f"Revision: {revision.get('commit') or revision.get('detail') or 'unknown'}"
         + (" (dirty)" if revision.get("dirty") else ""),
     ]
     for name, source in sorted((data.get("credential_sources") or {}).items()):
