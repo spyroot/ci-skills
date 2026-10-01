@@ -66,6 +66,15 @@ jobs:
       - name: Project neutrality
         run: python tools/check_project_neutrality.py --root . --json
 
+      # Unconditional and never allowed to fail: a Markdown-only change can edit
+      # the claims this gate exists to back, and a separate workflow would only
+      # be advisory because `validate` is the required check. It needs only the
+      # standard library, so it runs before the gated dependency install.
+      - name: Live acceptance receipts
+        run: >-
+          python tools/check_live_acceptance.py
+          --root . --json
+
       - name: Python dependencies
         if: steps.changes.outputs.non_markdown_count != '0'
         run: python -m pip install -r requirements.txt
@@ -85,12 +94,3 @@ jobs:
       - name: Tests
         if: steps.changes.outputs.non_markdown_count != '0'
         run: pytest -q --ignore=tests/test_installed_package.py
-
-      # Unconditional and never allowed to fail: a Markdown-only change can edit
-      # the claims this gate exists to back, and a separate workflow would only
-      # be advisory because `validate` is the required check. Keep it last so
-      # stale live evidence does not hide static or test failures.
-      - name: Live acceptance receipts
-        run: >-
-          python tools/check_live_acceptance.py
-          --root . --json
