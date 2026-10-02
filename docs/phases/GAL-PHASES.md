@@ -12,6 +12,7 @@ own design, steps and gates.
 | GAL-CATALOG | `list`, `get` and `install` over every skill | GAL-VENDOR |
 | GAL-ROUTING | three-hop routing; the k8s skill on top of `glab` | CATALOG |
 | GAL-HOOKS | local hooks that call `./scripts/check.sh` | GAL-GATES |
+| GAL-REFERENCE | tool capability index; decision pending | CATALOG |
 
 GAL-ROUTING also depends on GAL-VENDOR, through GAL-CATALOG.
 
@@ -47,3 +48,5 @@ GAL-ROUTING also depends on GAL-VENDOR, through GAL-CATALOG.
   G6).
 - Whether tests may run anywhere besides CI (GAL-GATES).
 - Whether the record shapes also get JSON Schema files (GAL-CATALOG).
+- How we collect, store and index the tools our skills call: runtime
+  discovery plus declared capabilities is proposed (GAL-REFERENCE).
