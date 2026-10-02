@@ -106,20 +106,25 @@ How the k8s skill comes to sit on top of `glab`:
    and how-to work to the `glab` skill.
 5. Declare the skill's tags, so that `bin/ci-skills list` shows them
    with the derived dependency on `glab`.
-6. After the last skill edit, capture a new receipt on the executor that
+6. Rename `skills/k8s-admin-diagnostics/` to `skills/k8s-diag/`. That
+   covers the `SKILL.md` frontmatter `name`, every path to the skill in
+   `tools/`, `tests/` and `README.md`, and the installer, which becomes
+   `bin/ci-skills install k8s-diag` (GAL-CATALOG).
+7. After the last skill edit, capture a new receipt on the executor that
    `acceptance/expected.toml` declares, with
-   `skills/k8s-admin-diagnostics/scripts/access_check.py --publication`
-   and `--receipt-out acceptance/receipts/<label>.json`. Commit it.
-7. Open one pull request. The `validate` workflow must pass, including live
+   `skills/k8s-diag/scripts/access_check.py --publication` and
+   `--receipt-out acceptance/receipts/<label>.json`. Commit it.
+8. Open one pull request. The `validate` workflow must pass, including live
    acceptance with the new receipt.
 
 ## Live receipt
 
 `tools/check_live_acceptance.py` compares the committed receipt's skill
 digest with the digest of the checked-out `skills/k8s-admin-diagnostics/`,
-and the workflow step that runs it is unconditional. Every change above
-alters that digest. So this phase is one pull request that ends with a new
-receipt, captured after the pull request's last skill edit. Open pull
+and the workflow step that runs it is unconditional. Every change above,
+the rename included, alters that digest. So this phase is one pull
+request that ends with a new receipt, captured after the pull request's
+last skill edit. Open pull
 requests #5, #7 and #8 also change this skill, so this phase lands after
 them. Its routing then also covers their commands (`cilium_node.py`,
 `ceph_kernel.py`, `ceph_cluster.py`) and the `project-binding.md`

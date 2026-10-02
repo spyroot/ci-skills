@@ -55,7 +55,7 @@ Checked on 2026-10-02. These phases build on them, not around them.
 
 ## Short names
 
-Proposed, in the style of the `bin/ci-*` tools:
+Decided on 2026-10-02, in the style of the `bin/ci-*` tools:
 
 | Today | Proposed |
 | --- | --- |
@@ -77,6 +77,5 @@ name keep working until they are reinstalled.
   G6).
 - Whether tests may run anywhere besides CI (GAL-GATES).
 - Whether the record shapes also get JSON Schema files (GAL-CATALOG).
-- The short names above.
 - How we collect, store and index the tools our skills call: runtime
   discovery plus declared capabilities is proposed (GAL-REFERENCE).
