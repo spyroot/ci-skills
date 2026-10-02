@@ -14,7 +14,7 @@ the same entrypoint that CI runs.
 | --- | --- |
 | Capability | run the static gates before a commit or push |
 | Owner | the hook scripts under `scripts/hooks/` |
-| Entrypoint | `./scripts/check.sh` (GAL-GATES) |
+| Entrypoint | `./scripts/check.sh` (PR #2, extended in GAL-GATES) |
 | Result | the script's result: `PASS`, or the failing gate |
 | Read-back | a failing staged file is refused, naming its gate |
 

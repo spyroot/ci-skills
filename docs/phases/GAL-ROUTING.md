@@ -28,7 +28,7 @@ The last two rows use Python's default JSON separators.
 
 | Hop | Answers | An agent reads |
 | --- | --- | --- |
-| L0 | which skill | `tools/ci_skills.py list` (GAL-CATALOG) |
+| L0 | which skill | `bin/ci-skills list` (GAL-CATALOG) |
 | L1 | which command or reference | the skill's `SKILL.md` and its routing |
 | L2 | the one thing to read or run | one reference, or `<command> --describe` |
 
@@ -81,7 +81,7 @@ The last two rows use Python's default JSON separators.
    reference. It says this skill is read-only, and that for a merge request,
    issue, comment or retry the agent loads the `glab` skill. That skill is
    vendored at `skills/glab/`; in an installed set it is installed beside
-   this one with `ci_skills.py install glab`.
+   this one with `bin/ci-skills install glab`.
 
 There are no platform-specific references (OpenShift, EKS and so on).
 Nothing in the code reads them, so their content would be invented.
@@ -104,7 +104,7 @@ How the k8s skill comes to sit on top of `glab`:
    `references/access.md` link in the router.
 4. Write `references/conditional/gitlab-writes.md`, which hands GitLab write
    and how-to work to the `glab` skill.
-5. Declare the skill's tags, so that `tools/ci_skills.py list` shows them
+5. Declare the skill's tags, so that `bin/ci-skills list` shows them
    with the derived dependency on `glab`.
 6. After the last skill edit, capture a new receipt on the executor that
    `acceptance/expected.toml` declares, with
@@ -119,7 +119,11 @@ How the k8s skill comes to sit on top of `glab`:
 digest with the digest of the checked-out `skills/k8s-admin-diagnostics/`,
 and the workflow step that runs it is unconditional. Every change above
 alters that digest. So this phase is one pull request that ends with a new
-receipt, captured after the pull request's last skill edit. Which host may
+receipt, captured after the pull request's last skill edit. Open pull
+requests #5, #7 and #8 also change this skill, so this phase lands after
+them. Its routing then also covers their commands (`cilium_node.py`,
+`ceph_kernel.py`, `ceph_cluster.py`) and the `project-binding.md`
+reference, and one receipt covers every change. Which host may
 serve as release evidence is open (GAL-GATES, G5).
 
 ## Gates

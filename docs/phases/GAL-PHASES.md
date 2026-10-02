@@ -38,6 +38,35 @@ GAL-ROUTING also depends on GAL-VENDOR, through GAL-CATALOG.
 - After merge, the phase document's read-back step confirms the result on
   `main`.
 
+## Open pull requests
+
+Checked on 2026-10-02. These phases build on them, not around them.
+
+- **#2 (draft): `ci-api`, `ci-binary-build`, `scripts/check.sh`.** Our own
+  tools and the existing gate script. GAL-GATES extends its
+  `scripts/check.sh`, GAL-CATALOG lists its tools, and GAL-REFERENCE reads
+  their capabilities.
+- **#5, #7 and #8: more k8s diagnostics.** They add `cilium_node.py`,
+  `ceph_kernel.py`, `ceph_cluster.py`, the `project-binding.md` reference
+  and an Event API fallback. GAL-ROUTING lands after them and routes their
+  commands, so one live receipt covers every skill change.
+- **#9 (draft): an Event API benchmark** under `benchmarks/`. No overlap.
+- **#10: field notes.** No overlap.
+
+## Short names
+
+Proposed, in the style of the `bin/ci-*` tools:
+
+| Today | Proposed |
+| --- | --- |
+| `skills/k8s-admin-diagnostics/` | `skills/k8s-diag/` |
+| `tools/install_k8s_admin_diagnostics.py` | `bin/ci-skills install` |
+| the catalog command | `bin/ci-skills` |
+
+Renaming the skill changes its digest, so the rename lands inside
+GAL-ROUTING, under the same new receipt. Installed copies under the old
+name keep working until they are reinstalled.
+
 ## Open decisions
 
 - `orbit`: its source project carries the GitLab Enterprise Edition
@@ -48,5 +77,6 @@ GAL-ROUTING also depends on GAL-VENDOR, through GAL-CATALOG.
   G6).
 - Whether tests may run anywhere besides CI (GAL-GATES).
 - Whether the record shapes also get JSON Schema files (GAL-CATALOG).
+- The short names above.
 - How we collect, store and index the tools our skills call: runtime
   discovery plus declared capabilities is proposed (GAL-REFERENCE).

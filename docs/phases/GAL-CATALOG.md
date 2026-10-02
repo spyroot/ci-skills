@@ -5,7 +5,9 @@ Status: proposed. Depends on: GAL-VENDOR. Followed by: GAL-ROUTING.
 ## Goal
 
 One interface over local and vendored skills, named after `glab skills`:
-`list`, `get` and `install`, beside GAL-VENDOR's `update`.
+`list`, `get` and `install`, beside GAL-VENDOR's `update`. It also lists
+the repository's own tools: the root `SKILL.md` and the `bin/ci-*`
+commands that PR #2 adds.
 
 ## Block
 
@@ -13,16 +15,16 @@ One interface over local and vendored skills, named after `glab skills`:
 | --- | --- |
 | Capability | list, read and install skills |
 | Owner | `tools/skillkit/discover.py`, `tools/skillkit/install.py` |
-| Entrypoint | `tools/ci_skills.py list`, `get` and `install` |
+| Entrypoint | `bin/ci-skills list`, `get` and `install` |
 | Result | `skill_index`, the file's bytes, `skill_install` |
 | Read-back | `install` compares the installed and source digests |
 
 ## Interface
 
 ```text
-tools/ci_skills.py list [--json | --yaml]
-tools/ci_skills.py get NAME [PATH]
-tools/ci_skills.py install NAME [--skills-dir DIR] [--dry-run]
+bin/ci-skills list [--json | --yaml]
+bin/ci-skills get NAME [PATH]
+bin/ci-skills install NAME [--skills-dir DIR] [--dry-run]
                                 [--json | --yaml]
 ```
 
@@ -114,15 +116,16 @@ How the vendored skills join the local one behind a single interface:
 1. Move the installer logic from `tools/install_k8s_admin_diagnostics.py`
    into `tools/skillkit/install.py`, taking the skill name as a parameter.
    The old script becomes a wrapper that keeps its five names.
-2. Add `tools/skillkit/discover.py`. It walks `skills/*/SKILL.md`, reads
-   the frontmatter, and merges in the lock and declarations for a vendored
-   skill or the manifest for a local one, producing one record per skill.
-3. Add the `list`, `get` and `install` verbs to `tools/ci_skills.py`, each
+2. Add `tools/skillkit/discover.py`. It walks `skills/*/SKILL.md` and the
+   root `SKILL.md`, reads the frontmatter, and merges in the lock and
+   declarations for a vendored skill or the manifest for a local one,
+   producing one record per skill.
+3. Add the `list`, `get` and `install` verbs to `bin/ci-skills`, each
    with `--help` that lists every argument and output mode.
 4. Add the tests below and open one pull request; the `validate` workflow
    must pass.
-5. Read back: `tools/ci_skills.py list` shows `glab`, `glab-stack` and
-   `k8s-admin-diagnostics`. Comparing `tools/ci_skills.py get glab` with
+5. Read back: `bin/ci-skills list` shows `glab`, `glab-stack` and
+   `k8s-admin-diagnostics`. Comparing `bin/ci-skills get glab` with
    `glab skills get glab` needs `glab`, which CI does not install, so that
    comparison runs where `glab` is installed, outside CI.
 

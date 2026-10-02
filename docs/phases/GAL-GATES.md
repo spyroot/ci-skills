@@ -37,22 +37,20 @@ change that closes it.
 - **Requirement.** Local runs and CI invoke the same repository-owned
   entrypoint. The pinned standards' workspace index names `scripts/check.sh`
   as the gate entrypoint.
-- **Failure today.** Before a push, a contributor retypes the workflow's
-  commands by hand, and the two lists drift.
-- **Smallest change.**
-  - `./scripts/check.sh` runs gates listed once in `scripts/gates.toml`.
-  - Each gate has an id, a command and a profile.
-  - `--profile static` covers lint, format check, secret scan, neutrality,
-    generated-file checks and, after GAL-VENDOR, vendored-skill `verify`.
-  - `--profile merge` adds live acceptance and the tests. It runs in CI only.
-  - The script takes `--help`, `--profile NAME`, `--gate ID` and `--json`. It
-    exits 0 only on `PASS`.
-  - Each `validate.yml` step calls `./scripts/check.sh --gate <id>`.
-  - `tests/test_validate_workflow_policy.py` then asserts that every
-    registry gate is called and that live acceptance stays unconditional and
-    first.
-  - The registry is TOML, so steps that run before the dependency install
-    can read it with the standard library.
+- **Existing mechanism.** PR #2 (draft) adds `scripts/check.sh` and
+  `lib/ci/check.bash`. It checks tracked shell, YAML and Markdown, scans for
+  secrets and runs the Bats suite. It takes `--dry-run`, `--log-format` and
+  `--help`, and exits 0, 64 (usage) or 69 (blocked).
+- **Smallest change.** Extend that script instead of adding a second one:
+  - add the checks `validate` runs today: Ruff, neutrality, live
+    acceptance, and, after GAL-VENDOR, vendored-skill `verify`;
+  - add a way to run one gate, or the static subset, for the hooks;
+  - make each `validate.yml` step call it, and extend
+    `tests/test_validate_workflow_policy.py` so that live acceptance stays
+    unconditional and first.
+- **Conflict to settle.** PR #2 runs its live gate only inside a Kubernetes
+  pod, while `validate` runs on a GitHub-hosted runner. Either the script
+  also accepts the GitHub runner, or `validate` dispatches to the pod job.
 
 ### G2. Exact tool versions
 
@@ -116,11 +114,11 @@ in `standards-binding.yaml`, whose `exceptions` list is empty today.
 
 ## Steps
 
-1. Add `scripts/gates.toml` and `./scripts/check.sh`. Repeated logic sits in
-   sourceable functions, and `--help` lists every argument and output mode.
-2. Switch the `validate.yml` steps to `./scripts/check.sh --gate <id>`, and
-   extend the workflow-policy test as in G1.
+1. After PR #2 lands, extend its `scripts/check.sh`. The new checks live in
+   `lib/ci/check.bash`, and `--help` lists every argument and output mode.
+2. Switch the `validate.yml` steps to call it, and extend the
+   workflow-policy test as in G1.
 3. Pin exact tool versions (G2).
 4. Open one pull request; `validate` must pass.
-5. Read back: `./scripts/check.sh --profile static --json` reports `PASS`
-   locally, and the pull request's checks show every registry gate.
+5. Read back: `./scripts/check.sh --dry-run` lists every gate locally, and
+   the pull request's checks show each one.

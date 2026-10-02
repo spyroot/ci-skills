@@ -35,7 +35,7 @@ skills. Its own help marks the `glab skills` command as an experiment.
 | --- | --- |
 | Capability | copy, record and verify vendored skills |
 | Owner | `tools/skillkit/vendor.py` |
-| Entrypoint | `tools/ci_skills.py verify` and `update` |
+| Entrypoint | `bin/ci-skills verify` and `update` |
 | Result | `skill_vendor_check`, `skill_vendor_update` |
 | Read-back | `update` runs `verify` after it writes |
 
@@ -109,13 +109,13 @@ Where each lock field comes from:
 ## Interface
 
 ```text
-tools/ci_skills.py verify [--json | --yaml]
-tools/ci_skills.py update [NAME ...] [--dry-run] [--json | --yaml]
+bin/ci-skills verify [--json | --yaml]
+bin/ci-skills update [NAME ...] [--dry-run] [--json | --yaml]
 ```
 
-Exit 0 means `PASS` or `DRY_RUN` and 2 means anything else, as defined by
-the k8s skill's `scripts/core/status.py`. Reason tokens are defined once, in
-`tools/skillkit/vendor.py`:
+Exit codes follow the repository's `bin/ci-*` tools: 0 success, 64 usage,
+65 invalid data, 66 missing input, 69 blocked. Reason tokens are defined
+once, in `tools/skillkit/vendor.py`:
 
 | Token | Meaning |
 | --- | --- |
@@ -128,7 +128,7 @@ the k8s skill's `scripts/core/status.py`. Reason tokens are defined once, in
 | `fetch_failed` | the fetch failed on every configured attempt |
 
 - `verify` needs no `glab`, no network and no third-party package.
-  `tools/ci_skills.py` imports PyYAML only inside `list` and `--yaml`, so CI
+  `bin/ci-skills` imports PyYAML only inside `list` and `--yaml`, so CI
   can run `verify` before the dependency install.
 - `update --dry-run` lists, per skill, the files that would be added,
   changed or removed, and writes nothing.
@@ -155,6 +155,9 @@ the k8s skill's `scripts/core/status.py`. Reason tokens are defined once, in
 
 ## Code placement
 
+- `bin/ci-skills` is a thin wrapper, like `bin/ci-api` (PR #2). Its logic
+  stays in Python in `tools/skillkit/`, because it reuses the skill's Python
+  `core.provenance`.
 - The library is `tools/skillkit/`, not `tools/core/`. A Python process
   holds one module named `core`, and the installer and the live acceptance
   check bind it to the skill's `scripts/core/` to import `core.provenance`.
@@ -170,13 +173,13 @@ the k8s skill's `scripts/core/status.py`. Reason tokens are defined once, in
 How we consume the skills that the installed `glab` ships:
 
 1. Build `tools/skillkit/vendor.py` and the `verify` and `update` verbs of
-   `tools/ci_skills.py`, with the tests below.
+   `bin/ci-skills`, with the tests below.
 2. Declare `glab` and `glab-stack` in `skills/vendor.toml`, and add each
    notice from the upstream release's `LICENSE`.
 3. Read `glab --version` and `glab skills list`.
-4. Run `tools/ci_skills.py update glab glab-stack`, which performs the
+4. Run `bin/ci-skills update glab glab-stack`, which performs the
    update transaction above.
-5. Run `tools/ci_skills.py verify`; it must report `PASS`.
+5. Run `bin/ci-skills verify`; it must report `PASS`.
 6. Add the `.markdownlint-cli2.yaml` ignores, the unconditional `verify`
    gate (GAL-GATES, G4) and `environment.yml`.
 7. Open one pull request; the `validate` workflow must pass.
@@ -186,7 +189,7 @@ drift, `update` applies it, and the diff goes through a pull request.
 
 ## Gates
 
-- **CI.** `ci_skills.py verify` runs unconditionally, before the dependency
+- **CI.** `bin/ci-skills verify` runs unconditionally, before the dependency
   install (GAL-GATES, G4). A change to `.md` files only skips the gated
   workflow steps, and a vendored skill is almost all Markdown.
 - **Markdown lint.** Vendored text stays byte-for-byte upstream. With the

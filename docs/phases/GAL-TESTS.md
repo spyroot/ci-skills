@@ -113,7 +113,7 @@ Observed 2026-10-02:
     standard-library only.
 - **Contract.** `.markdownlint-cli2.yaml` ignores every vendored skill that
   the lock lists.
-- **Offline smoke.** `tools/ci_skills.py verify --json` on the committed
+- **Offline smoke.** `bin/ci-skills verify --json` on the committed
   vendored tree reports `PASS`.
 
 ## GAL-CATALOG
@@ -187,6 +187,7 @@ Observed 2026-10-02:
 
 - **Line coverage floor.** Whether to set one, now that coverage would be
   measured.
-- **`bats` in CI.** CI needs `bats` on the runner. The pinned standards
-  forbid ad hoc tool installs inside a required job, so it needs either a
-  pinned runner image or a recorded exception (GAL-GATES, G6).
+- **`bats` in CI.** PR #2 runs its Bats suite in an approved CI image that
+  holds every declared tool. Whether `validate` uses that image, or the pod
+  job from GAL-GATES G1, is open; the pinned standards forbid ad hoc tool
+  installs inside a required job.

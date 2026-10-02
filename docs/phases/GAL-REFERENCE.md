@@ -6,7 +6,16 @@
 
 ## Context
 
-Our skills drive external command-line tools, `gh`, `glab` and `kubectl`.
+Our skills and tools call many command-line tools. Two lists already name
+them:
+
+- **Our own tools**, the `bin/ci-*` commands that PR #2 adds: `ci-api`
+  (read-only GitHub and GitLab API reads) and `ci-binary-build` (an
+  exact-commit OpenShift build plan), plus `scripts/check.sh`.
+- **The toolchain contract** from the shared standards
+  (`bin/agent-tools.sh`): 61 tools observed on 2026-10-02, each named by
+  full path, under the rule "call every tool by full path".
+
 To choose a command and its flags, an agent today reads `--help` text or
 upstream documentation. Two things are missing:
 
@@ -37,6 +46,13 @@ What our skill uses today, from its code:
 | `gh` | `auth status`, `api` (reads) |
 | `glab` | `auth status`, `api` (reads) |
 | `kubectl` | `get`, `auth whoami`, `config view`, `exec` |
+| `cilium` | node status on a selected node (PR #5) |
+| `ceph` | `status`, `health`, `osd`, through `kubectl exec` (PR #7) |
+
+PR #2's `SKILL.md` says to use `ci-api` instead of one-off `gh api` or
+`glab api` reads. The k8s skill makes such reads itself; whether it should
+call `ci-api` instead is open, because an installed skill loads no code
+from another skill.
 
 Constraints:
 
@@ -229,8 +245,12 @@ Proposed: **C and D together.**
   options we pass, in one file in `tools/skillkit/`, contract-tested:
   - **In CI:** against recorded completion output for the versions above.
   - **Where the tools are installed:** against the live binary.
-- **Index:** `tools/ci_skills.py tools [NAME]` lists tools and capability
-  ids. `tools/ci_skills.py tools NAME --describe ID` prints one capability
+- **Our own tools:** each `bin/ci-*` command gains `--describe`, printing
+  its capabilities and options in the record shape, as the k8s skill's
+  commands already do. Discovery reads that, not help text; these tools
+  are Bash, not cobra.
+- **Index:** `bin/ci-skills tools [NAME]` lists tools and capability
+  ids. `bin/ci-skills tools NAME --describe ID` prints one capability
   with its options. These are the same hops as GAL-ROUTING.
 
 ## Consequences
@@ -242,7 +262,7 @@ Proposed: **C and D together.**
 - **Harder:**
   - the hidden protocol may change;
   - CI depends on recorded fixtures;
-  - `ci_skills.py` gains one more verb.
+  - `bin/ci-skills` gains one more verb.
 - **Revisit:**
   - when a tool not built with cobra is added;
   - when the tool count passes about ten, where a cache by default may pay
@@ -258,6 +278,6 @@ Proposed: **C and D together.**
    1.120.0, `gh` 2.98.0 and `kubectl` v1.36.4.
 4. [ ] Declare the capabilities used today (the table above) and add the
    contract test.
-5. [ ] Add the `tools` verb to `tools/ci_skills.py` (after GAL-CATALOG).
+5. [ ] Add the `tools` verb to `bin/ci-skills` (after GAL-CATALOG).
 6. [ ] Decide where the live contract check runs, since CI installs no
    `glab` (as with `bats`, see GAL-TESTS).
