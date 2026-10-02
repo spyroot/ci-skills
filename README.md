@@ -2,11 +2,12 @@
 
 ## Scope
 
-This repository provides `k8s-admin-diagnostics`, a skill with five read-only
-commands for access checks, GitLab job diagnostics, Kubernetes storage and
-events, and Cilium status. The access check verifies the selected GitHub,
-GitLab, and Kubernetes authorities before collectors run. The commands use
-`gh`, `glab`, and `kubectl`.
+This repository provides `k8s-admin-diagnostics`, a skill with seven read-only
+commands for access checks, GitLab jobs, Kubernetes storage and events,
+Cilium status, and node-local Cilium and Ceph kernel diagnostics. The access
+check verifies the selected GitHub, GitLab, and Kubernetes authorities before
+API collectors run. API commands use `gh`, `glab`, and `kubectl`; node-local
+commands use `crictl` or `journalctl` on the selected node.
 
 Output follows the reader: a terminal gets a human summary, a pipe or a file
 gets versioned JSON. A program calling these commands therefore needs no
@@ -30,8 +31,9 @@ Discovery -> Activation -> Reading Machine Readble Specfication -> Execution
 
 You supply **one nonsecret file** naming the authorities to use. Copy
 `target.toml.template`, fill it in, and put it in one of these places. The
-first one found wins, and every command reports which it used as
-`target_source`. The layout is the one agent tooling already uses — a project
+first one found wins, and API commands report which it used as
+`target_source`. Node-local commands read the local host. The layout is the one
+agent tooling already uses — a project
 `./.ci-skills/` beside a user `~/.ci-skills/`, the same shape as `.claude` and
 `.codex`:
 
