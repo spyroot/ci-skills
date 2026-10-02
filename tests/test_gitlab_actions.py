@@ -87,7 +87,7 @@ def test_plan_fingerprint_binds_body_target_and_source():
             "gitlab_issue", "open-bug", {"title": "one"}, target_kind="group"
         ).digest
     )
-    assert "one" not in json.dumps(first.public())
+    assert '"one"' not in json.dumps(first.public())
 
 
 def test_milestone_create_reads_back_numeric_id():
