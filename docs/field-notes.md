@@ -177,8 +177,8 @@ are listed because they are open, not because anything has demonstrated them.
 
 **The neutrality gate matches one project marker.** It would not catch a home
 directory, a company domain or another project's hostname committed into the
-skill tree, and nothing lints `standards-binding.yaml` at all. That surface is
-checked by hand today.
+skill tree. The workflow runs `yamllint` on `standards-binding.yaml`, but has
+no semantic gate for its schema, pinned revision or required contracts.
 
 **Five deferred defects.** `_auth_mechanism` rejecting a kubeconfig user that
 carries both `token` and `tokenFile`; `collect_storage` keying controllers
