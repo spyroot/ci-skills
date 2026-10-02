@@ -1,15 +1,12 @@
-# CI, Gitlab and Kubernetes expert skill
+# Kubernetes and CI diagnostics skill
 
-## Object
+## Scope
 
-This repo host agent specialization for and skill that allow agent perform
-expert level CI / K8S and Gitlab / Github action and knowledge.
-
-Each tool provide additional capabilityes.
-
-`k8s-admin-diagnostics` collects read-only GitHub, GitLab CI, Kubernetes
-storage, event and Cilium evidence, after proving it actually had the access it
-claims. Its commands use `gh`, `glab` and `kubectl`.
+This repository provides `k8s-admin-diagnostics`, a skill with five read-only
+commands for access checks, GitLab job diagnostics, Kubernetes storage and
+events, and Cilium status. The access check verifies the selected GitHub,
+GitLab, and Kubernetes authorities before collectors run. The commands use
+`gh`, `glab`, and `kubectl`.
 
 Output follows the reader: a terminal gets a human summary, a pipe or a file
 gets versioned JSON. A program calling these commands therefore needs no
