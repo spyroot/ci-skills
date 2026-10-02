@@ -23,6 +23,36 @@ Both have `--help`. The `--log-*` flags are `--log-format`, `--log-level`,
 `--log-file` and `--run-id`. The two exit-code tables disagree, and only the
 k8s commands can describe themselves.
 
+### The k8s commands, read from their own `--describe`
+
+All five share the universal options `--target`, `--json`, `--yaml`,
+`--human`, `--dry-run`, `--revision`, `--output-dir` and `--describe`.
+
+Tiers: `search` (`--search`), `ns` (`--namespace`), `node` (`--node`), and
+`time` (`--last`, `--from`, `--to`).
+
+| Command | Its own options | Tiers |
+| --- | --- | --- |
+| `access_check.py` | `--publication`, `--job-url`, `--receipt-out` | none |
+| `gitlab_job.py` | `--job-url` (required) | search |
+| `storage_report.py` | `--phase`, `--storage-class` | search, ns, node |
+| `event_trace.py` | `--kind`, `--object`, `--reason` | search, ns, time |
+| `cilium_status.py` | none | search, ns, node |
+
+Reading the parsers shows two defects:
+
+- **One option name, two meanings.** `--namespace` filters records in
+  `storage_report.py` and `event_trace.py` (`NAME|all`, default `all`).
+  In `cilium_status.py` it names where Cilium is installed (`NAME|auto`,
+  default: discover). The catalog covers both with one description.
+- **Help text declared twice.** Each option is described in
+  `scripts/core/catalog.py`, which `--describe` prints, and again in the
+  parser's `help=`. The two have already drifted: `--publication` reads
+  "also require repository administration and the declared required
+  checks" in the catalog and "also require GitHub repository
+  administration before configuring checks" in the parser.
+  `tests/test_catalog.py` compares option names, not their text.
+
 ## The contract
 
 Every command follows the shared standards' agent-grade checklist: it is
@@ -75,7 +105,10 @@ The `cli` gate of `./scripts/check.sh` (GAL-GATES) runs in CI.
   - `--describe` validates against `command-contract`;
   - every option the command accepts is described, and every described
     option is accepted;
-  - a shared option name keeps one meaning across commands;
+  - a shared option name keeps one meaning across commands, so the Cilium
+    namespace moves to its own name, such as `--cilium-namespace`;
+  - each option's help text comes from one declaration, the catalog, which
+    the parser reads; the gate fails when the two differ;
   - for a mutating command, the default run writes nothing.
 - **Existing pattern.** `tests/test_catalog.py` already compares the k8s
   skill's declared options with each script's real parser. The gate extends
@@ -99,6 +132,17 @@ The `cli` gate of `./scripts/check.sh` (GAL-GATES) runs in CI.
 - **`PARTIAL` under the shared table.** The k8s skill's `PARTIAL` (the read
   worked, a component is unhealthy) exits 2 today, like `BLOCKED`. It needs
   either its own code, or exit 0 with `status: PARTIAL`.
-- **k8s command names.** Whether the k8s commands keep their
-  `scripts/*.py` names or move behind one `bin/ci-k8s` command with verbs,
-  together with the `k8s-diag` rename.
+- **k8s command names.** Proposed: one `bin/ci-k8s` command with short
+  verbs, renamed together with `k8s-diag`. Options keep their names and
+  meanings.
+
+  | Today | Proposed |
+  | --- | --- |
+  | `access_check.py` | `ci-k8s access` |
+  | `gitlab_job.py` | `ci-k8s job` |
+  | `storage_report.py` | `ci-k8s storage` |
+  | `event_trace.py` | `ci-k8s events` |
+  | `cilium_status.py` | `ci-k8s cilium` |
+  | `cilium_node.py` (PR #5) | `ci-k8s cilium-node` |
+  | `ceph_kernel.py` (PR #5) | `ci-k8s ceph-kernel` |
+  | `ceph_cluster.py` (PR #7) | `ci-k8s ceph` |
