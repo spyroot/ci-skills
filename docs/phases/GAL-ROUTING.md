@@ -60,10 +60,16 @@ The last two rows use Python's default JSON separators.
 ## Changes to the k8s skill
 
 1. `scripts/core/catalog.py` gains a `REFERENCES` declaration. For each
-   reference it records the path, the tags, the `load_when` entries, and an
-   optional `points_to` skill. It renders into `tools.json` with the rest of
-   the catalog. `depends_on` is derived from the `points_to` values, so the
-   link to `glab` is declared once.
+   reference it records:
+   - the path;
+   - the tags;
+   - the `load_when` entries;
+   - an optional `points_to` skill;
+   - the tool operations it describes, in `uses` (GAL-SCHEMA, GAL-REFERENCE).
+
+   Each command declares its `uses` too. Everything renders into
+   `tools.json` with the rest of the catalog. `depends_on` is derived from
+   the `points_to` values, so the link to `glab` is declared once.
 2. Routing grows from symptom → command to symptom → command, reference and
    tags.
 3. `SKILL.md` becomes the router: access first, the routing table, the
@@ -81,7 +87,9 @@ The last two rows use Python's default JSON separators.
    reference. It says this skill is read-only, and that for a merge request,
    issue, comment or retry the agent loads the `glab` skill. That skill is
    vendored at `skills/glab/`; in an installed set it is installed beside
-   this one with `bin/ci-skills install glab`.
+   this one with `bin/ci-skills install glab`. Because of `depends_on`,
+   installing this skill is refused until `glab` is installed beside it
+   (GAL-CATALOG), so an installed copy never points at an absent skill.
 
 There are no platform-specific references (OpenShift, EKS and so on).
 Nothing in the code reads them, so their content would be invented.
@@ -136,7 +144,11 @@ serve as release evidence is open (GAL-GATES, G5).
 - **Kept CI gates.** `tests/test_catalog.py` keeps `tools.json` byte-equal to
   the catalog. Its routing test is changed in step 2 to read `.command`.
 - **Live acceptance.** The workflow accepts the new receipt.
-- **Tests, run in CI.**
-  - A reference with no `load_when` is rejected.
-  - A `points_to` must name a skill that `list` reports.
-  - `depends_on` equals the set of `points_to` values.
+- **Closed world**, enforced by the `schemas` gate (GAL-SCHEMA) before a
+  pull request can pass. Every one of these must hold:
+  - every `REFERENCES` path exists in the packaged skill;
+  - every `points_to` names a skill that discovery finds;
+  - every `uses` id resolves to a declared operation.
+
+  A dangling entry fails the gate.
+- **Tests**, as listed in GAL-TESTS, run in CI.
