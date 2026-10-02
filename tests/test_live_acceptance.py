@@ -14,7 +14,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from conftest import REPO_ROOT, SCRIPT_ROOT, load_module
+from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
 
 ACCEPTANCE = load_module(
     "check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
@@ -177,6 +177,67 @@ def test_a_receipt_still_carrying_a_credential_is_refused():
     assert "declared.json:receipt_not_sanitized" in result["problems"]
 
 
+def test_real_operation_envelope_round_trips_through_portable_receipt(tmp_path):
+    actions = import_script_module("core.gitlab_actions")
+    portable = import_script_module("core.portable")
+    plan = actions.ActionPlan(
+        kind="gitlab_runner",
+        operation="create",
+        origin="https://gitlab.example.test",
+        target_kind="project",
+        target_reference="team/repo",
+        target_file="/selected/target.toml",
+        target_source="argv:--target;target:gitlab.project",
+        body={"runner_type": "project_type", "description": "unit-runner"},
+        token_out="/selected/runner-secret",
+    )
+    target = {"kind": "project", "id": 42, "full_path": "team/repo"}
+    record = {"action": "APPLIED", "id": 9, "verified": True, "sink_persisted": True}
+    report = actions._result(
+        plan,
+        "PASS",
+        phase="APPLY",
+        mutated=True,
+        result_action="APPLIED",
+        skill={"digest": _digest()},
+        identity={"username": "unit"},
+        verified_target=target,
+        credential_source="env:GITLAB_TOKEN",
+        credential_digest="a" * 64,
+        readback=record,
+        records=[record],
+        cleanup={"status": "NOT_PERFORMED"},
+    )
+    path = tmp_path / "runner.json"
+    portable.write_portable_receipt(report, str(path))
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    required = {
+        "kind": "gitlab_runner",
+        "operation": "create",
+        "result_action": "APPLIED",
+        "execution_host": report["execution_host"],
+        "origin": plan.origin,
+        "username": "unit",
+        "target_kind": "project",
+        "target_id": 42,
+        "target_path": "team/repo",
+    }
+
+    assert receipt["plan"]["one_time_sink_required"] is True
+    assert receipt["readback"]["sink_persisted"] is True
+    assert (
+        ACCEPTANCE._check_gitlab_receipt(
+            path.name,
+            receipt,
+            required,
+            {"max_receipt_age_days": 30},
+            _digest(),
+            datetime.now(timezone.utc),
+        )
+        == []
+    )
+
+
 def test_an_undeclared_extra_receipt_is_refused():
     """A receipt nobody declared cannot quietly satisfy acceptance."""
     result = ACCEPTANCE.evaluate(
@@ -206,6 +267,13 @@ def _gitlab_expectations() -> dict:
             "kind": "gitlab_issue",
             "operation": "open-bug",
             "result_action": "APPLIED",
+            **shared,
+        },
+        {
+            "label": "bug-repeat",
+            "kind": "gitlab_issue",
+            "operation": "open-bug",
+            "result_action": "NO_OP",
             **shared,
         },
     ]
@@ -240,8 +308,21 @@ def _gitlab_receipts() -> dict[str, dict]:
             "phase": "APPLY",
             "mutated": True,
             "result_action": "APPLIED",
+            "plan_digest": "a" * 64,
             "verified_target": target,
             "readback": {"iid": 4, "action": "APPLIED", "verified": True},
+            "errors": [],
+        },
+        "bug-repeat.json": {
+            **common,
+            "kind": "gitlab_issue",
+            "operation": "open-bug",
+            "phase": "APPLY",
+            "mutated": False,
+            "result_action": "NO_OP",
+            "plan_digest": "a" * 64,
+            "verified_target": target,
+            "readback": {"iid": 4, "action": "NO_OP", "verified": True},
             "errors": [],
         },
     }
@@ -252,7 +333,12 @@ def test_same_host_diagnostic_and_gitlab_operation_receipts_are_all_required():
     result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
 
     assert result["status"] == "PASS", result["problems"]
-    assert result["accepted"] == ["access.json", "bug.json", "declared.json"]
+    assert result["accepted"] == [
+        "access.json",
+        "bug-repeat.json",
+        "bug.json",
+        "declared.json",
+    ]
 
 
 def test_missing_or_wrong_target_operation_receipt_blocks():
@@ -264,6 +350,36 @@ def test_missing_or_wrong_target_operation_receipt_blocks():
     del receipts["bug.json"]
     result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
     assert "bug-create:receipt_missing" in result["problems"]
+
+
+def test_same_operation_on_two_exact_targets_uses_two_receipts():
+    expected = _gitlab_expectations()
+    for item in expected["gitlab_receipts"][1:]:
+        second = dict(item)
+        second.update(label="bug-other", target_id=24, target_path="unit/other")
+        expected["gitlab_receipts"].append(second)
+    receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
+    another = json.loads(json.dumps(receipts["bug.json"]))
+    another["verified_target"].update(id=24, full_path="unit/other")
+    receipts["bug-other.json"] = another
+    another_repeat = json.loads(json.dumps(receipts["bug-repeat.json"]))
+    another_repeat["verified_target"].update(id=24, full_path="unit/other")
+    receipts["bug-other-repeat.json"] = another_repeat
+
+    result = ACCEPTANCE.evaluate(expected, receipts, SKILL_ROOT, now=NOW)
+
+    assert result["status"] == "PASS", result["problems"]
+    assert len(result["accepted"]) == 6
+
+
+def test_repeated_operation_must_bind_same_plan_and_resource():
+    receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
+    receipts["bug-repeat.json"]["plan_digest"] = "different"
+
+    result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
+
+    assert result["status"] == "BLOCKED"
+    assert "bug.json:bug-repeat.json:repeat_readback_mismatch" in result["problems"]
 
 
 def test_read_only_live_plan_cannot_satisfy_mutation_acceptance():

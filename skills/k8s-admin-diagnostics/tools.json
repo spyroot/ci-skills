@@ -395,7 +395,8 @@
         "create": {
           "required_options": [
             "--runner-type",
-            "--description"
+            "--description",
+            "--token-out"
           ]
         }
       },

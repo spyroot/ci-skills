@@ -85,7 +85,7 @@ class ActionPlan:
                 json.dumps(self.body, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest(),
             "plan_digest": self.digest,
-            "token_out_required": self.operation == "create"
+            "one_time_sink_required": self.operation == "create"
             and self.kind == "gitlab_runner",
         }
 
@@ -542,7 +542,7 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
                     plan,
                     PASS if complete else PARTIAL,
                     phase="APPLY",
-                    mutated=record.get("action") == "APPLIED",
+                    mutated=record.get("mutated", record.get("action") == "APPLIED"),
                     result_action=record.get("action"),
                     records=[record],
                     errors=errors,

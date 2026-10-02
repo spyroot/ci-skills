@@ -128,8 +128,11 @@ def test_milestone_update_blocks_failed_readback():
             ("PUT", base): [{"id": 5}],
         }
     )
-    with pytest.raises(ACTION.ActionError, match="milestone_readback_mismatch"):
-        MILESTONES.apply(api, object(), plan, 42)
+    result = MILESTONES.apply(api, object(), plan, 42)
+    assert result["verified"] is False
+    assert result["mutated"] is True
+    assert result["id"] == 5
+    assert result["errors"][0]["reason"] == "milestone_readback_mismatch"
 
 
 def test_issue_reuses_exact_open_title_only_after_independent_get():
@@ -174,8 +177,11 @@ def test_issue_create_blocks_when_independent_readback_is_not_open():
             ("GET", base + "/9"): [{"iid": 9, "title": "broken", "state": "closed"}],
         }
     )
-    with pytest.raises(ACTION.ActionError, match="issue_readback_mismatch"):
-        ISSUES.apply(api, object(), plan, 42)
+    result = ISSUES.apply(api, object(), plan, 42)
+    assert result["verified"] is False
+    assert result["mutated"] is True
+    assert result["iid"] == 9
+    assert result["errors"][0]["reason"] == "issue_readback_mismatch"
     assert [call[0] for call in api.calls] == ["GET", "POST", "GET"]
 
 
@@ -206,18 +212,20 @@ def test_runner_group_assign_verifies_each_project_and_marks_partial():
     projects = _list("groups/42/projects?include_subgroups=true&with_shared=false")
     api = FakeAPI(
         {
-            ("GET", "runners/7"): [{"id": 7}],
-            ("GET", projects): [[{"id": 11}, {"id": 12}]],
-            ("GET", _list("projects/11/runners")): [
-                [],
-                [{"id": 7}],
-                [{"id": 7}],
-                [],
-                [],
+            ("GET", "runners/7"): [
+                {"id": 7, "runner_type": "project_type", "projects": []},
+                {"id": 7, "runner_type": "project_type", "projects": []},
+                {"id": 7, "runner_type": "project_type", "projects": [{"id": 11}]},
+                {"id": 7, "runner_type": "project_type", "projects": [{"id": 11}]},
+                {"id": 7, "runner_type": "project_type", "projects": [{"id": 11}]},
+                {"id": 7, "runner_type": "project_type", "projects": [{"id": 11}]},
+                {"id": 7, "runner_type": "project_type", "projects": [{"id": 11}]},
+                {"id": 7, "runner_type": "project_type", "projects": []},
+                {"id": 7, "runner_type": "project_type", "projects": []},
             ],
+            ("GET", projects): [[{"id": 11}, {"id": 12}]],
             ("POST", "projects/11/runners"): [{"id": 7}],
             ("DELETE", "projects/11/runners/7"): [{}],
-            ("GET", _list("projects/12/runners")): [[], [], [], [], []],
             ("POST", "projects/12/runners"): [{"id": 7}],
         }
     )
@@ -228,6 +236,7 @@ def test_runner_group_assign_verifies_each_project_and_marks_partial():
     assert result["errors"][0]["project_id"] == 12
     assert result["cleanup"]["status"] == "PASS"
     assert result["projects"][0]["action"] == "ROLLED_BACK"
+    assert result["mutated"] is False
 
 
 def test_runner_create_saves_token_0600_without_reporting_it(
@@ -253,8 +262,8 @@ def test_runner_create_saves_token_0600_without_reporting_it(
     assert result["action"] == "APPLIED"
     assert result["id"] == 23
     assert result["verified"] is True
-    assert result["token_saved"] is True
-    assert result["cleanup"]["status"] == "PASS"
+    assert result["sink_persisted"] is True
+    assert result["cleanup"]["status"] == "NOT_APPLICABLE"
     assert destination.read_text() == "private-one-time-value\n"
     assert stat.S_IMODE(destination.stat().st_mode) == 0o600
     assert "private-one-time-value" not in json.dumps(result)
@@ -276,16 +285,15 @@ def test_runner_create_uncertain_provider_result_leaves_no_token_file(
     api = FakeAPI(
         {
             ("GET", _list(scope)): [[]],
-            ("POST", "user/runners"): [API.GitLabAPIError("provider_500")],
+            ("POST", "user/runners"): [API.GitLabAPIError("provider_5xx")],
         }
     )
-    with pytest.raises(
-        ACTION.ActionError,
-        match="runner_create_outcome_uncertain_check_description_before_retry",
-    ):
-        RUNNERS.apply(api, object(), plan, 42)
+    result = RUNNERS.apply(api, object(), plan, 42)
+    assert result["action"] == "PARTIAL"
+    assert result["mutated"] is None
+    assert result["cleanup"]["status"] == "BLOCKED"
     assert not destination.exists()
-    assert "provider_500" not in str(api.calls)
+    assert "provider_5xx" not in str(api.calls)
     assert [call[0] for call in api.calls] == ["GET", "POST"]
 
 

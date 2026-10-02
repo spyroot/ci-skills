@@ -172,8 +172,9 @@ call. When the requested change is authorized, pass that digest with
 identity, and target, reads the resource before changing it, and independently
 reads it back. The same pattern applies to `gitlab_issue.py open-bug`,
 `gitlab_wiki.py create|update`, and `gitlab_runner.py assign|create`. Runner
-creation requires `--token-out PATH` on apply to save the one-time token at the
-caller-selected path; creating a record does not register or start a runner.
+creation requires the same `--token-out PATH` on the dry-run plan and apply to
+bind the one-time token destination into the plan digest. The token is saved at
+that caller-selected path; creating a record does not register or start a runner.
 
 Group runner assignment has one extra read-only step: call
 `gitlab_runner.py assign --group GROUP --runner-id ID --live-plan --json` to

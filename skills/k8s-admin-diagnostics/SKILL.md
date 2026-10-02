@@ -86,7 +86,8 @@ with `--project`/`--group`. Run the action without `--apply` to get a
 machine-readable dry-run plan and its `plan_digest`. Only an explicitly
 requested write uses `--apply --confirm-plan DIGEST`; the command reads the
 resource before changing it and verifies it afterward. `--token-out PATH` is
-required when creating a runner record because GitLab returns its token once;
+required for both the plan and apply when creating a runner record because
+GitLab returns its token once and the destination is bound into the plan;
 the token never appears in a report. Runner registration and online readiness
 are separate from creating its record.
 

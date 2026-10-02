@@ -19,7 +19,12 @@ from .gitlab_actions import (
     _required_text,
     _same,
 )
-from .gitlab_api import GitLabAPIError, create_guard, uncertain_write
+from .gitlab_api import (
+    GitLabAPIError,
+    create_guard,
+    uncertain_write,
+    unverified_write,
+)
 
 
 def prepare(args: Namespace) -> tuple[dict[str, Any], int | None, None]:
@@ -96,14 +101,25 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
                 "title": observed["title"],
                 "reconciled": True,
             }
-    observed = _object(
-        api.get_json(session, f"{base}/{identifier}"),
-        "milestone_readback",
-        "id",
-        "title",
-    )
+    try:
+        observed = _object(
+            api.get_json(session, f"{base}/{identifier}"),
+            "milestone_readback",
+            "id",
+            "title",
+        )
+    except GitLabAPIError:
+        return unverified_write(
+            target_id, {"id": identifier}, "milestone_readback_unavailable"
+        )
+    except ActionError:
+        return unverified_write(
+            target_id, {"id": identifier}, "milestone_readback_invalid_shape"
+        )
     if observed["id"] != identifier or not _same(observed, plan.body):
-        raise ActionError("milestone_readback_mismatch")
+        return unverified_write(
+            target_id, {"id": identifier}, "milestone_readback_mismatch"
+        )
     return {
         "action": "APPLIED",
         "id": identifier,
@@ -165,16 +181,27 @@ def _create(
             created = _object(response, "milestone_create", "id")
             identifier = _id(created["id"], "milestone")
             reconciled = False
-        observed = _object(
-            api.get_json(session, f"{base}/{identifier}"),
-            "milestone_readback",
-            "id",
-            "title",
-        )
+        try:
+            observed = _object(
+                api.get_json(session, f"{base}/{identifier}"),
+                "milestone_readback",
+                "id",
+                "title",
+            )
+        except GitLabAPIError:
+            return unverified_write(
+                target_id, {"id": identifier}, "milestone_readback_unavailable"
+            )
+        except ActionError:
+            return unverified_write(
+                target_id, {"id": identifier}, "milestone_readback_invalid_shape"
+            )
         if observed["id"] != identifier or not _same(observed, plan.body):
             if observed.get("title") == plan.body["title"]:
                 guard.clear()
-            raise ActionError("milestone_readback_mismatch")
+            return unverified_write(
+                target_id, {"id": identifier}, "milestone_readback_mismatch"
+            )
         guard.clear()
         result = {
             "action": "APPLIED",

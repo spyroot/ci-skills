@@ -82,7 +82,7 @@ can be attempted; a 401 or 403 is terminal.
 | 3 | `bug.create` | GET exact issue IID |
 | 4 | `wiki.create/update` | GET exact page slug |
 | 5 | `runner.assign` | GET membership for each project |
-| 6 | `runner.create` | GET ID, description, scope; `token_saved` |
+| 6 | `runner.create` | GET ID, description, scope; `sink_persisted` |
 
 ### 1. Access and packaging
 
@@ -132,8 +132,10 @@ project or group. Group mode enumerates all direct and subgroup projects with
 pagination in a read-only `--live-plan`, then binds their sorted numeric IDs
 into the plan digest. Apply re-enumerates the group and refuses a changed set
 before a write. The offline plan has no group project set and cannot authorize
-apply. Each project is read back after assignment; a repeat call skips already
-assigned projects. If a later assignment fails, the command attempts to
+apply. Direct project association is read from runner details after assignment;
+the project runner list includes inherited availability and cannot prove a
+direct assignment. A repeat call skips already assigned projects. If a later
+assignment fails, the command attempts to
 remove only the assignments made by this call and reports cleanup read-back.
 
 ### 6. Runner creation
@@ -141,14 +143,16 @@ remove only the assignments made by this call and reports cleanup read-back.
 `gitlab_runner.py create` uses `POST /user/runners` for a requested new
 runner record. The offline plan binds the selected project/group reference,
 tags, description, and token destination; apply resolves the numeric target.
-Any existing runner with that description blocks. Apply reserves an exclusive
-mode-0600 `--token-out PATH`, posts once, writes the one-time token, and reads
+Any existing runner with that description blocks. The same `--token-out PATH`
+is required on plan and apply to bind the destination in the plan digest. Apply
+reserves an exclusive mode-0600 destination, posts once, writes the one-time
+token, and reads
 back runner ID, description, and scope membership. The token is not reported.
 Tags and configuration are not compared. If a known newly created runner fails
 token persistence or read-back, the command attempts to delete that record and
 reports cleanup evidence. An uncertain POST or unresolved runner ID blocks
 further creation until independent reconciliation. The result records
-`token_saved`, not manager readiness. Registration and an online job remain
+`sink_persisted`, not manager readiness. Registration and an online job remain
 separate acceptance work.
 
 The suggested API mapping follows GitLab's project

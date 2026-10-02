@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -65,7 +63,9 @@ class FakeAPI:
 def test_group_apply_refuses_missing_or_changed_project_set_before_post(confirmed):
     api = FakeAPI(
         {
-            ("GET", "runners/7"): [{"id": 7}],
+            ("GET", "runners/7"): [
+                {"id": 7, "runner_type": "project_type", "projects": []}
+            ],
             (
                 "GET",
                 _list("groups/42/projects?include_subgroups=true&with_shared=false"),
@@ -83,19 +83,34 @@ def test_group_apply_refuses_missing_or_changed_project_set_before_post(confirme
 def test_group_repeat_returns_no_op_with_independent_membership_readback():
     api = FakeAPI(
         {
-            ("GET", "runners/7"): [{"id": 7}],
+            ("GET", "runners/7"): [
+                {
+                    "id": 7,
+                    "runner_type": "project_type",
+                    "projects": [{"id": 11}, {"id": 12}],
+                },
+                {
+                    "id": 7,
+                    "runner_type": "project_type",
+                    "projects": [{"id": 11}, {"id": 12}],
+                },
+                {
+                    "id": 7,
+                    "runner_type": "project_type",
+                    "projects": [{"id": 11}, {"id": 12}],
+                },
+            ],
             (
                 "GET",
                 _list("groups/42/projects?include_subgroups=true&with_shared=false"),
             ): [[{"id": 12}, {"id": 11}]],
-            ("GET", _list("projects/11/runners")): [[{"id": 7}], [{"id": 7}]],
-            ("GET", _list("projects/12/runners")): [[{"id": 7}], [{"id": 7}]],
         }
     )
     result = RUNNERS.apply(api, object(), _plan(project_ids=(11, 12)), 42)
     assert result["action"] == "NO_OP"
     assert result["verified"] is True
-    assert result["cleanup"]["status"] == "PASS"
+    assert result["cleanup"]["status"] == "NOT_APPLICABLE"
+    assert result["mutated"] is False
     assert all(method == "GET" for method, _, _ in api.calls)
 
 
@@ -187,27 +202,88 @@ def test_runner_token_write_readback_failure_deletes_created_runner(
     assert result["action"] == "PARTIAL"
     assert result["verified"] is False
     assert result["cleanup"]["status"] == "PASS"
-    assert result["token_saved"] is False
+    assert result["sink_persisted"] is False
     assert not token_out.exists()
     assert any(method == "DELETE" for method, _, _ in api.calls)
 
 
-def test_membership_snapshot_uses_bounded_parallel_reads():
-    state = {"active": 0, "peak": 0}
-    lock = threading.Lock()
-
-    class ConcurrentAPI:
-        def get_json(self, session, endpoint):
-            with lock:
-                state["active"] += 1
-                state["peak"] = max(state["peak"], state["active"])
-            time.sleep(0.01)
-            with lock:
-                state["active"] -= 1
-            return []
-
-    observed = RUNNERS._membership_snapshot(
-        ConcurrentAPI(), object(), 7, tuple(range(1, 9))
+def test_membership_snapshot_reads_direct_associations_once():
+    api = FakeAPI(
+        {
+            ("GET", "runners/7"): [
+                {"id": 7, "runner_type": "project_type", "projects": [{"id": 11}]}
+            ]
+        }
     )
-    assert observed == dict.fromkeys(range(1, 9), False)
-    assert 1 < state["peak"] <= RUNNERS.MAX_MEMBERSHIP_WORKERS
+    observed = RUNNERS._membership_snapshot(api, object(), 7, (11, 12))
+    assert observed == {11: True, 12: False}
+    assert api.calls == [("GET", "runners/7", None)]
+
+
+def test_group_runner_is_not_accepted_for_project_assignment():
+    api = FakeAPI(
+        {("GET", "runners/7"): [{"id": 7, "runner_type": "group_type", "projects": []}]}
+    )
+    with pytest.raises(
+        ACTION.ActionError, match="runner_assignment_requires_project_type"
+    ):
+        RUNNERS.apply(api, object(), _plan(project_ids=(11,)), 42)
+    assert api.calls == [("GET", "runners/7", None)]
+
+
+def test_runner_create_requires_token_sink_during_offline_plan():
+    args = SimpleNamespace(
+        action="create",
+        description="fresh-runner",
+        tag=[],
+        runner_id=None,
+        token_out=None,
+        apply=False,
+    )
+    with pytest.raises(
+        ACTION.ActionError, match="token_out_required_for_runner_create_plan"
+    ):
+        RUNNERS.prepare(args, object(), "group")
+
+
+@pytest.mark.parametrize(
+    "reason", ("authentication", "authorization", "command_failed")
+)
+def test_terminal_runner_post_failure_clears_pending_and_preserves_reason(
+    reason, monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
+    token_out = tmp_path / "one-time.token"
+    api = FakeAPI(
+        {
+            ("GET", _list("groups/42/runners")): [[]],
+            ("POST", "user/runners"): [API.GitLabAPIError(reason)],
+        }
+    )
+    with pytest.raises(API.GitLabAPIError, match=reason):
+        RUNNERS.apply(api, object(), _plan(operation="create", token_out=token_out), 42)
+    assert not token_out.exists()
+    assert [path.read_bytes() for path in (tmp_path / "locks").glob("*.lock")] == [b""]
+
+
+def test_malformed_runner_create_response_keeps_uncertain_recovery_marker(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
+    token_out = tmp_path / "one-time.token"
+    api = FakeAPI(
+        {
+            ("GET", _list("groups/42/runners")): [[]],
+            ("POST", "user/runners"): [{}],
+        }
+    )
+    result = RUNNERS.apply(
+        api, object(), _plan(operation="create", token_out=token_out), 42
+    )
+    assert result["action"] == "PARTIAL"
+    assert result["mutated"] is None
+    assert result["cleanup"]["status"] == "BLOCKED"
+    assert not token_out.exists()
+    assert [path.read_bytes() for path in (tmp_path / "locks").glob("*.lock")] == [
+        b"pending\n"
+    ]

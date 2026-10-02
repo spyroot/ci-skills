@@ -83,6 +83,40 @@ def test_get_retry_exhaustion_is_bounded_and_classified():
     assert len(calls) == API.READ_ATTEMPTS
 
 
+@pytest.mark.parametrize("status", (400, 404, 409, 422))
+def test_other_provider_4xx_is_terminal_even_if_stderr_mentions_5xx(status):
+    calls = []
+
+    def command(argv, *, timeout, env):
+        calls.append(argv)
+        return _result(
+            1,
+            f"HTTP/2 {status} Error\r\ncontent-type: application/json\r\n\r\n{{}}",
+            "upstream 500 detail is not the response status",
+        )
+
+    client = API.GlabAPIClient(command=command, sleep=lambda _: pytest.fail("slept"))
+    with pytest.raises(API.GitLabAPIError) as failure:
+        client.get_json(_session(), "projects/42")
+    assert failure.value.reason == f"provider_{status}"
+    assert len(calls) == 1
+
+
+def test_timeout_with_partial_headers_keeps_timeout_class_for_write_reconciliation():
+    calls = []
+
+    def command(argv, *, timeout, env):
+        calls.append(argv)
+        return _result(124, "HTTP/2 201 Created\r\nRetry-After:")
+
+    client = API.GlabAPIClient(command=command, sleep=lambda _: pytest.fail("slept"))
+    with pytest.raises(API.GitLabAPIError) as failure:
+        client.post_json(_session(), "projects/42/issues", {"title": "one"})
+    assert failure.value.reason == "timeout"
+    assert API.uncertain_write(failure.value)
+    assert len(calls) == 1
+
+
 def test_retry_after_beyond_budget_blocks_instead_of_sleeping_or_replaying():
     calls = []
 

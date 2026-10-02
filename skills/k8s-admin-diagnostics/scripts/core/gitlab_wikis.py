@@ -16,7 +16,12 @@ from .gitlab_actions import (
     _required_text,
     _same,
 )
-from .gitlab_api import GitLabAPIError, create_guard, uncertain_write
+from .gitlab_api import (
+    GitLabAPIError,
+    create_guard,
+    uncertain_write,
+    unverified_write,
+)
 
 
 def prepare(args: Namespace) -> tuple[dict[str, Any], str | None, None]:
@@ -55,14 +60,21 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
             return _reconcile_update(api, session, plan, base, endpoint)
         changed = _object(response, "wiki_update", "slug")
         slug = _required_text(changed["slug"], "wiki_slug")
-    observed = _object(
-        api.get_json(session, f"{base}/{quote(slug, safe='')}"),
-        "wiki_readback",
-        "slug",
-        "content",
-    )
+    try:
+        observed = _object(
+            api.get_json(session, f"{base}/{quote(slug, safe='')}"),
+            "wiki_readback",
+            "slug",
+            "content",
+        )
+    except GitLabAPIError:
+        return unverified_write(target_id, {"slug": slug}, "wiki_readback_unavailable")
+    except ActionError:
+        return unverified_write(
+            target_id, {"slug": slug}, "wiki_readback_invalid_shape"
+        )
     if observed["slug"] != slug or not _same(observed, plan.body):
-        raise ActionError("wiki_readback_mismatch")
+        return unverified_write(target_id, {"slug": slug}, "wiki_readback_mismatch")
     return {"action": "APPLIED", "slug": slug, "verified": True}
 
 
@@ -139,16 +151,25 @@ def _create(
             created = _object(response, "wiki_create", "slug")
             slug = _required_text(created["slug"], "wiki_slug")
             reconciled = False
-        observed = _object(
-            api.get_json(session, f"{base}/{quote(slug, safe='')}"),
-            "wiki_readback",
-            "slug",
-            "content",
-        )
+        try:
+            observed = _object(
+                api.get_json(session, f"{base}/{quote(slug, safe='')}"),
+                "wiki_readback",
+                "slug",
+                "content",
+            )
+        except GitLabAPIError:
+            return unverified_write(
+                target_id, {"slug": slug}, "wiki_readback_unavailable"
+            )
+        except ActionError:
+            return unverified_write(
+                target_id, {"slug": slug}, "wiki_readback_invalid_shape"
+            )
         if observed["slug"] != slug or not _same(observed, plan.body):
             if observed.get("title") == plan.body["title"]:
                 guard.clear()
-            raise ActionError("wiki_readback_mismatch")
+            return unverified_write(target_id, {"slug": slug}, "wiki_readback_mismatch")
         guard.clear()
         result: dict[str, Any] = {"action": "APPLIED", "slug": slug, "verified": True}
         if reconciled:

@@ -218,6 +218,107 @@ def test_terminal_create_refusal_keeps_its_class_and_does_not_reconcile(
     assert next(tmp_path.glob("*.lock")).read_text() == ""
 
 
+@pytest.mark.parametrize(
+    (
+        "module",
+        "kind",
+        "title",
+        "content",
+        "base",
+        "query",
+        "created",
+        "resource",
+        "readback",
+        "resource_key",
+        "resource_value",
+    ),
+    (
+        (
+            ISSUES,
+            "gitlab_issue",
+            "broken",
+            None,
+            "projects/42/issues",
+            "projects/42/issues?state=all&search=broken&per_page=100&page=1",
+            {"iid": 9},
+            "projects/42/issues/9",
+            {"iid": 9, "title": "broken", "state": "closed"},
+            "iid",
+            9,
+        ),
+        (
+            MILESTONES,
+            "gitlab_milestone",
+            "release",
+            None,
+            "projects/42/milestones",
+            "projects/42/milestones?title=release&per_page=100&page=1",
+            {"id": 9},
+            "projects/42/milestones/9",
+            {"id": 10, "title": "release"},
+            "id",
+            9,
+        ),
+        (
+            WIKIS,
+            "gitlab_wiki",
+            "Guide",
+            "body",
+            "projects/42/wikis",
+            "projects/42/wikis?per_page=100&page=1",
+            {"slug": "Guide"},
+            "projects/42/wikis/Guide",
+            {"slug": "Other", "title": "Guide", "content": "body"},
+            "slug",
+            "Guide",
+        ),
+    ),
+)
+def test_successful_create_with_mismatched_readback_keeps_mutation_evidence(
+    monkeypatch,
+    tmp_path,
+    module,
+    kind,
+    title,
+    content,
+    base,
+    query,
+    created,
+    resource,
+    readback,
+    resource_key,
+    resource_value,
+):
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path)
+    api = ScriptedAPI(
+        {
+            ("GET", query): [[]],
+            ("POST", base): [created],
+            ("GET", resource): [readback],
+        }
+    )
+    record = module.apply(
+        api, SimpleNamespace(), _plan(kind, title, content=content), 42
+    )
+    assert record["action"] == "APPLIED"
+    assert record["verified"] is False
+    assert record["mutated"] is True
+    assert record["uncertain"] is True
+    assert record[resource_key] == resource_value
+    assert record["errors"] == [
+        {
+            "project_id": 42,
+            "reason": f"{kind.removeprefix('gitlab_')}_readback_mismatch",
+        }
+    ]
+    assert record["cleanup"] == {
+        "status": "NOT_PERFORMED",
+        "reason": "post_write_readback_unverified",
+    }
+    assert [method for method, _ in api.calls].count("POST") == 1
+
+
 def test_milestone_put_timeout_reconciles_by_id_without_reposting():
     endpoint = "projects/42/milestones/9"
     plan = ACTION.ActionPlan(
@@ -277,4 +378,70 @@ def test_wiki_rename_put_timeout_reconciles_by_new_title_without_reposting():
     result = WIKIS.apply(api, SimpleNamespace(), plan, 42)
     assert result["action"] == "APPLIED"
     assert result["reconciled"] is True
+    assert [method for method, _ in api.calls].count("PUT") == 1
+
+
+def test_successful_milestone_put_with_stale_readback_returns_partial_record():
+    endpoint = "projects/42/milestones/9"
+    plan = ACTION.ActionPlan(
+        kind="gitlab_milestone",
+        operation="adjust-time",
+        origin="https://gitlab.example.test",
+        target_kind="project",
+        target_reference="team/repo",
+        target_file="/selected/target.toml",
+        target_source="argv:--target;target:gitlab.project",
+        body={"due_date": "2026-10-31"},
+        resource_id=9,
+        token_out=None,
+        revision="a" * 40,
+    )
+    api = ScriptedAPI(
+        {
+            ("GET", endpoint): [
+                {"id": 9, "title": "release", "due_date": "2026-10-01"},
+                {"id": 9, "title": "release", "due_date": "2026-10-01"},
+            ],
+            ("PUT", endpoint): [{"id": 9}],
+        }
+    )
+    record = MILESTONES.apply(api, SimpleNamespace(), plan, 42)
+    assert record["verified"] is False
+    assert record["mutated"] is True
+    assert record["id"] == 9
+    assert record["errors"] == [
+        {"project_id": 42, "reason": "milestone_readback_mismatch"}
+    ]
+    assert [method for method, _ in api.calls].count("PUT") == 1
+
+
+def test_successful_wiki_put_with_stale_readback_returns_partial_record():
+    endpoint = "projects/42/wikis/Guide"
+    plan = ACTION.ActionPlan(
+        kind="gitlab_wiki",
+        operation="update",
+        origin="https://gitlab.example.test",
+        target_kind="project",
+        target_reference="team/repo",
+        target_file="/selected/target.toml",
+        target_source="argv:--target;target:gitlab.project",
+        body={"content": "new"},
+        resource_id="Guide",
+        token_out=None,
+        revision="a" * 40,
+    )
+    api = ScriptedAPI(
+        {
+            ("GET", endpoint): [
+                {"slug": "Guide", "content": "old"},
+                {"slug": "Guide", "content": "old"},
+            ],
+            ("PUT", endpoint): [{"slug": "Guide"}],
+        }
+    )
+    record = WIKIS.apply(api, SimpleNamespace(), plan, 42)
+    assert record["verified"] is False
+    assert record["mutated"] is True
+    assert record["slug"] == "Guide"
+    assert record["errors"] == [{"project_id": 42, "reason": "wiki_readback_mismatch"}]
     assert [method for method, _ in api.calls].count("PUT") == 1

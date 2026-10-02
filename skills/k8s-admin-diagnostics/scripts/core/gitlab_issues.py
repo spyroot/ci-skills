@@ -18,7 +18,12 @@ from .gitlab_actions import (
     _required_text,
     _same,
 )
-from .gitlab_api import GitLabAPIError, create_guard, uncertain_write
+from .gitlab_api import (
+    GitLabAPIError,
+    create_guard,
+    uncertain_write,
+    unverified_write,
+)
 
 
 def prepare(args: Namespace) -> tuple[dict[str, Any], None, None]:
@@ -65,9 +70,21 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
             return _reconcile(api, session, plan, base, guard)
         created = _object(response, "issue_create", "iid")
         iid = _id(created["iid"], "issue")
-        observed = _object(
-            api.get_json(session, f"{base}/{iid}"), "issue_readback", "iid", "title"
-        )
+        try:
+            observed = _object(
+                api.get_json(session, f"{base}/{iid}"),
+                "issue_readback",
+                "iid",
+                "title",
+            )
+        except GitLabAPIError:
+            return unverified_write(
+                target_id, {"iid": iid}, "issue_readback_unavailable"
+            )
+        except ActionError:
+            return unverified_write(
+                target_id, {"iid": iid}, "issue_readback_invalid_shape"
+            )
         if (
             observed["iid"] != iid
             or observed.get("state") != "opened"
@@ -77,7 +94,7 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
             # resource, even if its state or other fields are wrong.
             if observed.get("title") == plan.body["title"]:
                 guard.clear()
-            raise ActionError("issue_readback_mismatch")
+            return unverified_write(target_id, {"iid": iid}, "issue_readback_mismatch")
         guard.clear()
         return {
             "action": "APPLIED",

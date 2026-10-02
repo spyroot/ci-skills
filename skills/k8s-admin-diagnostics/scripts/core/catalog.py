@@ -328,7 +328,9 @@ COMMANDS: dict[str, dict[str, Any]] = {
         },
         "subcommands": {
             "assign": {"required_options": ["--runner-id"]},
-            "create": {"required_options": ["--runner-type", "--description"]},
+            "create": {
+                "required_options": ["--runner-type", "--description", "--token-out"]
+            },
         },
         "returns": "A sanitized plan or verified runner record and assignment evidence.",
     },

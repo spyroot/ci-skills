@@ -205,8 +205,19 @@ def recover_install(skills_dir: Path, *, dry_run: bool) -> dict[str, Any]:
     """Recover under the same lock as installation and upgrade."""
     if dry_run:
         return _recover_install_unlocked(skills_dir, dry_run=True)
-    with _mutation_lock(skills_dir.expanduser().resolve()):
-        return _recover_install_unlocked(skills_dir, dry_run=False)
+    try:
+        with _mutation_lock(skills_dir.expanduser().resolve()):
+            return _recover_install_unlocked(skills_dir, dry_run=False)
+    except (OSError, ValueError) as exc:
+        reason = str(exc) if isinstance(exc, ValueError) else "install_io_failure"
+        return {
+            "schema_version": "1.0",
+            "kind": "skill_install_recovery",
+            "destination": str(skills_dir.expanduser().resolve() / SKILL_NAME),
+            "status": "BLOCKED",
+            "reason": reason,
+            "safe_next_step": RECOVERY.get(reason, RECOVERY["install_recovery_unsafe"]),
+        }
 
 
 def _install_unlocked(
@@ -312,14 +323,23 @@ def install(
     )
     if dry_run or preflight["status"] == "BLOCKED":
         return preflight
-    with _mutation_lock(skills_dir.expanduser().resolve()):
-        return _install_unlocked(
-            source,
-            skills_dir,
-            dry_run=False,
-            require_verified=require_verified,
-            upgrade=upgrade,
-        )
+    try:
+        with _mutation_lock(skills_dir.expanduser().resolve()):
+            return _install_unlocked(
+                source,
+                skills_dir,
+                dry_run=False,
+                require_verified=require_verified,
+                upgrade=upgrade,
+            )
+    except (OSError, ValueError) as exc:
+        reason = str(exc) if isinstance(exc, ValueError) else "install_io_failure"
+        return {
+            **preflight,
+            "status": "BLOCKED",
+            "reason": reason,
+            "safe_next_step": RECOVERY.get(reason, RECOVERY["install_recovery_unsafe"]),
+        }
 
 
 def main() -> int:

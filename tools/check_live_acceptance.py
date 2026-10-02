@@ -14,7 +14,7 @@ verifiable here, and it fails exactly when the code that ran differs from the
 code under review -- which is what "wrong revision" has to mean.
 
 This is plain data: an operator-owned expectations file, receipts as files, and
-one comparison function. No pairing protocol, no registry, no new service.
+one comparison function.
 """
 
 from __future__ import annotations
@@ -177,10 +177,9 @@ def _check_common(
     elif (now - captured).days > max_age_days:
         problems.append(f"{name}:receipt_stale")
     redactor = _redactor()
-    body = json.dumps(receipt, sort_keys=True)
     if redactor is None:
         problems.append(f"{name}:sanitization_check_unavailable")
-    elif redactor(body) != body:
+    elif redactor(receipt) != receipt:
         problems.append(f"{name}:receipt_not_sanitized")
     return problems
 
@@ -301,10 +300,20 @@ def _redactor():
     if str(scripts) not in sys.path:
         sys.path.insert(0, str(scripts))
     try:
-        from core.runtime import redact
+        from core.runtime import redact_tree
     except ImportError:
         return None
-    return redact
+    return redact_tree
+
+
+def _resource_identity(receipt: dict[str, Any]) -> Any:
+    readback = receipt.get("readback") or {}
+    if not isinstance(readback, dict):
+        return None
+    for key in ("id", "iid", "slug"):
+        if readback.get(key):
+            return (key, readback[key])
+    return None
 
 
 def evaluate(
@@ -327,6 +336,9 @@ def evaluate(
     problems: list[str] = []
     accepted: list[str] = []
     consumed: set[str] = set()
+    matched_operations: dict[
+        tuple[Any, ...], dict[str, tuple[str, dict[str, Any]]]
+    ] = {}
     for executor in expected["executors"]:
         host = executor.get("host")
         host_receipts = by_host.get(host, [])
@@ -367,6 +379,28 @@ def evaluate(
                 or receipt.get("result_action") == required.get("result_action")
             )
         ]
+        if len(candidates) > 1:
+            # The same operation may be required on several targets. Match the
+            # exact selected target before calling the remaining evidence
+            # ambiguous. A lone wrong-target receipt stays a precise mismatch.
+            candidates = [
+                (name, receipt)
+                for name, receipt in candidates
+                if (receipt.get("origin") == required.get("origin"))
+                and (
+                    (
+                        receipt.get("target")
+                        if kind == "gitlab_access"
+                        else receipt.get("verified_target")
+                    )
+                    or {}
+                )
+                == {
+                    "kind": required.get("target_kind"),
+                    "id": required.get("target_id"),
+                    "full_path": required.get("target_path"),
+                }
+            ]
         if not candidates:
             problems.append(f"{label}:receipt_missing")
             continue
@@ -385,6 +419,36 @@ def evaluate(
         problems.extend(found)
         if not found:
             accepted.append(name)
+            if (kind, operation) in REPEATABLE_GITLAB_OPERATIONS:
+                pair = (
+                    required["execution_host"],
+                    required["origin"],
+                    kind,
+                    operation,
+                    required["target_kind"],
+                    required["target_id"],
+                    required["target_path"],
+                )
+                matched_operations.setdefault(pair, {})[required["result_action"]] = (
+                    name,
+                    receipt,
+                )
+
+    for pair, actions in matched_operations.items():
+        if set(actions) != {"APPLIED", "NO_OP"}:
+            problems.append(f"{pair[2]}:{pair[3]}:repeat_readback_missing")
+            continue
+        applied_name, applied = actions["APPLIED"]
+        noop_name, noop = actions["NO_OP"]
+        if (
+            not applied.get("plan_digest")
+            or applied.get("plan_digest") != noop.get("plan_digest")
+            or not _resource_identity(applied)
+            or _resource_identity(applied) != _resource_identity(noop)
+            or applied.get("credential_source") != noop.get("credential_source")
+            or applied.get("credential_digest") != noop.get("credential_digest")
+        ):
+            problems.append(f"{applied_name}:{noop_name}:repeat_readback_mismatch")
 
     declared_hosts = {executor.get("host") for executor in expected["executors"]}
     for name, receipt in receipts.items():

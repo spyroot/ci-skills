@@ -59,6 +59,24 @@ def uncertain_write(error: GitLabAPIError) -> bool:
     return error.reason in _UNCERTAIN_WRITE
 
 
+def unverified_write(
+    target_id: int, resource: dict[str, Any], reason: str
+) -> dict[str, Any]:
+    """Keep a successful write's known resource in a PARTIAL adapter record."""
+    return {
+        "action": "APPLIED",
+        "verified": False,
+        "mutated": True,
+        "uncertain": True,
+        **resource,
+        "errors": [{"project_id": target_id, "reason": reason}],
+        "cleanup": {
+            "status": "NOT_PERFORMED",
+            "reason": "post_write_readback_unverified",
+        },
+    }
+
+
 def _endpoint(value: str) -> str:
     """Reject host changes and path traversal before handing a path to glab."""
     parsed = urlsplit(value)
@@ -106,6 +124,8 @@ def _failure(result: CommandResult, headers: str) -> str:
             return "provider_408"
         if code == 429:
             return "rate_limited"
+        if 400 <= code <= 499:
+            return f"provider_{code}"
         if 500 <= code <= 599:
             return "provider_5xx"
     known = error_class(result)
@@ -309,7 +329,12 @@ class GlabAPIClient:
                     timeout=self.timeout,
                     env=dict(session.environment),
                 )
-                headers, payload_text = _split_response(result.stdout)
+                # A timed-out child may have printed only half an HTTP header.
+                # Its exit class takes priority over parsing incomplete output.
+                if result.returncode == 124:
+                    headers, payload_text = "", ""
+                else:
+                    headers, payload_text = _split_response(result.stdout)
                 if result.returncode == 0:
                     break
                 reason = _failure(result, headers)
