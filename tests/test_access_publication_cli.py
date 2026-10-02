@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -400,3 +401,91 @@ def test_publication_blocks_when_the_target_declares_no_required_checks(
 
     assert result.returncode == 2
     assert data["surfaces"]["github"]["reason"] == "required_checks_not_declared"
+
+
+def test_the_written_receipt_carries_no_path_from_this_host(
+    fake_access_tools,
+    live_target_file,
+    tmp_path,
+):
+    """Every path-bearing field must be declared, not only the ones we remember.
+
+    `target_file` was added to the receipt without being added to
+    `PATH_VALUE_FIELDS`, so the committable form carried an absolute home
+    directory path. Asserting the absence of the host's own prefix catches the
+    next field too, rather than the one field already fixed.
+    """
+    receipt_path = tmp_path / "written" / "receipt.json"
+
+    result = run_script(
+        "access_check.py",
+        "--target",
+        live_target_file,
+        "--revision",
+        TEST_REVISION,
+        "--publication",
+        "--receipt-out",
+        receipt_path,
+        "--json",
+        fake_bin=fake_access_tools,
+        env={
+            "FAKE_GH_ADMIN": "true",
+            "FAKE_GH_REQUIRED_CONTEXTS": "portable-required-check",
+        },
+    )
+    data = parse_json_output(result)
+    body = receipt_path.read_text(encoding="utf-8")
+    written = json.loads(body)
+
+    assert result.returncode == 0
+    assert data["status"] == "PASS"
+    # The captured form names the real path; the written one may not.
+    assert data["target_file"] == str(live_target_file)
+    assert str(tmp_path) not in body
+    assert written["target_file"].startswith("path:")
+    assert written["target_source"] == "argv:--target"
+    # The structural invariant, which holds for a field under any home
+    # directory rather than only one under this fixture's tmp_path.
+    assert _absolute_path_values(written) == []
+
+
+def _absolute_path_values(value, path="") -> list[str]:
+    """Return every string in a receipt that is an absolute filesystem path."""
+    if isinstance(value, str):
+        return [f"{path}={value}"] if value.startswith("/") else []
+    if isinstance(value, dict):
+        found = []
+        for name, child in value.items():
+            found.extend(_absolute_path_values(child, f"{path}.{name}"))
+        return found
+    if isinstance(value, list):
+        found = []
+        for index, child in enumerate(value):
+            found.extend(_absolute_path_values(child, f"{path}[{index}]"))
+        return found
+    return []
+
+
+def test_a_forgotten_required_argument_is_not_reported_as_an_access_failure(
+    live_target_file,
+):
+    """The reader must be sent to the argument, not to an authority.
+
+    `--job-url` left argparse so `--describe` could answer without it. Enforcing
+    it inside the collector put it AFTER the live gate, so a host with no
+    cluster access saw a Kubernetes denial instead of the missing argument.
+    """
+    result = run_script(
+        "gitlab_job.py",
+        "--target",
+        live_target_file,
+        "--json",
+        env={"PATH": "/nonexistent"},
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 2
+    assert data["status"] == "BLOCKED"
+    assert data["errors"][0]["source"] == "arguments"
+    assert "--job-url" in data["errors"][0]["reason"]
+    assert data["kind"] == "gitlab_job"

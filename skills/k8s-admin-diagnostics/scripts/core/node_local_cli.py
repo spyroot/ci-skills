@@ -8,6 +8,7 @@ import socket
 import sys
 from datetime import datetime, timezone
 
+from .catalog import describe_node
 from .node_local import JOURNAL_SINCE, collect_ceph_kernel, collect_cilium_node
 from .report import emit
 from .status import BLOCKED, DRY_RUN, exit_code
@@ -41,6 +42,8 @@ class NodeParser(argparse.ArgumentParser):
             else "yaml"
             if "--yaml" in self.requested
             else "human"
+            if "--human" in self.requested or sys.stdout.isatty()
+            else "json"
         )
         try:
             print(emit(data, mode), end="")
@@ -58,8 +61,12 @@ def parser(kind: str) -> argparse.ArgumentParser:
     modes = result.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print versioned JSON")
     modes.add_argument("--yaml", action="store_true", help="print versioned YAML")
+    modes.add_argument("--human", action="store_true", help="print a human summary")
     result.add_argument(
         "--dry-run", action="store_true", help="show commands without executing them"
+    )
+    result.add_argument(
+        "--describe", action="store_true", help="print the command contract as JSON"
     )
     return result
 
@@ -68,6 +75,9 @@ def run(kind: str, args: argparse.Namespace) -> int:
     """Return structured evidence and a stable exit status for each mode."""
     if kind not in {"cilium_node", "ceph_kernel"}:
         raise ValueError("unsupported_node_diagnostic")
+    if getattr(args, "describe", False):
+        print(json.dumps(describe_node(f"{kind}.py"), sort_keys=True))
+        return 0
     data = {
         "schema_version": "1.0",
         "kind": kind,
@@ -119,6 +129,14 @@ def run(kind: str, args: argparse.Namespace) -> int:
             data["errors"] = [{"source": kind, "reason": "node_collection_failed"}]
             data["summary"]["error_count"] = 1
             data["safe_next_step"] = "Inspect the node tool output and retry."
-    mode = "json" if args.json else "yaml" if args.yaml else "human"
+    mode = (
+        "json"
+        if args.json
+        else "yaml"
+        if args.yaml
+        else "human"
+        if getattr(args, "human", False) or sys.stdout.isatty()
+        else "json"
+    )
     print(emit(data, mode), end="")
     return exit_code(data["status"])
