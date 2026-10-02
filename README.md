@@ -149,9 +149,9 @@ target file — installation grants nothing.
 
 Start here and you will not need to read the rest.
 
-1. **Run `access_check.py` before API collectors.** On `PASS` the receipt tells you
-   the effective source and identity per authority, so you never go looking for
-   a credential. On `BLOCKED`, the surface `reason` names what to fix.
+1. **Run `access_check.py` before API collectors.** On `PASS`, the receipt
+   names the effective credential source and identity for each authority.
+   On `BLOCKED`, the surface `reason` names what to fix.
 2. **Read `skills/k8s-admin-diagnostics/tools.json`** for the machine-readable
    manifest: every command, what it is for, when to use it, its authorities or
    execution surface, its options, and a symptom-to-command routing table.
