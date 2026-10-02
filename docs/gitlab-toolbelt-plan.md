@@ -12,9 +12,9 @@ runner, or token by a built-in name.
 
 The source inventory for these blocks is `gitlab_auth.sh` (credentialed
 execution), `gitlab_util.sh` (bug and milestone creation), and
-`gitlab_runner_assign.sh` (runner assignment). Their sourceable helpers own
-the actual API behavior. The behavior to carry forward includes exact-title
-lookup, open-issue reuse, project enumeration, and independent read-back;
+`gitlab_runner_assign.sh` (runner assignment). The Python core owns the
+adapted API behavior. It carries forward exact-title lookup, open-issue reuse,
+project enumeration, and independent read-back;
 project-specific default hosts, groups, token aliases, and unrelated
 deployment commands are excluded.
 
@@ -66,12 +66,12 @@ rejects changed input or target. A verified no-op sends no write request.
 
 The GitLab transport writes POST/PUT JSON to a mode-0600 temporary file passed
 as `glab api --input PATH`. It pins `--hostname` and clears conflicting token
-variables. The child runs in the caller's working directory; stdout and
-stderr are captured in memory. A successful JSON response larger than 8 MiB
-is rejected after capture, and failures expose a classified reason instead of
-raw provider output. The transport does not inspect HTTP headers or retry.
-Timed-out writes need independent read-back before a manual retry; automatic
-post-timeout reconciliation remains unimplemented.
+variables. The child runs in the caller's working directory. Capture is
+bounded to 8 MiB while the child runs; failures expose a classified reason
+instead of raw provider output. Safe reads retry a bounded number of times for
+transient failures and honor a bounded `Retry-After`. Writes are sent once.
+An uncertain write is reconciled by resource read-back before another create
+can be attempted; a 401 or 403 is terminal.
 
 ## Delivery blocks
 
@@ -128,12 +128,13 @@ the existing page has a different title.
 ### 5. Runner assignment
 
 `gitlab_runner.py assign` takes an existing numeric runner ID and a selected
-project or group. Group mode enumerates all direct and subgroup
-projects with pagination at apply time, then reports their IDs and individual
-assignment results. The offline plan does not bind that project set. Each
-project is read back after assignment; an unsuccessful subset reports
-`PARTIAL`. A repeat call skips already assigned projects. Automatic unassign
-or rollback is not implemented.
+project or group. Group mode enumerates all direct and subgroup projects with
+pagination in a read-only `--live-plan`, then binds their sorted numeric IDs
+into the plan digest. Apply re-enumerates the group and refuses a changed set
+before a write. The offline plan has no group project set and cannot authorize
+apply. Each project is read back after assignment; a repeat call skips already
+assigned projects. If a later assignment fails, the command attempts to
+remove only the assignments made by this call and reports cleanup read-back.
 
 ### 6. Runner creation
 
@@ -143,8 +144,10 @@ tags, description, and token destination; apply resolves the numeric target.
 Any existing runner with that description blocks. Apply reserves an exclusive
 mode-0600 `--token-out PATH`, posts once, writes the one-time token, and reads
 back runner ID, description, and scope membership. The token is not reported.
-Tags and configuration are not compared. A failure after POST can leave a
-runner record; automatic remote cleanup is not implemented. The result records
+Tags and configuration are not compared. If a known newly created runner fails
+token persistence or read-back, the command attempts to delete that record and
+reports cleanup evidence. An uncertain POST or unresolved runner ID blocks
+further creation until independent reconciliation. The result records
 `token_saved`, not manager readiness. Registration and an online job remain
 separate acceptance work.
 
@@ -176,6 +179,7 @@ output come from the existing renderer, with one redaction pass.
 | Mode | Status | Exit | Meaning |
 | --- | --- | --- | --- |
 | Offline dry-run | `DRY_RUN` | 0 | Intent only; no API evidence |
+| Group live-plan | `PLANNED` | 0 | Read-only projects and identity |
 | Apply verified | `PASS` | 0 | `APPLIED` or `NO_OP` |
 | Any unresolved step | `BLOCKED` | 2 | No success claim |
 | Partial assignment | `PARTIAL` | 2 | Inspect errors and recover |
@@ -198,26 +202,26 @@ Bash parse, ShellCheck, shfmt, and Bats must execute in that workflow.
 Acceptance requires tests for offline dry-run with zero API calls and
 plan/apply input binding; permission denial; terminal 401/403;
 408/429/5xx classification; malformed responses; redaction; timeout cleanup;
-read-back mismatch; and second-call no-op. Post-timeout create reconciliation
-and automatic cleanup after a remote write remain implementation and gate work.
+read-back mismatch; and second-call no-op. Same-host create locking and
+post-timeout read-back need exact-head test evidence; cross-host create
+serialization remains a limitation.
 
 Stages 2–6 also require protected live smoke against a named disposable
 GitLab target, from a named execution host that can reach that instance. A
-sanitized receipt binds exact skill digest and candidate commit, origin and
+sanitized receipt binds the exact skill digest, origin and
 numeric target IDs, effective source and user ID, plan digest, apply result,
-independent GET, repeated no-op, and cleanup. Add an operations receipt
-profile to the existing acceptance checker; keep the diagnostic receipt
-profile unchanged. The current GitHub workflow has no configured GitLab
-mutation credentials or disposable target, so its mocked `validate` result
-alone cannot accept stages 2–6. A PR containing those blocks stays draft until
-an approved live route and exact-head receipt check are wired. No production
-resource is changed merely to satisfy smoke.
+independent GET, repeated no-op, and cleanup. The existing acceptance checker
+requires operation receipt profiles alongside the diagnostic receipt; an
+empty or incomplete profile inventory blocks. The current expectations file
+has no disposable GitLab target or operation receipts, so `validate` remains
+blocked until they are supplied. Mocked unit tests alone cannot accept stages
+2–6. No production resource is changed merely to satisfy smoke.
 
 ## Remaining live acceptance inputs
 
 1. **Token sink for runner creation:** the command takes `--token-out PATH` and
-   saves the one-time token with mode 0600. A live smoke still needs the HOTT
-   team's selected destination and manager-registration owner.
+   saves the one-time token with mode 0600. A live smoke still needs the
+   operator's selected destination and manager-registration owner.
 2. **Live smoke route:** name a disposable project/group and execution host
-   for stages 2–6, then wire exact-head receipt validation. A saved login
-   does not identify that target or supply an approved mutation route.
+   for stages 2–6, then record exact-digest receipts from that host. A saved
+   login does not identify that target or supply an approved mutation route.

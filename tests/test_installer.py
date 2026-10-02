@@ -126,7 +126,7 @@ def test_upgrade_preserves_previous_skill_and_verifies_new_copy(tmp_path):
     upgraded = installer.install(
         source, skills_dir, dry_run=False, require_verified=False, upgrade=True
     )
-    previous = skills_dir / f".{installer.SKILL_NAME}.previous"
+    previous = Path(upgraded["previous_version"])
     destination = skills_dir / installer.SKILL_NAME
     assert upgraded["status"] == "PASS"
     assert upgraded["previous_version"] == str(previous)
@@ -141,14 +141,16 @@ def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(tmp_path, monkeypa
     skills_dir = tmp_path / "skills"
     installer.install(source, skills_dir, dry_run=False, require_verified=False)
     destination = skills_dir / installer.SKILL_NAME
-    previous = skills_dir / f".{installer.SKILL_NAME}.previous"
     before = (destination / "SKILL.md").read_bytes()
     (source / "SKILL.md").write_text("new source\n", encoding="utf-8")
 
     original_rename = Path.rename
 
     def fail_activation(path: Path, target: Path):
-        if path.name.startswith(f".{installer.SKILL_NAME}-") and target == destination:
+        if (
+            path.name.startswith(f".{installer.SKILL_NAME}.stage-")
+            and target == destination
+        ):
             raise OSError("injected activation failure")
         return original_rename(path, target)
 
@@ -158,7 +160,98 @@ def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(tmp_path, monkeypa
     )
     assert result["status"] == "BLOCKED"
     assert (destination / "SKILL.md").read_bytes() == before
+    assert not (skills_dir / installer.JOURNAL_NAME).exists()
+    assert not list(skills_dir.glob(f".{installer.SKILL_NAME}.previous-*"))
+
+
+def test_repeated_upgrade_preserves_each_immediate_previous_version(tmp_path):
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    installer.install(source, skills_dir, dry_run=False, require_verified=False)
+    source_skill = source / "SKILL.md"
+    source_skill.write_text("version two\n", encoding="utf-8")
+    second = installer.install(
+        source, skills_dir, dry_run=False, require_verified=False, upgrade=True
+    )
+    source_skill.write_text("version three\n", encoding="utf-8")
+    third = installer.install(
+        source, skills_dir, dry_run=False, require_verified=False, upgrade=True
+    )
+
+    assert second["status"] == third["status"] == "PASS"
+    assert "name: unit" in (Path(second["previous_version"]) / "SKILL.md").read_text()
+    assert (Path(third["previous_version"]) / "SKILL.md").read_text() == "version two\n"
+    assert (
+        skills_dir / installer.SKILL_NAME / "SKILL.md"
+    ).read_text() == "version three\n"
+
+
+def test_recovery_restores_old_skill_after_interrupted_upgrade(tmp_path):
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    installer.install(source, skills_dir, dry_run=False, require_verified=False)
+    destination = skills_dir / installer.SKILL_NAME
+    old_digest = installer.tree_digest(destination)["digest"]
+    (source / "SKILL.md").write_text("new\n", encoding="utf-8")
+    nonce = "a" * 32
+    previous = skills_dir / f".{installer.SKILL_NAME}.previous-{nonce}"
+    installer._write_journal(
+        skills_dir,
+        {
+            "schema_version": "1.0",
+            "nonce": nonce,
+            "old_digest": old_digest,
+            "new_digest": installer.tree_digest(source)["digest"],
+        },
+    )
+    destination.rename(previous)
+
+    planned = installer.recover_install(skills_dir, dry_run=True)
+    assert planned["status"] == "DRY_RUN"
+    assert planned["action"] == "restore_previous"
+    assert not destination.exists()
+    recovered = installer.recover_install(skills_dir, dry_run=False)
+    assert recovered["status"] == "PASS"
+    assert recovered["digest"] == old_digest
+    assert destination.exists()
     assert not previous.exists()
+    assert not (skills_dir / installer.JOURNAL_NAME).exists()
+
+
+def test_recovery_finishes_verified_activation_without_rolling_it_back(tmp_path):
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    installer.install(source, skills_dir, dry_run=False, require_verified=False)
+    destination = skills_dir / installer.SKILL_NAME
+    old_digest = installer.tree_digest(destination)["digest"]
+    (source / "SKILL.md").write_text("new\n", encoding="utf-8")
+    nonce = "b" * 32
+    previous = skills_dir / f".{installer.SKILL_NAME}.previous-{nonce}"
+    installer._write_journal(
+        skills_dir,
+        {
+            "schema_version": "1.0",
+            "nonce": nonce,
+            "old_digest": old_digest,
+            "new_digest": installer.tree_digest(source)["digest"],
+        },
+    )
+    destination.rename(previous)
+    destination.mkdir()
+    (destination / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())
+    (destination / "scripts").mkdir()
+    (destination / "scripts" / "check.py").write_bytes(
+        (source / "scripts" / "check.py").read_bytes()
+    )
+
+    recovered = installer.recover_install(skills_dir, dry_run=False)
+    assert recovered["status"] == "PASS"
+    assert recovered["action"] == "complete_verified_activation"
+    assert destination.exists() and previous.exists()
+    assert not (skills_dir / installer.JOURNAL_NAME).exists()
 
 
 def test_symlinked_source_file_is_rejected(tmp_path):

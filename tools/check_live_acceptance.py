@@ -42,7 +42,25 @@ REQUIRED_EXPECTATIONS = (
     "required_live_checks",
     "required_checks",
     "max_receipt_age_days",
+    "gitlab_receipts",
 )
+REPEATABLE_GITLAB_OPERATIONS = (
+    ("gitlab_milestone", "create"),
+    ("gitlab_milestone", "update"),
+    ("gitlab_milestone", "adjust-time"),
+    ("gitlab_issue", "open-bug"),
+    ("gitlab_wiki", "create"),
+    ("gitlab_wiki", "update"),
+    ("gitlab_runner", "assign"),
+)
+REQUIRED_GITLAB_OPERATIONS = {
+    ("gitlab_access", None, None),
+    ("gitlab_runner", "create", "APPLIED"),
+} | {
+    (kind, operation, action)
+    for kind, operation in REPEATABLE_GITLAB_OPERATIONS
+    for action in ("APPLIED", "NO_OP")
+}
 
 
 class AcceptanceError(RuntimeError):
@@ -82,10 +100,27 @@ def _load_expected(path: Path) -> dict[str, Any]:
                 "target_path",
             )
         )
-        or (item.get("kind") != "gitlab_access" and not item.get("operation"))
+        or (
+            item.get("kind") != "gitlab_access"
+            and (
+                not item.get("operation")
+                or item.get("result_action") not in {"APPLIED", "NO_OP"}
+            )
+        )
         for item in operations
     ):
         raise AcceptanceError("gitlab_receipt_expectation_invalid")
+    declared = {
+        (item["kind"], item.get("operation"), item.get("result_action"))
+        for item in operations
+    }
+    for kind, operation, action in sorted(
+        REQUIRED_GITLAB_OPERATIONS - declared,
+        key=lambda entry: tuple(str(value) for value in entry),
+    ):
+        raise AcceptanceError(
+            f"gitlab_receipt_expectation_missing:{kind}:{operation or 'check'}:{action or 'check'}"
+        )
     return data
 
 
@@ -246,9 +281,13 @@ def _check_gitlab_receipt(
         ):
             problems.append(f"{name}:access_readback_missing")
     elif (
-        receipt.get("operation") != required.get("operation")
+        receipt.get("phase") != "APPLY"
+        or receipt.get("mutated") is not (required.get("result_action") == "APPLIED")
+        or receipt.get("operation") != required.get("operation")
+        or receipt.get("result_action") != required.get("result_action")
         or not isinstance(receipt.get("readback"), dict)
         or receipt["readback"].get("verified") is not True
+        or receipt["readback"].get("action") != required.get("result_action")
         or receipt.get("errors")
     ):
         problems.append(f"{name}:operation_readback_missing")
@@ -321,7 +360,12 @@ def evaluate(
         candidates = [
             (name, receipt)
             for name, receipt in by_host.get(required["execution_host"], [])
-            if receipt.get("kind") == kind and receipt.get("operation") == operation
+            if receipt.get("kind") == kind
+            and receipt.get("operation") == operation
+            and (
+                kind == "gitlab_access"
+                or receipt.get("result_action") == required.get("result_action")
+            )
         ]
         if not candidates:
             problems.append(f"{label}:receipt_missing")

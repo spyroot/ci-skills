@@ -18,6 +18,7 @@ from .gitlab_actions import (
     _required_text,
     _same,
 )
+from .gitlab_api import GitLabAPIError, create_guard, uncertain_write
 
 
 def prepare(args: Namespace) -> tuple[dict[str, Any], None, None]:
@@ -39,47 +40,92 @@ def prepare(args: Namespace) -> tuple[dict[str, Any], None, None]:
 
 def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
     base = f"projects/{target_id}/issues"
+    with create_guard(
+        plan.origin, plan.target_kind, target_id, "issue", plan.body["title"]
+    ) as guard:
+        matches = _find_exact(api, session, base, plan.body["title"])
+        if matches:
+            if matches[0]["state"] != "opened":
+                raise ActionError("existing_issue_closed")
+            iid = _id(matches[0].get("iid"), "issue")
+            current = _object(
+                api.get_json(session, f"{base}/{iid}"), "issue", "iid", "title"
+            )
+            if not _same(current, plan.body):
+                raise ActionError("existing_issue_differs")
+            guard.clear()
+            return {"action": "NO_OP", "iid": iid, "verified": True}
+        guard.mark_pending()
+        try:
+            response = api.post_json(session, base, plan.body)
+        except GitLabAPIError as exc:
+            if not uncertain_write(exc):
+                guard.clear()
+                raise
+            return _reconcile(api, session, plan, base, guard)
+        created = _object(response, "issue_create", "iid")
+        iid = _id(created["iid"], "issue")
+        observed = _object(
+            api.get_json(session, f"{base}/{iid}"), "issue_readback", "iid", "title"
+        )
+        if (
+            observed["iid"] != iid
+            or observed.get("state") != "opened"
+            or not _same(observed, plan.body)
+        ):
+            # A title match is enough to make a future create detect this
+            # resource, even if its state or other fields are wrong.
+            if observed.get("title") == plan.body["title"]:
+                guard.clear()
+            raise ActionError("issue_readback_mismatch")
+        guard.clear()
+        return {
+            "action": "APPLIED",
+            "iid": iid,
+            "verified": True,
+            "web_url": observed.get("web_url"),
+        }
+
+
+def _find_exact(api: Any, session: Any, base: str, title: str) -> list[dict[str, Any]]:
     matches = [
         item
         for item in _fields(
             _pages(
                 api,
                 session,
-                f"{base}?{urlencode({'state': 'all', 'search': plan.body['title']})}",
+                f"{base}?{urlencode({'state': 'all', 'search': title})}",
             ),
             "issue_list",
             "iid",
             "title",
             "state",
         )
-        if item.get("title") == plan.body["title"]
+        if item.get("title") == title
     ]
     if len(matches) > 1:
         raise ActionError("issue_title_ambiguous")
-    if matches:
-        if matches[0]["state"] != "opened":
-            raise ActionError("existing_issue_closed")
-        iid = _id(matches[0].get("iid"), "issue")
-        current = _object(
-            api.get_json(session, f"{base}/{iid}"), "issue", "iid", "title"
-        )
-        if not _same(current, plan.body):
-            raise ActionError("existing_issue_differs")
-        return {"action": "NO_OP", "iid": iid, "verified": True}
-    created = _object(api.post_json(session, base, plan.body), "issue_create", "iid")
-    iid = _id(created["iid"], "issue")
+    return matches
+
+
+def _reconcile(
+    api: Any, session: Any, plan: ActionPlan, base: str, guard: Any
+) -> dict[str, Any]:
+    """Read after an uncertain POST; never resend the write."""
+    matches = _find_exact(api, session, base, plan.body["title"])
+    if not matches:
+        raise ActionError("issue_create_outcome_uncertain_check_title_before_retry")
+    iid = _id(matches[0].get("iid"), "issue")
     observed = _object(
         api.get_json(session, f"{base}/{iid}"), "issue_readback", "iid", "title"
     )
-    if (
-        observed["iid"] != iid
-        or observed.get("state") != "opened"
-        or not _same(observed, plan.body)
-    ):
-        raise ActionError("issue_readback_mismatch")
+    if observed.get("state") != "opened" or not _same(observed, plan.body):
+        raise ActionError("issue_create_reconciliation_mismatch")
+    guard.clear()
     return {
         "action": "APPLIED",
         "iid": iid,
         "verified": True,
         "web_url": observed.get("web_url"),
+        "reconciled": True,
     }

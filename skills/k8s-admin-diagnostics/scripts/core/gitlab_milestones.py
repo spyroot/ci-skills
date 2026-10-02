@@ -19,6 +19,7 @@ from .gitlab_actions import (
     _required_text,
     _same,
 )
+from .gitlab_api import GitLabAPIError, create_guard, uncertain_write
 
 
 def prepare(args: Namespace) -> tuple[dict[str, Any], int | None, None]:
@@ -65,35 +66,7 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
     """Find one exact title or ID, mutate once, then GET independently."""
     base = f"{plan.target_kind}s/{target_id}/milestones"
     if plan.operation == "create":
-        exact = [
-            item
-            for item in _fields(
-                _pages(
-                    api, session, f"{base}?{urlencode({'title': plan.body['title']})}"
-                ),
-                "milestone_list",
-                "id",
-                "title",
-            )
-            if item.get("title") == plan.body["title"]
-        ]
-        if len(exact) > 1:
-            raise ActionError("milestone_title_ambiguous")
-        if exact:
-            identifier = _id(exact[0].get("id"), "milestone")
-            current = _object(
-                api.get_json(session, f"{base}/{identifier}"),
-                "milestone",
-                "id",
-                "title",
-            )
-            if not _same(current, plan.body):
-                raise ActionError("existing_milestone_differs_use_update")
-            return {"action": "NO_OP", "id": identifier, "verified": True}
-        created = _object(
-            api.post_json(session, base, plan.body), "milestone_create", "id"
-        )
-        identifier = _id(created["id"], "milestone")
+        return _create(api, session, plan, base, target_id)
     else:
         identifier = _positive(plan.resource_id, "milestone_id")
         current = _object(
@@ -101,7 +74,28 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
         )
         if _same(current, plan.body):
             return {"action": "NO_OP", "id": identifier, "verified": True}
-        api.put_json(session, f"{base}/{identifier}", plan.body)
+        try:
+            api.put_json(session, f"{base}/{identifier}", plan.body)
+        except GitLabAPIError as exc:
+            if not uncertain_write(exc):
+                raise
+            observed = _object(
+                api.get_json(session, f"{base}/{identifier}"),
+                "milestone_readback",
+                "id",
+                "title",
+            )
+            if observed["id"] != identifier or not _same(observed, plan.body):
+                raise ActionError(
+                    "milestone_update_outcome_uncertain_check_id_before_retry"
+                ) from None
+            return {
+                "action": "APPLIED",
+                "id": identifier,
+                "verified": True,
+                "title": observed["title"],
+                "reconciled": True,
+            }
     observed = _object(
         api.get_json(session, f"{base}/{identifier}"),
         "milestone_readback",
@@ -116,3 +110,78 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
         "verified": True,
         "title": observed["title"],
     }
+
+
+def _find_exact(api: Any, session: Any, base: str, title: str) -> list[dict[str, Any]]:
+    exact = [
+        item
+        for item in _fields(
+            _pages(api, session, f"{base}?{urlencode({'title': title})}"),
+            "milestone_list",
+            "id",
+            "title",
+        )
+        if item.get("title") == title
+    ]
+    if len(exact) > 1:
+        raise ActionError("milestone_title_ambiguous")
+    return exact
+
+
+def _create(
+    api: Any, session: Any, plan: ActionPlan, base: str, target_id: int
+) -> dict[str, Any]:
+    with create_guard(
+        plan.origin, plan.target_kind, target_id, "milestone", plan.body["title"]
+    ) as guard:
+        exact = _find_exact(api, session, base, plan.body["title"])
+        if exact:
+            identifier = _id(exact[0].get("id"), "milestone")
+            current = _object(
+                api.get_json(session, f"{base}/{identifier}"),
+                "milestone",
+                "id",
+                "title",
+            )
+            if not _same(current, plan.body):
+                raise ActionError("existing_milestone_differs_use_update")
+            guard.clear()
+            return {"action": "NO_OP", "id": identifier, "verified": True}
+        guard.mark_pending()
+        try:
+            response = api.post_json(session, base, plan.body)
+        except GitLabAPIError as exc:
+            if not uncertain_write(exc):
+                guard.clear()
+                raise
+            exact = _find_exact(api, session, base, plan.body["title"])
+            if not exact:
+                raise ActionError(
+                    "milestone_create_outcome_uncertain_check_title_before_retry"
+                ) from None
+            identifier = _id(exact[0].get("id"), "milestone")
+            reconciled = True
+        else:
+            created = _object(response, "milestone_create", "id")
+            identifier = _id(created["id"], "milestone")
+            reconciled = False
+        observed = _object(
+            api.get_json(session, f"{base}/{identifier}"),
+            "milestone_readback",
+            "id",
+            "title",
+        )
+        if observed["id"] != identifier or not _same(observed, plan.body):
+            if observed.get("title") == plan.body["title"]:
+                guard.clear()
+            raise ActionError("milestone_readback_mismatch")
+        guard.clear()
+        result = {
+            "action": "APPLIED",
+            "id": identifier,
+            "verified": True,
+            "title": observed["title"],
+        }
+        if reconciled:
+            result["reconciled"] = True
+        return result

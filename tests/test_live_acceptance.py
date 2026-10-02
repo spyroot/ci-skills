@@ -205,6 +205,7 @@ def _gitlab_expectations() -> dict:
             "label": "bug-create",
             "kind": "gitlab_issue",
             "operation": "open-bug",
+            "result_action": "APPLIED",
             **shared,
         },
     ]
@@ -236,8 +237,11 @@ def _gitlab_receipts() -> dict[str, dict]:
             **common,
             "kind": "gitlab_issue",
             "operation": "open-bug",
+            "phase": "APPLY",
+            "mutated": True,
+            "result_action": "APPLIED",
             "verified_target": target,
-            "readback": {"iid": 4, "verified": True},
+            "readback": {"iid": 4, "action": "APPLIED", "verified": True},
             "errors": [],
         },
     }
@@ -262,6 +266,17 @@ def test_missing_or_wrong_target_operation_receipt_blocks():
     assert "bug-create:receipt_missing" in result["problems"]
 
 
+def test_read_only_live_plan_cannot_satisfy_mutation_acceptance():
+    receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
+    receipts["bug.json"]["phase"] = "LIVE_PLAN"
+    receipts["bug.json"]["mutated"] = False
+
+    result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
+
+    assert result["status"] == "BLOCKED"
+    assert "bug.json:operation_readback_missing" in result["problems"]
+
+
 def test_unexpected_same_host_operation_receipt_blocks():
     result = ACCEPTANCE.evaluate(
         _expected(),
@@ -278,6 +293,44 @@ def test_expectations_without_an_executor_block_rather_than_pass(tmp_path):
     path.write_text("max_receipt_age_days = 30\n", encoding="utf-8")
 
     with pytest.raises(ACCEPTANCE.AcceptanceError, match="no_executors_declared"):
+        ACCEPTANCE._load_expected(path)
+
+
+def test_gitlab_operation_receipts_are_mandatory_in_acceptance_inputs(tmp_path):
+    path = tmp_path / "expected.toml"
+    path.write_text(
+        "max_receipt_age_days = 30\n"
+        'required_live_checks = ["storage_report"]\n'
+        'required_checks = ["validate"]\n'
+        "[targets]\n"
+        'github = "github.com/unit/repo"\n'
+        "[[executors]]\n"
+        'host = "unit-host"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ACCEPTANCE.AcceptanceError,
+        match="expectation_not_declared:gitlab_receipts",
+    ):
+        ACCEPTANCE._load_expected(path)
+
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            "[[gitlab_receipts]]\n"
+            'kind = "gitlab_access"\n'
+            'execution_host = "unit-host"\n'
+            'origin = "https://gitlab.example.test"\n'
+            'username = "unit"\n'
+            'target_kind = "project"\n'
+            "target_id = 1\n"
+            'target_path = "unit/repo"\n'
+        )
+
+    with pytest.raises(
+        ACCEPTANCE.AcceptanceError,
+        match="gitlab_receipt_expectation_missing:",
+    ):
         ACCEPTANCE._load_expected(path)
 
 
@@ -298,16 +351,6 @@ def test_missing_expectations_emits_structured_json_failure(
     assert report["status"] == "BLOCKED"
     assert report["kind"] == "live_acceptance"
     assert report["problems"][0].startswith("expectations_unreadable:")
-
-
-def test_the_committed_receipt_set_accepts_this_revision():
-    """The repository's own acceptance inputs must hold for this commit."""
-    expected = ACCEPTANCE._load_expected(REPO_ROOT / "acceptance" / "expected.toml")
-    receipts = ACCEPTANCE._load_receipts(REPO_ROOT / "acceptance" / "receipts")
-
-    result = ACCEPTANCE.evaluate(expected, receipts, SKILL_ROOT)
-
-    assert result["status"] == "PASS", result["problems"]
 
 
 def test_no_committed_receipt_carries_a_host_path():

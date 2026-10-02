@@ -34,8 +34,12 @@ UNIVERSAL_OPTIONS: dict[str, str] = {
     "--human": "human summary even when stdout is not a terminal",
     "--dry-run": "list planned probes without contacting any API; never access evidence",
     "--revision": "exact source commit of the installed copy, recorded as a claim",
-    "--output-dir": "write paired JSON and text reports; nothing is persisted without it",
+    "--output-dir": "write paired JSON and text reports to this explicit path",
     "--describe": "this command's machine-readable contract, then exit",
+    "--log-format": "diagnostic log format: text or JSON Lines (default: text)",
+    "--log-level": "minimum diagnostic level: debug, info, warning, or error",
+    "--log-file": "also append sanitized diagnostics to this exact path",
+    "--run-id": "caller-selected identifier included in diagnostic logs",
 }
 
 # Capability tiers. A command declaring a capability accepts all of its options.
@@ -316,8 +320,9 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "--description": "runner description and server-visible recovery key",
             "--tag": "runner tag; repeat for multiple tags",
             "--token-out": "caller-selected 0600 file for the one-time runner token",
+            "--live-plan": "read exact group project IDs and print an apply-ready plan without writes",
             "--apply": "perform the validated change",
-            "--confirm-plan": "SHA-256 fingerprint printed by the dry-run plan",
+            "--confirm-plan": "SHA-256 fingerprint printed by the live plan for group assignment, otherwise the dry-run plan",
             "--timeout": "maximum seconds for each external request",
             "--receipt-out": "write a sanitized, shareable operation receipt",
         },
@@ -372,11 +377,12 @@ STATUS_MEANING = {
     "PARTIAL": "the read completed and a component is unhealthy; see access_proven",
     "BLOCKED": "an authority or a required read failed; see blocking_live_checks",
     "DRY_RUN": "a probe plan only, never access evidence",
+    "PLANNED": "a live read-only operation plan, with no resource mutation",
     "UNKNOWN": "a per-item reading could not be taken, preserved rather than coerced",
 }
 
 EXIT_CODES = {
-    "0": "PASS or an explicitly marked DRY_RUN",
+    "0": "PASS, DRY_RUN, or a live read-only PLANNED result",
     "2": "BLOCKED or PARTIAL, or an input that could not be used",
 }
 

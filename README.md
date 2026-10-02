@@ -83,13 +83,19 @@ conda run -n ci-skills python tools/install_k8s_admin_diagnostics.py \
   --skills-dir ~/.claude/skills --apply --confirm-install --json
 conda run -n ci-skills python tools/install_k8s_admin_diagnostics.py \
   --upgrade --apply --confirm-upgrade --json
+conda run -n ci-skills python tools/install_k8s_admin_diagnostics.py \
+  --recover --json
+conda run -n ci-skills python tools/install_k8s_admin_diagnostics.py \
+  --recover --apply --confirm-recover --json
 ```
 
 The default destination is `$CODEX_HOME/skills/k8s-admin-diagnostics`, or
 `~/.codex/skills/k8s-admin-diagnostics` when `CODEX_HOME` is unset; pass
 `--skills-dir PATH` for any other runtime. Existing installs require
-`--upgrade --apply --confirm-upgrade`; the previous version is preserved as a
-hidden sibling for rollback. Both install and upgrade default to dry-run.
+`--upgrade --apply --confirm-upgrade`; each previous version is preserved as a
+hidden sibling. If an install is interrupted, inspect the `--recover` dry-run
+result, then apply that recovery before retrying. Install, upgrade, and recovery
+default to dry-run.
 The installer requires a clean checkout of the skill subtree so the revision it
 reports is verified against the source bytes, and reports the installed digest
 — which is the value to compare against the `skill.digest` in any later report.
@@ -168,6 +174,13 @@ reads it back. The same pattern applies to `gitlab_issue.py open-bug`,
 `gitlab_wiki.py create|update`, and `gitlab_runner.py assign|create`. Runner
 creation requires `--token-out PATH` on apply to save the one-time token at the
 caller-selected path; creating a record does not register or start a runner.
+
+Group runner assignment has one extra read-only step: call
+`gitlab_runner.py assign --group GROUP --runner-id ID --live-plan --json` to
+read the exact project IDs. Its `PLANNED` result supplies the digest for
+`--apply --confirm-plan DIGEST`. Apply rechecks group membership and blocks
+before a write if it changed. The default offline `DRY_RUN` plan makes no API
+call and is not apply-ready for a group.
 
 Run `<command> --describe` for the machine contract and `--help` for examples.
 The generated `tools.json` marks each command read-only or mutating, lists its

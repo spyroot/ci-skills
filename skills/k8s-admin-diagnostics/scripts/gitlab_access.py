@@ -7,12 +7,13 @@ import argparse
 import json
 import socket
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 from core.access import check_gitlab_operation_access
 from core.catalog import describe
-from core.cli import _failure, output_mode, parser, resolve_target
+from core.cli import _failure, log_event, output_mode, parser, resolve_target
 from core.credentials import bind_gitlab_session
 from core.portable import write_portable_receipt
 from core.report import emit
@@ -61,13 +62,14 @@ def _dry_run(
 
 
 def main(argv: list[str] | None = None) -> int:
+    started = time.monotonic()
     args = build_parser().parse_args(argv)
     if args.describe:
         sys.stdout.write(json.dumps(describe("gitlab_access.py"), indent=2) + "\n")
         return 0
     if args.operation != "check":
         return _failure(args, "gitlab_access", "arguments", "check_required")
-    if args.dry_run and (args.output_dir or args.receipt_out):
+    if args.dry_run and (args.output_dir or args.receipt_out or args.log_file):
         return _failure(
             args, "gitlab_access", "arguments", "dry_run_cannot_write_output"
         )
@@ -99,7 +101,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.receipt_out:
             source = "receipt"
             write_portable_receipt(result, args.receipt_out)
-        sys.stdout.write(emit(result, output_mode(args), args.output_dir))
+        rendered = emit(result, output_mode(args), args.output_dir)
+        log_event(
+            args,
+            "gitlab_access",
+            "result",
+            result["status"],
+            elapsed=time.monotonic() - started,
+        )
+        sys.stdout.write(rendered)
         return exit_code(result["status"])
     except (TargetError, OSError, RuntimeError, ValueError, TypeError) as exc:
         return _failure(args, "gitlab_access", source, str(exc))

@@ -20,7 +20,14 @@ RUNNERS = import_script_module("core.gitlab_runners")
 
 
 def _plan(
-    kind, operation, body, *, target_kind="project", resource_id=None, token_out=None
+    kind,
+    operation,
+    body,
+    *,
+    target_kind="project",
+    resource_id=None,
+    token_out=None,
+    project_ids=None,
 ):
     return ACTION.ActionPlan(
         kind=kind,
@@ -33,6 +40,7 @@ def _plan(
         body=body,
         resource_id=resource_id,
         token_out=str(token_out) if token_out else None,
+        project_ids=project_ids,
         revision="a" * 40,
     )
 
@@ -60,6 +68,9 @@ class FakeAPI:
 
     def put_json(self, session, endpoint, body):
         return self._next("PUT", endpoint, body)
+
+    def delete_json(self, session, endpoint):
+        return self._next("DELETE", endpoint)
 
 
 def _list(endpoint):
@@ -184,15 +195,29 @@ def test_wiki_update_reads_back_new_slug():
 
 
 def test_runner_group_assign_verifies_each_project_and_marks_partial():
-    plan = _plan("gitlab_runner", "assign", {}, target_kind="group", resource_id=7)
+    plan = _plan(
+        "gitlab_runner",
+        "assign",
+        {},
+        target_kind="group",
+        resource_id=7,
+        project_ids=(11, 12),
+    )
     projects = _list("groups/42/projects?include_subgroups=true&with_shared=false")
     api = FakeAPI(
         {
             ("GET", "runners/7"): [{"id": 7}],
             ("GET", projects): [[{"id": 11}, {"id": 12}]],
-            ("GET", _list("projects/11/runners")): [[], [{"id": 7}]],
+            ("GET", _list("projects/11/runners")): [
+                [],
+                [{"id": 7}],
+                [{"id": 7}],
+                [],
+                [],
+            ],
             ("POST", "projects/11/runners"): [{"id": 7}],
-            ("GET", _list("projects/12/runners")): [[], []],
+            ("DELETE", "projects/11/runners/7"): [{}],
+            ("GET", _list("projects/12/runners")): [[], [], [], [], []],
             ("POST", "projects/12/runners"): [{"id": 7}],
         }
     )
@@ -201,9 +226,14 @@ def test_runner_group_assign_verifies_each_project_and_marks_partial():
     assert result["action"] == "PARTIAL"
     assert [item["project_id"] for item in result["projects"]] == [11]
     assert result["errors"][0]["project_id"] == 12
+    assert result["cleanup"]["status"] == "PASS"
+    assert result["projects"][0]["action"] == "ROLLED_BACK"
 
 
-def test_runner_create_saves_token_0600_without_reporting_it(tmp_path: Path):
+def test_runner_create_saves_token_0600_without_reporting_it(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     destination = tmp_path / "one-time.token"
     plan = _plan(
         "gitlab_runner",
@@ -220,19 +250,21 @@ def test_runner_create_saves_token_0600_without_reporting_it(tmp_path: Path):
         }
     )
     result = RUNNERS.apply(api, object(), plan, 42)
-    assert result == {
-        "action": "APPLIED",
-        "id": 23,
-        "verified": True,
-        "token_saved": True,
-    }
+    assert result["action"] == "APPLIED"
+    assert result["id"] == 23
+    assert result["verified"] is True
+    assert result["token_saved"] is True
+    assert result["cleanup"]["status"] == "PASS"
     assert destination.read_text() == "private-one-time-value\n"
     assert stat.S_IMODE(destination.stat().st_mode) == 0o600
     assert "private-one-time-value" not in json.dumps(result)
     assert str(destination) not in json.dumps(result)
 
 
-def test_runner_create_uncertain_provider_result_leaves_no_token_file(tmp_path: Path):
+def test_runner_create_uncertain_provider_result_leaves_no_token_file(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     destination = tmp_path / "one-time.token"
     plan = _plan(
         "gitlab_runner",
@@ -301,7 +333,7 @@ def test_transport_pins_host_and_sends_body_through_private_file():
         captured["argv"][captured["argv"].index("--hostname") + 1]
         == "gitlab.example.test"
     )
-    assert "runner" not in " ".join(captured["argv"])
+    assert "runner" not in captured["argv"]
     assert captured["env"]["GITLAB_TOKEN"] == "selected"
     assert captured["body"] == {"description": "runner"}
 
@@ -361,3 +393,85 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
     assert data["errors"] == [
         {"source": "gitlab_action", "reason": "list_response_invalid_shape"}
     ]
+
+
+@pytest.mark.parametrize("dry_run_flag", ([], ["--dry-run"]))
+def test_action_plan_rejects_output_paths_without_creating_files(
+    tmp_path: Path, capsys, dry_run_flag
+):
+    output = tmp_path / "reports"
+    result = ACTION.run_action_cli(
+        "gitlab_issue",
+        [
+            "open-bug",
+            "--project",
+            "unit/repo",
+            "--title",
+            "planned",
+            "--output-dir",
+            str(output),
+            "--json",
+            *dry_run_flag,
+        ],
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert report["status"] == "BLOCKED"
+    assert report["errors"][0]["reason"] == "dry_run_cannot_write_output"
+    assert not output.exists()
+
+
+def test_action_plan_rejects_log_file_without_creating_it(tmp_path: Path, capsys):
+    output = tmp_path / "audit.jsonl"
+    result = ACTION.run_action_cli(
+        "gitlab_issue",
+        [
+            "open-bug",
+            "--project",
+            "unit/repo",
+            "--title",
+            "planned",
+            "--log-file",
+            str(output),
+            "--log-format",
+            "json",
+            "--json",
+        ],
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert result == 2
+    assert report["status"] == "BLOCKED"
+    assert not output.exists()
+
+
+def test_action_plan_json_diagnostic_is_separate_from_machine_result(
+    tmp_path: Path, capsys
+):
+    target = tmp_path / "target.toml"
+    target.write_text(
+        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
+        encoding="utf-8",
+    )
+    result = ACTION.run_action_cli(
+        "gitlab_issue",
+        [
+            "open-bug",
+            "--title",
+            "planned",
+            "--target",
+            str(target),
+            "--log-format",
+            "json",
+            "--run-id",
+            "unit-run",
+            "--json",
+        ],
+    )
+    emitted = capsys.readouterr()
+    report = json.loads(emitted.out)
+    diagnostic = json.loads(emitted.err)
+    assert result == 0
+    assert report["status"] == "DRY_RUN"
+    assert diagnostic["run_id"] == "unit-run"
+    assert diagnostic["mode"] == "dry_run"
+    assert diagnostic["result"] == "DRY_RUN"

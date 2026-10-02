@@ -8,19 +8,20 @@ import json
 import re
 import socket
 import sys
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .access import check_gitlab_operation_access
-from .cli import _failure, output_mode, parser, resolve_target
+from .cli import _failure, log_event, output_mode, parser, resolve_target
 from .credentials import bind_gitlab_session
 from .gitlab_api import GitLabAPIError, GlabAPIClient
 from .portable import write_portable_receipt
 from .report import emit
 from .runtime import sanitize
-from .status import DRY_RUN, PARTIAL, PASS, exit_code
+from .status import DRY_RUN, PARTIAL, PASS, PLANNED, exit_code
 from .target import GitLabOperationTarget, TargetError, load_gitlab_target
 
 
@@ -41,6 +42,7 @@ class ActionPlan:
     resource_id: int | str | None = None
     token_out: str | None = None
     revision: str | None = None
+    project_ids: tuple[int, ...] | None = None
 
     @property
     def digest(self) -> str:
@@ -57,6 +59,7 @@ class ActionPlan:
             "resource_id": self.resource_id,
             "token_out": self.token_out,
             "revision": self.revision,
+            "project_ids": self.project_ids,
         }
         encoded = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
@@ -68,6 +71,15 @@ class ActionPlan:
             "target_kind": self.target_kind,
             "target_reference": self.target_reference,
             "resource_id": self.resource_id,
+            "project_ids": list(self.project_ids)
+            if self.project_ids is not None
+            else None,
+            "confirmation_ready": not (
+                self.kind == "gitlab_runner"
+                and self.operation == "assign"
+                and self.target_kind == "group"
+                and self.project_ids is None
+            ),
             "fields": sorted(self.body),
             "body_sha256": hashlib.sha256(
                 json.dumps(self.body, sort_keys=True, separators=(",", ":")).encode()
@@ -363,6 +375,11 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
         result.add_argument("--content-file", metavar="PATH", help="UTF-8 wiki content")
     if kind == "gitlab_runner":
         result.add_argument(
+            "--live-plan",
+            action="store_true",
+            help="read exact group project IDs and print an apply-ready plan without writes",
+        )
+        result.add_argument(
             "--runner-id", type=int, help="numeric runner ID for assignment"
         )
         result.add_argument(
@@ -384,7 +401,7 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
         "--apply", action="store_true", help="perform the planned change"
     )
     result.add_argument(
-        "--confirm-plan", metavar="SHA256", help="exact dry-run plan digest"
+        "--confirm-plan", metavar="SHA256", help="exact dry-run or live-plan digest"
     )
     result.add_argument(
         "--timeout", type=int, default=25, metavar="SECONDS", help="per-request timeout"
@@ -421,6 +438,7 @@ def _result(plan: ActionPlan, status: str, **fields: Any) -> dict[str, Any]:
 
 def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
     """Adapter used by every operation entrypoint; no other CLI owns writes."""
+    started = time.monotonic()
     args = action_parser(kind).parse_args(argv)
     if args.describe:
         from .catalog import COMMAND_BY_KIND, describe
@@ -433,20 +451,36 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         return _failure(args, kind, "arguments", "action_required")
     if args.apply and args.dry_run:
         return _failure(args, kind, "arguments", "apply_and_dry_run_conflict")
+    live_plan = getattr(args, "live_plan", False)
+    if live_plan and (args.apply or args.dry_run):
+        return _failure(args, kind, "arguments", "live_plan_mode_conflict")
     if args.timeout <= 0 or args.timeout > 300:
         return _failure(args, kind, "arguments", "timeout_out_of_range")
     if args.confirm_plan and not args.apply:
         return _failure(args, kind, "arguments", "confirm_plan_requires_apply")
     if args.receipt_out and not args.apply:
         return _failure(args, kind, "arguments", "receipt_out_requires_apply")
+    if not args.apply and not live_plan and (args.output_dir or args.log_file):
+        return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
     try:
         path, target_source = resolve_target(args.target)
         target = load_gitlab_target(path)
         plan = make_plan(kind, args, target, target_source)
-        if not args.apply:
-            data = _result(plan, DRY_RUN)
+        group_assignment = (
+            plan.kind == "gitlab_runner"
+            and plan.operation == "assign"
+            and plan.target_kind == "group"
+        )
+        if live_plan and not group_assignment:
+            raise ActionError("live_plan_requires_group_runner_assignment")
+        if not args.apply and not live_plan:
+            data = _result(plan, DRY_RUN, phase="OFFLINE_PLAN", mutated=False)
         else:
-            if not args.confirm_plan or args.confirm_plan != plan.digest:
+            if (
+                args.apply
+                and not group_assignment
+                and (not args.confirm_plan or args.confirm_plan != plan.digest)
+            ):
                 raise ActionError("confirm_plan_mismatch_rerun_dry_run")
             session = bind_gitlab_session(
                 target,
@@ -457,27 +491,76 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
             )
             api = GlabAPIClient(timeout=args.timeout)
             access = check_gitlab_operation_access(session, api_client=api)
-            record = apply_plan(api, session, access, plan)
-            errors = [
-                {"source": f"project:{error['project_id']}", "reason": error["reason"]}
-                for error in record.get("errors", [])
-            ]
-            data = _result(
-                plan,
-                PASS if record.get("verified") is True and not errors else PARTIAL,
-                records=[record],
-                errors=errors,
-                identity=access.get("identity"),
-                verified_target=access.get("target"),
-                readback=record,
-                credential_source=session.credential_source,
-                credential_digest=session.credential_digest,
-                skill=session.skill,
-                cleanup={"status": "NOT_APPLICABLE"},
-            )
+            if access.get("status") != PASS:
+                raise ActionError("gitlab_access_not_pass")
+            if group_assignment:
+                from .gitlab_runners import project_ids
+
+                selected = _object(access.get("target"), "access_target", "kind", "id")
+                if selected["kind"] != "group":
+                    raise ActionError("access_target_kind_mismatch")
+                plan = replace(
+                    plan,
+                    project_ids=project_ids(
+                        api, session, _id(selected["id"], "target")
+                    ),
+                )
+            if live_plan:
+                data = _result(
+                    plan,
+                    PLANNED,
+                    phase="LIVE_PLAN",
+                    mutated=False,
+                    identity=access.get("identity"),
+                    verified_target=access.get("target"),
+                    credential_source=session.credential_source,
+                    credential_digest=session.credential_digest,
+                    skill=session.skill,
+                    readback={
+                        "verified": True,
+                        "project_ids": list(plan.project_ids or ()),
+                    },
+                )
+            else:
+                if not args.confirm_plan or args.confirm_plan != plan.digest:
+                    raise ActionError("confirm_plan_mismatch_rerun_live_plan")
+                record = apply_plan(api, session, access, plan)
+                errors = [
+                    {
+                        "source": f"project:{error['project_id']}",
+                        "reason": error["reason"],
+                    }
+                    for error in record.get("errors", [])
+                ]
+                cleanup = record.get("cleanup", {"status": "NOT_APPLICABLE"})
+                complete = (
+                    record.get("verified") is True
+                    and not errors
+                    and cleanup.get("status") not in {"BLOCKED", "PARTIAL"}
+                )
+                data = _result(
+                    plan,
+                    PASS if complete else PARTIAL,
+                    phase="APPLY",
+                    mutated=record.get("action") == "APPLIED",
+                    result_action=record.get("action"),
+                    records=[record],
+                    errors=errors,
+                    identity=access.get("identity"),
+                    verified_target=access.get("target"),
+                    readback=record,
+                    credential_source=session.credential_source,
+                    credential_digest=session.credential_digest,
+                    skill=session.skill,
+                    cleanup=cleanup,
+                )
         if args.receipt_out:
             write_portable_receipt(data, args.receipt_out)
-        sys.stdout.write(emit(data, output_mode(args), args.output_dir))
+        rendered = emit(data, output_mode(args), args.output_dir)
+        log_event(
+            args, kind, "result", data["status"], elapsed=time.monotonic() - started
+        )
+        sys.stdout.write(rendered)
         return exit_code(data["status"])
     except (ActionError, TargetError, GitLabAPIError, OSError, RuntimeError) as exc:
         return _failure(args, kind, "gitlab_action", sanitize(str(exc), 240))

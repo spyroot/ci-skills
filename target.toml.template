@@ -52,9 +52,10 @@ url = "https://gitlab.example.com"
 # group = "group"
 # runner_id = 123
 
-# Optional: a private token file instead of the `glab` credential store. The
-# The full diagnostics access check needs an instance ADMINISTRATOR identity;
-# an operation checks the permissions needed for its selected action.
+# Optional: a private token file instead of the `glab` credential store.
+# The full diagnostics access check needs an instance administrator identity.
+# The GitLab-only check proves identity and target read access; an action's
+# apply and read-back establish whether that action is authorized.
 # token_file = "/home/operator/.ci-skills/credentials/gitlab.token"
 
 [kubernetes]

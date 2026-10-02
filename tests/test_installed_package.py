@@ -366,3 +366,29 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     assert data["kind"] == kind
     assert data["status"] == expected_status
     assert str(REPO_ROOT) not in result.stdout
+
+    failure = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / script_name),
+            "--target",
+            str(tmp_path / "missing-target.toml"),
+            mode,
+            *(
+                str(content_file) if item == "@CONTENT@" else item
+                for item in extra_args
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    blocked = loader(failure.stdout)
+    assert failure.returncode == 2
+    assert blocked["kind"] == kind
+    assert blocked["status"] == "BLOCKED"
+    assert blocked["errors"]
+    assert str(REPO_ROOT) not in failure.stdout

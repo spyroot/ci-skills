@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -124,7 +125,7 @@ def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentPar
             "Output: a terminal gets the human summary; a pipe or file gets "
             "versioned JSON, so no flag is needed when a program reads this. "
             "Force it with --json, --yaml or --human. "
-            "Exit 0 = PASS or DRY_RUN, 2 = BLOCKED or PARTIAL. "
+            "Exit 0 = PASS, DRY_RUN or PLANNED; 2 = BLOCKED or PARTIAL. "
             "Run --describe for this command's machine-readable contract, or "
             "see tools.json for the whole skill. "
             f"Target resolves in order: --target, CI_SKILLS_TARGET, "
@@ -164,11 +165,87 @@ def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentPar
         metavar="SHA",
         help="exact source commit SHA (required for live installed copies without Git metadata)",
     )
+    result.add_argument(
+        "--log-format",
+        choices=("text", "json"),
+        default="text",
+        help="diagnostic format on stderr and in --log-file (default: text)",
+    )
+    result.add_argument(
+        "--log-level",
+        choices=("debug", "info", "warning", "error"),
+        default="info",
+        help="minimum diagnostic level (default: info)",
+    )
+    result.add_argument(
+        "--log-file",
+        metavar="PATH",
+        help="also append sanitized diagnostics to PATH",
+    )
+    result.add_argument(
+        "--run-id",
+        metavar="ID",
+        help="stable identifier for diagnostic logs",
+    )
     if output_dir:
         result.add_argument(
             "--output-dir", metavar="PATH", help="write paired JSON and human reports"
         )
     return result
+
+
+def log_event(
+    args: argparse.Namespace,
+    kind: str,
+    event: str,
+    status: str,
+    *,
+    elapsed: float = 0.0,
+    error_class: str | None = None,
+    persist: bool = True,
+) -> None:
+    """Emit one bounded, secret-free diagnostic line to stderr and an optional file."""
+    level = "error" if status in {BLOCKED, "PARTIAL"} else "info"
+    thresholds = {"debug": 0, "info": 1, "warning": 2, "error": 3}
+    if thresholds[level] < thresholds[getattr(args, "log_level", "info")]:
+        return
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "level": level,
+        "run_id": sanitize(getattr(args, "run_id", None) or "", 80)
+        .replace("\r", " ")
+        .replace("\n", " "),
+        "component": kind,
+        "operation": sanitize(getattr(args, "action", None) or "check", 40),
+        "mode": (
+            "live_plan"
+            if getattr(args, "live_plan", False)
+            else "dry_run"
+            if getattr(args, "dry_run", False) or not getattr(args, "apply", True)
+            else "live"
+        ),
+        "event": event,
+        "attempt": 1,
+        "resource": kind,
+        "result": status,
+        "elapsed_time_ms": max(0, round(elapsed * 1000)),
+        "error_class": error_class,
+    }
+    if getattr(args, "log_format", "text") == "json":
+        line = json.dumps(record, sort_keys=True) + "\n"
+    else:
+        line = (
+            f"{record['timestamp']} {level.upper()} {kind} "
+            f"{record['operation']} {event} result={status} "
+            f"run_id={record['run_id']}\n"
+        )
+    sys.stderr.write(line)
+    destination = getattr(args, "log_file", None)
+    if destination and persist:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(Path(destination).expanduser(), flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(line)
 
 
 def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> int:
@@ -183,6 +260,19 @@ def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> i
         "errors": [{"source": source, "reason": sanitize(reason, 240)}],
         "summary": {"record_count": 0, "error_count": 1},
     }
+    try:
+        log_event(
+            args,
+            kind,
+            "failure",
+            BLOCKED,
+            error_class=source,
+            persist=not getattr(args, "dry_run", False)
+            and getattr(args, "apply", True),
+        )
+    except OSError:
+        # The structured failure must survive an unavailable optional log file.
+        pass
     # The reader rule applies to a failure too. A program piping a cold run
     # hits the no-target error FIRST, so emitting only a stderr line there made
     # the one shape a caller cannot parse the one it meets first -- and it
@@ -204,6 +294,7 @@ def execute(
     *,
     live_checks: bool = False,
 ) -> int:
+    started = time.monotonic()
     kind = (
         ACCESS_CHECK_KIND
         if collect is None
@@ -224,6 +315,10 @@ def execute(
         contract = describe(script)
         sys.stdout.write(json.dumps(contract, indent=2, sort_keys=True) + "\n")
         return 0
+    if args.dry_run and any(
+        getattr(args, name, None) for name in ("output_dir", "receipt_out", "log_file")
+    ):
+        return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
     missing = missing_required_options(script, args) if script else []
     if missing:
         # Enforced here rather than by argparse because --describe must answer
@@ -306,7 +401,11 @@ def execute(
             )
             os.replace(partial, destination)
         mode = output_mode(args)
-        sys.stdout.write(emit(data, mode, getattr(args, "output_dir", None)))
+        rendered = emit(data, mode, getattr(args, "output_dir", None))
+        log_event(
+            args, kind, "result", data["status"], elapsed=time.monotonic() - started
+        )
+        sys.stdout.write(rendered)
         return exit_code(data["status"])
     except (
         TargetError,

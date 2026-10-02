@@ -66,7 +66,7 @@ Routing, in short:
 | why a volume or claim is stuck | `storage_report.py` |
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |
-| prove GitLab operation access | `gitlab_access.py check` |
+| read back GitLab target and identity | `gitlab_access.py check` |
 | create, update, or adjust milestone dates | `gitlab_milestone.py` |
 | open a bug issue | `gitlab_issue.py open-bug` |
 | create or update a wiki page | `gitlab_wiki.py` |
@@ -75,7 +75,8 @@ Routing, in short:
 ## 3. One target and output interface
 
 Every command accepts `--target`, `--json`, `--yaml`, `--human`, `--dry-run`,
-`--revision`, `--output-dir` and `--describe`. A command that filters records
+`--revision`, `--output-dir`, `--describe`, `--log-format`, `--log-level`,
+`--log-file`, and `--run-id`. A command that filters records
 accepts `--search`; one scoped to a namespace accepts `--namespace`; one
 reading a time range accepts `--last`, `--from` and `--to`. Learn the tier
 once and it holds everywhere.
@@ -88,6 +89,11 @@ resource before changing it and verifies it afterward. `--token-out PATH` is
 required when creating a runner record because GitLab returns its token once;
 the token never appears in a report. Runner registration and online readiness
 are separate from creating its record.
+
+For a group runner assignment, the offline plan has no project list and cannot
+authorize apply. Run `gitlab_runner.py assign --group GROUP --runner-id ID
+--live-plan` to read the exact project IDs and obtain an apply-ready digest.
+Apply re-reads that set and blocks if it changed before any assignment.
 
 `--target` resolves in four declared places — the argument, then
 `$CI_SKILLS_TARGET`, then `./.ci-skills/target.toml`, then
@@ -109,6 +115,7 @@ pair; pass the job's own interval when correlating a job.
   unhealthy. That is usually the finding, not an obstacle. Say which component.
 - `BLOCKED` — see `blocking_live_checks` and the surface `reason`.
 - `DRY_RUN` — a probe plan. Never access evidence.
+- `PLANNED` — a live, read-only group assignment plan with bound project IDs.
 - `UNKNOWN` — a per-item reading could not be taken. Preserve it; do not
   coerce it to a failure or a pass.
 - For GitLab writes, `PASS` means an applied change or verified no-op with
@@ -117,7 +124,7 @@ pair; pass the job's own interval when correlating a job.
   out of the cluster, not that the read failed. Say "unverified, evidence
   expired".
 
-Exit 0 is `PASS` or `DRY_RUN`; exit 2 is `BLOCKED` or `PARTIAL`.
+Exit 0 is `PASS`, `DRY_RUN`, or `PLANNED`; exit 2 is `BLOCKED` or `PARTIAL`.
 
 ## 5. Correlate, then state your confidence
 
