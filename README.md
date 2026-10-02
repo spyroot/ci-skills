@@ -1,4 +1,11 @@
-# Kubernetes admin diagnostics skill
+# CI, Gitlab and Kubernetes expert skill
+
+## Object
+
+This repo host agent specialization for and skill that allow agent perform
+expert level CI / K8S and Gitlab / Github action and knowledge.
+
+Each tool provide additional capabilityes.
 
 `k8s-admin-diagnostics` collects read-only GitHub, GitLab CI, Kubernetes
 storage, event and Cilium evidence, after proving it actually had the access it
@@ -7,6 +14,17 @@ claims. Its commands use `gh`, `glab` and `kubectl`.
 Output follows the reader: a terminal gets a human summary, a pipe or a file
 gets versioned JSON. A program calling these commands therefore needs no
 `--json` flag, though it may pass one.
+
+# Why Agent Skills?
+Agents are increasingly capable, but often don’t have the context they need to do real work reliably. Skills solve this by packaging procedural knowledge  This ci-skill gives agents:
+Domain expertise: Capture specialized knowledge —  analysis pipelines, k8s state 
+Repeatable workflows: Turn multi-step tasks into consistent, auditable procedures.
+Cross-product reuse: Build a skill once and use it across any skills-compatible agent.
+​
+Agents load skills through 
+
+Discovery -> Activation -> Reading Machine Readble Specfication -> Execution
+
 
 ## The protocol, in one table
 
