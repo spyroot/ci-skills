@@ -1,0 +1,16 @@
+---
+# Adjust default MD013 to 120 line length.
+# Exclude original vendor or third-party docs
+# ALl dirs are place-holders
+config:
+  default: true
+  MD013:
+    line_length: 120
+    code_blocks: false
+ignores:
+  - "docs/vendor/original/**"
+  - "docs/vendor/**"
+  - "docs/thirdparty/**"
+
+
+

@@ -3,9 +3,9 @@
 ## Object
 
 This repo host agent specialization for and skill that allow agent perform
-expert level CI / K8S and Gitlab / Github action and knowledge.
+expert level CI / K8S and Gitlab / GitHub Action and knowledge.
 
-Each tool provide additional capabilityes.
+Each tool provide additional capabilities.
 
 `k8s-admin-diagnostics` collects read-only GitHub, GitLab CI, Kubernetes
 storage, event and Cilium evidence, after proving it actually had the access it
@@ -21,13 +21,13 @@ Agents are increasingly capable, but often don’t have the context they need to
 do real work reliably. Skills solve this by packaging procedural knowledge
 This ci-skill gives agents:
 Domain expertise: Capture specialized knowledge —  analysis pipelines, k8s state
-Repeatable workflows: Turn multi-step tasks into consistent, auditable procedures.
+Repeatable workflows: Turn multistep tasks into consistent, auditable procedures.
 Cross-product reuse: Build a skill once and use it across any
 skills-compatible agent.
 ​
 Agents load skills through
 
-Discovery -> Activation -> Reading Machine Readble Specfication -> Execution
+Discovery → Activation → Reading Machine Readable Specification → Execution
 
 ## The protocol, in one table
 
@@ -71,7 +71,7 @@ is found, the error names every path it searched and the template to copy.
 ## After you clone
 
 Five steps. The whole point of the third is that you do it once and no command
-afterwards needs an argument.
+afterward needs an argument.
 
 **1. Install the tools.** Python 3.11 or newer with PyYAML, plus `gh`, `glab`
 and `kubectl` on the host where the commands will run.
@@ -148,7 +148,7 @@ target file — installation grants nothing.
 
 ## If you are an agent
 
-Start here and you will not need to read the rest.
+Start here, and you will not need to read the rest.
 
 1. **Run `access_check.py` first.** One call. On `PASS` the receipt tells you
    the effective source and identity per authority, so you never go looking for

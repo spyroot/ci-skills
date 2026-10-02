@@ -1,0 +1,45 @@
+---
+# kube-linter policy for this repository's Kubernetes manifests.
+#
+# Defaults are off (doNotAutoAddDefaults); only the checks listed below run.
+# Each listed check passes on the current manifests, so any new hit is a
+# regression.
+# Excluded on purpose; do not re-add:
+#   cluster-admin-role-binding  CI runner is cluster-admin.
+#   default-service-account     scratch pod and ISO server use it.
+#   exposed-services            node-ISO server is a NodePort for blade boot.
+#
+# Re-measure:
+#   kube-linter lint --do-not-auto-add-defaults --include <all checks> <inputs>
+checks:
+  doNotAutoAddDefaults: true
+  include:
+    - dangling-horizontalpodautoscaler
+    - dangling-ingress
+    - dangling-networkpolicy
+    - dangling-networkpolicypeer-podselector
+    - dangling-servicemonitor
+    - deprecated-service-account-field
+    - docker-sock
+    - drop-net-raw-capability
+    - duplicate-env-var
+    - env-var-secret
+    - host-ipc
+    - host-network
+    - host-pid
+    - invalid-target-ports
+    - liveness-port
+    - mismatching-selector
+    - no-extensions-v1beta
+    - pdb-max-unavailable
+    - priority-class-name
+    - privilege-escalation-container
+    - privileged-container
+    - privileged-ports
+    - readiness-port
+    - scc-deny-privileged-container23
+    - ssh-port
+    - startup-port
+    - unsafe-proc-mount
+    - unsafe-sysctls
+    - writable-host-mount

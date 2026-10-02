@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "default place for example .env files excluded"
+paths = ['''(^|/)docs/''']
