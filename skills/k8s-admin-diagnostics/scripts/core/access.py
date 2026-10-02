@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from .catalog import GITLAB_VARIABLES, github_variables
 from .cilium import (
@@ -19,6 +20,7 @@ from .cilium import (
     valid_health,
 )
 from .credentials import Sources, assert_kubeconfig_unchanged
+from .gitlab_session import BoundGitLabSession
 from .runtime import CommandResult, error_class, run_command
 from .status import BLOCKED, DRY_RUN, PASS
 from .target import Target
@@ -365,6 +367,117 @@ def gitlab_access(target: Target) -> Surface:
         None,
         credential_source=source,
     )
+
+
+def _gitlab_positive_id(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _gitlab_origin_matches(value: Any, origin: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    observed = urlsplit(value)
+    expected = urlsplit(origin)
+    return (
+        observed.scheme == expected.scheme
+        and observed.netloc.lower() == expected.netloc.lower()
+        and observed.username is None
+        and observed.password is None
+    )
+
+
+def _gitlab_safe_reason(error: Exception) -> str:
+    """Never place an API body, stderr, or credential in the access report."""
+    reason = getattr(error, "reason", None)
+    if reason is None and isinstance(error, ValueError):
+        reason = str(error)
+    if isinstance(reason, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", reason):
+        return reason
+    return "provider_request_failed"
+
+
+def check_gitlab_operation_access(
+    session: BoundGitLabSession, api_client: Any = None
+) -> dict[str, Any]:
+    """Read back one bound GitLab identity and exact numeric target.
+
+    This gate is separate from the diagnostic instance-admin gate: a project
+    or group operation does not imply GitHub, Kubernetes, or instance runner
+    permissions. Both API reads use the same bound credential and host.
+    """
+    receipt: dict[str, Any] = {
+        "schema_version": "1.0",
+        "kind": "gitlab_access",
+        "status": BLOCKED,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "execution_host": session.execution_host,
+        "origin": session.origin,
+        "target_source": session.target_source,
+        "target_file": str(session.target_file),
+        "credential_source": session.credential_source,
+        "credential_digest": session.credential_digest,
+        "skill": session.skill,
+        "identity": None,
+        "target": None,
+        "observed_capability": [],
+        "errors": [],
+    }
+    source = "user"
+    try:
+        if api_client is None:
+            from .gitlab_api import GlabAPIClient
+
+            api_client = GlabAPIClient()
+        user = api_client.get_json(session, "user")
+        if (
+            not isinstance(user, dict)
+            or not _gitlab_positive_id(user.get("id"))
+            or not isinstance(user.get("username"), str)
+            or not user["username"].strip()
+        ):
+            raise ValueError("user_identity_invalid")
+        if not _gitlab_origin_matches(user.get("web_url"), session.origin):
+            raise ValueError("user_host_mismatch")
+        receipt["identity"] = {
+            "id": user["id"],
+            "username": user["username"],
+            "web_url": user["web_url"],
+        }
+        receipt["observed_capability"].append("identity_read")
+
+        source = "target"
+        endpoint_kind = "projects" if session.target_kind == "project" else "groups"
+        if session.target_kind not in {"project", "group"}:
+            raise ValueError("target_kind_invalid")
+        reference = session.target_reference
+        endpoint = f"{endpoint_kind}/{quote(reference, safe='')}"
+        item = api_client.get_json(session, endpoint)
+        if not isinstance(item, dict) or not _gitlab_positive_id(item.get("id")):
+            raise ValueError("target_response_invalid")
+        if not _gitlab_origin_matches(item.get("web_url"), session.origin):
+            raise ValueError("target_host_mismatch")
+        path_field = (
+            "path_with_namespace" if session.target_kind == "project" else "full_path"
+        )
+        full_path = item.get(path_field)
+        if not isinstance(full_path, str) or not full_path:
+            raise ValueError("target_path_missing")
+        if reference.isdecimal():
+            if item["id"] != int(reference):
+                raise ValueError("target_id_mismatch")
+        elif full_path != reference:
+            raise ValueError("target_path_mismatch")
+        receipt["target"] = {
+            "kind": session.target_kind,
+            "id": item["id"],
+            "full_path": full_path,
+            "web_url": item["web_url"],
+        }
+        receipt["observed_capability"].append("target_read")
+        receipt["status"] = PASS
+    except Exception as exc:  # noqa: BLE001 - keep every provider failure structured
+        receipt["errors"].append({"source": source, "reason": _gitlab_safe_reason(exc)})
+    return receipt
 
 
 def cilium_discovery(target: Target) -> tuple[str, dict[str, Any]]:

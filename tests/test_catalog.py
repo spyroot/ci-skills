@@ -13,6 +13,7 @@ what lets a caller learn one interface instead of five.
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -39,10 +40,17 @@ def _actual_options(script: str) -> set[str]:
         f"entrypoint_{script.removesuffix('.py')}", SCRIPT_ROOT / script
     )
     found: set[str] = set()
-    for action in module.build_parser()._actions:
-        found.update(
-            option for option in action.option_strings if option.startswith("--")
-        )
+
+    def visit(parser: argparse.ArgumentParser) -> None:
+        for action in parser._actions:
+            found.update(
+                option for option in action.option_strings if option.startswith("--")
+            )
+            if isinstance(action, argparse._SubParsersAction):
+                for subparser in action.choices.values():
+                    visit(subparser)
+
+    visit(module.build_parser())
     return found - {"--help"}
 
 
@@ -167,9 +175,22 @@ def test_every_report_kind_the_cli_can_produce_is_a_declared_command():
     """
     produced = {CLI.ACCESS_CHECK_KIND, *CLI.COLLECTOR_KINDS.values()}
 
-    assert produced == set(CATALOG.COMMAND_BY_KIND)
+    assert produced <= set(CATALOG.COMMAND_BY_KIND)
+    assert len(CATALOG.COMMAND_BY_KIND) == len(CATALOG.COMMANDS)
     for kind in produced:
         assert CATALOG.COMMAND_BY_KIND[kind] in CATALOG.COMMANDS
+
+
+def test_mutating_commands_are_identified_in_the_manifest():
+    """An agent must see the write boundary before it chooses a command."""
+    manifest = CATALOG.manifest()
+    assert manifest["read_only"] is False
+    for script, entry in CATALOG.COMMANDS.items():
+        assert manifest["commands"][script]["read_only"] is not entry.get(
+            "mutates", False
+        )
+        if entry.get("mutates", False):
+            assert manifest["commands"][script]["subcommands"]
 
 
 def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):

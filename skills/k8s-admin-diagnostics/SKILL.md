@@ -1,21 +1,26 @@
 ---
 name: k8s-admin-diagnostics
-description: Collect read-only GitLab CI, Kubernetes storage, event, and Cilium evidence after proving GitHub, GitLab, and cluster administrator access. Reports which credential it actually used, so no credential hunting is needed.
+description: Collect GitLab CI and Kubernetes diagnostics, or perform explicitly confirmed GitLab milestone, bug, wiki, and runner operations against a selected target. Reports the effective credential source and verified identity.
 metadata:
   manifest: tools.json
   first_call: scripts/access_check.py
+  first_call_by_route:
+    diagnostics: scripts/access_check.py
+    gitlab_operations: scripts/gitlab_access.py check
   default_output: json when stdout is not a terminal
-  read_only: true
+  read_only: false
 ---
 
-# Kubernetes admin diagnostics
+# Kubernetes diagnostics and GitLab operations
 
-Diagnose a Kubernetes-backed CI, storage or network symptom. Every command is
-read-only: none logs in, changes context, grants a role, or mutates anything.
+Diagnose a Kubernetes-backed CI, storage, or network symptom, or act on an
+explicit GitLab request. Diagnostic commands are read-only. GitLab operation
+commands default to an offline dry-run and write only with `--apply` and the
+printed plan fingerprint.
 
-## 1. First call is always the access check
+## 1. Choose the access route
 
-Run this before anything else, every time:
+For diagnostics, run the full access check first:
 
     scripts/access_check.py --publication
 
@@ -38,7 +43,14 @@ that declares `kubernetes.kubeconfigs` is how you avoid aiming elsewhere.
 Provisioning access is not this skill's job. If a kubeconfig has to be fetched
 or minted first, that belongs to the calling project's own instructions.
 
-## 2. Read the manifest, not five help texts
+For a GitLab milestone, bug, wiki, or runner request, start with
+`scripts/gitlab_access.py check`. It resolves only the selected GitLab target
+and effective credential source, then reads back the GitLab identity and
+numeric project or group ID. A GitLab-only target file does not select a
+Kubernetes context or GitHub repository. Every apply repeats this check with
+the same selected source and target; a saved login alone is not proof.
+
+## 2. Read the manifest
 
 `tools.json` beside this file is the machine-readable contract: every command,
 its purpose, when to use it, the authorities it needs, its options, and a
@@ -54,8 +66,13 @@ Routing, in short:
 | why a volume or claim is stuck | `storage_report.py` |
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |
+| prove GitLab operation access | `gitlab_access.py check` |
+| create, update, or adjust milestone dates | `gitlab_milestone.py` |
+| open a bug issue | `gitlab_issue.py open-bug` |
+| create or update a wiki page | `gitlab_wiki.py` |
+| assign or create a runner record | `gitlab_runner.py` |
 
-## 3. One interface, not five
+## 3. One target and output interface
 
 Every command accepts `--target`, `--json`, `--yaml`, `--human`, `--dry-run`,
 `--revision`, `--output-dir` and `--describe`. A command that filters records
@@ -63,13 +80,22 @@ accepts `--search`; one scoped to a namespace accepts `--namespace`; one
 reading a time range accepts `--last`, `--from` and `--to`. Learn the tier
 once and it holds everywhere.
 
+For a GitLab operation, select the exact project or group in the target file or
+with `--project`/`--group`. Run the action without `--apply` to get a
+machine-readable dry-run plan and its `plan_digest`. Only an explicitly
+requested write uses `--apply --confirm-plan DIGEST`; the command reads the
+resource before changing it and verifies it afterward. `--token-out PATH` is
+required when creating a runner record because GitLab returns its token once;
+the token never appears in a report. Runner registration and online readiness
+are separate from creating its record.
+
 `--target` resolves in four declared places — the argument, then
 `$CI_SKILLS_TARGET`, then `./.ci-skills/target.toml`, then
-`~/.ci-skills/target.toml` — and every report says which it used as
-`target_source`. One cluster means setting the last one once; many clusters
-mean the environment variable or a per-project file. The common case takes no
-arguments at all. Output needs no flag either: a terminal gets the human
-summary, a pipe or file gets versioned JSON.
+`~/.ci-skills/target.toml` — and live reports and GitLab operation plans name
+the selected source as `target_source`. One cluster means setting the last
+one once; many clusters mean the environment variable or a per-project file.
+The common case takes no arguments at all. Output needs no flag either: a
+terminal gets the human summary, a pipe or file gets versioned JSON.
 
 Prefer a native filter over a shell pipeline — `--namespace`, `--node`,
 `--reason`, `--search`, `--last` — because a pipeline discards the identity and
@@ -85,6 +111,8 @@ pair; pass the job's own interval when correlating a job.
 - `DRY_RUN` — a probe plan. Never access evidence.
 - `UNKNOWN` — a per-item reading could not be taken. Preserve it; do not
   coerce it to a failure or a pass.
+- For GitLab writes, `PASS` means an applied change or verified no-op with
+  independent read-back. A returned API ID alone is not acceptance evidence.
 - An event read returning zero records with zero errors means the events aged
   out of the cluster, not that the read failed. Say "unverified, evidence
   expired".

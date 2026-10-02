@@ -45,9 +45,16 @@ repository = "owner/repository"
 # The exact origin. A job URL on any other host is refused.
 url = "https://gitlab.example.com"
 
+# For GitLab-only operations, select the exact project or group in this file
+# or pass --project / --group for one invocation. No repository remote or glab
+# profile supplies a fallback target.
+# project = "group/project"
+# group = "group"
+# runner_id = 123
+
 # Optional: a private token file instead of the `glab` credential store. The
-# GitLab surface needs an instance ADMINISTRATOR identity — group Owner is not
-# enough — so this is usually where an admin token belongs.
+# The full diagnostics access check needs an instance ADMINISTRATOR identity;
+# an operation checks the permissions needed for its selected action.
 # token_file = "/home/operator/.ci-skills/credentials/gitlab.token"
 
 [kubernetes]

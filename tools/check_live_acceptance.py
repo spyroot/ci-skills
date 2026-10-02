@@ -30,6 +30,13 @@ import tomllib
 
 SCHEMA_VERSION = "1.0"
 RECEIPT_KIND = "access_check"
+GITLAB_RECEIPT_KINDS = {
+    "gitlab_access",
+    "gitlab_milestone",
+    "gitlab_issue",
+    "gitlab_wiki",
+    "gitlab_runner",
+}
 REQUIRED_EXPECTATIONS = (
     "targets",
     "required_live_checks",
@@ -57,6 +64,28 @@ def _load_expected(path: Path) -> dict[str, Any]:
     for key in REQUIRED_EXPECTATIONS:
         if not data.get(key):
             raise AcceptanceError(f"expectation_not_declared:{key}")
+    window = data["max_receipt_age_days"]
+    if isinstance(window, bool) or not isinstance(window, int) or window <= 0:
+        raise AcceptanceError("max_receipt_age_days_invalid")
+    operations = data.get("gitlab_receipts", [])
+    if not isinstance(operations, list) or any(
+        not isinstance(item, dict)
+        or item.get("kind") not in GITLAB_RECEIPT_KINDS
+        or any(
+            not item.get(field)
+            for field in (
+                "execution_host",
+                "origin",
+                "username",
+                "target_kind",
+                "target_id",
+                "target_path",
+            )
+        )
+        or (item.get("kind") != "gitlab_access" and not item.get("operation"))
+        for item in operations
+    ):
+        raise AcceptanceError("gitlab_receipt_expectation_invalid")
     return data
 
 
@@ -66,9 +95,12 @@ def _load_receipts(directory: Path) -> dict[str, Any]:
     receipts: dict[str, Any] = {}
     for path in sorted(directory.glob("*.json")):
         try:
-            receipts[path.name] = json.loads(path.read_text(encoding="utf-8"))
+            receipt = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise AcceptanceError(f"receipt_unreadable:{path.name}") from exc
+        if not isinstance(receipt, dict):
+            raise AcceptanceError(f"receipt_invalid_shape:{path.name}")
+        receipts[path.name] = receipt
     if not receipts:
         raise AcceptanceError("receipts_missing")
     return receipts
@@ -84,6 +116,40 @@ def _parse_time(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def _check_common(
+    name: str,
+    receipt: dict[str, Any],
+    digest: str,
+    now: datetime,
+    max_age_days: int,
+) -> list[str]:
+    """Verify fields shared by diagnostics and GitLab operation receipts."""
+    problems: list[str] = []
+    if receipt.get("schema_version") != SCHEMA_VERSION:
+        problems.append(f"{name}:schema_version_unexpected")
+    if receipt.get("status") != "PASS":
+        problems.append(f"{name}:status_not_pass")
+    reported = (receipt.get("skill") or {}).get("digest")
+    if not reported:
+        problems.append(f"{name}:skill_digest_absent")
+    elif reported != digest:
+        problems.append(f"{name}:skill_digest_mismatch")
+    captured = _parse_time(receipt.get("captured_at"))
+    if captured is None:
+        problems.append(f"{name}:captured_at_unreadable")
+    elif captured > now:
+        problems.append(f"{name}:captured_in_the_future")
+    elif (now - captured).days > max_age_days:
+        problems.append(f"{name}:receipt_stale")
+    redactor = _redactor()
+    body = json.dumps(receipt, sort_keys=True)
+    if redactor is None:
+        problems.append(f"{name}:sanitization_check_unavailable")
+    elif redactor(body) != body:
+        problems.append(f"{name}:receipt_not_sanitized")
+    return problems
+
+
 def _check_receipt(
     name: str,
     receipt: dict[str, Any],
@@ -93,14 +159,11 @@ def _check_receipt(
     now: datetime,
 ) -> list[str]:
     """Return every reason this receipt does not accept the current skill."""
-    problems: list[str] = []
-
-    if receipt.get("schema_version") != SCHEMA_VERSION:
-        problems.append(f"{name}:schema_version_unexpected")
+    problems = _check_common(
+        name, receipt, digest, now, expected["max_receipt_age_days"]
+    )
     if receipt.get("kind") != RECEIPT_KIND:
         problems.append(f"{name}:kind_unexpected")
-    if receipt.get("status") != "PASS":
-        problems.append(f"{name}:status_not_pass")
     if receipt.get("publication") is not True:
         problems.append(f"{name}:not_a_publication_receipt")
 
@@ -117,14 +180,6 @@ def _check_receipt(
     # Wrong target: deep equality, so an extra or missing authority is caught.
     if "targets" in expected and receipt.get("targets") != expected["targets"]:
         problems.append(f"{name}:targets_mismatch")
-
-    # Wrong code: the digest of the tree under review must be the digest of the
-    # tree that produced the receipt.
-    reported = (receipt.get("skill") or {}).get("digest")
-    if not reported:
-        problems.append(f"{name}:skill_digest_absent")
-    elif reported != digest:
-        problems.append(f"{name}:skill_digest_mismatch")
 
     # Required results: every declared live check present, proven, none blocking.
     live = receipt.get("live_checks") or {}
@@ -146,24 +201,57 @@ def _check_receipt(
     for missing in sorted(declared - observed_checks):
         problems.append(f"{name}:required_check_absent:{missing}")
 
-    # Stale: measured against the receipt's own capture time.
-    captured = _parse_time(receipt.get("captured_at"))
-    window = expected.get("max_receipt_age_days")
-    if captured is None:
-        problems.append(f"{name}:captured_at_unreadable")
-    elif captured > now:
-        problems.append(f"{name}:captured_in_the_future")
-    elif isinstance(window, int) and (now - captured).days > window:
-        problems.append(f"{name}:receipt_stale")
+    return problems
 
-    # A receipt that still carries a credential value must never be accepted.
-    from_runtime = _redactor()
-    body = json.dumps(receipt, sort_keys=True)
-    if from_runtime is None:
-        problems.append(f"{name}:sanitization_check_unavailable")
-    elif from_runtime(body) != body:
-        problems.append(f"{name}:receipt_not_sanitized")
 
+def _check_gitlab_receipt(
+    name: str,
+    receipt: dict[str, Any],
+    required: dict[str, Any],
+    expected: dict[str, Any],
+    digest: str,
+    now: datetime,
+) -> list[str]:
+    """Accept one exact-host, exact-target GitLab access or action read-back."""
+    problems = _check_common(
+        name, receipt, digest, now, expected["max_receipt_age_days"]
+    )
+    kind = required["kind"]
+    if kind not in GITLAB_RECEIPT_KINDS or receipt.get("kind") != kind:
+        problems.append(f"{name}:kind_unexpected")
+    for field in ("execution_host", "origin"):
+        if receipt.get(field) != required.get(field):
+            problems.append(f"{name}:{field}_mismatch")
+    identity = receipt.get("identity") or {}
+    if identity.get("username") != required.get("username"):
+        problems.append(f"{name}:identity_mismatch")
+    if not receipt.get("credential_source") or not receipt.get("credential_digest"):
+        problems.append(f"{name}:credential_source_unresolved")
+    if not receipt.get("target_source"):
+        problems.append(f"{name}:target_source_unresolved")
+    target = (
+        receipt.get("target")
+        if kind == "gitlab_access"
+        else receipt.get("verified_target")
+    ) or {}
+    if (
+        target.get("kind") != required.get("target_kind")
+        or target.get("id") != required.get("target_id")
+        or target.get("full_path") != required.get("target_path")
+    ):
+        problems.append(f"{name}:target_mismatch")
+    if kind == "gitlab_access":
+        if not {"identity_read", "target_read"} <= set(
+            receipt.get("observed_capability") or []
+        ):
+            problems.append(f"{name}:access_readback_missing")
+    elif (
+        receipt.get("operation") != required.get("operation")
+        or not isinstance(receipt.get("readback"), dict)
+        or receipt["readback"].get("verified") is not True
+        or receipt.get("errors")
+    ):
+        problems.append(f"{name}:operation_readback_missing")
     return problems
 
 
@@ -192,28 +280,76 @@ def evaluate(
 
     now = now or datetime.now(timezone.utc)
     digest = tree_digest(skill_root)["digest"]
-    by_host = {
-        (receipt.get("execution_host") or ""): (name, receipt)
-        for name, receipt in receipts.items()
-    }
-
+    by_host: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for name, receipt in receipts.items():
+        by_host.setdefault(receipt.get("execution_host") or "", []).append(
+            (name, receipt)
+        )
     problems: list[str] = []
     accepted: list[str] = []
+    consumed: set[str] = set()
     for executor in expected["executors"]:
         host = executor.get("host")
-        if host not in by_host:
+        host_receipts = by_host.get(host, [])
+        candidates = [
+            item for item in host_receipts if item[1].get("kind") == RECEIPT_KIND
+        ]
+        if not candidates and len(host_receipts) == 1:
+            # Preserve a precise kind error for a lone malformed diagnostic.
+            candidates = host_receipts
+        if not candidates:
             problems.append(f"{executor.get('label', host)}:receipt_missing")
             continue
-        name, receipt = by_host[host]
-        found = _check_receipt(name, receipt, executor, expected, digest, now)
+        if len(candidates) != 1:
+            problems.append(f"{executor.get('label', host)}:receipt_ambiguous")
+            consumed.update(name for name, _receipt in candidates)
+            continue
+        name, receipt = candidates[0]
+        consumed.add(name)
+        try:
+            found = _check_receipt(name, receipt, executor, expected, digest, now)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            found = [f"{name}:receipt_invalid_shape"]
+        problems.extend(found)
+        if not found:
+            accepted.append(name)
+
+    for required in expected.get("gitlab_receipts", []):
+        kind = required["kind"]
+        operation = required.get("operation") if kind != "gitlab_access" else None
+        label = required.get("label") or f"{kind}:{operation or 'check'}"
+        candidates = [
+            (name, receipt)
+            for name, receipt in by_host.get(required["execution_host"], [])
+            if receipt.get("kind") == kind and receipt.get("operation") == operation
+        ]
+        if not candidates:
+            problems.append(f"{label}:receipt_missing")
+            continue
+        if len(candidates) != 1:
+            problems.append(f"{label}:receipt_ambiguous")
+            consumed.update(name for name, _receipt in candidates)
+            continue
+        name, receipt = candidates[0]
+        consumed.add(name)
+        try:
+            found = _check_gitlab_receipt(
+                name, receipt, required, expected, digest, now
+            )
+        except (AttributeError, KeyError, TypeError, ValueError):
+            found = [f"{name}:receipt_invalid_shape"]
         problems.extend(found)
         if not found:
             accepted.append(name)
 
     declared_hosts = {executor.get("host") for executor in expected["executors"]}
     for name, receipt in receipts.items():
+        if name in consumed:
+            continue
         if (receipt.get("execution_host") or "") not in declared_hosts:
             problems.append(f"{name}:executor_not_declared")
+        else:
+            problems.append(f"{name}:receipt_not_declared")
 
     return {
         "schema_version": "1.0",
@@ -266,8 +402,14 @@ def main() -> int:
         data = evaluate(
             _load_expected(expected_path), _load_receipts(receipts_path), skill_path
         )
-    except (AcceptanceError, OSError, ValueError) as exc:
-        cli.exit(2, f"BLOCKED: {exc}\n")
+    except (AcceptanceError, OSError, ValueError, TypeError) as exc:
+        data = {
+            "schema_version": SCHEMA_VERSION,
+            "kind": "live_acceptance",
+            "status": "BLOCKED",
+            "accepted": [],
+            "problems": [str(exc)],
+        }
 
     if args.json:
         print(json.dumps(data, indent=2, sort_keys=True))

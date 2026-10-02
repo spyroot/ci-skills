@@ -30,6 +30,17 @@ class GitLabTarget:
     url: str
     host: str
     token_file: Path | None = None
+    project: str | None = None
+    group: str | None = None
+    runner_id: int | None = None
+
+
+@dataclass(frozen=True)
+class GitLabOperationTarget:
+    """A GitLab-only selection, separate from the three-surface diagnostic target."""
+
+    gitlab: GitLabTarget
+    source_file: Path
 
 
 @dataclass(frozen=True)
@@ -166,10 +177,53 @@ def _optional_file(table: dict[str, object], key: str, skill_root: Path) -> Path
     return path
 
 
-def load_target(path: str | Path) -> Target:
-    """Parse one operator-selected TOML file; never search for hidden profiles."""
-    source = Path(path).expanduser()
-    skill_root = Path(__file__).resolve().parents[2]
+def _optional_reference(table: dict[str, object], key: str) -> str | None:
+    """Accept an exact numeric ID or relative GitLab project/group path."""
+    value = table.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise TargetError(f"gitlab.{key} must be a path or positive numeric ID")
+    if isinstance(value, int):
+        if value <= 0:
+            raise TargetError(f"gitlab.{key} must be a positive numeric ID")
+        return str(value)
+    selected = value.strip()
+    if (
+        not selected
+        or selected.startswith("/")
+        or selected.endswith("/")
+        or "://" in selected
+        or any(character.isspace() for character in selected)
+    ):
+        raise TargetError(f"gitlab.{key} must be a relative path or numeric ID")
+    return selected
+
+
+def _parse_gitlab(value: object, skill_root: Path) -> GitLabTarget:
+    gitlab = _table(
+        value,
+        "gitlab",
+        {"url", "token_file", "project", "group", "runner_id"},
+    )
+    url, host = _https_url(_string(gitlab, "url"), "gitlab.url")
+    runner_id = gitlab.get("runner_id")
+    if runner_id is not None and (
+        isinstance(runner_id, bool) or not isinstance(runner_id, int) or runner_id <= 0
+    ):
+        raise TargetError("gitlab.runner_id must be a positive numeric ID")
+    return GitLabTarget(
+        url=url,
+        host=host,
+        token_file=_optional_file(gitlab, "token_file", skill_root),
+        project=_optional_reference(gitlab, "project"),
+        group=_optional_reference(gitlab, "group"),
+        runner_id=runner_id,
+    )
+
+
+def _read_target_data(source: Path, skill_root: Path) -> dict[str, object]:
+    """Read one selected target file without searching another location."""
     if source.resolve().is_relative_to(skill_root):
         raise TargetError("target file must be stored outside the installed skill")
     try:
@@ -177,6 +231,51 @@ def load_target(path: str | Path) -> Target:
             data = tomllib.load(handle)
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise TargetError(f"target file is unavailable or invalid: {source}") from exc
+    return data
+
+
+def load_gitlab_target(path: str | Path) -> GitLabOperationTarget:
+    """Load only GitLab settings, even when other allowed tables are present."""
+    source = Path(path).expanduser()
+    skill_root = Path(__file__).resolve().parents[2]
+    data = _read_target_data(source, skill_root)
+    if "gitlab" not in data or set(data) - {"github", "gitlab", "kubernetes"}:
+        raise TargetError("GitLab operations need a gitlab table without extra tables")
+    selected = _parse_gitlab(data["gitlab"], skill_root)
+    return GitLabOperationTarget(selected, source.resolve())
+
+
+def select_gitlab_reference(
+    target: GitLabOperationTarget,
+    *,
+    project: str | None = None,
+    group: str | None = None,
+) -> tuple[str, str]:
+    """Select exactly one target kind, with an explicit same-kind override."""
+    if project is not None and group is not None:
+        raise TargetError("project_and_group_conflict")
+    selected_project = _optional_reference({"project": project}, "project")
+    selected_group = _optional_reference({"group": group}, "group")
+    if selected_project is not None:
+        return "project", selected_project
+    if selected_group is not None:
+        return "group", selected_group
+    selected_project = target.gitlab.project
+    selected_group = target.gitlab.group
+    if bool(selected_project) == bool(selected_group):
+        raise TargetError("select_exactly_one_gitlab_project_or_group")
+    return (
+        ("project", selected_project)
+        if selected_project is not None
+        else ("group", selected_group or "")
+    )
+
+
+def load_target(path: str | Path) -> Target:
+    """Parse one operator-selected TOML file; never search for hidden profiles."""
+    source = Path(path).expanduser()
+    skill_root = Path(__file__).resolve().parents[2]
+    data = _read_target_data(source, skill_root)
     if set(data) != {"github", "gitlab", "kubernetes"}:
         raise TargetError(
             "target must contain github, gitlab, and kubernetes tables only"
@@ -196,8 +295,7 @@ def load_target(path: str | Path) -> Target:
     ):
         raise TargetError("github.repository must be owner/repository")
 
-    gitlab = _table(data["gitlab"], "gitlab", {"url", "token_file"})
-    gitlab_url, gitlab_host = _https_url(_string(gitlab, "url"), "gitlab.url")
+    gitlab = _parse_gitlab(data["gitlab"], skill_root)
 
     kubernetes = _table(
         data["kubernetes"],
@@ -216,11 +314,7 @@ def load_target(path: str | Path) -> Target:
             token_file=_optional_file(github, "token_file", skill_root),
             required_checks=_optional_names(github, "required_checks"),
         ),
-        gitlab=GitLabTarget(
-            url=gitlab_url,
-            host=gitlab_host,
-            token_file=_optional_file(gitlab, "token_file", skill_root),
-        ),
+        gitlab=gitlab,
         kubernetes=KubernetesTarget(
             context=_string(kubernetes, "context"),
             server=server,

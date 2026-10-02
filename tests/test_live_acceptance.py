@@ -10,6 +10,7 @@ checked "file exists and says PASS" would pass every one of them.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -188,6 +189,90 @@ def test_an_undeclared_extra_receipt_is_refused():
     assert "stranger.json:executor_not_declared" in result["problems"]
 
 
+def _gitlab_expectations() -> dict:
+    expected = _expected()
+    shared = {
+        "execution_host": HOST,
+        "origin": "https://gitlab.example.test",
+        "username": "unit-gl",
+        "target_kind": "project",
+        "target_id": 12,
+        "target_path": "unit/repo",
+    }
+    expected["gitlab_receipts"] = [
+        {"label": "operation-access", "kind": "gitlab_access", **shared},
+        {
+            "label": "bug-create",
+            "kind": "gitlab_issue",
+            "operation": "open-bug",
+            **shared,
+        },
+    ]
+    return expected
+
+
+def _gitlab_receipts() -> dict[str, dict]:
+    common = {
+        "schema_version": "1.0",
+        "status": "PASS",
+        "execution_host": HOST,
+        "captured_at": (NOW - timedelta(days=1)).isoformat(),
+        "skill": {"digest": _digest()},
+        "origin": "https://gitlab.example.test",
+        "identity": {"username": "unit-gl"},
+        "credential_source": "env:GITLAB_TOKEN",
+        "credential_digest": "sha256:unit-digest",
+        "target_source": "argv:--target;argv:--project",
+    }
+    target = {"kind": "project", "id": 12, "full_path": "unit/repo"}
+    return {
+        "access.json": {
+            **common,
+            "kind": "gitlab_access",
+            "target": target,
+            "observed_capability": ["identity_read", "target_read"],
+        },
+        "bug.json": {
+            **common,
+            "kind": "gitlab_issue",
+            "operation": "open-bug",
+            "verified_target": target,
+            "readback": {"iid": 4, "verified": True},
+            "errors": [],
+        },
+    }
+
+
+def test_same_host_diagnostic_and_gitlab_operation_receipts_are_all_required():
+    receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
+    result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
+
+    assert result["status"] == "PASS", result["problems"]
+    assert result["accepted"] == ["access.json", "bug.json", "declared.json"]
+
+
+def test_missing_or_wrong_target_operation_receipt_blocks():
+    receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
+    receipts["bug.json"]["verified_target"]["id"] = 99
+    result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
+    assert "bug.json:target_mismatch" in result["problems"]
+
+    del receipts["bug.json"]
+    result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
+    assert "bug-create:receipt_missing" in result["problems"]
+
+
+def test_unexpected_same_host_operation_receipt_blocks():
+    result = ACCEPTANCE.evaluate(
+        _expected(),
+        {"declared.json": _receipt(), **_gitlab_receipts()},
+        SKILL_ROOT,
+        now=NOW,
+    )
+    assert result["status"] == "BLOCKED"
+    assert "access.json:receipt_not_declared" in result["problems"]
+
+
 def test_expectations_without_an_executor_block_rather_than_pass(tmp_path):
     path = tmp_path / "expected.toml"
     path.write_text("max_receipt_age_days = 30\n", encoding="utf-8")
@@ -199,6 +284,20 @@ def test_expectations_without_an_executor_block_rather_than_pass(tmp_path):
 def test_an_empty_receipt_directory_blocks(tmp_path):
     with pytest.raises(ACCEPTANCE.AcceptanceError, match="receipts_missing"):
         ACCEPTANCE._load_receipts(tmp_path)
+
+
+def test_missing_expectations_emits_structured_json_failure(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        sys, "argv", ["check_live_acceptance.py", "--root", str(tmp_path), "--json"]
+    )
+
+    assert ACCEPTANCE.main() == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "BLOCKED"
+    assert report["kind"] == "live_acceptance"
+    assert report["problems"][0].startswith("expectations_unreadable:")
 
 
 def test_the_committed_receipt_set_accepts_this_revision():

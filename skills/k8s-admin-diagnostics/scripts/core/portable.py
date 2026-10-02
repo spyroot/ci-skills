@@ -20,7 +20,13 @@ and a `owner/repository` pair, and acceptance compares those by exact equality.
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import tempfile
+from pathlib import Path
 from typing import Any
+
+from .runtime import redact_tree
 
 DIGEST_LENGTH = 12
 # Fields that carry an absolute path on the execution host. Each is rewritten
@@ -75,3 +81,28 @@ def portable(value: Any, *, key: str | None = None) -> Any:
     if isinstance(value, (list, tuple)):
         return [portable(item, key=key) for item in value]
     return value
+
+
+def write_portable_receipt(data: dict[str, Any], selected: str) -> None:
+    """Atomically write redacted evidence to a caller-selected 0600 file."""
+    destination = Path(selected).expanduser()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    body = json.dumps(portable(redact_tree(data)), indent=2, sort_keys=True) + "\n"
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=f".{destination.name}.",
+            suffix=".partial",
+            dir=destination.parent,
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

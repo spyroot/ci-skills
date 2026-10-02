@@ -22,7 +22,10 @@ RECOVERY = {
     "skill_manifest_missing": "Use a checkout containing skills/k8s-admin-diagnostics/SKILL.md.",
     "skill_symlink_unexpected": "Remove the symlink from the source skill tree and retry.",
     "source_revision_unverified": "Install from a clean checkout of the merged skill revision.",
-    "destination_exists": "Inspect the existing skill directory before choosing another --skills-dir.",
+    "destination_exists": "Inspect the installed skill, then use --upgrade --apply --confirm-upgrade.",
+    "destination_symlink": "Choose a real skills directory; the installed skill cannot be a symlink.",
+    "destination_not_directory": "Inspect the existing path; an installed skill must be a directory.",
+    "previous_version_exists": "Inspect the preserved previous version before another upgrade.",
     "installed_digest_mismatch": "Inspect source changes and retry from a clean checkout.",
     "pyyaml_unavailable": "Install PyYAML in the project environment or select --json.",
 }
@@ -52,15 +55,18 @@ def install(
     *,
     dry_run: bool,
     require_verified: bool = True,
+    upgrade: bool = False,
 ) -> dict[str, Any]:
-    """Copy a complete skill once and read back its file digest."""
+    """Stage and verify a skill, preserving the prior install on upgrade."""
     skills_dir = skills_dir.expanduser().resolve()
     destination = skills_dir / SKILL_NAME
+    previous = skills_dir / f".{SKILL_NAME}.previous"
     result: dict[str, Any] = {
         "schema_version": "1.0",
         "kind": "skill_install",
         "source": str(source.resolve()),
         "destination": str(destination),
+        "action": "upgrade" if upgrade else "install",
     }
     try:
         files = package_files(source)
@@ -69,8 +75,14 @@ def install(
             raise ValueError("source_revision_unverified")
         expected_digest = tree_digest(source)
         result.update(**expected_digest, revision=identity["revision"])
-        if destination.exists() or destination.is_symlink():
+        if destination.is_symlink():
+            raise ValueError("destination_symlink")
+        if destination.exists() and not destination.is_dir():
+            raise ValueError("destination_not_directory")
+        if destination.exists() and not upgrade:
             raise ValueError("destination_exists")
+        if destination.exists() and (previous.exists() or previous.is_symlink()):
+            raise ValueError("previous_version_exists")
         if dry_run:
             result["status"] = "DRY_RUN"
             return result
@@ -83,9 +95,23 @@ def install(
                 shutil.copy2(source / relative, target)
             if tree_digest(staging) != expected_digest:
                 raise ValueError("installed_digest_mismatch")
-            staging.rename(destination)
+            if destination.exists():
+                destination.rename(previous)
+                try:
+                    staging.rename(destination)
+                    if tree_digest(destination) != expected_digest:
+                        raise ValueError("installed_digest_mismatch")
+                except BaseException:
+                    if destination.exists():
+                        shutil.rmtree(destination)
+                    previous.rename(destination)
+                    raise
+                result["previous_version"] = str(previous)
+            else:
+                staging.rename(destination)
         except BaseException:
-            shutil.rmtree(staging)
+            if staging.exists():
+                shutil.rmtree(staging)
             raise
         result["status"] = "PASS"
     except (OSError, ValueError) as exc:
@@ -111,7 +137,26 @@ def main() -> int:
         default=skills_directory(),
         help="Codex skills directory (default: $CODEX_HOME/skills or ~/.codex/skills)",
     )
-    parser.add_argument("--dry-run", action="store_true", help="show the install plan")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--dry-run", action="store_true", help="show the install plan (default)"
+    )
+    mode.add_argument("--apply", action="store_true", help="copy the verified skill")
+    parser.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="replace an installed skill while preserving its previous version",
+    )
+    parser.add_argument(
+        "--confirm-install",
+        action="store_true",
+        help="confirm a new installation with --apply",
+    )
+    parser.add_argument(
+        "--confirm-upgrade",
+        action="store_true",
+        help="confirm replacement with --apply --upgrade",
+    )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print JSON")
     modes.add_argument("--yaml", action="store_true", help="print YAML")
@@ -133,7 +178,29 @@ def main() -> int:
                 )
             )
             return 2
-    result = install(SOURCE, args.skills_dir, dry_run=args.dry_run)
+    if args.apply and not (
+        args.confirm_upgrade if args.upgrade else args.confirm_install
+    ):
+        result = {
+            "schema_version": "1.0",
+            "kind": "skill_install",
+            "status": "BLOCKED",
+            "source": str(SOURCE.resolve()),
+            "destination": str(args.skills_dir.expanduser().resolve() / SKILL_NAME),
+            "action": "upgrade" if args.upgrade else "install",
+            "reason": "confirmation_required",
+            "safe_next_step": (
+                "Use --confirm-upgrade with --upgrade --apply, "
+                "or --confirm-install with --apply."
+            ),
+        }
+    else:
+        result = install(
+            SOURCE,
+            args.skills_dir,
+            dry_run=not args.apply,
+            upgrade=args.upgrade,
+        )
     if args.yaml:
         print(yaml.safe_dump(result, sort_keys=True), end="")
     elif args.json:

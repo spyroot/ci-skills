@@ -16,19 +16,54 @@ from conftest import REPO_ROOT, install_executable, load_module
 SKILL_ROOT = REPO_ROOT / "skills" / "k8s-admin-diagnostics"
 
 ENTRYPOINT_CASES = (
-    ("access_check.py", (), "access_check"),
+    ("access_check.py", (), "access_check", "PASS"),
     (
         "gitlab_job.py",
         ("--job-url", "https://gitlab.example.test/unit/repo/-/jobs/123"),
         "gitlab_job",
+        "PASS",
     ),
-    ("storage_report.py", (), "storage_report"),
+    ("storage_report.py", (), "storage_report", "PASS"),
     (
         "event_trace.py",
         ("--from", "2026-10-01T10:00:00Z", "--to", "2026-10-01T10:10:00Z"),
         "event_trace",
+        "PASS",
     ),
-    ("cilium_status.py", (), "cilium_status"),
+    ("cilium_status.py", (), "cilium_status", "PASS"),
+    ("gitlab_access.py", ("check", "--project", "unit/repo"), "gitlab_access", "PASS"),
+    (
+        "gitlab_milestone.py",
+        ("create", "--project", "unit/repo", "--title", "unit-milestone"),
+        "gitlab_milestone",
+        "DRY_RUN",
+    ),
+    (
+        "gitlab_issue.py",
+        ("open-bug", "--project", "unit/repo", "--title", "unit-bug"),
+        "gitlab_issue",
+        "DRY_RUN",
+    ),
+    (
+        "gitlab_wiki.py",
+        (
+            "create",
+            "--project",
+            "unit/repo",
+            "--title",
+            "unit-page",
+            "--content-file",
+            "@CONTENT@",
+        ),
+        "gitlab_wiki",
+        "DRY_RUN",
+    ),
+    (
+        "gitlab_runner.py",
+        ("assign", "--project", "unit/repo", "--runner-id", "9"),
+        "gitlab_runner",
+        "DRY_RUN",
+    ),
 )
 
 
@@ -60,12 +95,28 @@ if tool == "gh":
 if tool == "glab":
     if args[:2] == ["auth", "status"]:
         raise SystemExit(0)
-    endpoint = args[-1]
+    if args[:3] == ["config", "get", "token"] and args[-2:] == [
+        "--host", "gitlab.example.test"
+    ]:
+        print("unit-token")
+        raise SystemExit(0)
+    endpoint = (
+        args[1]
+        if len(args) > 1 and args[0] == "api" and not args[1].startswith("--")
+        else args[-1]
+    )
     if endpoint == "user":
         emit({
+            "id": 24,
             "username": "unit-gl",
             "is_admin": True,
             "web_url": "https://gitlab.example.test/unit-gl",
+        })
+    if endpoint == "projects/unit%2Frepo":
+        emit({
+            "id": 12,
+            "path_with_namespace": "unit/repo",
+            "web_url": "https://gitlab.example.test/unit/repo",
         })
     if endpoint == "runners/all?per_page=1":
         emit([{"id": 1}])
@@ -245,7 +296,9 @@ def _write_target(tmp_path: Path, kubeconfig: Path) -> Path:
 @pytest.mark.parametrize(
     ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
 )
-@pytest.mark.parametrize(("script_name", "extra_args", "kind"), ENTRYPOINT_CASES)
+@pytest.mark.parametrize(
+    ("script_name", "extra_args", "kind", "expected_status"), ENTRYPOINT_CASES
+)
 def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     tmp_path,
     fake_bin,
@@ -254,6 +307,7 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     script_name,
     extra_args,
     kind,
+    expected_status,
 ):
     """Every installed script renders normal machine output outside the repo."""
     installed = tmp_path / "installed" / "k8s-admin-diagnostics"
@@ -271,8 +325,12 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     target = _write_target(tmp_path, kubeconfig)
+    content_file = tmp_path / "content.md"
+    content_file.write_text("unit page\n", encoding="utf-8")
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
+    for name in ("GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN", "CI_JOB_TOKEN"):
+        env.pop(name, None)
     env.update(
         {
             "HOME": str(tmp_path / "home"),
@@ -290,7 +348,10 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
             "--revision",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             mode,
-            *extra_args,
+            *(
+                str(content_file) if item == "@CONTENT@" else item
+                for item in extra_args
+            ),
         ],
         check=False,
         capture_output=True,
@@ -303,5 +364,5 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
 
     assert result.returncode == 0
     assert data["kind"] == kind
-    assert data["status"] == "PASS"
+    assert data["status"] == expected_status
     assert str(REPO_ROOT) not in result.stdout

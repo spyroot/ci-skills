@@ -106,6 +106,61 @@ def test_dry_run_and_existing_destination_are_non_destructive(tmp_path):
     assert marker.read_text(encoding="utf-8") == "keep"
 
 
+def test_upgrade_preserves_previous_skill_and_verifies_new_copy(tmp_path):
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    first = installer.install(source, skills_dir, dry_run=False, require_verified=False)
+    assert first["status"] == "PASS"
+    source_skill = source / "SKILL.md"
+    source_skill.write_text("---\nname: unit\n---\n# Updated\n", encoding="utf-8")
+
+    planned = installer.install(
+        source, skills_dir, dry_run=True, require_verified=False, upgrade=True
+    )
+    assert planned["status"] == "DRY_RUN"
+    assert (skills_dir / installer.SKILL_NAME / "SKILL.md").read_text() != (
+        source_skill.read_text()
+    )
+
+    upgraded = installer.install(
+        source, skills_dir, dry_run=False, require_verified=False, upgrade=True
+    )
+    previous = skills_dir / f".{installer.SKILL_NAME}.previous"
+    destination = skills_dir / installer.SKILL_NAME
+    assert upgraded["status"] == "PASS"
+    assert upgraded["previous_version"] == str(previous)
+    assert "# Updated" in (destination / "SKILL.md").read_text()
+    assert "# Updated" not in (previous / "SKILL.md").read_text()
+    assert upgraded["digest"] == installer.tree_digest(destination)["digest"]
+
+
+def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(tmp_path, monkeypatch):
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    installer.install(source, skills_dir, dry_run=False, require_verified=False)
+    destination = skills_dir / installer.SKILL_NAME
+    previous = skills_dir / f".{installer.SKILL_NAME}.previous"
+    before = (destination / "SKILL.md").read_bytes()
+    (source / "SKILL.md").write_text("new source\n", encoding="utf-8")
+
+    original_rename = Path.rename
+
+    def fail_activation(path: Path, target: Path):
+        if path.name.startswith(f".{installer.SKILL_NAME}-") and target == destination:
+            raise OSError("injected activation failure")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", fail_activation)
+    result = installer.install(
+        source, skills_dir, dry_run=False, require_verified=False, upgrade=True
+    )
+    assert result["status"] == "BLOCKED"
+    assert (destination / "SKILL.md").read_bytes() == before
+    assert not previous.exists()
+
+
 def test_symlinked_source_file_is_rejected(tmp_path):
     installer = _installer()
     source = _source(tmp_path)
