@@ -32,7 +32,8 @@ GAL-ROUTING also depends on GAL-VENDOR, through GAL-CATALOG.
   - an independent review of the exact head commit, with its findings fixed
     in the same pull request;
   - the `validate` workflow is green for that commit (GAL-GATES);
-  - the phase document's own gates pass.
+  - the phase document's own gates pass, including the tests that
+    GAL-TESTS lists for that phase.
 - After merge, the phase document's read-back step confirms the result on
   `main`.
 
