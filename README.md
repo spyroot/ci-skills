@@ -15,16 +15,19 @@ Output follows the reader: a terminal gets a human summary, a pipe or a file
 gets versioned JSON. A program calling these commands therefore needs no
 `--json` flag, though it may pass one.
 
-# Why Agent Skills?
-Agents are increasingly capable, but often don’t have the context they need to do real work reliably. Skills solve this by packaging procedural knowledge  This ci-skill gives agents:
-Domain expertise: Capture specialized knowledge —  analysis pipelines, k8s state 
+## Why Agent Skills?
+
+Agents are increasingly capable, but often don’t have the context they need to
+do real work reliably. Skills solve this by packaging procedural knowledge
+This ci-skill gives agents:
+Domain expertise: Capture specialized knowledge —  analysis pipelines, k8s state
 Repeatable workflows: Turn multi-step tasks into consistent, auditable procedures.
-Cross-product reuse: Build a skill once and use it across any skills-compatible agent.
+Cross-product reuse: Build a skill once and use it across any
+skills-compatible agent.
 ​
-Agents load skills through 
+Agents load skills through
 
 Discovery -> Activation -> Reading Machine Readble Specfication -> Execution
-
 
 ## The protocol, in one table
 
