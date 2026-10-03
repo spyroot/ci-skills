@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-03T19:29:12.574382+00:00",
+  "captured_at": "2026-10-03T20:54:14.844287+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -22,7 +22,7 @@
       "ciliumnode_count": 9,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "270f002ce757fc0b08b0ff6f47f514559043450b7a1b98e9e11f1df67ce43f10",
+      "readback_sha256": "4eaa066eaf88adc7321f0ce1577d6737e3bb5c4e891f62a242c7f62b28796fc8",
       "record_count": 9,
       "status": "PASS"
     },
@@ -30,15 +30,15 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "cceb06ecaee682f43857eea0025e2c049e2fe9665289b81f9021c0f8625cac57",
-      "record_count": 615,
+      "readback_sha256": "4193df4943553ea7b2675302fa7604b90978339778363f5f5404650350fa8a9a",
+      "record_count": 4481,
       "status": "PASS"
     },
     "storage_report": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "2fb7bda5b1bb8e3295df2f555f4f7fd58ddd9e054b709a34e768be021e3b9d67",
+      "readback_sha256": "4673453c875936b545be6edb479de4f1cb18c1e7c9b015bc3e9683fc7c98c4fb",
       "record_count": 65,
       "resource_counts": {
         "attachments": 23,
@@ -47,7 +47,7 @@
         "daemonsets": 41,
         "deployments": 189,
         "nodes": 9,
-        "pods": 625,
+        "pods": 626,
         "pvcs": 60,
         "pvs": 65,
         "replicasets": 504,
@@ -66,11 +66,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "994aa2151edd566d9b420ef8fb24c2396d849095849ac099c69e986a86b24862",
+    "digest": "213b9e26550122f26e27e325af8f034ba362d00c71a3f1ea6485d7db212e3d56",
     "file_count": 32,
     "revision": {
       "source": "git_head",
-      "value": "1a514b339798557589c61d749a6e2635aed813f9",
+      "value": "67b8562d21515740ce02373add32f5ad634e849a",
       "verified": true
     }
   },
@@ -162,5 +162,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "1a514b339798557589c61d749a6e2635aed813f9"
+  "tested_revision": "67b8562d21515740ce02373add32f5ad634e849a"
 }
