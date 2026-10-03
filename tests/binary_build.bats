@@ -74,3 +74,40 @@ MOCK
     --log-level error
   [ "$status" -eq 65 ]
 }
+
+@test 'Dockerfile lookup includes source contextDir at the selected commit' {
+  git -C "$repo" rm -q Dockerfile
+  mkdir -p "$repo/app"
+  printf 'FROM scratch\n' > "$repo/app/Dockerfile"
+  git -C "$repo" add app/Dockerfile
+  git -C "$repo" commit -qm 'Move Dockerfile into build context'
+  commit=$(git -C "$repo" rev-parse HEAD)
+  cat > "$spec" <<EOF_SPEC
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: fixture-build
+  namespace: fixture-ns
+  labels:
+    example.invalid/source-commit: $commit
+spec:
+  source:
+    type: Binary
+    binary: {}
+    contextDir: app
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: DockerImage
+      name: registry.example.invalid/demo/image:candidate
+  triggers: []
+EOF_SPEC
+
+  run "$tool" --spec "$spec" --source-repo "$repo" \
+    --source-commit "$commit" --commit-label example.invalid/source-commit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"sourceDockerfilePath":"app/Dockerfile"'* ]]
+}

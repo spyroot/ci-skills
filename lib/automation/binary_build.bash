@@ -51,6 +51,7 @@ ci_binary_manifest_fields() {
     | {
         name: .metadata.name,
         namespace: .metadata.namespace,
+        contextDir: (.spec.source.contextDir // ""),
         dockerfilePath: .spec.strategy.dockerStrategy.dockerfilePath,
         image: .spec.output.to.name,
         pullSecret: (.spec.strategy.dockerStrategy.pullSecret.name // null),
@@ -58,6 +59,7 @@ ci_binary_manifest_fields() {
       }
     | select((.name|type)=="string" and (.name|length)>0)
     | select((.namespace|type)=="string" and (.namespace|length)>0)
+    | select((.contextDir|type)=="string")
     | select((.dockerfilePath|type)=="string" and (.dockerfilePath|length)>0)
     | select((.image|type)=="string" and (.image|length)>0)
   ' <<<"$manifest"
@@ -121,16 +123,21 @@ ci_binary_build_main() {
     'Check the Binary/Docker/DockerImage manifest and selected label.' || return $?
   repo_root=$(git -C "$source_repo" rev-parse --show-toplevel) || return "$CI_EXIT_DATA"
   git -C "$repo_root" cat-file -e "$commit^{commit}" || return "$CI_EXIT_DATA"
-  local dockerfile
+  local dockerfile context_dir source_dockerfile
   dockerfile=$(jq -r .dockerfilePath <<<"$fields")
-  git -C "$repo_root" cat-file -e "$commit:$dockerfile" || ci_fail \
+  context_dir=$(jq -r .contextDir <<<"$fields")
+  source_dockerfile=$dockerfile
+  if [[ -n $context_dir && $context_dir != . ]]; then
+    source_dockerfile="${context_dir%/}/$dockerfile"
+  fi
+  git -C "$repo_root" cat-file -e "$commit:$source_dockerfile" || ci_fail \
     "$CI_EXIT_DATA" 'Dockerfile is absent at the selected commit' \
     'Choose a commit containing the manifest Dockerfile path.' || return $?
   tree=$(git -C "$repo_root" rev-parse "$commit^{tree}") || return "$CI_EXIT_DATA"
   plan=$(jq -cnS --argjson manifest "$manifest" --arg sourceRepo "$repo_root" \
     --arg sourceCommit "$commit" --arg sourceTree "$tree" \
-    --arg context "$context" \
-    '{manifest:$manifest,sourceRepo:$sourceRepo,sourceCommit:$sourceCommit,sourceTree:$sourceTree,context:$context}') || return
+    --arg context "$context" --arg sourceDockerfilePath "$source_dockerfile" \
+    '{manifest:$manifest,sourceRepo:$sourceRepo,sourceCommit:$sourceCommit,sourceTree:$sourceTree,context:$context,sourceDockerfilePath:$sourceDockerfilePath}') || return
   fingerprint=$(printf '%s' "$plan" | ci_sha256_stdin) || return
   ci_log info ci-binary-build plan 'validated one Binary BuildConfig' || return
   jq -cn --arg fingerprint "$fingerprint" --argjson plan "$plan" \
