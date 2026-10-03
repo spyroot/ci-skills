@@ -21,12 +21,14 @@ own design, steps and gates.
 | GAL-CLI | one command-line contract and its gate | SCHEMA, GATES |
 | GAL-VENDOR | `glab` agent skills vendored under `skills/` | GATES, SCHEMA |
 | GAL-CATALOG | discover, `list`, `get`, `install` | VENDOR, CLI |
+| GAL-TESTS | CI-run `bin/ci-skills test` for offline skill tests and coverage evidence | GATES, CATALOG |
 | GAL-ROUTING | three-hop routing; `k8s-diag` on top of `glab` | CATALOG |
 | GAL-REFERENCE | declared tool operations and their check | CATALOG |
 | GAL-HOOKS | advisory local hooks | GATES, VENDOR |
 
-- **GAL-TESTS** is not a phase. It lists the tests each phase's pull request
-  carries.
+- **GAL-TESTS** has its own delivery pull request for the reusable test
+  command. Every phase still carries its own focused tests in its own pull
+  request; GAL-TESTS does not defer those tests.
 - **GAL-ROUTING** also waits for pull requests #5, #7 and #8, and for an
   approved receipt host (GAL-GATES, G5).
 
@@ -39,13 +41,18 @@ own design, steps and gates.
 3. GAL-SCHEMA, then GAL-CLI.
 4. GAL-VENDOR.
 5. GAL-CATALOG.
-6. GAL-REFERENCE and GAL-ROUTING. Both need GAL-CATALOG; GAL-ROUTING also
+6. GAL-TESTS, after GAL-CATALOG provides `bin/ci-skills`.
+7. GAL-REFERENCE and GAL-ROUTING. Both need GAL-CATALOG; GAL-ROUTING also
    needs PRs #5, #7 and #8 and the receipt host.
-7. GAL-HOOKS, after GAL-GATES and GAL-VENDOR.
+8. GAL-HOOKS, after GAL-GATES and GAL-VENDOR.
 
 ## How a phase lands
 
 - **One pull request per phase.**
+- **GAL-TESTS has its own delivery pull request.** Its test command and
+  coverage evidence land there; tests for earlier phases stay in those phases'
+  pull requests. Reconcile `GAL-TESTS.md` with this order before that delivery
+  pull request merges.
 - **Files it may change:**
   - its own files;
   - the shared files its gates need: `.github/workflows/validate.yml`,
