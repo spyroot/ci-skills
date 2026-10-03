@@ -10,12 +10,12 @@ import time
 
 from core.access import check_gitlab_operation_access
 from core.catalog import describe, missing_required_options
-from core.cli import _failure, log_event, output_mode, parser, resolve_target
+from core.cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
 from core.credentials import bind_gitlab_session
 from core.gitlab_pipelines import MAX_JOB_PAGES, PAGE_SIZE, read_pipeline
 from core.report import emit, report
 from core.status import BLOCKED, DRY_RUN, PASS, exit_code
-from core.target import TargetError, load_gitlab_target, select_gitlab_reference
+from core.target import TargetError, select_gitlab_reference
 
 KIND = "gitlab_pipeline"
 SCRIPT = "gitlab_pipeline.py"
@@ -60,8 +60,9 @@ def main(argv: list[str] | None = None) -> int:
     started = time.monotonic()
     source = "target"
     try:
-        path, target_source = resolve_target(args.target)
-        target = load_gitlab_target(path)
+        target, target_source = resolve_gitlab_target(
+            args.target, args.binding, dry_run=args.dry_run
+        )
         target_kind, reference = select_gitlab_reference(target, project=args.project)
         if target_kind != "project":
             raise TargetError("pipeline_requires_project_target")

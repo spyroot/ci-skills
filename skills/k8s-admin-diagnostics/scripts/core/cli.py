@@ -30,8 +30,7 @@ from .catalog import (
 )
 from .credentials import bind_gitlab_session, bind_sources
 from .portable import portable
-from .project_binding import resolve_target as resolve_project_target
-from .project_binding import resolve_target_file
+from .project_binding import BINDING_ENV, resolve_target as resolve_project_target
 from .report import emit, report
 from .runtime import redact_tree, sanitize
 from .status import (
@@ -43,7 +42,7 @@ from .status import (
     PROFILE_FULL,
     exit_code,
 )
-from .target import Target, TargetError, load_gitlab_target
+from .target import GitLabOperationTarget, Target, TargetError
 
 # The documented per-host location. Keeping it here rather than in each script
 # means one answer to "where does the target live", and the script-interface
@@ -66,9 +65,30 @@ COLLECTOR_KINDS = {
 ACCESS_CHECK_KIND = "access_check"
 
 
-def resolve_target(explicit: str | None) -> tuple[Path, str]:
-    """Expose the shared target resolver for GitLab-only CLI consumers."""
-    return resolve_target_file(explicit)
+def resolve_gitlab_target(
+    explicit_target: str | None,
+    explicit_binding: str | None,
+    *,
+    dry_run: bool = False,
+) -> tuple[GitLabOperationTarget, str]:
+    """Resolve one GitLab target through the declared target or binding tier."""
+    selected = resolve_project_target(
+        explicit_target,
+        explicit_binding,
+        dry_run=dry_run,
+        required_surfaces=("gitlab",),
+    )
+    if selected.gitlab is None or selected.source_file is None:
+        raise TargetError("gitlab_target_unresolved")
+    if selected.source_kind == "binding":
+        selector = "argv:--binding" if explicit_binding else f"env:{BINDING_ENV}"
+        source = f"{selector} -> {selected.target_reference}"
+    else:
+        source = selected.source_kind or "target"
+    return (
+        GitLabOperationTarget(selected.gitlab, selected.source_file.resolve()),
+        source,
+    )
 
 
 def output_mode(args: argparse.Namespace) -> str:
@@ -476,14 +496,16 @@ def execute_gitlab_job(args: argparse.Namespace) -> int:
     source = "target"
     started = time.monotonic()
     try:
-        target_path, target_source = resolve_target(args.target)
-        target = load_gitlab_target(target_path)
+        target, target_source = resolve_gitlab_target(
+            args.target, args.binding, dry_run=args.dry_run
+        )
         source = "arguments"
         project, _job_id = gitlab_job_reference(args.job_url, target.gitlab.host)
         filters = {"job_url": args.job_url, "search": args.search}
         if args.dry_run:
             data = report(kind, target.gitlab.url, filters, [], [])
             data["status"] = DRY_RUN
+            data["target_source"] = target_source
             data["access"] = {
                 "status": DRY_RUN,
                 "target": {"kind": "project", "reference": project},

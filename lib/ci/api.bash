@@ -133,7 +133,13 @@ ci_api_get() {
   for ((attempt = 1; attempt <= 3; attempt++)); do
     status=0
     if [[ -n $token && $provider == github ]]; then
-      response=$(GH_TOKEN="$token" "${request[@]}" 2>&1) || status=$?
+      # gh selects GH_TOKEN for GitHub Cloud and GH_ENTERPRISE_TOKEN for
+      # Enterprise Server. Bind both to the same selected file and remove
+      # ambient aliases so the host cannot select another credential.
+      response=$(
+        unset GITHUB_TOKEN GITHUB_ENTERPRISE_TOKEN
+        GH_TOKEN="$token" GH_ENTERPRISE_TOKEN="$token" "${request[@]}" 2>&1
+      ) || status=$?
     elif [[ -n $token ]]; then
       response=$(GITLAB_TOKEN="$token" "${request[@]}" 2>&1) || status=$?
     else
@@ -159,13 +165,27 @@ ci_api_get() {
   [[ ${#response} -le 1048576 ]] || ci_fail "$CI_EXIT_DATA" \
     'API response exceeds 1 MiB' 'Select a field or a narrower endpoint.' || return $?
   if [[ $raw == false ]]; then
-    if [[ $paginate == true && $provider == gitlab ]]; then
-      response=$(jq -sc '
-        if length > 0 and all(.[]; type == "array") then add
-        else error("expected paginated arrays") end
-      ' <<<"$response") || ci_fail "$CI_EXIT_DATA" \
-        'provider returned invalid paginated JSON' \
-        'Check the endpoint and provider.' || return $?
+    if [[ $paginate == true ]]; then
+      if [[ $provider == github ]]; then
+        # gh --slurp emits one array whose entries are page arrays.
+        response=$(jq -sc '
+          if length == 1 and (.[0] | type) == "array" and
+             all(.[0][]; type == "array") then
+            reduce .[0][] as $page ([]; . + $page)
+          else error("expected paginated arrays") end
+        ' <<<"$response") || ci_fail "$CI_EXIT_DATA" \
+          'provider returned invalid paginated JSON' \
+          'Check the endpoint and provider.' || return $?
+      else
+        # glab emits one JSON array per page.
+        response=$(jq -sc '
+          if length > 0 and all(.[]; type == "array") then
+            reduce .[] as $page ([]; . + $page)
+          else error("expected paginated arrays") end
+        ' <<<"$response") || ci_fail "$CI_EXIT_DATA" \
+          'provider returned invalid paginated JSON' \
+          'Check the endpoint and provider.' || return $?
+      fi
     else
       response=$(jq -sc '
         if length == 1 then .[0] else error("expected one JSON value") end

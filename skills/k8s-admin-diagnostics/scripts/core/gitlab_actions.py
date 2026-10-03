@@ -15,14 +15,14 @@ from pathlib import Path
 from typing import Any
 
 from .access import check_gitlab_operation_access
-from .cli import _failure, log_event, output_mode, parser, resolve_target
+from .cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
 from .credentials import bind_gitlab_session
 from .gitlab_api import GitLabAPIError, GlabAPIClient
 from .portable import write_portable_receipt
 from .report import emit
 from .runtime import sanitize
 from .status import BLOCKED, DRY_RUN, PARTIAL, PASS, PLANNED, exit_code
-from .target import GitLabOperationTarget, TargetError, load_gitlab_target
+from .target import GitLabOperationTarget, TargetError
 
 
 class ActionError(ValueError):
@@ -557,8 +557,9 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
     phase = "OFFLINE_PLAN"
     mutated: bool | None = False
     try:
-        path, target_source = resolve_target(args.target)
-        target = load_gitlab_target(path)
+        target, target_source = resolve_gitlab_target(
+            args.target, args.binding, dry_run=not args.apply and not live_plan
+        )
         plan = make_plan(kind, args, target, target_source)
         group_assignment = (
             plan.kind == "gitlab_runner"

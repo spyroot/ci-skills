@@ -511,9 +511,10 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
         target_reference=plan.target_reference,
     )
     monkeypatch.setattr(
-        ACTION, "resolve_target", lambda _explicit: (tmp_path / "target.toml", "test")
+        ACTION,
+        "resolve_gitlab_target",
+        lambda _target, _binding, *, dry_run: (object(), "test"),
     )
-    monkeypatch.setattr(ACTION, "load_gitlab_target", lambda _path: object())
     monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
         ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
@@ -560,9 +561,10 @@ def test_action_access_failure_preserves_the_failed_subcheck(
 ):
     plan = _plan("gitlab_issue", "open-bug", {"title": "broken"})
     monkeypatch.setattr(
-        ACTION, "resolve_target", lambda _explicit: (tmp_path / "target.toml", "test")
+        ACTION,
+        "resolve_gitlab_target",
+        lambda _target, _binding, *, dry_run: (object(), "test"),
     )
-    monkeypatch.setattr(ACTION, "load_gitlab_target", lambda _path: object())
     monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
         ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: object()
@@ -622,9 +624,10 @@ def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
         "target": {"kind": "project", "id": 42, "full_path": "team/repo"},
     }
     monkeypatch.setattr(
-        ACTION, "resolve_target", lambda _path: (tmp_path / "target.toml", "test")
+        ACTION,
+        "resolve_gitlab_target",
+        lambda _target, _binding, *, dry_run: (object(), "test"),
     )
-    monkeypatch.setattr(ACTION, "load_gitlab_target", lambda _path: object())
     monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
         ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session

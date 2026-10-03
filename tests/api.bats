@@ -146,6 +146,52 @@ MOCK
   [ "$output" = '[{"id":1},{"id":2}]' ]
 }
 
+@test 'GitHub paginated JSON arrays combine into one collection' {
+  cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' '[[{"id":1}],[{"id":2}]]'
+MOCK
+  chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
+  run "$tool" get --provider github --endpoint repos/example/repo/issues \
+    --paginate --log-level error
+  [ "$status" -eq 0 ]
+  [ "$output" = '[{"id":1},{"id":2}]' ]
+}
+
+@test 'GitHub pagination rejects a non-collection page' {
+  cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' '[[{"id":1}],{"id":2}]'
+MOCK
+  chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
+  run "$tool" get --provider github --endpoint repos/example/repo/issues \
+    --paginate --log-level error
+  [ "$status" -eq 65 ]
+  [[ "$output" == *'invalid paginated JSON'* ]]
+}
+
+@test 'Enterprise GitHub token file overrides every ambient token source' {
+  cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
+#!/usr/bin/env bash
+[[ ${GH_ENTERPRISE_TOKEN:-} == ci-selected-token ]] || exit 97
+[[ ${GH_TOKEN:-} == ci-selected-token ]] || exit 98
+[[ ! ${GITHUB_TOKEN+x} && ! ${GITHUB_ENTERPRISE_TOKEN+x} ]] || exit 99
+printf '%s\n' '{"login":"selected"}'
+MOCK
+  chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
+  printf '%s\n' ci-selected-token > "${BATS_TEST_TMPDIR}/github-enterprise-token"
+  export GH_TOKEN=wrong-cloud-token GH_ENTERPRISE_TOKEN=wrong-enterprise-token
+  export GITHUB_TOKEN=wrong-alias-token
+  export GITHUB_ENTERPRISE_TOKEN=wrong-enterprise-alias-token
+  run "$tool" check --provider github --host github.enterprise.example.test \
+    --token-file "${BATS_TEST_TMPDIR}/github-enterprise-token" --log-level error
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.provider' <<< "$output")" = github ]
+  [ "$(jq -r '.host' <<< "$output")" = github.enterprise.example.test ]
+  [ "$(jq -r '.user' <<< "$output")" = selected ]
+  [[ "$output" != *ci-selected-token* ]]
+}
+
 @test 'connection refusal is classified and never displays a token' {
   export CI_TEST_GH_MARKER="${BATS_TEST_TMPDIR}/gh-calls"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
