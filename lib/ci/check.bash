@@ -61,14 +61,45 @@ ci_check_step() {
   fi
 }
 
+# Summary: Reject diagnostic log files that would dirty the source checkout.
+# Arguments: requested log file path.
+# Stdout: canonical log path. Stderr: classified blocker for unsafe paths.
+# Returns: zero, missing, or blocked class.
+ci_check_log_file_path() {
+  local path=$1 parent='' base='' parent_real='' root_real='' target=''
+  [[ -n $path ]] || return "$CI_EXIT_USAGE"
+  parent=$(dirname -- "$path")
+  base=$(basename -- "$path")
+  parent_real=$(cd "$parent" 2>/dev/null && pwd -P) ||
+    ci_fail "$CI_EXIT_MISSING" 'log file parent directory is unreadable' \
+      'Create the selected log directory outside this checkout, then rerun this gate.' ||
+    return $?
+  root_real=$(cd "$CI_CHECK_ROOT" 2>/dev/null && pwd -P) ||
+    ci_fail "$CI_EXIT_BLOCKED" 'source tree path is unreadable' \
+      'Run this gate from the checked-out repository root.' || return $?
+  target="${parent_real}/${base}"
+  if [[ -L $target ]]; then
+    ci_fail "$CI_EXIT_BLOCKED" 'log file must not be a symlink' \
+      'Choose a regular --log-file path outside this repository.' || return $?
+  fi
+  case "$target" in
+  "$root_real" | "$root_real"/*)
+    ci_fail "$CI_EXIT_BLOCKED" 'log file must be outside the source checkout' \
+      'Choose a --log-file path outside this repository.' || return $?
+    ;;
+  esac
+  printf '%s\n' "$target"
+}
+
 # Summary: Run the tracked shell, metadata, secret, and Bats checks in a pod.
 # Arguments: none.
 # Stdout: one JSON success result. Stderr: check output and diagnostics.
 # Returns: zero or blocked class.
 ci_check_run() {
-  local file empty_tree
+  local file empty_tree verified_revision final_revision
   local -a shell_files=() yaml_files=() markdown_files=()
   cd "$CI_CHECK_ROOT" || return "$CI_EXIT_BLOCKED"
+  verified_revision=$(ci_verified_source_revision "$CI_CHECK_ROOT") || return $?
   while IFS= read -r -d '' file; do shell_files+=("$file"); done \
     < <(git ls-files -z -- '*.sh' '*.bash' 'bin/*')
   while IFS= read -r -d '' file; do yaml_files+=("$file"); done \
@@ -93,7 +124,11 @@ ci_check_run() {
   ci_check_step markdown markdownlint-cli2 "${markdown_files[@]}" || return $?
   ci_check_step secrets gitleaks git --redact --no-banner . || return $?
   ci_check_step unit bats --tap tests || return $?
-  jq -cn --arg commit "$(git rev-parse HEAD)" \
+  final_revision=$(ci_verified_source_revision "$CI_CHECK_ROOT") || return $?
+  [[ $final_revision == "$verified_revision" ]] || ci_fail "$CI_EXIT_BLOCKED" \
+    'source revision changed during validation' \
+    'Rerun this gate against one stable exact source commit.' || return $?
+  jq -cn --arg commit "$verified_revision" \
     '{status:"passed",commit:$commit,checks:["whitespace","bash-n","shellcheck","shfmt","yaml","markdown","secrets","unit"]}'
 }
 
@@ -135,6 +170,9 @@ ci_check_main() {
   [[ $CI_LOG_FORMAT == text || $CI_LOG_FORMAT == json ]] || return "$CI_EXIT_USAGE"
   [[ $CI_LOG_LEVEL =~ ^(debug|info|warning|error)$ ]] || return "$CI_EXIT_USAGE"
   [[ $CI_RUN_ID =~ ^[A-Za-z0-9._:-]*$ ]] || return "$CI_EXIT_USAGE"
+  if [[ -n $CI_LOG_FILE ]]; then
+    CI_LOG_FILE=$(ci_check_log_file_path "$CI_LOG_FILE") || return $?
+  fi
   if [[ $dry_run == true ]]; then
     command -v jq >/dev/null 2>&1 || return "$CI_EXIT_BLOCKED"
     jq -cn '{mode:"dry-run",location:"Kubernetes pod",checks:["whitespace","bash-n","shellcheck","shfmt","yaml","markdown","secrets","unit"]}'
