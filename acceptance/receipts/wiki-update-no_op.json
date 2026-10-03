@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-03T21:56:09.582872+00:00",
+  "captured_at": "2026-10-03T23:14:37.303906+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,29 +18,29 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "1c896cef7cc55112011f27fbb4a6336bbb3585adcfa846c7480ee26bff9bfefd",
+    "body_sha256": "d2bad96d3790d72fa6deeb2979f5834bfdfbdc48f9fb16fbca0a997a183959cc",
     "confirmation_ready": true,
     "fields": [
       "content"
     ],
     "one_time_sink_required": false,
     "operation": "update",
-    "plan_digest": "216d7efe2477355c526904640c4eb5729342c73647b343baa6082ef399f9b1db",
+    "plan_digest": "ce73f7f9b2df48cf157f75e90ee5c4ec15a6c4bf7fce86809e254846aada442c",
     "project_ids": null,
-    "resource_id": "ci-skills-pr13-fdcea49a-wiki",
+    "resource_id": "HOTT-team-ci-skills-PR16-4a57607-wiki-20261003",
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "216d7efe2477355c526904640c4eb5729342c73647b343baa6082ef399f9b1db",
+  "plan_digest": "ce73f7f9b2df48cf157f75e90ee5c4ec15a6c4bf7fce86809e254846aada442c",
   "readback": {
     "action": "NO_OP",
-    "slug": "ci-skills-pr13-fdcea49a-wiki",
+    "slug": "HOTT-team-ci-skills-PR16-4a57607-wiki-20261003",
     "verified": true
   },
   "records": [
     {
       "action": "NO_OP",
-      "slug": "ci-skills-pr13-fdcea49a-wiki",
+      "slug": "HOTT-team-ci-skills-PR16-4a57607-wiki-20261003",
       "verified": true
     }
   ],
@@ -52,11 +52,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "8a7549dcaed525ab366a2cf2880010505a58a16af8c4c5fe5c6ff2665bc88241",
+    "digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "ddd461dce89e690b4854fb0843fd8d5852eaf824",
+      "value": "4a576077ed44adf8c352b789ae41321c906beeb2",
       "verified": true
     }
   },
@@ -70,7 +70,7 @@
     "reference": "hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "argv:--target;argv:--project",
+  "target_source": "user;argv:--project",
   "tested_revision": null,
   "verified_target": {
     "full_path": "hott/test",

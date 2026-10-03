@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-03T21:55:28.952302+00:00",
+  "captured_at": "2026-10-03T23:13:52.480280+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,32 +18,32 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "2c91a3ebe6a136ce0dd6938548d119013ddcffba497adae2061f8bd8216b14ad",
+    "body_sha256": "447c9c985cd82059045535337f3b33fe42c1a9c1a76cba0b9b728299e37e9045",
     "confirmation_ready": true,
     "fields": [
       "title"
     ],
     "one_time_sink_required": false,
     "operation": "open-bug",
-    "plan_digest": "fe30755d43e23c5dbfe1472780183c1c359853b6b8c922d529724ebffa29b869",
+    "plan_digest": "792a6c1d4c40fba6e986c55f3c8e41fea8e343fc9e87eb045b7b9d7e83a9fc7b",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "fe30755d43e23c5dbfe1472780183c1c359853b6b8c922d529724ebffa29b869",
+  "plan_digest": "792a6c1d4c40fba6e986c55f3c8e41fea8e343fc9e87eb045b7b9d7e83a9fc7b",
   "readback": {
     "action": "APPLIED",
-    "iid": 3,
+    "iid": 4,
     "verified": true,
-    "web_url": "https://gitlab.dcloud.run/hott/test/-/issues/3"
+    "web_url": "https://gitlab.dcloud.run/hott/test/-/issues/4"
   },
   "records": [
     {
       "action": "APPLIED",
-      "iid": 3,
+      "iid": 4,
       "verified": true,
-      "web_url": "https://gitlab.dcloud.run/hott/test/-/issues/3"
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/issues/4"
     }
   ],
   "result_action": "APPLIED",
@@ -54,11 +54,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "8a7549dcaed525ab366a2cf2880010505a58a16af8c4c5fe5c6ff2665bc88241",
+    "digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "257e51b2f5127881c54432d02f19392546d3febc",
+      "value": "4a576077ed44adf8c352b789ae41321c906beeb2",
       "verified": true
     }
   },
@@ -72,7 +72,7 @@
     "reference": "hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "argv:--target;argv:--project",
+  "target_source": "user;argv:--project",
   "tested_revision": null,
   "verified_target": {
     "full_path": "hott/test",

@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-03T21:56:37.283446+00:00",
+  "captured_at": "2026-10-03T23:09:28.900150+00:00",
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:2ccda27d0866",
   "errors": [],
@@ -22,11 +22,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "8a7549dcaed525ab366a2cf2880010505a58a16af8c4c5fe5c6ff2665bc88241",
+    "digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "ddd461dce89e690b4854fb0843fd8d5852eaf824",
+      "value": "4a576077ed44adf8c352b789ae41321c906beeb2",
       "verified": true
     }
   },
@@ -38,5 +38,5 @@
     "web_url": "https://gitlab.dcloud.run/hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "argv:--target"
+  "target_source": "user"
 }

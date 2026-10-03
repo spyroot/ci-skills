@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-03T21:55:19.720666+00:00",
+  "captured_at": "2026-10-03T23:13:39.579120+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,7 +18,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "a9fd1da193d4447a0a4a2dd5cca3f1e70dde4307da2233b3df5d986bbccc34ce",
+    "body_sha256": "101adc7abcd2e0380e645016c004ba6f738582c5d414daf09a63e5f33f89ba61",
     "confirmation_ready": true,
     "fields": [
       "due_date",
@@ -26,22 +26,22 @@
     ],
     "one_time_sink_required": false,
     "operation": "adjust-time",
-    "plan_digest": "0fec1aed7209c6a2a2c9b9b94c22563bd8edf037330d937adbf5f887d9f7b146",
+    "plan_digest": "e10a9df606a91c7e7ce7f59f5f0887b0b5408f93e72e96a880a19064c05c3878",
     "project_ids": null,
-    "resource_id": 77,
+    "resource_id": 78,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "0fec1aed7209c6a2a2c9b9b94c22563bd8edf037330d937adbf5f887d9f7b146",
+  "plan_digest": "e10a9df606a91c7e7ce7f59f5f0887b0b5408f93e72e96a880a19064c05c3878",
   "readback": {
     "action": "NO_OP",
-    "id": 77,
+    "id": 78,
     "verified": true
   },
   "records": [
     {
       "action": "NO_OP",
-      "id": 77,
+      "id": 78,
       "verified": true
     }
   ],
@@ -53,11 +53,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "8a7549dcaed525ab366a2cf2880010505a58a16af8c4c5fe5c6ff2665bc88241",
+    "digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "257e51b2f5127881c54432d02f19392546d3febc",
+      "value": "4a576077ed44adf8c352b789ae41321c906beeb2",
       "verified": true
     }
   },
@@ -71,7 +71,7 @@
     "reference": "hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "argv:--target;argv:--project",
+  "target_source": "user;argv:--project",
   "tested_revision": null,
   "verified_target": {
     "full_path": "hott/test",

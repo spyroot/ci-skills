@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-03T21:55:45.180181+00:00",
+  "captured_at": "2026-10-03T23:14:13.663736+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,7 +18,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "232dbc3ed73fac434b7275233ad7310b9f9de23748e29212b34d5b22ceace727",
+    "body_sha256": "39c7223b785a8072f4e97f72e45e5f97b305e135e21a694c0e6d5e0da76cd6bb",
     "confirmation_ready": true,
     "fields": [
       "content",
@@ -26,22 +26,22 @@
     ],
     "one_time_sink_required": false,
     "operation": "create",
-    "plan_digest": "c074e0d35e716c79e1eadd67b1f3cfaee251bcfd5c60ade99b7d888483444759",
+    "plan_digest": "ca33a1832cfe700429c47d254e70313a0f952bd88fdf684833729050e01cae20",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "c074e0d35e716c79e1eadd67b1f3cfaee251bcfd5c60ade99b7d888483444759",
+  "plan_digest": "ca33a1832cfe700429c47d254e70313a0f952bd88fdf684833729050e01cae20",
   "readback": {
     "action": "APPLIED",
-    "slug": "ci-skills-pr13-fdcea49a-wiki",
+    "slug": "HOTT-team-ci-skills-PR16-4a57607-wiki-20261003",
     "verified": true
   },
   "records": [
     {
       "action": "APPLIED",
-      "slug": "ci-skills-pr13-fdcea49a-wiki",
+      "slug": "HOTT-team-ci-skills-PR16-4a57607-wiki-20261003",
       "verified": true
     }
   ],
@@ -53,11 +53,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "8a7549dcaed525ab366a2cf2880010505a58a16af8c4c5fe5c6ff2665bc88241",
+    "digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "257e51b2f5127881c54432d02f19392546d3febc",
+      "value": "4a576077ed44adf8c352b789ae41321c906beeb2",
       "verified": true
     }
   },
@@ -71,7 +71,7 @@
     "reference": "hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "argv:--target;argv:--project",
+  "target_source": "user;argv:--project",
   "tested_revision": null,
   "verified_target": {
     "full_path": "hott/test",
