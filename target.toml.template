@@ -58,8 +58,8 @@ context = "admin-context"
 server = "https://api.cluster.example.com:6443"
 
 # How the credential is found. Declare ONE of the two forms below, or omit
-# both when a separate project binding selects the kubeconfig. The skill
-# never adopts an ambient KUBECONFIG or default current context.
+# both to use KUBECONFIG, then ~/.kube/config. An explicit project binding
+# can also select the kubeconfig. Context and server are verified either way.
 
 # One file:
 # kubeconfig = "/home/operator/.kube/config"

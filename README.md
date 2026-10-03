@@ -107,10 +107,10 @@ Keep that file out of this repository, and never point anything that runs
 elsewhere at it. The paths inside are true on one machine only; a pipeline
 aimed at a path under someone's home directory fails the moment it runs on a
 runner, and the failure reads like a credential problem rather than the wiring
-mistake it is. A consuming project provides its own target or binding;
-the skill does not adopt an ambient `KUBECONFIG`. Provisioning access is
-the project's job; this skill only resolves what is already there and reports
-which source it used.
+mistake it is. A consuming project can provide its own target or binding.
+When the target omits a kubeconfig path, the skill uses `KUBECONFIG`, then
+`~/.kube/config`, and still verifies the selected context and API server.
+Provisioning access is the project's job; the skill reports the source it used.
 
 **4. Prove access, before trusting anything else.**
 

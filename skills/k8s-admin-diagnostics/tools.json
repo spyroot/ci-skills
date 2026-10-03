@@ -44,11 +44,19 @@
       {
         "source": "binding:kubernetes.sources",
         "when": "a project binding selects a declared file, environment, or command source"
+      },
+      {
+        "source": "env:KUBECONFIG",
+        "when": "set; its path order is honoured"
+      },
+      {
+        "source": "kubectl-default:~/.kube/config",
+        "when": "nothing above applies"
       }
     ],
     "no_search": "Do not hunt for credentials. Run access_check.py once: if it passes, the report names the effective source for each authority and you are done. If it blocks, the surface reason names what to fix.",
     "rule": "first match wins; the resolved source is reported in credential_sources",
-    "warning": "The skill does not adopt ambient KUBECONFIG or kubectl's default. Declare one target kubeconfig source or use a project binding."
+    "warning": "The default kubeconfig may name another cluster. The selected context and API server are always verified before collection."
   },
   "authorities": [
     "github",

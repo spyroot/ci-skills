@@ -41,10 +41,10 @@ an explicit step in the calling project's own instructions.
   Otherwise, the selected host's `glab` credential store is used.
 - Kubernetes uses the target's explicit `kubernetes.kubeconfigs` ordered,
   combined path, its `kubernetes.kubeconfig` single file, or the kubeconfig
-  selected by an explicit project binding. An ambient `KUBECONFIG` or default
-  kubeconfig is never substituted. Use `kubeconfigs` when the context and the
+  selected by an explicit project binding. If none is declared, it uses
+  `KUBECONFIG`, then `~/.kube/config`. Use `kubeconfigs` when the context and
   credential live in separate files, in kubectl's path order. The selected
-  context resolves the user and cluster.
+  context and API server are checked against those files.
   The user may use an embedded token, `tokenFile`, client certificate and
   key, or an exec provider. No separate token file is assumed.
 

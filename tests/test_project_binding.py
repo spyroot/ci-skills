@@ -183,6 +183,20 @@ def test_ci_skills_target_precedes_project_and_user_defaults(
     assert _reported_target_selection(resolved) == expected
 
 
+def test_declared_environment_target_missing_does_not_use_project_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_binding = _project_binding()
+    _clear_target_selectors(project_binding, monkeypatch)
+    project = tmp_path / "project"
+    _write_target(project / ".ci-skills", filename="target.toml")
+    monkeypatch.chdir(project)
+    monkeypatch.setenv(project_binding.TARGET_ENV, str(tmp_path / "missing.toml"))
+
+    with pytest.raises(project_binding.TargetError, match="target_file_missing"):
+        project_binding.resolve_target(None, None)
+
+
 def test_project_target_precedes_user_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -527,18 +541,36 @@ def test_missing_declared_target_and_ambient_kubeconfig_do_not_select_target(
     assert env_config.exists()
 
 
-def test_explicit_target_without_kubeconfig_blocks_ambient_kubeconfig_fallback(
+def test_explicit_target_without_kubeconfig_uses_environment_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Selected targets still need an explicit bound kubeconfig for live use."""
+    """A target pins the context/server while KUBECONFIG supplies the files."""
     project_binding = _project_binding()
     credentials = import_script_module("core.credentials")
     target = _write_target(tmp_path)
-    monkeypatch.setenv("KUBECONFIG", str(_write_kubeconfig(tmp_path / "global")))
+    config = _write_kubeconfig(tmp_path / "global")
+    monkeypatch.setenv("KUBECONFIG", str(config))
 
-    with pytest.raises(
-        project_binding.TargetError, match="kubeconfig_source_unresolved"
-    ):
-        credentials._kubernetes_source(
-            project_binding.resolve_target(str(target), None)
-        )
+    source, paths = credentials._kubernetes_source(
+        project_binding.resolve_target(str(target), None)
+    )
+    assert source.reference == "env:KUBECONFIG"
+    assert paths == (config.resolve(),)
+
+
+def test_target_without_kubeconfig_uses_user_kubectl_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_binding = _project_binding()
+    credentials = import_script_module("core.credentials")
+    target = _write_target(tmp_path)
+    user_home = tmp_path / "user"
+    config = _write_kubeconfig(user_home / ".kube" / "config")
+    monkeypatch.delenv("KUBECONFIG", raising=False)
+    monkeypatch.setenv("HOME", str(user_home))
+
+    source, paths = credentials._kubernetes_source(
+        project_binding.resolve_target(str(target), None)
+    )
+    assert source.reference == f"kubectl-default:{config.resolve()}"
+    assert paths == (config.resolve(),)

@@ -41,6 +41,14 @@ def resolve_target_file(explicit: str | None) -> tuple[Path, str]:
         if not path.is_file():
             raise TargetError(f"target_file_missing:{path}")
         return path, "argv:--target"
+    if TARGET_ENV in os.environ:
+        configured = os.environ[TARGET_ENV].strip()
+        if not configured:
+            raise TargetError(f"target_environment_empty:{TARGET_ENV}")
+        path = Path(configured).expanduser()
+        if not path.is_file():
+            raise TargetError(f"target_file_missing:{path}")
+        return path, f"env:{TARGET_ENV}"
     for source, path in target_candidates():
         if path.is_file():
             return path, source

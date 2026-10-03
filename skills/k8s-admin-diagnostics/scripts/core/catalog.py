@@ -138,10 +138,12 @@ ACCESS_PROTOCOL: dict[str, Any] = {
             "source": "binding:kubernetes.sources",
             "when": "a project binding selects a declared file, environment, or command source",
         },
+        {"source": "env:KUBECONFIG", "when": "set; its path order is honoured"},
+        {"source": "kubectl-default:~/.kube/config", "when": "nothing above applies"},
     ],
     "warning": (
-        "The skill does not adopt ambient KUBECONFIG or kubectl's default. "
-        "Declare one target kubeconfig source or use a project binding."
+        "The default kubeconfig may name another cluster. The selected context "
+        "and API server are always verified before collection."
     ),
 }
 

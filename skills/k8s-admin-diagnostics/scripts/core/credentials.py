@@ -84,8 +84,15 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
     elif target.kubernetes.kubeconfig is not None:
         paths = (target.kubernetes.kubeconfig.resolve(),)
         reference = target.kubernetes_source_reference or f"file:{paths[0]}"
+    elif "KUBECONFIG" in os.environ:
+        parts = os.environ["KUBECONFIG"].split(os.pathsep)
+        if any(not part for part in parts):
+            raise TargetError("kubeconfig_source_empty")
+        paths = tuple(Path(part).expanduser().resolve() for part in parts)
+        reference = "env:KUBECONFIG"
     else:
-        raise TargetError("kubeconfig_source_unresolved")
+        paths = ((Path.home() / ".kube" / "config").resolve(),)
+        reference = f"kubectl-default:{paths[0]}"
     if not paths:
         raise TargetError("kubeconfig_source_empty")
     for path in paths:
