@@ -216,7 +216,10 @@ def test_real_operation_envelope_round_trips_through_portable_receipt(tmp_path):
         phase="APPLY",
         mutated=True,
         result_action="APPLIED",
-        skill={"digest": _digest()},
+        skill={
+            "digest": _digest(),
+            "revision": {"value": "unit-sha", "verified": True},
+        },
         identity={"username": "unit"},
         verified_target=target,
         credential_source="env:GITLAB_TOKEN",
@@ -242,8 +245,9 @@ def test_real_operation_envelope_round_trips_through_portable_receipt(tmp_path):
 
     assert receipt["plan"]["one_time_sink_required"] is True
     assert receipt["readback"]["sink_persisted"] is True
-    assert (
-        ACCEPTANCE._check_gitlab_receipt(
+
+    def problems() -> list[str]:
+        return ACCEPTANCE._check_gitlab_receipt(
             path.name,
             receipt,
             required,
@@ -251,8 +255,30 @@ def test_real_operation_envelope_round_trips_through_portable_receipt(tmp_path):
             _digest(),
             datetime.now(timezone.utc),
         )
-        == []
-    )
+
+    assert problems() == ["runner.json:runner_smoke_cleanup_unproven"]
+    receipt["smoke_cleanup"] = {
+        "schema_version": "1.0",
+        "kind": "gitlab_runner_smoke_cleanup",
+        "status": "PASS",
+        "captured_at": receipt["captured_at"],
+        "execution_host": receipt["execution_host"],
+        "origin": plan.origin,
+        "credential_source": receipt["credential_source"],
+        "skill_digest": _digest(),
+        "tested_revision": "unit-sha",
+        "runner_id": 9,
+        "before": {"id": 9, "project_ids": [42]},
+        "delete": {"method": "DELETE", "endpoint": "runners/9", "exit_code": 0},
+        "after": {
+            "global_get_http_status": 404,
+            "global_get_exit_code": 1,
+            "project_42_absent": True,
+        },
+    }
+    assert problems() == []
+    receipt["smoke_cleanup"]["after"]["project_42_absent"] = False
+    assert problems() == ["runner.json:runner_smoke_cleanup_unproven"]
 
 
 def test_an_undeclared_extra_receipt_is_refused():

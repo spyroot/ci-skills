@@ -91,5 +91,39 @@
     "id": 123,
     "kind": "project",
     "web_url": "https://gitlab.dcloud.run/hott/test"
+  },
+  "smoke_cleanup": {
+    "schema_version": "1.0",
+    "kind": "gitlab_runner_smoke_cleanup",
+    "status": "PASS",
+    "captured_at": "2026-10-03T23:21:45Z",
+    "execution_host": "mac.lan",
+    "tested_revision": "4a576077ed44adf8c352b789ae41321c906beeb2",
+    "skill_digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
+    "origin": "https://gitlab.dcloud.run",
+    "credential_source": "file:path:2ccda27d0866",
+    "runner_id": 41,
+    "before": {
+      "id": 41,
+      "description": "HOTT team ci-skills PR16 4a57607 runner 20261003",
+      "runner_type": "project_type",
+      "status": "never_contacted",
+      "active": true,
+      "project_ids": [
+        123,
+        124
+      ]
+    },
+    "delete": {
+      "method": "DELETE",
+      "endpoint": "runners/41",
+      "exit_code": 0
+    },
+    "after": {
+      "global_get_http_status": 404,
+      "global_get_exit_code": 1,
+      "project_123_absent": true,
+      "project_124_absent": true
+    }
   }
 }

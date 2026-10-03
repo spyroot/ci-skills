@@ -9,9 +9,11 @@ import fcntl
 import json
 import os
 import shutil
+import signal
 import stat
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -109,6 +111,28 @@ def _write_journal(skills_dir: Path, data: dict[str, Any]) -> None:
         os.link(temporary, _journal_path(skills_dir))
     finally:
         temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _recoverable_signals():
+    """Turn process interrupts into exceptions while an install can recover."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = {
+        signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+
+    def interrupt(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    try:
+        for signum in previous:
+            signal.signal(signum, interrupt)
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 def _read_journal(skills_dir: Path) -> tuple[dict[str, Any], Path, Path]:
@@ -272,34 +296,36 @@ def _install_unlocked(
         old_digest = (
             tree_digest(destination)["digest"] if destination.exists() else "0" * 64
         )
-        _write_journal(
-            skills_dir,
-            {
-                "schema_version": "1.0",
-                "nonce": nonce,
-                "old_digest": old_digest,
-                "new_digest": expected_digest["digest"],
-            },
-        )
         try:
-            staging.mkdir(mode=0o700)
-            for relative in files:
-                target = staging / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source / relative, target)
-            if tree_digest(staging) != expected_digest:
-                raise ValueError("installed_digest_mismatch")
-            if destination.exists():
-                destination.rename(previous)
-                result["previous_version"] = str(previous)
-            staging.rename(destination)
-            if tree_digest(destination) != expected_digest:
-                raise ValueError("installed_digest_mismatch")
-            _journal_path(skills_dir).unlink()
+            with _recoverable_signals():
+                _write_journal(
+                    skills_dir,
+                    {
+                        "schema_version": "1.0",
+                        "nonce": nonce,
+                        "old_digest": old_digest,
+                        "new_digest": expected_digest["digest"],
+                    },
+                )
+                staging.mkdir(mode=0o700)
+                for relative in files:
+                    target = staging / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source / relative, target)
+                if tree_digest(staging) != expected_digest:
+                    raise ValueError("installed_digest_mismatch")
+                if destination.exists():
+                    destination.rename(previous)
+                    result["previous_version"] = str(previous)
+                staging.rename(destination)
+                if tree_digest(destination) != expected_digest:
+                    raise ValueError("installed_digest_mismatch")
+                _journal_path(skills_dir).unlink()
         except BaseException:
-            recovered = _recover_install_unlocked(skills_dir, dry_run=False)
-            if recovered["status"] != "PASS":
-                raise ValueError("install_recovery_unsafe") from None
+            if _journal_path(skills_dir).exists():
+                recovered = _recover_install_unlocked(skills_dir, dry_run=False)
+                if recovered["status"] != "PASS":
+                    raise ValueError("install_recovery_unsafe") from None
             raise
         result["status"] = "PASS"
     except (OSError, ValueError) as exc:

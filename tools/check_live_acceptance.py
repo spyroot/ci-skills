@@ -299,7 +299,78 @@ def _check_gitlab_receipt(
         or receipt.get("errors")
     ):
         problems.append(f"{name}:operation_readback_missing")
+    if (
+        kind == "gitlab_runner"
+        and required.get("operation") == "create"
+        and required.get("result_action") == "APPLIED"
+        and not _runner_smoke_cleanup_verified(receipt, required, digest, now, expected)
+    ):
+        problems.append(f"{name}:runner_smoke_cleanup_unproven")
     return problems
+
+
+def _runner_smoke_cleanup_verified(
+    receipt: dict[str, Any],
+    required: dict[str, Any],
+    digest: str,
+    now: datetime,
+    expected: dict[str, Any],
+) -> bool:
+    """Require independent absence read-back for a disposable created runner."""
+    cleanup = receipt.get("smoke_cleanup")
+    if not isinstance(cleanup, dict):
+        return False
+    captured = _parse_time(cleanup.get("captured_at"))
+    created = _parse_time(receipt.get("captured_at"))
+    runner_id = (receipt.get("readback") or {}).get("id")
+    before = cleanup.get("before")
+    deletion = cleanup.get("delete")
+    after = cleanup.get("after")
+    revision = (receipt.get("skill") or {}).get("revision") or {}
+    if (
+        cleanup.get("schema_version") != SCHEMA_VERSION
+        or cleanup.get("kind") != "gitlab_runner_smoke_cleanup"
+        or cleanup.get("status") != "PASS"
+        or cleanup.get("execution_host") != receipt.get("execution_host")
+        or cleanup.get("origin") != receipt.get("origin")
+        or cleanup.get("credential_source") != receipt.get("credential_source")
+        or cleanup.get("skill_digest") != digest
+        or revision.get("verified") is not True
+        or not isinstance(revision.get("value"), str)
+        or not revision["value"]
+        or cleanup.get("tested_revision") != revision["value"]
+        or type(runner_id) is not int
+        or runner_id <= 0
+        or cleanup.get("runner_id") != runner_id
+        or captured is None
+        or created is None
+        or not created <= captured <= now
+        or (now - captured).days > expected["max_receipt_age_days"]
+        or not isinstance(before, dict)
+        or before.get("id") != runner_id
+        or not isinstance(deletion, dict)
+        or deletion.get("method") != "DELETE"
+        or deletion.get("endpoint") != f"runners/{runner_id}"
+        or deletion.get("exit_code") != 0
+        or not isinstance(after, dict)
+        or after.get("global_get_http_status") != 404
+        or type(after.get("global_get_exit_code")) is not int
+        or after["global_get_exit_code"] == 0
+    ):
+        return False
+    project_ids = before.get("project_ids")
+    if (
+        not isinstance(project_ids, list)
+        or not project_ids
+        or any(
+            type(project_id) is not int or project_id <= 0 for project_id in project_ids
+        )
+        or required.get("target_id") not in project_ids
+    ):
+        return False
+    return all(
+        after.get(f"project_{project_id}_absent") is True for project_id in project_ids
+    )
 
 
 def _redactor():

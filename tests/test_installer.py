@@ -305,10 +305,7 @@ module.install(Path(sys.argv[2]), Path(sys.argv[3]), dry_run=False,
         text=True,
     )
     assert result.returncode != 0
-    if interruption == "SIGTERM":
-        assert result.returncode == -signal.SIGTERM
-        assert not destination.exists()
-        assert installer.recover_install(skills_dir, dry_run=False)["status"] == "PASS"
+    assert result.returncode == 128 + getattr(signal, interruption)
     assert (destination / "SKILL.md").read_bytes() == before
     assert not (skills_dir / installer.JOURNAL_NAME).exists()
 
