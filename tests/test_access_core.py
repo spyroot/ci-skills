@@ -42,6 +42,66 @@ def _clear_token_env(monkeypatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.mark.parametrize(
+    ("host", "selected"),
+    (
+        ("github.com", "GH_TOKEN"),
+        ("tenant.ghe.com", "GH_TOKEN"),
+        ("github.example.test", "GH_ENTERPRISE_TOKEN"),
+        ("tenant.ghe.com.example.test", "GH_ENTERPRISE_TOKEN"),
+    ),
+)
+def test_github_file_token_uses_gh_host_class_and_clears_ambient_tokens(
+    monkeypatch, tmp_path, host, selected
+):
+    """The child gh process must use the selected file, not an ambient token."""
+    catalog = import_script_module("core.catalog")
+    credentials = import_script_module("core.credentials")
+    runtime = import_script_module("core.runtime")
+    token_file = tmp_path / "github.token"
+    token_file.write_text("selected-file-token\n", encoding="utf-8")
+    for name in catalog.GITHUB_TOKEN_VARIABLES:
+        monkeypatch.setenv(name, f"ambient-{name}")
+
+    source = credentials._token_source(
+        token_file,
+        catalog.github_variables(host),
+        "unused-store",
+        clear_names=catalog.GITHUB_TOKEN_VARIABLES,
+    )
+    effective = runtime._environment(source.environment)
+
+    assert source.reference == f"file:{token_file.resolve()}"
+    assert effective[selected] == "selected-file-token"
+    assert all(
+        name not in effective
+        for name in catalog.GITHUB_TOKEN_VARIABLES
+        if name != selected
+    )
+
+
+def test_ghe_cloud_uses_gh_token_over_lower_priority_and_server_tokens(monkeypatch):
+    catalog = import_script_module("core.catalog")
+    credentials = import_script_module("core.credentials")
+    runtime = import_script_module("core.runtime")
+    monkeypatch.setenv("GH_TOKEN", "selected-cloud-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "lower-priority-token")
+    monkeypatch.setenv("GH_ENTERPRISE_TOKEN", "unrelated-server-token")
+
+    source = credentials._token_source(
+        None,
+        catalog.github_variables("tenant.ghe.com"),
+        "unused-store",
+        clear_names=catalog.GITHUB_TOKEN_VARIABLES,
+    )
+    effective = runtime._environment(source.environment)
+
+    assert source.reference == "env:GH_TOKEN"
+    assert effective["GH_TOKEN"] == "selected-cloud-token"
+    assert "GITHUB_TOKEN" not in effective
+    assert "GH_ENTERPRISE_TOKEN" not in effective
+
+
 def _write_token_target(tmp_path: Path, token_file: Path) -> Path:
     """Write one target file that points at a GitLab token file."""
     path = tmp_path / "target-with-token.toml"

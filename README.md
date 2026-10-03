@@ -4,11 +4,11 @@
 
 This repository provides `k8s-admin-diagnostics`, a skill with eight read-only
 commands for access checks, GitLab jobs, Kubernetes storage and events,
-Cilium status, Ceph cluster state, and node-local Cilium and Ceph kernel
+Cilium status, Ceph cluster state, and selected-node Cilium and Ceph kernel
 diagnostics. The access check verifies the selected GitHub, GitLab, and
-Kubernetes authorities before API collectors run. API commands use `gh`,
-`glab`, and `kubectl`; node-local commands use `crictl` or `journalctl`
-on the selected node.
+Kubernetes authorities before API collectors run. Commands use `gh`, `glab`,
+and `kubectl`; node diagnostics use non-TTY `kubectl exec` into existing Pods
+selected by the target file.
 
 Output follows the reader: a terminal gets a human summary, a pipe or a file
 gets versioned JSON. A program calling these commands therefore needs no
@@ -32,8 +32,8 @@ Discovery -> Activation -> Reading Machine Readble Specfication -> Execution
 
 You supply **one nonsecret file** naming the authorities to use. Copy
 `target.toml.template`, fill it in, and put it in one of these places. The
-first one found wins, and API commands report which it used as
-`target_source`. Node-local commands read the local host. The layout is the one
+first one found wins, and every command reports which it used as
+`target_source`. The layout is the one
 agent tooling already uses — a project
 `./.ci-skills/` beside a user `~/.ci-skills/`, the same shape as `.claude` and
 `.codex`:
@@ -86,6 +86,11 @@ administrator, a GitLab instance administrator identity, and a GitHub identity
 that can read the repository. `gh auth login`, `glab auth login`, and whatever
 your cluster uses.
 
+For GitHub, `gh help environment` assigns `GH_TOKEN`/`GITHUB_TOKEN` to
+`github.com` and `*.ghe.com`; GitHub Enterprise Server hosts use
+`GH_ENTERPRISE_TOKEN`/`GITHUB_ENTERPRISE_TOKEN`. A declared token file takes
+precedence, and the command clears other ambient GitHub token variables.
+
 **3. Create your target file.** This is the step that makes everything else
 argument-free:
 
@@ -97,20 +102,23 @@ $EDITOR ~/.ci-skills/target.toml
 
 Fill in the exact GitHub repository, the exact GitLab origin, and the
 Kubernetes context with the API server it must resolve to. Declare
-`kubernetes.kubeconfigs` while you are there — see the template for why.
-That field is kubectl's ordered, combined file path. A project that produces
-its kubeconfig through a declared file, environment variable, or command can
-instead use the separate `--binding PATH` protocol in
+`kubernetes.kubeconfigs` when the context and credential span files; it is
+kubectl's ordered, combined file path. A project that produces its kubeconfig
+through a declared file, environment variable, or command can instead use the
+separate `--binding PATH` protocol in
 [project-binding.md](skills/k8s-admin-diagnostics/references/project-binding.md).
+For node diagnostics, also declare the node and its existing Pod routes under
+`[kubernetes.node_diagnostics]`. A project `.ci-skills/target.toml` selects a
+whole project target; it does not merge partial fields into the user target.
 
 Keep that file out of this repository, and never point anything that runs
 elsewhere at it. The paths inside are true on one machine only; a pipeline
 aimed at a path under someone's home directory fails the moment it runs on a
 runner, and the failure reads like a credential problem rather than the wiring
-mistake it is. A consuming project provides its own target or binding;
-the skill does not adopt an ambient `KUBECONFIG`. Provisioning access is
-the project's job; this skill only resolves what is already there and reports
-which source it used.
+mistake it is. A consuming project can provide its own target or binding.
+When the target omits a kubeconfig path, the skill uses `KUBECONFIG`, then
+`~/.kube/config`, and still verifies the selected context and API server.
+Provisioning access is the project's job; the skill reports the source it used.
 
 **4. Prove access, before trusting anything else.**
 
@@ -131,12 +139,15 @@ runtime's skills directory:
 python tools/install_k8s_admin_diagnostics.py --dry-run --json   # the plan
 python tools/install_k8s_admin_diagnostics.py --json             # ~/.codex/skills
 python tools/install_k8s_admin_diagnostics.py --skills-dir ~/.claude/skills --json
+python tools/install_k8s_admin_diagnostics.py --upgrade --dry-run --json
+python tools/install_k8s_admin_diagnostics.py --upgrade --json
 ```
 
 The default destination is `$CODEX_HOME/skills/k8s-admin-diagnostics`, or
 `~/.codex/skills/k8s-admin-diagnostics` when `CODEX_HOME` is unset; pass
-`--skills-dir PATH` for any other runtime. It refuses to overwrite an existing
-destination, requires a clean checkout of the skill subtree so the revision it
+`--skills-dir PATH` for any other runtime. An existing installation requires
+explicit `--upgrade`; the installer keeps the previous copy until the new
+copy validates. It requires a clean checkout of the skill subtree so its revision
 reports is verified against the source bytes, and reports the installed digest
 — which is the value to compare against the `skill.digest` in any later report.
 It also accepts `--yaml` and `--help`.
@@ -167,9 +178,10 @@ Start here and you will not need to read the rest.
    `--output-dir` and `--describe`. A command that filters records takes
    `--search`; one scoped to a namespace takes `--namespace`; one reading
    a time range takes `--last`, `--from` and `--to`. Learn the tier once.
-4. **Read the status, not the exit code alone.** `PARTIAL` with
-   `access_proven: true` means the read worked and a component is unhealthy —
-   usually the finding. `DRY_RUN` is a plan and never evidence.
+4. **Read the status, not the exit code alone.** `access_proven: true` means
+   the live read was demonstrated even if a component is unhealthy. Its
+   finding remains in the collector report. `DRY_RUN` is a plan and never
+   evidence.
 
 ## Commands
 
@@ -196,33 +208,43 @@ is written.
   window is the previous hour.
 - `cilium_status.py` reads Cilium resources and executes non-TTY health on
   ready agents. It accepts `--namespace NAME|auto`, `--node`, and `--search`.
+  Successful reads retain `records[].status: PASS`; explicit failed peer or
+  endpoint probes appear in `records[].findings` with a path and action, and
+  make the report `PARTIAL` without requiring every peer to be healthy.
 - `ceph_cluster.py --namespace NAME` reads Ceph health, OSD state, inactive
   PGs, and OSD/monitor Pods on the pinned cluster. It accepts `--node`,
   `--ready`, and `--condition` filters.
 
-The node-local commands run on the selected Linux node with noninteractive
-`sudo -n`. They require local `crictl` or `journalctl`, and do not require
-the API target file or an API access receipt:
+The node commands run from the host where the skill is installed. They use the
+same target and three-surface access gate as the API collectors, then select
+exactly one Running Pod on the declared node. They never create a Pod:
 
-- `cilium_node.py --json` reads the local running `cilium-agent` container
-  through CRI, then collects `cilium-dbg status --verbose --output json` and
-  `cilium-health status --verbose --output json` concurrently. If no agent is
-  running, it records the stopped Cilium containers.
-- `ceph_kernel.py --json` reads the previous three minutes of kernel journal
-  entries matching `libceph|rbd|ceph`. Each record has a UTC timestamp,
+- `cilium_node.py --json` executes `cilium-dbg status --verbose --output json`
+  and `cilium-health status --verbose --output json` concurrently inside the
+  selected existing agent Pod. It reports bounded summaries and explicit
+  daemon or peer failures in `findings`; a degraded agent remains a successful
+  read with `PASS` collection status when both commands return valid evidence.
+  Use `--search TEXT` to narrow its returned records.
+- `ceph_kernel.py --json` runs `journalctl -k` inside the selected existing
+  Pod only after reading back its configured host journal mount. It reads the
+  previous three minutes of entries matching `libceph|rbd|ceph`. Each record
+  has a UTC timestamp,
   priority, classification, and machine-readable recommended action. It
   performs no recovery action. The window is the previous three minutes, with
-  bounded output; a limit hit is reported as `PARTIAL`.
+  bounded output; a limit hit is reported as `PARTIAL`. Use `--search TEXT`
+  and `--classification NAME` to narrow returned records without changing the
+  underlying read status.
 
 The kernel classifier emits action codes for observed blocklisting, auth
 failure, connectivity timeout, and I/O errors. Other priority 0–3 entries
 receive `review_ceph_kernel_event`; informational entries have no action.
 The action code is a prompt for investigation, not a claimed root cause.
 
-Both accept `--yaml`, `--dry-run`, and `--help`. Exit code 0 means the node
-read succeeded or a dry run was requested; code 2 means incomplete evidence.
-These node reads supplement the three-surface API receipt; they do not
-replace it.
+Both accept `--target` or `--binding`, `--yaml`, `--dry-run`, and `--help`.
+Exit code 0 means the node read succeeded or a dry run was requested; code 2
+means incomplete evidence.
+An absent, ambiguous, or wrong-node Pod blocks; `ceph_kernel.py` also blocks
+when the declared host journal directory is not mounted in its container.
 
 The base access gate -- all three authorities, including a real non-TTY
 `cilium-health` exec on a selector-discovered ready agent -- runs before every

@@ -22,6 +22,7 @@ from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
 
 CATALOG = import_script_module("core.catalog")
 CLI = import_script_module("core.cli")
+PROJECT_BINDING = import_script_module("core.project_binding")
 RENDER = load_module("render_manifest", REPO_ROOT / "tools" / "render_manifest.py")
 MANIFEST_PATH = SCRIPT_ROOT.parent / "tools.json"
 
@@ -132,7 +133,7 @@ def test_the_manifest_routes_every_command_and_nothing_else():
 
 @pytest.mark.parametrize("script", sorted(CATALOG.NODE_LOCAL_COMMANDS))
 def test_node_local_commands_publish_their_distinct_interface(script):
-    """A node read is discoverable without claiming an API target or receipt."""
+    """A node read publishes its selected API target and Pod route."""
     node_cli = import_script_module("core.node_local_cli")
     kind = script.removesuffix(".py")
     actual = {
@@ -141,13 +142,15 @@ def test_node_local_commands_publish_their_distinct_interface(script):
         for option in action.option_strings
         if option.startswith("--")
     } - {"--help"}
-    declared = set(CATALOG.NODE_LOCAL_OPTIONS)
+    contract = CATALOG.describe_node(script)
+    declared = set(contract["options"])
 
     assert actual == declared
-    assert "--target" not in actual
-    contract = CATALOG.describe_node(script)
-    assert contract["requires_authorities"] == []
-    assert contract["execution_surface"] == "selected Linux node"
+    assert "--target" in actual
+    assert contract["requires_authorities"] == ["github", "gitlab", "kubernetes"]
+    assert contract["execution_surface"] == (
+        "Kubernetes API and one existing Pod on the selected node"
+    )
     assert set(contract["options"]) == declared
 
 
@@ -164,15 +167,14 @@ def test_each_command_declares_the_authorities_it_needs_and_their_protocol():
         assert set(contract["access_protocol"]) == set(entry["requires"])
 
 
-def test_the_kubernetes_chain_has_no_ambient_default():
-    """The published contract must not promise a kubeconfig the code rejects."""
+def test_the_kubernetes_chain_declares_ambient_fallback_after_selected_sources():
+    """The published order matches the effective kubeconfig source binder."""
     chain = [step["source"] for step in CATALOG.ACCESS_PROTOCOL["kubernetes"]]
 
     assert chain[0] == "target:kubernetes.kubeconfigs"
     assert "target:kubernetes.kubeconfig" in chain
     assert "binding:kubernetes.sources" in chain
-    assert "env:KUBECONFIG" not in chain
-    assert "kubectl-default:~/.kube/config" not in chain
+    assert chain[-2:] == ["env:KUBECONFIG", "kubectl-default:~/.kube/config"]
     assert "first match wins" in CATALOG.ACCESS_PROTOCOL["rule"]
 
 
@@ -212,7 +214,7 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
         step["source"]: step["when"] for step in CATALOG.ACCESS_PROTOCOL["github"]
     }
     enterprise = "env:" + " or ".join(CATALOG.GITHUB_ENTERPRISE_VARIABLES)
-    dotcom = "env:" + " or ".join(CATALOG.GITHUB_DOTCOM_VARIABLES)
+    dotcom = "env:" + " or ".join(CATALOG.GITHUB_CLOUD_VARIABLES)
 
     assert enterprise in declared
     assert CATALOG.GITHUB_DOTCOM_HOST in declared[dotcom]
@@ -221,7 +223,7 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
         CATALOG.GITHUB_ENTERPRISE_VARIABLES
     )
     assert CATALOG.github_variables(CATALOG.GITHUB_DOTCOM_HOST) == (
-        CATALOG.GITHUB_DOTCOM_VARIABLES
+        CATALOG.GITHUB_CLOUD_VARIABLES
     )
     assert credentials.github_variables is CATALOG.github_variables
 
@@ -243,7 +245,7 @@ def test_the_declared_target_protocol_is_the_chain_the_code_searches():
     declared = [step["source"] for step in CATALOG.TARGET_PROTOCOL]
     searched = [
         "argv:--target",
-        *(source for source, _path in CLI._target_candidates()),
+        *(source for source, _path in PROJECT_BINDING.target_candidates()),
     ]
 
     # No CI_SKILLS_TARGET in this environment, so that tier is absent from the

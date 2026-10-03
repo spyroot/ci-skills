@@ -15,6 +15,7 @@ from .cilium import (
     HEALTH_COMMAND,
     agent_selector,
     health_detail,
+    health_findings,
     is_ready,
     matches_selector,
     valid_health,
@@ -394,12 +395,12 @@ def _event_parts(
     if (
         not isinstance(obj, dict)
         or not isinstance(series, dict)
-        or not isinstance(obj.get("kind"), str)
-        or not obj["kind"]
         or not isinstance(obj.get("name"), str)
         or not obj["name"]
     ):
         raise TypeError("invalid_event_record")
+    # ObjectReference.kind is optional in the Kubernetes Event API. A name
+    # still identifies the record for the filters and report below.
     for container, fields in (
         (meta, ("namespace", "creationTimestamp")),
         (obj, ("kind", "namespace", "name", "uid")),
@@ -655,6 +656,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
             return row
         row["health"] = decoded
         row["health_detail"] = health_detail(decoded)
+        row["findings"] = health_findings(decoded)
         row["status"] = PASS
         return row
 
@@ -666,6 +668,10 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
                         "source": str(row["name"]),
                         "reason": row.get("reason") or "agent_not_ready",
                     }
+                )
+            elif row["findings"]:
+                errors.append(
+                    {"source": str(row["name"]), "reason": "component_unhealthy"}
                 )
             if _search(row, args.search):
                 rows.append(row)

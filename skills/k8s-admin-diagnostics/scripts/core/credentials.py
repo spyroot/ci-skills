@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from .catalog import GITLAB_VARIABLES, github_variables
+from .catalog import GITHUB_TOKEN_VARIABLES, GITLAB_VARIABLES, github_variables
 from .provenance import ProvenanceError, skill_identity
 from .target import Target, TargetError
 
@@ -49,7 +49,11 @@ def _file_token(path: Path) -> str:
 
 
 def _token_source(
-    path: Path | None, names: tuple[str, ...], store: str
+    path: Path | None,
+    names: tuple[str, ...],
+    store: str,
+    *,
+    clear_names: tuple[str, ...] | None = None,
 ) -> CredentialSource:
     """Pin explicit file, first effective environment variable, or CLI store."""
     selected: str | None = None
@@ -69,7 +73,10 @@ def _token_source(
                 break
         else:
             reference = store
-    overrides = {name: (value if name == selected else None) for name in names}
+    overrides = {
+        name: (value if name == selected else None)
+        for name in (clear_names if clear_names is not None else names)
+    }
     return CredentialSource(reference, overrides)
 
 
@@ -84,8 +91,15 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
     elif target.kubernetes.kubeconfig is not None:
         paths = (target.kubernetes.kubeconfig.resolve(),)
         reference = target.kubernetes_source_reference or f"file:{paths[0]}"
+    elif "KUBECONFIG" in os.environ:
+        parts = os.environ["KUBECONFIG"].split(os.pathsep)
+        if any(not part for part in parts):
+            raise TargetError("kubeconfig_source_empty")
+        paths = tuple(Path(part).expanduser().resolve() for part in parts)
+        reference = "env:KUBECONFIG"
     else:
-        raise TargetError("kubeconfig_source_unresolved")
+        paths = ((Path.home() / ".kube" / "config").resolve(),)
+        reference = f"kubectl-default:{paths[0]}"
     if not paths:
         raise TargetError("kubeconfig_source_empty")
     for path in paths:
@@ -153,6 +167,7 @@ def bind_sources(target: Target, *, revision: str | None = None) -> Target:
         target.github.token_file,
         github_variables(target.github.host),
         f"gh-credential-store:{target.github.host}",
+        clear_names=GITHUB_TOKEN_VARIABLES,
     )
     gitlab = _token_source(
         target.gitlab.token_file,

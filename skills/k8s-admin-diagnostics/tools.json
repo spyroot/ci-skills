@@ -7,11 +7,11 @@
       },
       {
         "source": "env:GH_TOKEN or GITHUB_TOKEN",
-        "when": "set, and github.host is github.com"
+        "when": "set, and github.host is github.com or a subdomain of ghe.com"
       },
       {
         "source": "env:GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN",
-        "when": "set, and github.host is anything other than github.com"
+        "when": "set, and github.host is a GitHub Enterprise Server host"
       },
       {
         "source": "gh-credential-store:<host>",
@@ -44,11 +44,19 @@
       {
         "source": "binding:kubernetes.sources",
         "when": "a project binding selects a declared file, environment, or command source"
+      },
+      {
+        "source": "env:KUBECONFIG",
+        "when": "set; its path order is honoured"
+      },
+      {
+        "source": "kubectl-default:~/.kube/config",
+        "when": "nothing above applies"
       }
     ],
     "no_search": "Do not hunt for credentials. Run access_check.py once: if it passes, the report names the effective source for each authority and you are done. If it blocks, the surface reason names what to fix.",
     "rule": "first match wins; the resolved source is reported in credential_sources",
-    "warning": "The skill does not adopt ambient KUBECONFIG or kubectl's default. Declare one target kubeconfig source or use a project binding."
+    "warning": "The default kubeconfig may name another cluster. The selected context and API server are always verified before collection."
   },
   "authorities": [
     "github",
@@ -134,45 +142,61 @@
     },
     "ceph_kernel.py": {
       "capabilities": [],
-      "execution_surface": "selected Linux node",
+      "execution_surface": "Kubernetes API and one existing Pod on the selected node",
       "options": [
+        "--binding",
+        "--classification",
         "--describe",
         "--dry-run",
         "--human",
         "--json",
+        "--revision",
+        "--search",
+        "--target",
         "--yaml"
       ],
-      "purpose": "Classify recent local Ceph and RBD kernel journal messages.",
+      "purpose": "Classify host Ceph/RBD kernel journal lines through an existing Pod.",
       "report_kind": "ceph_kernel",
       "required_options": [],
       "required_tools": [
-        "sudo",
-        "journalctl"
+        "kubectl",
+        "journalctl in the selected Pod"
       ],
-      "requires_authorities": [],
+      "requires_authorities": [
+        "github",
+        "gitlab",
+        "kubernetes"
+      ],
       "returns": "Bounded UTC kernel records and read-only recommended action codes.",
-      "use_when": "A selected Linux node shows storage or RBD symptoms."
+      "use_when": "A selected node has a Pod with a verified host journal mount."
     },
     "cilium_node.py": {
       "capabilities": [],
-      "execution_surface": "selected Linux node",
+      "execution_surface": "Kubernetes API and one existing Pod on the selected node",
       "options": [
+        "--binding",
         "--describe",
         "--dry-run",
         "--human",
         "--json",
+        "--revision",
+        "--search",
+        "--target",
         "--yaml"
       ],
-      "purpose": "Read the local Cilium agent container, daemon status and health.",
+      "purpose": "Read Cilium daemon status and health from an existing agent Pod on one node.",
       "report_kind": "cilium_node",
       "required_options": [],
       "required_tools": [
-        "sudo",
-        "crictl"
+        "kubectl"
       ],
-      "requires_authorities": [],
-      "returns": "One local agent record with daemon and health JSON, or a classified failure.",
-      "use_when": "A selected Linux node needs CRI-level Cilium diagnosis."
+      "requires_authorities": [
+        "github",
+        "gitlab",
+        "kubernetes"
+      ],
+      "returns": "One Pod record with bounded daemon and health summaries plus findings, or a classified failure.",
+      "use_when": "A selected node needs Cilium daemon and peer diagnosis."
     },
     "cilium_status.py": {
       "capabilities": [
@@ -200,7 +224,7 @@
       "requires_authorities": [
         "kubernetes"
       ],
-      "returns": "One record per agent, with health from a non-TTY exec; UNKNOWN where it could not run.",
+      "returns": "One record per agent with non-TTY health and actionable peer findings; UNKNOWN where exec could not run.",
       "use_when": "Connectivity is suspect, or a node's CNI may differ from its Ready condition."
     },
     "event_trace.py": {
@@ -304,20 +328,24 @@
   },
   "kind": "skill_manifest",
   "node_local_options": {
+    "--binding": "project binding for target and ordered kubeconfig sources",
     "--describe": "this command's machine-readable contract, then exit",
-    "--dry-run": "list local commands without executing them; never live evidence",
+    "--dry-run": "list API and existing-Pod probes without executing them",
     "--human": "human summary even when stdout is not a terminal",
     "--json": "versioned JSON document",
+    "--revision": "exact source commit of the installed copy, recorded as a claim",
+    "--search": "case-insensitive text filter over returned records",
+    "--target": "nonsecret TOML naming the exact authorities and node Pod routes",
     "--yaml": "versioned YAML document"
   },
   "read_only": true,
   "routing": {
     "Ceph cluster health and OSD/monitor Pods": "ceph_cluster.py",
+    "Cilium daemon and health on a selected node": "cilium_node.py",
     "a named CI job failed": "gitlab_job.py",
     "a volume or claim is stuck": "storage_report.py",
     "connectivity or CNI health": "cilium_status.py",
-    "local Ceph or RBD kernel messages": "ceph_kernel.py",
-    "local Cilium CRI health on a selected node": "cilium_node.py",
+    "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
     "prove access first": "access_check.py",
     "what the cluster said during an interval": "event_trace.py"
   },
@@ -341,7 +369,7 @@
       "location": "$CI_SKILLS_TARGET",
       "scope": "one environment",
       "source": "env:CI_SKILLS_TARGET",
-      "when": "set and the file exists"
+      "when": "set; a missing file is an error, never a fallback"
     },
     {
       "location": "./.ci-skills/target.toml",

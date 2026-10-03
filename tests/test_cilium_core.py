@@ -74,6 +74,76 @@ def test_health_detail_reports_the_node_name_without_requiring_it():
     }
 
 
+def test_health_findings_keep_failed_peer_and_endpoint_paths():
+    """A valid response can still contain failed probes on multiple paths."""
+    cilium = _cilium()
+    response = {
+        "local": {"name": "node-a"},
+        "nodes": [
+            {
+                "name": "node-b",
+                "host": {"primary-address": {"icmp": {"status": "timeout"}}},
+                "endpoint": {"http": {"status": "connection refused"}},
+                "health-endpoint": {
+                    "secondary-addresses": [{"http": {"status": "probe failed"}}]
+                },
+            }
+        ],
+    }
+
+    assert cilium.valid_health(response) is True
+    assert cilium.health_findings(response) == [
+        {
+            "component": "host",
+            "peer": "node-b",
+            "peer_index": 0,
+            "path": "peer.host.primary-address.icmp.status",
+            "message": "timeout",
+            "action": "inspect_cilium_peer_connectivity",
+        },
+        {
+            "component": "endpoint",
+            "peer": "node-b",
+            "peer_index": 0,
+            "path": "peer.endpoint.http.status",
+            "message": "connection refused",
+            "action": "inspect_cilium_peer_connectivity",
+        },
+        {
+            "component": "health-endpoint",
+            "peer": "node-b",
+            "peer_index": 0,
+            "path": "peer.health-endpoint.secondary-addresses[0].http.status",
+            "message": "probe failed",
+            "action": "inspect_cilium_peer_connectivity",
+        },
+    ]
+
+
+def test_daemon_findings_report_failed_components_without_optional_disabled_noise():
+    cilium = _cilium()
+    assert cilium.daemon_findings(
+        {
+            "cilium": {"state": "Failure", "msg": "agent unavailable"},
+            "kubernetes": {"state": "Warning", "msg": "API delayed"},
+            "hubble": {"state": "Disabled"},
+        }
+    ) == [
+        {
+            "component": "cilium",
+            "state": "Failure",
+            "message": "agent unavailable",
+            "action": "inspect_cilium_daemon_component",
+        },
+        {
+            "component": "kubernetes",
+            "state": "Warning",
+            "message": "API delayed",
+            "action": "inspect_cilium_daemon_component",
+        },
+    ]
+
+
 @pytest.mark.parametrize(
     "selector",
     (None, {}, {"matchLabels": {}}, {"matchLabels": {}, "matchExpressions": []}),

@@ -107,12 +107,42 @@ def test_an_explicit_target_that_is_absent_is_an_error_not_a_fallback(tiers):
         CLI.resolve_target(str(absent))
 
 
-def test_an_absent_env_target_is_skipped_rather_than_fatal(tiers, monkeypatch):
-    """A stale variable in a shell must not break a host that has a user target."""
+def test_an_absent_env_target_is_an_error_not_a_fallback(tiers, monkeypatch):
+    """An explicit environment selector cannot fall through to another cluster."""
     _write_target(tiers["user"])
     monkeypatch.setenv("CI_SKILLS_TARGET", str(tiers["env"]))  # never written
 
-    assert CLI.resolve_target(None) == (tiers["user"], "user")
+    with pytest.raises(TARGET.TargetError, match="target_file_missing"):
+        CLI.resolve_target(None)
+
+
+def test_node_diagnostic_routes_are_optional_but_strict(tmp_path):
+    """The selected target declares exact existing-Pod routes, no image or token."""
+    path = _write_target(tmp_path / "target.toml")
+    assert TARGET.load_target(path).kubernetes.node_diagnostics is None
+
+    path.write_text(
+        TARGET_BODY
+        + "\n[kubernetes.node_diagnostics]\n"
+        + 'node = "node-a"\n'
+        + "\n[kubernetes.node_diagnostics.cilium]\n"
+        + 'namespace = "cilium"\nselector = "app=cilium"\n'
+        + 'container = "cilium-agent"\n'
+        + "\n[kubernetes.node_diagnostics.journal]\n"
+        + 'namespace = "diagnostics"\nselector = "app=journal"\n'
+        + 'container = "journal-reader"\n'
+        + 'directory = "/host-journal"\n'
+        + 'host_path = "/var/log/journal"\n',
+        encoding="utf-8",
+    )
+    selected = TARGET.load_target(path).kubernetes.node_diagnostics
+    assert selected.node == "node-a"
+    assert selected.cilium.selector == "app=cilium"
+    assert selected.journal.host_path == "/var/log/journal"
+
+    path.write_text(path.read_text(encoding="utf-8") + 'image = "busybox"\n')
+    with pytest.raises(TARGET.TargetError, match="unsupported fields"):
+        TARGET.load_target(path)
 
 
 def test_no_target_anywhere_names_the_template_and_every_path_searched(tiers):

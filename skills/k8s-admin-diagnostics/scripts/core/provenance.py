@@ -86,13 +86,18 @@ def tree_digest(root: Path) -> dict[str, Any]:
 
 
 def _git(root: Path, *args: str) -> str | None:
-    result = subprocess.run(
-        ["git", "-C", str(root), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=10,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        # Installed commands must still identify their own bytes when Git is
+        # unavailable; the optional repository revision remains unverified.
+        return None
     return result.stdout.strip() if result.returncode == 0 else None
 
 

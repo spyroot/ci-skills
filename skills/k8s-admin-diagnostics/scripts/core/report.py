@@ -103,6 +103,12 @@ def human(data: dict[str, Any]) -> str:
             lines.extend(
                 "      " + line for line in _nested(item["health"], search, limit=32)
             )
+        elif kind == "cilium_node" and item.get("findings"):
+            lines.append("    findings:")
+            for finding in item["findings"][:32]:
+                lines.extend(
+                    "      " + line for line in _nested(finding, search, limit=8)
+                )
     if data.get("inventory"):
         lines.append(
             "Inventory: "
