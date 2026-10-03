@@ -89,3 +89,30 @@ ci_sha256_stdin() {
   fi
   printf '%s\n' "${result%% *}"
 }
+
+# Summary: Identify a clean, tracked skill checkout by its exact Git commit.
+# Arguments: absolute source root containing a tracked SKILL.md.
+# Stdout: full commit SHA. Stderr: classified blocker.
+# Returns: zero or blocked class.
+ci_verified_source_revision() {
+  local source=$1 root='' revision='' changes=''
+  root=$(git -C "$source" rev-parse --show-toplevel 2>/dev/null) ||
+    ci_fail "$CI_EXIT_BLOCKED" 'skill source is not a Git checkout' \
+      'Install from a committed skill checkout.' || return $?
+  [[ $root == "$source" ]] || ci_fail "$CI_EXIT_BLOCKED" \
+    'skill source is not the checkout root' \
+    'Use the repository root that owns SKILL.md.' || return $?
+  git -C "$source" ls-files --error-unmatch SKILL.md >/dev/null 2>&1 ||
+    ci_fail "$CI_EXIT_BLOCKED" 'skill manifest is not tracked' \
+      'Commit SKILL.md before installation.' || return $?
+  changes=$(git -C "$source" status --porcelain=v1 --untracked-files=all) ||
+    ci_fail "$CI_EXIT_BLOCKED" 'skill source status is unreadable' \
+      'Inspect the Git checkout before installation.' || return $?
+  [[ -z $changes ]] || ci_fail "$CI_EXIT_BLOCKED" \
+    'skill source has uncommitted changes' \
+    'Commit or remove source changes, then make a new install plan.' || return $?
+  revision=$(git -C "$source" rev-parse --verify 'HEAD^{commit}') ||
+    ci_fail "$CI_EXIT_BLOCKED" 'skill source revision is unavailable' \
+      'Install from a committed skill checkout.' || return $?
+  printf '%s\n' "$revision"
+}

@@ -226,6 +226,9 @@ interface. `scripts/check.sh --dry-run` shows the validation plan; live
 validation runs in a Kubernetes pod.
 
 The commands require Bash and `jq`, plus `gh` or `glab` for the selected
-provider. Build planning also requires `yq`, Git, and a SHA-256 utility. An
-explicit `--token-file` overrides CLI authentication for its request; the
-installer does not create or store credentials.
+provider. Build planning also requires `yq`, Git, and a SHA-256 utility.
+Installation requires Bash, `jq`, Git, and a SHA-256 utility. An explicit
+`--token-file` overrides CLI authentication for its request; the
+installer does not create or store credentials. `install.sh` confirms the
+current clean source commit before linking this checkout; the link follows
+later source changes, which is useful while developing the skill locally.

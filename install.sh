@@ -11,7 +11,8 @@ install.sh: link this repository as a Codex skill (audience: agent and human)
 
 Usage:
   ./install.sh [--destination PATH] [--dry-run]
-  ./install.sh [--destination PATH] --apply --confirm-install FINGERPRINT
+  ./install.sh [--destination PATH] --apply --confirm-install FINGERPRINT \
+    --timeout DURATION
 
 Options:
   --destination PATH     Skill link path; default: $CODEX_HOME/skills/ci-skills
@@ -27,14 +28,17 @@ Options:
   --help                 Show this help without external dependencies.
 
 Existing files or links to a different source are preserved. Repeating an
-installation of the same link is a no-op. Exit: 0 success, 64 usage,
+installation of the same link is a no-op. The plan binds a clean source commit;
+the installed link follows later checkout changes for local development.
+Exit: 0 success, 64 usage,
 66 missing input, 69 blocked.
 HELP
 }
 
 ci_install_main() {
   local destination='' mode=dry-run explicit_dry_run=false confirm=''
-  local timeout='' seconds='' fingerprint='' started=$SECONDS help=false
+  local timeout='' seconds='' fingerprint='' revision='' readback=''
+  local started=$SECONDS help=false
   CI_LOG_FORMAT=text CI_LOG_LEVEL=info CI_LOG_FILE='' CI_RUN_ID=''
   if (($# == 0)); then
     ci_install_help >&2
@@ -82,11 +86,15 @@ ci_install_main() {
     destination=${CODEX_HOME:-$HOME/.codex}/skills/ci-skills
   fi
   [[ $destination == /* ]] || return "$CI_EXIT_USAGE"
-  fingerprint=$(printf '%s\0%s' "$CI_INSTALL_ROOT" "$destination" | ci_sha256_stdin) || return
+  revision=$(ci_verified_source_revision "$CI_INSTALL_ROOT") || return $?
+  fingerprint=$(
+    printf '%s\0%s\0%s' "$CI_INSTALL_ROOT" "$destination" "$revision" |
+      ci_sha256_stdin
+  ) || return
   if [[ $mode == dry-run ]]; then
     jq -cn --arg source "$CI_INSTALL_ROOT" --arg destination "$destination" \
-      --arg fingerprint "$fingerprint" \
-      '{mode:"dry-run",source:$source,destination:$destination,fingerprint:$fingerprint}'
+      --arg fingerprint "$fingerprint" --arg revision "$revision" \
+      '{mode:"dry-run",source:$source,destination:$destination,fingerprint:$fingerprint,source_revision:$revision,mutable_link:true}'
     return
   fi
   [[ -n $timeout && -n $confirm ]] || ci_fail "$CI_EXIT_USAGE" \
@@ -99,8 +107,9 @@ ci_install_main() {
   ci_log info ci-install apply "linking ci-skills" || return
   if [[ -L $destination ]]; then
     if [[ $(readlink "$destination") == "$CI_INSTALL_ROOT" ]]; then
-      jq -cn --arg destination "$destination" \
-        '{status:"NO_OP",destination:$destination}'
+      jq -cn --arg destination "$destination" --arg source "$CI_INSTALL_ROOT" \
+        --arg revision "$revision" \
+        '{status:"NO_OP",destination:$destination,source:$source,source_revision:$revision,mutable_link:true}'
       return
     fi
     ci_fail "$CI_EXIT_BLOCKED" 'skill destination points elsewhere' \
@@ -114,8 +123,13 @@ ci_install_main() {
   ln -s -- "$CI_INSTALL_ROOT" "$destination" || return "$CI_EXIT_BLOCKED"
   [[ -L $destination && $(readlink "$destination") == "$CI_INSTALL_ROOT" ]] ||
     return "$CI_EXIT_BLOCKED"
-  jq -cn --arg destination "$destination" \
-    '{status:"READY",destination:$destination}'
+  readback=$(ci_verified_source_revision "$CI_INSTALL_ROOT") || return $?
+  [[ $readback == "$revision" ]] || ci_fail "$CI_EXIT_BLOCKED" \
+    'skill source changed during installation' \
+    'Inspect the link and make a new install plan.' || return $?
+  jq -cn --arg destination "$destination" --arg source "$CI_INSTALL_ROOT" \
+    --arg revision "$revision" \
+    '{status:"READY",destination:$destination,source:$source,source_revision:$revision,mutable_link:true}'
 }
 
 ci_install_main "$@"
