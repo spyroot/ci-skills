@@ -209,7 +209,7 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
         step["source"]: step["when"] for step in CATALOG.ACCESS_PROTOCOL["github"]
     }
     enterprise = "env:" + " or ".join(CATALOG.GITHUB_ENTERPRISE_VARIABLES)
-    dotcom = "env:" + " or ".join(CATALOG.GITHUB_DOTCOM_VARIABLES)
+    dotcom = "env:" + " or ".join(CATALOG.GITHUB_CLOUD_VARIABLES)
 
     assert enterprise in declared
     assert CATALOG.GITHUB_DOTCOM_HOST in declared[dotcom]
@@ -218,7 +218,7 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
         CATALOG.GITHUB_ENTERPRISE_VARIABLES
     )
     assert CATALOG.github_variables(CATALOG.GITHUB_DOTCOM_HOST) == (
-        CATALOG.GITHUB_DOTCOM_VARIABLES
+        CATALOG.GITHUB_CLOUD_VARIABLES
     )
     assert credentials.github_variables is CATALOG.github_variables
 
