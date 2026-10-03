@@ -342,7 +342,7 @@ def test_explicit_upgrade_preserves_previous_copy_and_is_idempotent(tmp_path):
     )
     assert plan["status"] == "DRY_RUN"
     assert (destination / "scripts" / "check.py").read_text() == "print('ok')\n"
-    assert plan["previous_version"] is None
+    assert "previous_version" not in plan
 
     changed = installer.install(
         source, skills_dir, dry_run=False, require_verified=False, upgrade=True
