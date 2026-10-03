@@ -627,6 +627,41 @@ def test_event_trace_reports_malformed_nested_fields_as_partial(
     ]
 
 
+def test_event_trace_accepts_reference_without_optional_kind(monkeypatch, target_file):
+    """A live Event API reference can have a name and UID but no kind."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    event = {
+        "metadata": {"namespace": "jobs", "name": "runner-pod.abc"},
+        "regarding": {"namespace": "jobs", "name": "runner-pod", "uid": "pod-1"},
+        "eventTime": "2026-10-01T10:02:00Z",
+        "reason": "Updated",
+        "note": "status changed",
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        return _command_result(runtime, command, {"items": [event]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="all",
+        kind=None,
+        object=None,
+        reason=None,
+        search=None,
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PASS"
+    assert result["errors"] == []
+    assert result["records"][0]["kind"] is None
+    assert result["records"][0]["name"] == "runner-pod"
+
+
 @pytest.mark.parametrize(
     ("stderr", "expected_reason"),
     (

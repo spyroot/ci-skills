@@ -395,12 +395,12 @@ def _event_parts(
     if (
         not isinstance(obj, dict)
         or not isinstance(series, dict)
-        or not isinstance(obj.get("kind"), str)
-        or not obj["kind"]
         or not isinstance(obj.get("name"), str)
         or not obj["name"]
     ):
         raise TypeError("invalid_event_record")
+    # ObjectReference.kind is optional in the Kubernetes Event API. A name
+    # still identifies the record for the filters and report below.
     for container, fields in (
         (meta, ("namespace", "creationTimestamp")),
         (obj, ("kind", "namespace", "name", "uid")),
