@@ -30,22 +30,6 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="per-node oc debug timeout, 10–300 seconds (default 90)",
     )
-    cli.add_argument("--run-id", metavar="ID", help="optional log correlation ID")
-    cli.add_argument(
-        "--log-format",
-        choices=("text", "json"),
-        default="text",
-        help="diagnostic log format on stderr (default text)",
-    )
-    cli.add_argument(
-        "--log-level",
-        choices=("debug", "info", "warning", "error"),
-        default="info",
-        help="minimum diagnostic level (default info)",
-    )
-    cli.add_argument(
-        "--log-file", metavar="PATH", help="append diagnostics to a private local file"
-    )
     cli.epilog += (
         " This command reads the selected node inventory by default and returns "
         "a plan_digest. --apply --confirm-plan SHA256 creates temporary oc debug "
