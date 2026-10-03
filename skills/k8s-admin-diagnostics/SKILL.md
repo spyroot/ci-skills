@@ -1,9 +1,10 @@
 ---
 name: k8s-admin-diagnostics
-description: Collect read-only GitLab CI, Kubernetes storage, event, and Cilium evidence after proving GitHub, GitLab, and cluster administrator access. Reports which credential it actually used, so no credential hunting is needed.
+description: Collect read-only GitLab CI, Kubernetes, Cilium, and Ceph evidence through verified credentials and selected targets.
 metadata:
   manifest: tools.json
   first_call: scripts/access_check.py
+  first_call_scope: api_collectors
   default_output: json when stdout is not a terminal
   read_only: true
 ---
@@ -13,9 +14,9 @@ metadata:
 Diagnose a Kubernetes-backed CI, storage or network symptom. Every command is
 read-only: none logs in, changes context, grants a role, or mutates anything.
 
-## 1. First call is always the access check
+## 1. First call for API diagnostics: access check
 
-Run this before anything else, every time:
+Run this before any API collector:
 
     scripts/access_check.py --publication
 
@@ -31,6 +32,9 @@ what it used:
 Access is resolved from declared locations, first match wins, and the match is
 reported. The chain per authority is in `tools.json` under `access_protocol`,
 and [references/access.md](references/access.md) is the full contract.
+The installed `gh` environment contract uses `GH_TOKEN`/`GITHUB_TOKEN` for
+`github.com` and `*.ghe.com`, and enterprise token variables for other GitHub
+Enterprise Server hosts. A selected token file clears ambient GitHub tokens.
 The one trap worth knowing: with no Kubernetes location declared, resolution
 ends at `~/.kube/config`, which is usually a *different* cluster — so a target
 that declares `kubernetes.kubeconfigs` is how you avoid aiming elsewhere.
@@ -38,12 +42,12 @@ that declares `kubernetes.kubeconfigs` is how you avoid aiming elsewhere.
 Provisioning access is not this skill's job. If a kubeconfig has to be fetched
 or minted first, that belongs to the calling project's own instructions.
 
-## 2. Read the manifest, not five help texts
+## 2. Read the command manifest
 
-`tools.json` beside this file is the machine-readable contract: every command,
-its purpose, when to use it, the authorities it needs, its options, and a
-symptom-to-command routing table. `<command> --describe` prints one command's
-contract as JSON and needs no credentials.
+`tools.json` beside this file is the machine-readable contract for API and
+node commands: their purpose, when to use them, required authorities or
+execution surface, options, and symptom routing. `<command> --describe` prints
+one command's contract as JSON and needs no credentials.
 
 Routing, in short:
 
@@ -54,10 +58,12 @@ Routing, in short:
 | why a volume or claim is stuck | `storage_report.py` |
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |
+| Cilium daemon and health on a selected node | `cilium_node.py` |
+| Ceph or RBD kernel messages on that node | `ceph_kernel.py` |
 
 ## 3. One interface, not five
 
-Every command accepts `--target`, `--json`, `--yaml`, `--human`, `--dry-run`,
+Every API command accepts `--target`, `--json`, `--yaml`, `--human`, `--dry-run`,
 `--revision`, `--output-dir` and `--describe`. A command that filters records
 accepts `--search`; one scoped to a namespace accepts `--namespace`; one
 reading a time range accepts `--last`, `--from` and `--to`. Learn the tier
@@ -80,7 +86,8 @@ pair; pass the job's own interval when correlating a job.
 
 - `PASS` — every selected authority and live check passed.
 - `PARTIAL` with `access_proven: true` — the read worked and a component is
-  unhealthy. That is usually the finding, not an obstacle. Say which component.
+  unhealthy. `records[].findings` names explicit Cilium daemon, peer, or
+  endpoint failures with an inspection action. Say which component.
 - `BLOCKED` — see `blocking_live_checks` and the surface `reason`.
 - `DRY_RUN` — a probe plan. Never access evidence.
 - `UNKNOWN` — a per-item reading could not be taken. Preserve it; do not
@@ -97,7 +104,7 @@ Correlate by job time, Pod UID, node, claim and event reason. Mark each
 conclusion **confirmed** by direct read-back, **correlated** by matching time
 and identity, or **unverified** when evidence is missing or expired.
 
-Every report carries the gate that authorized it: `access.profile`, the
+Every API report carries the gate that authorized it: `access.profile`, the
 identities, the credential sources, the execution host, and `skill.digest`.
 That digest is identical across every report from one installed copy, and each
 carries a `receipt_sha256` tying it to its gate — cross-check and cite them,
@@ -115,3 +122,15 @@ text. For an artifact that will be kept or committed, use `access_check.py
 the captured form names credential locations under someone's home directory.
 Review any artifact before sharing — event messages and job traces can carry
 sensitive text.
+
+## 7. Read evidence on a selected node
+
+Declare `[kubernetes.node_diagnostics]` and an existing Pod route in the
+selected `.ci-skills/target.toml` (see the template). Run
+`scripts/cilium_node.py --json` to execute `cilium-dbg` and `cilium-health`
+inside that agent Pod without a TTY. Run `scripts/ceph_kernel.py --json` to
+classify recent host journal messages through a selected existing Pod whose
+host journal mount is read back first. Both commands use the same pinned
+kubeconfig/context/server and three-surface access gate as the API commands;
+neither creates a Pod or repairs a node. Both accept `--search TEXT`;
+`ceph_kernel.py` also accepts `--classification NAME`.

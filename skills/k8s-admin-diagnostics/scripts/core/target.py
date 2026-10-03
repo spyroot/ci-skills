@@ -33,6 +33,33 @@ class GitLabTarget:
 
 
 @dataclass(frozen=True)
+class NodePodRoute:
+    """One existing Pod selected by namespace, label selector, and node."""
+
+    namespace: str
+    selector: str
+    container: str
+
+
+@dataclass(frozen=True)
+class JournalPodRoute:
+    """Existing Pod whose declared mount exposes the host journal directory."""
+
+    pod: NodePodRoute
+    directory: str
+    host_path: str
+
+
+@dataclass(frozen=True)
+class NodeDiagnosticsTarget:
+    """Exact node and existing Pod routes for nonmutating node reads."""
+
+    node: str
+    cilium: NodePodRoute | None
+    journal: JournalPodRoute | None
+
+
+@dataclass(frozen=True)
 class KubernetesTarget:
     context: str
     server: str
@@ -43,6 +70,7 @@ class KubernetesTarget:
     # operator to export KUBECONFIG for that is a trap: the default kubeconfig
     # is usually a DIFFERENT cluster, so a cold run silently aims elsewhere.
     kubeconfigs: tuple[Path, ...] = ()
+    node_diagnostics: NodeDiagnosticsTarget | None = None
 
 
 @dataclass(frozen=True)
@@ -166,6 +194,55 @@ def _optional_file(table: dict[str, object], key: str, skill_root: Path) -> Path
     return path
 
 
+def _node_diagnostics(value: object | None) -> NodeDiagnosticsTarget | None:
+    if value is None:
+        return None
+    table = _table(value, "kubernetes.node_diagnostics", {"node", "cilium", "journal"})
+    node = _string(table, "node")
+    if any(character.isspace() for character in node):
+        raise TargetError(
+            "kubernetes.node_diagnostics.node must not contain whitespace"
+        )
+    cilium = _node_pod_route(table["cilium"], "cilium") if "cilium" in table else None
+    journal = None
+    if "journal" in table:
+        journal_table = _table(
+            table["journal"],
+            "kubernetes.node_diagnostics.journal",
+            {"namespace", "selector", "container", "directory", "host_path"},
+        )
+        journal = JournalPodRoute(
+            pod=_node_pod_route(journal_table, "journal", allow_journal_fields=True),
+            directory=_absolute_path(_string(journal_table, "directory"), "directory"),
+            host_path=_absolute_path(_string(journal_table, "host_path"), "host_path"),
+        )
+    return NodeDiagnosticsTarget(node=node, cilium=cilium, journal=journal)
+
+
+def _node_pod_route(
+    value: object, kind: str, *, allow_journal_fields: bool = False
+) -> NodePodRoute:
+    keys = {"namespace", "selector", "container"}
+    if allow_journal_fields:
+        keys.update({"directory", "host_path"})
+    table = _table(value, f"kubernetes.node_diagnostics.{kind}", keys)
+    namespace = _string(table, "namespace")
+    selector = _string(table, "selector")
+    container = _string(table, "container")
+    if any(character.isspace() for character in namespace + container):
+        raise TargetError(f"kubernetes.node_diagnostics.{kind} has invalid name")
+    return NodePodRoute(namespace=namespace, selector=selector, container=container)
+
+
+def _absolute_path(value: str, key: str) -> str:
+    path = Path(value)
+    if not path.is_absolute() or ".." in path.parts or value == "/":
+        raise TargetError(
+            f"kubernetes.node_diagnostics.journal.{key} must be an absolute directory"
+        )
+    return value
+
+
 def load_target(path: str | Path) -> Target:
     """Parse one operator-selected TOML file; never search for hidden profiles."""
     source = Path(path).expanduser()
@@ -202,7 +279,7 @@ def load_target(path: str | Path) -> Target:
     kubernetes = _table(
         data["kubernetes"],
         "kubernetes",
-        {"context", "server", "kubeconfig", "kubeconfigs"},
+        {"context", "server", "kubeconfig", "kubeconfigs", "node_diagnostics"},
     )
     server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
     kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
@@ -226,5 +303,6 @@ def load_target(path: str | Path) -> Target:
             server=server,
             kubeconfig=kubeconfig,
             kubeconfigs=kubeconfigs,
+            node_diagnostics=_node_diagnostics(kubernetes.get("node_diagnostics")),
         ),
     )

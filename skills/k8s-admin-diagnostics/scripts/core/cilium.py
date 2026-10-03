@@ -15,8 +15,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from .runtime import sanitize
+
 HEALTH_COMMAND = ("cilium-health", "status", "-o", "json")
 AGENT_DAEMONSET = "cilium"
+HEALTHY_STATES = frozenset({"ok", "reachable", "healthy", "success"})
 
 
 def matches_selector(labels: dict[str, str], selector: dict[str, Any]) -> bool:
@@ -127,3 +130,87 @@ def health_detail(value: Any) -> dict[str, Any]:
         "local_node": name if isinstance(name, str) and name.strip() else None,
         "peer_count": len(peers) if isinstance(peers, list) else None,
     }
+
+
+def _failure_messages(value: Any, path: str) -> list[tuple[str, str]]:
+    """Find explicit Cilium probe messages without inferring missing probes failed."""
+    if isinstance(value, list):
+        return [
+            finding
+            for index, item in enumerate(value)
+            for finding in _failure_messages(item, f"{path}[{index}]")
+        ]
+    if not isinstance(value, dict):
+        return []
+    findings = []
+    status = value.get("status")
+    if (
+        isinstance(status, str)
+        and status.strip()
+        and status.strip().casefold() not in HEALTHY_STATES
+    ):
+        findings.append((f"{path}.status", sanitize(status.strip(), 240)))
+    for key, item in value.items():
+        if key != "status" and isinstance(item, (dict, list)):
+            findings.extend(_failure_messages(item, f"{path}.{key}"))
+    return findings
+
+
+def health_findings(value: Any) -> list[dict[str, Any]]:
+    """Return peer and endpoint failures explicitly reported by cilium-health."""
+    if not isinstance(value, dict):
+        return []
+    findings = [
+        {
+            "component": "local",
+            "path": path,
+            "message": message,
+            "action": "inspect_cilium_local_health",
+        }
+        for path, message in _failure_messages(value.get("local"), "local")
+    ]
+    peers = value.get("nodes")
+    if not isinstance(peers, list):
+        return findings
+    for index, peer in enumerate(peers):
+        if not isinstance(peer, dict):
+            continue
+        name = peer.get("name")
+        for path, message in _failure_messages(peer, "peer"):
+            findings.append(
+                {
+                    "component": path.split(".")[1].split("[")[0],
+                    "peer": sanitize(name, 240) if isinstance(name, str) else None,
+                    "peer_index": index,
+                    "path": path,
+                    "message": message,
+                    "action": "inspect_cilium_peer_connectivity",
+                }
+            )
+    return findings
+
+
+def daemon_findings(value: Any) -> list[dict[str, Any]]:
+    """Return non-Ok daemon components; optional disabled components are normal."""
+    if not isinstance(value, dict):
+        return []
+    findings = []
+    for name, component in value.items():
+        if not isinstance(component, dict):
+            continue
+        state = component.get("state")
+        if not isinstance(state, str) or not state.strip():
+            continue
+        normalized = state.strip().casefold()
+        if normalized == "ok" or (normalized == "disabled" and name != "cilium"):
+            continue
+        message = component.get("msg")
+        findings.append(
+            {
+                "component": name,
+                "state": sanitize(state.strip(), 80),
+                "message": sanitize(message, 240) if isinstance(message, str) else None,
+                "action": "inspect_cilium_daemon_component",
+            }
+        )
+    return findings
