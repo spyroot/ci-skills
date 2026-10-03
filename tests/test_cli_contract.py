@@ -16,14 +16,15 @@ from conftest import (
 )
 
 SCRIPT_CASES = (
-    ("access_check.py", ()),
+    ("access_check.py", (), {"github", "gitlab", "kubernetes"}),
     (
         "gitlab_job.py",
         ("--job-url", "https://gitlab.example.test/unit/repo/-/jobs/123"),
+        {"gitlab"},
     ),
-    ("storage_report.py", ()),
-    ("event_trace.py", ()),
-    ("cilium_status.py", ()),
+    ("storage_report.py", (), {"kubernetes"}),
+    ("event_trace.py", (), {"kubernetes"}),
+    ("cilium_status.py", (), {"kubernetes"}),
 )
 
 
@@ -62,13 +63,14 @@ def test_help_lists_common_and_script_specific_flags(script_name, specific_flags
         assert flag in result.stdout
 
 
-@pytest.mark.parametrize(("script_name", "extra_args"), SCRIPT_CASES)
+@pytest.mark.parametrize(("script_name", "extra_args", "authorities"), SCRIPT_CASES)
 def test_dry_run_json_lists_access_probes_without_external_calls(
     fake_bin,
     call_journal,
     target_file,
     script_name,
     extra_args,
+    authorities,
 ):
     """Dry run is a local explanation mode and cannot contact live tools."""
     body = (
@@ -96,7 +98,7 @@ def test_dry_run_json_lists_access_probes_without_external_calls(
 
     assert result.returncode == 0
     assert data["status"] == "DRY_RUN"
-    assert set(data["surfaces"]) == {"github", "gitlab", "kubernetes"}
+    assert set(data["surfaces"]) == authorities
     assert read_journal(call_journal) == []
 
 
@@ -112,7 +114,10 @@ def test_output_modes_are_mutually_exclusive(target_file):
     )
 
     assert result.returncode == 2
-    assert "not allowed with argument" in result.stderr
+    assert result.stderr == ""
+    data = json.loads(result.stdout)
+    assert data["status"] == "BLOCKED"
+    assert data["errors"] == [{"source": "arguments", "reason": "invalid_arguments"}]
 
 
 @pytest.mark.parametrize(
@@ -185,7 +190,7 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
     monkeypatch.setattr(
         cli,
         "check_access",
-        lambda _target, publication=False: {
+        lambda _target, publication=False, cilium=False: {
             "kind": "access_check",
             "status": status.PASS,
         },

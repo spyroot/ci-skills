@@ -57,6 +57,11 @@ def _load_expected(path: Path) -> dict[str, Any]:
     for key in REQUIRED_EXPECTATIONS:
         if not data.get(key):
             raise AcceptanceError(f"expectation_not_declared:{key}")
+    ceph_namespace = data.get("ceph_namespace")
+    if "ceph_cluster" in data["required_live_checks"] and (
+        not isinstance(ceph_namespace, str) or not ceph_namespace
+    ):
+        raise AcceptanceError("expectation_not_declared:ceph_namespace")
     return data
 
 
@@ -134,6 +139,10 @@ def _check_receipt(
             problems.append(f"{name}:live_check_missing:{required}")
         elif check.get("access_proven") is not True:
             problems.append(f"{name}:live_check_unproven:{required}")
+    if "ceph_cluster" in expected.get("required_live_checks", ()):
+        ceph = live.get("ceph_cluster") or {}
+        if ceph.get("namespace") != expected.get("ceph_namespace"):
+            problems.append(f"{name}:ceph_namespace_mismatch")
     if receipt.get("blocking_live_checks"):
         problems.append(f"{name}:live_checks_blocking")
 

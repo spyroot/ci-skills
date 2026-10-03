@@ -35,24 +35,28 @@
     "kubernetes": [
       {
         "source": "target:kubernetes.kubeconfigs",
-        "when": "the target declares the search path; needs no environment"
+        "when": "the target declares kubectl's ordered, combined path"
       },
       {
         "source": "target:kubernetes.kubeconfig",
         "when": "the target declares one file"
       },
       {
+        "source": "binding:kubernetes.sources",
+        "when": "a project binding selects a declared file, environment, or command source"
+      },
+      {
         "source": "env:KUBECONFIG",
-        "when": "set; its own path order is honoured"
+        "when": "set; its path order is honoured"
       },
       {
         "source": "kubectl-default:~/.kube/config",
         "when": "nothing above applies"
       }
     ],
-    "no_search": "Do not hunt for credentials. Run access_check.py once: if it passes, the report names the effective source for each authority and you are done. If it blocks, the surface reason names what to fix.",
+    "no_search": "Do not hunt for credentials. Run the diagnostic you need: its access receipt names the effective source for each required authority. Use access_check.py when you need the full three-authority receipt.",
     "rule": "first match wins; the resolved source is reported in credential_sources",
-    "warning": "The last Kubernetes entry is usually a DIFFERENT cluster from the one you want. Declare kubernetes.kubeconfigs in the target so a cold run cannot silently aim elsewhere."
+    "warning": "The default kubeconfig may name another cluster. The selected context and API server are always verified before collection."
   },
   "authorities": [
     "github",
@@ -79,6 +83,8 @@
     "access_check.py": {
       "capabilities": [],
       "options": [
+        "--binding",
+        "--ceph-namespace",
         "--describe",
         "--dry-run",
         "--human",
@@ -100,12 +106,46 @@
         "kubernetes"
       ],
       "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
-      "use_when": "Before trusting any other command, and whenever you need evidence that a host really had the access it claims."
+      "use_when": "When you need one live receipt proving GitHub, GitLab, and Kubernetes access on the execution host."
+    },
+    "ceph_cluster.py": {
+      "capabilities": [
+        "namespaced",
+        "node_scoped"
+      ],
+      "options": [
+        "--binding",
+        "--condition",
+        "--conf",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--namespace",
+        "--node",
+        "--operator",
+        "--output-dir",
+        "--ready",
+        "--revision",
+        "--target",
+        "--yaml"
+      ],
+      "purpose": "Read Ceph health, root/rack/host/OSD hierarchy, inactive PGs, and OSD/monitor Pods.",
+      "report_kind": "ceph_cluster",
+      "required_options": [
+        "--namespace"
+      ],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "Ceph status, nested OSD tree, inactive PGs, and filtered OSD/monitor Pod records.",
+      "use_when": "A selected Rook Ceph cluster needs API-backed diagnostics."
     },
     "ceph_kernel.py": {
       "capabilities": [],
       "execution_surface": "Kubernetes API and one existing Pod on the selected node",
       "options": [
+        "--binding",
         "--classification",
         "--describe",
         "--dry-run",
@@ -124,8 +164,6 @@
         "journalctl in the selected Pod"
       ],
       "requires_authorities": [
-        "github",
-        "gitlab",
         "kubernetes"
       ],
       "returns": "Bounded UTC kernel records and read-only recommended action codes.",
@@ -135,6 +173,7 @@
       "capabilities": [],
       "execution_surface": "Kubernetes API and one existing Pod on the selected node",
       "options": [
+        "--binding",
         "--describe",
         "--dry-run",
         "--human",
@@ -151,8 +190,6 @@
         "kubectl"
       ],
       "requires_authorities": [
-        "github",
-        "gitlab",
         "kubernetes"
       ],
       "returns": "One Pod record with bounded daemon and health summaries plus findings, or a classified failure.",
@@ -165,6 +202,7 @@
         "node_scoped"
       ],
       "options": [
+        "--binding",
         "--describe",
         "--dry-run",
         "--human",
@@ -193,6 +231,7 @@
         "time_ranged"
       ],
       "options": [
+        "--binding",
         "--describe",
         "--dry-run",
         "--from",
@@ -224,6 +263,7 @@
         "filters_records"
       ],
       "options": [
+        "--binding",
         "--describe",
         "--dry-run",
         "--human",
@@ -253,6 +293,7 @@
         "node_scoped"
       ],
       "options": [
+        "--binding",
         "--describe",
         "--dry-run",
         "--human",
@@ -284,6 +325,7 @@
   },
   "kind": "skill_manifest",
   "node_local_options": {
+    "--binding": "project binding for target and ordered kubeconfig sources",
     "--describe": "this command's machine-readable contract, then exit",
     "--dry-run": "list API and existing-Pod probes without executing them",
     "--human": "human summary even when stdout is not a terminal",
@@ -295,12 +337,13 @@
   },
   "read_only": true,
   "routing": {
+    "Ceph cluster health and OSD/monitor Pods": "ceph_cluster.py",
     "Cilium daemon and health on a selected node": "cilium_node.py",
     "a named CI job failed": "gitlab_job.py",
     "a volume or claim is stuck": "storage_report.py",
     "connectivity or CNI health": "cilium_status.py",
     "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
-    "prove access first": "access_check.py",
+    "prove all three authorities": "access_check.py",
     "what the cluster said during an interval": "event_trace.py"
   },
   "schema_version": "1.0",
@@ -339,6 +382,7 @@
     }
   ],
   "universal_options": {
+    "--binding": "project-declared target and ordered kubeconfig source resolver",
     "--describe": "this command's machine-readable contract, then exit",
     "--dry-run": "list planned probes without contacting any API; never access evidence",
     "--human": "human summary even when stdout is not a terminal",

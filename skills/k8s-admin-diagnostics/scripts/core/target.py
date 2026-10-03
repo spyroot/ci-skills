@@ -9,6 +9,8 @@ from urllib.parse import urlsplit
 
 import tomllib
 
+from .catalog import AUTHORITIES
+
 
 class TargetError(ValueError):
     """A target file cannot safely identify the requested authorities."""
@@ -75,9 +77,10 @@ class KubernetesTarget:
 
 @dataclass(frozen=True)
 class Target:
-    github: GitHubTarget
-    gitlab: GitLabTarget
-    kubernetes: KubernetesTarget
+    github: GitHubTarget | None
+    gitlab: GitLabTarget | None
+    kubernetes: KubernetesTarget | None
+    active_surfaces: tuple[str, ...] = AUTHORITIES
     sources: object | None = field(default=None, repr=False, compare=False)
     tested_revision: str | None = None
     # Which declared source supplied this target, so a report can say where it
@@ -85,6 +88,8 @@ class Target:
     source_file: Path | None = None
     source_kind: str | None = None
     skill: dict[str, Any] | None = None
+    kubernetes_source_reference: str | None = None
+    target_reference: str | None = None
 
 
 def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:
@@ -243,8 +248,16 @@ def _absolute_path(value: str, key: str) -> str:
     return value
 
 
-def load_target(path: str | Path) -> Target:
-    """Parse one operator-selected TOML file; never search for hidden profiles."""
+def load_target(
+    path: str | Path, *, required_surfaces: tuple[str, ...] = AUTHORITIES
+) -> Target:
+    """Validate only the authorities needed by this command's declared contract."""
+    if (
+        not required_surfaces
+        or len(set(required_surfaces)) != len(required_surfaces)
+        or set(required_surfaces) - set(AUTHORITIES)
+    ):
+        raise TargetError("required_target_surfaces_invalid")
     source = Path(path).expanduser()
     skill_root = Path(__file__).resolve().parents[2]
     if source.resolve().is_relative_to(skill_root):
@@ -254,55 +267,66 @@ def load_target(path: str | Path) -> Target:
             data = tomllib.load(handle)
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise TargetError(f"target file is unavailable or invalid: {source}") from exc
-    if set(data) != {"github", "gitlab", "kubernetes"}:
+    if set(data) - set(AUTHORITIES) or set(required_surfaces) - set(data):
         raise TargetError(
-            "target must contain github, gitlab, and kubernetes tables only"
+            "target must contain the selected authority tables only: "
+            + ", ".join(required_surfaces)
         )
 
-    github = _table(
-        data["github"],
-        "github",
-        {"host", "repository", "token_file", "required_checks"},
-    )
-    github_host = _string(github, "host").lower()
-    if "." not in github_host or "/" in github_host or ":" in github_host:
-        raise TargetError("github.host must be a full hostname")
-    repository = _string(github, "repository")
-    if len(repository.split("/")) != 2 or any(
-        not part for part in repository.split("/")
-    ):
-        raise TargetError("github.repository must be owner/repository")
-
-    gitlab = _table(data["gitlab"], "gitlab", {"url", "token_file"})
-    gitlab_url, gitlab_host = _https_url(_string(gitlab, "url"), "gitlab.url")
-
-    kubernetes = _table(
-        data["kubernetes"],
-        "kubernetes",
-        {"context", "server", "kubeconfig", "kubeconfigs", "node_diagnostics"},
-    )
-    server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
-    kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
-    kubeconfigs = _optional_files(kubernetes, "kubeconfigs", skill_root)
-    if kubeconfig and kubeconfigs:
-        raise TargetError("declare kubernetes.kubeconfig or kubeconfigs, not both")
-    return Target(
-        github=GitHubTarget(
+    github_target = None
+    if "github" in required_surfaces:
+        github = _table(
+            data["github"],
+            "github",
+            {"host", "repository", "token_file", "required_checks"},
+        )
+        github_host = _string(github, "host").lower()
+        if "." not in github_host or "/" in github_host or ":" in github_host:
+            raise TargetError("github.host must be a full hostname")
+        repository = _string(github, "repository")
+        if len(repository.split("/")) != 2 or any(
+            not part for part in repository.split("/")
+        ):
+            raise TargetError("github.repository must be owner/repository")
+        github_target = GitHubTarget(
             host=github_host,
             repository=repository,
             token_file=_optional_file(github, "token_file", skill_root),
             required_checks=_optional_names(github, "required_checks"),
-        ),
-        gitlab=GitLabTarget(
+        )
+
+    gitlab_target = None
+    if "gitlab" in required_surfaces:
+        gitlab = _table(data["gitlab"], "gitlab", {"url", "token_file"})
+        gitlab_url, gitlab_host = _https_url(_string(gitlab, "url"), "gitlab.url")
+        gitlab_target = GitLabTarget(
             url=gitlab_url,
             host=gitlab_host,
             token_file=_optional_file(gitlab, "token_file", skill_root),
-        ),
-        kubernetes=KubernetesTarget(
+        )
+
+    kubernetes_target = None
+    if "kubernetes" in required_surfaces:
+        kubernetes = _table(
+            data["kubernetes"],
+            "kubernetes",
+            {"context", "server", "kubeconfig", "kubeconfigs", "node_diagnostics"},
+        )
+        server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
+        kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
+        kubeconfigs = _optional_files(kubernetes, "kubeconfigs", skill_root)
+        if kubeconfig and kubeconfigs:
+            raise TargetError("declare kubernetes.kubeconfig or kubeconfigs, not both")
+        kubernetes_target = KubernetesTarget(
             context=_string(kubernetes, "context"),
             server=server,
             kubeconfig=kubeconfig,
             kubeconfigs=kubeconfigs,
             node_diagnostics=_node_diagnostics(kubernetes.get("node_diagnostics")),
-        ),
+        )
+    return Target(
+        github=github_target,
+        gitlab=gitlab_target,
+        kubernetes=kubernetes_target,
+        active_surfaces=required_surfaces,
     )

@@ -1,10 +1,8 @@
 ---
 name: k8s-admin-diagnostics
-description: Collect read-only GitLab CI, Kubernetes, Cilium, and Ceph evidence through verified credentials and selected targets.
+description: Collect read-only GitLab CI, Kubernetes, Cilium, and Ceph evidence through verified credentials and selected targets, including existing-Pod node diagnostics.
 metadata:
   manifest: tools.json
-  first_call: scripts/access_check.py
-  first_call_scope: api_collectors
   default_output: json when stdout is not a terminal
   read_only: true
 ---
@@ -14,18 +12,30 @@ metadata:
 Diagnose a Kubernetes-backed CI, storage or network symptom. Every command is
 read-only: none logs in, changes context, grants a role, or mutates anything.
 
-## 1. First call for API diagnostics: access check
+## 1. Choose the command for the symptom
 
-Run this before any API collector:
+Run the relevant command from `tools.json` directly. Each command resolves and
+checks only its declared authority: GitLab for a job, or Kubernetes for storage,
+events, Cilium, and Ceph. Its `access` field reports the effective source and
+identity. A Kubernetes-only target needs only `[kubernetes]`; a GitLab-only
+target needs only `[gitlab]`. The selected target file never inherits missing
+tables from a lower tier.
 
-    scripts/access_check.py --publication
+For one receipt proving all three authorities, run:
+
+    scripts/access_check.py --json
+
+Add `--publication` when repository administration and required-check read-back
+are part of the requested proof. Add `--ceph-namespace NAME` when the receipt
+must also prove the Ceph collector in that selected namespace. Ceph, storage,
+events, and kernel diagnostics require base Kubernetes access; Cilium discovery
+and health exec are checked only for Cilium commands and the full receipt.
 
 Do not go looking for credentials. This one call resolves them and tells you
 what it used:
 
-- `PASS` — `credential_sources` names the effective source per authority and
-  `surfaces.<name>.identity` the identity read back. You now know what you are
-  authenticated as. Stop searching; proceed.
+- `PASS` — `credential_sources` names the effective source per required
+  authority and `surfaces.<name>.identity` names the identity read back.
 - `BLOCKED` — `surfaces.<name>.reason` names what failed and `next_step` what
   to do. Report that; do not try other credentials.
 
@@ -35,9 +45,12 @@ and [references/access.md](references/access.md) is the full contract.
 The installed `gh` environment contract uses `GH_TOKEN`/`GITHUB_TOKEN` for
 `github.com` and `*.ghe.com`, and enterprise token variables for other GitHub
 Enterprise Server hosts. A selected token file clears ambient GitHub tokens.
-The one trap worth knowing: with no Kubernetes location declared, resolution
-ends at `~/.kube/config`, which is usually a *different* cluster — so a target
-that declares `kubernetes.kubeconfigs` is how you avoid aiming elsewhere.
+For Kubernetes, the target may declare `kubernetes.kubeconfig` or the ordered
+`kubernetes.kubeconfigs` path. Otherwise resolution uses `KUBECONFIG`, then
+`~/.kube/config`. Every route must match the target's context and API server;
+the skill does not substitute an ambient current context. For a project-specific
+kubeconfig resolver, use the [project binding](references/project-binding.md)
+and its declared sources.
 
 Provisioning access is not this skill's job. If a kubeconfig has to be fetched
 or minted first, that belongs to the calling project's own instructions.
@@ -53,21 +66,22 @@ Routing, in short:
 
 | You need | Command |
 | --- | --- |
-| proof of access, before trusting anything | `access_check.py` |
+| proof of access across all three authorities | `access_check.py` |
 | a named CI job's own facts | `gitlab_job.py --job-url URL` |
 | why a volume or claim is stuck | `storage_report.py` |
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |
+| Ceph hierarchy and Pods | `ceph_cluster.py --namespace NAME` |
 | Cilium daemon and health on a selected node | `cilium_node.py` |
 | Ceph or RBD kernel messages on that node | `ceph_kernel.py` |
 
-## 3. One interface, not five
+## 3. One API interface
 
-Every API command accepts `--target`, `--json`, `--yaml`, `--human`, `--dry-run`,
-`--revision`, `--output-dir` and `--describe`. A command that filters records
-accepts `--search`; one scoped to a namespace accepts `--namespace`; one
-reading a time range accepts `--last`, `--from` and `--to`. Learn the tier
-once and it holds everywhere.
+Every API command accepts `--target` or `--binding`, `--json`, `--yaml`,
+`--human`, `--dry-run`, `--revision`, `--output-dir` and `--describe`.
+A command that filters records accepts `--search`; one scoped to a namespace
+accepts `--namespace`; one reading a time range accepts `--last`, `--from`
+and `--to`. Learn the tier once and it holds everywhere.
 
 `--target` resolves in four declared places — the argument, then
 `$CI_SKILLS_TARGET`, then `./.ci-skills/target.toml`, then
@@ -76,6 +90,10 @@ once and it holds everywhere.
 mean the environment variable or a per-project file. The common case takes no
 arguments at all. Output needs no flag either: a terminal gets the human
 summary, a pipe or file gets versioned JSON.
+
+`--binding PATH` or `K8S_ADMIN_DIAGNOSTICS_BINDING` names a project target and
+ordered file, environment, or command sources for its kubeconfig. The receipt
+records the selected source; see the binding protocol before using it.
 
 Prefer a native filter over a shell pipeline — `--namespace`, `--node`,
 `--reason`, `--search`, `--last` — because a pipeline discards the identity and
@@ -130,7 +148,8 @@ selected `.ci-skills/target.toml` (see the template). Run
 `scripts/cilium_node.py --json` to execute `cilium-dbg` and `cilium-health`
 inside that agent Pod without a TTY. Run `scripts/ceph_kernel.py --json` to
 classify recent host journal messages through a selected existing Pod whose
-host journal mount is read back first. Both commands use the same pinned
-kubeconfig/context/server and three-surface access gate as the API commands;
+host journal mount is read back first. Both accept `--target` or `--binding`
+and use the same pinned kubeconfig/context/server and Kubernetes access gate
+as the cluster collectors;
 neither creates a Pod or repairs a node. Both accept `--search TEXT`;
 `ceph_kernel.py` also accepts `--classification NAME`.

@@ -29,6 +29,7 @@ SKILL_NAME = "k8s-admin-diagnostics"
 # Every API command accepts these. Node diagnostics share the target protocol.
 UNIVERSAL_OPTIONS: dict[str, str] = {
     "--target": "nonsecret TOML naming the exact authorities; defaults to the per-host location",
+    "--binding": "project-declared target and ordered kubeconfig source resolver",
     "--json": "versioned JSON document",
     "--yaml": "versioned YAML document",
     "--human": "human summary even when stdout is not a terminal",
@@ -88,9 +89,9 @@ def github_variables(host: str) -> tuple[str, ...]:
 ACCESS_PROTOCOL: dict[str, Any] = {
     "rule": "first match wins; the resolved source is reported in credential_sources",
     "no_search": (
-        "Do not hunt for credentials. Run access_check.py once: if it passes, the "
-        "report names the effective source for each authority and you are done. "
-        "If it blocks, the surface reason names what to fix."
+        "Do not hunt for credentials. Run the diagnostic you need: its access "
+        "receipt names the effective source for each required authority. "
+        "Use access_check.py when you need the full three-authority receipt."
     ),
     "github": [
         {
@@ -129,19 +130,22 @@ ACCESS_PROTOCOL: dict[str, Any] = {
     "kubernetes": [
         {
             "source": "target:kubernetes.kubeconfigs",
-            "when": "the target declares the search path; needs no environment",
+            "when": "the target declares kubectl's ordered, combined path",
         },
         {
             "source": "target:kubernetes.kubeconfig",
             "when": "the target declares one file",
         },
-        {"source": "env:KUBECONFIG", "when": "set; its own path order is honoured"},
+        {
+            "source": "binding:kubernetes.sources",
+            "when": "a project binding selects a declared file, environment, or command source",
+        },
+        {"source": "env:KUBECONFIG", "when": "set; its path order is honoured"},
         {"source": "kubectl-default:~/.kube/config", "when": "nothing above applies"},
     ],
     "warning": (
-        "The last Kubernetes entry is usually a DIFFERENT cluster from the one "
-        "you want. Declare kubernetes.kubeconfigs in the target so a cold run "
-        "cannot silently aim elsewhere."
+        "The default kubeconfig may name another cluster. The selected context "
+        "and API server are always verified before collection."
     ),
 }
 
@@ -190,14 +194,15 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "kind": "access_check",
         "purpose": "Prove access to every selected authority and emit one receipt.",
         "use_when": (
-            "Before trusting any other command, and whenever you need evidence "
-            "that a host really had the access it claims."
+            "When you need one live receipt proving GitHub, GitLab, and "
+            "Kubernetes access on the execution host."
         ),
         "requires": ("github", "gitlab", "kubernetes"),
         "capabilities": (),
         "options": {
             "--publication": "also require repository administration and the declared required checks",
             "--job-url": "also prove access to one job, its pipeline, runner and trace",
+            "--ceph-namespace": "also prove Ceph health, OSD, PG and Pod reads in the selected namespace",
             "--receipt-out": "write the committable receipt, with host paths digested",
         },
         "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
@@ -250,11 +255,27 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "options": {},
         "returns": "One record per agent with non-TTY health and actionable peer findings; UNKNOWN where exec could not run.",
     },
+    "ceph_cluster.py": {
+        "kind": "ceph_cluster",
+        "purpose": "Read Ceph health, root/rack/host/OSD hierarchy, inactive PGs, and OSD/monitor Pods.",
+        "use_when": "A selected Rook Ceph cluster needs API-backed diagnostics.",
+        "requires": ("kubernetes",),
+        "capabilities": ("namespaced", "node_scoped"),
+        "options": {
+            "--operator": "operator deployment name",
+            "--conf": "Ceph config path inside the operator Pod",
+            "--ready": "Pod Ready filter: all, true, or false",
+            "--condition": "Pod condition filter: TYPE=STATUS",
+        },
+        "required_options": ("--namespace",),
+        "returns": "Ceph status, nested OSD tree, inactive PGs, and filtered OSD/monitor Pod records.",
+    },
 }
 
 # Node diagnostics use existing selected Pods through the same API target.
 NODE_LOCAL_OPTIONS: dict[str, str] = {
     "--target": "nonsecret TOML naming the exact authorities and node Pod routes",
+    "--binding": "project binding for target and ordered kubeconfig sources",
     "--revision": "exact source commit of the installed copy, recorded as a claim",
     "--json": "versioned JSON document",
     "--yaml": "versioned YAML document",
@@ -267,6 +288,7 @@ NODE_LOCAL_OPTIONS: dict[str, str] = {
 NODE_LOCAL_COMMANDS: dict[str, dict[str, Any]] = {
     "cilium_node.py": {
         "kind": "cilium_node",
+        "requires": ("kubernetes",),
         "purpose": "Read Cilium daemon status and health from an existing agent Pod on one node.",
         "use_when": "A selected node needs Cilium daemon and peer diagnosis.",
         "required_tools": ("kubectl",),
@@ -274,6 +296,7 @@ NODE_LOCAL_COMMANDS: dict[str, dict[str, Any]] = {
     },
     "ceph_kernel.py": {
         "kind": "ceph_kernel",
+        "requires": ("kubernetes",),
         "purpose": "Classify host Ceph/RBD kernel journal lines through an existing Pod.",
         "use_when": "A selected node has a Pod with a verified host journal mount.",
         "required_tools": ("kubectl", "journalctl in the selected Pod"),
@@ -364,10 +387,10 @@ def describe_node(script: str) -> dict[str, Any]:
         "report_kind": entry["kind"],
         "purpose": entry["purpose"],
         "use_when": entry["use_when"],
-        "requires_authorities": list(AUTHORITIES),
+        "requires_authorities": list(entry["requires"]),
         "execution_surface": "Kubernetes API and one existing Pod on the selected node",
         "required_tools": list(entry["required_tools"]),
-        "access_protocol": ACCESS_PROTOCOL,
+        "access_protocol": {name: ACCESS_PROTOCOL[name] for name in entry["requires"]},
         "capabilities": [],
         "required_options": [],
         "options": {**NODE_LOCAL_OPTIONS, **entry.get("options", {})},
@@ -414,7 +437,7 @@ def manifest() -> dict[str, Any]:
                     "report_kind": entry["kind"],
                     "purpose": entry["purpose"],
                     "use_when": entry["use_when"],
-                    "requires_authorities": list(AUTHORITIES),
+                    "requires_authorities": list(entry["requires"]),
                     "execution_surface": "Kubernetes API and one existing Pod on the selected node",
                     "required_tools": list(entry["required_tools"]),
                     "capabilities": [],
@@ -428,12 +451,13 @@ def manifest() -> dict[str, Any]:
             },
         },
         "routing": {
-            "prove access first": "access_check.py",
+            "prove all three authorities": "access_check.py",
             "a named CI job failed": "gitlab_job.py",
             "a volume or claim is stuck": "storage_report.py",
             "what the cluster said during an interval": "event_trace.py",
             "connectivity or CNI health": "cilium_status.py",
             "Cilium daemon and health on a selected node": "cilium_node.py",
             "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
+            "Ceph cluster health and OSD/monitor Pods": "ceph_cluster.py",
         },
     }

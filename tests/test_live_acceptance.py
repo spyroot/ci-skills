@@ -33,7 +33,13 @@ def _digest() -> str:
 def _expected() -> dict:
     return {
         "max_receipt_age_days": 30,
-        "required_live_checks": ["storage_report", "event_trace", "cilium_status"],
+        "required_live_checks": [
+            "storage_report",
+            "event_trace",
+            "cilium_status",
+            "ceph_cluster",
+        ],
+        "ceph_namespace": "selected-ceph",
         "required_checks": ["validate"],
         "targets": {
             "github": "github.com/owner/repository",
@@ -60,8 +66,9 @@ def _expected() -> dict:
 def _receipt() -> dict:
     checks = {
         name: {"status": "PASS", "access_proven": True}
-        for name in ("storage_report", "event_trace", "cilium_status")
+        for name in ("storage_report", "event_trace", "cilium_status", "ceph_cluster")
     }
+    checks["ceph_cluster"]["namespace"] = "selected-ceph"
     return {
         "schema_version": "1.0",
         "kind": "access_check",
@@ -98,6 +105,16 @@ def test_a_good_receipt_is_accepted():
 
     assert result["status"] == "PASS", result["problems"]
     assert result["accepted"] == ["declared.json"]
+
+
+def test_ceph_namespace_must_match_operator_selection():
+    receipt = _receipt()
+    receipt["live_checks"]["ceph_cluster"]["namespace"] = "another-cluster"
+
+    result = _evaluate(receipt)
+
+    assert result["status"] == "BLOCKED"
+    assert "declared.json:ceph_namespace_mismatch" in result["problems"]
 
 
 @pytest.mark.parametrize(
