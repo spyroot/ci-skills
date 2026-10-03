@@ -6,18 +6,25 @@ import argparse
 import json
 import socket
 import sys
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
+from .access import access_evidence, check_access
 from .catalog import describe_node
+from .cli import resolve_target
+from .credentials import bind_sources
 from .node_local import (
     CEPH_CLASSIFICATIONS,
     JOURNAL_SINCE,
     collect_ceph_kernel,
     collect_cilium_node,
 )
+from .node_pod import NodePodError, select_node_pod
 from .report import emit
-from .status import BLOCKED, DRY_RUN, exit_code
+from .runtime import sanitize
+from .status import BLOCKED, DRY_RUN, PASS, exit_code
+from .target import TargetError, load_target
 
 
 class NodeParser(argparse.ArgumentParser):
@@ -61,8 +68,15 @@ class NodeParser(argparse.ArgumentParser):
 def parser(kind: str) -> argparse.ArgumentParser:
     result = NodeParser(
         prog=f"{kind}.py",
-        description=f"Collect {kind} evidence on the current Linux node. Audience: human and agent.",
-        epilog="Example: %(prog)s --json (run on the selected node)",
+        description=f"Collect {kind} evidence through a selected Kubernetes target. Audience: human and agent.",
+        epilog=(
+            "Target order: --target, CI_SKILLS_TARGET, ./.ci-skills/target.toml, "
+            "~/.ci-skills/target.toml. Example: %(prog)s --json"
+        ),
+    )
+    result.add_argument("--target", metavar="PATH", help="nonsecret TOML target file")
+    result.add_argument(
+        "--revision", metavar="SHA", help="exact installed skill revision"
     )
     modes = result.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print versioned JSON")
@@ -133,17 +147,17 @@ def run(kind: str, args: argparse.Namespace) -> int:
     if getattr(args, "describe", False):
         print(json.dumps(describe_node(f"{kind}.py"), sort_keys=True))
         return 0
-    data = {
+    data: dict[str, Any] = {
         "schema_version": "1.0",
         "kind": kind,
         "captured_at": datetime.now(timezone.utc).isoformat(),
         "execution_host": socket.getfqdn(),
-        "target": socket.getfqdn(),
+        "target": None,
         "records": [],
         "errors": [],
         "summary": {"record_count": 0, "error_count": 0},
     }
-    if args.yaml:
+    if getattr(args, "yaml", False):
         try:
             import yaml  # noqa: F401 - preflight before node reads
         except ImportError:
@@ -155,35 +169,96 @@ def run(kind: str, args: argparse.Namespace) -> int:
             )
             print(json.dumps(data, sort_keys=True))
             return 2
-    if args.dry_run:
-        data["status"] = DRY_RUN
-        data["probes"] = (
-            [
-                "sudo -n crictl ps --output json",
-                "sudo -n crictl exec <agent-id> cilium-dbg/cilium-health --output json",
-            ]
-            if kind == "cilium_node"
-            else [
-                f"sudo -n journalctl -k --utc --since {JOURNAL_SINCE!r} --no-pager --output=json"
-            ]
+    source = "target"
+    try:
+        target_path, target_source = resolve_target(getattr(args, "target", None))
+        target = replace(
+            load_target(target_path),
+            source_file=target_path,
+            source_kind=target_source,
         )
-    elif sys.platform != "linux":
-        data["status"] = BLOCKED
-        data["errors"] = [{"source": "execution_host", "reason": "linux_node_required"}]
-        data["summary"]["error_count"] = 1
-        data["safe_next_step"] = "Run this command on the selected Linux node."
-    else:
-        try:
-            data = (
-                collect_cilium_node()
+        selected = target.kubernetes.node_diagnostics
+        if selected is None:
+            raise TargetError("kubernetes.node_diagnostics is required for node tools")
+        route = selected.cilium if kind == "cilium_node" else selected.journal
+        if route is None:
+            raise TargetError(f"kubernetes.node_diagnostics.{kind} route is missing")
+        pod_route = route if kind == "cilium_node" else route.pod
+        data["target"] = selected.node
+        data["target_file"] = str(target_path.resolve())
+        data["target_source"] = target_source
+        data["kubernetes"] = {
+            "context": target.kubernetes.context,
+            "server": target.kubernetes.server,
+        }
+        data["pod_selection"] = {
+            "node": selected.node,
+            "namespace": pod_route.namespace,
+            "selector": pod_route.selector,
+            "container": pod_route.container,
+        }
+        if getattr(args, "dry_run", False):
+            data["status"] = DRY_RUN
+            data["probes"] = [
+                "verify selected GitHub, GitLab, and Kubernetes credentials and identities",
+                "kubectl get one existing Running Pod on the declared node",
+                "kubectl exec without TTY to read Cilium status and health"
                 if kind == "cilium_node"
-                else collect_ceph_kernel()
+                else f"kubectl exec without TTY to read kernel journal since {JOURNAL_SINCE}",
+            ]
+            if kind == "ceph_kernel":
+                data["probes"].insert(2, "verify the declared host journal mount")
+        else:
+            target = bind_sources(target, revision=getattr(args, "revision", None))
+            source = "access_check"
+            gate = check_access(target)
+            data["access"] = access_evidence(gate)
+            if gate["status"] != PASS:
+                data["access_failures"] = [
+                    {
+                        "surface": name,
+                        "reason": surface.get("reason"),
+                        "safe_next_step": surface.get("next_step"),
+                    }
+                    for name, surface in (gate.get("surfaces") or {}).items()
+                    if isinstance(surface, dict) and surface.get("status") != PASS
+                ]
+                raise NodePodError("required_live_access_failed")
+            source = "pod_selection"
+            reader = select_node_pod(
+                target,
+                pod_route,
+                journal=route if kind == "ceph_kernel" else None,
             )
-        except (OSError, RuntimeError, TypeError, ValueError):
-            data["status"] = BLOCKED
-            data["errors"] = [{"source": kind, "reason": "node_collection_failed"}]
-            data["summary"]["error_count"] = 1
-            data["safe_next_step"] = "Inspect the node tool output and retry."
+            source = kind
+            data = (
+                collect_cilium_node(reader)
+                if kind == "cilium_node"
+                else collect_ceph_kernel(reader, route.directory)
+            )
+            data["access"] = access_evidence(gate)
+            data["target_file"] = str(target_path.resolve())
+            data["target_source"] = target_source
+            data["kubernetes"] = {
+                "context": target.kubernetes.context,
+                "server": target.kubernetes.server,
+            }
+    except (
+        TargetError,
+        NodePodError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        data["status"] = BLOCKED
+        data["errors"] = [{"source": source, "reason": sanitize(str(exc), 240)}]
+        data["summary"]["error_count"] = 1
+        data["safe_next_step"] = (
+            "Resolve the failed credential or authority shown in access_failures."
+            if source == "access_check"
+            else "Correct the selected target or existing Pod route and retry."
+        )
     data = _apply_filters(
         data,
         search=getattr(args, "search", None),

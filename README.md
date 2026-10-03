@@ -4,10 +4,10 @@
 
 This repository provides `k8s-admin-diagnostics`, a skill with seven read-only
 commands for access checks, GitLab jobs, Kubernetes storage and events,
-Cilium status, and node-local Cilium and Ceph kernel diagnostics. The access
+Cilium status, and node Cilium and Ceph kernel diagnostics. The access
 check verifies the selected GitHub, GitLab, and Kubernetes authorities before
-API collectors run. API commands use `gh`, `glab`, and `kubectl`; node-local
-commands use `crictl` or `journalctl` on the selected node.
+API collectors run. Commands use `gh`, `glab`, and `kubectl`; node diagnostics
+use non-TTY `kubectl exec` into existing Pods selected by the target file.
 
 Output follows the reader: a terminal gets a human summary, a pipe or a file
 gets versioned JSON. A program calling these commands therefore needs no
@@ -31,8 +31,8 @@ Discovery -> Activation -> Reading Machine Readble Specfication -> Execution
 
 You supply **one nonsecret file** naming the authorities to use. Copy
 `target.toml.template`, fill it in, and put it in one of these places. The
-first one found wins, and API commands report which it used as
-`target_source`. Node-local commands read the local host. The layout is the one
+first one found wins, and every command reports which it used as
+`target_source`. The layout is the one
 agent tooling already uses — a project
 `./.ci-skills/` beside a user `~/.ci-skills/`, the same shape as `.claude` and
 `.codex`:
@@ -102,6 +102,9 @@ $EDITOR ~/.ci-skills/target.toml
 Fill in the exact GitHub repository, the exact GitLab origin, and the
 Kubernetes context with the API server it must resolve to. Declare
 `kubernetes.kubeconfigs` while you are there — see the template for why.
+For node diagnostics, also declare the node and its existing Pod routes under
+`[kubernetes.node_diagnostics]`. A project `.ci-skills/target.toml` selects a
+whole project target; it does not merge partial fields into the user target.
 
 Keep that file out of this repository, and never point anything that runs
 elsewhere at it. The paths inside are true on one machine only; a pipeline
@@ -131,12 +134,15 @@ runtime's skills directory:
 python tools/install_k8s_admin_diagnostics.py --dry-run --json   # the plan
 python tools/install_k8s_admin_diagnostics.py --json             # ~/.codex/skills
 python tools/install_k8s_admin_diagnostics.py --skills-dir ~/.claude/skills --json
+python tools/install_k8s_admin_diagnostics.py --upgrade --dry-run --json
+python tools/install_k8s_admin_diagnostics.py --upgrade --json
 ```
 
 The default destination is `$CODEX_HOME/skills/k8s-admin-diagnostics`, or
 `~/.codex/skills/k8s-admin-diagnostics` when `CODEX_HOME` is unset; pass
-`--skills-dir PATH` for any other runtime. It refuses to overwrite an existing
-destination, requires a clean checkout of the skill subtree so the revision it
+`--skills-dir PATH` for any other runtime. An existing installation requires
+explicit `--upgrade`; the installer keeps the previous copy until the new
+copy validates. It requires a clean checkout of the skill subtree so its revision
 reports is verified against the source bytes, and reports the installed digest
 — which is the value to compare against the `skill.digest` in any later report.
 It also accepts `--yaml` and `--help`.
@@ -200,18 +206,20 @@ is written.
   endpoint probes appear in `records[].findings` with a path and action, and
   make the report `PARTIAL` without requiring every peer to be healthy.
 
-The node-local commands run on the selected Linux node with noninteractive
-`sudo -n`. They require local `crictl` or `journalctl`, and do not require
-the API target file or an API access receipt:
+The node commands run from the host where the skill is installed. They use the
+same target and three-surface access gate as the API collectors, then select
+exactly one Running Pod on the declared node. They never create a Pod:
 
-- `cilium_node.py --json` reads the local running `cilium-agent` container
-  through CRI, then collects `cilium-dbg status --verbose --output json` and
-  `cilium-health status --verbose --output json` concurrently. If no agent is
-  running, it records the stopped Cilium containers. A successful read keeps
-  the raw JSON and reports explicit daemon or peer failures in `findings`.
+- `cilium_node.py --json` executes `cilium-dbg status --verbose --output json`
+  and `cilium-health status --verbose --output json` concurrently inside the
+  selected existing agent Pod. It reports bounded summaries and explicit
+  daemon or peer failures in `findings`; a degraded agent remains a successful
+  read with `PASS` collection status when both commands return valid evidence.
   Use `--search TEXT` to narrow its returned records.
-- `ceph_kernel.py --json` reads the previous three minutes of kernel journal
-  entries matching `libceph|rbd|ceph`. Each record has a UTC timestamp,
+- `ceph_kernel.py --json` runs `journalctl -k` inside the selected existing
+  Pod only after reading back its configured host journal mount. It reads the
+  previous three minutes of entries matching `libceph|rbd|ceph`. Each record
+  has a UTC timestamp,
   priority, classification, and machine-readable recommended action. It
   performs no recovery action. The window is the previous three minutes, with
   bounded output; a limit hit is reported as `PARTIAL`. Use `--search TEXT`
@@ -223,10 +231,11 @@ failure, connectivity timeout, and I/O errors. Other priority 0–3 entries
 receive `review_ceph_kernel_event`; informational entries have no action.
 The action code is a prompt for investigation, not a claimed root cause.
 
-Both accept `--yaml`, `--dry-run`, and `--help`. Exit code 0 means the node
+Both accept `--target`, `--yaml`, `--dry-run`, and `--help`. Exit code 0 means
+the node
 read succeeded or a dry run was requested; code 2 means incomplete evidence.
-These node reads supplement the three-surface API receipt; they do not
-replace it.
+An absent, ambiguous, or wrong-node Pod blocks; `ceph_kernel.py` also blocks
+when the declared host journal directory is not mounted in its container.
 
 The base access gate -- all three authorities, including a real non-TTY
 `cilium-health` exec on a selector-discovered ready agent -- runs before every

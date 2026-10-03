@@ -1,4 +1,4 @@
-"""Read node-local Cilium and Ceph evidence without mutating the node."""
+"""Parse Cilium and host-journal evidence read from existing Kubernetes Pods."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
-from .cilium import daemon_findings, health_findings, valid_health
+from .cilium import daemon_findings, health_detail, health_findings, valid_health
+from .node_pod import NodePodReader
 from .report import report
-from .runtime import CommandResult, error_class, run_command, run_command_tail, sanitize
+from .runtime import CommandResult, error_class, sanitize
 from .status import BLOCKED, PARTIAL, PASS, UNKNOWN
 
 CEPH_PATTERN = re.compile(r"libceph|rbd|ceph")
@@ -75,10 +76,14 @@ def _valid_node_health(value: Any) -> bool:
 
 
 def _node_report(
-    kind: str, records: list[dict[str, Any]], errors: list[dict[str, str]]
+    kind: str,
+    reader: NodePodReader,
+    records: list[dict[str, Any]],
+    errors: list[dict[str, str]],
 ) -> dict[str, Any]:
-    result = report(kind, socket.getfqdn(), {}, records, errors)
+    result = report(kind, reader.evidence()["node"], {}, records, errors)
     result["execution_host"] = socket.getfqdn()
+    result["selected_pod"] = reader.evidence()
     return result
 
 
@@ -91,160 +96,25 @@ def _json_result(result: CommandResult, *, source: str) -> Any:
         raise ValueError(f"{source}:invalid_json") from exc
 
 
-def _containers(payload: Any) -> list[dict[str, Any]]:
-    if not isinstance(payload, dict) or not isinstance(payload.get("containers"), list):
-        raise TypeError("crictl:invalid_container_response")
-    containers = payload["containers"]
-    if any(not isinstance(item, dict) for item in containers):
-        raise TypeError("crictl:invalid_container_response")
-    return containers
-
-
-def _agent_containers(payload: Any) -> list[dict[str, str]]:
-    selected = []
-    for item in _containers(payload):
-        metadata = item.get("metadata")
-        if not isinstance(metadata, dict) or metadata.get("name") != "cilium-agent":
-            continue
-        identifier = item.get("id")
-        if not isinstance(identifier, str) or not re.fullmatch(
-            r"[0-9a-fA-F]{12,64}", identifier
-        ):
-            raise ValueError("crictl:invalid_agent_id")
-        selected.append({"id": identifier, "state": str(item.get("state", ""))})
-    return selected
-
-
-def collect_cilium_node() -> dict[str, Any]:
-    """Read the one local CRI Cilium agent, daemon status, and health JSON."""
+def collect_cilium_node(reader: NodePodReader) -> dict[str, Any]:
+    """Execute both Cilium JSON diagnostics in the verified existing Pod."""
     errors: list[dict[str, str]] = []
     records: list[dict[str, Any]] = []
-    result = _node_report("cilium_node", records, errors)
-    result["commands"] = [
-        ["sudo", "-n", "crictl", "ps", "--output", "json"],
-        [
-            "sudo",
-            "-n",
-            "crictl",
-            "exec",
-            "--sync",
-            "--timeout",
-            "30",
-            "<agent-id>",
-            "cilium-dbg",
-            "status",
-            "--verbose",
-            "--output",
-            "json",
-        ],
-        [
-            "sudo",
-            "-n",
-            "crictl",
-            "exec",
-            "--sync",
-            "--timeout",
-            "30",
-            "<agent-id>",
-            "cilium-health",
-            "status",
-            "--verbose",
-            "--output",
-            "json",
-        ],
-    ]
-    try:
-        agents = _agent_containers(
-            _json_result(
-                run_command(["sudo", "-n", "crictl", "ps", "--output", "json"]),
-                source="crictl_ps",
-            )
-        )
-    except (TypeError, ValueError) as exc:
-        errors.append({"source": "crictl", "reason": str(exc)})
-        result["status"] = BLOCKED
-        result["summary"]["error_count"] = len(errors)
-        result["safe_next_step"] = (
-            "Check noninteractive sudo and the local CRI endpoint."
-        )
-        return result
-    if not agents:
-        stopped = run_command(
-            ["sudo", "-n", "crictl", "ps", "-a", "--name", "cilium", "--output", "json"]
-        )
-        try:
-            result["cilium_containers"] = [
-                {
-                    "id": item.get("id"),
-                    "name": item["metadata"]["name"],
-                    "state": item.get("state"),
-                }
-                for item in _containers(_json_result(stopped, source="crictl_ps_all"))
-                if isinstance(item.get("metadata"), dict)
-                and isinstance(item["metadata"].get("name"), str)
-                and "cilium" in item["metadata"]["name"]
-            ]
-        except (TypeError, ValueError) as exc:
-            errors.append({"source": "crictl_ps_all", "reason": str(exc)})
-        errors.append({"source": "cilium-agent", "reason": "agent_not_running"})
-        result["status"] = BLOCKED
-        result["summary"]["error_count"] = len(errors)
-        result["safe_next_step"] = (
-            "Inspect the Cilium agent container and node runtime state."
-        )
-        return result
-    if len(agents) != 1:
-        errors.append({"source": "cilium-agent", "reason": "multiple_running_agents"})
-        result["status"] = BLOCKED
-        result["summary"]["error_count"] = len(errors)
-        result["agent_count"] = len(agents)
-        result["safe_next_step"] = (
-            "Identify the intended local Cilium agent before collecting status."
-        )
-        return result
-    agent = agents[0]
-    identifier = agent["id"]
+    result = _node_report("cilium_node", reader, records, errors)
     commands = {
-        "daemon": [
-            "sudo",
-            "-n",
-            "crictl",
-            "exec",
-            "--sync",
-            "--timeout",
-            "30",
-            identifier,
-            "cilium-dbg",
-            "status",
-            "--verbose",
-            "--output",
-            "json",
-        ],
-        "health": [
-            "sudo",
-            "-n",
-            "crictl",
-            "exec",
-            "--sync",
-            "--timeout",
-            "30",
-            identifier,
-            "cilium-health",
-            "status",
-            "--verbose",
-            "--output",
-            "json",
-        ],
+        "daemon": ("cilium-dbg", "status", "--verbose", "--output", "json"),
+        "health": ("cilium-health", "status", "--verbose", "--output", "json"),
     }
+    result["commands"] = [reader.command(*command) for command in commands.values()]
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = {
-            name: pool.submit(run_command, command, timeout=35)
+            name: pool.submit(reader.run, *command, timeout=35)
             for name, command in commands.items()
         }
         outputs = {name: future.result() for name, future in futures.items()}
     row: dict[str, Any] = {
-        "name": "cilium-agent",
-        "container_id": identifier,
+        "name": reader.name,
+        "pod_uid": reader.uid,
         "status": PASS,
         "findings": [],
     }
@@ -258,13 +128,23 @@ def collect_cilium_node() -> dict[str, Any]:
             )
             if not valid:
                 raise ValueError(f"{name}:invalid_response")
-            row[name] = value
+            if name == "daemon":
+                row["daemon"] = {
+                    "components": {
+                        component: sanitize(data.get("state", ""), 80)
+                        for component, data in value.items()
+                        if isinstance(data, dict) and isinstance(data.get("state"), str)
+                    }
+                }
+            else:
+                row["health"] = health_detail(value)
             findings = (
                 daemon_findings(value) if name == "daemon" else health_findings(value)
             )
-            row["findings"].extend(findings)
-            if findings:
-                errors.append({"source": name, "reason": "component_unhealthy"})
+            row["findings"].extend(findings[:100])
+            if len(findings) > 100:
+                row["findings_truncated"] = True
+                errors.append({"source": name, "reason": "findings_truncated"})
         except (TypeError, ValueError) as exc:
             row["status"] = UNKNOWN
             errors.append({"source": name, "reason": str(exc)})
@@ -291,13 +171,21 @@ def classify_ceph_message(message: str, priority: int) -> tuple[str, str | None]
     return "observation", None
 
 
-def collect_ceph_kernel() -> dict[str, Any]:
+def collect_ceph_kernel(reader: NodePodReader, directory: str) -> dict[str, Any]:
     """Read recent kernel Ceph/RBD journal entries and propose read-only actions."""
+    journal_access = reader.run_tail(
+        "journalctl",
+        f"--directory={directory}",
+        "--list-boots",
+        "--no-pager",
+        timeout=20,
+        max_bytes=4096,
+        max_lines=20,
+    )
     command = [
-        "sudo",
-        "-n",
         "journalctl",
         "-k",
+        f"--directory={directory}",
         "--utc",
         "--since",
         JOURNAL_SINCE,
@@ -308,12 +196,23 @@ def collect_ceph_kernel() -> dict[str, Any]:
     ]
     records: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
-    result = _node_report("ceph_kernel", records, errors)
+    result = _node_report("ceph_kernel", reader, records, errors)
     result["filters"] = {"since": JOURNAL_SINCE, "message_regex": CEPH_PATTERN.pattern}
-    result["command"] = command
+    result["command"] = reader.command(*command)
     result["limits"] = {"lines": JOURNAL_MAX_LINES, "bytes": JOURNAL_MAX_BYTES}
-    response = run_command_tail(
-        command,
+    if journal_access.returncode:
+        errors.append(
+            {"source": "journal_access", "reason": error_class(journal_access)}
+        )
+        result["status"] = BLOCKED
+        result["summary"]["error_count"] = 1
+        result["actions"] = []
+        result["safe_next_step"] = (
+            "Verify the selected Pod can read the mounted host journal directory."
+        )
+        return result
+    response = reader.run_tail(
+        *command,
         timeout=25,
         max_bytes=JOURNAL_MAX_BYTES,
         max_lines=JOURNAL_MAX_LINES,
@@ -321,7 +220,7 @@ def collect_ceph_kernel() -> dict[str, Any]:
     if (
         response.returncode == 1
         and response.stdout.strip() in {"", "-- No entries --"}
-        and not response.stderr.strip()
+        and response.stderr.strip() in {"", "command terminated with exit code 1"}
     ):
         result["truncated"] = False
         result["actions"] = []
@@ -332,7 +231,7 @@ def collect_ceph_kernel() -> dict[str, Any]:
         result["summary"]["error_count"] = 1
         result["actions"] = []
         result["safe_next_step"] = (
-            "Check noninteractive sudo and kernel journal access on this node."
+            "Check journal access inside the selected existing Pod."
         )
         return result
     else:

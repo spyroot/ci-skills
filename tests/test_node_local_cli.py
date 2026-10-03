@@ -11,6 +11,30 @@ import yaml
 from conftest import import_script_module
 
 
+@pytest.fixture(autouse=True)
+def _selected_existing_pods(monkeypatch, target_file):
+    """Keep adapter tests on a declared target without contacting providers."""
+    target_file.write_text(
+        target_file.read_text(encoding="utf-8")
+        + "\n[kubernetes.node_diagnostics]\n"
+        + 'node = "node-a"\n'
+        + "\n[kubernetes.node_diagnostics.cilium]\n"
+        + 'namespace = "cilium"\nselector = "app=cilium"\n'
+        + 'container = "cilium-agent"\n'
+        + "\n[kubernetes.node_diagnostics.journal]\n"
+        + 'namespace = "diagnostics"\nselector = "app=journal"\n'
+        + 'container = "journal-reader"\n'
+        + 'directory = "/host-journal"\nhost_path = "/var/log/journal"\n',
+        encoding="utf-8",
+    )
+    cli = import_script_module("core.node_local_cli")
+    monkeypatch.setattr(cli, "resolve_target", lambda _value: (target_file, "test"))
+    monkeypatch.setattr(cli, "bind_sources", lambda target, **_kwargs: target)
+    monkeypatch.setattr(cli, "check_access", lambda _target: {"status": "PASS"})
+    monkeypatch.setattr(cli, "access_evidence", lambda _gate: {"status": "PASS"})
+    monkeypatch.setattr(cli, "select_node_pod", lambda *_args, **_kwargs: object())
+
+
 def _args(**overrides: Any) -> SimpleNamespace:
     values = {
         "json": True,
@@ -92,7 +116,7 @@ def test_node_local_cli_returns_blocked_envelope_for_collector_exceptions(
     assert data["kind"] == "cilium_node"
     assert data["status"] == "BLOCKED"
     assert data["errors"] == [
-        {"source": "cilium_node", "reason": "node_collection_failed"}
+        {"source": "cilium_node", "reason": "invalid_crictl_response"}
     ]
 
 
@@ -192,8 +216,8 @@ def test_node_local_cli_search_no_match_preserves_collection_status(
 @pytest.mark.parametrize(
     ("kind", "probe_fragment"),
     (
-        ("cilium_node", "crictl ps --output json"),
-        ("ceph_kernel", "journalctl -k"),
+        ("cilium_node", "Cilium status and health"),
+        ("ceph_kernel", "kernel journal"),
     ),
 )
 def test_node_local_cli_dry_run_json_does_not_call_collectors(
@@ -251,7 +275,7 @@ def test_node_local_parser_invalid_args_emit_structured_stdout(
     parser = cli.parser("cilium_node")
 
     with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["--target", "target.toml", mode])
+        parser.parse_args(["--unknown", mode])
 
     captured = capsys.readouterr()
     data = loader(captured.out)
@@ -290,5 +314,5 @@ def test_node_local_describe_needs_no_linux_runtime_or_credentials(capsys, kind)
 
     assert exit_status == 0
     assert contract["command"] == f"{kind}.py"
-    assert contract["requires_authorities"] == []
-    assert contract["target_protocol"] is None
+    assert contract["requires_authorities"] == ["github", "gitlab", "kubernetes"]
+    assert contract["target_protocol"]

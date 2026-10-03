@@ -81,6 +81,12 @@ def resolve_target(explicit: str | None) -> tuple[Path, str]:
         if not path.is_file():
             raise TargetError(f"target_file_missing:{path}")
         return path, "argv:--target"
+    configured = (os.environ.get("CI_SKILLS_TARGET") or "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        if not path.is_file():
+            raise TargetError(f"target_file_missing:{path}")
+        return path, "env:CI_SKILLS_TARGET"
     for source, path in _target_candidates():
         if path.is_file():
             return path, source

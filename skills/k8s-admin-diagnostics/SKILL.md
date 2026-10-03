@@ -1,6 +1,6 @@
 ---
 name: k8s-admin-diagnostics
-description: Collect read-only GitLab CI and Kubernetes API evidence with verified credential sources, plus local Cilium and Ceph evidence on a selected Linux node.
+description: Collect read-only GitLab CI, Kubernetes, Cilium, and Ceph evidence through verified credentials and selected targets.
 metadata:
   manifest: tools.json
   first_call: scripts/access_check.py
@@ -45,7 +45,7 @@ or minted first, that belongs to the calling project's own instructions.
 ## 2. Read the command manifest
 
 `tools.json` beside this file is the machine-readable contract for API and
-node-local commands: their purpose, when to use them, required authorities or
+node commands: their purpose, when to use them, required authorities or
 execution surface, options, and symptom routing. `<command> --describe` prints
 one command's contract as JSON and needs no credentials.
 
@@ -58,7 +58,7 @@ Routing, in short:
 | why a volume or claim is stuck | `storage_report.py` |
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |
-| Cilium CRI status on a selected Linux node | `cilium_node.py` |
+| Cilium daemon and health on a selected node | `cilium_node.py` |
 | Ceph or RBD kernel messages on that node | `ceph_kernel.py` |
 
 ## 3. One interface, not five
@@ -123,11 +123,14 @@ the captured form names credential locations under someone's home directory.
 Review any artifact before sharing — event messages and job traces can carry
 sensitive text.
 
-## 7. Read evidence on a selected Linux node
+## 7. Read evidence on a selected node
 
-Run `scripts/cilium_node.py --json` on the selected node to inspect the local
-CRI `cilium-agent` without a TTY. Run `scripts/ceph_kernel.py --json` for recent
-Ceph/RBD kernel messages and action codes. These node-local commands use
-`sudo -n`, accept `--yaml` and `--dry-run`, require no API target file, and do
-not establish the three-surface access receipt. Both accept `--search TEXT`;
-`ceph_kernel.py` also accepts `--classification NAME` to narrow its records.
+Declare `[kubernetes.node_diagnostics]` and an existing Pod route in the
+selected `.ci-skills/target.toml` (see the template). Run
+`scripts/cilium_node.py --json` to execute `cilium-dbg` and `cilium-health`
+inside that agent Pod without a TTY. Run `scripts/ceph_kernel.py --json` to
+classify recent host journal messages through a selected existing Pod whose
+host journal mount is read back first. Both commands use the same pinned
+kubeconfig/context/server and three-surface access gate as the API commands;
+neither creates a Pod or repairs a node. Both accept `--search TEXT`;
+`ceph_kernel.py` also accepts `--classification NAME`.

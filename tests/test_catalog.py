@@ -132,7 +132,7 @@ def test_the_manifest_routes_every_command_and_nothing_else():
 
 @pytest.mark.parametrize("script", sorted(CATALOG.NODE_LOCAL_COMMANDS))
 def test_node_local_commands_publish_their_distinct_interface(script):
-    """A node read is discoverable without claiming an API target or receipt."""
+    """A node read publishes its selected API target and Pod route."""
     node_cli = import_script_module("core.node_local_cli")
     kind = script.removesuffix(".py")
     actual = {
@@ -145,9 +145,11 @@ def test_node_local_commands_publish_their_distinct_interface(script):
     declared = set(contract["options"])
 
     assert actual == declared
-    assert "--target" not in actual
-    assert contract["requires_authorities"] == []
-    assert contract["execution_surface"] == "selected Linux node"
+    assert "--target" in actual
+    assert contract["requires_authorities"] == ["github", "gitlab", "kubernetes"]
+    assert contract["execution_surface"] == (
+        "Kubernetes API and one existing Pod on the selected node"
+    )
     assert set(contract["options"]) == declared
 
 
