@@ -74,3 +74,23 @@ server = "https://api.cluster.example.com:6443"
 #   "/home/operator/.ci-skills/credentials/kubeconfig",
 #   "/home/operator/.kube/config",
 # ]
+
+# Optional node diagnostics. Declare only the route you use. Each route names
+# an EXISTING Pod on one node; the commands never create a privileged debug Pod.
+# The selector must match exactly one Running Pod on `node` in its namespace.
+# [kubernetes.node_diagnostics]
+# node = "worker.example.com"
+#
+# [kubernetes.node_diagnostics.cilium]
+# namespace = "cilium"
+# selector = "app.kubernetes.io/name=cilium-agent"
+# container = "cilium-agent"
+#
+# [kubernetes.node_diagnostics.journal]
+# namespace = "node-diagnostics"
+# selector = "app.kubernetes.io/name=journal-reader"
+# container = "journal-reader"
+# directory = "/host-journal"
+# host_path = "/var/log/journal"
+# The selected Pod must mount host_path at directory in this container and
+# provide journalctl. A missing or ambiguous Pod/mount produces BLOCKED.

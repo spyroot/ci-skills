@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-01T22:35:26.460447+00:00",
+  "captured_at": "2026-10-03T19:27:06.341315+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -16,51 +16,42 @@
     "cilium_status": {
       "access_proven": true,
       "agent_health": {
-        "passed": 7,
+        "passed": 9,
         "total": 9
       },
       "ciliumnode_count": 9,
-      "error_count": 2,
-      "errors": [
-        {
-          "reason": "agent_not_ready",
-          "source": "cilium-9kvdj"
-        },
-        {
-          "reason": "agent_not_ready",
-          "source": "cilium-c8qtx"
-        }
-      ],
-      "readback_sha256": "461bf0d2d9e120eb655aebf2513236f9f0261efc2f7a9f82c9a561e0973bbb21",
+      "error_count": 0,
+      "errors": [],
+      "readback_sha256": "8dc1de8fe291238659d5121f04525dcf0dcfdb4b6d8694d6ddaf6f5fc29accc1",
       "record_count": 9,
-      "status": "PARTIAL"
+      "status": "PASS"
     },
     "event_trace": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "4a4f59510bc524f33c7c4515ce31ed49f8a5624088d53878cf1a680d664d46a6",
-      "record_count": 959,
+      "readback_sha256": "009805fe27fb2ce01275537d114b41202855dbcb8a28a84234042f3b79de4d46",
+      "record_count": 639,
       "status": "PASS"
     },
     "storage_report": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "ab801a6bc449fdca091225b4186da89b47e86e9442c89bbd1e41774ede35c52d",
+      "readback_sha256": "32df9cb925ffdde18c6a393aa1c2ac878d71c48bfcac4653da971e1418c72cbf",
       "record_count": 65,
       "resource_counts": {
-        "attachments": 25,
+        "attachments": 23,
         "csidrivers": 4,
         "csinodes": 9,
         "daemonsets": 41,
-        "deployments": 187,
+        "deployments": 189,
         "nodes": 9,
-        "pods": 624,
-        "pvcs": 57,
+        "pods": 625,
+        "pvcs": 60,
         "pvs": 65,
-        "replicasets": 502,
-        "statefulsets": 10,
+        "replicasets": 504,
+        "statefulsets": 11,
         "storageclasses": 8
       },
       "status": "PASS"
@@ -75,13 +66,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "8a4f81094905c28cf058d0be72ba6db1b8f88d0ca44de75a2a7456d06f8bbc91",
-    "file_count": 22,
+    "digest": "e30c80af8762d557c84a51c30361c8dff0ad2c154d4771cd963a4df9ba01a1b7",
+    "file_count": 27,
     "revision": {
-      "detail": "skill_subtree_dirty",
       "source": "git_head",
-      "value": "a8f3741142c75bbc4dac15b7f7ee4d4f227f5b83",
-      "verified": false
+      "value": "ed7f12395af674f7c615b9a61249e124152c058a",
+      "verified": true
     }
   },
   "status": "PASS",
@@ -171,5 +161,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "a8f3741142c75bbc4dac15b7f7ee4d4f227f5b83"
+  "tested_revision": "ed7f12395af674f7c615b9a61249e124152c058a"
 }

@@ -6,7 +6,7 @@ break that: a command accepting different options than the catalog says, and
 failures here rather than a surprise at run time.
 
 Consistency is the other half. Options are declared in capability tiers, so
-`--json` means the same thing in all five commands and a command that filters
+`--json` means the same thing in all API commands and a command that filters
 records always spells it `--search`. These tests assert the tiers hold, which is
 what lets a caller learn one interface instead of five.
 """
@@ -125,8 +125,32 @@ def test_the_manifest_routes_every_command_and_nothing_else():
     """Routing that omits a command sends an agent to read prose instead."""
     manifest = CATALOG.manifest()
 
-    assert set(manifest["commands"]) == set(CATALOG.COMMANDS)
-    assert set(manifest["routing"].values()) == set(CATALOG.COMMANDS)
+    declared = set(CATALOG.COMMANDS) | set(CATALOG.NODE_LOCAL_COMMANDS)
+    assert set(manifest["commands"]) == declared
+    assert set(manifest["routing"].values()) == declared
+
+
+@pytest.mark.parametrize("script", sorted(CATALOG.NODE_LOCAL_COMMANDS))
+def test_node_local_commands_publish_their_distinct_interface(script):
+    """A node read publishes its selected API target and Pod route."""
+    node_cli = import_script_module("core.node_local_cli")
+    kind = script.removesuffix(".py")
+    actual = {
+        option
+        for action in node_cli.parser(kind)._actions
+        for option in action.option_strings
+        if option.startswith("--")
+    } - {"--help"}
+    contract = CATALOG.describe_node(script)
+    declared = set(contract["options"])
+
+    assert actual == declared
+    assert "--target" in actual
+    assert contract["requires_authorities"] == ["github", "gitlab", "kubernetes"]
+    assert contract["execution_surface"] == (
+        "Kubernetes API and one existing Pod on the selected node"
+    )
+    assert set(contract["options"]) == declared
 
 
 def test_each_command_declares_the_authorities_it_needs_and_their_protocol():
@@ -187,7 +211,7 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
         step["source"]: step["when"] for step in CATALOG.ACCESS_PROTOCOL["github"]
     }
     enterprise = "env:" + " or ".join(CATALOG.GITHUB_ENTERPRISE_VARIABLES)
-    dotcom = "env:" + " or ".join(CATALOG.GITHUB_DOTCOM_VARIABLES)
+    dotcom = "env:" + " or ".join(CATALOG.GITHUB_CLOUD_VARIABLES)
 
     assert enterprise in declared
     assert CATALOG.GITHUB_DOTCOM_HOST in declared[dotcom]
@@ -196,7 +220,7 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
         CATALOG.GITHUB_ENTERPRISE_VARIABLES
     )
     assert CATALOG.github_variables(CATALOG.GITHUB_DOTCOM_HOST) == (
-        CATALOG.GITHUB_DOTCOM_VARIABLES
+        CATALOG.GITHUB_CLOUD_VARIABLES
     )
     assert credentials.github_variables is CATALOG.github_variables
 
