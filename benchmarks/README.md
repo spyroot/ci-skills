@@ -12,12 +12,20 @@ only when the preferred API is unavailable, the event collection boundary
 should issue fewer Kubernetes client calls and should use less wall time and CPU
 while returning the same semantic event records.
 
-The timed boundary is `collect_events()`. A live access preflight runs once for
-each exact source SHA before timing and is excluded from the samples. Both
-variants use the same target file, credential sources, kubeconfig bytes, time
-window, Python runtime, execution Pod, and environment. Every measured sample
-must read back the same target, credential-source, kubeconfig, source, and
-harness identities recorded by its preflight.
+The timed boundary is `collect_events()`. A Kubernetes-only live access
+preflight runs once for each exact source SHA before timing and is excluded
+from the samples. It verifies TLS to the selected API server, reads back the
+effective Kubernetes identity, checks the cluster-wide Event permission, and
+performs one bounded Event resource read. Both variants use the same target
+file, Kubernetes credential source, kubeconfig bytes, time window, Python
+runtime, execution Pod, and environment. Every measured sample must read back
+the same target, credential-source, kubeconfig, source, and harness identities
+recorded by its preflight.
+
+The benchmark intentionally does not resolve or authenticate GitHub or GitLab:
+neither authority participates in `collect_events()`. The production
+`access_check.py` gate remains unchanged and still verifies all configured
+authorities when its full receipt is required.
 
 ## Execution contract
 
@@ -68,8 +76,8 @@ The benchmark result is `PASS` only when all of these hold:
 
 - both clean skill trees prove their exact Git SHA;
 - the clean benchmark harness proves its exact Git SHA and content digest;
-- both live access preflights pass and resolve the same target, credentials,
-  and kubeconfig content digests;
+- both Kubernetes live access preflights pass and resolve the same API server,
+  effective identity, credential source, and kubeconfig content digests;
 - every warmup and measured sample matches its variant preflight identity;
 - at least five measured samples per variant complete with `PASS` and no
   collector errors;

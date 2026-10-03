@@ -389,7 +389,7 @@ def _markdown(evidence: dict[str, Any]) -> str:
         (
             "- No measurements were run; this artifact records the planned boundary."
             if evidence.get("status") == "DRY_RUN"
-            else "- Measurements cover `collect_events()` with the pinned target and credential identity. Preflight time is excluded."
+            else "- Measurements cover `collect_events()` with the pinned Kubernetes target and credential identity. Preflight time is excluded."
         ),
         "- A PASS applies only to this executor, target, window, harness SHA, and source SHA pair.",
         "",
@@ -410,7 +410,7 @@ def _parser() -> argparse.ArgumentParser:
         description="Benchmark exact baseline and candidate event collectors live.",
         epilog=(
             "Run only in an authorized Linux Kubernetes Job or Kubernetes-backed "
-            "CI runner with the same target and effective credentials mounted."
+            "CI runner with the same Kubernetes target and effective credential mounted."
         ),
     )
     parser.add_argument("--harness-sha", required=True, metavar="SHA")

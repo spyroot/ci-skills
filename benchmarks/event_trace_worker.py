@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one isolated live event-collector measurement for the A/B harness."""
+"""Run one isolated Kubernetes event-collector measurement for the A/B harness."""
 
 from __future__ import annotations
 
@@ -11,9 +11,11 @@ import platform
 import resource
 import shlex
 import shutil
+import socket
 import sys
 import tempfile
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -57,12 +59,71 @@ def _source_kind(reference: str | None) -> str | None:
     return reference.split(":", 1)[0]
 
 
+def _kubernetes_paths(target: Any) -> tuple[tuple[Path, ...], str]:
+    """Resolve only the kubeconfig source required by this Kubernetes benchmark."""
+    if target.kubernetes.kubeconfigs:
+        paths = tuple(path.resolve() for path in target.kubernetes.kubeconfigs)
+        reference = "target:kubernetes.kubeconfigs"
+    elif target.kubernetes.kubeconfig is not None:
+        paths = (target.kubernetes.kubeconfig.resolve(),)
+        reference = getattr(target, "kubernetes_source_reference", None) or (
+            f"file:{paths[0]}"
+        )
+    elif "KUBECONFIG" in os.environ:
+        parts = os.environ["KUBECONFIG"].split(os.pathsep)
+        if any(not part for part in parts):
+            raise RuntimeError("kubeconfig_source_empty")
+        paths = tuple(Path(part).expanduser().resolve() for part in parts)
+        reference = "env:KUBECONFIG"
+    else:
+        paths = ((Path.home() / ".kube" / "config").resolve(),)
+        reference = f"kubectl-default:{paths[0]}"
+    if not paths:
+        raise RuntimeError("kubeconfig_source_empty")
+    for path in paths:
+        try:
+            if not path.is_file() or not path.stat().st_size:
+                raise RuntimeError("kubeconfig_unavailable")
+            with path.open("rb") as handle:
+                handle.read(1)
+        except OSError as exc:
+            raise RuntimeError("kubeconfig_unreadable") from exc
+    return paths, reference
+
+
 def _bound_target(arguments: argparse.Namespace) -> Any:
+    """Bind the exact skill revision and Kubernetes credential source only."""
     _source(Path(arguments.source_root), arguments.revision)
-    from core.credentials import bind_sources
+    from core.credentials import (
+        CredentialSource,
+        Sources,
+        kubeconfig_digests,
+        resolve_skill_identity,
+    )
     from core.target import load_target
 
-    target = bind_sources(load_target(arguments.target), revision=arguments.revision)
+    target = load_target(arguments.target)
+    paths, reference = _kubernetes_paths(target)
+    kubernetes = CredentialSource(
+        reference,
+        {"KUBECONFIG": os.pathsep.join(str(path) for path in paths)},
+    )
+    unused = CredentialSource("benchmark:kubernetes-only", {})
+    identity = resolve_skill_identity(arguments.revision)
+    sources = Sources(
+        github=unused,
+        gitlab=unused,
+        kubernetes=kubernetes,
+        kubeconfig_files=paths,
+        execution_host=socket.getfqdn(),
+        kubeconfig_digests=kubeconfig_digests(paths),
+    )
+    target = replace(
+        target,
+        sources=sources,
+        skill=identity,
+        tested_revision=identity["revision"]["value"],
+    )
     skill = target.skill or {}
     revision = skill.get("revision") or {}
     if revision.get("value") != arguments.revision.lower():
@@ -74,27 +135,20 @@ def _bound_target(arguments: argparse.Namespace) -> Any:
 
 def _identity(target: Any, target_file: Path) -> dict[str, Any]:
     sources = target.sources
-    references = {
-        "github": sources.github.reference,
-        "gitlab": sources.gitlab.reference,
-        "kubernetes": sources.kubernetes.reference,
-    }
+    reference = sources.kubernetes.reference
     return {
         "target_sha256": hashlib.sha256(target_file.read_bytes()).hexdigest(),
         "targets": {
-            "github": f"{target.github.host}/{target.github.repository}",
-            "gitlab": target.gitlab.url,
             "kubernetes": {
                 "context": target.kubernetes.context,
                 "server": target.kubernetes.server,
             },
         },
         "credential_sources": {
-            name: {
+            "kubernetes": {
                 "kind": _source_kind(reference),
                 "reference_sha256": hashlib.sha256(reference.encode()).hexdigest(),
             }
-            for name, reference in references.items()
         },
         "kubeconfig_sha256": list(sources.kubeconfig_digests),
     }
@@ -112,25 +166,77 @@ def _skill(target: Any) -> dict[str, Any]:
 
 def _preflight(arguments: argparse.Namespace) -> dict[str, Any]:
     target = _bound_target(arguments)
-    from core.access import check_access
+    from core.access import kubectl_argv, kubernetes_env
+    from core.runtime import error_class, run_command
 
-    gate = check_access(target)
-    surfaces = gate.get("surfaces") or {}
+    def command_json(*command: str) -> Any:
+        """Run one selected-target kubectl command and decode its JSON response."""
+        result = run_command(
+            kubectl_argv(target, *command), env=kubernetes_env(target)
+        )
+        if result.returncode:
+            raise RuntimeError(error_class(result))
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("invalid_json") from exc
+
+    config = command_json("config", "view", "--minify", "-o", "json")
+    clusters = config.get("clusters") if isinstance(config, dict) else None
+    if not isinstance(clusters, list) or len(clusters) != 1:
+        raise RuntimeError("kubernetes_target_unresolved")
+    observed_server = clusters[0].get("cluster", {}).get("server")
+    if observed_server != target.kubernetes.server:
+        raise RuntimeError("kubernetes_server_mismatch")
+
+    review = command_json("auth", "whoami", "-o", "json")
+    identity = (
+        review.get("status", {}).get("userInfo", {}).get("username")
+        if isinstance(review, dict)
+        else None
+    )
+    if not isinstance(identity, str) or not identity:
+        raise RuntimeError("kubernetes_identity_missing")
+
+    permission = run_command(
+        kubectl_argv(
+            target,
+            "auth",
+            "can-i",
+            "get",
+            "events.events.k8s.io",
+            "--all-namespaces",
+        ),
+        env=kubernetes_env(target),
+    )
+    if permission.returncode or permission.stdout.strip().lower() != "yes":
+        raise RuntimeError("kubernetes_event_read_denied")
+
+    event_list = command_json(
+        "get", "--raw=/apis/events.k8s.io/v1/events?limit=1"
+    )
+    if not isinstance(event_list, dict) or not isinstance(
+        event_list.get("items"), list
+    ):
+        raise RuntimeError("kubernetes_event_response_invalid")
     return {
         "schema_version": "1.0",
         "kind": "event_trace_benchmark_preflight",
-        "status": gate.get("status"),
+        "status": "PASS",
         "harness": _harness(arguments),
         "source": _skill(target),
         "identity": _identity(target, Path(arguments.target)),
         "access": {
-            "profile": "base",
-            "identities": {
-                name: surface.get("identity") for name, surface in surfaces.items()
-            },
-            "surface_status": {
-                name: surface.get("status") for name, surface in surfaces.items()
-            },
+            "profile": "kubernetes-event-read",
+            "identities": {"kubernetes": identity},
+            "surface_status": {"kubernetes": "PASS"},
+            "verified_server": observed_server,
+            "observed_capability": [
+                "tls_verified",
+                "identity_read",
+                "cluster_event_permission_read",
+                "cluster_event_resource_read",
+            ],
         },
     }
 
@@ -258,7 +364,9 @@ def _parser() -> argparse.ArgumentParser:
         description="Run one exact-source live event-trace benchmark operation.",
         epilog=(
             "This worker is called by event_trace_ab.py inside an authorized "
-            "Kubernetes runner. It never emits event records or credential references."
+            "Kubernetes runner. It resolves and verifies only the Kubernetes "
+            "credential used by the measured collector, and never emits event "
+            "records or credential references."
         ),
     )
     parser.add_argument("operation", choices=("preflight", "sample"))
