@@ -225,6 +225,32 @@ def test_mtu_mismatch_is_partial_with_action_and_verified_cleanup(
     assert result["findings"][0]["code"] == "physical_mtu_mismatch"
 
 
+def test_identical_multi_nic_nodes_are_consistent(tmp_path, monkeypatch):
+    target = _target(tmp_path)
+
+    def fake_read(_target, _plan, node, _marker, _timeout):
+        links = MTU.physical_uplinks([_link("eno1", 9000), _link("eno2", 1500)])
+        return [{"node": node, **link} for link in links], None
+
+    monkeypatch.setattr(MTU, "_read_one", fake_read)
+    monkeypatch.setattr(
+        MTU,
+        "_cleanup",
+        lambda *_args: {"status": "PASS", "verified": True, "remaining_pods": []},
+    )
+
+    result = MTU.collect_mtu_consistency(target, _args(), _plan(), "unit-marker")
+
+    assert result["status"] == "PASS"
+    assert result["condition"] == "CONSISTENT"
+    assert result["summary"]["mtu_values"] == [1500, 9000]
+    assert result["summary"]["mtu_by_interface"] == {
+        "eno1": [9000],
+        "eno2": [1500],
+    }
+    assert result["findings"] == []
+
+
 def test_cleanup_failure_blocks_even_when_nic_reads_succeed(tmp_path, monkeypatch):
     target = _target(tmp_path)
     monkeypatch.setattr(
@@ -350,11 +376,15 @@ def test_timeout_keeps_partial_evidence_and_still_verifies_cleanup(
 def test_interrupted_debug_still_runs_cleanup(tmp_path, monkeypatch):
     target = _target(tmp_path)
     called = []
+    original_int = MTU.signal.getsignal(MTU.signal.SIGINT)
+    original_term = MTU.signal.getsignal(MTU.signal.SIGTERM)
 
     def interrupted(*_args):
         raise MTU.Interrupted("interrupted")
 
     def fake_cleanup(*_args):
+        assert MTU.signal.getsignal(MTU.signal.SIGINT) == MTU.signal.SIG_IGN
+        assert MTU.signal.getsignal(MTU.signal.SIGTERM) == MTU.signal.SIG_IGN
         called.append("cleanup")
         return {"status": "PASS", "verified": True, "remaining_pods": []}
 
@@ -366,6 +396,9 @@ def test_interrupted_debug_still_runs_cleanup(tmp_path, monkeypatch):
     assert called == ["cleanup"]
     assert result["status"] == "BLOCKED"
     assert {"source": "run", "reason": "interrupted"} in result["errors"]
+    assert result["debug_marker"] == "unit-marker"
+    assert MTU.signal.getsignal(MTU.signal.SIGINT) == original_int
+    assert MTU.signal.getsignal(MTU.signal.SIGTERM) == original_term
 
 
 def test_default_plan_and_mismatched_confirmation_never_launch_debug(

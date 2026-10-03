@@ -358,7 +358,7 @@ def _cleanup(target: Target, namespace: str, marker: str) -> dict[str, Any]:
             "remaining_pods": remaining,
             "verified": not failed and not remaining,
         }
-    except (TargetError, ValueError, TypeError, OSError) as exc:
+    except (TargetError, ValueError, TypeError, OSError, Interrupted) as exc:
         return {
             "status": BLOCKED,
             "verified": False,
@@ -435,11 +435,24 @@ def collect_mtu_consistency(
     except (KeyboardInterrupt, Interrupted):
         errors.append({"source": "run", "reason": "interrupted"})
     finally:
-        executor.shutdown(wait=True, cancel_futures=True)
-        cleanup = _cleanup(target, plan.namespace, marker)
+        # A second interrupt must not leave this run's privileged debug Pods.
+        previous_int = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        previous_term = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            executor.shutdown(wait=True, cancel_futures=True)
+            cleanup = _cleanup(target, plan.namespace, marker)
+        finally:
+            signal.signal(signal.SIGTERM, previous_term)
+            signal.signal(signal.SIGINT, previous_int)
 
     records.sort(key=lambda row: (row["node"], row["interface"]))
     mtu_values = sorted({row["mtu"] for row in records})
+    by_interface: dict[str, set[int]] = {}
+    for row in records:
+        by_interface.setdefault(row["interface"], set()).add(row["mtu"])
+    mtu_by_interface = {
+        name: sorted(values) for name, values in sorted(by_interface.items())
+    }
     nodes_read = sorted({row["node"] for row in records})
     result = report(
         KIND,
@@ -462,17 +475,22 @@ def collect_mtu_consistency(
         "nodes_selected": len(plan.nodes),
         "nodes_read": len(nodes_read),
         "mtu_values": mtu_values,
-        "consistent": not errors and cleanup["verified"] and len(mtu_values) == 1,
+        "mtu_by_interface": mtu_by_interface,
+        "consistent": bool(records)
+        and not errors
+        and cleanup["verified"]
+        and not any(len(values) > 1 for values in mtu_by_interface.values()),
     }
-    findings = []
-    if len(mtu_values) > 1:
-        findings.append(
-            {
-                "code": "physical_mtu_mismatch",
-                "action": "inspect_node_physical_nic_mtu",
-                "mtu_values": mtu_values,
-            }
-        )
+    findings = [
+        {
+            "code": "physical_mtu_mismatch",
+            "action": "inspect_node_physical_nic_mtu",
+            "interface": name,
+            "mtu_values": values,
+        }
+        for name, values in mtu_by_interface.items()
+        if len(values) > 1
+    ]
     result["findings"] = findings
     result["condition"] = (
         "UNKNOWN"
