@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-03T20:54:14.844287+00:00",
+  "captured_at": "2026-10-03T21:17:27.826417+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -13,6 +13,19 @@
   "execution_host": "mac.lan",
   "kind": "access_check",
   "live_checks": {
+    "ceph_cluster": {
+      "access_proven": true,
+      "error_count": 0,
+      "errors": [],
+      "health": "HEALTH_OK",
+      "inactive_pg_count": 0,
+      "namespace": "openshift-storage",
+      "osd_count": 12,
+      "pod_count": 15,
+      "readback_sha256": "0dd5a7822a9bf441cd9f69263486c469080750861f6cc9e46bbb4cfa516e770a",
+      "record_count": 15,
+      "status": "PASS"
+    },
     "cilium_status": {
       "access_proven": true,
       "agent_health": {
@@ -22,7 +35,7 @@
       "ciliumnode_count": 9,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "4eaa066eaf88adc7321f0ce1577d6737e3bb5c4e891f62a242c7f62b28796fc8",
+      "readback_sha256": "2e1ed042468eaa0aa0e8b4d8456e817e657214089f2bf6f605248c8260de2dcc",
       "record_count": 9,
       "status": "PASS"
     },
@@ -30,15 +43,15 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "4193df4943553ea7b2675302fa7604b90978339778363f5f5404650350fa8a9a",
-      "record_count": 4481,
+      "readback_sha256": "6588d27d8fd8f7e77200db60be4dea643e5692177751a477aeff2028e3d5a232",
+      "record_count": 4559,
       "status": "PASS"
     },
     "storage_report": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "4673453c875936b545be6edb479de4f1cb18c1e7c9b015bc3e9683fc7c98c4fb",
+      "readback_sha256": "e9144a2f7b4280c0d0444381e09491493c8aac0519cc60b86bbd2d2f9943d385",
       "record_count": 65,
       "resource_counts": {
         "attachments": 23,
@@ -47,7 +60,7 @@
         "daemonsets": 41,
         "deployments": 189,
         "nodes": 9,
-        "pods": 626,
+        "pods": 627,
         "pvcs": 60,
         "pvs": 65,
         "replicasets": 504,
@@ -66,11 +79,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "213b9e26550122f26e27e325af8f034ba362d00c71a3f1ea6485d7db212e3d56",
+    "digest": "392a60c500e8c9affc3500c70eec9ec076d7deb01ddac2f0afc98fc357d72fe8",
     "file_count": 32,
     "revision": {
       "source": "git_head",
-      "value": "67b8562d21515740ce02373add32f5ad634e849a",
+      "value": "cb010a2647d8977a04ba4da8c0a3b98f8494a7eb",
       "verified": true
     }
   },
@@ -152,8 +165,8 @@
     }
   },
   "target_file": "path:5e5380df1eda",
-  "target_selection": "user:path:5e5380df1eda",
-  "target_source": "user",
+  "target_selection": "cli:path:5e5380df1eda",
+  "target_source": "argv:--target",
   "targets": {
     "github": "github.com/spyroot/ci-skills",
     "gitlab": "https://gitlab.dcloud.run",
@@ -162,5 +175,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "67b8562d21515740ce02373add32f5ad634e849a"
+  "tested_revision": "cb010a2647d8977a04ba4da8c0a3b98f8494a7eb"
 }
