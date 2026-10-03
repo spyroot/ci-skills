@@ -372,6 +372,35 @@ def test_cli_dry_run_never_binds_credentials_or_calls_api(
     assert data["credential_source"] is None
 
 
+def test_access_check_uses_user_gitlab_target_without_selector(
+    tmp_path, monkeypatch, capsys
+):
+    home = tmp_path / "home"
+    selected = home / ".ci-skills" / "target.toml"
+    selected.parent.mkdir(parents=True)
+    selected.write_text(
+        '[gitlab]\nurl = "https://gitlab.example.test"\n'
+        'project = "unit/repo"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CI_SKILLS_TARGET", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        SCRIPT,
+        "bind_gitlab_session",
+        lambda *_args, **_kwargs: pytest.fail("dry run bound credentials"),
+    )
+
+    result = SCRIPT.main(["check", "--dry-run", "--json"])
+    data = json.loads(capsys.readouterr().out)
+
+    assert result == 0
+    assert data["target_source"] == "user"
+    assert data["target"] == {"kind": "project", "reference": "unit/repo"}
+    assert data["credential_source"] is None
+
+
 def test_live_receipt_is_portable_redacted_and_parseable(tmp_path, monkeypatch, capsys):
     token_file = tmp_path / "credential"
     token_file.write_text("file-token\n", encoding="utf-8")

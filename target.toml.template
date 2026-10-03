@@ -45,9 +45,10 @@ repository = "owner/repository"
 # The exact origin. A job URL on any other host is refused.
 url = "https://gitlab.example.com"
 
-# For GitLab-only operations, select the exact project or group in this file
-# or pass --project / --group for one invocation. No repository remote or glab
-# profile supplies a fallback target.
+# For GitLab-only access and actions, set the exact project or group here.
+# Use one selector at a time for `gitlab_access.py check`.
+# The declared --project / --group flags override that choice for one run.
+# No repository remote or glab profile supplies a fallback target.
 # project = "group/project"
 # group = "group"
 # runner_id = 123

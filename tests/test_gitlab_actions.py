@@ -90,6 +90,101 @@ def test_plan_fingerprint_binds_body_target_and_source():
     assert '"one"' not in json.dumps(first.public())
 
 
+def test_action_uses_project_target_before_user_target_without_selector(
+    tmp_path: Path, monkeypatch, capsys
+):
+    home = tmp_path / "home"
+    project = tmp_path / "project"
+    user_target = home / ".ci-skills" / "target.toml"
+    project_target = project / ".ci-skills" / "target.toml"
+    for path, reference in (
+        (user_target, "user/repo"),
+        (project_target, "project/repo"),
+    ):
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            '[gitlab]\nurl = "https://gitlab.example.test"\n'
+            f'project = "{reference}"\n',
+            encoding="utf-8",
+        )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CI_SKILLS_TARGET", raising=False)
+    monkeypatch.chdir(project)
+
+    result = ACTION.run_action_cli(
+        "gitlab_issue", ["open-bug", "--title", "selected", "--json"]
+    )
+    project_plan = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert project_plan["target"]["reference"] == "project/repo"
+    assert project_plan["target_source"] == "project;target:gitlab.project"
+
+    project_target.unlink()
+    result = ACTION.run_action_cli(
+        "gitlab_issue", ["open-bug", "--title", "selected", "--json"]
+    )
+    user_plan = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert user_plan["target"]["reference"] == "user/repo"
+    assert user_plan["target_source"] == "user;target:gitlab.project"
+    assert user_plan["plan_digest"] != project_plan["plan_digest"]
+
+
+def test_group_action_uses_selected_target_without_group_flag(
+    tmp_path: Path, monkeypatch, capsys
+):
+    home = tmp_path / "home"
+    target = home / ".ci-skills" / "target.toml"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        '[gitlab]\nurl = "https://gitlab.example.test"\n'
+        'group = "platform/team"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CI_SKILLS_TARGET", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    result = ACTION.run_action_cli(
+        "gitlab_runner", ["assign", "--runner-id", "9", "--json"]
+    )
+    plan = json.loads(capsys.readouterr().out)
+
+    assert result == 0
+    assert plan["target"] == {"kind": "group", "reference": "platform/team"}
+    assert plan["target_source"] == "user;target:gitlab.group"
+
+
+def test_declared_project_override_replaces_selected_target_for_one_action(
+    tmp_path: Path, capsys
+):
+    target = tmp_path / "selected.toml"
+    target.write_text(
+        '[gitlab]\nurl = "https://gitlab.example.test"\n'
+        'project = "stored/repo"\n',
+        encoding="utf-8",
+    )
+
+    result = ACTION.run_action_cli(
+        "gitlab_issue",
+        [
+            "open-bug",
+            "--title",
+            "selected",
+            "--target",
+            str(target),
+            "--project",
+            "override/repo",
+            "--json",
+        ],
+    )
+    plan = json.loads(capsys.readouterr().out)
+
+    assert result == 0
+    assert plan["target"]["reference"] == "override/repo"
+    assert plan["target_source"] == "argv:--target;argv:--project"
+
+
 def test_milestone_create_reads_back_numeric_id():
     plan = _plan(
         "gitlab_milestone", "create", {"title": "release", "due_date": "2026-10-31"}

@@ -153,20 +153,23 @@ is found, the error names every path it searched and the template to copy.
 ## GitLab operations
 
 For GitLab-only work, the selected target file may contain only `[gitlab]` with
-its exact `url`; operations also select a `project` or `group`, while
-`gitlab_job.py` selects its project from `--job-url`. The same four-tier target
-selection above applies. Storage, event, and Cilium diagnostics still need all
-three authorities.
+its exact `url`. Set `gitlab.project` or `gitlab.group` for the intended
+operation. `gitlab_job.py` selects its project from `--job-url`. The same
+four-tier target selection above applies. Storage, event, and Cilium
+diagnostics still need all three authorities. Set `gitlab.project` in the
+selected target for the commands below. The declared `--project` flag overrides
+it for one invocation.
+
 The operation access check reads back the effective GitLab identity and exact
 numeric target before a write:
 
 ```bash
 conda run -n ci-skills python \
   skills/k8s-admin-diagnostics/scripts/gitlab_access.py check \
-  --project group/project --json
+  --json
 conda run -n ci-skills python \
   skills/k8s-admin-diagnostics/scripts/gitlab_milestone.py create \
-  --project group/project --title "Release checkpoint" --json
+  --title "Release checkpoint" --json
 ```
 
 The second command prints a `DRY_RUN` plan with `plan_digest` and makes no API
@@ -179,9 +182,9 @@ creation requires the same `--token-out PATH` on the dry-run plan and apply to
 bind the one-time token destination into the plan digest. The token is saved at
 that caller-selected path; creating a record does not register or start a runner.
 
-Group runner assignment has one extra read-only step: call
-`gitlab_runner.py assign --group GROUP --runner-id ID --live-plan --json` to
-read the exact project IDs. Its `PLANNED` result supplies the digest for
+Group runner assignment has one extra read-only step: select `gitlab.group` in
+the target, then call `gitlab_runner.py assign --runner-id ID --live-plan --json`
+to read the exact project IDs. Its `PLANNED` result supplies the digest for
 `--apply --confirm-plan DIGEST`. Apply rechecks group membership and blocks
 before a write if it changed. The default offline `DRY_RUN` plan makes no API
 call and is not apply-ready for a group.
