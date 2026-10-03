@@ -342,14 +342,14 @@ def test_explicit_upgrade_preserves_previous_copy_and_is_idempotent(tmp_path):
     )
     assert plan["status"] == "DRY_RUN"
     assert (destination / "scripts" / "check.py").read_text() == "print('ok')\n"
-    assert not Path(plan["previous_destination"]).exists()
+    assert plan["previous_version"] is None
 
     changed = installer.install(
         source, skills_dir, dry_run=False, require_verified=False, upgrade=True
     )
     assert changed["status"] == "PASS"
     assert (destination / "scripts" / "check.py").read_text() == "print('new')\n"
-    backup = Path(changed["previous_destination"])
+    backup = Path(changed["previous_version"])
     assert (backup / "scripts" / "check.py").read_text() == "print('ok')\n"
     assert changed["digest"] == installer.tree_digest(destination)["digest"]
 

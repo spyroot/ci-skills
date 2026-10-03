@@ -218,7 +218,11 @@ def test_mutating_commands_are_identified_in_the_manifest():
             "mutates", False
         )
         if entry.get("mutates", False):
-            assert manifest["commands"][script]["subcommands"]
+            command = manifest["commands"][script]
+            assert command["subcommands"] or {
+                "--apply",
+                "--confirm-plan",
+            } <= set(command["options"])
 
 
 def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):

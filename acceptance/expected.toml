@@ -37,3 +37,177 @@ host = "mac.lan"
 github = "spyroot"
 gitlab = "spyroot"
 kubernetes = "kube:admin"
+
+[[gitlab_receipts]]
+kind = "gitlab_access"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+
+[[gitlab_receipts]]
+kind = "gitlab_milestone"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "create"
+result_action = "APPLIED"
+
+[[gitlab_receipts]]
+kind = "gitlab_milestone"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "create"
+result_action = "NO_OP"
+
+[[gitlab_receipts]]
+kind = "gitlab_milestone"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "update"
+result_action = "APPLIED"
+
+[[gitlab_receipts]]
+kind = "gitlab_milestone"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "update"
+result_action = "NO_OP"
+
+[[gitlab_receipts]]
+kind = "gitlab_milestone"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "adjust-time"
+result_action = "APPLIED"
+
+[[gitlab_receipts]]
+kind = "gitlab_milestone"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "adjust-time"
+result_action = "NO_OP"
+
+[[gitlab_receipts]]
+kind = "gitlab_issue"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "open-bug"
+result_action = "APPLIED"
+
+[[gitlab_receipts]]
+kind = "gitlab_issue"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "open-bug"
+result_action = "NO_OP"
+
+[[gitlab_receipts]]
+kind = "gitlab_wiki"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "create"
+result_action = "APPLIED"
+
+[[gitlab_receipts]]
+kind = "gitlab_wiki"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "create"
+result_action = "NO_OP"
+
+[[gitlab_receipts]]
+kind = "gitlab_wiki"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "update"
+result_action = "APPLIED"
+
+[[gitlab_receipts]]
+kind = "gitlab_wiki"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "update"
+result_action = "NO_OP"
+
+[[gitlab_receipts]]
+kind = "gitlab_runner"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "create"
+result_action = "APPLIED"
+
+[[gitlab_receipts]]
+kind = "gitlab_runner"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 124
+target_path = "hott/ci-skills-runner-proof"
+operation = "assign"
+result_action = "APPLIED"
+
+[[gitlab_receipts]]
+kind = "gitlab_runner"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 124
+target_path = "hott/ci-skills-runner-proof"
+operation = "assign"
+result_action = "NO_OP"

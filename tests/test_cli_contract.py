@@ -122,7 +122,7 @@ def test_output_modes_are_mutually_exclusive(target_file):
     assert data["status"] == "BLOCKED"
     assert data["kind"] == "access_check"
     assert data["errors"][0]["source"] == "arguments"
-    assert "not allowed with argument" in data["errors"][0]["reason"]
+    assert data["errors"][0]["reason"] == "invalid_arguments"
 
 
 @pytest.mark.parametrize(

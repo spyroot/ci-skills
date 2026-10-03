@@ -79,7 +79,10 @@ def _plan():
         "diagnostics",
         ("node-a", "node-b"),
         "a" * 64,
-        {"selection": "PCI Ethernet with IPv4"},
+        {
+            "selection": "PCI Ethernet with nonempty parentdev and no virtual kind",
+            "host_command": ["chroot", "/host", "ip", "-d", "-j", "addr", "show"],
+        },
     )
 
 

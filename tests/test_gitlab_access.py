@@ -71,7 +71,7 @@ def test_gitlab_only_target_does_not_weaken_full_diagnostic_target(tmp_path):
     path = _target(tmp_path, body='project = "team/repo"\n')
     selected = TARGET.load_gitlab_target(path)
     assert selected.gitlab.project == "team/repo"
-    with pytest.raises(TARGET.TargetError, match="github, gitlab, and kubernetes"):
+    with pytest.raises(TARGET.TargetError, match="selected authority tables"):
         TARGET.load_target(path)
 
 
