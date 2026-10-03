@@ -448,7 +448,46 @@ def _auth_mechanism(user: dict[str, Any], target: Target) -> dict[str, str]:
     return options[0]
 
 
-def kubernetes_access(target: Target) -> Surface:
+def _cilium_access(target: Target) -> tuple[list[str], dict[str, Any]]:
+    """Prove the Cilium-specific exec path after base cluster access succeeds."""
+    observed: list[str] = []
+    namespace, agent_pod_selector = cilium_discovery(target)
+    observed.append("cilium_namespace:" + namespace)
+    result = run_command(
+        kubectl_argv(
+            target, "auth", "can-i", "create", "pods/exec", "-n", namespace, "-q"
+        ),
+        env=kubernetes_env(target),
+    )
+    if result.returncode:
+        raise ValueError("pods_exec_denied")
+    observed.append("cilium_pods_exec")
+    pods = _json(
+        run_command(
+            kubectl_argv(target, "-n", namespace, "get", "pods", "-o", "json"),
+            env=kubernetes_env(target),
+        )
+    )
+    if not isinstance(pods, dict) or not isinstance(pods.get("items"), list):
+        raise TypeError("invalid_cilium_pod_list")
+    ready = ready_agent_pods(pods["items"], agent_pod_selector, namespace)
+    if not ready:
+        raise ValueError("cilium_ready_pod_missing")
+    pod_name = (ready[0].get("metadata") or {}).get("name")
+    health_result = run_command(
+        kubectl_argv(target, "-n", namespace, "exec", pod_name, "--", *HEALTH_COMMAND),
+        timeout=30,
+        env=kubernetes_env(target),
+    )
+    if health_result.returncode:
+        raise ValueError("cilium_health_exec_failed")
+    if not valid_health(_json(health_result)):
+        raise TypeError("invalid_cilium_health_response")
+    observed.append("cilium_health_exec")
+    return observed, {"cilium_health_pod": pod_name}
+
+
+def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
     name = target.kubernetes.context
     server = target.kubernetes.server
     observed: list[str] = []
@@ -586,53 +625,10 @@ def kubernetes_access(target: Target) -> Surface:
             if result.returncode:
                 raise ValueError(label + "_denied")
             observed.append(label)
-        namespace, agent_pod_selector = cilium_discovery(target)
-        observed.append("cilium_namespace:" + namespace)
-        result = run_command(
-            kubectl_argv(
-                target, "auth", "can-i", "create", "pods/exec", "-n", namespace, "-q"
-            ),
-            env=kubernetes_env(target),
-        )
-        if result.returncode:
-            raise ValueError("pods_exec_denied")
-        observed.append("cilium_pods_exec")
-        pods = _json(
-            run_command(
-                kubectl_argv(target, "-n", namespace, "get", "pods", "-o", "json"),
-                env=kubernetes_env(target),
-            )
-        )
-        if not isinstance(pods, dict) or not isinstance(pods.get("items"), list):
-            raise TypeError("invalid_cilium_pod_list")
-        # Agents come from the DaemonSet's own selector, the same discovery the
-        # collector uses. A name prefix also matches cilium-operator-* and
-        # cilium-envoy-*, which carry no health endpoint.
-        ready = ready_agent_pods(pods["items"], agent_pod_selector, namespace)
-        if not ready:
-            raise ValueError("cilium_ready_pod_missing")
-        pod_name = (ready[0].get("metadata") or {}).get("name")
-        health_result = run_command(
-            kubectl_argv(
-                target,
-                "-n",
-                namespace,
-                "exec",
-                pod_name,
-                "--",
-                *HEALTH_COMMAND,
-            ),
-            timeout=30,
-            env=kubernetes_env(target),
-        )
-        if health_result.returncode:
-            raise ValueError("cilium_health_exec_failed")
-        health = _json(health_result)
-        # Parseable JSON is not a health response.
-        if not valid_health(health):
-            raise TypeError("invalid_cilium_health_response")
-        observed.append("cilium_health_exec")
-        details["cilium_health_pod"] = pod_name
+        if cilium:
+            cilium_observed, cilium_details = _cilium_access(target)
+            observed.extend(cilium_observed)
+            details.update(cilium_details)
     except (
         ValueError,
         KeyError,
@@ -646,7 +642,8 @@ def kubernetes_access(target: Target) -> Surface:
             f"{name} -> {server}",
             observed,
             str(exc),
-            "Verify the exact context, API TLS, cluster admin RBAC, and Cilium exec permission.",
+            "Verify the exact context, API TLS, cluster admin RBAC"
+            + (", and Cilium exec permission." if cilium else "."),
             source,
         )
     return Surface(
@@ -699,12 +696,14 @@ def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]:
+def check_access(
+    target: Target, *, publication: bool = False, cilium: bool = True
+) -> dict[str, Any]:
     """Probe this command's declared authorities and fail closed on denial."""
     checks = {
         "github": github_publication_access if publication else github_access,
         "gitlab": gitlab_access,
-        "kubernetes": kubernetes_access,
+        "kubernetes": lambda selected: kubernetes_access(selected, cilium=cilium),
     }
     selected = target.active_surfaces
     if not selected or any(name not in checks for name in selected):
@@ -758,7 +757,9 @@ def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]
     return receipt
 
 
-def dry_run_access(target: Target, *, publication: bool = False) -> dict[str, Any]:
+def dry_run_access(
+    target: Target, *, publication: bool = False, cilium: bool = True
+) -> dict[str, Any]:
     selected = target.active_surfaces
     if publication and "github" not in selected:
         raise ValueError("publication_requires_github")
@@ -791,8 +792,11 @@ def dry_run_access(target: Target, *, publication: bool = False) -> dict[str, An
                 "auth whoami",
                 "cluster wildcard",
                 "clusterrolebinding admin",
-                "Cilium namespace",
-                "pods/exec",
+                *(
+                    ["Cilium namespace", "pods/exec", "non-TTY Cilium health"]
+                    if cilium
+                    else []
+                ),
             ],
         }
     return {

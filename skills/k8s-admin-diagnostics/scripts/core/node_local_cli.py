@@ -223,7 +223,7 @@ def run(kind: str, args: argparse.Namespace) -> int:
         else:
             target = bind_sources(target, revision=getattr(args, "revision", None))
             source = "access_check"
-            gate = check_access(target)
+            gate = check_access(target, cilium=kind == "cilium_node")
             data["access"] = access_evidence(gate)
             if gate["status"] != PASS:
                 data["access_failures"] = [

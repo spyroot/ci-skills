@@ -225,10 +225,11 @@ def execute(
         if not args.dry_run:
             target = bind_sources(target, revision=getattr(args, "revision", None))
         source = "access_check"
+        needs_cilium = kind in {ACCESS_CHECK_KIND, "cilium_status"}
         gate = (
-            dry_run_access(target, publication=publication)
+            dry_run_access(target, publication=publication, cilium=needs_cilium)
             if args.dry_run
-            else check_access(target, publication=publication)
+            else check_access(target, publication=publication, cilium=needs_cilium)
         )
         if args.dry_run and collect is not None:
             probes = {

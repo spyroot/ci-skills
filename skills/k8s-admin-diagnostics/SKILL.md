@@ -26,7 +26,10 @@ For one receipt proving all three authorities, run:
     scripts/access_check.py --json
 
 Add `--publication` when repository administration and required-check read-back
-are part of the requested proof.
+are part of the requested proof. Add `--ceph-namespace NAME` when the receipt
+must also prove the Ceph collector in that selected namespace. Ceph, storage,
+events, and kernel diagnostics require base Kubernetes access; Cilium discovery
+and health exec are checked only for Cilium commands and the full receipt.
 
 Do not go looking for credentials. This one call resolves them and tells you
 what it used:

@@ -202,6 +202,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "options": {
             "--publication": "also require repository administration and the declared required checks",
             "--job-url": "also prove access to one job, its pipeline, runner and trace",
+            "--ceph-namespace": "also prove Ceph health, OSD, PG and Pod reads in the selected namespace",
             "--receipt-out": "write the committable receipt, with host paths digested",
         },
         "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",

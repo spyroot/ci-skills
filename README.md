@@ -199,6 +199,8 @@ is written.
   storage, event, and Cilium collector reads. `--publication` also requires
   repository admin permission and read-back of required branch checks.
   `--job-url URL` also checks that job, pipeline, runner, and trace.
+  `--ceph-namespace NAME` adds Ceph health, OSD, PG, and Pod reads to that
+  receipt; this repository requires it in `acceptance/expected.toml`.
 - `gitlab_job.py --job-url URL` reads a selected job, pipeline, runner, and
   bounded trace. It accepts `--search TEXT`.
 - `storage_report.py` correlates PVCs, standalone PVs, Pods, attachments,
