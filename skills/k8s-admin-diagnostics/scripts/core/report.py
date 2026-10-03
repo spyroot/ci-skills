@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -89,6 +93,7 @@ def human(data: dict[str, Any]) -> str:
             lines.append(f"Error: {error.get('source')}: {error.get('reason')}")
         if cleanup := data.get("cleanup"):
             lines.append(f"Cleanup: {cleanup.get('status', 'UNKNOWN')}")
+        lines.extend(_report_file_lines(data))
         return "\n".join(lines) + "\n"
     lines = [
         f"{data.get('kind', 'diagnostic')}: {data.get('status', 'UNKNOWN')}",
@@ -199,7 +204,18 @@ def human(data: dict[str, Any]) -> str:
                 lines.append(f"    reason: {surface['reason']}")
             if surface.get("next_step"):
                 lines.append(f"    next: {surface['next_step']}")
+    lines.extend(_report_file_lines(data))
     return "\n".join(lines) + "\n"
+
+
+def _report_file_lines(data: dict[str, Any]) -> list[str]:
+    files = data.get("report_files") or {}
+    if not files:
+        return []
+    return [
+        f"Report JSON: {sanitize(files['json'], 1024)}",
+        f"Report text: {sanitize(files['text'], 1024)}",
+    ]
 
 
 def emit(data: dict[str, Any], mode: str, output_dir: str | None = None) -> str:
@@ -211,22 +227,33 @@ def emit(data: dict[str, Any], mode: str, output_dir: str | None = None) -> str:
     leave the others raw.
     """
     data = redact_tree(data)
-    pretty_json = json.dumps(data, indent=2, sort_keys=True) + "\n"
-    human_text = human(data)
-    if output_dir:
-        destination = Path(output_dir).expanduser()
-        destination.mkdir(parents=True, exist_ok=True)
-        stem = data.get("kind", "report")
-        for name, body in ((f"{stem}.json", pretty_json), (f"{stem}.txt", human_text)):
-            temporary = destination / f".{name}.partial"
-            temporary.write_text(body, encoding="utf-8")
-            os.replace(temporary, destination / name)
-    if mode == "json":
-        return pretty_json
     if mode == "yaml":
         try:
             import yaml
         except ImportError as exc:
             raise RuntimeError("PyYAML is required for --yaml") from exc
+    if output_dir:
+        destination = Path(output_dir).expanduser().resolve()
+        destination.mkdir(parents=True, exist_ok=True)
+        stem = re.sub(r"[^A-Za-z0-9_-]", "_", str(data.get("kind") or "report"))
+        run_directory = destination / f"{stem}-{uuid.uuid4().hex}"
+        data["report_files"] = {
+            "json": str(run_directory / f"{stem}.json"),
+            "text": str(run_directory / f"{stem}.txt"),
+        }
+    pretty_json = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    human_text = human(data)
+    if output_dir:
+        temporary = Path(tempfile.mkdtemp(prefix=f".{stem}-", dir=destination))
+        try:
+            (temporary / f"{stem}.json").write_text(pretty_json, encoding="utf-8")
+            (temporary / f"{stem}.txt").write_text(human_text, encoding="utf-8")
+            os.replace(temporary, run_directory)
+        finally:
+            if temporary.exists():
+                shutil.rmtree(temporary)
+    if mode == "json":
+        return pretty_json
+    if mode == "yaml":
         return yaml.safe_dump(data, sort_keys=True, allow_unicode=True)
     return human_text

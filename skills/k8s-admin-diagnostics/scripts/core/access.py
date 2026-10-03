@@ -533,12 +533,21 @@ def _credential_path(value: str, target: Target) -> Path:
 def _auth_mechanism(user: dict[str, Any], target: Target) -> dict[str, str]:
     """Identify the selected kubeconfig user's configured auth mechanism."""
     options: list[dict[str, str]] = []
-    if user.get("tokenFile"):
-        selected = _credential_path(user["tokenFile"], target)
-        if not selected.is_file() or not selected.stat().st_size:
+    if "tokenFile" in user:
+        token_file = user["tokenFile"]
+        if not isinstance(token_file, str) or not token_file:
             raise ValueError("token_file_unavailable")
+        selected = _credential_path(token_file, target)
+        if not selected.is_file():
+            raise ValueError("token_file_unavailable")
+        try:
+            with selected.open("rb") as token_handle:
+                if not token_handle.read(1):
+                    raise ValueError("token_file_unavailable")
+        except OSError as exc:
+            raise ValueError("token_file_unavailable") from exc
         options.append({"type": "tokenFile", "source": str(selected)})
-    if user.get("token"):
+    elif user.get("token"):
         options.append(
             {"type": "embedded-token", "source": "selected kubeconfig user entry"}
         )

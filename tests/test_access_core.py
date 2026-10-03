@@ -584,6 +584,7 @@ def test_check_access_prefers_explicit_token_files_over_ambient_env(
     (
         ("embedded_token", "embedded-token"),
         ("token_file", "tokenFile"),
+        ("token_file_with_embedded_token", "tokenFile"),
         ("client_certificate", "client-certificate"),
         ("exec", "exec-provider"),
     ),
@@ -603,11 +604,14 @@ def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
     if mechanism == "embedded_token":
         user_auth = {"token": "embedded-secret-token"}
         secret_values.append("embedded-secret-token")
-    elif mechanism == "token_file":
+    elif mechanism in ("token_file", "token_file_with_embedded_token"):
         token_file = tmp_path / "admin.token"
         token_file.write_text("token-file-secret\n", encoding="utf-8")
         user_auth = {"tokenFile": str(token_file)}
         secret_values.append("token-file-secret")
+        if mechanism == "token_file_with_embedded_token":
+            user_auth["token"] = "stale-embedded-secret"
+            secret_values.append("stale-embedded-secret")
     elif mechanism == "client_certificate":
         cert = tmp_path / "admin.crt"
         key = tmp_path / "admin.key"
@@ -673,9 +677,35 @@ def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
     assert details["user_entry"] == "admin-user"
     assert details["api_server"] == "https://api.cluster.example.test:6443"
     assert details["auth_mechanism"]["type"] == expected_type
+    if mechanism == "token_file_with_embedded_token":
+        assert details["auth_mechanism"]["source"] == str(token_file.resolve())
     serialized = json.dumps(report)
     for value in secret_values:
         assert value not in serialized
+
+
+def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
+    monkeypatch, tmp_path
+):
+    """A stale embedded token must not hide an unreadable effective tokenFile."""
+    access, _runtime = _access_modules()
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    token_file = tmp_path / "admin.token"
+    token_file.write_text("secret\n", encoding="utf-8")
+    target = _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig))
+    original_open = Path.open
+
+    def denied_open(path, *args, **kwargs):
+        if path == token_file:
+            raise PermissionError("unit denied")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", denied_open)
+    with pytest.raises(ValueError, match="token_file_unavailable"):
+        access._auth_mechanism(
+            {"tokenFile": str(token_file), "token": "stale-secret"}, target
+        )
 
 
 @pytest.mark.parametrize(

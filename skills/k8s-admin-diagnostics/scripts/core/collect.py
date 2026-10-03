@@ -112,6 +112,26 @@ def _batch(
     return data, errors
 
 
+def _controller_counts(
+    kind: str, item: dict[str, Any]
+) -> tuple[int | None, int | None]:
+    """Read the replica counters from the selected controller's API shape."""
+    if kind == "DaemonSet":
+        status = item.get("status", {})
+        return status.get("desiredNumberScheduled"), status.get("numberReady")
+    return item.get("spec", {}).get("replicas"), item.get("status", {}).get(
+        "readyReplicas"
+    )
+
+
+def _controller_record(
+    key: tuple[str, str, str], item: dict[str, Any]
+) -> dict[str, Any]:
+    kind, _namespace, name = key
+    desired, ready = _controller_counts(kind, item)
+    return {"kind": kind, "name": name, "desired": desired, "ready": ready}
+
+
 def collect_storage(target: Target, args: Any) -> dict[str, Any]:
     resources = {
         "nodes": ("nodes", False),
@@ -140,33 +160,54 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
                     "attached": item.get("status", {}).get("attached"),
                 }
             )
-    controller_kinds = ("deployments", "statefulsets", "daemonsets")
+    controller_kinds = {
+        "deployments": "Deployment",
+        "statefulsets": "StatefulSet",
+        "daemonsets": "DaemonSet",
+    }
     controller_items = {
-        (_meta(item).get("namespace"), _meta(item).get("name")): item
-        for kind in controller_kinds
-        for item in data.get(kind, [])
+        (kind, _meta(item).get("namespace"), _meta(item).get("name")): item
+        for resource, kind in controller_kinds.items()
+        for item in data.get(resource, [])
     }
     replica_owners = {
         (_meta(item).get("namespace"), _meta(item).get("name")): [
             ref.get("name")
             for ref in (_meta(item).get("ownerReferences") or [])
-            if ref.get("kind") == "Deployment"
+            if isinstance(ref, dict)
+            and ref.get("kind") == "Deployment"
+            and isinstance(ref.get("name"), str)
+            and ref.get("name")
         ]
         for item in data.get("replicasets", [])
     }
     pods_by_claim: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    controllers_by_claim: dict[tuple[str, str], set[tuple[str, str, str]]] = {}
     for pod in data.get("pods", []):
         meta = _meta(pod)
         namespace = meta.get("namespace")
         owners = meta.get("ownerReferences") or []
         owner_names = [ref.get("name") for ref in owners if isinstance(ref, dict)]
+        controller_refs = {
+            (ref.get("kind"), namespace, ref.get("name"))
+            for ref in owners
+            if isinstance(ref, dict)
+            and ref.get("kind") in controller_kinds.values()
+            and isinstance(ref.get("name"), str)
+            and ref.get("name")
+        }
         for ref in owners:
-            if ref.get("kind") == "ReplicaSet":
-                owner_names += replica_owners.get((namespace, ref.get("name")), [])
+            if isinstance(ref, dict) and ref.get("kind") == "ReplicaSet":
+                deployment_names = replica_owners.get((namespace, ref.get("name")), [])
+                owner_names += deployment_names
+                controller_refs.update(
+                    ("Deployment", namespace, name) for name in deployment_names
+                )
         for volume in pod.get("spec", {}).get("volumes", []):
             claim = volume.get("persistentVolumeClaim", {}).get("claimName")
             if claim:
-                pods_by_claim.setdefault((namespace, claim), []).append(
+                claim_key = (namespace, claim)
+                pods_by_claim.setdefault(claim_key, []).append(
                     {
                         "pod": meta.get("name"),
                         "pod_uid": meta.get("uid"),
@@ -174,6 +215,9 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
                         "owners": owner_names,
                         "phase": pod.get("status", {}).get("phase"),
                     }
+                )
+                controllers_by_claim.setdefault(claim_key, set()).update(
+                    controller_refs
                 )
     rows: list[dict[str, Any]] = []
     claimed_pvs: set[str] = set()
@@ -201,7 +245,9 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
         if args.phase != "all" and args.phase not in (phase, pv_phase):
             continue
         related_controllers = sorted(
-            {owner for pod in pods for owner in pod["owners"] if owner}
+            key
+            for key in controllers_by_claim.get((namespace, name), set())
+            if key in controller_items
         )
         row = {
             "resource_kind": "PersistentVolumeClaim",
@@ -218,17 +264,8 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
             "attachments": attachments.get(pv_name, []),
             "csi_driver": pv.get("spec", {}).get("csi", {}).get("driver"),
             "controllers": [
-                {
-                    "name": owner,
-                    "desired": controller_items[(namespace, owner)]
-                    .get("spec", {})
-                    .get("replicas"),
-                    "ready": controller_items[(namespace, owner)]
-                    .get("status", {})
-                    .get("readyReplicas"),
-                }
-                for owner in related_controllers
-                if (namespace, owner) in controller_items
+                _controller_record(key, controller_items[key])
+                for key in related_controllers
             ],
         }
         if _search(row, args.search):

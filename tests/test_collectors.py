@@ -269,6 +269,114 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
     assert row["csi_driver"] == "csi.fast"
 
 
+def test_storage_controller_lookup_uses_kind_namespace_and_daemonset_counters(
+    monkeypatch, target_file
+):
+    """Same-named controllers remain distinct and use their API replica fields."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    payloads = _empty_storage_payloads()
+    payloads["persistentvolumeclaims"] = {
+        "items": [
+            {
+                "metadata": {"namespace": "app", "name": "claim"},
+                "spec": {"volumeName": "pv"},
+                "status": {"phase": "Bound"},
+            }
+        ]
+    }
+    payloads["persistentvolumes"] = {
+        "items": [
+            {
+                "metadata": {"name": "pv"},
+                "spec": {},
+                "status": {"phase": "Bound"},
+            }
+        ]
+    }
+    payloads["pods"] = {
+        "items": [
+            {
+                "metadata": {
+                    "namespace": "app",
+                    "name": f"pod-{kind.lower()}",
+                    "ownerReferences": [{"kind": kind, "name": owner}],
+                },
+                "spec": {
+                    "volumes": [{"persistentVolumeClaim": {"claimName": "claim"}}]
+                },
+            }
+            for kind, owner in (
+                ("ReplicaSet", "shared-rs"),
+                ("StatefulSet", "shared"),
+                ("DaemonSet", "shared"),
+            )
+        ]
+    }
+    payloads["replicasets"] = {
+        "items": [
+            {
+                "metadata": {
+                    "namespace": "app",
+                    "name": "shared-rs",
+                    "ownerReferences": [{"kind": "Deployment", "name": "shared"}],
+                }
+            }
+        ]
+    }
+    payloads["deployments"] = {
+        "items": [
+            {
+                "metadata": {"namespace": "app", "name": "shared"},
+                "spec": {"replicas": 3},
+                "status": {"readyReplicas": 2},
+            },
+            {
+                "metadata": {"namespace": "other", "name": "shared"},
+                "spec": {"replicas": 99},
+                "status": {"readyReplicas": 99},
+            },
+        ]
+    }
+    payloads["statefulsets"] = {
+        "items": [
+            {
+                "metadata": {"namespace": "app", "name": "shared"},
+                "spec": {"replicas": 2},
+                "status": {"readyReplicas": 1},
+            }
+        ]
+    }
+    payloads["daemonsets"] = {
+        "items": [
+            {
+                "metadata": {"namespace": "app", "name": "shared"},
+                "status": {"desiredNumberScheduled": 4, "numberReady": 3},
+            }
+        ]
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, payloads[resource])
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    result = collect.collect_storage(
+        _target(target_file),
+        SimpleNamespace(
+            namespace="app", node=None, storage_class=None, phase="all", search=None
+        ),
+    )
+
+    assert result["status"] == "PASS"
+    assert result["records"][0]["controllers"] == [
+        {"kind": "DaemonSet", "name": "shared", "desired": 4, "ready": 3},
+        {"kind": "Deployment", "name": "shared", "desired": 3, "ready": 2},
+        {"kind": "StatefulSet", "name": "shared", "desired": 2, "ready": 1},
+    ]
+
+
 def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
     monkeypatch,
     target_file,
