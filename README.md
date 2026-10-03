@@ -134,7 +134,7 @@ It also accepts `--yaml` and `--help`.
 A Codex session can install the merged skill straight from GitHub instead:
 
 ```text
-Install the skill from https://github.com/spyroot/ci-skills/tree/main/skills/k8s-admin-diagnostics
+Install the skill from https://github.com/spyroot/ci-skills/tree/main
 ```
 
 Either way, each execution host still needs its own credentials and its own

@@ -6,9 +6,11 @@ description: Use repeatable GitLab CI and Kubernetes/OpenShift tools for jobs, m
 # CI Skills
 
 Use the maintained commands in this skill for CI and cluster work. The directory
-containing this file is the skill root. Run commands relative to that root, even
-when the calling project's working directory is elsewhere. Do not rebuild a
-supported operation with one-off `gh`, `glab`, `kubectl`, `jq`, or shell parsing.
+containing this file is the skill root. Invoke each command by its path under
+that root, while keeping the working directory at the calling project root.
+The project target resolver reads `./.ci-skills/target.toml` from the working
+directory. Do not rebuild a supported operation with one-off `gh`, `glab`,
+`kubectl`, `jq`, or shell parsing.
 
 ## Select the tool
 
