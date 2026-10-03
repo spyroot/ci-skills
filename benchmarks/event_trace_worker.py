@@ -218,7 +218,7 @@ def _preflight(arguments: argparse.Namespace) -> dict[str, Any]:
     if not isinstance(event_list, dict) or not isinstance(
         event_list.get("items"), list
     ):
-        raise RuntimeError("kubernetes_event_response_invalid")
+        raise TypeError("kubernetes_event_response_invalid")
     return {
         "schema_version": "1.0",
         "kind": "event_trace_benchmark_preflight",
