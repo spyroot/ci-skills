@@ -190,7 +190,7 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
     monkeypatch.setattr(
         cli,
         "check_access",
-        lambda _target, publication=False: {
+        lambda _target, publication=False, cilium=False: {
             "kind": "access_check",
             "status": status.PASS,
         },

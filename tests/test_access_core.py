@@ -13,9 +13,15 @@ from conftest import import_script_module
 TEST_REVISION = "a" * 40
 
 
-def _load_target(path: Path) -> Any:
+def _load_target(
+    path: Path, *, required_surfaces: tuple[str, ...] | None = None
+) -> Any:
     """Load the nonsecret target used by access tests."""
-    return import_script_module("core.target").load_target(path)
+    if required_surfaces is None:
+        return import_script_module("core.target").load_target(path)
+    return import_script_module("core.target").load_target(
+        path, required_surfaces=required_surfaces
+    )
 
 
 def _access_modules() -> tuple[Any, Any]:

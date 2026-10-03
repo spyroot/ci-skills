@@ -38,7 +38,9 @@ def _selected_existing_pods(monkeypatch, target_file):
         ),
     )
     monkeypatch.setattr(cli, "bind_sources", lambda target, **_kwargs: target)
-    monkeypatch.setattr(cli, "check_access", lambda _target: {"status": "PASS"})
+    monkeypatch.setattr(
+        cli, "check_access", lambda _target, *, cilium=False: {"status": "PASS"}
+    )
     monkeypatch.setattr(cli, "access_evidence", lambda _gate: {"status": "PASS"})
     monkeypatch.setattr(cli, "select_node_pod", lambda *_args, **_kwargs: object())
 
