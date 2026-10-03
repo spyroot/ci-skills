@@ -331,6 +331,12 @@ def error_class(result: CommandResult) -> str:
     if "forbidden" in detail or "403" in detail or "permission" in detail:
         return "authorization"
     if (
+        "the server doesn't have a resource type" in detail
+        or "the server does not have a resource type" in detail
+        or "the server could not find the requested resource" in detail
+    ):
+        return "resource_unavailable"
+    if (
         "could not resolve" in detail
         or "connection refused" in detail
         or "no such host" in detail

@@ -379,7 +379,7 @@ def execute(
                     "concurrent node, Pod, PVC/PV, StorageClass, CSI, attachment, controller reads"
                 ],
                 "collect_events": [
-                    "core and events.k8s.io reads",
+                    "events.k8s.io read; core fallback only if resource is absent",
                     "time and object filtering",
                 ],
                 "collect_cilium": [
