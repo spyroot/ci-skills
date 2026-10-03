@@ -338,6 +338,103 @@ def _timestamp(value: str) -> datetime:
     return stamp.astimezone(timezone.utc)
 
 
+def _event_data(
+    target: Target,
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]], str | None]:
+    """Read the stable Event API once, with core/v1 as compatibility fallback."""
+    preferred_key = "events_v1"
+    preferred, error = _read_json(
+        kubectl_argv(target, "get", "events.events.k8s.io", "-A", "-o", "json"),
+        env=kubernetes_env(target),
+    )
+    if not error:
+        try:
+            return {preferred_key: _items(preferred)}, [], None
+        except (ValueError, TypeError) as exc:
+            return (
+                {preferred_key: []},
+                [{"source": preferred_key, "reason": str(exc)}],
+                None,
+            )
+    if error != "resource_unavailable":
+        return {preferred_key: []}, [{"source": preferred_key, "reason": error}], None
+
+    core_key = "core_events"
+    core, core_error = _read_json(
+        kubectl_argv(target, "get", "events", "-A", "-o", "json"),
+        env=kubernetes_env(target),
+    )
+    if not core_error:
+        try:
+            return (
+                {core_key: _items(core)},
+                [{"source": preferred_key, "reason": "compatibility_fallback"}],
+                "resource_unavailable",
+            )
+        except (ValueError, TypeError) as exc:
+            core_error = str(exc)
+    return (
+        {preferred_key: [], core_key: []},
+        [
+            {"source": preferred_key, "reason": error},
+            {"source": core_key, "reason": core_error or "command_failed"},
+        ],
+        "resource_unavailable",
+    )
+
+
+def _event_parts(
+    event: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Validate nested Event fields before filtering or rendering them."""
+    meta = _meta(event)
+    obj = event["regarding"] if "regarding" in event else event.get("involvedObject")
+    series = event.get("series", {})
+    if series is None:
+        series = {}
+    if (
+        not isinstance(obj, dict)
+        or not isinstance(series, dict)
+        or not isinstance(obj.get("name"), str)
+        or not obj["name"]
+    ):
+        raise TypeError("invalid_event_record")
+    # ObjectReference.kind is optional in the Kubernetes Event API. A name
+    # still identifies the record for the filters and report below.
+    for container, fields in (
+        (meta, ("namespace", "creationTimestamp")),
+        (obj, ("kind", "namespace", "name", "uid")),
+        (series, ("lastObservedTime",)),
+        (
+            event,
+            (
+                "eventTime",
+                "firstTimestamp",
+                "lastTimestamp",
+                "deprecatedLastTimestamp",
+                "reason",
+                "type",
+                "note",
+                "message",
+            ),
+        ),
+    ):
+        if any(
+            container.get(field) is not None and not isinstance(container[field], str)
+            for field in fields
+        ):
+            raise TypeError("invalid_event_record")
+    for container, field in (
+        (series, "count"),
+        (event, "deprecatedCount"),
+        (event, "count"),
+    ):
+        value = container.get(field)
+        if value is not None and (type(value) is not int or value < 0):
+            raise TypeError("invalid_event_record")
+    return meta, obj, series
+
+
 def collect_events(target: Target, args: Any) -> dict[str, Any]:
     # `is not None`, not truthiness: `--last ""` was supplied, so it is an input
     # error. Treating it as absent silently returned the default hour, which is
@@ -354,31 +451,29 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
         start = end - DEFAULT_WINDOW
     if start > end:
         raise ValueError("--from must not be after --to")
-    data, errors = _batch(
-        target,
-        {
-            "core_events": ("events", True),
-            "events_v1": ("events.events.k8s.io", True),
-        },
-    )
+    data, errors, fallback_reason = _event_data(target)
     rows: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
     for source in ("core_events", "events_v1"):
         for event in data.get(source, []):
-            meta = _meta(event)
-            obj = event.get("regarding") or event.get("involvedObject") or {}
+            try:
+                meta, obj, series = _event_parts(event)
+            except TypeError as exc:
+                errors.append({"source": source, "reason": str(exc)})
+                continue
             first_source = (
                 event.get("eventTime")
                 or event.get("firstTimestamp")
                 or meta.get("creationTimestamp")
             )
             last_source = (
-                (event.get("series") or {}).get("lastObservedTime")
+                series.get("lastObservedTime")
                 or event.get("lastTimestamp")
                 or event.get("deprecatedLastTimestamp")
                 or first_source
             )
             if not last_source:
+                errors.append({"source": source, "reason": "invalid_event_timestamp"})
                 continue
             try:
                 event_time = _timestamp(last_source)
@@ -411,7 +506,12 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
                 "message": sanitize(
                     event.get("note") or event.get("message") or "", 1000
                 ),
-                "count": event.get("deprecatedCount") or event.get("count") or 1,
+                "count": (
+                    series.get("count")
+                    or event.get("deprecatedCount")
+                    or event.get("count")
+                    or 1
+                ),
                 "source": source,
             }
             key = (row["timestamp"], row["object_uid"], row["reason"], row["message"])
@@ -425,7 +525,7 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
             item["name"] or "",
         )
     )
-    return report(
+    result = report(
         "event_trace",
         kubernetes_label(target),
         {
@@ -440,6 +540,12 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
         rows,
         errors,
     )
+    if fallback_reason:
+        result["compatibility_fallback"] = {
+            "preferred_api": "events.k8s.io/v1",
+            "reason": fallback_reason,
+        }
+    return result
 
 
 def collect_cilium(target: Target, args: Any) -> dict[str, Any]:

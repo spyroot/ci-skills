@@ -201,11 +201,11 @@ is written.
   and controllers. Filters: `--namespace NAME|all`, `--node NAME`,
   `--storage-class NAME`, `--phase Pending|Bound|Lost|Released|Failed|all`,
   and `--search TEXT`.
-- `event_trace.py` reads both Kubernetes event APIs and accepts `--last`
-  (`5m`, `90s`, `2h`, `7d`), `--from`, `--to`, `--namespace`, `--kind`,
-  `--object`, `--reason`, and `--search`. `--last 15m` is shorter than
-  computing an RFC3339 pair; the default window is the previous hour, which is
-  the trap when correlating a job that failed earlier.
+- `event_trace.py` reads `events.k8s.io/v1`, falling back to core events only
+  when that API resource is unavailable. A fallback is reported as `PARTIAL`.
+  It accepts `--last` (`5m`, `90s`, `2h`, `7d`), `--from`, `--to`,
+  `--namespace`, `--kind`, `--object`, `--reason`, and `--search`. The default
+  window is the previous hour.
 - `cilium_status.py` reads Cilium resources and executes non-TTY health on
   ready agents. It accepts `--namespace NAME|auto`, `--node`, and `--search`.
   Successful reads retain `records[].status: PASS`; explicit failed peer or

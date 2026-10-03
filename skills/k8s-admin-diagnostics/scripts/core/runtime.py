@@ -242,6 +242,12 @@ def error_class(result: CommandResult) -> str:
     if result.returncode == 124:
         return "timeout"
     detail = result.stderr.lower()
+    if (
+        "the server doesn't have a resource type" in detail
+        or "the server does not have a resource type" in detail
+        or "the server could not find the requested resource" in detail
+    ):
+        return "resource_unavailable"
     if "unauthorized" in detail or "401" in detail or "not logged in" in detail:
         return "authentication"
     if "forbidden" in detail or "403" in detail or "permission" in detail:
