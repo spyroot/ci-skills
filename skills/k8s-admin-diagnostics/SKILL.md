@@ -198,8 +198,9 @@ inventory, and returns `plan_digest` without creating a Pod. Then run
 using that digest. `--node NAME` restricts both calls to one existing node.
 
 The apply uses `oc debug node/NAME` to read `ip -d -j addr show` through
-`chroot /host`. It selects PCI Ethernet interfaces with an IPv4 address,
+`chroot /host`. It selects PCI Ethernet interfaces regardless of IP address,
 compares their MTUs, and emits one versioned JSON report or a human table.
+The `ipv4_addresses` field is empty when a selected interface has no IPv4 address.
 The command creates temporary debug Pods in the selected context's namespace,
 tags them for this run, deletes any survivors, and reads back their absence.
 An incomplete read or cleanup is `BLOCKED` or `PARTIAL`; a real MTU mismatch is

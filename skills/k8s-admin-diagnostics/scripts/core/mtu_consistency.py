@@ -107,7 +107,7 @@ def _response(result: CommandResult, source: str) -> Any:
 
 
 def physical_uplinks(payload: Any) -> list[dict[str, Any]]:
-    """Port the Galileo PCI/ethernet/IPv4 selection without dropping bad data."""
+    """Select PCI Ethernet links and retain optional IPv4 address metadata."""
     if not isinstance(payload, list):
         raise TypeError("links:invalid_list_response")
     selected: list[dict[str, Any]] = []
@@ -135,8 +135,6 @@ def physical_uplinks(payload: Any) -> list[dict[str, Any]]:
                 if not isinstance(local, str) or not local:
                     raise ValueError("links:invalid_ipv4_address")
                 ipv4.append(local)
-        if not ipv4:
-            continue
         name, mtu, state = item.get("ifname"), item.get("mtu"), item.get("operstate")
         if (
             not isinstance(name, str)
@@ -276,7 +274,7 @@ def build_plan(target: Target, args: Any) -> MtuPlan:
         "namespace": namespace,
         "nodes": list(nodes),
         "timeout_seconds": args.timeout,
-        "selection": "PCI Ethernet with nonempty parentdev, no virtual kind, and IPv4",
+        "selection": "PCI Ethernet with nonempty parentdev and no virtual kind",
         "host_command": ["chroot", "/host", "ip", "-d", "-j", "addr", "show"],
     }
     encoded = json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()
@@ -398,7 +396,7 @@ def _read_one(
     try:
         links = physical_uplinks(_response(result, f"node/{node}"))
         if not links:
-            raise ValueError(f"node/{node}:no_pci_ethernet_ipv4_uplink")
+            raise ValueError(f"node/{node}:no_pci_ethernet_uplink")
         return [{"node": node, **link} for link in links], None
     except (ValueError, TypeError) as exc:
         return [], {"source": f"node/{node}", "reason": sanitize(str(exc), 160)}

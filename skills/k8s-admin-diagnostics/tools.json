@@ -646,7 +646,7 @@
         "--timeout",
         "--yaml"
       ],
-      "purpose": "Compare PCI Ethernet IPv4 uplink MTUs across selected Kubernetes nodes.",
+      "purpose": "Compare PCI Ethernet uplink MTUs across selected Kubernetes nodes.",
       "read_only": false,
       "report_kind": "k8s_verify_mtu_consistency",
       "required_options": [],
@@ -658,7 +658,7 @@
       "requires_authorities": [
         "kubernetes"
       ],
-      "returns": "A versioned table of node, PCI NIC, IPv4 address and MTU, consistency findings, and temporary-Pod cleanup read-back.",
+      "returns": "A versioned table of node, PCI NIC, optional IPv4 address and MTU, consistency findings, and temporary-Pod cleanup read-back.",
       "side_effects": "oc debug creates temporary Pods; apply verifies their cleanup",
       "subcommands": {},
       "use_when": "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; plan the selected nodes, then run the exact confirmed plan."

@@ -259,12 +259,12 @@ is written.
   hierarchy, inactive PGs, and OSD/monitor Pods on the pinned cluster.
   It accepts `--operator`, `--node`, `--ready`, and `--condition` filters.
 - `k8s_verify_mtu_consistency.py --json` reads the selected node inventory and
-  prints a plan digest. To collect PCI Ethernet IPv4 interface MTUs, run
+  prints a plan digest. To collect PCI Ethernet interface MTUs, run
   `k8s_verify_mtu_consistency.py --apply --confirm-plan SHA256 --json` with
   that digest. This OpenShift command requires `oc` and `kubectl` and blocks
   on a non-OpenShift API. `--node NAME` scopes both calls. The apply uses
   `oc debug`, creates temporary Pods, and verifies cleanup; its JSON and human
-  table show each node, interface, PCI device, IPv4 address and MTU. A
+  table show each node, interface, PCI device, optional IPv4 address, and MTU. A
   mismatch is `PARTIAL` with a finding, and no host interface is changed.
 
 The Cilium and Ceph node commands run from the skill's execution host. They

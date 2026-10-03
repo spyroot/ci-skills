@@ -412,7 +412,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
     },
     "k8s_verify_mtu_consistency.py": {
         "kind": "k8s_verify_mtu_consistency",
-        "purpose": "Compare PCI Ethernet IPv4 uplink MTUs across selected Kubernetes nodes.",
+        "purpose": "Compare PCI Ethernet uplink MTUs across selected Kubernetes nodes.",
         "use_when": (
             "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; "
             "plan the selected nodes, then run the exact confirmed plan."
@@ -433,7 +433,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "--run-id": "correlation ID for logs and the temporary Pod marker",
         },
         "returns": (
-            "A versioned table of node, PCI NIC, IPv4 address and MTU, "
+            "A versioned table of node, PCI NIC, optional IPv4 address and MTU, "
             "consistency findings, and temporary-Pod cleanup read-back."
         ),
         "side_effects": "oc debug creates temporary Pods; apply verifies their cleanup",

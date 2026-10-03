@@ -21,7 +21,12 @@ def _link(name: str, mtu: int, *, bus: str = "pci", family: str = "inet"):
         "link_type": "ether",
         "parentbus": bus,
         "parentdev": "0000:0a:00.0",
-        "addr_info": [{"family": family, "local": "192.0.2.10"}],
+        "addr_info": [
+            {
+                "family": family,
+                "local": "2001:db8::10" if family == "inet6" else "192.0.2.10",
+            }
+        ],
     }
 
 
@@ -78,11 +83,12 @@ def _plan():
     )
 
 
-def test_physical_uplinks_port_galileo_selection_without_virtual_or_ipv6():
+def test_physical_uplinks_include_pci_links_without_ipv4():
     payload = [
         _link("eno1", 9000),
         _link("cilium_vxlan", 1450, bus="virtual"),
         _link("eno2", 9000, family="inet6"),
+        {**_link("eno3", 9000), "addr_info": []},
         {**_link("veth0", 1500), "linkinfo": {"info_kind": "veth"}},
     ]
 
@@ -94,7 +100,23 @@ def test_physical_uplinks_port_galileo_selection_without_virtual_or_ipv6():
             "parent_bus": "pci",
             "pci_device": "0000:0a:00.0",
             "ipv4_addresses": ["192.0.2.10"],
-        }
+        },
+        {
+            "interface": "eno2",
+            "mtu": 9000,
+            "oper_state": "UP",
+            "parent_bus": "pci",
+            "pci_device": "0000:0a:00.0",
+            "ipv4_addresses": [],
+        },
+        {
+            "interface": "eno3",
+            "mtu": 9000,
+            "oper_state": "UP",
+            "parent_bus": "pci",
+            "pci_device": "0000:0a:00.0",
+            "ipv4_addresses": [],
+        },
     ]
 
 
