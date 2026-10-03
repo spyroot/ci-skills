@@ -13,13 +13,43 @@ from typing import Any
 
 import tomllib
 
+from .catalog import PROJECT_DIR, TARGET_FILENAME
 from .runtime import error_class, run_command_tail
 from .target import Target, TargetError, load_target
 
 BINDING_ENV = "K8S_ADMIN_DIAGNOSTICS_BINDING"
 TARGET_ENV = "CI_SKILLS_TARGET"
-DEFAULT_TARGET = Path(".ci-skills/target.toml")
+DEFAULT_TARGET = Path(PROJECT_DIR) / TARGET_FILENAME
 ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+
+def target_candidates() -> list[tuple[str, Path]]:
+    """Return the declared target files in their precedence order."""
+    candidates: list[tuple[str, Path]] = []
+    configured = (os.environ.get(TARGET_ENV) or "").strip()
+    if configured:
+        candidates.append((f"env:{TARGET_ENV}", Path(configured).expanduser()))
+    candidates.append(("project", Path.cwd() / DEFAULT_TARGET))
+    candidates.append(("user", Path.home() / DEFAULT_TARGET))
+    return candidates
+
+
+def resolve_target_file(explicit: str | None) -> tuple[Path, str]:
+    """Resolve the selected four-tier target file without an ambient profile."""
+    if explicit:
+        path = Path(explicit).expanduser()
+        if not path.is_file():
+            raise TargetError(f"target_file_missing:{path}")
+        return path, "argv:--target"
+    for source, path in target_candidates():
+        if path.is_file():
+            return path, source
+    searched = ", ".join(str(path) for _source, path in target_candidates())
+    raise TargetError(
+        "target_missing: no_target_file. Copy target.toml.template to "
+        f"~/{DEFAULT_TARGET} or supply --target or {TARGET_ENV}. "
+        f"Searched: {searched}"
+    )
 
 
 def _path(value: object, base: Path) -> Path:
@@ -108,8 +138,9 @@ def load_project_binding(path: str | Path, *, dry_run: bool = False) -> Target:
     sources = kube["sources"]
     if not isinstance(sources, list) or not sources:
         raise TargetError("binding_sources_missing")
-    target = load_target(_path(data["target"], binding.parent))
-    if target.kubernetes.kubeconfig is not None:
+    target_path = _path(data["target"], binding.parent)
+    target = load_target(target_path)
+    if target.kubernetes.kubeconfig is not None or target.kubernetes.kubeconfigs:
         raise TargetError("binding_target_kubeconfig_conflict")
     for index, source in enumerate(sources):
         if not isinstance(source, dict):
@@ -120,6 +151,8 @@ def load_project_binding(path: str | Path, *, dry_run: bool = False) -> Target:
                 target,
                 kubernetes_source_reference=f"binding:{binding}#{index + 1}:{reference}",
                 target_reference=f"binding:{binding}",
+                source_file=target_path,
+                source_kind="binding",
             )
         if selected is None:
             continue
@@ -135,6 +168,8 @@ def load_project_binding(path: str | Path, *, dry_run: bool = False) -> Target:
             kubernetes=replace(target.kubernetes, kubeconfig=selected),
             kubernetes_source_reference=f"binding:{binding}#{index + 1}:{reference}",
             target_reference=f"binding:{binding}",
+            source_file=target_path,
+            source_kind="binding",
         )
     raise TargetError("binding_sources_absent")
 
@@ -146,26 +181,28 @@ def resolve_target(
     if explicit_target and explicit_binding:
         raise TargetError("target_binding_conflict")
     if explicit_target:
-        selected = Path(explicit_target).expanduser().resolve()
-        return replace(load_target(selected), target_reference=f"cli:{selected}")
+        selected, source = resolve_target_file(explicit_target)
+        return replace(
+            load_target(selected),
+            target_reference=f"cli:{selected.resolve()}",
+            source_file=selected,
+            source_kind=source,
+        )
     if explicit_binding:
         return load_project_binding(explicit_binding, dry_run=dry_run)
     if TARGET_ENV in os.environ and BINDING_ENV in os.environ:
         raise TargetError("environment_selector_conflict")
-    if TARGET_ENV in os.environ:
-        selected = _path(os.environ[TARGET_ENV], Path.cwd())
-        return replace(
-            load_target(selected),
-            target_reference=f"env:{TARGET_ENV} -> file:{selected}",
-        )
     if BINDING_ENV in os.environ:
         return load_project_binding(os.environ[BINDING_ENV], dry_run=dry_run)
-    project = Path.cwd() / DEFAULT_TARGET
-    if project.exists():
-        selected = project.resolve()
-        return replace(load_target(selected), target_reference=f"project:{selected}")
-    user = Path.home() / DEFAULT_TARGET
-    if user.exists():
-        selected = user.resolve()
-        return replace(load_target(selected), target_reference=f"user:{selected}")
-    raise TargetError("target_missing")
+    selected, source = resolve_target_file(None)
+    reference = (
+        f"env:{TARGET_ENV} -> file:{selected.resolve()}"
+        if source == f"env:{TARGET_ENV}"
+        else f"{source}:{selected.resolve()}"
+    )
+    return replace(
+        load_target(selected),
+        target_reference=reference,
+        source_file=selected,
+        source_kind=source,
+    )

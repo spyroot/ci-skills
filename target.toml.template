@@ -1,0 +1,73 @@
+# Target template — copy, fill in, and keep the copy OUT of this repository.
+#
+#     mkdir -p ~/.ci-skills
+#     cp target.toml.template ~/.ci-skills/target.toml
+#     $EDITOR ~/.ci-skills/target.toml
+#
+# Or per project, for a repository that owns its own cluster:
+#
+#     mkdir -p .ci-skills && cp target.toml.template .ci-skills/target.toml
+#
+# Every command then needs no --target argument at all. Override the location
+# with --target PATH or CI_SKILLS_TARGET if you keep it elsewhere.
+#
+# This file is NONSECRET: it names authorities and points at credential files.
+# It must contain no token, password or key — the parser rejects those fields.
+#
+# Two rules about where the filled-in copy lives, both learned the hard way:
+#
+#   1. Do not commit it. The paths in it are true on one machine only.
+#   2. Do not let anything that runs elsewhere reference it. A pipeline that
+#      points at a path under someone's home directory fails the moment it runs
+#      on a runner, and the failure looks like a credential problem rather than
+#      a wiring mistake. CI declares its own target or project binding.
+#
+# Using this skill implies you already hold cluster-admin and are already
+# authenticated to the hosts below. Nothing here grants access; it only says
+# WHICH authorities to use, so a report can name the one it actually used.
+
+[github]
+# The exact host and repository. Enterprise Server hosts work too.
+host = "github.com"
+repository = "owner/repository"
+
+# Optional: a private token file, if you do not want the `gh` credential store
+# used. Absolute path, outside this repository and outside the installed skill.
+# token_file = "/home/operator/.ci-skills/credentials/github.token"
+
+# Required for `access_check.py --publication`: the status checks that branch
+# protection must require. Compared by exact equality, and a declared check
+# that protection does not require blocks. Omit the field and publication mode
+# refuses rather than accepting whatever it finds.
+# required_checks = ["validate"]
+
+[gitlab]
+# The exact origin. A job URL on any other host is refused.
+url = "https://gitlab.example.com"
+
+# Optional: a private token file instead of the `glab` credential store. The
+# GitLab surface needs an instance ADMINISTRATOR identity — group Owner is not
+# enough — so this is usually where an admin token belongs.
+# token_file = "/home/operator/.ci-skills/credentials/gitlab.token"
+
+[kubernetes]
+# The context name and the API server it must resolve to. The server is
+# compared against the kubeconfig, so a context that silently points somewhere
+# else is refused rather than read.
+context = "admin-context"
+server = "https://api.cluster.example.com:6443"
+
+# How the credential is found. Declare ONE of the two forms below, or omit
+# both when a separate project binding selects the kubeconfig. The skill
+# never adopts an ambient KUBECONFIG or default current context.
+
+# One file:
+# kubeconfig = "/home/operator/.kube/config"
+
+# Or the whole search path, in kubectl's own order. Use this when the context
+# and the credential live in separate files — for example a CA-verified overlay
+# plus the file holding the token. It needs no environment variable.
+# kubeconfigs = [
+#   "/home/operator/.ci-skills/credentials/kubeconfig",
+#   "/home/operator/.kube/config",
+# ]

@@ -4,3 +4,35 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+
+# Operator-local material: credentials, target files, raw traces. A token file
+# already sits untracked under .internal/ in this working tree, and nothing
+# ignored it, so `git add -A` would have staged it into a public repository.
+.internal/
+.env
+.env.*
+*.key
+*.pem
+*.crt
+*.p12
+
+# Agent instruction, handoff and coordination files. These are per-operator and
+# are never committed.
+.claude/
+.codex/
+.coordination/
+.agent-review/
+AGENT*.md
+CLAUDE*.md
+CODEX*.md
+TEAM_GUIDE.md
+
+# Editor and OS noise.
+.DS_Store
+.idea/
+*.swp
+*.tmp
+
+# Working copies a merge or patch tool leaves behind.
+*.orig
+*.rej

@@ -8,14 +8,52 @@ import socket
 import sys
 from datetime import datetime, timezone
 
-from .argument_parser import StructuredParser
+from .catalog import describe_node
 from .node_local import JOURNAL_SINCE, collect_ceph_kernel, collect_cilium_node
 from .report import emit
 from .status import BLOCKED, DRY_RUN, exit_code
 
 
-def parser(kind: str) -> StructuredParser:
-    result = StructuredParser(
+class NodeParser(argparse.ArgumentParser):
+    """Keep controlled argument failures in the requested output format."""
+
+    requested: list[str]
+
+    def parse_args(self, args=None, namespace=None):
+        self.requested = list(sys.argv[1:] if args is None else args)
+        return super().parse_args(args, namespace)
+
+    def error(self, message: str) -> None:
+        data = {
+            "schema_version": "1.0",
+            "kind": self.prog.removesuffix(".py"),
+            "status": BLOCKED,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "execution_host": socket.getfqdn(),
+            "target": socket.getfqdn(),
+            "records": [],
+            "errors": [{"source": "arguments", "reason": "invalid_arguments"}],
+            "summary": {"record_count": 0, "error_count": 1},
+            "safe_next_step": "Check --help and correct the arguments.",
+        }
+        mode = (
+            "json"
+            if "--json" in self.requested
+            else "yaml"
+            if "--yaml" in self.requested
+            else "human"
+            if "--human" in self.requested or sys.stdout.isatty()
+            else "json"
+        )
+        try:
+            print(emit(data, mode), end="")
+        except RuntimeError:
+            print(emit(data, "json"), end="")
+        raise SystemExit(2)
+
+
+def parser(kind: str) -> argparse.ArgumentParser:
+    result = NodeParser(
         prog=f"{kind}.py",
         description=f"Collect {kind} evidence on the current Linux node. Audience: human and agent.",
         epilog="Example: %(prog)s --json (run on the selected node)",
@@ -23,8 +61,12 @@ def parser(kind: str) -> StructuredParser:
     modes = result.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print versioned JSON")
     modes.add_argument("--yaml", action="store_true", help="print versioned YAML")
+    modes.add_argument("--human", action="store_true", help="print a human summary")
     result.add_argument(
         "--dry-run", action="store_true", help="show commands without executing them"
+    )
+    result.add_argument(
+        "--describe", action="store_true", help="print the command contract as JSON"
     )
     return result
 
@@ -33,6 +75,9 @@ def run(kind: str, args: argparse.Namespace) -> int:
     """Return structured evidence and a stable exit status for each mode."""
     if kind not in {"cilium_node", "ceph_kernel"}:
         raise ValueError("unsupported_node_diagnostic")
+    if getattr(args, "describe", False):
+        print(json.dumps(describe_node(f"{kind}.py"), sort_keys=True))
+        return 0
     data = {
         "schema_version": "1.0",
         "kind": kind,
@@ -84,6 +129,14 @@ def run(kind: str, args: argparse.Namespace) -> int:
             data["errors"] = [{"source": kind, "reason": "node_collection_failed"}]
             data["summary"]["error_count"] = 1
             data["safe_next_step"] = "Inspect the node tool output and retry."
-    mode = "json" if args.json else "yaml" if args.yaml else "human"
+    mode = (
+        "json"
+        if args.json
+        else "yaml"
+        if args.yaml
+        else "human"
+        if getattr(args, "human", False) or sys.stdout.isatty()
+        else "json"
+    )
     print(emit(data, mode), end="")
     return exit_code(data["status"])

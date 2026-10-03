@@ -12,10 +12,9 @@ in `target_selection`:
 Each receipt reference includes the resolved absolute path. Portable receipts
 replace that path with a stable digest token.
 
-Two environment selectors set together are an error. A selected file that is
-missing or invalid blocks; the command never silently falls through to another
-project or user's target. The project and user tiers are considered only when
-the higher tier is absent. Every target must declare an exact Kubernetes
+Two environment selectors set together are an error. An explicit target or a
+present but invalid selected file blocks. An environment target path that is
+absent advances to the project or user tier. Every target must declare an exact Kubernetes
 context and API server. A plain target must also declare its kubeconfig; the
 skill never adopts a global current context or ambient `KUBECONFIG`.
 
@@ -37,13 +36,13 @@ server = "https://api.cluster.example.com:6443"
 kubeconfig = "/absolute/path/to/project/kubeconfig"
 ```
 
-If a project declares several explicit kubeconfig files, replace
-`kubeconfig` with `kubeconfigs = ["/absolute/first", "/absolute/second"]`.
-The skill reads each declared file and selects the **sole** file whose named
-context resolves to the declared API server. No match, more than one match,
-or an unreadable/malformed candidate blocks. The receipt identifies the
-selected candidate index and file source. The list does not use the ambient
-current context or `KUBECONFIG`.
+If context, cluster, and user entries live in separate kubeconfig files,
+replace `kubeconfig` with
+`kubeconfigs = ["/absolute/first", "/absolute/second"]`. This is kubectl's
+ordered, combined KUBECONFIG path, not a list of alternative targets. Every
+file must be readable. The selected context and exact API server are verified
+against the combined configuration. The list does not use the ambient current
+context or `KUBECONFIG`.
 
 Credential values do not belong in the target. GitHub and GitLab select their
 effective token file, named environment variable, or host-specific CLI store
@@ -56,8 +55,9 @@ keys out of tracked files.
 
 A project with a kubeconfig-producing command can supply `--binding PATH` or
 `K8S_ADMIN_DIAGNOSTICS_BINDING=PATH`. The binding names its nonsecret target
-file and ordered kubeconfig sources. The target it names must omit
-`kubernetes.kubeconfig`, because the binding owns that selection.
+file and ordered kubeconfig sources. The target it names must omit both
+`kubernetes.kubeconfig` and `kubernetes.kubeconfigs`, because the binding owns
+that selection.
 
 ```toml
 schema_version = "1.0"

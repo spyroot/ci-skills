@@ -314,6 +314,27 @@ def test_explicit_binding_arg_resolves_exact_target_context_and_source(
     )
 
 
+def test_binding_rejects_target_with_declared_kubeconfig_path(tmp_path: Path) -> None:
+    """A binding must not mix its selected source with a target search path."""
+    project_binding = _project_binding()
+    target = _write_target(tmp_path)
+    target.write_text(
+        target.read_text(encoding="utf-8")
+        + f"kubeconfigs = [{_toml_string(tmp_path / 'declared.yaml')}]\n",
+        encoding="utf-8",
+    )
+    binding = _write_binding(
+        tmp_path / "binding.toml",
+        target=target.name,
+        sources=_file_source(_write_kubeconfig(tmp_path / "binding.yaml")),
+    )
+
+    with pytest.raises(
+        project_binding.TargetError, match="binding_target_kubeconfig_conflict"
+    ):
+        project_binding.load_project_binding(binding)
+
+
 def test_binding_sources_fall_through_only_when_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

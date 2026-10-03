@@ -362,7 +362,7 @@ def _write_kubeconfig_for_target(
 def _write_target_with_kubeconfigs(
     tmp_path: Path, kubeconfigs: tuple[Path, ...]
 ) -> Path:
-    """Write a target that uses the plural kubeconfigs selector."""
+    """Write a target with an ordered combined kubeconfig path."""
     target = tmp_path / "target-kubeconfigs.toml"
     target.write_text(
         (
@@ -493,7 +493,7 @@ def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
     tmp_path,
     fake_bin,
 ):
-    """The installed API gate proves plural kubeconfig target selection."""
+    """The installed API gate uses the declared combined kubeconfig path."""
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -540,7 +540,7 @@ def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
     assert data["kind"] == "access_check"
     assert data["status"] == "PASS"
     assert data["credential_sources"]["kubernetes"] == (
-        f"kubeconfig-list:1 -> file:{matching.resolve()}"
+        "target:kubernetes.kubeconfigs"
     )
     assert str(REPO_ROOT) not in result.stdout
 

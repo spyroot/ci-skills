@@ -987,6 +987,8 @@ def test_access_evidence_carries_what_a_reader_needs_to_check_the_run():
         "skill": {"digest": "d" * 64, "revision": {"value": None}},
         "consuming_project": {"commit": None, "source": None},
         "credential_sources": {"github": "env:GH_TOKEN"},
+        "target_file": "/unit/home/.ci-skills/target.toml",
+        "target_source": "user",
         "targets": {"kubernetes": {"server": "https://api.unit.test:6443"}},
         "surfaces": {
             "github": {"identity": "unit-gh"},
@@ -1003,6 +1005,9 @@ def test_access_evidence_carries_what_a_reader_needs_to_check_the_run():
     assert evidence["targets"]["kubernetes"]["server"] == "https://api.unit.test:6443"
     assert evidence["skill"]["digest"] == "d" * 64
     assert len(evidence["receipt_sha256"]) == 64
+    # A collector report must name its own target source, like the gate does.
+    assert evidence["target_file"] == "/unit/home/.ci-skills/target.toml"
+    assert evidence["target_source"] == "user"
 
 
 def test_the_receipt_digest_identifies_the_gate_it_came_from():
@@ -1014,3 +1019,67 @@ def test_the_receipt_digest_identifies_the_gate_it_came_from():
 
     assert first["receipt_sha256"] == again["receipt_sha256"]
     assert first["receipt_sha256"] != other["receipt_sha256"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_seconds"),
+    (
+        ("5m", 300),
+        ("90s", 90),
+        ("2h", 7200),
+        ("7d", 604800),
+        (" 5m ", 300),
+    ),
+)
+def test_parse_window_reads_a_relative_duration(value, expected_seconds):
+    """`--last 15m` is the form an operator asks for, so it must parse exactly."""
+    collect = import_script_module("core.collect")
+
+    assert collect.parse_window(value).total_seconds() == expected_seconds
+
+
+@pytest.mark.parametrize(
+    "value", ("1M", "2H", "0m", "-5m", "5", "m", "", "5 m", "5min")
+)
+def test_parse_window_refuses_anything_it_cannot_mean_exactly(value):
+    """`1M` most likely means a month; reading it as a minute would be silent.
+
+    The refusals matter more than the accepts here: a misread window returns
+    evidence from the wrong interval, which correlates against the wrong job.
+    """
+    collect = import_script_module("core.collect")
+
+    with pytest.raises(ValueError, match="--last"):
+        collect.parse_window(value)
+
+
+@pytest.mark.parametrize(
+    ("last", "from_time", "to_time"),
+    (
+        ("5m", "2026-06-01T00:00:00+00:00", None),
+        ("5m", None, "2026-06-01T01:00:00+00:00"),
+        ("", "2026-06-01T00:00:00+00:00", None),
+    ),
+)
+def test_event_trace_refuses_a_relative_window_combined_with_bounds(
+    target_file, last, from_time, to_time
+):
+    """Two ways of naming one interval have no defined precedence.
+
+    The empty row is deliberate: `--last ""` was supplied, so it is an input
+    error. Treating it as absent silently returned the default hour.
+    """
+    collect = import_script_module("core.collect")
+    args = SimpleNamespace(
+        last=last,
+        from_time=from_time,
+        to_time=to_time,
+        namespace="all",
+        kind=None,
+        object=None,
+        reason=None,
+        search=None,
+    )
+
+    with pytest.raises(ValueError, match="--last"):
+        collect.collect_events(_target(target_file), args)

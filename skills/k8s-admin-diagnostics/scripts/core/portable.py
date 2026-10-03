@@ -32,6 +32,7 @@ PATH_VALUE_FIELDS = (
     "kubeconfig",
     "credential_source",
     "target_selection",
+    "target_file",
 )
 PATH_LIST_FIELDS = ("kubeconfig_files",)
 PATH_MAP_FIELDS = ("credential_sources",)

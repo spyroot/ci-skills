@@ -9,6 +9,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .catalog import GITLAB_VARIABLES, github_variables
 from .provenance import ProvenanceError, skill_identity
 from .target import Target, TargetError
 
@@ -74,7 +75,13 @@ def _token_source(
 
 def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ...]]:
     """Pin the effective kubeconfig path set without assuming an auth type."""
-    if target.kubernetes.kubeconfig is not None:
+    if target.kubernetes.kubeconfigs:
+        # A declared search path needs no environment export, so a cold run
+        # cannot silently fall through to a different cluster's default
+        # kubeconfig.
+        paths = tuple(path.resolve() for path in target.kubernetes.kubeconfigs)
+        reference = "target:kubernetes.kubeconfigs"
+    elif target.kubernetes.kubeconfig is not None:
         paths = (target.kubernetes.kubeconfig.resolve(),)
         reference = target.kubernetes_source_reference or f"file:{paths[0]}"
     else:
@@ -142,19 +149,14 @@ def assert_kubeconfig_unchanged(sources: object) -> None:
 
 def bind_sources(target: Target, *, revision: str | None = None) -> Target:
     """Freeze effective source selection for access checks and collectors."""
-    github_names = (
-        ("GH_TOKEN", "GITHUB_TOKEN")
-        if target.github.host == "github.com"
-        else ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
-    )
     github = _token_source(
         target.github.token_file,
-        github_names,
+        github_variables(target.github.host),
         f"gh-credential-store:{target.github.host}",
     )
     gitlab = _token_source(
         target.gitlab.token_file,
-        ("GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN"),
+        GITLAB_VARIABLES,
         f"glab-credential-store:{target.gitlab.host}",
     )
     kube, files = _kubernetes_source(target)

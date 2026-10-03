@@ -151,3 +151,16 @@ def test_node_local_parser_invalid_args_emit_structured_stdout(
     assert data["kind"] == "cilium_node"
     assert data["status"] == "BLOCKED"
     assert data["errors"] == [{"source": "arguments", "reason": "invalid_arguments"}]
+
+
+@pytest.mark.parametrize("kind", ("cilium_node", "ceph_kernel"))
+def test_node_local_describe_needs_no_linux_runtime_or_credentials(capsys, kind):
+    cli = import_script_module("core.node_local_cli")
+
+    exit_status = cli.run(kind, SimpleNamespace(describe=True))
+    contract = json.loads(capsys.readouterr().out)
+
+    assert exit_status == 0
+    assert contract["command"] == f"{kind}.py"
+    assert contract["requires_authorities"] == []
+    assert contract["target_protocol"] is None

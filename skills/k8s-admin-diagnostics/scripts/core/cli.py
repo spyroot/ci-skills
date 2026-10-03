@@ -14,9 +14,20 @@ from typing import Any
 
 from .access import access_evidence, check_access, dry_run_access
 from .argument_parser import StructuredParser
+from .catalog import (
+    COMMAND_BY_KIND,
+    PROJECT_DIR,
+    TARGET_FILENAME,
+    describe,
+    missing_required_options,
+)
 from .credentials import bind_sources
 from .portable import portable
-from .project_binding import resolve_target
+from .project_binding import (
+    resolve_target as resolve_project_target,
+    resolve_target_file as resolve_target,
+    target_candidates as _target_candidates,
+)
 from .report import emit
 from .runtime import redact_tree, sanitize
 from .status import (
@@ -29,20 +40,74 @@ from .status import (
 )
 from .target import Target, TargetError
 
+# The documented per-host location. Keeping it here rather than in each script
+# means one answer to "where does the target live", and the script-interface
+# rule that a value the host already knows is not a required argument.
+# Composed from the catalog's own directory and filename constants, so help
+# text, the no-target error and the search path cannot name different places.
+DEFAULT_TARGET = f"~/{PROJECT_DIR}/{TARGET_FILENAME}"
+
+
+# Which report kind each collector produces. Module scope so the catalog test
+# can prove every one of them is a declared command.
+COLLECTOR_KINDS = {
+    "collect_storage": "storage_report",
+    "collect_events": "event_trace",
+    "collect_cilium": "cilium_status",
+    "collect_gitlab_job": "gitlab_job",
+    "collect_ceph_cluster": "ceph_cluster",
+}
+ACCESS_CHECK_KIND = "access_check"
+
+
+def output_mode(args: argparse.Namespace) -> str:
+    """Choose the output format, defaulting to JSON for a non-terminal reader.
+
+    An agent should not have to discover `--json`. A human at a terminal wants
+    the summary; anything reading a pipe wants the machine-readable document,
+    and that is the overwhelmingly common case for this skill. So the default
+    follows the reader: a TTY gets `human`, a pipe or file gets `json`. The
+    three flags remain explicit overrides in both directions, `--human`
+    included, so a person piping into a pager still has a way to ask.
+    """
+    if args.json:
+        return "json"
+    if args.yaml:
+        return "yaml"
+    if getattr(args, "human", False):
+        return "human"
+    try:
+        interactive = sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        interactive = False
+    return "human" if interactive else "json"
+
 
 def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentParser:
     result = StructuredParser(
         description=description,
         epilog=(
-            "Example: %(prog)s --json; target lookup: --target, CI_SKILLS_TARGET, "
-            "./.ci-skills/target.toml, ~/.ci-skills/target.toml"
+            "Output: a terminal gets the human summary; a pipe or file gets "
+            "versioned JSON, so no flag is needed when a program reads this. "
+            "Force it with --json, --yaml or --human. "
+            "Exit 0 = PASS or DRY_RUN, 2 = BLOCKED or PARTIAL. "
+            "Run --describe for this command's machine-readable contract, or "
+            "see tools.json for the whole skill. "
+            "Target resolves in order: --target or --binding, CI_SKILLS_TARGET "
+            "or K8S_ADMIN_DIAGNOSTICS_BINDING, "
+            f"./{PROJECT_DIR}/{TARGET_FILENAME}, {DEFAULT_TARGET}. "
+            "Example: %(prog)s --json"
         ),
     )
     selection = result.add_mutually_exclusive_group()
     selection.add_argument(
         "--target",
         metavar="PATH",
-        help="explicit nonsecret TOML target file",
+        default=None,
+        help=(
+            "nonsecret TOML target file "
+            f"(default: {DEFAULT_TARGET}, override with CI_SKILLS_TARGET)"
+        ),
     )
     selection.add_argument(
         "--binding",
@@ -52,6 +117,16 @@ def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentPar
     modes = result.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print versioned JSON")
     modes.add_argument("--yaml", action="store_true", help="print versioned YAML")
+    modes.add_argument(
+        "--human",
+        action="store_true",
+        help="print the human summary even when stdout is not a terminal",
+    )
+    result.add_argument(
+        "--describe",
+        action="store_true",
+        help="print this command's machine-readable contract and exit",
+    )
     result.add_argument(
         "--dry-run",
         action="store_true",
@@ -81,13 +156,18 @@ def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> i
         "errors": [{"source": source, "reason": sanitize(reason, 240)}],
         "summary": {"record_count": 0, "error_count": 1},
     }
-    if getattr(args, "json", False) or getattr(args, "yaml", False):
+    # The reader rule applies to a failure too. A program piping a cold run
+    # hits the no-target error FIRST, so emitting only a stderr line there made
+    # the one shape a caller cannot parse the one it meets first -- and it
+    # contradicted the default_output contract the manifest publishes.
+    mode = output_mode(args)
+    if mode == "human":
+        print(f"BLOCKED: {data['errors'][0]['reason']}", file=sys.stderr)
+    else:
         try:
-            sys.stdout.write(emit(data, "yaml" if args.yaml else "json"))
+            sys.stdout.write(emit(data, mode))
         except (RuntimeError, OSError):
             sys.stdout.write(json.dumps(data, sort_keys=True) + "\n")
-    else:
-        print(f"BLOCKED: {data['errors'][0]['reason']}", file=sys.stderr)
     return 2
 
 
@@ -97,21 +177,38 @@ def execute(
     *,
     live_checks: bool = False,
 ) -> int:
-    kinds = {
-        "collect_storage": "storage_report",
-        "collect_events": "event_trace",
-        "collect_cilium": "cilium_status",
-        "collect_gitlab_job": "gitlab_job",
-        "collect_ceph_cluster": "ceph_cluster",
-    }
     kind = (
-        "access_check"
+        ACCESS_CHECK_KIND
         if collect is None
-        else kinds.get(collect.__name__, collect.__name__)
+        else COLLECTOR_KINDS.get(collect.__name__, collect.__name__)
     )
+    # The catalog is keyed by script name, but a command must not learn its own
+    # identity from argv[0]: a symlink, a wrapper or a renamed installed copy
+    # would then print another command's contract, or raise KeyError where every
+    # other path returns a structured envelope. The report kind IS the identity.
+    # `.get`, because a caller may pass a collector this catalog does not
+    # declare. Every real command's kind IS declared -- COLLECTOR_KINDS is
+    # checked against the catalog by test -- so this only keeps an undeclared
+    # one from raising where every other path returns an envelope.
+    script = COMMAND_BY_KIND.get(kind)
+    if getattr(args, "describe", False):
+        if script is None:
+            return _failure(args, kind, "arguments", f"no declared contract for {kind}")
+        contract = describe(script)
+        sys.stdout.write(json.dumps(contract, indent=2, sort_keys=True) + "\n")
+        return 0
+    missing = missing_required_options(script, args) if script else []
+    if missing:
+        # Enforced here rather than by argparse because --describe must answer
+        # without it, and enforced BEFORE the access gate because a forgotten
+        # argument is not an access failure: reporting it as one sends the
+        # reader to the wrong authority.
+        return _failure(
+            args, kind, "arguments", f"{', '.join(missing)} is required; see --describe"
+        )
     source = "target"
     try:
-        target = resolve_target(
+        target = resolve_project_target(
             args.target, getattr(args, "binding", None), dry_run=args.dry_run
         )
         publication = bool(getattr(args, "publication", False))
@@ -183,7 +280,7 @@ def execute(
                 encoding="utf-8",
             )
             os.replace(partial, destination)
-        mode = "json" if args.json else "yaml" if args.yaml else "human"
+        mode = output_mode(args)
         sys.stdout.write(emit(data, mode, getattr(args, "output_dir", None)))
         return exit_code(data["status"])
     except (

@@ -3,9 +3,31 @@
 The installed skill contains instructions and code. Each execution host
 supplies a nonsecret target file and its own credentials. The target file
 identifies one exact GitHub repository, GitLab origin, Kubernetes context, and
-API server. Prefer the project binding described in
-[project-binding.md](project-binding.md); an explicit `--target PATH` must
-declare its kubeconfig.
+API server. A project can select that target and its kubeconfig through the
+[project binding](project-binding.md).
+
+## Where the target file comes from
+
+Four declared places, first match wins, and the winner is reported back in
+every report as `target_file` and `target_source`:
+
+| # | Scope | Where | Source name |
+| --- | --- | --- | --- |
+| 1 | one command | `--target PATH` | `argv:--target` |
+| 2 | one environment | `$CI_SKILLS_TARGET` | `env:CI_SKILLS_TARGET` |
+| 3 | one project | `./.ci-skills/target.toml` | `project` |
+| 4 | one user | `~/.ci-skills/target.toml` | `user` |
+
+One cluster means filling in tier 4 once; many clusters mean tier 2 or tier 3,
+one target per cluster. A `--target` that does not exist is an error, never a
+fallback to a lower tier — a silent fallback would aim the run somewhere the
+caller did not ask for. `target.toml.template` in the repository root is the
+file to copy, and `core.catalog.TARGET_PROTOCOL` is the declaration this table
+and `tools.json` are both rendered from.
+
+This skill resolves; it does not provision. It creates no target file, mints no
+token and fetches no kubeconfig. Putting them there is the operator's job, or
+an explicit step in the calling project's own instructions.
 
 ## Effective credential sources
 
@@ -17,10 +39,12 @@ declare its kubeconfig.
 - GitLab uses an explicit `gitlab.token_file`, then the effective
   `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable.
   Otherwise, the selected host's `glab` credential store is used.
-- Kubernetes uses an explicit `kubernetes.kubeconfig` or the kubeconfig source
-  declared by the project binding. The selected context resolves the user and
-  cluster. A binding can name an environment variable; no global fallback is
-  inferred.
+- Kubernetes uses the target's explicit `kubernetes.kubeconfigs` ordered,
+  combined path, its `kubernetes.kubeconfig` single file, or the kubeconfig
+  selected by an explicit project binding. An ambient `KUBECONFIG` or default
+  kubeconfig is never substituted. Use `kubeconfigs` when the context and the
+  credential live in separate files, in kubectl's path order. The selected
+  context resolves the user and cluster.
   The user may use an embedded token, `tokenFile`, client certificate and
   key, or an exec provider. No separate token file is assumed.
 
@@ -30,14 +54,28 @@ and passes the same sources to every collector. It records source references,
 not token values, private keys, or raw kubeconfig contents. Keep credentials
 outside this repository and the installed skill.
 
-The canonical target example and four-tier selection order are in
-[project-binding.md](project-binding.md).
+Example nonsecret target:
+
+```toml
+[github]
+host = "github.com"
+repository = "owner/repository"
+# token_file = "/home/operator/.ci-skills/credentials/github.token"
+
+[gitlab]
+url = "https://gitlab.example.com"
+# token_file = "/home/operator/.ci-skills/credentials/gitlab.token"
+
+[kubernetes]
+context = "admin-context"
+server = "https://api.cluster.example.com:6443"
+# kubeconfig = "/home/operator/.kube/config"
+```
 
 ## Mandatory live gate
 
-Run `access_check.py --json` on each intended execution host. Add
-`--publication` when the target declares the actual required checks. Supply
-`--revision SHA` for an installed copy without Git
+Run `access_check.py --target PATH --json --publication` on each intended
+execution host. Supply `--revision SHA` for an installed copy without Git
 metadata, and `--job-url URL` when verifying a requested job. The receipt
 identifies the execution host, time, revision, sources, targets, identities,
 and individual results.
@@ -110,8 +148,11 @@ wrong-target, or unauthorized credentials block. A mock, file-existence
 check, login-status message, dry run, or receipt from another host is not
 live acceptance evidence.
 
-Cluster-wide list reads carry their own bound,
-`collect.LIST_TIMEOUT_SECONDS`.
+Cluster-wide list reads carry their own bound, `collect.LIST_TIMEOUT_SECONDS`.
+Measured on one target cluster, a whole-cluster event list was 7.7 MB and
+about 20 seconds on its own with up to ten such reads running concurrently;
+the default per-command bound reported that healthy cluster as a timeout, and
+the gate then read the timeout as a denial.
 
 ## Automated gates
 
