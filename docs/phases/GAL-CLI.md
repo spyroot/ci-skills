@@ -96,9 +96,9 @@ hidden state, and bounds its output.
 
 The `cli` gate of `./scripts/check.sh` (GAL-GATES) runs in CI.
 
-- **Which commands.** It covers every entrypoint that discovery finds
-  (GAL-CATALOG), as a closed world: `bin/ci-*`, `bin/ci-skills`,
-  `scripts/check.sh`, and each skill's `scripts/*.py`.
+- **Which commands.** It covers every entrypoint present in the phase's
+  checkout: `bin/ci-*`, `scripts/check.sh`, and each skill's `scripts/*.py`.
+  GAL-VENDOR adds the repository-level `bin/ci-skills` command.
 - **What it checks**, for each command:
   - `--help` and `--describe` exit 0 with an empty environment and no
     network;
@@ -117,8 +117,9 @@ The `cli` gate of `./scripts/check.sh` (GAL-GATES) runs in CI.
 ## Steps
 
 1. Add the `command-contract` and `command-result` schemas (GAL-SCHEMA).
-2. Add `--describe` to the `bin/ci-*` tools and to `bin/ci-skills`; the k8s
-   commands already have it.
+2. Add `--describe` to the existing `bin/ci-*` tools; GAL-VENDOR adds it
+   to `bin/ci-skills` when that command is created. The diagnostics commands
+   already have it.
 3. Add the contract test and the `cli` gate.
 4. Bring the two styles together inside the phase that touches each
    command, not in a separate refactor:
@@ -133,8 +134,8 @@ The `cli` gate of `./scripts/check.sh` (GAL-GATES) runs in CI.
   worked, a component is unhealthy) exits 2 today, like `BLOCKED`. It needs
   either its own code, or exit 0 with `status: PARTIAL`.
 - **k8s command names.** Proposed: one `bin/ci-k8s` command with short
-  verbs, renamed together with `k8s-diag`. Options keep their names and
-  meanings.
+  verbs after the separate `ci-skills` package delivery (GAL-PHASES).
+  Options keep their names and meanings.
 
   | Today | Proposed |
   | --- | --- |
