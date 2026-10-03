@@ -100,6 +100,42 @@ def test_cilium_node_collects_one_agent_and_runs_both_json_execs(monkeypatch):
     )
 
 
+def test_cilium_node_preserves_failed_daemon_and_peer_details(monkeypatch):
+    """Successful CRI reads can report unhealthy daemon and endpoint state."""
+    node_local, runtime = _modules()
+    daemon = {"cilium": {"state": "Failure", "msg": "agent unavailable"}}
+    health = {
+        "local": {"name": "node-a"},
+        "nodes": [{"name": "node-b", "endpoint": {"icmp": {"status": "timeout"}}}],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        if "ps" in command:
+            payload = {"containers": [_agent_container()]}
+        else:
+            payload = daemon if "cilium-dbg" in command else health
+        return runtime.CommandResult(command, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(node_local, "run_command", fake_run)
+
+    result = node_local.collect_cilium_node()
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"][0]["status"] == "PASS"
+    assert result["records"][0]["daemon"] == daemon
+    assert result["records"][0]["health"] == health
+    assert result["errors"] == [
+        {"source": "daemon", "reason": "component_unhealthy"},
+        {"source": "health", "reason": "component_unhealthy"},
+    ]
+    findings = result["records"][0]["findings"]
+    assert [finding["component"] for finding in findings] == ["cilium", "endpoint"]
+    assert findings[0]["state"] == "Failure"
+    assert findings[1]["path"] == "peer.endpoint.icmp.status"
+    assert all(finding["action"] for finding in findings)
+
+
 @pytest.mark.parametrize(
     ("stdout", "expected_reason"),
     (

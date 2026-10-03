@@ -32,6 +32,9 @@ what it used:
 Access is resolved from declared locations, first match wins, and the match is
 reported. The chain per authority is in `tools.json` under `access_protocol`,
 and [references/access.md](references/access.md) is the full contract.
+The installed `gh` environment contract uses `GH_TOKEN`/`GITHUB_TOKEN` for
+`github.com` and `*.ghe.com`, and enterprise token variables for other GitHub
+Enterprise Server hosts. A selected token file clears ambient GitHub tokens.
 The one trap worth knowing: with no Kubernetes location declared, resolution
 ends at `~/.kube/config`, which is usually a *different* cluster — so a target
 that declares `kubernetes.kubeconfigs` is how you avoid aiming elsewhere.
@@ -83,7 +86,8 @@ pair; pass the job's own interval when correlating a job.
 
 - `PASS` — every selected authority and live check passed.
 - `PARTIAL` with `access_proven: true` — the read worked and a component is
-  unhealthy. That is usually the finding, not an obstacle. Say which component.
+  unhealthy. `records[].findings` names explicit Cilium daemon, peer, or
+  endpoint failures with an inspection action. Say which component.
 - `BLOCKED` — see `blocking_live_checks` and the surface `reason`.
 - `DRY_RUN` — a probe plan. Never access evidence.
 - `UNKNOWN` — a per-item reading could not be taken. Preserve it; do not
@@ -125,4 +129,5 @@ Run `scripts/cilium_node.py --json` on the selected node to inspect the local
 CRI `cilium-agent` without a TTY. Run `scripts/ceph_kernel.py --json` for recent
 Ceph/RBD kernel messages and action codes. These node-local commands use
 `sudo -n`, accept `--yaml` and `--dry-run`, require no API target file, and do
-not establish the three-surface access receipt.
+not establish the three-surface access receipt. Both accept `--search TEXT`;
+`ceph_kernel.py` also accepts `--classification NAME` to narrow its records.

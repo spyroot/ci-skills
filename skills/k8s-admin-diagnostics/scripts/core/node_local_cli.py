@@ -7,9 +7,15 @@ import json
 import socket
 import sys
 from datetime import datetime, timezone
+from typing import Any
 
 from .catalog import describe_node
-from .node_local import JOURNAL_SINCE, collect_ceph_kernel, collect_cilium_node
+from .node_local import (
+    CEPH_CLASSIFICATIONS,
+    JOURNAL_SINCE,
+    collect_ceph_kernel,
+    collect_cilium_node,
+)
 from .report import emit
 from .status import BLOCKED, DRY_RUN, exit_code
 
@@ -66,9 +72,58 @@ def parser(kind: str) -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="show commands without executing them"
     )
     result.add_argument(
+        "--search",
+        metavar="TEXT",
+        help="case-insensitive text filter over returned records",
+    )
+    if kind == "ceph_kernel":
+        result.add_argument(
+            "--classification",
+            choices=CEPH_CLASSIFICATIONS,
+            help="return only Ceph kernel records with this classification",
+        )
+    result.add_argument(
         "--describe", action="store_true", help="print the command contract as JSON"
     )
     return result
+
+
+def _matches_search(record: dict[str, Any], search: str | None) -> bool:
+    return (
+        not search
+        or search.casefold() in json.dumps(record, ensure_ascii=False).casefold()
+    )
+
+
+def _apply_filters(
+    data: dict[str, Any], *, search: str | None, classification: str | None
+) -> dict[str, Any]:
+    if not search and not classification:
+        return data
+    filters = data.setdefault("filters", {})
+    if search:
+        filters["search"] = search
+    if classification:
+        filters["classification"] = classification
+    records = [
+        row
+        for row in data.get("records", [])
+        if isinstance(row, dict)
+        and _matches_search(row, search)
+        and (
+            not classification
+            or data.get("kind") == "ceph_kernel"
+            and row.get("classification") == classification
+        )
+    ]
+    data["records"] = records
+    summary = data.setdefault("summary", {})
+    summary["record_count"] = len(records)
+    if data.get("kind") == "ceph_kernel":
+        data["actions"] = sorted(
+            {row["action"] for row in records if row.get("action")}
+        )
+    return data
 
 
 def run(kind: str, args: argparse.Namespace) -> int:
@@ -129,6 +184,11 @@ def run(kind: str, args: argparse.Namespace) -> int:
             data["errors"] = [{"source": kind, "reason": "node_collection_failed"}]
             data["summary"]["error_count"] = 1
             data["safe_next_step"] = "Inspect the node tool output and retry."
+    data = _apply_filters(
+        data,
+        search=getattr(args, "search", None),
+        classification=getattr(args, "classification", None),
+    )
     mode = (
         "json"
         if args.json

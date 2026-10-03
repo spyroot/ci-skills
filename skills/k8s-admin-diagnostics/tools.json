@@ -7,11 +7,11 @@
       },
       {
         "source": "env:GH_TOKEN or GITHUB_TOKEN",
-        "when": "set, and github.host is github.com"
+        "when": "set, and github.host is github.com or a subdomain of ghe.com"
       },
       {
         "source": "env:GH_ENTERPRISE_TOKEN or GITHUB_ENTERPRISE_TOKEN",
-        "when": "set, and github.host is anything other than github.com"
+        "when": "set, and github.host is a GitHub Enterprise Server host"
       },
       {
         "source": "gh-credential-store:<host>",
@@ -110,6 +110,7 @@
         "--dry-run",
         "--human",
         "--json",
+        "--search",
         "--yaml"
       ],
       "purpose": "Classify recent local Ceph and RBD kernel journal messages.",
@@ -131,6 +132,7 @@
         "--dry-run",
         "--human",
         "--json",
+        "--search",
         "--yaml"
       ],
       "purpose": "Read the local Cilium agent container, daemon status and health.",
@@ -141,7 +143,7 @@
         "crictl"
       ],
       "requires_authorities": [],
-      "returns": "One local agent record with daemon and health JSON, or a classified failure.",
+      "returns": "One local agent record with daemon and health JSON plus component findings, or a classified failure.",
       "use_when": "A selected Linux node needs CRI-level Cilium diagnosis."
     },
     "cilium_status.py": {
@@ -169,7 +171,7 @@
       "requires_authorities": [
         "kubernetes"
       ],
-      "returns": "One record per agent, with health from a non-TTY exec; UNKNOWN where it could not run.",
+      "returns": "One record per agent with non-TTY health and actionable peer findings; UNKNOWN where exec could not run.",
       "use_when": "Connectivity is suspect, or a node's CNI may differ from its Ready condition."
     },
     "event_trace.py": {
@@ -274,6 +276,7 @@
     "--dry-run": "list local commands without executing them; never live evidence",
     "--human": "human summary even when stdout is not a terminal",
     "--json": "versioned JSON document",
+    "--search": "case-insensitive text filter over returned records",
     "--yaml": "versioned YAML document"
   },
   "read_only": true,

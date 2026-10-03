@@ -85,6 +85,11 @@ administrator, a GitLab instance administrator identity, and a GitHub identity
 that can read the repository. `gh auth login`, `glab auth login`, and whatever
 your cluster uses.
 
+For GitHub, `gh help environment` assigns `GH_TOKEN`/`GITHUB_TOKEN` to
+`github.com` and `*.ghe.com`; GitHub Enterprise Server hosts use
+`GH_ENTERPRISE_TOKEN`/`GITHUB_ENTERPRISE_TOKEN`. A declared token file takes
+precedence, and the command clears other ambient GitHub token variables.
+
 **3. Create your target file.** This is the step that makes everything else
 argument-free:
 
@@ -191,6 +196,9 @@ is written.
   the trap when correlating a job that failed earlier.
 - `cilium_status.py` reads Cilium resources and executes non-TTY health on
   ready agents. It accepts `--namespace NAME|auto`, `--node`, and `--search`.
+  Successful reads retain `records[].status: PASS`; explicit failed peer or
+  endpoint probes appear in `records[].findings` with a path and action, and
+  make the report `PARTIAL` without requiring every peer to be healthy.
 
 The node-local commands run on the selected Linux node with noninteractive
 `sudo -n`. They require local `crictl` or `journalctl`, and do not require
@@ -199,12 +207,16 @@ the API target file or an API access receipt:
 - `cilium_node.py --json` reads the local running `cilium-agent` container
   through CRI, then collects `cilium-dbg status --verbose --output json` and
   `cilium-health status --verbose --output json` concurrently. If no agent is
-  running, it records the stopped Cilium containers.
+  running, it records the stopped Cilium containers. A successful read keeps
+  the raw JSON and reports explicit daemon or peer failures in `findings`.
+  Use `--search TEXT` to narrow its returned records.
 - `ceph_kernel.py --json` reads the previous three minutes of kernel journal
   entries matching `libceph|rbd|ceph`. Each record has a UTC timestamp,
   priority, classification, and machine-readable recommended action. It
   performs no recovery action. The window is the previous three minutes, with
-  bounded output; a limit hit is reported as `PARTIAL`.
+  bounded output; a limit hit is reported as `PARTIAL`. Use `--search TEXT`
+  and `--classification NAME` to narrow returned records without changing the
+  underlying read status.
 
 The kernel classifier emits action codes for observed blocklisting, auth
 failure, connectivity timeout, and I/O errors. Other priority 0–3 entries

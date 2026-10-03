@@ -64,17 +64,19 @@ AUTHORITIES = ("github", "gitlab", "kubernetes")
 # protocol named GH_TOKEN for an Enterprise host while the code read only
 # GH_ENTERPRISE_TOKEN there, so a caller could set exactly the variable the
 # manifest named and still be told the credential store was used.
-GITHUB_DOTCOM_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN")
+GITHUB_CLOUD_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN")
 GITHUB_ENTERPRISE_VARIABLES = ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+GITHUB_TOKEN_VARIABLES = GITHUB_CLOUD_VARIABLES + GITHUB_ENTERPRISE_VARIABLES
 GITLAB_VARIABLES = ("GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN")
 GITHUB_DOTCOM_HOST = "github.com"
+GITHUB_CLOUD_SUFFIX = ".ghe.com"
 
 
 def github_variables(host: str) -> tuple[str, ...]:
-    """Return the token variables that apply to one GitHub host."""
+    """Return the variables gh uses for GitHub Cloud or Enterprise Server."""
     return (
-        GITHUB_DOTCOM_VARIABLES
-        if host == GITHUB_DOTCOM_HOST
+        GITHUB_CLOUD_VARIABLES
+        if host == GITHUB_DOTCOM_HOST or host.endswith(GITHUB_CLOUD_SUFFIX)
         else GITHUB_ENTERPRISE_VARIABLES
     )
 
@@ -96,12 +98,12 @@ ACCESS_PROTOCOL: dict[str, Any] = {
             "when": "the target declares a token file",
         },
         {
-            "source": "env:" + " or ".join(GITHUB_DOTCOM_VARIABLES),
-            "when": f"set, and github.host is {GITHUB_DOTCOM_HOST}",
+            "source": "env:" + " or ".join(GITHUB_CLOUD_VARIABLES),
+            "when": f"set, and github.host is {GITHUB_DOTCOM_HOST} or a subdomain of ghe.com",
         },
         {
             "source": "env:" + " or ".join(GITHUB_ENTERPRISE_VARIABLES),
-            "when": f"set, and github.host is anything other than {GITHUB_DOTCOM_HOST}",
+            "when": "set, and github.host is a GitHub Enterprise Server host",
         },
         {
             "source": "gh-credential-store:<host>",
@@ -246,7 +248,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "requires": ("kubernetes",),
         "capabilities": ("filters_records", "namespaced", "node_scoped"),
         "options": {},
-        "returns": "One record per agent, with health from a non-TTY exec; UNKNOWN where it could not run.",
+        "returns": "One record per agent with non-TTY health and actionable peer findings; UNKNOWN where exec could not run.",
     },
 }
 
@@ -258,6 +260,7 @@ NODE_LOCAL_OPTIONS: dict[str, str] = {
     "--yaml": "versioned YAML document",
     "--human": "human summary even when stdout is not a terminal",
     "--dry-run": "list local commands without executing them; never live evidence",
+    "--search": "case-insensitive text filter over returned records",
     "--describe": "this command's machine-readable contract, then exit",
 }
 
@@ -267,13 +270,16 @@ NODE_LOCAL_COMMANDS: dict[str, dict[str, Any]] = {
         "purpose": "Read the local Cilium agent container, daemon status and health.",
         "use_when": "A selected Linux node needs CRI-level Cilium diagnosis.",
         "required_tools": ("sudo", "crictl"),
-        "returns": "One local agent record with daemon and health JSON, or a classified failure.",
+        "returns": "One local agent record with daemon and health JSON plus component findings, or a classified failure.",
     },
     "ceph_kernel.py": {
         "kind": "ceph_kernel",
         "purpose": "Classify recent local Ceph and RBD kernel journal messages.",
         "use_when": "A selected Linux node shows storage or RBD symptoms.",
         "required_tools": ("sudo", "journalctl"),
+        "options": {
+            "--classification": "return only records with the selected Ceph kernel classification"
+        },
         "returns": "Bounded UTC kernel records and read-only recommended action codes.",
     },
 }
@@ -364,7 +370,7 @@ def describe_node(script: str) -> dict[str, Any]:
         "access_protocol": {},
         "capabilities": [],
         "required_options": [],
-        "options": NODE_LOCAL_OPTIONS,
+        "options": {**NODE_LOCAL_OPTIONS, **entry.get("options", {})},
         "returns": entry["returns"],
         "status_values": STATUS_MEANING,
         "exit_codes": EXIT_CODES,

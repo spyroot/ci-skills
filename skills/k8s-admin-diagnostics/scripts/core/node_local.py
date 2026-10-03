@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
-from .cilium import valid_health
+from .cilium import daemon_findings, health_findings, valid_health
 from .report import report
 from .runtime import CommandResult, error_class, run_command, run_command_tail, sanitize
 from .status import BLOCKED, PARTIAL, PASS, UNKNOWN
@@ -41,6 +41,10 @@ CEPH_ACTIONS = (
         "io_error",
         "inspect_rbd_and_ceph_health",
     ),
+)
+CEPH_CLASSIFICATIONS = tuple(
+    sorted({category for _pattern, category, _action in CEPH_ACTIONS})
+    + ["observation", "unclassified_error"]
 )
 JOURNAL_SINCE = "3 minutes ago"
 JOURNAL_MAX_LINES = 200
@@ -242,6 +246,7 @@ def collect_cilium_node() -> dict[str, Any]:
         "name": "cilium-agent",
         "container_id": identifier,
         "status": PASS,
+        "findings": [],
     }
     for name, command_result in outputs.items():
         try:
@@ -254,6 +259,12 @@ def collect_cilium_node() -> dict[str, Any]:
             if not valid:
                 raise ValueError(f"{name}:invalid_response")
             row[name] = value
+            findings = (
+                daemon_findings(value) if name == "daemon" else health_findings(value)
+            )
+            row["findings"].extend(findings)
+            if findings:
+                errors.append({"source": name, "reason": "component_unhealthy"})
         except (TypeError, ValueError) as exc:
             row["status"] = UNKNOWN
             errors.append({"source": name, "reason": str(exc)})
@@ -261,7 +272,11 @@ def collect_cilium_node() -> dict[str, Any]:
     result["summary"] = {"record_count": 1, "error_count": len(errors)}
     result["status"] = PARTIAL if errors else PASS
     result["safe_next_step"] = (
-        "Inspect the failed Cilium command on this node." if errors else None
+        "Inspect the failed Cilium command on this node."
+        if row["status"] == UNKNOWN
+        else "Inspect the reported Cilium component and peer findings."
+        if row["findings"]
+        else None
     )
     return result
 

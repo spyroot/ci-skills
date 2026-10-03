@@ -141,11 +141,11 @@ def test_node_local_commands_publish_their_distinct_interface(script):
         for option in action.option_strings
         if option.startswith("--")
     } - {"--help"}
-    declared = set(CATALOG.NODE_LOCAL_OPTIONS)
+    contract = CATALOG.describe_node(script)
+    declared = set(contract["options"])
 
     assert actual == declared
     assert "--target" not in actual
-    contract = CATALOG.describe_node(script)
     assert contract["requires_authorities"] == []
     assert contract["execution_surface"] == "selected Linux node"
     assert set(contract["options"]) == declared
