@@ -96,12 +96,16 @@ def test_dry_run_json_lists_access_probes_without_external_calls(
 
     assert result.returncode == 0
     assert data["status"] == "DRY_RUN"
-    assert set(data["surfaces"]) == {"github", "gitlab", "kubernetes"}
+    if script_name == "gitlab_job.py":
+        assert data["access"]["status"] == "DRY_RUN"
+        assert data["access"]["target"]["kind"] == "project"
+    else:
+        assert set(data["surfaces"]) == {"github", "gitlab", "kubernetes"}
     assert read_journal(call_journal) == []
 
 
 def test_output_modes_are_mutually_exclusive(target_file):
-    """argparse rejects ambiguous machine-readable output selection."""
+    """An ambiguous machine mode still returns a structured argument error."""
     result = run_script(
         "access_check.py",
         "--target",
@@ -112,7 +116,37 @@ def test_output_modes_are_mutually_exclusive(target_file):
     )
 
     assert result.returncode == 2
-    assert "not allowed with argument" in result.stderr
+    data = parse_json_output(result)
+    assert data["status"] == "BLOCKED"
+    assert data["kind"] == "access_check"
+    assert data["errors"][0]["source"] == "arguments"
+    assert "not allowed with argument" in data["errors"][0]["reason"]
+
+
+@pytest.mark.parametrize(
+    ("script_name", "args"),
+    (
+        ("gitlab_access.py", ("check", "--unexpected")),
+        ("gitlab_job.py", ("--job-url",)),
+        ("gitlab_issue.py", ("open-bug", "--title")),
+        ("access_check.py", ("--unexpected",)),
+    ),
+)
+@pytest.mark.parametrize(
+    ("mode", "loader"),
+    (("--json", json.loads), ("--yaml", yaml.safe_load)),
+)
+def test_argparse_failures_keep_machine_output_contract(
+    script_name, args, mode, loader
+):
+    result = run_script(script_name, *args, mode)
+    data = loader(result.stdout)
+
+    assert result.returncode == 2
+    assert data["status"] == "BLOCKED"
+    assert data["errors"][0]["source"] == "arguments"
+    assert data["errors"][0]["reason"]
+    assert "usage:" not in result.stdout
 
 
 @pytest.mark.parametrize(

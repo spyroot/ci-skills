@@ -2,9 +2,10 @@
 
 ## Scope
 
-This repository provides `k8s-admin-diagnostics`. Its diagnostic commands read
-GitLab jobs, Kubernetes storage and events, and Cilium status after an access
-check of the selected GitHub, GitLab, and Kubernetes authorities. The skill also
+This repository provides `k8s-admin-diagnostics`. Its storage, event, and
+Cilium diagnostics check the selected GitHub, GitLab, and Kubernetes authorities.
+The GitLab job diagnostic checks the selected GitLab host, identity, and job
+project before reading the job, pipeline, runner, and trace. The skill also
 has separately routed GitLab milestone, bug, wiki, and runner operations. Those
 commands default to an offline dry-run and require an explicit apply plus the
 dry-run plan fingerprint before a write.
@@ -152,8 +153,10 @@ is found, the error names every path it searched and the template to copy.
 ## GitLab operations
 
 For GitLab-only work, the selected target file may contain only `[gitlab]` with
-its exact `url` and `project` or `group`. The same four-tier target selection
-above applies. A target for diagnostics still needs all three authorities.
+its exact `url`; operations also select a `project` or `group`, while
+`gitlab_job.py` selects its project from `--job-url`. The same four-tier target
+selection above applies. Storage, event, and Cilium diagnostics still need all
+three authorities.
 The operation access check reads back the effective GitLab identity and exact
 numeric target before a write:
 
@@ -207,7 +210,7 @@ is written.
   repository admin permission and read-back of required branch checks.
   `--job-url URL` also checks that job, pipeline, runner, and trace.
 - `gitlab_job.py --job-url URL` reads a selected job, pipeline, runner, and
-  bounded trace. It accepts `--search TEXT`.
+  bounded trace using GitLab-only access. It accepts `--search TEXT`.
 - `storage_report.py` correlates PVCs, standalone PVs, Pods, attachments,
   and controllers. Filters: `--namespace NAME|all`, `--node NAME`,
   `--storage-class NAME`, `--phase Pending|Bound|Lost|Released|Failed|all`,

@@ -23,7 +23,7 @@ from .credentials import Sources, assert_kubeconfig_unchanged
 from .gitlab_session import BoundGitLabSession
 from .runtime import CommandResult, error_class, run_command
 from .status import BLOCKED, DRY_RUN, PASS
-from .target import Target
+from .target import GitLabOperationTarget, Target
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,7 @@ def kubectl_argv(target: Target, *args: str) -> list[str]:
     return command
 
 
-def glab_argv(target: Target, endpoint: str) -> list[str]:
+def glab_argv(target: Target | GitLabOperationTarget, endpoint: str) -> list[str]:
     return [
         "glab",
         "api",

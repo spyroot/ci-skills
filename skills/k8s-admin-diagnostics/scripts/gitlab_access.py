@@ -23,7 +23,10 @@ from core.target import TargetError, load_gitlab_target, select_gitlab_reference
 
 def build_parser() -> argparse.ArgumentParser:
     """Expose the universal tier and one exact GitLab target selector."""
-    cli = parser("Check one GitLab identity and exact project or group for operations.")
+    cli = parser(
+        "Check one GitLab identity and exact project or group for operations.",
+        kind="gitlab_access",
+    )
     cli.add_argument("operation", nargs="?", choices=("check",), help="check access")
     selection = cli.add_mutually_exclusive_group()
     selection.add_argument(

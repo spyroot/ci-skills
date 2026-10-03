@@ -335,7 +335,9 @@ def apply_plan(
 
 def action_parser(kind: str) -> argparse.ArgumentParser:
     """Keep wrappers thin while exposing the existing universal CLI tier."""
-    result = parser(f"Plan, apply, and verify {kind.replace('_', ' ')} changes.")
+    result = parser(
+        f"Plan, apply, and verify {kind.replace('_', ' ')} changes.", kind=kind
+    )
     choices = {
         "gitlab_milestone": ("create", "update", "adjust-time"),
         "gitlab_issue": ("open-bug", "create-bug"),
@@ -436,6 +438,21 @@ def _result(plan: ActionPlan, status: str, **fields: Any) -> dict[str, Any]:
     }
 
 
+def _access_failure(access: dict[str, Any]) -> tuple[str, str]:
+    """Keep the failed GitLab identity or target check in an action result."""
+    errors = access.get("errors")
+    if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+        source = errors[0].get("source")
+        reason = errors[0].get("reason")
+        if (
+            source in {"user", "target"}
+            and isinstance(reason, str)
+            and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", reason)
+        ):
+            return f"gitlab_access.{source}", reason
+    return "gitlab_access", "gitlab_access_not_pass"
+
+
 def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
     """Adapter used by every operation entrypoint; no other CLI owns writes."""
     started = time.monotonic()
@@ -492,7 +509,8 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
             api = GlabAPIClient(timeout=args.timeout)
             access = check_gitlab_operation_access(session, api_client=api)
             if access.get("status") != PASS:
-                raise ActionError("gitlab_access_not_pass")
+                source, reason = _access_failure(access)
+                return _failure(args, kind, source, reason)
             if group_assignment:
                 from .gitlab_runners import project_ids
 

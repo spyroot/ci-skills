@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import socket
 import sys
 import time
@@ -14,27 +15,34 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .access import access_evidence, check_access, dry_run_access
+from .access import (
+    access_evidence,
+    check_access,
+    check_gitlab_operation_access,
+    dry_run_access,
+)
 from .catalog import (
     COMMAND_BY_KIND,
+    COMMANDS,
     PROJECT_DIR,
     TARGET_FILENAME,
     describe,
     missing_required_options,
 )
-from .credentials import bind_sources
+from .credentials import bind_gitlab_session, bind_sources
 from .portable import portable
-from .report import emit
+from .report import emit, report
 from .runtime import redact_tree, sanitize
 from .status import (
     BLOCKED,
+    DRY_RUN,
     PASS,
     PROFILE_BASE,
     PROFILE_DRY_RUN,
     PROFILE_FULL,
     exit_code,
 )
-from .target import Target, TargetError, load_target
+from .target import Target, TargetError, load_gitlab_target, load_target
 
 # The documented per-host location. Keeping it here rather than in each script
 # means one answer to "where does the target live", and the script-interface
@@ -118,8 +126,53 @@ def output_mode(args: argparse.Namespace) -> str:
     return "human" if interactive else "json"
 
 
-def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(
+class MachineArgumentParser(argparse.ArgumentParser):
+    """Keep parser failures in the selected machine-readable result shape."""
+
+    def __init__(
+        self, *args: Any, report_kind: str | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.report_kind = report_kind
+        self._raw_argv: tuple[str, ...] = ()
+
+    def parse_args(
+        self, args: list[str] | None = None, namespace: argparse.Namespace | None = None
+    ) -> argparse.Namespace:
+        self._raw_argv = tuple(sys.argv[1:] if args is None else args)
+        return super().parse_args(self._raw_argv, namespace)
+
+    def error(self, message: str) -> None:
+        modes = [
+            flag.partition("=")[0]
+            for flag in self._raw_argv
+            if flag.partition("=")[0] in {"--json", "--yaml"}
+        ]
+        if not modes:
+            super().error(message)
+        mode = modes[0]
+        kind = self.report_kind or COMMANDS.get(Path(self.prog).name, {}).get(
+            "kind", "arguments"
+        )
+        reason = (
+            "unrecognized_arguments; see --help"
+            if message.startswith("unrecognized arguments:")
+            else re.sub(r"'[^']*'", "'[value]'", message)
+        )
+        _failure(
+            argparse.Namespace(json=mode == "--json", yaml=mode == "--yaml"),
+            kind,
+            "arguments",
+            reason,
+        )
+        self.exit(2)
+
+
+def parser(
+    description: str, *, output_dir: bool = True, kind: str | None = None
+) -> argparse.ArgumentParser:
+    result = MachineArgumentParser(
+        report_kind=kind,
         description=description,
         epilog=(
             "Output: a terminal gets the human summary; a pipe or file gets "
@@ -418,4 +471,75 @@ def execute(
     ) as exc:
         return _failure(args, kind, source, str(exc))
     except Exception:  # noqa: BLE001 - preserve structured output for unexpected provider data
+        return _failure(args, kind, source, "unexpected_runtime_failure")
+
+
+def execute_gitlab_job(args: argparse.Namespace) -> int:
+    """Read one job through the GitLab-only target and bound access session."""
+    from .collect import collect_gitlab_job, gitlab_job_reference
+
+    kind = "gitlab_job"
+    if args.describe:
+        sys.stdout.write(json.dumps(describe(COMMAND_BY_KIND[kind]), indent=2) + "\n")
+        return 0
+    if args.dry_run and (args.output_dir or args.log_file):
+        return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
+    missing = missing_required_options(COMMAND_BY_KIND[kind], args)
+    if missing:
+        return _failure(
+            args, kind, "arguments", f"{', '.join(missing)} is required; see --describe"
+        )
+    source = "target"
+    started = time.monotonic()
+    try:
+        target_path, target_source = resolve_target(args.target)
+        target = load_gitlab_target(target_path)
+        source = "arguments"
+        project, _job_id = gitlab_job_reference(args.job_url, target.gitlab.host)
+        filters = {"job_url": args.job_url, "search": args.search}
+        if args.dry_run:
+            data = report(kind, target.gitlab.url, filters, [], [])
+            data["status"] = DRY_RUN
+            data["access"] = {
+                "status": DRY_RUN,
+                "target": {"kind": "project", "reference": project},
+                "observed_capability": [],
+            }
+            data["collection_probes"] = [
+                "exact GitLab identity and project reads",
+                "job, pipeline, runner and bounded trace reads",
+            ]
+        else:
+            source = "credential"
+            session = bind_gitlab_session(
+                target,
+                target_kind="project",
+                target_reference=project,
+                target_source=f"{target_source};argv:--job-url",
+                revision=args.revision,
+            )
+            source = "access"
+            gate = check_gitlab_operation_access(session)
+            if gate["status"] != PASS:
+                data = report(kind, target.gitlab.url, filters, [], gate["errors"])
+                data["status"] = BLOCKED
+            else:
+                source = "collect_gitlab_job"
+                data = collect_gitlab_job(
+                    target, args, credential=dict(session.environment)
+                )
+            data["access"] = gate
+            data["execution_host"] = session.execution_host
+            data["tested_revision"] = session.skill["revision"]["value"]
+            data["skill"] = session.skill
+            data["target_source"] = session.target_source
+        rendered = emit(data, output_mode(args), args.output_dir)
+        log_event(
+            args, kind, "result", data["status"], elapsed=time.monotonic() - started
+        )
+        sys.stdout.write(rendered)
+        return exit_code(data["status"])
+    except (TargetError, RuntimeError, ValueError, OSError, TypeError, KeyError) as exc:
+        return _failure(args, kind, source, str(exc))
+    except Exception:  # noqa: BLE001 - preserve the machine result on provider failures
         return _failure(args, kind, source, "unexpected_runtime_failure")

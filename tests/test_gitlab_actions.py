@@ -403,6 +403,56 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
     ]
 
 
+@pytest.mark.parametrize(
+    ("subcheck", "reason"),
+    (("user", "authentication"), ("target", "target_path_mismatch")),
+)
+def test_action_access_failure_preserves_the_failed_subcheck(
+    monkeypatch, tmp_path: Path, capsys, subcheck, reason
+):
+    plan = _plan("gitlab_issue", "open-bug", {"title": "broken"})
+    monkeypatch.setattr(
+        ACTION, "resolve_target", lambda _explicit: (tmp_path / "target.toml", "test")
+    )
+    monkeypatch.setattr(ACTION, "load_gitlab_target", lambda _path: object())
+    monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
+    monkeypatch.setattr(
+        ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: object()
+    )
+    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda *, timeout: object())
+    monkeypatch.setattr(
+        ACTION,
+        "check_gitlab_operation_access",
+        lambda _session, api_client: {
+            "status": "BLOCKED",
+            "errors": [{"source": subcheck, "reason": reason}],
+        },
+    )
+    monkeypatch.setattr(
+        ACTION,
+        "apply_plan",
+        lambda *_args: pytest.fail("apply ran after access failure"),
+    )
+
+    result = ACTION.run_action_cli(
+        "gitlab_issue",
+        [
+            "open-bug",
+            "--title",
+            "broken",
+            "--apply",
+            "--confirm-plan",
+            plan.digest,
+            "--json",
+        ],
+    )
+    data = json.loads(capsys.readouterr().out)
+
+    assert result == 2
+    assert data["status"] == "BLOCKED"
+    assert data["errors"] == [{"source": f"gitlab_access.{subcheck}", "reason": reason}]
+
+
 @pytest.mark.parametrize("dry_run_flag", ([], ["--dry-run"]))
 def test_action_plan_rejects_output_paths_without_creating_files(
     tmp_path: Path, capsys, dry_run_flag

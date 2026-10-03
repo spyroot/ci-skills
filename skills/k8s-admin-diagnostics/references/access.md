@@ -1,9 +1,11 @@
 # Per-computer access and evidence
 
 The installed skill contains instructions and code. Each execution host
-supplies a nonsecret target file and its own credentials. The target file
-identifies one exact GitHub repository, GitLab origin, Kubernetes context, and
-API server.
+supplies a nonsecret target file and its own credentials. The full access
+target identifies one exact GitHub repository, GitLab origin, Kubernetes
+context, and API server. `gitlab_job.py`, the GitLab job diagnostic, can use a
+GitLab-only target; its job URL selects the exact project for an identity and
+project access read before job, pipeline, runner, and trace reads.
 
 ## Where the target file comes from
 

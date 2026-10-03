@@ -22,7 +22,7 @@ from .cilium import (
 from .report import report
 from .runtime import error_class, run_command, run_command_tail, sanitize
 from .status import PASS, UNKNOWN
-from .target import Target, kubernetes_label
+from .target import GitLabOperationTarget, Target, kubernetes_label
 
 # A cluster-wide list read is legitimately slow and several run concurrently.
 # Measured on one target cluster: `kubectl get events -A -o json` was 7.7 MB and
@@ -602,13 +602,12 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     return result
 
 
-def collect_gitlab_job(target: Target, args: Any) -> dict[str, Any]:
-    if not getattr(args, "job_url", None):
-        raise ValueError("--job-url is required; see --describe for the contract")
-    parsed = urlsplit(args.job_url)
+def gitlab_job_reference(job_url: str, host: str) -> tuple[str, str]:
+    """Resolve the exact project and numeric job selected by one GitLab URL."""
+    parsed = urlsplit(job_url)
     if (
         parsed.scheme != "https"
-        or parsed.netloc.lower() != target.gitlab.host
+        or parsed.netloc.lower() != host
         or parsed.query
         or parsed.fragment
     ):
@@ -616,8 +615,22 @@ def collect_gitlab_job(target: Target, args: Any) -> dict[str, Any]:
     prefix, marker, job_id = parsed.path.rpartition("/-/jobs/")
     if not marker or not job_id.isdecimal() or not prefix.strip("/"):
         raise ValueError("job URL must contain a project path and numeric job ID")
-    project = prefix.strip("/")
-    credential = gitlab_env(target)
+    return prefix.strip("/"), job_id
+
+
+def collect_gitlab_job(
+    target: Target | GitLabOperationTarget,
+    args: Any,
+    *,
+    credential: dict[str, str | None] | None = None,
+) -> dict[str, Any]:
+    if not getattr(args, "job_url", None):
+        raise ValueError("--job-url is required; see --describe for the contract")
+    project, job_id = gitlab_job_reference(args.job_url, target.gitlab.host)
+    if credential is None:
+        if isinstance(target, GitLabOperationTarget):
+            raise ValueError("bound_gitlab_credential_required")
+        credential = gitlab_env(target)
     encoded = quote(project, safe="")
     base = f"projects/{encoded}"
     job, error = _read_json(glab_argv(target, f"{base}/jobs/{job_id}"), env=credential)
