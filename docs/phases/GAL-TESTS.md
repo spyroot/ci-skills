@@ -34,8 +34,9 @@ its own tests; this page says which tests and why.
   `run_script` drives only the k8s skill's scripts, so a sibling `run_tool`
   fixture drives `bin/ci-skills` and the hook scripts with the same fake
   `PATH`.
-- **Tests ride with their capability.** No phase lands its tests in a
-  separate pull request.
+- **Tests ride with their capability.** Each phase carries its focused tests;
+  GAL-TESTS separately delivers only the reusable test command and coverage
+  report.
 
 ## Layers
 
@@ -68,15 +69,26 @@ Contract tests compare declarations that must agree:
 Observed 2026-10-02:
 
 - 174 test functions in 22 files, no skips, and no coverage measurement.
-- `tools/install_k8s_admin_diagnostics.py` has tests for dry-run, refusal, a
+- The existing diagnostics installer has tests for dry-run, refusal, a
   negative path and a successful read-back. It has none for:
   - staging cleanup after a failed copy;
   - the `installed_digest_mismatch` read-back failure;
   - `pyyaml_unavailable`.
 - **Second runs.** Today the installer refuses any existing destination,
-  so a second run is a refusal, not a no-op. GAL-CATALOG's `install` makes
-  the same digest a no-op and refuses a different one. The old wrapper keeps
-  its current behaviour and tests until GAL-ROUTING retires it.
+  so a second run is a refusal, not a no-op. Package delivery preserves
+  its tests while changing the package path. GAL-CATALOG's `install` makes
+  the same digest a no-op and refuses a different one.
+
+## `ci-skills` package delivery
+
+The separate delivery pull request in GAL-PHASES tests:
+
+- the sole `ci-skills` entry and path assertions;
+- the thin checkout adapters and installed diagnostics and PR #2 commands
+  from outside the checkout;
+- confirmed upgrade from an existing link, refusal without confirmation,
+  revision-bound fingerprint, timeout, and installed digest read-back;
+- manifest equality in CI and a fresh live receipt for the final package.
 
 ## GAL-GATES
 
@@ -151,7 +163,11 @@ The contract test runs over every entrypoint discovery finds:
 ## GAL-CATALOG
 
 - **Discovery.**
-  - The walk order is the root first, then name order.
+  - The walk order is the direct children of `skills/` in name order;
+    the repository root is not a second skill.
+  - Exactly one `ci-skills` record resolves to `skills/ci-skills/`.
+  - `list --skills-dir DIR` reads a copied installed package; an unconverted
+    symbolic link reports `symlink_unexpected` with the upgrade command.
   - Nested and hidden directories are skipped.
   - Each error token: `frontmatter_missing`, `frontmatter_invalid`,
     `name_mismatch`, `manifest_invalid`, `lock_entry_missing` and
@@ -171,9 +187,12 @@ The contract test runs over every entrypoint discovery finds:
   - a failed copy removes the staging directory;
   - a read-back mismatch gives `installed_digest_mismatch`.
 - **Regression.** `tests/test_installer.py` and
-  `tests/test_installed_package.py` pass unchanged against the wrapper.
+  `tests/test_installed_package.py` pass against the compatibility wrapper;
+  package delivery updates path assertions for `skills/ci-skills/` first.
 - **Offline smoke.** The installed-package smoke also installs a vendored
-  skill and compares digests.
+  skill and compares digests. `bin/ci-skills` runs from the repository as
+  a maintenance command; installed-package smoke exercises the diagnostics
+  and PR #2 tools from outside the checkout.
 - **Outside CI.** `get glab` is compared byte for byte with
   `glab skills get glab` where `glab` is installed.
 
@@ -188,6 +207,9 @@ The contract test runs over every entrypoint discovery finds:
 - **The router.** `SKILL.md` keeps the `references/access.md` link and the
   four safety rules, and `references/reading-reports.md` holds the moved
   sections.
+- **Install dependency.** Both `install.sh` and `bin/ci-skills install`
+  refuse an absent or mismatched `glab` dependency without partial writes;
+  each succeeds once the matching dependency is installed.
 - **Matching.**
   - A status token matches only that exact status.
   - A phrase matches the task text as a case-insensitive substring.
