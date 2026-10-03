@@ -10,9 +10,7 @@ from core.cli import execute, parser
 def build_parser() -> argparse.ArgumentParser:
     """Return the declared interface, including options for a selected cluster."""
     cli = parser("Report a selected Rook Ceph cluster and its OSD/monitor Pods.")
-    cli.add_argument(
-        "--namespace", metavar="NAME", help="selected Ceph namespace"
-    )
+    cli.add_argument("--namespace", metavar="NAME", help="selected Ceph namespace")
     cli.add_argument(
         "--operator",
         default="rook-ceph-operator",

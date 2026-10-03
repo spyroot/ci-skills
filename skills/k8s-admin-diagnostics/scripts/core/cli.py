@@ -23,11 +23,8 @@ from .catalog import (
 )
 from .credentials import bind_sources
 from .portable import portable
-from .project_binding import (
-    resolve_target as resolve_project_target,
-    resolve_target_file as resolve_target,
-    target_candidates as _target_candidates,
-)
+from .project_binding import resolve_target as resolve_project_target
+from .project_binding import resolve_target_file
 from .report import emit
 from .runtime import redact_tree, sanitize
 from .status import (
@@ -58,6 +55,11 @@ COLLECTOR_KINDS = {
     "collect_ceph_cluster": "ceph_cluster",
 }
 ACCESS_CHECK_KIND = "access_check"
+
+
+def resolve_target(explicit: str | None) -> tuple[Path, str]:
+    """Expose the shared target-file resolver for existing CLI consumers."""
+    return resolve_target_file(explicit)
 
 
 def output_mode(args: argparse.Namespace) -> str:

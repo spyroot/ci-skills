@@ -964,6 +964,64 @@ def test_cilium_status_uses_daemonset_selector_for_agent_pods(
     assert result["records"][0]["status"] == "PASS"
 
 
+def test_cilium_status_exposes_failed_peer_but_proves_successful_read(
+    monkeypatch, target_file
+):
+    """A failed endpoint probe is a finding, while its exec still proves access."""
+    collect = import_script_module("core.collect")
+    live = import_script_module("core.live")
+    runtime = import_script_module("core.runtime")
+    resources = {
+        "daemonsets": [
+            {
+                "metadata": {"namespace": "networking", "name": "cilium"},
+                "spec": {"selector": {"matchLabels": {"app": "cilium"}}},
+            }
+        ],
+        "pods": [
+            {
+                "metadata": {
+                    "namespace": "networking",
+                    "name": "cilium-agent-a",
+                    "labels": {"app": "cilium"},
+                },
+                "spec": {"nodeName": "node-a"},
+                "status": {"conditions": [{"type": "Ready", "status": "True"}]},
+            }
+        ],
+        "deployments": [],
+        "ciliumnodes.cilium.io": [],
+    }
+    health = {
+        "local": {"name": "node-a"},
+        "nodes": [{"name": "node-b", "endpoint": {"http": {"status": "timeout"}}}],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        if "exec" in command:
+            return _command_result(runtime, command, health)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": resources[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(namespace="networking", node=None, search=None)
+
+    result = collect.collect_cilium(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["errors"] == [
+        {"source": "cilium-agent-a", "reason": "component_unhealthy"}
+    ]
+    row = result["records"][0]
+    assert row["status"] == "PASS"
+    assert row["exit_status"] == 0
+    assert row["health"] == health
+    assert row["findings"][0]["path"] == "peer.endpoint.http.status"
+    assert row["findings"][0]["message"] == "timeout"
+    assert live._access_proven("cilium_status", live._evidence(result)) is True
+
+
 def test_cilium_status_reports_partial_for_explicit_namespace_with_zero_pods(
     monkeypatch,
     target_file,

@@ -118,7 +118,9 @@ def _pods(
 
 def _inactive_pgs(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, dict):
-        payload = payload.get("pg_stats", payload.get("pgs"))
+        payload = payload.get(
+            "stuck_pg_stats", payload.get("pg_stats", payload.get("pgs"))
+        )
     if not isinstance(payload, list):
         raise TypeError("inactive_pgs:invalid_response")
     result = []
@@ -127,6 +129,45 @@ def _inactive_pgs(payload: Any) -> list[dict[str, Any]]:
             raise TypeError("inactive_pgs:invalid_item")
         result.append({"pgid": item["pgid"], "state": item.get("state")})
     return result
+
+
+def _health(payload: Any) -> tuple[str, list[dict[str, Any]]]:
+    """Keep Ceph's named health checks so an alert has an exact cause."""
+    if not isinstance(payload, dict) or payload.get("status") not in {
+        "HEALTH_OK",
+        "HEALTH_WARN",
+        "HEALTH_ERR",
+    }:
+        raise TypeError("status:invalid_health")
+    checks = payload.get("checks", {})
+    if not isinstance(checks, dict):
+        raise TypeError("status:invalid_health_checks")
+    findings = []
+    for code, check in sorted(checks.items()):
+        if not isinstance(code, str) or not code or not isinstance(check, dict):
+            raise TypeError("status:invalid_health_check")
+        summary = check.get("summary")
+        message = summary.get("message") if isinstance(summary, dict) else summary
+        if not isinstance(message, str) or not message:
+            raise TypeError("status:invalid_health_summary")
+        severity = check.get("severity")
+        if severity is not None and not isinstance(severity, str):
+            raise TypeError("status:invalid_health_severity")
+        detail = check.get("detail", [])
+        if not isinstance(detail, list) or any(
+            not isinstance(item, dict) or not isinstance(item.get("message"), str)
+            for item in detail
+        ):
+            raise TypeError("status:invalid_health_detail")
+        findings.append(
+            {
+                "code": code,
+                "severity": severity,
+                "summary": message,
+                "detail": [item["message"] for item in detail],
+            }
+        )
+    return payload["status"], findings
 
 
 def collect_ceph_cluster(target: Target, args: Any) -> dict[str, Any]:
@@ -191,14 +232,10 @@ def collect_ceph_cluster(target: Target, args: Any) -> dict[str, Any]:
             if isinstance(decoded["status"], dict)
             else None
         )
-        if not isinstance(health, dict) or health.get("status") not in {
-            "HEALTH_OK",
-            "HEALTH_WARN",
-            "HEALTH_ERR",
-        }:
-            errors.append({"source": "status", "reason": "status:invalid_response"})
-        else:
-            result["health"] = health["status"]
+        try:
+            result["health"], result["health_checks"] = _health(health)
+        except TypeError as exc:
+            errors.append({"source": "status", "reason": str(exc)})
     if "osd_tree" in decoded:
         tree = decoded["osd_tree"]
         nodes = tree.get("nodes") if isinstance(tree, dict) else None

@@ -32,19 +32,20 @@ an explicit step in the calling project's own instructions.
 ## Effective credential sources
 
 - GitHub uses an explicit `github.token_file` from the target, then the
-  effective `GH_TOKEN` or `GITHUB_TOKEN` environment variable on github.com.
-  Enterprise hosts use `GH_ENTERPRISE_TOKEN` or
+  effective `GH_TOKEN` or `GITHUB_TOKEN` environment variable on `github.com`
+  or a subdomain of `ghe.com`. GitHub Enterprise Server hosts use
+  `GH_ENTERPRISE_TOKEN` or
   `GITHUB_ENTERPRISE_TOKEN`. Otherwise, the selected host's `gh` credential
-  store is used.
+  store is used. An explicit token file clears other ambient GitHub tokens.
 - GitLab uses an explicit `gitlab.token_file`, then the effective
   `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable.
   Otherwise, the selected host's `glab` credential store is used.
 - Kubernetes uses the target's explicit `kubernetes.kubeconfigs` ordered,
   combined path, its `kubernetes.kubeconfig` single file, or the kubeconfig
-  selected by an explicit project binding. An ambient `KUBECONFIG` or default
-  kubeconfig is never substituted. Use `kubeconfigs` when the context and the
+  selected by an explicit project binding. If none is declared, it uses
+  `KUBECONFIG`, then `~/.kube/config`. Use `kubeconfigs` when the context and
   credential live in separate files, in kubectl's path order. The selected
-  context resolves the user and cluster.
+  context and API server are checked against those files.
   The user may use an embedded token, `tokenFile`, client certificate and
   key, or an exec provider. No separate token file is assumed.
 

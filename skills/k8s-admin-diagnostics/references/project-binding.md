@@ -1,6 +1,6 @@
 # Project target and credential binding
 
-API commands resolve the target in this order and report the selected tier
+Commands resolve the target in this order and report the selected tier
 in `target_selection`:
 
 1. Explicit `--target PATH` or `--binding PATH`: `cli:` or `binding:`.
@@ -13,11 +13,11 @@ Each receipt reference includes the resolved absolute path. Portable receipts
 replace that path with a stable digest token.
 
 Two environment selectors set together are an error. An explicit target or a
-present but invalid selected file blocks. An environment target path that is
-absent advances to the project or user tier. Every target must declare an
-exact Kubernetes context and API server. A plain target must also declare
-its kubeconfig; the skill never adopts a global current context or ambient
-`KUBECONFIG`.
+declared environment target path that is absent blocks without substituting
+the project or user target. Every target must declare an
+exact Kubernetes context and API server. When a plain target omits its
+kubeconfig, credential resolution uses `KUBECONFIG`, then `~/.kube/config`.
+The configured context and server still have to match the selected files.
 
 Example nonsecret `./.ci-skills/target.toml`:
 
