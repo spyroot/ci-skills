@@ -228,6 +228,8 @@ is written.
   declared live collector reads. `--publication` also requires
   repository admin permission and read-back of required branch checks.
   `--job-url URL` also checks that job, pipeline, runner, and trace.
+  `--ceph-namespace NAME` adds Ceph health, OSD, PG, and Pod reads to that
+  receipt; this repository requires it in `acceptance/expected.toml`.
 - `gitlab_job.py --job-url URL` reads a selected job, pipeline, runner, and
   bounded trace using GitLab-only access. It accepts `--search TEXT`.
 - `gitlab_pipeline.py --pipeline-id ID` reads pipeline progress and bounded

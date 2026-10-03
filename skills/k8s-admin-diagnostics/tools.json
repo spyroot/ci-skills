@@ -84,6 +84,7 @@
       "capabilities": [],
       "options": [
         "--binding",
+        "--ceph-namespace",
         "--describe",
         "--dry-run",
         "--human",

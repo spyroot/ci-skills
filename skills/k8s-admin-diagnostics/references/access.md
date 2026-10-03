@@ -132,9 +132,11 @@ mutable path. This is detect-and-block, not an atomic pin -- a file swapped
 between the check and the command's own open is still possible -- and it closes
 the case that actually happens, a login rewriting the kubeconfig mid-run.
 
-The command-specific base gate runs before every collector. The expanded
-three-authority bundle runs in `access_check.py`, and every report names which
-one it passed in `access.profile`, so neither is implied for the other. A
+The command-specific base gate runs before every collector. Cilium discovery
+and non-TTY health exec extend that gate only for Cilium commands and the full
+`access_check.py` receipt. The expanded three-authority bundle runs in
+`access_check.py`, and every report names which gate it passed in
+`access.profile`. A
 collector report also carries `access`: the identities, credential sources,
 targets, execution host,
 skill digest and a `receipt_sha256` correlating it to the gate that authorized
@@ -148,6 +150,8 @@ captured form names credential locations under the operator's home directory.
 `acceptance/expected.toml` and refuses one that is missing, stale, from an
 undeclared executor or identity, aimed at different targets, missing a required
 live check, carrying an unproven one, or produced by a different skill digest.
+For this repository, the expected Ceph namespace is declared there; invoke
+`access_check.py --ceph-namespace NAME` with that selection to prove its reads.
 The validate workflow runs it unconditionally.
 
 `PASS` requires all selected live checks. Missing, invalid, expired,

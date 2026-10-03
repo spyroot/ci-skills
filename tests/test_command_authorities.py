@@ -63,7 +63,7 @@ def test_ceph_collector_uses_only_kubernetes_authority(tmp_path, monkeypatch, ca
     monkeypatch.setattr(
         access,
         "kubernetes_access",
-        lambda _target: access.Surface(
+        lambda _target, *, cilium=False: access.Surface(
             "kubernetes", "PASS", "unit-admin", "unit -> api", ["live-read"], None
         ),
     )

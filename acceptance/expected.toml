@@ -12,7 +12,11 @@
 max_receipt_age_days = 30
 
 # Every one of these live checks must be present and access_proven.
-required_live_checks = ["storage_report", "event_trace", "cilium_status"]
+required_live_checks = ["storage_report", "event_trace", "cilium_status", "ceph_cluster"]
+
+# The namespace selected for this repository's Ceph live check. The generic
+# skill takes it from --ceph-namespace; no namespace is built into the tool.
+ceph_namespace = "openshift-storage"
 
 # Required GitHub checks the publication gate must have read back.
 required_checks = ["validate"]
