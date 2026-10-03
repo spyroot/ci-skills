@@ -292,6 +292,62 @@ def test_wiki_update_reads_back_new_slug():
     assert WIKIS.apply(api, object(), plan, 42)["slug"] == "new"
 
 
+def test_wiki_create_accepts_provider_normalized_title_and_reuses_page(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
+    plan = _plan(
+        "gitlab_wiki",
+        "create",
+        {"title": "ci-skills acceptance", "content": "accepted\n"},
+    )
+    base = "projects/42/wikis"
+    page = {
+        "slug": "ci-skills-acceptance",
+        "title": "ci skills acceptance",
+        "content": "accepted\n",
+    }
+    api = FakeAPI(
+        {
+            ("GET", _list(base)): [[], [page]],
+            ("POST", base): [{"slug": page["slug"]}],
+            ("GET", base + "/ci-skills-acceptance"): [page, page],
+        }
+    )
+    first = WIKIS.apply(api, object(), plan, 42)
+    second = WIKIS.apply(api, object(), plan, 42)
+    assert first["action"] == "APPLIED" and first["verified"] is True
+    assert second["action"] == "NO_OP" and second["verified"] is True
+    assert [call[0] for call in api.calls].count("POST") == 1
+
+
+def test_wiki_update_accepts_provider_normalized_title():
+    plan = _plan(
+        "gitlab_wiki",
+        "update",
+        {"title": "ci-skills acceptance", "content": "new\n"},
+        resource_id="old",
+    )
+    base = "projects/42/wikis"
+    api = FakeAPI(
+        {
+            ("GET", base + "/old"): [
+                {"slug": "old", "title": "old", "content": "old\n"}
+            ],
+            ("PUT", base + "/old"): [{"slug": "ci-skills-acceptance"}],
+            ("GET", base + "/ci-skills-acceptance"): [
+                {
+                    "slug": "ci-skills-acceptance",
+                    "title": "ci skills acceptance",
+                    "content": "new\n",
+                }
+            ],
+        }
+    )
+    result = WIKIS.apply(api, object(), plan, 42)
+    assert result["action"] == "APPLIED" and result["verified"] is True
+
+
 def test_runner_group_assign_verifies_each_project_and_marks_partial():
     plan = _plan(
         "gitlab_runner",

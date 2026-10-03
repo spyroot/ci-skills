@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from argparse import Namespace
 from typing import Any
 from urllib.parse import quote
@@ -42,6 +43,21 @@ def prepare(args: Namespace) -> tuple[dict[str, Any], str | None, None]:
     return body, slug, None
 
 
+def _title_key(value: object) -> str | None:
+    """Compare titles after GitLab's observed hyphen-to-space normalization."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return re.sub(r"[\s-]+", " ", value).strip()
+
+
+def _wiki_same(current: dict[str, Any], body: dict[str, Any]) -> bool:
+    if not _same(current, {key: val for key, val in body.items() if key != "title"}):
+        return False
+    return "title" not in body or _title_key(current.get("title")) == _title_key(
+        body["title"]
+    )
+
+
 def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
     base = f"projects/{target_id}/wikis"
     if plan.operation == "create":
@@ -50,7 +66,7 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
         slug = _required_text(str(plan.resource_id), "wiki_slug")
         endpoint = f"{base}/{quote(slug, safe='')}"
         current = _object(api.get_json(session, endpoint), "wiki", "slug", "content")
-        if _same(current, plan.body):
+        if _wiki_same(current, plan.body):
             return {"action": "NO_OP", "slug": current["slug"], "verified": True}
         try:
             response = api.put_json(session, endpoint, plan.body)
@@ -73,7 +89,7 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
         return unverified_write(
             target_id, {"slug": slug}, "wiki_readback_invalid_shape"
         )
-    if observed["slug"] != slug or not _same(observed, plan.body):
+    if observed["slug"] != slug or not _wiki_same(observed, plan.body):
         return unverified_write(target_id, {"slug": slug}, "wiki_readback_mismatch")
     return {"action": "APPLIED", "slug": slug, "verified": True}
 
@@ -93,7 +109,7 @@ def _reconcile_update(
     observed = _object(
         api.get_json(session, endpoint), "wiki_readback", "slug", "content"
     )
-    if not _same(observed, plan.body):
+    if not _wiki_same(observed, plan.body):
         raise ActionError("wiki_update_outcome_uncertain_check_slug_before_retry")
     return {
         "action": "APPLIED",
@@ -107,7 +123,7 @@ def _find_exact(api: Any, session: Any, base: str, title: str) -> list[dict[str,
     matches = [
         item
         for item in _fields(_pages(api, session, base), "wiki_list", "slug", "title")
-        if item.get("title") == title
+        if _title_key(item.get("title")) == _title_key(title)
     ]
     if len(matches) > 1:
         raise ActionError("wiki_title_ambiguous")
@@ -129,7 +145,7 @@ def _create(
                 "slug",
                 "content",
             )
-            if not _same(current, plan.body):
+            if not _wiki_same(current, plan.body):
                 raise ActionError("existing_wiki_differs_use_update")
             guard.clear()
             return {"action": "NO_OP", "slug": slug, "verified": True}
@@ -167,7 +183,7 @@ def _create(
             return unverified_write(
                 target_id, {"slug": slug}, "wiki_readback_invalid_shape"
             )
-        if observed["slug"] != slug or not _same(observed, plan.body):
+        if observed["slug"] != slug or not _wiki_same(observed, plan.body):
             if observed.get("title") == plan.body["title"]:
                 guard.clear()
             return unverified_write(target_id, {"slug": slug}, "wiki_readback_mismatch")
