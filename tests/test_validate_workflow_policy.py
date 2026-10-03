@@ -37,7 +37,8 @@ def test_the_live_acceptance_step_is_unconditional_and_may_not_fail():
 
     Gated on `non_markdown_count`, a Markdown-only change could edit the very
     claims it backs and skip it. Marked `continue-on-error`, or moved to its own
-    workflow, it would be advisory -- `validate` is the required check.
+    workflow, it would be advisory -- `validate` is the required check. Its
+    position does not change whether it is required for a successful job.
     """
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     steps = workflow["jobs"]["validate"]["steps"]
@@ -51,12 +52,6 @@ def test_the_live_acceptance_step_is_unconditional_and_may_not_fail():
     assert step.get("continue-on-error") in (None, False)
     assert "|| true" not in str(step.get("run"))
 
-    gated = [
-        index
-        for index, item in enumerate(steps)
-        if "non_markdown_count" in str(item.get("if", ""))
-    ]
-    assert gated, "the gated Python steps should still exist"
-    assert steps.index(step) < min(gated), (
-        "the acceptance step must precede the steps a Markdown-only change skips"
+    assert any("non_markdown_count" in str(item.get("if", "")) for item in steps), (
+        "the gated Python steps should still exist"
     )

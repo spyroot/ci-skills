@@ -26,6 +26,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="also verify one exact GitLab job, pipeline, runner, and trace",
     )
     cli.add_argument(
+        "--ceph-namespace",
+        metavar="NAME",
+        help="also prove Ceph health, OSD, PG and Pod reads in this namespace",
+    )
+    cli.add_argument(
         "--receipt-out",
         metavar="PATH",
         help="also write the committable receipt, with host paths digested",

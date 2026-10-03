@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from .catalog import GITLAB_VARIABLES, github_variables
 from .cilium import (
@@ -19,9 +20,10 @@ from .cilium import (
     valid_health,
 )
 from .credentials import Sources, assert_kubeconfig_unchanged
+from .gitlab_session import BoundGitLabSession
 from .runtime import CommandResult, error_class, run_command
 from .status import BLOCKED, DRY_RUN, PASS
-from .target import Target
+from .target import GitLabOperationTarget, Target
 
 
 @dataclass(frozen=True)
@@ -53,7 +55,12 @@ def kubectl_argv(target: Target, *args: str) -> list[str]:
     return command
 
 
-def glab_argv(target: Target, endpoint: str) -> list[str]:
+def oc_argv(target: Target, *args: str) -> list[str]:
+    """Use the same pinned kubeconfig and context for OpenShift commands."""
+    return ["oc", *kubectl_argv(target, *args)[1:]]
+
+
+def glab_argv(target: Target | GitLabOperationTarget, endpoint: str) -> list[str]:
     return [
         "glab",
         "api",
@@ -367,6 +374,117 @@ def gitlab_access(target: Target) -> Surface:
     )
 
 
+def _gitlab_positive_id(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _gitlab_origin_matches(value: Any, origin: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    observed = urlsplit(value)
+    expected = urlsplit(origin)
+    return (
+        observed.scheme == expected.scheme
+        and observed.netloc.lower() == expected.netloc.lower()
+        and observed.username is None
+        and observed.password is None
+    )
+
+
+def _gitlab_safe_reason(error: Exception) -> str:
+    """Never place an API body, stderr, or credential in the access report."""
+    reason = getattr(error, "reason", None)
+    if reason is None and isinstance(error, ValueError):
+        reason = str(error)
+    if isinstance(reason, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,63}", reason):
+        return reason
+    return "provider_request_failed"
+
+
+def check_gitlab_operation_access(
+    session: BoundGitLabSession, api_client: Any = None
+) -> dict[str, Any]:
+    """Read back one bound GitLab identity and exact numeric target.
+
+    This gate is separate from the diagnostic instance-admin gate: a project
+    or group operation does not imply GitHub, Kubernetes, or instance runner
+    permissions. Both API reads use the same bound credential and host.
+    """
+    receipt: dict[str, Any] = {
+        "schema_version": "1.0",
+        "kind": "gitlab_access",
+        "status": BLOCKED,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "execution_host": session.execution_host,
+        "origin": session.origin,
+        "target_source": session.target_source,
+        "target_file": str(session.target_file),
+        "credential_source": session.credential_source,
+        "credential_digest": session.credential_digest,
+        "skill": session.skill,
+        "identity": None,
+        "target": None,
+        "observed_capability": [],
+        "errors": [],
+    }
+    source = "user"
+    try:
+        if api_client is None:
+            from .gitlab_api import GlabAPIClient
+
+            api_client = GlabAPIClient()
+        user = api_client.get_json(session, "user")
+        if (
+            not isinstance(user, dict)
+            or not _gitlab_positive_id(user.get("id"))
+            or not isinstance(user.get("username"), str)
+            or not user["username"].strip()
+        ):
+            raise ValueError("user_identity_invalid")
+        if not _gitlab_origin_matches(user.get("web_url"), session.origin):
+            raise ValueError("user_host_mismatch")
+        receipt["identity"] = {
+            "id": user["id"],
+            "username": user["username"],
+            "web_url": user["web_url"],
+        }
+        receipt["observed_capability"].append("identity_read")
+
+        source = "target"
+        endpoint_kind = "projects" if session.target_kind == "project" else "groups"
+        if session.target_kind not in {"project", "group"}:
+            raise ValueError("target_kind_invalid")
+        reference = session.target_reference
+        endpoint = f"{endpoint_kind}/{quote(reference, safe='')}"
+        item = api_client.get_json(session, endpoint)
+        if not isinstance(item, dict) or not _gitlab_positive_id(item.get("id")):
+            raise ValueError("target_response_invalid")
+        if not _gitlab_origin_matches(item.get("web_url"), session.origin):
+            raise ValueError("target_host_mismatch")
+        path_field = (
+            "path_with_namespace" if session.target_kind == "project" else "full_path"
+        )
+        full_path = item.get(path_field)
+        if not isinstance(full_path, str) or not full_path:
+            raise ValueError("target_path_missing")
+        if reference.isdecimal():
+            if item["id"] != int(reference):
+                raise ValueError("target_id_mismatch")
+        elif full_path != reference:
+            raise ValueError("target_path_mismatch")
+        receipt["target"] = {
+            "kind": session.target_kind,
+            "id": item["id"],
+            "full_path": full_path,
+            "web_url": item["web_url"],
+        }
+        receipt["observed_capability"].append("target_read")
+        receipt["status"] = PASS
+    except Exception as exc:  # noqa: BLE001 - keep every provider failure structured
+        receipt["errors"].append({"source": source, "reason": _gitlab_safe_reason(exc)})
+    return receipt
+
+
 def cilium_discovery(target: Target) -> tuple[str, dict[str, Any]]:
     """Resolve the agent namespace and its DaemonSet selector in ONE read.
 
@@ -415,12 +533,21 @@ def _credential_path(value: str, target: Target) -> Path:
 def _auth_mechanism(user: dict[str, Any], target: Target) -> dict[str, str]:
     """Identify the selected kubeconfig user's configured auth mechanism."""
     options: list[dict[str, str]] = []
-    if user.get("tokenFile"):
-        selected = _credential_path(user["tokenFile"], target)
-        if not selected.is_file() or not selected.stat().st_size:
+    if "tokenFile" in user:
+        token_file = user["tokenFile"]
+        if not isinstance(token_file, str) or not token_file:
             raise ValueError("token_file_unavailable")
+        selected = _credential_path(token_file, target)
+        if not selected.is_file():
+            raise ValueError("token_file_unavailable")
+        try:
+            with selected.open("rb") as token_handle:
+                if not token_handle.read(1):
+                    raise ValueError("token_file_unavailable")
+        except OSError as exc:
+            raise ValueError("token_file_unavailable") from exc
         options.append({"type": "tokenFile", "source": str(selected)})
-    if user.get("token"):
+    elif user.get("token"):
         options.append(
             {"type": "embedded-token", "source": "selected kubeconfig user entry"}
         )
@@ -448,7 +575,46 @@ def _auth_mechanism(user: dict[str, Any], target: Target) -> dict[str, str]:
     return options[0]
 
 
-def kubernetes_access(target: Target) -> Surface:
+def _cilium_access(target: Target) -> tuple[list[str], dict[str, Any]]:
+    """Prove the Cilium-specific exec path after base cluster access succeeds."""
+    observed: list[str] = []
+    namespace, agent_pod_selector = cilium_discovery(target)
+    observed.append("cilium_namespace:" + namespace)
+    result = run_command(
+        kubectl_argv(
+            target, "auth", "can-i", "create", "pods/exec", "-n", namespace, "-q"
+        ),
+        env=kubernetes_env(target),
+    )
+    if result.returncode:
+        raise ValueError("pods_exec_denied")
+    observed.append("cilium_pods_exec")
+    pods = _json(
+        run_command(
+            kubectl_argv(target, "-n", namespace, "get", "pods", "-o", "json"),
+            env=kubernetes_env(target),
+        )
+    )
+    if not isinstance(pods, dict) or not isinstance(pods.get("items"), list):
+        raise TypeError("invalid_cilium_pod_list")
+    ready = ready_agent_pods(pods["items"], agent_pod_selector, namespace)
+    if not ready:
+        raise ValueError("cilium_ready_pod_missing")
+    pod_name = (ready[0].get("metadata") or {}).get("name")
+    health_result = run_command(
+        kubectl_argv(target, "-n", namespace, "exec", pod_name, "--", *HEALTH_COMMAND),
+        timeout=30,
+        env=kubernetes_env(target),
+    )
+    if health_result.returncode:
+        raise ValueError("cilium_health_exec_failed")
+    if not valid_health(_json(health_result)):
+        raise TypeError("invalid_cilium_health_response")
+    observed.append("cilium_health_exec")
+    return observed, {"cilium_health_pod": pod_name}
+
+
+def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
     name = target.kubernetes.context
     server = target.kubernetes.server
     observed: list[str] = []
@@ -586,53 +752,10 @@ def kubernetes_access(target: Target) -> Surface:
             if result.returncode:
                 raise ValueError(label + "_denied")
             observed.append(label)
-        namespace, agent_pod_selector = cilium_discovery(target)
-        observed.append("cilium_namespace:" + namespace)
-        result = run_command(
-            kubectl_argv(
-                target, "auth", "can-i", "create", "pods/exec", "-n", namespace, "-q"
-            ),
-            env=kubernetes_env(target),
-        )
-        if result.returncode:
-            raise ValueError("pods_exec_denied")
-        observed.append("cilium_pods_exec")
-        pods = _json(
-            run_command(
-                kubectl_argv(target, "-n", namespace, "get", "pods", "-o", "json"),
-                env=kubernetes_env(target),
-            )
-        )
-        if not isinstance(pods, dict) or not isinstance(pods.get("items"), list):
-            raise TypeError("invalid_cilium_pod_list")
-        # Agents come from the DaemonSet's own selector, the same discovery the
-        # collector uses. A name prefix also matches cilium-operator-* and
-        # cilium-envoy-*, which carry no health endpoint.
-        ready = ready_agent_pods(pods["items"], agent_pod_selector, namespace)
-        if not ready:
-            raise ValueError("cilium_ready_pod_missing")
-        pod_name = (ready[0].get("metadata") or {}).get("name")
-        health_result = run_command(
-            kubectl_argv(
-                target,
-                "-n",
-                namespace,
-                "exec",
-                pod_name,
-                "--",
-                *HEALTH_COMMAND,
-            ),
-            timeout=30,
-            env=kubernetes_env(target),
-        )
-        if health_result.returncode:
-            raise ValueError("cilium_health_exec_failed")
-        health = _json(health_result)
-        # Parseable JSON is not a health response.
-        if not valid_health(health):
-            raise TypeError("invalid_cilium_health_response")
-        observed.append("cilium_health_exec")
-        details["cilium_health_pod"] = pod_name
+        if cilium:
+            cilium_observed, cilium_details = _cilium_access(target)
+            observed.extend(cilium_observed)
+            details.update(cilium_details)
     except (
         ValueError,
         KeyError,
@@ -646,7 +769,8 @@ def kubernetes_access(target: Target) -> Surface:
             f"{name} -> {server}",
             observed,
             str(exc),
-            "Verify the exact context, API TLS, cluster admin RBAC, and Cilium exec permission.",
+            "Verify the exact context, API TLS, cluster admin RBAC"
+            + (", and Cilium exec permission." if cilium else "."),
             source,
         )
     return Surface(
@@ -690,6 +814,7 @@ def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
         "skill": gate.get("skill"),
         "consuming_project": gate.get("consuming_project"),
         "credential_sources": gate.get("credential_sources"),
+        "target_selection": gate.get("target_selection"),
         "targets": gate.get("targets"),
         "identities": {
             name: surface.get("identity") for name, surface in surfaces.items()
@@ -698,14 +823,22 @@ def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]:
-    """Probe independent authorities concurrently, then fail closed on any denial."""
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        github_check = github_publication_access if publication else github_access
-        futures = [
-            pool.submit(check, target)
-            for check in (github_check, gitlab_access, kubernetes_access)
-        ]
+def check_access(
+    target: Target, *, publication: bool = False, cilium: bool = True
+) -> dict[str, Any]:
+    """Probe this command's declared authorities and fail closed on denial."""
+    checks = {
+        "github": github_publication_access if publication else github_access,
+        "gitlab": gitlab_access,
+        "kubernetes": lambda selected: kubernetes_access(selected, cilium=cilium),
+    }
+    selected = target.active_surfaces
+    if not selected or any(name not in checks for name in selected):
+        raise ValueError("required_target_surfaces_invalid")
+    if publication and "github" not in selected:
+        raise ValueError("publication_requires_github")
+    with ThreadPoolExecutor(max_workers=len(selected)) as pool:
+        futures = [pool.submit(checks[name], target) for name in selected]
         surfaces = [future.result() for future in futures]
     receipt = {
         "schema_version": "1.0",
@@ -715,6 +848,23 @@ def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]
         "surfaces": {item.name: item.as_dict() for item in surfaces},
     }
     if isinstance(target.sources, Sources):
+        source_by_name = {
+            "github": target.sources.github,
+            "gitlab": target.sources.gitlab,
+            "kubernetes": target.sources.kubernetes,
+        }
+        if any(source_by_name[name] is None for name in selected):
+            raise ValueError("required_credential_source_missing")
+        targets = {}
+        if "github" in selected:
+            targets["github"] = f"{target.github.host}/{target.github.repository}"
+        if "gitlab" in selected:
+            targets["gitlab"] = target.gitlab.url
+        if "kubernetes" in selected:
+            targets["kubernetes"] = {
+                "context": target.kubernetes.context,
+                "server": target.kubernetes.server,
+            }
         receipt.update(
             {
                 "execution_host": target.sources.execution_host,
@@ -725,58 +875,62 @@ def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]
                 "skill": target.skill,
                 "consuming_project": (target.skill or {}).get("consuming_project"),
                 "credential_sources": {
-                    "github": target.sources.github.reference,
-                    "gitlab": target.sources.gitlab.reference,
-                    "kubernetes": target.sources.kubernetes.reference,
+                    name: source_by_name[name].reference for name in selected
                 },
-                "targets": {
-                    "github": f"{target.github.host}/{target.github.repository}",
-                    "gitlab": target.gitlab.url,
-                    "kubernetes": {
-                        "context": target.kubernetes.context,
-                        "server": target.kubernetes.server,
-                    },
-                },
+                "target_selection": target.target_reference,
+                "targets": targets,
             }
         )
     return receipt
 
 
-def dry_run_access(target: Target, *, publication: bool = False) -> dict[str, Any]:
+def dry_run_access(
+    target: Target, *, publication: bool = False, cilium: bool = True
+) -> dict[str, Any]:
+    selected = target.active_surfaces
+    if publication and "github" not in selected:
+        raise ValueError("publication_requires_github")
+    surfaces = {}
+    if "github" in selected:
+        surfaces["github"] = {
+            "target": f"{target.github.host}/{target.github.repository}",
+            "probes": [
+                "gh auth status",
+                "gh api user",
+                "gh api repository",
+                *(["repository admin"] if publication else []),
+            ],
+        }
+    if "gitlab" in selected:
+        surfaces["gitlab"] = {
+            "target": target.gitlab.url,
+            "probes": [
+                "glab auth status",
+                "GET /user is_admin",
+                "GET /runners/all",
+            ],
+        }
+    if "kubernetes" in selected:
+        surfaces["kubernetes"] = {
+            "target": f"{target.kubernetes.context} -> {target.kubernetes.server}",
+            "probes": [
+                "context server",
+                "TLS API version",
+                "auth whoami",
+                "cluster wildcard",
+                "clusterrolebinding admin",
+                *(
+                    ["Cilium namespace", "pods/exec", "non-TTY Cilium health"]
+                    if cilium
+                    else []
+                ),
+            ],
+        }
     return {
         "schema_version": "1.0",
         "kind": "access_check",
         "status": DRY_RUN,
         "publication": publication,
-        "surfaces": {
-            "github": {
-                "target": f"{target.github.host}/{target.github.repository}",
-                "probes": [
-                    "gh auth status",
-                    "gh api user",
-                    "gh api repository",
-                    *(["repository admin"] if publication else []),
-                ],
-            },
-            "gitlab": {
-                "target": target.gitlab.url,
-                "probes": [
-                    "glab auth status",
-                    "GET /user is_admin",
-                    "GET /runners/all",
-                ],
-            },
-            "kubernetes": {
-                "target": f"{target.kubernetes.context} -> {target.kubernetes.server}",
-                "probes": [
-                    "context server",
-                    "TLS API version",
-                    "auth whoami",
-                    "cluster wildcard",
-                    "clusterrolebinding admin",
-                    "Cilium namespace",
-                    "pods/exec",
-                ],
-            },
-        },
+        "target_selection": target.target_reference,
+        "surfaces": surfaces,
     }

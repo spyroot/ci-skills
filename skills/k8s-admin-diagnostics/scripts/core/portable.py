@@ -20,7 +20,13 @@ and a `owner/repository` pair, and acceptance compares those by exact equality.
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import tempfile
+from pathlib import Path
 from typing import Any
+
+from .runtime import redact_tree
 
 DIGEST_LENGTH = 12
 # Fields that carry an absolute path on the execution host. Each is rewritten
@@ -31,10 +37,12 @@ PATH_VALUE_FIELDS = (
     "token_file",
     "kubeconfig",
     "credential_source",
+    "target_selection",
     "target_file",
 )
 PATH_LIST_FIELDS = ("kubeconfig_files",)
 PATH_MAP_FIELDS = ("credential_sources",)
+COMMAND_MAP_FIELDS = ("queries",)
 
 
 def path_token(path: str) -> str:
@@ -49,12 +57,38 @@ def portable_reference(value: str) -> str:
     carries no path, such as `env:GITLAB_TOKEN` or
     `gh-credential-store:github.com`, is returned unchanged.
     """
+    if value.startswith("binding:"):
+        binding, mark, selected = value.removeprefix("binding:").partition("#")
+        if mark:
+            index, separator, source = selected.partition(":")
+            if separator:
+                return (
+                    f"binding:path:{path_token(binding)}#{index}:"
+                    f"{portable_reference(source)}"
+                )
+        return f"binding:path:{path_token(binding)}"
+    if " -> file:" in value:
+        selector, _, path = value.partition(" -> file:")
+        return f"{portable_reference(selector)} -> file:path:{path_token(path)}"
     scheme, separator, remainder = value.partition(":")
+    if scheme == "command" and remainder.startswith("/"):
+        path, marker, digest = remainder.partition("#argv-sha256:")
+        suffix = f"#argv-sha256:{digest}" if marker else ""
+        return f"command:path:{path_token(path)}{suffix}"
     if separator and remainder.startswith("/"):
         return f"{scheme}:path:{path_token(remainder)}"
     if value.startswith("/"):
         return f"path:{path_token(value)}"
     return value
+
+
+def portable_command(argv: list[Any]) -> list[Any]:
+    """Hide the host kubeconfig path in a recorded command argument vector."""
+    result = list(argv)
+    for index, item in enumerate(result[:-1]):
+        if item == "--kubeconfig" and isinstance(result[index + 1], str):
+            result[index + 1] = f"path:{path_token(result[index + 1])}"
+    return result
 
 
 def portable(value: Any, *, key: str | None = None) -> Any:
@@ -66,6 +100,8 @@ def portable(value: Any, *, key: str | None = None) -> Any:
             name: (
                 {inner: portable_reference(item) for inner, item in child.items()}
                 if name in PATH_MAP_FIELDS and isinstance(child, dict)
+                else {inner: portable_command(item) for inner, item in child.items()}
+                if name in COMMAND_MAP_FIELDS and isinstance(child, dict)
                 else [portable_reference(item) for item in child]
                 if name in PATH_LIST_FIELDS and isinstance(child, list)
                 else portable(child, key=name)
@@ -75,3 +111,28 @@ def portable(value: Any, *, key: str | None = None) -> Any:
     if isinstance(value, (list, tuple)):
         return [portable(item, key=key) for item in value]
     return value
+
+
+def write_portable_receipt(data: dict[str, Any], selected: str) -> None:
+    """Atomically write redacted evidence to a caller-selected 0600 file."""
+    destination = Path(selected).expanduser()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    body = json.dumps(portable(redact_tree(data)), indent=2, sort_keys=True) + "\n"
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=f".{destination.name}.",
+            suffix=".partial",
+            dir=destination.parent,
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)

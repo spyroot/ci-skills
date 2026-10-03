@@ -1,0 +1,82 @@
+{
+  "captured_at": "2026-10-03T23:14:21.526689+00:00",
+  "cleanup": {
+    "status": "NOT_APPLICABLE"
+  },
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:2ccda27d0866",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_wiki",
+  "mutated": false,
+  "operation": "create",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "APPLY",
+  "plan": {
+    "body_sha256": "39c7223b785a8072f4e97f72e45e5f97b305e135e21a694c0e6d5e0da76cd6bb",
+    "confirmation_ready": true,
+    "fields": [
+      "content",
+      "title"
+    ],
+    "one_time_sink_required": false,
+    "operation": "create",
+    "plan_digest": "ca33a1832cfe700429c47d254e70313a0f952bd88fdf684833729050e01cae20",
+    "project_ids": null,
+    "resource_id": null,
+    "target_kind": "project",
+    "target_reference": "hott/test"
+  },
+  "plan_digest": "ca33a1832cfe700429c47d254e70313a0f952bd88fdf684833729050e01cae20",
+  "readback": {
+    "action": "NO_OP",
+    "slug": "HOTT-team-ci-skills-PR16-4a57607-wiki-20261003",
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "NO_OP",
+      "slug": "HOTT-team-ci-skills-PR16-4a57607-wiki-20261003",
+      "verified": true
+    }
+  ],
+  "result_action": "NO_OP",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
+    "file_count": 48,
+    "revision": {
+      "source": "git_head",
+      "value": "4a576077ed44adf8c352b789ae41321c906beeb2",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": {
+    "kind": "project",
+    "reference": "hott/test"
+  },
+  "target_file": "path:5e5380df1eda",
+  "target_source": "user;argv:--project",
+  "tested_revision": null,
+  "verified_target": {
+    "full_path": "hott/test",
+    "id": 123,
+    "kind": "project",
+    "web_url": "https://gitlab.dcloud.run/hott/test"
+  }
+}

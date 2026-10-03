@@ -7,33 +7,43 @@ import json
 import os
 import socket
 import sys
+import time
 from collections.abc import Callable
-from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .access import access_evidence, check_access, dry_run_access
+from .access import (
+    access_evidence,
+    check_access,
+    check_gitlab_operation_access,
+    dry_run_access,
+)
 from .catalog import (
+    AUTHORITIES,
     COMMAND_BY_KIND,
+    COMMANDS,
     PROJECT_DIR,
     TARGET_FILENAME,
     describe,
     missing_required_options,
 )
-from .credentials import bind_sources
+from .credentials import bind_gitlab_session, bind_sources
 from .portable import portable
-from .report import emit
+from .project_binding import BINDING_ENV, resolve_target_file
+from .project_binding import resolve_target as resolve_project_target
+from .report import emit, report
 from .runtime import redact_tree, sanitize
 from .status import (
     BLOCKED,
+    DRY_RUN,
     PASS,
     PROFILE_BASE,
     PROFILE_DRY_RUN,
     PROFILE_FULL,
     exit_code,
 )
-from .target import Target, TargetError, load_target
+from .target import GitLabOperationTarget, Target, TargetError
 
 # The documented per-host location. Keeping it here rather than in each script
 # means one answer to "where does the target live", and the script-interface
@@ -50,53 +60,40 @@ COLLECTOR_KINDS = {
     "collect_events": "event_trace",
     "collect_cilium": "cilium_status",
     "collect_gitlab_job": "gitlab_job",
+    "collect_ceph_cluster": "ceph_cluster",
+    "collect_mtu_consistency": "k8s_verify_mtu_consistency",
 }
 ACCESS_CHECK_KIND = "access_check"
 
 
-def _target_candidates() -> list[tuple[str, Path]]:
-    """Return the target search path, in declared order."""
-    candidates: list[tuple[str, Path]] = []
-    configured = (os.environ.get("CI_SKILLS_TARGET") or "").strip()
-    if configured:
-        candidates.append(("env:CI_SKILLS_TARGET", Path(configured).expanduser()))
-    # Absolute, deliberately. A relative candidate reports `target_file` as
-    # ".ci-skills/target.toml", which identifies no file: it means a different
-    # place for every caller, it tells a receipt's reader nothing, and the
-    # no-target error would not say where it actually looked.
-    candidates.append(("project", Path.cwd() / PROJECT_DIR / TARGET_FILENAME))
-    candidates.append(("user", Path(DEFAULT_TARGET).expanduser()))
-    return candidates
-
-
 def resolve_target(explicit: str | None) -> tuple[Path, str]:
-    """Resolve the target file and say which declared source supplied it.
+    """Preserve the target-file resolver used by existing command consumers."""
+    return resolve_target_file(explicit)
 
-    First match wins. An explicit path that does not exist is an error rather
-    than a fallback: silently reading a different target than the one asked for
-    is how a command ends up aimed at the wrong cluster.
-    """
-    if explicit:
-        path = Path(explicit).expanduser()
-        if not path.is_file():
-            raise TargetError(f"target_file_missing:{path}")
-        return path, "argv:--target"
-    configured = (os.environ.get("CI_SKILLS_TARGET") or "").strip()
-    if configured:
-        path = Path(configured).expanduser()
-        if not path.is_file():
-            raise TargetError(f"target_file_missing:{path}")
-        return path, "env:CI_SKILLS_TARGET"
-    for source, path in _target_candidates():
-        if path.is_file():
-            return path, source
-    searched = ", ".join(str(path) for _source, path in _target_candidates())
-    raise TargetError(
-        "no_target_file. This skill RESOLVES a target; it cannot create one. "
-        "Copy target.toml.template to "
-        f"{DEFAULT_TARGET} and fill in your authorities, or have the calling "
-        "project supply one via --target or CI_SKILLS_TARGET. "
-        f"Searched: {searched}"
+
+def resolve_gitlab_target(
+    explicit_target: str | None,
+    explicit_binding: str | None,
+    *,
+    dry_run: bool = False,
+) -> tuple[GitLabOperationTarget, str]:
+    """Resolve one GitLab target through the declared target or binding tier."""
+    selected = resolve_project_target(
+        explicit_target,
+        explicit_binding,
+        dry_run=dry_run,
+        required_surfaces=("gitlab",),
+    )
+    if selected.gitlab is None or selected.source_file is None:
+        raise TargetError("gitlab_target_unresolved")
+    if selected.source_kind == "binding":
+        selector = "argv:--binding" if explicit_binding else f"env:{BINDING_ENV}"
+        source = f"{selector} -> {selected.target_reference}"
+    else:
+        source = selected.source_kind or "target"
+    return (
+        GitLabOperationTarget(selected.gitlab, selected.source_file.resolve()),
+        source,
     )
 
 
@@ -123,22 +120,65 @@ def output_mode(args: argparse.Namespace) -> str:
     return "human" if interactive else "json"
 
 
-def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(
+class MachineArgumentParser(argparse.ArgumentParser):
+    """Keep parser failures in the selected machine-readable result shape."""
+
+    def __init__(
+        self, *args: Any, report_kind: str | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.report_kind = report_kind
+        self._raw_argv: tuple[str, ...] = ()
+
+    def parse_args(
+        self, args: list[str] | None = None, namespace: argparse.Namespace | None = None
+    ) -> argparse.Namespace:
+        self._raw_argv = tuple(sys.argv[1:] if args is None else args)
+        return super().parse_args(self._raw_argv, namespace)
+
+    def error(self, message: str) -> None:
+        modes = [
+            flag.partition("=")[0]
+            for flag in self._raw_argv
+            if flag.partition("=")[0] in {"--json", "--yaml"}
+        ]
+        if not modes:
+            super().error(message)
+        mode = modes[0]
+        kind = self.report_kind or COMMANDS.get(Path(self.prog).name, {}).get(
+            "kind", "arguments"
+        )
+        reason = "invalid_arguments"
+        _failure(
+            argparse.Namespace(json=mode == "--json", yaml=mode == "--yaml"),
+            kind,
+            "arguments",
+            reason,
+        )
+        self.exit(2)
+
+
+def parser(
+    description: str, *, output_dir: bool = True, kind: str | None = None
+) -> argparse.ArgumentParser:
+    result = MachineArgumentParser(
+        report_kind=kind,
         description=description,
         epilog=(
             "Output: a terminal gets the human summary; a pipe or file gets "
             "versioned JSON, so no flag is needed when a program reads this. "
             "Force it with --json, --yaml or --human. "
-            "Exit 0 = PASS or DRY_RUN, 2 = BLOCKED or PARTIAL. "
+            "Exit 0 = PASS, DRY_RUN or PLANNED; 2 = BLOCKED or PARTIAL. "
             "Run --describe for this command's machine-readable contract, or "
             "see tools.json for the whole skill. "
-            f"Target resolves in order: --target, CI_SKILLS_TARGET, "
+            "Target resolves in order: --target or --binding, "
+            "CI_SKILLS_TARGET or K8S_ADMIN_DIAGNOSTICS_BINDING, "
             f"./{PROJECT_DIR}/{TARGET_FILENAME}, {DEFAULT_TARGET}. "
             "Example: %(prog)s --json"
         ),
     )
-    result.add_argument(
+    selection = result.add_mutually_exclusive_group()
+    selection.add_argument(
         "--target",
         metavar="PATH",
         default=None,
@@ -146,6 +186,11 @@ def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentPar
             "nonsecret TOML target file "
             f"(default: {DEFAULT_TARGET}, override with CI_SKILLS_TARGET)"
         ),
+    )
+    selection.add_argument(
+        "--binding",
+        metavar="PATH",
+        help="explicit project binding for target and ordered kubeconfig sources",
     )
     modes = result.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print versioned JSON")
@@ -170,11 +215,87 @@ def parser(description: str, *, output_dir: bool = True) -> argparse.ArgumentPar
         metavar="SHA",
         help="exact source commit SHA (required for live installed copies without Git metadata)",
     )
+    result.add_argument(
+        "--log-format",
+        choices=("text", "json"),
+        default="text",
+        help="diagnostic format on stderr and in --log-file (default: text)",
+    )
+    result.add_argument(
+        "--log-level",
+        choices=("debug", "info", "warning", "error"),
+        default="info",
+        help="minimum diagnostic level (default: info)",
+    )
+    result.add_argument(
+        "--log-file",
+        metavar="PATH",
+        help="also append sanitized diagnostics to PATH",
+    )
+    result.add_argument(
+        "--run-id",
+        metavar="ID",
+        help="stable identifier for diagnostic logs",
+    )
     if output_dir:
         result.add_argument(
             "--output-dir", metavar="PATH", help="write paired JSON and human reports"
         )
     return result
+
+
+def log_event(
+    args: argparse.Namespace,
+    kind: str,
+    event: str,
+    status: str,
+    *,
+    elapsed: float = 0.0,
+    error_class: str | None = None,
+    persist: bool = True,
+) -> None:
+    """Emit one bounded, secret-free diagnostic line to stderr and an optional file."""
+    level = "error" if status in {BLOCKED, "PARTIAL"} else "info"
+    thresholds = {"debug": 0, "info": 1, "warning": 2, "error": 3}
+    if thresholds[level] < thresholds[getattr(args, "log_level", "info")]:
+        return
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "level": level,
+        "run_id": sanitize(getattr(args, "run_id", None) or "", 80)
+        .replace("\r", " ")
+        .replace("\n", " "),
+        "component": kind,
+        "operation": sanitize(getattr(args, "action", None) or "check", 40),
+        "mode": (
+            "live_plan"
+            if getattr(args, "live_plan", False)
+            else "dry_run"
+            if getattr(args, "dry_run", False) or not getattr(args, "apply", True)
+            else "live"
+        ),
+        "event": event,
+        "attempt": 1,
+        "resource": kind,
+        "result": status,
+        "elapsed_time_ms": max(0, round(elapsed * 1000)),
+        "error_class": error_class,
+    }
+    if getattr(args, "log_format", "text") == "json":
+        line = json.dumps(record, sort_keys=True) + "\n"
+    else:
+        line = (
+            f"{record['timestamp']} {level.upper()} {kind} "
+            f"{record['operation']} {event} result={status} "
+            f"run_id={record['run_id']}\n"
+        )
+    sys.stderr.write(line)
+    destination = getattr(args, "log_file", None)
+    if destination and persist:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(Path(destination).expanduser(), flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(line)
 
 
 def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> int:
@@ -189,6 +310,19 @@ def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> i
         "errors": [{"source": source, "reason": sanitize(reason, 240)}],
         "summary": {"record_count": 0, "error_count": 1},
     }
+    try:
+        log_event(
+            args,
+            kind,
+            "failure",
+            BLOCKED,
+            error_class=source,
+            persist=not getattr(args, "dry_run", False)
+            and getattr(args, "apply", True),
+        )
+    except OSError:
+        # The structured failure must survive an unavailable optional log file.
+        pass
     # The reader rule applies to a failure too. A program piping a cold run
     # hits the no-target error FIRST, so emitting only a stderr line there made
     # the one shape a caller cannot parse the one it meets first -- and it
@@ -210,6 +344,7 @@ def execute(
     *,
     live_checks: bool = False,
 ) -> int:
+    started = time.monotonic()
     kind = (
         ACCESS_CHECK_KIND
         if collect is None
@@ -230,6 +365,10 @@ def execute(
         contract = describe(script)
         sys.stdout.write(json.dumps(contract, indent=2, sort_keys=True) + "\n")
         return 0
+    if args.dry_run and any(
+        getattr(args, name, None) for name in ("output_dir", "receipt_out", "log_file")
+    ):
+        return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
     missing = missing_required_options(script, args) if script else []
     if missing:
         # Enforced here rather than by argparse because --describe must answer
@@ -241,20 +380,24 @@ def execute(
         )
     source = "target"
     try:
-        target_path, target_source = resolve_target(args.target)
-        target = replace(
-            load_target(target_path),
-            source_file=target_path,
-            source_kind=target_source,
+        required_surfaces = (
+            tuple(COMMANDS[script]["requires"]) if script else AUTHORITIES
+        )
+        target = resolve_project_target(
+            args.target,
+            getattr(args, "binding", None),
+            dry_run=args.dry_run,
+            required_surfaces=required_surfaces,
         )
         publication = bool(getattr(args, "publication", False))
         if not args.dry_run:
             target = bind_sources(target, revision=getattr(args, "revision", None))
         source = "access_check"
+        needs_cilium = kind in {ACCESS_CHECK_KIND, "cilium_status"}
         gate = (
-            dry_run_access(target, publication=publication)
+            dry_run_access(target, publication=publication, cilium=needs_cilium)
             if args.dry_run
-            else check_access(target, publication=publication)
+            else check_access(target, publication=publication, cilium=needs_cilium)
         )
         if args.dry_run and collect is not None:
             probes = {
@@ -262,7 +405,7 @@ def execute(
                     "concurrent node, Pod, PVC/PV, StorageClass, CSI, attachment, controller reads"
                 ],
                 "collect_events": [
-                    "core and events.k8s.io reads",
+                    "events.k8s.io read; core fallback only if resource is absent",
                     "time and object filtering",
                 ],
                 "collect_cilium": [
@@ -273,12 +416,21 @@ def execute(
                     "job, pipeline, runner API reads",
                     "bounded job trace read",
                 ],
+                "collect_ceph_cluster": [
+                    "concurrent Ceph status, OSD tree, inactive PG and OSD/monitor Pod reads",
+                    "node, Ready and Pod condition filtering",
+                ],
+                "collect_mtu_consistency": [
+                    "read selected nodes and create temporary oc debug Pods on apply",
+                    "read PCI Ethernet IPv4 links and verify Pod cleanup",
+                ],
             }
             gate["collection_probes"] = probes.get(collect.__name__, [])
             gate["filters"] = {
                 key: value
                 for key, value in vars(args).items()
-                if key not in {"target", "json", "yaml", "dry_run", "output_dir"}
+                if key
+                not in {"target", "binding", "json", "yaml", "dry_run", "output_dir"}
             }
         # Only access_check.py runs the expanded bundle, so every report names
         # which gate it actually passed rather than the docs implying one.
@@ -312,7 +464,11 @@ def execute(
             )
             os.replace(partial, destination)
         mode = output_mode(args)
-        sys.stdout.write(emit(data, mode, getattr(args, "output_dir", None)))
+        rendered = emit(data, mode, getattr(args, "output_dir", None))
+        log_event(
+            args, kind, "result", data["status"], elapsed=time.monotonic() - started
+        )
+        sys.stdout.write(rendered)
         return exit_code(data["status"])
     except (
         TargetError,
@@ -325,4 +481,77 @@ def execute(
     ) as exc:
         return _failure(args, kind, source, str(exc))
     except Exception:  # noqa: BLE001 - preserve structured output for unexpected provider data
+        return _failure(args, kind, source, "unexpected_runtime_failure")
+
+
+def execute_gitlab_job(args: argparse.Namespace) -> int:
+    """Read one job through the GitLab-only target and bound access session."""
+    from .collect import collect_gitlab_job, gitlab_job_reference
+
+    kind = "gitlab_job"
+    if args.describe:
+        sys.stdout.write(json.dumps(describe(COMMAND_BY_KIND[kind]), indent=2) + "\n")
+        return 0
+    if args.dry_run and (args.output_dir or args.log_file):
+        return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
+    missing = missing_required_options(COMMAND_BY_KIND[kind], args)
+    if missing:
+        return _failure(
+            args, kind, "arguments", f"{', '.join(missing)} is required; see --describe"
+        )
+    source = "target"
+    started = time.monotonic()
+    try:
+        target, target_source = resolve_gitlab_target(
+            args.target, args.binding, dry_run=args.dry_run
+        )
+        source = "arguments"
+        project, _job_id = gitlab_job_reference(args.job_url, target.gitlab.host)
+        filters = {"job_url": args.job_url, "search": args.search}
+        if args.dry_run:
+            data = report(kind, target.gitlab.url, filters, [], [])
+            data["status"] = DRY_RUN
+            data["target_source"] = target_source
+            data["access"] = {
+                "status": DRY_RUN,
+                "target": {"kind": "project", "reference": project},
+                "observed_capability": [],
+            }
+            data["collection_probes"] = [
+                "exact GitLab identity and project reads",
+                "job, pipeline, runner and bounded trace reads",
+            ]
+        else:
+            source = "credential"
+            session = bind_gitlab_session(
+                target,
+                target_kind="project",
+                target_reference=project,
+                target_source=f"{target_source};argv:--job-url",
+                revision=args.revision,
+            )
+            source = "access"
+            gate = check_gitlab_operation_access(session)
+            if gate["status"] != PASS:
+                data = report(kind, target.gitlab.url, filters, [], gate["errors"])
+                data["status"] = BLOCKED
+            else:
+                source = "collect_gitlab_job"
+                data = collect_gitlab_job(
+                    target, args, credential=dict(session.environment)
+                )
+            data["access"] = gate
+            data["execution_host"] = session.execution_host
+            data["tested_revision"] = session.skill["revision"]["value"]
+            data["skill"] = session.skill
+            data["target_source"] = session.target_source
+        rendered = emit(data, output_mode(args), args.output_dir)
+        log_event(
+            args, kind, "result", data["status"], elapsed=time.monotonic() - started
+        )
+        sys.stdout.write(rendered)
+        return exit_code(data["status"])
+    except (TargetError, RuntimeError, ValueError, OSError, TypeError, KeyError) as exc:
+        return _failure(args, kind, source, str(exc))
+    except Exception:  # noqa: BLE001 - preserve the machine result on provider failures
         return _failure(args, kind, source, "unexpected_runtime_failure")

@@ -4,15 +4,26 @@
 from __future__ import annotations
 
 import argparse
+import errno
+import fcntl
 import json
 import os
 import shutil
+import signal
+import stat
 import sys
 import tempfile
+import threading
+import time
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 SKILL_NAME = "k8s-admin-diagnostics"
+JOURNAL_NAME = f".{SKILL_NAME}.install-transaction.json"
+LOCK_NAME = f".{SKILL_NAME}.install.lock"
+LOCK_WAIT_SECONDS = 30
 SOURCE = Path(__file__).resolve().parents[1] / "skills" / SKILL_NAME
 sys.path.insert(0, str(SOURCE / "scripts"))
 
@@ -22,10 +33,13 @@ RECOVERY = {
     "skill_manifest_missing": "Use a checkout containing skills/k8s-admin-diagnostics/SKILL.md.",
     "skill_symlink_unexpected": "Remove the symlink from the source skill tree and retry.",
     "source_revision_unverified": "Install from a clean checkout of the merged skill revision.",
-    "destination_exists": "Inspect the existing skill directory before choosing another --skills-dir.",
-    "destination_symlink": "Replace the symlink with a real skill directory before upgrading.",
-    "destination_not_directory": "Inspect the existing destination before upgrading.",
-    "backup_exists": "Inspect the prior backup before upgrading this skill again.",
+    "destination_exists": "Inspect the installed skill, then use --upgrade --apply --confirm-upgrade.",
+    "destination_symlink": "Choose a real skills directory; the installed skill cannot be a symlink.",
+    "destination_not_directory": "Inspect the existing path; an installed skill must be a directory.",
+    "incomplete_install_recover": "Run --recover --apply --confirm-recover, then retry installation.",
+    "install_recovery_unsafe": "Inspect the installed skill and transaction journal before changing either.",
+    "install_io_failure": "Run --recover --apply --confirm-recover, then retry installation.",
+    "install_lock_timeout": "Wait for the other installer process to finish, then retry.",
     "installed_digest_mismatch": "Inspect source changes and retry from a clean checkout.",
     "pyyaml_unavailable": "Install PyYAML in the project environment or select --json.",
 }
@@ -49,7 +63,188 @@ def package_files(source: Path) -> list[Path]:
     return [path.relative_to(source) for path in _included(source)]
 
 
-def install(
+def _journal_path(skills_dir: Path) -> Path:
+    return skills_dir / JOURNAL_NAME
+
+
+@contextmanager
+def _mutation_lock(skills_dir: Path):
+    """Serialize destination inspection and mutation across local processes."""
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(
+        skills_dir / LOCK_NAME,
+        os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+            raise ValueError("install_recovery_unsafe")
+        deadline = time.monotonic() + LOCK_WAIT_SECONDS
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EAGAIN}:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise ValueError("install_lock_timeout") from exc
+                time.sleep(0.1)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
+def _write_journal(skills_dir: Path, data: dict[str, Any]) -> None:
+    """Publish a complete transaction atomically before moving the old skill."""
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{SKILL_NAME}.journal-", dir=skills_dir
+    )
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary, _journal_path(skills_dir))
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _recoverable_signals():
+    """Turn process interrupts into exceptions while an install can recover."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = {
+        signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+
+    def interrupt(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    try:
+        for signum in previous:
+            signal.signal(signum, interrupt)
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def _read_journal(skills_dir: Path) -> tuple[dict[str, Any], Path, Path]:
+    journal = _journal_path(skills_dir)
+    metadata = journal.lstat()
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+        raise ValueError("install_recovery_unsafe")
+    try:
+        data = json.loads(journal.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise ValueError("install_recovery_unsafe") from exc
+    if not isinstance(data, dict) or data.get("schema_version") != "1.0":
+        raise ValueError("install_recovery_unsafe")
+    nonce = data.get("nonce")
+    if (
+        not isinstance(nonce, str)
+        or len(nonce) != 32
+        or any(char not in "0123456789abcdef" for char in nonce)
+    ):
+        raise ValueError("install_recovery_unsafe")
+    if not all(
+        isinstance(data.get(key), str) and len(data[key]) == 64
+        for key in ("old_digest", "new_digest")
+    ):
+        raise ValueError("install_recovery_unsafe")
+    staging = skills_dir / f".{SKILL_NAME}.stage-{nonce}"
+    previous = skills_dir / f".{SKILL_NAME}.previous-{nonce}"
+    if staging.is_symlink() or previous.is_symlink():
+        raise ValueError("install_recovery_unsafe")
+    return data, staging, previous
+
+
+def _recover_install_unlocked(skills_dir: Path, *, dry_run: bool) -> dict[str, Any]:
+    """Reconcile one interrupted install without deleting an unknown skill."""
+    skills_dir = skills_dir.expanduser().resolve()
+    destination = skills_dir / SKILL_NAME
+    result: dict[str, Any] = {
+        "schema_version": "1.0",
+        "kind": "skill_install_recovery",
+        "destination": str(destination),
+    }
+    try:
+        data, staging, previous = _read_journal(skills_dir)
+        if destination.is_symlink() or (
+            destination.exists() and not destination.is_dir()
+        ):
+            raise ValueError("install_recovery_unsafe")
+        if destination.exists() and previous.exists():
+            if tree_digest(destination)["digest"] != data["new_digest"]:
+                raise ValueError("install_recovery_unsafe")
+            action = "complete_verified_activation"
+        elif not destination.exists() and previous.exists():
+            if tree_digest(previous)["digest"] != data["old_digest"]:
+                raise ValueError("install_recovery_unsafe")
+            action = "restore_previous"
+        elif destination.exists() and not previous.exists():
+            current = tree_digest(destination)["digest"]
+            if current not in {data["old_digest"], data["new_digest"]}:
+                raise ValueError("install_recovery_unsafe")
+            action = "clear_unstarted_transaction"
+        elif (
+            not destination.exists()
+            and not previous.exists()
+            and data["old_digest"] == "0" * 64
+        ):
+            action = "clear_unstarted_transaction"
+        else:
+            raise ValueError("install_recovery_unsafe")
+        result["action"] = action
+        result["previous_version"] = str(previous) if previous.exists() else None
+        if dry_run:
+            result["status"] = "DRY_RUN"
+            return result
+        if action == "restore_previous":
+            previous.rename(destination)
+        if staging.exists():
+            shutil.rmtree(staging)
+        _journal_path(skills_dir).unlink()
+        result["status"] = "PASS"
+        result["digest"] = (
+            tree_digest(destination)["digest"] if destination.exists() else None
+        )
+    except (OSError, ValueError) as exc:
+        reason = str(exc) if isinstance(exc, ValueError) else "install_io_failure"
+        result.update(
+            status="BLOCKED",
+            reason=reason,
+            safe_next_step=RECOVERY.get(reason, RECOVERY["install_recovery_unsafe"]),
+        )
+    return result
+
+
+def recover_install(skills_dir: Path, *, dry_run: bool) -> dict[str, Any]:
+    """Recover under the same lock as installation and upgrade."""
+    if dry_run:
+        return _recover_install_unlocked(skills_dir, dry_run=True)
+    try:
+        with _mutation_lock(skills_dir.expanduser().resolve()):
+            return _recover_install_unlocked(skills_dir, dry_run=False)
+    except (OSError, ValueError) as exc:
+        reason = str(exc) if isinstance(exc, ValueError) else "install_io_failure"
+        return {
+            "schema_version": "1.0",
+            "kind": "skill_install_recovery",
+            "destination": str(skills_dir.expanduser().resolve() / SKILL_NAME),
+            "status": "BLOCKED",
+            "reason": reason,
+            "safe_next_step": RECOVERY.get(reason, RECOVERY["install_recovery_unsafe"]),
+        }
+
+
+def _install_unlocked(
     source: Path,
     skills_dir: Path,
     *,
@@ -57,7 +252,7 @@ def install(
     require_verified: bool = True,
     upgrade: bool = False,
 ) -> dict[str, Any]:
-    """Install or explicitly upgrade a skill, preserving the previous copy."""
+    """Stage and verify a skill with a recoverable cross-rename journal."""
     skills_dir = skills_dir.expanduser().resolve()
     destination = skills_dir / SKILL_NAME
     result: dict[str, Any] = {
@@ -65,6 +260,7 @@ def install(
         "kind": "skill_install",
         "source": str(source.resolve()),
         "destination": str(destination),
+        "action": "upgrade" if upgrade else "install",
     }
     try:
         files = package_files(source)
@@ -73,55 +269,67 @@ def install(
             raise ValueError("source_revision_unverified")
         expected_digest = tree_digest(source)
         result.update(**expected_digest, revision=identity["revision"])
-        backup: Path | None = None
         if destination.is_symlink():
             raise ValueError("destination_symlink")
-        if destination.exists():
-            if not upgrade:
-                raise ValueError("destination_exists")
-            if not destination.is_dir() or not (destination / "SKILL.md").is_file():
-                raise ValueError("destination_not_directory")
-            installed_digest = tree_digest(destination)["digest"]
-            if installed_digest == expected_digest["digest"]:
-                result["status"] = "DRY_RUN" if dry_run else "PASS"
-                result["already_installed"] = True
-                return result
-            backup = skills_dir / f".{SKILL_NAME}-backup-{installed_digest[:12]}"
-            if backup.exists() or backup.is_symlink():
-                raise ValueError("backup_exists")
-            result["previous_destination"] = str(backup)
+        if destination.exists() and not destination.is_dir():
+            raise ValueError("destination_not_directory")
+        if destination.exists() and not upgrade:
+            raise ValueError("destination_exists")
+        if _journal_path(skills_dir).exists():
+            raise ValueError("incomplete_install_recover")
+        if (
+            upgrade
+            and destination.exists()
+            and tree_digest(destination) == expected_digest
+        ):
+            result.update(
+                status="DRY_RUN" if dry_run else "PASS", already_installed=True
+            )
+            return result
         if dry_run:
             result["status"] = "DRY_RUN"
             return result
         skills_dir.mkdir(parents=True, exist_ok=True)
-        staging = Path(tempfile.mkdtemp(prefix=f".{SKILL_NAME}-", dir=skills_dir))
-        moved_old = False
-        installed_new = False
+        nonce = uuid.uuid4().hex
+        staging = skills_dir / f".{SKILL_NAME}.stage-{nonce}"
+        previous = skills_dir / f".{SKILL_NAME}.previous-{nonce}"
+        old_digest = (
+            tree_digest(destination)["digest"] if destination.exists() else "0" * 64
+        )
         try:
-            for relative in files:
-                target = staging / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source / relative, target)
-            if tree_digest(staging) != expected_digest:
-                raise ValueError("installed_digest_mismatch")
-            if backup is not None:
-                destination.rename(backup)
-                moved_old = True
-            staging.rename(destination)
-            installed_new = True
-            if tree_digest(destination) != expected_digest:
-                raise ValueError("installed_digest_mismatch")
+            with _recoverable_signals():
+                _write_journal(
+                    skills_dir,
+                    {
+                        "schema_version": "1.0",
+                        "nonce": nonce,
+                        "old_digest": old_digest,
+                        "new_digest": expected_digest["digest"],
+                    },
+                )
+                staging.mkdir(mode=0o700)
+                for relative in files:
+                    target = staging / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source / relative, target)
+                if tree_digest(staging) != expected_digest:
+                    raise ValueError("installed_digest_mismatch")
+                if destination.exists():
+                    destination.rename(previous)
+                    result["previous_version"] = str(previous)
+                staging.rename(destination)
+                if tree_digest(destination) != expected_digest:
+                    raise ValueError("installed_digest_mismatch")
+                _journal_path(skills_dir).unlink()
         except BaseException:
-            if installed_new:
-                shutil.rmtree(destination)
-            if moved_old and backup is not None:
-                backup.rename(destination)
-            if staging.exists():
-                shutil.rmtree(staging)
+            if _journal_path(skills_dir).exists():
+                recovered = _recover_install_unlocked(skills_dir, dry_run=False)
+                if recovered["status"] != "PASS":
+                    raise ValueError("install_recovery_unsafe") from None
             raise
         result["status"] = "PASS"
     except (OSError, ValueError) as exc:
-        reason = str(exc)
+        reason = str(exc) if isinstance(exc, ValueError) else "install_io_failure"
         result.update(
             status="BLOCKED",
             reason=reason,
@@ -130,6 +338,43 @@ def install(
             ),
         )
     return result
+
+
+def install(
+    source: Path,
+    skills_dir: Path,
+    *,
+    dry_run: bool,
+    require_verified: bool = True,
+    upgrade: bool = False,
+) -> dict[str, Any]:
+    """Serialize the full install decision and mutation for one skill root."""
+    preflight = _install_unlocked(
+        source,
+        skills_dir,
+        dry_run=True,
+        require_verified=require_verified,
+        upgrade=upgrade,
+    )
+    if dry_run or preflight["status"] == "BLOCKED":
+        return preflight
+    try:
+        with _mutation_lock(skills_dir.expanduser().resolve()):
+            return _install_unlocked(
+                source,
+                skills_dir,
+                dry_run=False,
+                require_verified=require_verified,
+                upgrade=upgrade,
+            )
+    except (OSError, ValueError) as exc:
+        reason = str(exc) if isinstance(exc, ValueError) else "install_io_failure"
+        return {
+            **preflight,
+            "status": "BLOCKED",
+            "reason": reason,
+            "safe_next_step": RECOVERY.get(reason, RECOVERY["install_recovery_unsafe"]),
+        }
 
 
 def main() -> int:
@@ -143,11 +388,35 @@ def main() -> int:
         default=skills_directory(),
         help="Codex skills directory (default: $CODEX_HOME/skills or ~/.codex/skills)",
     )
-    parser.add_argument("--dry-run", action="store_true", help="show the install plan")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--dry-run", action="store_true", help="show the install plan (default)"
+    )
+    mode.add_argument("--apply", action="store_true", help="copy the verified skill")
     parser.add_argument(
         "--upgrade",
         action="store_true",
-        help="replace an existing skill and retain its prior copy as a backup",
+        help="replace an installed skill and preserve its previous version",
+    )
+    parser.add_argument(
+        "--recover",
+        action="store_true",
+        help="reconcile an interrupted install or upgrade",
+    )
+    parser.add_argument(
+        "--confirm-install",
+        action="store_true",
+        help="confirm a new installation with --apply",
+    )
+    parser.add_argument(
+        "--confirm-upgrade",
+        action="store_true",
+        help="confirm replacement with --apply --upgrade",
+    )
+    parser.add_argument(
+        "--confirm-recover",
+        action="store_true",
+        help="confirm recovery with --recover --apply",
     )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print JSON")
@@ -170,9 +439,49 @@ def main() -> int:
                 )
             )
             return 2
-    result = install(
-        SOURCE, args.skills_dir, dry_run=args.dry_run, upgrade=args.upgrade
-    )
+    if args.recover and args.upgrade:
+        result = {
+            "schema_version": "1.0",
+            "kind": "skill_install_recovery",
+            "status": "BLOCKED",
+            "destination": str(args.skills_dir.expanduser().resolve() / SKILL_NAME),
+            "reason": "recover_and_upgrade_conflict",
+            "safe_next_step": "Run --recover first, then start a separate --upgrade.",
+        }
+    elif args.apply and not (
+        args.confirm_recover
+        if args.recover
+        else args.confirm_upgrade
+        if args.upgrade
+        else args.confirm_install
+    ):
+        result = {
+            "schema_version": "1.0",
+            "kind": "skill_install_recovery" if args.recover else "skill_install",
+            "status": "BLOCKED",
+            "source": str(SOURCE.resolve()),
+            "destination": str(args.skills_dir.expanduser().resolve() / SKILL_NAME),
+            "action": "recover"
+            if args.recover
+            else "upgrade"
+            if args.upgrade
+            else "install",
+            "reason": "confirmation_required",
+            "safe_next_step": (
+                "Use --confirm-recover with --recover --apply, "
+                "--confirm-upgrade with --upgrade --apply, "
+                "or --confirm-install with --apply."
+            ),
+        }
+    elif args.recover:
+        result = recover_install(args.skills_dir, dry_run=not args.apply)
+    else:
+        result = install(
+            SOURCE,
+            args.skills_dir,
+            dry_run=not args.apply,
+            upgrade=args.upgrade,
+        )
     if args.yaml:
         print(yaml.safe_dump(result, sort_keys=True), end="")
     elif args.json:
