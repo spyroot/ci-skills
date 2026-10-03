@@ -87,6 +87,35 @@ def _pod(
     }
 
 
+def test_ceph_health_checks_preserve_exact_findings_and_reject_malformed_detail():
+    ceph_cluster = import_script_module("core.ceph_cluster")
+    health = {
+        "status": "HEALTH_WARN",
+        "checks": {
+            "OSD_DOWN": {
+                "severity": "HEALTH_WARN",
+                "summary": {"message": "one OSD is down"},
+                "detail": [{"message": "osd.1 is down"}],
+            }
+        },
+    }
+
+    status, findings = ceph_cluster._health(health)
+    assert status == "HEALTH_WARN"
+    assert findings == [
+        {
+            "code": "OSD_DOWN",
+            "severity": "HEALTH_WARN",
+            "summary": "one OSD is down",
+            "detail": ["osd.1 is down"],
+        }
+    ]
+
+    health["checks"]["OSD_DOWN"]["detail"] = {"message": "invalid"}
+    with pytest.raises(TypeError, match="status:invalid_health_detail"):
+        ceph_cluster._health(health)
+
+
 def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
     monkeypatch,
     tmp_path,
