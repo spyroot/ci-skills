@@ -4,11 +4,13 @@
 
 This repository provides `k8s-admin-diagnostics`, a skill for GitLab CI and
 Kubernetes diagnostics. Separate commands read GitLab jobs and pipelines,
-storage and events, Cilium, and Ceph. GitLab milestone, bug, wiki, and runner
-commands support planned writes with independent read-back. Each command
-checks its selected authority; `access_check.py` proves GitHub, GitLab, and
-Kubernetes together. Node diagnostics use non-TTY `kubectl exec` into existing
-Pods selected by the target file.
+storage and events, Cilium, Ceph, and physical NIC MTU consistency. GitLab
+milestone, bug, wiki, and runner commands support planned writes with
+independent read-back. Each command checks its selected authority;
+`access_check.py` proves GitHub, GitLab, and Kubernetes together. Cilium and
+Ceph node diagnostics use non-TTY `kubectl exec` into existing Pods; the
+OpenShift MTU command creates temporary debug Pods only with `--apply` and a
+matching plan digest.
 
 Output follows the reader: a terminal gets a human summary, a pipe or a file
 gets versioned JSON. A program calling these commands therefore needs no
@@ -256,10 +258,19 @@ is written.
 - `ceph_cluster.py --namespace NAME` reads Ceph health, root/rack/host/OSD
   hierarchy, inactive PGs, and OSD/monitor Pods on the pinned cluster.
   It accepts `--operator`, `--node`, `--ready`, and `--condition` filters.
+- `k8s_verify_mtu_consistency.py --json` reads the selected node inventory and
+  prints a plan digest. To collect PCI Ethernet IPv4 interface MTUs, run
+  `k8s_verify_mtu_consistency.py --apply --confirm-plan SHA256 --json` with
+  that digest. This OpenShift command requires `oc` and `kubectl` and blocks
+  on a non-OpenShift API. `--node NAME` scopes both calls. The apply uses
+  `oc debug`, creates temporary Pods, and verifies cleanup; its JSON and human
+  table show each node, interface, PCI device, IPv4 address and MTU. A
+  mismatch is `PARTIAL` with a finding, and no host interface is changed.
 
-The node commands run from the host where the skill is installed. They use the
-same target and Kubernetes access gate as the cluster collectors, then select
-exactly one Running Pod on the declared node. They never create a Pod:
+The Cilium and Ceph node commands run from the skill's execution host. They
+use the same target and Kubernetes access gate as the cluster collectors,
+then select exactly one Running Pod on the declared node. They never create a
+Pod:
 
 - `cilium_node.py --json` executes `cilium-dbg status --verbose --output json`
   and `cilium-health status --verbose --output json` concurrently inside the

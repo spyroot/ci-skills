@@ -82,6 +82,7 @@
   "commands": {
     "access_check.py": {
       "capabilities": [],
+      "execution_surface": "selected authority API",
       "options": [
         "--binding",
         "--ceph-namespace",
@@ -105,12 +106,14 @@
       "read_only": true,
       "report_kind": "access_check",
       "required_options": [],
+      "required_tools": [],
       "requires_authorities": [
         "github",
         "gitlab",
         "kubernetes"
       ],
       "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
+      "side_effects": "none",
       "subcommands": {},
       "use_when": "When you need one live receipt proving GitHub, GitLab, and Kubernetes access on the execution host."
     },
@@ -119,6 +122,7 @@
         "namespaced",
         "node_scoped"
       ],
+      "execution_surface": "selected authority API",
       "options": [
         "--binding",
         "--condition",
@@ -146,10 +150,12 @@
       "required_options": [
         "--namespace"
       ],
+      "required_tools": [],
       "requires_authorities": [
         "kubernetes"
       ],
       "returns": "Ceph status, nested OSD tree, inactive PGs, and filtered OSD/monitor Pod records.",
+      "side_effects": "none",
       "subcommands": {},
       "use_when": "A selected Rook Ceph cluster needs API-backed diagnostics."
     },
@@ -213,6 +219,7 @@
         "namespaced",
         "node_scoped"
       ],
+      "execution_surface": "selected authority API",
       "options": [
         "--binding",
         "--describe",
@@ -235,10 +242,12 @@
       "read_only": true,
       "report_kind": "cilium_status",
       "required_options": [],
+      "required_tools": [],
       "requires_authorities": [
         "kubernetes"
       ],
       "returns": "One record per agent with non-TTY health and actionable peer findings; UNKNOWN where exec could not run.",
+      "side_effects": "none",
       "subcommands": {},
       "use_when": "Connectivity is suspect, or a node's CNI may differ from its Ready condition."
     },
@@ -248,6 +257,7 @@
         "namespaced",
         "time_ranged"
       ],
+      "execution_surface": "selected authority API",
       "options": [
         "--binding",
         "--describe",
@@ -275,15 +285,18 @@
       "read_only": true,
       "report_kind": "event_trace",
       "required_options": [],
+      "required_tools": [],
       "requires_authorities": [
         "kubernetes"
       ],
       "returns": "One record per event, deduplicated across both APIs, oldest first.",
+      "side_effects": "none",
       "subcommands": {},
       "use_when": "You need what the cluster said during an interval. Pass the interval; a zero count with zero errors means the events aged out, not that the read failed."
     },
     "gitlab_access.py": {
       "capabilities": [],
+      "execution_surface": "selected authority API",
       "options": [
         "--binding",
         "--describe",
@@ -306,10 +319,12 @@
       "read_only": true,
       "report_kind": "gitlab_access",
       "required_options": [],
+      "required_tools": [],
       "requires_authorities": [
         "gitlab"
       ],
       "returns": "The effective source, identity, origin, and numeric project or group ID.",
+      "side_effects": "none",
       "subcommands": {
         "check": {
           "purpose": "read back GitLab identity and selected target"
@@ -319,6 +334,7 @@
     },
     "gitlab_issue.py": {
       "capabilities": [],
+      "execution_surface": "selected authority API",
       "options": [
         "--apply",
         "--binding",
@@ -347,10 +363,12 @@
       "read_only": false,
       "report_kind": "gitlab_issue",
       "required_options": [],
+      "required_tools": [],
       "requires_authorities": [
         "gitlab"
       ],
       "returns": "A sanitized plan or verified issue IID and independent GET evidence.",
+      "side_effects": "none",
       "subcommands": {
         "create-bug": {
           "required_options": [
@@ -369,6 +387,7 @@
       "capabilities": [
         "filters_records"
       ],
+      "execution_surface": "selected authority API",
       "options": [
         "--binding",
         "--describe",
@@ -392,15 +411,18 @@
       "required_options": [
         "--job-url"
       ],
+      "required_tools": [],
       "requires_authorities": [
         "gitlab"
       ],
       "returns": "One record: job, pipeline, runner, and the last 200 trace lines, sanitized.",
+      "side_effects": "none",
       "subcommands": {},
       "use_when": "A named job failed and you need its own facts, not the cluster's."
     },
     "gitlab_milestone.py": {
       "capabilities": [],
+      "execution_surface": "selected authority API",
       "options": [
         "--apply",
         "--binding",
@@ -432,10 +454,12 @@
       "read_only": false,
       "report_kind": "gitlab_milestone",
       "required_options": [],
+      "required_tools": [],
       "requires_authorities": [
         "gitlab"
       ],
       "returns": "A sanitized plan or verified milestone record and independent GET evidence.",
+      "side_effects": "none",
       "subcommands": {
         "adjust-time": {
           "required_options": [
@@ -457,6 +481,7 @@
     },
     "gitlab_pipeline.py": {
       "capabilities": [],
+      "execution_surface": "selected authority API",
       "options": [
         "--binding",
         "--describe",
@@ -480,15 +505,18 @@
       "required_options": [
         "--pipeline-id"
       ],
+      "required_tools": [],
       "requires_authorities": [
         "gitlab"
       ],
       "returns": "One validated pipeline with stage and job status counts, up to 500 job records, and a PARTIAL result when the job cap is exceeded.",
+      "side_effects": "none",
       "subcommands": {},
       "use_when": "You need the status and progress of an exact GitLab pipeline."
     },
     "gitlab_runner.py": {
       "capabilities": [],
+      "execution_surface": "selected authority API",
       "options": [
         "--apply",
         "--binding",
@@ -520,10 +548,12 @@
       "read_only": false,
       "report_kind": "gitlab_runner",
       "required_options": [],
+      "required_tools": [],
       "requires_authorities": [
         "gitlab"
       ],
       "returns": "A sanitized plan or verified runner record and assignment evidence.",
+      "side_effects": "none",
       "subcommands": {
         "assign": {
           "required_options": [
@@ -542,6 +572,7 @@
     },
     "gitlab_wiki.py": {
       "capabilities": [],
+      "execution_surface": "selected authority API",
       "options": [
         "--apply",
         "--binding",
@@ -569,10 +600,12 @@
       "read_only": false,
       "report_kind": "gitlab_wiki",
       "required_options": [],
+      "required_tools": [],
       "requires_authorities": [
         "gitlab"
       ],
       "returns": "A sanitized plan or verified wiki slug and independent GET evidence.",
+      "side_effects": "none",
       "subcommands": {
         "create": {
           "required_options": [
@@ -589,12 +622,54 @@
       },
       "use_when": "A selected project wiki page needs requested content."
     },
+    "k8s_verify_mtu_consistency.py": {
+      "capabilities": [
+        "node_scoped"
+      ],
+      "execution_surface": "OpenShift API and temporary oc debug Pods",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--node",
+        "--output-dir",
+        "--revision",
+        "--run-id",
+        "--target",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Compare PCI Ethernet IPv4 uplink MTUs across selected Kubernetes nodes.",
+      "read_only": false,
+      "report_kind": "k8s_verify_mtu_consistency",
+      "required_options": [],
+      "required_tools": [
+        "kubectl",
+        "oc",
+        "ip on the selected node"
+      ],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "A versioned table of node, PCI NIC, IPv4 address and MTU, consistency findings, and temporary-Pod cleanup read-back.",
+      "side_effects": "oc debug creates temporary Pods; apply verifies their cleanup",
+      "subcommands": {},
+      "use_when": "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; plan the selected nodes, then run the exact confirmed plan."
+    },
     "storage_report.py": {
       "capabilities": [
         "filters_records",
         "namespaced",
         "node_scoped"
       ],
+      "execution_surface": "selected authority API",
       "options": [
         "--binding",
         "--describe",
@@ -619,10 +694,12 @@
       "read_only": true,
       "report_kind": "storage_report",
       "required_options": [],
+      "required_tools": [],
       "requires_authorities": [
         "kubernetes"
       ],
       "returns": "One record per claim or standalone volume, with its pods, attachments and controllers.",
+      "side_effects": "none",
       "subcommands": {},
       "use_when": "A workload will not start or a volume looks stuck, and you need the chain."
     }
@@ -658,6 +735,7 @@
     "create or change a GitLab wiki page": "gitlab_wiki.py",
     "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
     "open a GitLab bug": "gitlab_issue.py",
+    "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
     "prove all three authorities": "access_check.py",
     "what the cluster said during an interval": "event_trace.py"
   },

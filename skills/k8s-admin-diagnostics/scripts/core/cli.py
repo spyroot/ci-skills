@@ -61,6 +61,7 @@ COLLECTOR_KINDS = {
     "collect_cilium": "cilium_status",
     "collect_gitlab_job": "gitlab_job",
     "collect_ceph_cluster": "ceph_cluster",
+    "collect_mtu_consistency": "k8s_verify_mtu_consistency",
 }
 ACCESS_CHECK_KIND = "access_check"
 
@@ -392,6 +393,10 @@ def execute(
                 "collect_ceph_cluster": [
                     "concurrent Ceph status, OSD tree, inactive PG and OSD/monitor Pod reads",
                     "node, Ready and Pod condition filtering",
+                ],
+                "collect_mtu_consistency": [
+                    "read selected nodes and create temporary oc debug Pods on apply",
+                    "read PCI Ethernet IPv4 links and verify Pod cleanup",
                 ],
             }
             gate["collection_probes"] = probes.get(collect.__name__, [])

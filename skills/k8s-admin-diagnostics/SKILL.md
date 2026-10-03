@@ -1,6 +1,6 @@
 ---
 name: k8s-admin-diagnostics
-description: Diagnose GitLab CI jobs and pipelines with Kubernetes storage, Cilium, Ceph, and node evidence; perform selected GitLab milestone, issue, wiki, and runner operations with verified credentials.
+description: Diagnose GitLab CI, Kubernetes storage, Cilium, Ceph, and physical NIC MTUs; perform selected GitLab milestone, issue, wiki, and runner operations.
 metadata:
   manifest: tools.json
   default_output: json when stdout is not a terminal
@@ -10,9 +10,11 @@ metadata:
 # Kubernetes diagnostics and GitLab operations
 
 Diagnose a Kubernetes-backed CI, storage, or network symptom, or act on an
-explicit GitLab request. Diagnostic commands are read-only. GitLab operation
-commands default to an offline dry-run and write only with `--apply` and the
-printed plan fingerprint.
+explicit GitLab request. GitLab operation commands default to an offline
+dry-run and write only with `--apply` and the printed plan fingerprint.
+`k8s_verify_mtu_consistency.py --apply` creates temporary OpenShift debug Pods
+and verifies cleanup; its default invocation reads the selected node inventory
+and returns a plan.
 
 ## 1. Choose the command for the symptom
 
@@ -81,6 +83,7 @@ Routing, in short:
 | create or update a wiki page | `gitlab_wiki.py` |
 | assign or create a runner record | `gitlab_runner.py` |
 | Ceph hierarchy and Pods | `ceph_cluster.py --namespace NAME` |
+| physical PCI NIC MTU mismatch across nodes | `k8s_verify_mtu_consistency.py` |
 | Cilium daemon and health on a selected node | `cilium_node.py` |
 | Ceph or RBD kernel messages on that node | `ceph_kernel.py` |
 
@@ -131,7 +134,8 @@ pair; pass the job's own interval when correlating a job.
   unhealthy. `records[].findings` names explicit Cilium daemon, peer, or
   endpoint failures with an inspection action. Say which component.
 - `BLOCKED` — see `blocking_live_checks` and the surface `reason`.
-- `DRY_RUN` — a probe plan. Never access evidence.
+- `DRY_RUN` — a plan, never proof of NIC MTUs. The MTU planner reads the
+  authenticated node inventory; other collectors do not contact their APIs.
 - `PLANNED` — a live, read-only group assignment plan with bound project IDs.
 - `UNKNOWN` — a per-item reading could not be taken. Preserve it; do not
   coerce it to a failure or a pass.
@@ -180,3 +184,24 @@ and use the same pinned kubeconfig/context/server and Kubernetes access gate
 as the cluster collectors;
 neither creates a Pod or repairs a node. Both accept `--search TEXT`;
 `ceph_kernel.py` also accepts `--classification NAME`.
+
+## 8. Verify physical uplink MTUs
+
+On OpenShift, for Ceph connectivity, RBD timeout, or cross-node network
+symptoms, check physical MTU consistency before searching node interfaces by
+hand. This command requires `oc` as well as `kubectl`, and blocks if the
+selected API is not OpenShift. Run
+`scripts/k8s_verify_mtu_consistency.py --json` in the selected project. It
+resolves the same exact Kubernetes target, verifies access, reads the node
+inventory, and returns `plan_digest` without creating a Pod. Then run
+`scripts/k8s_verify_mtu_consistency.py --apply --confirm-plan SHA256 --json`
+using that digest. `--node NAME` restricts both calls to one existing node.
+
+The apply uses `oc debug node/NAME` to read `ip -d -j addr show` through
+`chroot /host`. It selects PCI Ethernet interfaces with an IPv4 address,
+compares their MTUs, and emits one versioned JSON report or a human table.
+The command creates temporary debug Pods in the selected context's namespace,
+tags them for this run, deletes any survivors, and reads back their absence.
+An incomplete read or cleanup is `BLOCKED` or `PARTIAL`; a real MTU mismatch is
+`PARTIAL` with `physical_mtu_mismatch` and an inspection action. It does not
+change host interfaces or repair networking.

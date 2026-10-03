@@ -55,6 +55,11 @@ def kubectl_argv(target: Target, *args: str) -> list[str]:
     return command
 
 
+def oc_argv(target: Target, *args: str) -> list[str]:
+    """Use the same pinned kubeconfig and context for OpenShift commands."""
+    return ["oc", *kubectl_argv(target, *args)[1:]]
+
+
 def glab_argv(target: Target | GitLabOperationTarget, endpoint: str) -> list[str]:
     return [
         "glab",

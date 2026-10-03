@@ -410,6 +410,34 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "required_options": ("--namespace",),
         "returns": "Ceph status, nested OSD tree, inactive PGs, and filtered OSD/monitor Pod records.",
     },
+    "k8s_verify_mtu_consistency.py": {
+        "kind": "k8s_verify_mtu_consistency",
+        "purpose": "Compare PCI Ethernet IPv4 uplink MTUs across selected Kubernetes nodes.",
+        "use_when": (
+            "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; "
+            "plan the selected nodes, then run the exact confirmed plan."
+        ),
+        "execution_surface": "OpenShift API and temporary oc debug Pods",
+        "required_tools": ("kubectl", "oc", "ip on the selected node"),
+        "requires": ("kubernetes",),
+        "capabilities": ("node_scoped",),
+        "mutates": True,
+        "options": {
+            "--dry-run": "read exact node inventory and return a plan without creating Pods",
+            "--apply": "create temporary oc debug Pods for the confirmed plan",
+            "--confirm-plan": "SHA256 digest returned by the dry-run plan",
+            "--timeout": "per-node oc debug timeout in seconds",
+            "--log-format": "text or JSON Lines diagnostics on stderr",
+            "--log-level": "minimum diagnostic level",
+            "--log-file": "optional private diagnostic log path",
+            "--run-id": "correlation ID for logs and the temporary Pod marker",
+        },
+        "returns": (
+            "A versioned table of node, PCI NIC, IPv4 address and MTU, "
+            "consistency findings, and temporary-Pod cleanup read-back."
+        ),
+        "side_effects": "oc debug creates temporary Pods; apply verifies their cleanup",
+    },
 }
 
 # Node diagnostics use existing selected Pods through the same API target.
@@ -512,6 +540,9 @@ def describe(script: str) -> dict[str, Any]:
         "returns": entry["returns"],
         "mutates": entry.get("mutates", False),
         "subcommands": entry.get("subcommands", {}),
+        "side_effects": entry.get("side_effects", "none"),
+        "execution_surface": entry.get("execution_surface", "selected authority API"),
+        "required_tools": list(entry.get("required_tools", ())),
         "status_values": STATUS_MEANING,
         "exit_codes": EXIT_CODES,
         "default_output": "json when stdout is not a terminal, human when it is",
@@ -576,6 +607,11 @@ def manifest() -> dict[str, Any]:
                     "returns": entry["returns"],
                     "read_only": not entry.get("mutates", False),
                     "subcommands": entry.get("subcommands", {}),
+                    "side_effects": entry.get("side_effects", "none"),
+                    "execution_surface": entry.get(
+                        "execution_surface", "selected authority API"
+                    ),
+                    "required_tools": list(entry.get("required_tools", ())),
                 }
                 for script, entry in COMMANDS.items()
             },
@@ -612,5 +648,6 @@ def manifest() -> dict[str, Any]:
             "Cilium daemon and health on a selected node": "cilium_node.py",
             "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
             "Ceph cluster health and OSD/monitor Pods": "ceph_cluster.py",
+            "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
         },
     }

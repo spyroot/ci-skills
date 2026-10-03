@@ -58,6 +58,38 @@ def report(
 
 
 def human(data: dict[str, Any]) -> str:
+    if data.get("kind") == "k8s_verify_mtu_consistency":
+        records = data.get("records", [])
+        lines = [
+            f"Physical NIC MTU: {data.get('status', 'UNKNOWN')}",
+            f"Target: {data.get('target', 'unknown')}",
+            f"Plan: {data.get('plan_digest', 'unavailable')}",
+            f"Nodes: {len(data.get('planned_nodes', []))} selected",
+            "Selection: PCI Ethernet interfaces with an IPv4 address",
+            "Apply creates temporary oc debug Pods and verifies cleanup.",
+        ]
+        if records:
+            lines.append(
+                "NODE                      INTERFACE     PCI DEVICE       MTU   STATE   IPv4"
+            )
+            for row in records[:128]:
+                lines.append(
+                    f"{sanitize(row['node'], 25):25} "
+                    f"{sanitize(row['interface'], 13):13} "
+                    f"{sanitize(row['pci_device'], 16):16} "
+                    f"{row['mtu']:5} "
+                    f"{sanitize(row['oper_state'], 7):7} "
+                    f"{sanitize(','.join(row['ipv4_addresses']), 48)}"
+                )
+            if len(records) > 128:
+                lines.append(f"... {len(records) - 128} more interfaces in JSON")
+        for finding in data.get("findings", []):
+            lines.append(f"Finding: {finding['code']} MTUs={finding['mtu_values']}")
+        for error in data.get("errors", []):
+            lines.append(f"Error: {error.get('source')}: {error.get('reason')}")
+        if cleanup := data.get("cleanup"):
+            lines.append(f"Cleanup: {cleanup.get('status', 'UNKNOWN')}")
+        return "\n".join(lines) + "\n"
     lines = [
         f"{data.get('kind', 'diagnostic')}: {data.get('status', 'UNKNOWN')}",
         f"Target: {data.get('target', 'unknown')}",

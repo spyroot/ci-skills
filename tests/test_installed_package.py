@@ -175,6 +175,17 @@ if tool == "kubectl":
         raise SystemExit(98)
     context_index = args.index("--context")
     kargs = args[context_index + 2:]
+    if kargs == ["config", "view", "--minify", "-o", "jsonpath={..namespace}"]:
+        print("default")
+        raise SystemExit(0)
+    if kargs == ["-n", "default", "get", "pods", "-o", "json"]:
+        emit({"items": []})
+    if kargs == ["get", "--raw=/apis/config.openshift.io/v1"]:
+        emit({
+            "kind": "APIResourceList",
+            "groupVersion": "config.openshift.io/v1",
+            "resources": [],
+        })
     if kargs[:2] in (["-n", "cilium"], ["-n", "diagnostics"]):
         namespace = kargs[1]
         journal = namespace == "diagnostics"
@@ -353,7 +364,21 @@ if tool == "kubectl":
     raise SystemExit(98)
 
 if tool == "oc":
-    if "--context" not in args or "-n" not in args:
+    if "--context" not in args:
+        raise SystemExit(98)
+    if "debug" in args:
+        if "--to-namespace=default" not in args or "-t" in args or "-i" in args:
+            raise SystemExit(97)
+        emit([{
+            "ifname": "eno1",
+            "mtu": 9000,
+            "operstate": "UP",
+            "link_type": "ether",
+            "parentbus": "pci",
+            "parentdev": "0000:0a:00.0",
+            "addr_info": [{"family": "inet", "local": "192.0.2.10"}],
+        }])
+    if "-n" not in args:
         raise SystemExit(98)
     if "exec" in args:
         if "-s" in args:
@@ -599,6 +624,63 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     assert blocked["status"] == "BLOCKED"
     assert blocked["errors"]
     assert str(REPO_ROOT) not in failure.stdout
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
+)
+def test_installed_mtu_entrypoint_plans_and_applies_from_unrelated_cwd(
+    tmp_path, fake_bin, mode, loader
+):
+    """The new installed command needs no source PYTHONPATH or ambient context."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    for tool in ("gh", "glab", "kubectl", "oc"):
+        install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _write_target(tmp_path, kubeconfig)
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "LC_ALL": "C",
+            "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+        }
+    )
+    script = installed / "scripts" / "k8s_verify_mtu_consistency.py"
+    base = [sys.executable, str(script), "--target", str(target), mode]
+    plan = subprocess.run(
+        base,
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    planned = loader(plan.stdout)
+    assert plan.returncode == 0
+    assert planned["status"] == "DRY_RUN"
+
+    applied = subprocess.run(
+        [*base, "--apply", "--confirm-plan", planned["plan_digest"]],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data = loader(applied.stdout)
+    assert applied.returncode == 0
+    assert data["status"] == "PASS"
+    assert data["cleanup"]["verified"] is True
+    assert data["summary"]["consistent"] is True
+    assert data["records"][0]["interface"] == "eno1"
+    assert str(REPO_ROOT) not in applied.stdout
 
 
 def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(

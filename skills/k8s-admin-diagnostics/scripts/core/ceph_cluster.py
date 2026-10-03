@@ -7,8 +7,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from .access import kubernetes_env
-from .credentials import Sources, assert_kubeconfig_unchanged
+from .access import kubernetes_env, oc_argv
 from .report import report
 from .runtime import CommandResult, error_class, run_command_tail
 from .status import PARTIAL, PASS
@@ -23,16 +22,7 @@ KUBERNETES_NAME = re.compile(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?\Z")
 
 def _oc_prefix(target: Target, namespace: str) -> list[str]:
     """Bind every oc call to the same credential files and context as the gate."""
-    assert_kubeconfig_unchanged(target.sources)
-    command = ["oc"]
-    if (
-        isinstance(target.sources, Sources)
-        and len(target.sources.kubeconfig_files) == 1
-    ):
-        command += ["--kubeconfig", str(target.sources.kubeconfig_files[0])]
-    elif target.kubernetes.kubeconfig:
-        command += ["--kubeconfig", str(target.kubernetes.kubeconfig)]
-    return [*command, "--context", target.kubernetes.context, "-n", namespace]
+    return oc_argv(target, "-n", namespace)
 
 
 def _json_response(result: CommandResult, source: str) -> Any:
