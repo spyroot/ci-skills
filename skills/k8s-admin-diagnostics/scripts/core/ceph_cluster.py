@@ -118,7 +118,9 @@ def _pods(
 
 def _inactive_pgs(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, dict):
-        payload = payload.get("pg_stats", payload.get("pgs"))
+        payload = payload.get(
+            "stuck_pg_stats", payload.get("pg_stats", payload.get("pgs"))
+        )
     if not isinstance(payload, list):
         raise TypeError("inactive_pgs:invalid_response")
     result = []

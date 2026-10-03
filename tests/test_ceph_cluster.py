@@ -189,7 +189,8 @@ def test_ceph_cluster_filters_pods_by_node_ready_and_condition(
     responses = {
         "status": {"health": {"status": "HEALTH_OK"}},
         "osd_tree": {"nodes": []},
-        "inactive_pgs": {"pg_stats": []},
+        # Ceph's live dump_stuck envelope uses stuck_pg_stats even when empty.
+        "inactive_pgs": {"pg_ready": True, "stuck_pg_stats": []},
         "pods": {
             "items": [
                 _pod("ready-on-worker-a", node="worker-a", ready="True"),
@@ -222,6 +223,20 @@ def test_ceph_cluster_filters_pods_by_node_ready_and_condition(
     assert result["records"][0]["ready"] is False
     assert result["records"][0]["conditions"]["PodScheduled"] == "False"
     assert result["actions"] == ["inspect_unready_ceph_pods"]
+
+
+def test_ceph_cluster_parses_live_dump_stuck_envelope():
+    """Ceph pg dump_stuck returns stuck_pg_stats rather than pg_stats."""
+    ceph_cluster = import_script_module("core.ceph_cluster")
+
+    assert ceph_cluster._inactive_pgs(
+        {
+            "pg_ready": True,
+            "stuck_pg_stats": [{"pgid": "1.2", "state": "inactive"}],
+        }
+    ) == [{"pgid": "1.2", "state": "inactive"}]
+    with pytest.raises(TypeError, match="inactive_pgs:invalid_response"):
+        ceph_cluster._inactive_pgs({"pg_ready": True, "stuck_pg_stats": None})
 
 
 @pytest.mark.parametrize(
