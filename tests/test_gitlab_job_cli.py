@@ -48,6 +48,7 @@ def test_live_job_uses_exact_gitlab_project_access_and_bound_token(
     session = SimpleNamespace(
         environment={"GITLAB_TOKEN": "selected-token"},
         execution_host="worker.example.test",
+        target_source="argv:--target;argv:--job-url",
         skill={"revision": {"value": "a" * 40}},
     )
 
@@ -99,6 +100,7 @@ def test_job_access_failure_preserves_failed_subcheck_and_skips_collection(
     session = SimpleNamespace(
         environment={"GITLAB_TOKEN": "selected-token"},
         execution_host="worker.example.test",
+        target_source="argv:--target;argv:--job-url",
         skill={"revision": {"value": "a" * 40}},
     )
     monkeypatch.setattr(CLI, "bind_gitlab_session", lambda *_args, **_kwargs: session)
