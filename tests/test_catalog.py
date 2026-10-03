@@ -22,6 +22,7 @@ from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
 
 CATALOG = import_script_module("core.catalog")
 CLI = import_script_module("core.cli")
+PROJECT_BINDING = import_script_module("core.project_binding")
 RENDER = load_module("render_manifest", REPO_ROOT / "tools" / "render_manifest.py")
 MANIFEST_PATH = SCRIPT_ROOT.parent / "tools.json"
 
@@ -244,7 +245,7 @@ def test_the_declared_target_protocol_is_the_chain_the_code_searches():
     declared = [step["source"] for step in CATALOG.TARGET_PROTOCOL]
     searched = [
         "argv:--target",
-        *(source for source, _path in CLI._target_candidates()),
+        *(source for source, _path in PROJECT_BINDING.target_candidates()),
     ]
 
     # No CI_SKILLS_TARGET in this environment, so that tier is absent from the

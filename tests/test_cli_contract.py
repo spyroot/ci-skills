@@ -112,7 +112,10 @@ def test_output_modes_are_mutually_exclusive(target_file):
     )
 
     assert result.returncode == 2
-    assert "not allowed with argument" in result.stderr
+    assert result.stderr == ""
+    data = json.loads(result.stdout)
+    assert data["status"] == "BLOCKED"
+    assert data["errors"] == [{"source": "arguments", "reason": "invalid_arguments"}]
 
 
 @pytest.mark.parametrize(

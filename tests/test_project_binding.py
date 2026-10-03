@@ -271,6 +271,7 @@ def test_invalid_higher_tier_blocks_lower_target_fallback(
     project_binding = _project_binding()
     _clear_target_selectors(project_binding, monkeypatch)
     project = tmp_path / "project"
+    project.mkdir()
     user_target = _write_target(
         tmp_path / "home" / ".ci-skills", filename="target.toml", context="tier-4"
     )
