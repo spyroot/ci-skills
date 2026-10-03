@@ -84,6 +84,18 @@ def human(data: dict[str, Any]) -> str:
                 ]
             lines.append("    trace_tail:")
             lines.extend("      " + sanitize(line, 240) for line in trace_lines[-40:])
+        elif kind == "gitlab_pipeline":
+            progress = item.get("progress") or {}
+            lines.append(
+                "    jobs: "
+                f"{progress.get('terminal', 0)}/{progress.get('total', 0)} terminal"
+            )
+            for stage in item.get("stages", []):
+                lines.append(
+                    "    stage="
+                    + sanitize(str(stage.get("name", "")), 120)
+                    + f" terminal={stage.get('terminal', 0)}/{stage.get('total', 0)}"
+                )
         elif kind == "storage_report":
             for label in ("pods", "attachments", "controllers"):
                 if item.get(label):

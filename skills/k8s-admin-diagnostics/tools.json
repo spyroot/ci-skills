@@ -350,6 +350,37 @@
       },
       "use_when": "A selected project or group milestone needs a requested change."
     },
+    "gitlab_pipeline.py": {
+      "capabilities": [],
+      "options": [
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--output-dir",
+        "--pipeline-id",
+        "--project",
+        "--revision",
+        "--run-id",
+        "--target",
+        "--yaml"
+      ],
+      "purpose": "Read one CI pipeline and bounded job progress by stage.",
+      "read_only": true,
+      "report_kind": "gitlab_pipeline",
+      "required_options": [
+        "--pipeline-id"
+      ],
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "returns": "One validated pipeline with stage and job status counts, up to 500 job records, and a PARTIAL result when the job cap is exceeded.",
+      "subcommands": {},
+      "use_when": "You need the status and progress of an exact GitLab pipeline."
+    },
     "gitlab_runner.py": {
       "capabilities": [],
       "options": [
@@ -499,6 +530,7 @@
     "a named CI job failed": "gitlab_job.py",
     "a volume or claim is stuck": "storage_report.py",
     "assign or create a GitLab runner": "gitlab_runner.py",
+    "check GitLab pipeline progress": "gitlab_pipeline.py",
     "connectivity or CNI health": "cilium_status.py",
     "create or change a GitLab milestone": "gitlab_milestone.py",
     "create or change a GitLab wiki page": "gitlab_wiki.py",

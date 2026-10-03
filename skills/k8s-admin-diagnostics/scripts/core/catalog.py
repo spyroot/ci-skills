@@ -214,6 +214,22 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "required_options": ("--job-url",),
         "returns": "One record: job, pipeline, runner, and the last 200 trace lines, sanitized.",
     },
+    "gitlab_pipeline.py": {
+        "kind": "gitlab_pipeline",
+        "purpose": "Read one CI pipeline and bounded job progress by stage.",
+        "use_when": "You need the status and progress of an exact GitLab pipeline.",
+        "requires": ("gitlab",),
+        "capabilities": (),
+        "options": {
+            "--project": "exact project path or numeric ID; otherwise use gitlab.project",
+            "--pipeline-id": "numeric ID of the pipeline to read",
+        },
+        "required_options": ("--pipeline-id",),
+        "returns": (
+            "One validated pipeline with stage and job status counts, up to 500 "
+            "job records, and a PARTIAL result when the job cap is exceeded."
+        ),
+    },
     "gitlab_access.py": {
         "kind": "gitlab_access",
         "purpose": "Resolve the effective GitLab credential and read back identity and exact target.",
@@ -481,6 +497,7 @@ def manifest() -> dict[str, Any]:
         "routing": {
             "prove access first": "access_check.py",
             "a named CI job failed": "gitlab_job.py",
+            "check GitLab pipeline progress": "gitlab_pipeline.py",
             "GitLab operation access": "gitlab_access.py",
             "create or change a GitLab milestone": "gitlab_milestone.py",
             "open a GitLab bug": "gitlab_issue.py",

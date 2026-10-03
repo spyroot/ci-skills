@@ -23,6 +23,12 @@ ENTRYPOINT_CASES = (
         "gitlab_job",
         "PASS",
     ),
+    (
+        "gitlab_pipeline.py",
+        ("--project", "unit/repo", "--pipeline-id", "77"),
+        "gitlab_pipeline",
+        "PASS",
+    ),
     ("storage_report.py", (), "storage_report", "PASS"),
     (
         "event_trace.py",
@@ -131,6 +137,22 @@ if tool == "glab":
         })
     if endpoint == "projects/unit%2Frepo/pipelines/77":
         emit({"id": 77, "status": "success"})
+    if endpoint == "projects/12/pipelines/77":
+        emit({
+            "id": 77,
+            "project_id": 12,
+            "status": "success",
+            "ref": "main",
+            "sha": "a" * 40,
+        })
+    if endpoint == "projects/12/pipelines/77/jobs?per_page=100&page=1":
+        emit([{
+            "id": 123,
+            "name": "selected-job",
+            "stage": "test",
+            "status": "success",
+            "pipeline": {"id": 77},
+        }])
     if endpoint == "runners/9":
         emit({"id": 9, "description": "runner-a"})
     if endpoint == "projects/unit%2Frepo/jobs/123/trace":

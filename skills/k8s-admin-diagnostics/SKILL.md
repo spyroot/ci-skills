@@ -1,6 +1,6 @@
 ---
 name: k8s-admin-diagnostics
-description: Collect GitLab CI and Kubernetes diagnostics, or perform explicitly confirmed GitLab milestone, bug, wiki, and runner operations against a selected target. Reports the effective credential source and verified identity.
+description: Read GitLab job and pipeline progress, collect Kubernetes diagnostics, or perform explicitly confirmed GitLab milestone, bug, wiki, and runner operations against a selected target. Reports the effective credential source and verified identity.
 metadata:
   manifest: tools.json
   first_call: scripts/access_check.py
@@ -20,7 +20,7 @@ printed plan fingerprint.
 
 ## 1. Choose the access route
 
-For diagnostics, run the full access check first:
+For Kubernetes diagnostics, run the full access check first:
 
     scripts/access_check.py --publication
 
@@ -43,7 +43,7 @@ that declares `kubernetes.kubeconfigs` is how you avoid aiming elsewhere.
 Provisioning access is not this skill's job. If a kubeconfig has to be fetched
 or minted first, that belongs to the calling project's own instructions.
 
-For a GitLab milestone, bug, wiki, or runner request, start with
+For a GitLab job, pipeline, milestone, bug, wiki, or runner request, start with
 `scripts/gitlab_access.py check`. It resolves only the selected GitLab target
 and effective credential source, then reads back the GitLab identity and
 numeric project or group ID. A GitLab-only target file does not select a
@@ -63,6 +63,7 @@ Routing, in short:
 | --- | --- |
 | proof of access, before trusting anything | `access_check.py` |
 | a named CI job's own facts | `gitlab_job.py --job-url URL` |
+| pipeline progress | `gitlab_pipeline.py --project PATH --pipeline-id ID` |
 | why a volume or claim is stuck | `storage_report.py` |
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |
