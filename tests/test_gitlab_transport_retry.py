@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -48,6 +49,7 @@ def test_get_retries_only_transient_failures_with_unchanged_target_and_retry_aft
     assert len(calls) == 3
     assert all(call == calls[0] for call in calls)
     assert "--include" in calls[0][0]
+    assert "--header" not in calls[0][0]
     assert 0.2 <= sleeps[0] <= 0.24
     assert sleeps[1] == 1
 
@@ -163,6 +165,25 @@ def test_delete_accepts_empty_success_and_removes_no_body_file():
     )
     assert calls[0][calls[0].index("--method") + 1] == "DELETE"
     assert "--input" not in calls[0]
+    assert "--header" not in calls[0]
+
+
+@pytest.mark.parametrize("method", ("post_json", "put_json"))
+def test_json_body_write_declares_content_type(method):
+    calls = []
+
+    def command(argv, *, timeout, env):
+        calls.append(tuple(argv))
+        assert argv[argv.index("--header") + 1] == "Content-Type: application/json"
+        with Path(argv[argv.index("--input") + 1]).open(encoding="utf-8") as body:
+            assert json.load(body) == {"title": "one"}
+        return _result(0, 'HTTP/2 200 OK\r\n\r\n{"id":42}')
+
+    result = getattr(API.GlabAPIClient(command=command), method)(
+        _session(), "projects/42/issues", {"title": "one"}
+    )
+    assert result == {"id": 42}
+    assert len(calls) == 1
 
 
 def test_json_capture_kills_a_child_before_retaining_unbounded_response():

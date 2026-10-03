@@ -328,7 +328,14 @@ class GlabAPIClient:
                 except BaseException:
                     temporary.unlink(missing_ok=True)
                     raise
-                argv.extend(("--input", str(temporary)))
+                argv.extend(
+                    (
+                        "--header",
+                        "Content-Type: application/json",
+                        "--input",
+                        str(temporary),
+                    )
+                )
             for attempt in range(READ_ATTEMPTS if method == "GET" else 1):
                 result = self._command(
                     argv,
