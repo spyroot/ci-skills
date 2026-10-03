@@ -9,6 +9,7 @@ import subprocess
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 # How long a killed child is given to be reaped, so the worst case is the
@@ -252,6 +253,7 @@ def run_command_tail(
     max_bytes: int = 65536,
     max_lines: int = 200,
     env: dict[str, str | None] | None = None,
+    cwd: str | Path | None = None,
 ) -> CommandResult:
     """Stream a command and retain only bounded stdout/stderr tail bytes."""
     if max_bytes <= 0 or max_lines <= 0:
@@ -264,6 +266,7 @@ def run_command_tail(
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
             env=_environment(env),
+            cwd=cwd,
         )
     except FileNotFoundError:
         return CommandResult(command, 127, "", "command unavailable")

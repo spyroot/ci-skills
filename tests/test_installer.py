@@ -328,6 +328,55 @@ def test_symlinked_source_file_is_rejected(tmp_path):
     assert not (tmp_path / "skills").exists()
 
 
+def test_explicit_upgrade_preserves_previous_copy_and_is_idempotent(tmp_path):
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    destination = skills_dir / installer.SKILL_NAME
+    first = installer.install(source, skills_dir, dry_run=False, require_verified=False)
+    assert first["status"] == "PASS"
+
+    (source / "scripts" / "check.py").write_text("print('new')\n", encoding="utf-8")
+    plan = installer.install(
+        source, skills_dir, dry_run=True, require_verified=False, upgrade=True
+    )
+    assert plan["status"] == "DRY_RUN"
+    assert (destination / "scripts" / "check.py").read_text() == "print('ok')\n"
+    assert not Path(plan["previous_destination"]).exists()
+
+    changed = installer.install(
+        source, skills_dir, dry_run=False, require_verified=False, upgrade=True
+    )
+    assert changed["status"] == "PASS"
+    assert (destination / "scripts" / "check.py").read_text() == "print('new')\n"
+    backup = Path(changed["previous_destination"])
+    assert (backup / "scripts" / "check.py").read_text() == "print('ok')\n"
+    assert changed["digest"] == installer.tree_digest(destination)["digest"]
+
+    again = installer.install(
+        source, skills_dir, dry_run=False, require_verified=False, upgrade=True
+    )
+    assert again["status"] == "PASS"
+    assert again["already_installed"] is True
+    assert (backup / "scripts" / "check.py").read_text() == "print('ok')\n"
+
+
+def test_upgrade_refuses_symlink_destination(tmp_path):
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    destination = skills_dir / installer.SKILL_NAME
+    destination.symlink_to(source, target_is_directory=True)
+
+    result = installer.install(
+        source, skills_dir, dry_run=False, require_verified=False, upgrade=True
+    )
+    assert result["status"] == "BLOCKED"
+    assert result["reason"] == "destination_symlink"
+    assert destination.is_symlink()
+
+
 def test_default_destination_uses_codex_home(monkeypatch, tmp_path):
     installer = _installer()
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))

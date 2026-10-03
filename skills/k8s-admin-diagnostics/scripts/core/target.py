@@ -9,6 +9,8 @@ from urllib.parse import urlsplit
 
 import tomllib
 
+from .catalog import AUTHORITIES
+
 
 class TargetError(ValueError):
     """A target file cannot safely identify the requested authorities."""
@@ -37,10 +39,37 @@ class GitLabTarget:
 
 @dataclass(frozen=True)
 class GitLabOperationTarget:
-    """A GitLab-only selection, separate from the three-surface diagnostic target."""
+    """A GitLab-only selection for project and group operations."""
 
     gitlab: GitLabTarget
     source_file: Path
+
+
+@dataclass(frozen=True)
+class NodePodRoute:
+    """One existing Pod selected by namespace, label selector, and node."""
+
+    namespace: str
+    selector: str
+    container: str
+
+
+@dataclass(frozen=True)
+class JournalPodRoute:
+    """Existing Pod whose declared mount exposes the host journal directory."""
+
+    pod: NodePodRoute
+    directory: str
+    host_path: str
+
+
+@dataclass(frozen=True)
+class NodeDiagnosticsTarget:
+    """Exact node and existing Pod routes for nonmutating node reads."""
+
+    node: str
+    cilium: NodePodRoute | None
+    journal: JournalPodRoute | None
 
 
 @dataclass(frozen=True)
@@ -54,13 +83,15 @@ class KubernetesTarget:
     # operator to export KUBECONFIG for that is a trap: the default kubeconfig
     # is usually a DIFFERENT cluster, so a cold run silently aims elsewhere.
     kubeconfigs: tuple[Path, ...] = ()
+    node_diagnostics: NodeDiagnosticsTarget | None = None
 
 
 @dataclass(frozen=True)
 class Target:
-    github: GitHubTarget
-    gitlab: GitLabTarget
-    kubernetes: KubernetesTarget
+    github: GitHubTarget | None
+    gitlab: GitLabTarget | None
+    kubernetes: KubernetesTarget | None
+    active_surfaces: tuple[str, ...] = AUTHORITIES
     sources: object | None = field(default=None, repr=False, compare=False)
     tested_revision: str | None = None
     # Which declared source supplied this target, so a report can say where it
@@ -68,6 +99,8 @@ class Target:
     source_file: Path | None = None
     source_kind: str | None = None
     skill: dict[str, Any] | None = None
+    kubernetes_source_reference: str | None = None
+    target_reference: str | None = None
 
 
 def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:
@@ -271,54 +304,122 @@ def select_gitlab_reference(
     )
 
 
-def load_target(path: str | Path) -> Target:
-    """Parse one operator-selected TOML file; never search for hidden profiles."""
+def _node_diagnostics(value: object | None) -> NodeDiagnosticsTarget | None:
+    if value is None:
+        return None
+    table = _table(value, "kubernetes.node_diagnostics", {"node", "cilium", "journal"})
+    node = _string(table, "node")
+    if any(character.isspace() for character in node):
+        raise TargetError(
+            "kubernetes.node_diagnostics.node must not contain whitespace"
+        )
+    cilium = _node_pod_route(table["cilium"], "cilium") if "cilium" in table else None
+    journal = None
+    if "journal" in table:
+        journal_table = _table(
+            table["journal"],
+            "kubernetes.node_diagnostics.journal",
+            {"namespace", "selector", "container", "directory", "host_path"},
+        )
+        journal = JournalPodRoute(
+            pod=_node_pod_route(journal_table, "journal", allow_journal_fields=True),
+            directory=_absolute_path(_string(journal_table, "directory"), "directory"),
+            host_path=_absolute_path(_string(journal_table, "host_path"), "host_path"),
+        )
+    return NodeDiagnosticsTarget(node=node, cilium=cilium, journal=journal)
+
+
+def _node_pod_route(
+    value: object, kind: str, *, allow_journal_fields: bool = False
+) -> NodePodRoute:
+    keys = {"namespace", "selector", "container"}
+    if allow_journal_fields:
+        keys.update({"directory", "host_path"})
+    table = _table(value, f"kubernetes.node_diagnostics.{kind}", keys)
+    namespace = _string(table, "namespace")
+    selector = _string(table, "selector")
+    container = _string(table, "container")
+    if any(character.isspace() for character in namespace + container):
+        raise TargetError(f"kubernetes.node_diagnostics.{kind} has invalid name")
+    return NodePodRoute(namespace=namespace, selector=selector, container=container)
+
+
+def _absolute_path(value: str, key: str) -> str:
+    path = Path(value)
+    if not path.is_absolute() or ".." in path.parts or value == "/":
+        raise TargetError(
+            f"kubernetes.node_diagnostics.journal.{key} must be an absolute directory"
+        )
+    return value
+
+
+def load_target(
+    path: str | Path, *, required_surfaces: tuple[str, ...] = AUTHORITIES
+) -> Target:
+    """Validate only the authorities needed by this command's declared contract."""
+    if (
+        not required_surfaces
+        or len(set(required_surfaces)) != len(required_surfaces)
+        or set(required_surfaces) - set(AUTHORITIES)
+    ):
+        raise TargetError("required_target_surfaces_invalid")
     source = Path(path).expanduser()
     skill_root = Path(__file__).resolve().parents[2]
     data = _read_target_data(source, skill_root)
-    if set(data) != {"github", "gitlab", "kubernetes"}:
+    if set(data) - set(AUTHORITIES) or set(required_surfaces) - set(data):
         raise TargetError(
-            "target must contain github, gitlab, and kubernetes tables only"
+            "target must contain the selected authority tables only: "
+            + ", ".join(required_surfaces)
         )
 
-    github = _table(
-        data["github"],
-        "github",
-        {"host", "repository", "token_file", "required_checks"},
-    )
-    github_host = _string(github, "host").lower()
-    if "." not in github_host or "/" in github_host or ":" in github_host:
-        raise TargetError("github.host must be a full hostname")
-    repository = _string(github, "repository")
-    if len(repository.split("/")) != 2 or any(
-        not part for part in repository.split("/")
-    ):
-        raise TargetError("github.repository must be owner/repository")
-
-    gitlab = _parse_gitlab(data["gitlab"], skill_root)
-
-    kubernetes = _table(
-        data["kubernetes"],
-        "kubernetes",
-        {"context", "server", "kubeconfig", "kubeconfigs"},
-    )
-    server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
-    kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
-    kubeconfigs = _optional_files(kubernetes, "kubeconfigs", skill_root)
-    if kubeconfig and kubeconfigs:
-        raise TargetError("declare kubernetes.kubeconfig or kubeconfigs, not both")
-    return Target(
-        github=GitHubTarget(
+    github_target = None
+    if "github" in required_surfaces:
+        github = _table(
+            data["github"],
+            "github",
+            {"host", "repository", "token_file", "required_checks"},
+        )
+        github_host = _string(github, "host").lower()
+        if "." not in github_host or "/" in github_host or ":" in github_host:
+            raise TargetError("github.host must be a full hostname")
+        repository = _string(github, "repository")
+        if len(repository.split("/")) != 2 or any(
+            not part for part in repository.split("/")
+        ):
+            raise TargetError("github.repository must be owner/repository")
+        github_target = GitHubTarget(
             host=github_host,
             repository=repository,
             token_file=_optional_file(github, "token_file", skill_root),
             required_checks=_optional_names(github, "required_checks"),
-        ),
-        gitlab=gitlab,
-        kubernetes=KubernetesTarget(
+        )
+
+    gitlab_target = None
+    if "gitlab" in required_surfaces:
+        gitlab_target = _parse_gitlab(data["gitlab"], skill_root)
+
+    kubernetes_target = None
+    if "kubernetes" in required_surfaces:
+        kubernetes = _table(
+            data["kubernetes"],
+            "kubernetes",
+            {"context", "server", "kubeconfig", "kubeconfigs", "node_diagnostics"},
+        )
+        server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
+        kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
+        kubeconfigs = _optional_files(kubernetes, "kubeconfigs", skill_root)
+        if kubeconfig and kubeconfigs:
+            raise TargetError("declare kubernetes.kubeconfig or kubeconfigs, not both")
+        kubernetes_target = KubernetesTarget(
             context=_string(kubernetes, "context"),
             server=server,
             kubeconfig=kubeconfig,
             kubeconfigs=kubeconfigs,
-        ),
+            node_diagnostics=_node_diagnostics(kubernetes.get("node_diagnostics")),
+        )
+    return Target(
+        github=github_target,
+        gitlab=gitlab_target,
+        kubernetes=kubernetes_target,
+        active_surfaces=required_surfaces,
     )

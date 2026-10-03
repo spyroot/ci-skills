@@ -2,13 +2,13 @@
 
 ## Scope
 
-This repository provides `k8s-admin-diagnostics`. Its storage, event, and
-Cilium diagnostics check the selected GitHub, GitLab, and Kubernetes authorities.
-The GitLab job diagnostic checks the selected GitLab host, identity, and job
-project before reading the job, pipeline, runner, and trace. The skill also
-has separately routed GitLab milestone, bug, wiki, and runner operations. Those
-commands default to an offline dry-run and require an explicit apply plus the
-dry-run plan fingerprint before a write.
+This repository provides `k8s-admin-diagnostics`, a skill for GitLab CI and
+Kubernetes diagnostics. Separate commands read GitLab jobs and pipelines,
+storage and events, Cilium, and Ceph. GitLab milestone, bug, wiki, and runner
+commands support planned writes with independent read-back. Each command
+checks its selected authority; `access_check.py` proves GitHub, GitLab, and
+Kubernetes together. Node diagnostics use non-TTY `kubectl exec` into existing
+Pods selected by the target file.
 
 Output follows the reader: a terminal gets a human summary, a pipe or a file
 gets versioned JSON. A program calling these commands therefore needs no
@@ -31,10 +31,12 @@ conda run -n ci-skills python -m pip install -r requirements.txt
 ```
 
 **2. Authenticate, as yourself.** The skill ships no credentials and grants no
-access. It assumes you already hold what it will use — in practice cluster
-administrator, a GitLab instance administrator identity, and a GitHub identity
-that can read the repository. `gh auth login`, `glab auth login`, and whatever
-your cluster uses.
+access. Provide the identity needed by the commands you run: a Kubernetes
+administrator for cluster diagnostics, a GitLab instance administrator for
+GitLab diagnostics, and a GitHub identity for the full access receipt.
+`gh auth login`, `glab auth login`, and your cluster's existing login mechanism
+are supported. A declared token file takes precedence over ambient token
+variables; the report names the effective source.
 
 **3. Create your target file.** This is the step that makes everything else
 argument-free:
@@ -45,20 +47,25 @@ cp target.toml.template ~/.ci-skills/target.toml
 $EDITOR ~/.ci-skills/target.toml
 ```
 
-Fill in the exact GitHub repository, the exact GitLab origin, and the
-Kubernetes context with the API server it must resolve to. Declare
-`kubernetes.kubeconfigs` while you are there — see the template for why.
-For the `--publication` check in step 4, declare the repository's actual
+Fill in the sections needed by your commands. GitLab-only commands can use
+`[gitlab]` alone, while the full `access_check.py` receipt needs all three
+sections. Kubernetes commands need the selected context and exact API server.
+Declare `kubernetes.kubeconfigs` when context and credential span files;
+otherwise the resolver uses a declared `kubeconfig`, `KUBECONFIG`, or
+`~/.kube/config` in that order, then verifies the context and server. For the
+`--publication` check in step 4, declare the repository's actual
 `github.required_checks` from branch protection.
 
 Keep that file out of this repository, and never point anything that runs
 elsewhere at it. The paths inside are true on one machine only; a pipeline
 aimed at a path under someone's home directory fails the moment it runs on a
 runner, and the failure reads like a credential problem rather than the wiring
-mistake it is. A consuming project provides its own target, or sets
-`KUBECONFIG` itself — typically as an explicit first step in that project's own
-agent instructions. Provisioning access is the project's job; this skill only
-resolves what is already there and reports which source it used.
+mistake it is. A consuming project can provide its own target file or the
+documented `--binding PATH` protocol for an existing kubeconfig resolver; see
+[project-binding.md](skills/k8s-admin-diagnostics/references/project-binding.md).
+For node diagnostics, declare the selected node and existing Pod routes under
+`[kubernetes.node_diagnostics]`. Provisioning access is the project's job;
+this skill resolves the selected source and reports it.
 
 **4. Prove access, before trusting anything else.**
 
@@ -67,8 +74,8 @@ conda run -n ci-skills python \
   skills/k8s-admin-diagnostics/scripts/access_check.py --publication
 ```
 
-`PASS` means every authority was reached and every live read succeeded, and the
-receipt names the effective credential source and identity for each one. That
+`PASS` means every selected authority was reached and each required live read
+succeeded, and the receipt names the effective source and identity. That
 is the answer to "which credential am I using" — read it rather than searching
 the host.
 
@@ -113,10 +120,10 @@ target file — installation grants nothing.
 
 ## Target selection
 
-You supply **one nonsecret file** naming the authorities to use. Copy
-`target.toml.template`, fill it in, and put it in one of these places. The
-first one found wins. Live reports and GitLab operation plans name that source
-as `target_source`. The layout is the one agent tooling already uses — a project
+You supply **one nonsecret file** naming the authorities each command will use.
+Copy `target.toml.template`, fill it in, and put it in one of these places. The
+first one found wins, and every command reports which it used as
+`target_source`. The layout is the one agent tooling already uses — a project
 `./.ci-skills/` beside a user `~/.ci-skills/`, the same shape as `.claude` and
 `.codex`:
 
@@ -218,11 +225,13 @@ PATH` to write paired JSON and text files; without that option no report file
 is written.
 
 - `access_check.py` checks the three selected authorities and runs the
-  storage, event, and Cilium collector reads. `--publication` also requires
+  declared live collector reads. `--publication` also requires
   repository admin permission and read-back of required branch checks.
   `--job-url URL` also checks that job, pipeline, runner, and trace.
 - `gitlab_job.py --job-url URL` reads a selected job, pipeline, runner, and
   bounded trace using GitLab-only access. It accepts `--search TEXT`.
+- `gitlab_pipeline.py --pipeline-id ID` reads pipeline progress and bounded
+  job results for the selected GitLab project.
 - `storage_report.py` correlates PVCs, standalone PVs, Pods, attachments,
   and controllers. Filters: `--namespace NAME|all`, `--node NAME`,
   `--storage-class NAME`, `--phase Pending|Bound|Lost|Released|Failed|all`,
@@ -234,6 +243,7 @@ is written.
   the trap when correlating a job that failed earlier.
 - `cilium_status.py` reads Cilium resources and executes non-TTY health on
   ready agents. It accepts `--namespace NAME|auto`, `--node`, and `--search`.
+  Peer and endpoint findings stay in the report even when the read succeeds.
 - `gitlab_access.py check` reads the GitLab identity and selected project or
   group without requiring GitHub or Kubernetes access.
 - `gitlab_milestone.py create|update|adjust-time` manages exact milestone IDs
@@ -241,6 +251,51 @@ is written.
 - `gitlab_wiki.py create|update` manages one selected page;
   `gitlab_runner.py assign|create` manages a selected runner scope. These
   commands default to dry-run and require a matching plan fingerprint to apply.
+- `ceph_cluster.py --namespace NAME` reads Ceph health, root/rack/host/OSD
+  hierarchy, inactive PGs, and OSD/monitor Pods on the pinned cluster.
+  It accepts `--operator`, `--node`, `--ready`, and `--condition` filters.
+
+The node commands run from the host where the skill is installed. They use the
+same target and Kubernetes access gate as the cluster collectors, then select
+exactly one Running Pod on the declared node. They never create a Pod:
+
+- `cilium_node.py --json` executes `cilium-dbg status --verbose --output json`
+  and `cilium-health status --verbose --output json` concurrently inside the
+  selected existing agent Pod. It reports bounded summaries and explicit
+  daemon or peer failures in `findings`; a degraded agent remains a successful
+  read with `PASS` collection status when both commands return valid evidence.
+  Use `--search TEXT` to narrow its returned records.
+- `ceph_kernel.py --json` runs `journalctl -k` inside the selected existing
+  Pod only after reading back its configured host journal mount. It reads the
+  previous three minutes of entries matching `libceph|rbd|ceph`. Each record
+  has a UTC timestamp,
+  priority, classification, and machine-readable recommended action. It
+  performs no recovery action. The window is the previous three minutes, with
+  bounded output; a limit hit is reported as `PARTIAL`. Use `--search TEXT`
+  and `--classification NAME` to narrow returned records without changing the
+  underlying read status.
+
+The kernel classifier emits action codes for observed blocklisting, auth
+failure, connectivity timeout, and I/O errors. Other priority 0–3 entries
+receive `review_ceph_kernel_event`; informational entries have no action.
+The action code is a prompt for investigation, not a claimed root cause.
+
+Both accept `--target` or `--binding`, `--yaml`, `--dry-run`, and `--help`.
+Exit code 0 means the node read succeeded or a dry run was requested; code 2
+means incomplete evidence.
+An absent, ambiguous, or wrong-node Pod blocks; `ceph_kernel.py` also blocks
+when the declared host journal directory is not mounted in its container.
+
+Each collector checks its declared authority before collecting. The full
+three-authority receipt runs in `access_check.py`. A collector report names
+its gate in `access.profile`; the receipt names it in top-level `profile`.
+Exit code 0 means `PASS` or a marked `DRY_RUN`; code 2 means `BLOCKED` or
+`PARTIAL`. JSON and YAML failures emit a structured report on stdout.
+
+A collector that could not read blocks the gate. One that read successfully
+while reporting an unhealthy component does not, as long as the capability it
+proves was demonstrated at least once. Each live check reports
+`access_proven` next to its own `status`.
 
 ## Validation
 

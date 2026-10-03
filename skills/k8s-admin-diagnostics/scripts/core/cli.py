@@ -5,12 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import socket
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,6 +20,7 @@ from .access import (
     dry_run_access,
 )
 from .catalog import (
+    AUTHORITIES,
     COMMAND_BY_KIND,
     COMMANDS,
     PROJECT_DIR,
@@ -31,6 +30,8 @@ from .catalog import (
 )
 from .credentials import bind_gitlab_session, bind_sources
 from .portable import portable
+from .project_binding import resolve_target as resolve_project_target
+from .project_binding import resolve_target_file
 from .report import emit, report
 from .runtime import redact_tree, sanitize
 from .status import (
@@ -42,7 +43,7 @@ from .status import (
     PROFILE_FULL,
     exit_code,
 )
-from .target import Target, TargetError, load_gitlab_target, load_target
+from .target import Target, TargetError, load_gitlab_target
 
 # The documented per-host location. Keeping it here rather than in each script
 # means one answer to "where does the target live", and the script-interface
@@ -59,48 +60,14 @@ COLLECTOR_KINDS = {
     "collect_events": "event_trace",
     "collect_cilium": "cilium_status",
     "collect_gitlab_job": "gitlab_job",
+    "collect_ceph_cluster": "ceph_cluster",
 }
 ACCESS_CHECK_KIND = "access_check"
 
 
-def _target_candidates() -> list[tuple[str, Path]]:
-    """Return the target search path, in declared order."""
-    candidates: list[tuple[str, Path]] = []
-    configured = (os.environ.get("CI_SKILLS_TARGET") or "").strip()
-    if configured:
-        candidates.append(("env:CI_SKILLS_TARGET", Path(configured).expanduser()))
-    # Absolute, deliberately. A relative candidate reports `target_file` as
-    # ".ci-skills/target.toml", which identifies no file: it means a different
-    # place for every caller, it tells a receipt's reader nothing, and the
-    # no-target error would not say where it actually looked.
-    candidates.append(("project", Path.cwd() / PROJECT_DIR / TARGET_FILENAME))
-    candidates.append(("user", Path(DEFAULT_TARGET).expanduser()))
-    return candidates
-
-
 def resolve_target(explicit: str | None) -> tuple[Path, str]:
-    """Resolve the target file and say which declared source supplied it.
-
-    First match wins. An explicit path that does not exist is an error rather
-    than a fallback: silently reading a different target than the one asked for
-    is how a command ends up aimed at the wrong cluster.
-    """
-    if explicit:
-        path = Path(explicit).expanduser()
-        if not path.is_file():
-            raise TargetError(f"target_file_missing:{path}")
-        return path, "argv:--target"
-    for source, path in _target_candidates():
-        if path.is_file():
-            return path, source
-    searched = ", ".join(str(path) for _source, path in _target_candidates())
-    raise TargetError(
-        "no_target_file. This skill RESOLVES a target; it cannot create one. "
-        "Copy target.toml.template to "
-        f"{DEFAULT_TARGET} and fill in your authorities, or have the calling "
-        "project supply one via --target or CI_SKILLS_TARGET. "
-        f"Searched: {searched}"
-    )
+    """Expose the shared target resolver for GitLab-only CLI consumers."""
+    return resolve_target_file(explicit)
 
 
 def output_mode(args: argparse.Namespace) -> str:
@@ -154,11 +121,7 @@ class MachineArgumentParser(argparse.ArgumentParser):
         kind = self.report_kind or COMMANDS.get(Path(self.prog).name, {}).get(
             "kind", "arguments"
         )
-        reason = (
-            "unrecognized_arguments; see --help"
-            if message.startswith("unrecognized arguments:")
-            else re.sub(r"'[^']*'", "'[value]'", message)
-        )
+        reason = "invalid_arguments"
         _failure(
             argparse.Namespace(json=mode == "--json", yaml=mode == "--yaml"),
             kind,
@@ -181,12 +144,14 @@ def parser(
             "Exit 0 = PASS, DRY_RUN or PLANNED; 2 = BLOCKED or PARTIAL. "
             "Run --describe for this command's machine-readable contract, or "
             "see tools.json for the whole skill. "
-            f"Target resolves in order: --target, CI_SKILLS_TARGET, "
+            "Target resolves in order: --target or --binding, "
+            "CI_SKILLS_TARGET or K8S_ADMIN_DIAGNOSTICS_BINDING, "
             f"./{PROJECT_DIR}/{TARGET_FILENAME}, {DEFAULT_TARGET}. "
             "Example: %(prog)s --json"
         ),
     )
-    result.add_argument(
+    selection = result.add_mutually_exclusive_group()
+    selection.add_argument(
         "--target",
         metavar="PATH",
         default=None,
@@ -194,6 +159,11 @@ def parser(
             "nonsecret TOML target file "
             f"(default: {DEFAULT_TARGET}, override with CI_SKILLS_TARGET)"
         ),
+    )
+    selection.add_argument(
+        "--binding",
+        metavar="PATH",
+        help="explicit project binding for target and ordered kubeconfig sources",
     )
     modes = result.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print versioned JSON")
@@ -383,11 +353,14 @@ def execute(
         )
     source = "target"
     try:
-        target_path, target_source = resolve_target(args.target)
-        target = replace(
-            load_target(target_path),
-            source_file=target_path,
-            source_kind=target_source,
+        required_surfaces = (
+            tuple(COMMANDS[script]["requires"]) if script else AUTHORITIES
+        )
+        target = resolve_project_target(
+            args.target,
+            getattr(args, "binding", None),
+            dry_run=args.dry_run,
+            required_surfaces=required_surfaces,
         )
         publication = bool(getattr(args, "publication", False))
         if not args.dry_run:
@@ -415,12 +388,17 @@ def execute(
                     "job, pipeline, runner API reads",
                     "bounded job trace read",
                 ],
+                "collect_ceph_cluster": [
+                    "concurrent Ceph status, OSD tree, inactive PG and OSD/monitor Pod reads",
+                    "node, Ready and Pod condition filtering",
+                ],
             }
             gate["collection_probes"] = probes.get(collect.__name__, [])
             gate["filters"] = {
                 key: value
                 for key, value in vars(args).items()
-                if key not in {"target", "json", "yaml", "dry_run", "output_dir"}
+                if key
+                not in {"target", "binding", "json", "yaml", "dry_run", "output_dir"}
             }
         # Only access_check.py runs the expanded bundle, so every report names
         # which gate it actually passed rather than the docs implying one.

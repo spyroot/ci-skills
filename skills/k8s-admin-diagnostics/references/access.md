@@ -1,11 +1,14 @@
 # Per-computer access and evidence
 
 The installed skill contains instructions and code. Each execution host
-supplies a nonsecret target file and its own credentials. The full access
-target identifies one exact GitHub repository, GitLab origin, Kubernetes
-context, and API server. `gitlab_job.py`, the GitLab job diagnostic, can use a
-GitLab-only target; its job URL selects the exact project for an identity and
-project access read before job, pipeline, runner, and trace reads.
+supplies a nonsecret target file and its own credentials. The target file
+identifies the authorities its commands use. A Kubernetes collector needs its
+exact context and API server; a GitLab job needs its exact origin. The full
+access receipt also needs the GitHub repository. A project can select a target
+and its kubeconfig through the [project binding](project-binding.md).
+`gitlab_job.py` can use a GitLab-only target; its job URL selects the exact
+project for identity and project access read-back before job, pipeline, runner,
+and trace reads.
 
 ## Where the target file comes from
 
@@ -33,29 +36,28 @@ an explicit step in the calling project's own instructions.
 ## Effective credential sources
 
 - GitHub uses an explicit `github.token_file` from the target, then the
-  effective `GH_TOKEN` or `GITHUB_TOKEN` environment variable on github.com.
-  Enterprise hosts use `GH_ENTERPRISE_TOKEN` or
+  effective `GH_TOKEN` or `GITHUB_TOKEN` environment variable on `github.com`
+  or a subdomain of `ghe.com`. GitHub Enterprise Server hosts use
+  `GH_ENTERPRISE_TOKEN` or
   `GITHUB_ENTERPRISE_TOKEN`. Otherwise, the selected host's `gh` credential
-  store is used.
+  store is used. An explicit token file clears other ambient GitHub tokens.
 - GitLab uses an explicit `gitlab.token_file`, then the effective
   `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable.
   Otherwise, the selected host's `glab` credential store is used.
-- Kubernetes uses an explicit `kubernetes.kubeconfigs` search path, then an
-  explicit `kubernetes.kubeconfig` single file, then `KUBECONFIG`, then the
-  default kubeconfig. Declare one of the first two: the default is usually a
-  DIFFERENT cluster, so a cold run aims elsewhere and only the server
-  comparison catches it. Use `kubeconfigs` when the context and the credential
-  live in separate files — a CA-verified overlay plus the file holding the
-  token — which needs no environment variable. The selected context resolves
-  the user and cluster.
+- Kubernetes uses the target's explicit `kubernetes.kubeconfigs` ordered,
+  combined path, its `kubernetes.kubeconfig` single file, or the kubeconfig
+  selected by an explicit project binding. If none is declared, it uses
+  `KUBECONFIG`, then `~/.kube/config`. Use `kubeconfigs` when the context and
+  credential live in separate files, in kubectl's path order. The selected
+  context and API server are checked against those files.
   The user may use an embedded token, `tokenFile`, client certificate and
   key, or an exec provider. No separate token file is assumed.
 
 An explicit missing or unreadable file blocks with no fallback to a different
-credential. The gate selects sources once
-and passes the same sources to every collector. It records source references,
-not token values, private keys, or raw kubeconfig contents. Keep credentials
-outside this repository and the installed skill.
+credential. Each collector selects only its declared authority, checks that
+authority, and uses the same resolved source for its data reads. It records
+source references, not token values, private keys, or raw kubeconfig contents.
+Keep credentials outside this repository and the installed skill.
 
 Example nonsecret target:
 
@@ -75,9 +77,10 @@ server = "https://api.cluster.example.com:6443"
 # kubeconfig = "/home/operator/.kube/config"
 ```
 
-## Mandatory live gate
+## Full three-authority live receipt
 
-Run `access_check.py --target PATH --json --publication` on each intended
+When accepting the full access capability, run
+`access_check.py --target PATH --json --publication` on each intended
 execution host. Supply `--revision SHA` for an installed copy without Git
 metadata, and `--job-url URL` when verifying a requested job. The receipt
 identifies the execution host, time, revision, sources, targets, identities,
@@ -129,10 +132,11 @@ mutable path. This is detect-and-block, not an atomic pin -- a file swapped
 between the check and the command's own open is still possible -- and it closes
 the case that actually happens, a login rewriting the kubeconfig mid-run.
 
-The base gate runs before every collector. The expanded bundle runs in
-`access_check.py`, and every report names which one it passed in
-`access.profile`, so neither is implied for the other. A collector report also
-carries `access`: the identities, credential sources, targets, execution host,
+The command-specific base gate runs before every collector. The expanded
+three-authority bundle runs in `access_check.py`, and every report names which
+one it passed in `access.profile`, so neither is implied for the other. A
+collector report also carries `access`: the identities, credential sources,
+targets, execution host,
 skill digest and a `receipt_sha256` correlating it to the gate that authorized
 it. An `access_check.py` receipt carries `profile` at the top level instead,
 since it IS the gate rather than a report authorized by one.

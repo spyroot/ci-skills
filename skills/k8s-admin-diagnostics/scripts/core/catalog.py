@@ -4,8 +4,8 @@ An agent choosing a command should not have to read five `--help` texts in prose
 and infer the interface. Two things make that unnecessary, and both come from
 here:
 
-* **Consistency.** Options are declared as CAPABILITY TIERS, not per command.
-  Every command accepts the universal tier, so `--json`, `--target`,
+* **Consistency.** API options are declared as CAPABILITY TIERS, not per command.
+  Every API command accepts the universal tier, so `--json`, `--target`,
   `--dry-run`, `--revision`, `--output-dir` and `--describe` mean the same thing
   everywhere. A command that filters records accepts `--search`; one scoped to a
   namespace accepts `--namespace`; one reading a time range accepts `--last`,
@@ -26,9 +26,10 @@ from typing import Any
 SCHEMA_VERSION = "1.0"
 SKILL_NAME = "k8s-admin-diagnostics"
 
-# Every command accepts these. An agent can rely on them without checking.
+# Every API command accepts these. Node diagnostics share the target protocol.
 UNIVERSAL_OPTIONS: dict[str, str] = {
     "--target": "nonsecret TOML naming the exact authorities; defaults to the per-host location",
+    "--binding": "project-declared target and ordered kubeconfig source resolver",
     "--json": "versioned JSON document",
     "--yaml": "versioned YAML document",
     "--human": "human summary even when stdout is not a terminal",
@@ -68,17 +69,19 @@ AUTHORITIES = ("github", "gitlab", "kubernetes")
 # protocol named GH_TOKEN for an Enterprise host while the code read only
 # GH_ENTERPRISE_TOKEN there, so a caller could set exactly the variable the
 # manifest named and still be told the credential store was used.
-GITHUB_DOTCOM_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN")
+GITHUB_CLOUD_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN")
 GITHUB_ENTERPRISE_VARIABLES = ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+GITHUB_TOKEN_VARIABLES = GITHUB_CLOUD_VARIABLES + GITHUB_ENTERPRISE_VARIABLES
 GITLAB_VARIABLES = ("GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN")
 GITHUB_DOTCOM_HOST = "github.com"
+GITHUB_CLOUD_SUFFIX = ".ghe.com"
 
 
 def github_variables(host: str) -> tuple[str, ...]:
-    """Return the token variables that apply to one GitHub host."""
+    """Return the variables gh uses for GitHub Cloud or Enterprise Server."""
     return (
-        GITHUB_DOTCOM_VARIABLES
-        if host == GITHUB_DOTCOM_HOST
+        GITHUB_CLOUD_VARIABLES
+        if host == GITHUB_DOTCOM_HOST or host.endswith(GITHUB_CLOUD_SUFFIX)
         else GITHUB_ENTERPRISE_VARIABLES
     )
 
@@ -90,9 +93,9 @@ def github_variables(host: str) -> tuple[str, ...]:
 ACCESS_PROTOCOL: dict[str, Any] = {
     "rule": "first match wins; the resolved source is reported in credential_sources",
     "no_search": (
-        "Do not hunt for credentials. Run access_check.py once: if it passes, the "
-        "report names the effective source for each authority and you are done. "
-        "If it blocks, the surface reason names what to fix."
+        "Do not hunt for credentials. Run the diagnostic you need: its access "
+        "receipt names the effective source for each required authority. "
+        "Use access_check.py when you need the full three-authority receipt."
     ),
     "github": [
         {
@@ -100,12 +103,12 @@ ACCESS_PROTOCOL: dict[str, Any] = {
             "when": "the target declares a token file",
         },
         {
-            "source": "env:" + " or ".join(GITHUB_DOTCOM_VARIABLES),
-            "when": f"set, and github.host is {GITHUB_DOTCOM_HOST}",
+            "source": "env:" + " or ".join(GITHUB_CLOUD_VARIABLES),
+            "when": f"set, and github.host is {GITHUB_DOTCOM_HOST} or a subdomain of ghe.com",
         },
         {
             "source": "env:" + " or ".join(GITHUB_ENTERPRISE_VARIABLES),
-            "when": f"set, and github.host is anything other than {GITHUB_DOTCOM_HOST}",
+            "when": "set, and github.host is a GitHub Enterprise Server host",
         },
         {
             "source": "gh-credential-store:<host>",
@@ -131,19 +134,22 @@ ACCESS_PROTOCOL: dict[str, Any] = {
     "kubernetes": [
         {
             "source": "target:kubernetes.kubeconfigs",
-            "when": "the target declares the search path; needs no environment",
+            "when": "the target declares kubectl's ordered, combined path",
         },
         {
             "source": "target:kubernetes.kubeconfig",
             "when": "the target declares one file",
         },
-        {"source": "env:KUBECONFIG", "when": "set; its own path order is honoured"},
+        {
+            "source": "binding:kubernetes.sources",
+            "when": "a project binding selects a declared file, environment, or command source",
+        },
+        {"source": "env:KUBECONFIG", "when": "set; its path order is honoured"},
         {"source": "kubectl-default:~/.kube/config", "when": "nothing above applies"},
     ],
     "warning": (
-        "The last Kubernetes entry is usually a DIFFERENT cluster from the one "
-        "you want. Declare kubernetes.kubeconfigs in the target so a cold run "
-        "cannot silently aim elsewhere."
+        "The default kubeconfig may name another cluster. The selected context "
+        "and API server are always verified before collection."
     ),
 }
 
@@ -163,7 +169,7 @@ TARGET_PROTOCOL: list[dict[str, str]] = [
         "source": "env:CI_SKILLS_TARGET",
         "location": "$CI_SKILLS_TARGET",
         "scope": "one environment",
-        "when": "set and the file exists",
+        "when": "set; a missing file is an error, never a fallback",
     },
     {
         "source": "project",
@@ -192,8 +198,8 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "kind": "access_check",
         "purpose": "Prove access to every selected authority and emit one receipt.",
         "use_when": (
-            "Before trusting any other command, and whenever you need evidence "
-            "that a host really had the access it claims."
+            "When you need one live receipt proving GitHub, GitLab, and "
+            "Kubernetes access on the execution host."
         ),
         "requires": ("github", "gitlab", "kubernetes"),
         "capabilities": (),
@@ -386,7 +392,57 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "requires": ("kubernetes",),
         "capabilities": ("filters_records", "namespaced", "node_scoped"),
         "options": {},
-        "returns": "One record per agent, with health from a non-TTY exec; UNKNOWN where it could not run.",
+        "returns": "One record per agent with non-TTY health and actionable peer findings; UNKNOWN where exec could not run.",
+    },
+    "ceph_cluster.py": {
+        "kind": "ceph_cluster",
+        "purpose": "Read Ceph health, root/rack/host/OSD hierarchy, inactive PGs, and OSD/monitor Pods.",
+        "use_when": "A selected Rook Ceph cluster needs API-backed diagnostics.",
+        "requires": ("kubernetes",),
+        "capabilities": ("namespaced", "node_scoped"),
+        "options": {
+            "--operator": "operator deployment name",
+            "--conf": "Ceph config path inside the operator Pod",
+            "--ready": "Pod Ready filter: all, true, or false",
+            "--condition": "Pod condition filter: TYPE=STATUS",
+        },
+        "required_options": ("--namespace",),
+        "returns": "Ceph status, nested OSD tree, inactive PGs, and filtered OSD/monitor Pod records.",
+    },
+}
+
+# Node diagnostics use existing selected Pods through the same API target.
+NODE_LOCAL_OPTIONS: dict[str, str] = {
+    "--target": "nonsecret TOML naming the exact authorities and node Pod routes",
+    "--binding": "project binding for target and ordered kubeconfig sources",
+    "--revision": "exact source commit of the installed copy, recorded as a claim",
+    "--json": "versioned JSON document",
+    "--yaml": "versioned YAML document",
+    "--human": "human summary even when stdout is not a terminal",
+    "--dry-run": "list API and existing-Pod probes without executing them",
+    "--search": "case-insensitive text filter over returned records",
+    "--describe": "this command's machine-readable contract, then exit",
+}
+
+NODE_LOCAL_COMMANDS: dict[str, dict[str, Any]] = {
+    "cilium_node.py": {
+        "kind": "cilium_node",
+        "requires": ("kubernetes",),
+        "purpose": "Read Cilium daemon status and health from an existing agent Pod on one node.",
+        "use_when": "A selected node needs Cilium daemon and peer diagnosis.",
+        "required_tools": ("kubectl",),
+        "returns": "One Pod record with bounded daemon and health summaries plus findings, or a classified failure.",
+    },
+    "ceph_kernel.py": {
+        "kind": "ceph_kernel",
+        "requires": ("kubernetes",),
+        "purpose": "Classify host Ceph/RBD kernel journal lines through an existing Pod.",
+        "use_when": "A selected node has a Pod with a verified host journal mount.",
+        "required_tools": ("kubectl", "journalctl in the selected Pod"),
+        "options": {
+            "--classification": "return only records with the selected Ceph kernel classification"
+        },
+        "returns": "Bounded UTC kernel records and read-only recommended action codes.",
     },
 }
 
@@ -462,6 +518,32 @@ def describe(script: str) -> dict[str, Any]:
     }
 
 
+def describe_node(script: str) -> dict[str, Any]:
+    """Return the contract for a node read through an existing selected Pod."""
+    entry = NODE_LOCAL_COMMANDS[script]
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "kind": "command_contract",
+        "skill": SKILL_NAME,
+        "command": script,
+        "report_kind": entry["kind"],
+        "purpose": entry["purpose"],
+        "use_when": entry["use_when"],
+        "requires_authorities": list(entry["requires"]),
+        "execution_surface": "Kubernetes API and one existing Pod on the selected node",
+        "required_tools": list(entry["required_tools"]),
+        "access_protocol": {name: ACCESS_PROTOCOL[name] for name in entry["requires"]},
+        "capabilities": [],
+        "required_options": [],
+        "options": {**NODE_LOCAL_OPTIONS, **entry.get("options", {})},
+        "returns": entry["returns"],
+        "status_values": STATUS_MEANING,
+        "exit_codes": EXIT_CODES,
+        "default_output": "json when stdout is not a terminal, human when it is",
+        "target_protocol": TARGET_PROTOCOL,
+    }
+
+
 def manifest() -> dict[str, Any]:
     """Return the whole-skill manifest rendered into `tools.json`."""
     return {
@@ -473,6 +555,7 @@ def manifest() -> dict[str, Any]:
         ),
         "default_output": "json when stdout is not a terminal, human when it is",
         "universal_options": UNIVERSAL_OPTIONS,
+        "node_local_options": NODE_LOCAL_OPTIONS,
         "capability_options": CAPABILITY_OPTIONS,
         "authorities": list(AUTHORITIES),
         "access_protocol": ACCESS_PROTOCOL,
@@ -480,22 +563,41 @@ def manifest() -> dict[str, Any]:
         "status_values": STATUS_MEANING,
         "exit_codes": EXIT_CODES,
         "commands": {
-            script: {
-                "report_kind": entry["kind"],
-                "purpose": entry["purpose"],
-                "use_when": entry["use_when"],
-                "requires_authorities": list(entry["requires"]),
-                "capabilities": list(entry["capabilities"]),
-                "required_options": list(entry.get("required_options", ())),
-                "options": sorted(options_for(script)),
-                "returns": entry["returns"],
-                "read_only": not entry.get("mutates", False),
-                "subcommands": entry.get("subcommands", {}),
-            }
-            for script, entry in COMMANDS.items()
+            **{
+                script: {
+                    "report_kind": entry["kind"],
+                    "purpose": entry["purpose"],
+                    "use_when": entry["use_when"],
+                    "requires_authorities": list(entry["requires"]),
+                    "capabilities": list(entry["capabilities"]),
+                    "required_options": list(entry.get("required_options", ())),
+                    "options": sorted(options_for(script)),
+                    "returns": entry["returns"],
+                    "read_only": not entry.get("mutates", False),
+                    "subcommands": entry.get("subcommands", {}),
+                }
+                for script, entry in COMMANDS.items()
+            },
+            **{
+                script: {
+                    "report_kind": entry["kind"],
+                    "purpose": entry["purpose"],
+                    "use_when": entry["use_when"],
+                    "requires_authorities": list(entry["requires"]),
+                    "execution_surface": "Kubernetes API and one existing Pod on the selected node",
+                    "required_tools": list(entry["required_tools"]),
+                    "capabilities": [],
+                    "required_options": [],
+                    "options": sorted(
+                        {**NODE_LOCAL_OPTIONS, **entry.get("options", {})}
+                    ),
+                    "returns": entry["returns"],
+                }
+                for script, entry in NODE_LOCAL_COMMANDS.items()
+            },
         },
         "routing": {
-            "prove access first": "access_check.py",
+            "prove all three authorities": "access_check.py",
             "a named CI job failed": "gitlab_job.py",
             "check GitLab pipeline progress": "gitlab_pipeline.py",
             "GitLab operation access": "gitlab_access.py",
@@ -506,5 +608,8 @@ def manifest() -> dict[str, Any]:
             "a volume or claim is stuck": "storage_report.py",
             "what the cluster said during an interval": "event_trace.py",
             "connectivity or CNI health": "cilium_status.py",
+            "Cilium daemon and health on a selected node": "cilium_node.py",
+            "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
+            "Ceph cluster health and OSD/monitor Pods": "ceph_cluster.py",
         },
     }

@@ -70,8 +70,18 @@ ENTRYPOINT_CASES = (
         "gitlab_runner",
         "DRY_RUN",
     ),
+    (
+        "ceph_cluster.py",
+        ("--namespace", "rook-ceph", "--node", "worker-a", "--ready", "true"),
+        "ceph_cluster",
+        "PASS",
+    ),
 )
 
+NODE_ENTRYPOINT_CASES = (
+    ("cilium_node.py", "cilium_node"),
+    ("ceph_kernel.py", "ceph_kernel"),
+)
 
 FAKE_NATIVE_TOOLS = """#!/usr/bin/env python3
 import json
@@ -165,6 +175,58 @@ if tool == "kubectl":
         raise SystemExit(98)
     context_index = args.index("--context")
     kargs = args[context_index + 2:]
+    if kargs[:2] in (["-n", "cilium"], ["-n", "diagnostics"]):
+        namespace = kargs[1]
+        journal = namespace == "diagnostics"
+        container = "journal-reader" if journal else "cilium-agent"
+        pod = {
+            "metadata": {
+                "namespace": namespace,
+                "name": "selected-node-pod",
+                "uid": "selected-node-pod-uid",
+            },
+            "spec": {
+                "nodeName": "worker-a",
+                "containers": [{"name": container}],
+            },
+            "status": {
+                "phase": "Running",
+                "containerStatuses": [{
+                    "name": container,
+                    "state": {"running": {"startedAt": "now"}},
+                }],
+            },
+        }
+        if journal:
+            pod["spec"]["containers"][0]["volumeMounts"] = [
+                {"name": "journal", "mountPath": "/host-journal"}
+            ]
+            pod["spec"]["volumes"] = [
+                {"name": "journal", "hostPath": {"path": "/var/log/journal"}}
+            ]
+        if "get" in kargs and "pods" in kargs:
+            emit({"items": [pod]})
+        if "get" in kargs and "pod" in kargs:
+            emit(pod)
+        if "exec" in kargs:
+            if "-t" in kargs or "-i" in kargs:
+                raise SystemExit(97)
+            command = kargs[kargs.index("--") + 1:]
+            if command[:1] == ["cilium-dbg"]:
+                emit({"cilium": {"state": "Ok"}})
+            if command[:1] == ["cilium-health"]:
+                emit({"local": {"name": "worker-a"}, "nodes": []})
+            if "--list-boots" in command:
+                print("-1 selected-boot")
+                raise SystemExit(0)
+            if command[:2] == ["journalctl", "-k"]:
+                print(json.dumps({
+                    "__REALTIME_TIMESTAMP": "1760000000000000",
+                    "MESSAGE": "libceph: mon0 connection refused",
+                    "PRIORITY": "3",
+                }))
+                raise SystemExit(0)
+        raise SystemExit(98)
     if kargs in (
         ["config", "view", "-o", "json"],
         ["config", "view", "--raw", "-o", "json"],
@@ -290,6 +352,33 @@ if tool == "kubectl":
         emit({"items": resources.get(resource, [])})
     raise SystemExit(98)
 
+if tool == "oc":
+    if "--context" not in args or "-n" not in args:
+        raise SystemExit(98)
+    if "exec" in args:
+        if "-s" in args:
+            emit({"health": {"status": "HEALTH_OK"}})
+        if "osd" in args and "tree" in args:
+            emit({"nodes": [{"type": "osd", "id": 0, "name": "osd.0", "status": "up"}]})
+        if "pg" in args and "dump_stuck" in args:
+            emit({"pg_stats": []})
+    if "get" in args and "pods" in args:
+        emit({
+            "items": [{
+                "metadata": {
+                    "namespace": "rook-ceph",
+                    "name": "rook-ceph-osd-0",
+                    "labels": {"app": "rook-ceph-osd", "ceph-osd-id": "0"},
+                },
+                "spec": {"nodeName": "worker-a"},
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }],
+        })
+    raise SystemExit(98)
+
 raise SystemExit(127)
 """
 
@@ -309,10 +398,113 @@ def _write_target(tmp_path: Path, kubeconfig: Path) -> Path:
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
             f'kubeconfig = "{kubeconfig}"\n'
+            "\n[kubernetes.node_diagnostics]\n"
+            'node = "worker-a"\n'
+            "\n[kubernetes.node_diagnostics.cilium]\n"
+            'namespace = "cilium"\nselector = "app=cilium"\n'
+            'container = "cilium-agent"\n'
+            "\n[kubernetes.node_diagnostics.journal]\n"
+            'namespace = "diagnostics"\nselector = "app=journal"\n'
+            'container = "journal-reader"\n'
+            'directory = "/host-journal"\nhost_path = "/var/log/journal"\n'
         ),
         encoding="utf-8",
     )
     return target
+
+
+def _toml_string(value: str | Path) -> str:
+    """Return one TOML basic string for a synthetic path or name."""
+    return json.dumps(str(value))
+
+
+def _write_kubeconfig_for_target(
+    path: Path,
+    *,
+    context: str = "unit-context",
+    server: str = "https://api.cluster.example.test:6443",
+    cluster: str = "cluster-a",
+) -> Path:
+    """Write a kubeconfig that target.py can match by context and server."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        (
+            "apiVersion: v1\n"
+            "kind: Config\n"
+            "clusters:\n"
+            f"- name: {cluster}\n"
+            "  cluster:\n"
+            f"    server: {server}\n"
+            "contexts:\n"
+            f"- name: {context}\n"
+            "  context:\n"
+            f"    cluster: {cluster}\n"
+            "    user: admin-user\n"
+            "users:\n"
+            "- name: admin-user\n"
+            "  user: {}\n"
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_target_with_kubeconfigs(
+    tmp_path: Path, kubeconfigs: tuple[Path, ...]
+) -> Path:
+    """Write a target with an ordered combined kubeconfig path."""
+    target = tmp_path / "target-kubeconfigs.toml"
+    target.write_text(
+        (
+            "[github]\n"
+            'host = "github.example.test"\n'
+            'repository = "unit/repo"\n'
+            "\n"
+            "[gitlab]\n"
+            'url = "https://gitlab.example.test"\n'
+            "\n"
+            "[kubernetes]\n"
+            'context = "unit-context"\n'
+            'server = "https://api.cluster.example.test:6443"\n'
+            "kubeconfigs = ["
+            + ", ".join(_toml_string(path) for path in kubeconfigs)
+            + "]\n"
+        ),
+        encoding="utf-8",
+    )
+    return target
+
+
+def _install_skill(tmp_path: Path) -> Path:
+    installed = tmp_path / "installed" / "k8s-admin-diagnostics"
+    installer = load_module(
+        "skill_installer", REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"
+    )
+    installation = installer.install(SKILL_ROOT, installed.parent, dry_run=False)
+    assert installation["status"] == "PASS"
+    assert installation["algorithm"] == "sha256-tree-v1"
+    assert installation["revision"]["verified"] is True
+    return installed
+
+
+def _run_installed_node_script(
+    installed: Path,
+    script_name: str,
+    args: tuple[str, ...],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """Run an installed node script directly from an unrelated directory."""
+    return subprocess.run(
+        [sys.executable, str(installed / "scripts" / script_name), *args],
+        check=False,
+        capture_output=True,
+        cwd=cwd,
+        env=env,
+        text=True,
+        timeout=10,
+    )
 
 
 @pytest.mark.parametrize(
@@ -332,17 +524,10 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     expected_status,
 ):
     """Every installed script renders normal machine output outside the repo."""
-    installed = tmp_path / "installed" / "k8s-admin-diagnostics"
+    installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
-    installer = load_module(
-        "skill_installer", REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"
-    )
-    installation = installer.install(SKILL_ROOT, installed.parent, dry_run=False)
-    assert installation["status"] == "PASS"
-    assert installation["algorithm"] == "sha256-tree-v1"
-    assert installation["revision"]["verified"] is True
-    for tool in ("gh", "glab", "kubectl"):
+    for tool in ("gh", "glab", "kubectl", "oc"):
         install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
@@ -414,3 +599,291 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     assert blocked["status"] == "BLOCKED"
     assert blocked["errors"]
     assert str(REPO_ROOT) not in failure.stdout
+
+
+def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
+    tmp_path,
+    fake_bin,
+):
+    """The installed API gate uses the declared combined kubeconfig path."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    for tool in ("gh", "glab", "kubectl", "oc"):
+        install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
+    matching = _write_kubeconfig_for_target(tmp_path / "matching.yaml")
+    unrelated_kubeconfig = _write_kubeconfig_for_target(
+        tmp_path / "unrelated.yaml",
+        context="other-context",
+        server="https://api.other.example.test:6443",
+        cluster="other-cluster",
+    )
+    target = _write_target_with_kubeconfigs(tmp_path, (matching, unrelated_kubeconfig))
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "LC_ALL": "C",
+            "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+        }
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / "access_check.py"),
+            "--target",
+            str(target),
+            "--revision",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--json",
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data = json.loads(result.stdout)
+
+    assert result.returncode == 0
+    assert data["kind"] == "access_check"
+    assert data["status"] == "PASS"
+    assert data["credential_sources"]["kubernetes"] == ("target:kubernetes.kubeconfigs")
+    assert str(REPO_ROOT) not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
+)
+@pytest.mark.parametrize(
+    ("script_name", "kind"),
+    (("access_check.py", "access_check"), ("ceph_cluster.py", "ceph_cluster")),
+)
+def test_installed_api_and_ceph_invalid_args_are_structured(
+    tmp_path,
+    mode,
+    loader,
+    script_name,
+    kind,
+):
+    """Shared StructuredParser failures emit machine-readable stdout."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update({"HOME": str(tmp_path / "home"), "LC_ALL": "C"})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / script_name),
+            "--definitely-invalid",
+            mode,
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data: dict[str, Any] = loader(result.stdout)
+
+    assert result.returncode == 2
+    assert result.stderr == ""
+    assert data["kind"] == kind
+    assert data["status"] == "BLOCKED"
+    assert data["errors"] == [{"source": "arguments", "reason": "invalid_arguments"}]
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
+)
+@pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
+def test_installed_node_entrypoints_dry_run_from_unrelated_cwd(
+    tmp_path,
+    mode,
+    loader,
+    script_name,
+    kind,
+):
+    """Installed node commands plan their declared route without source PYTHONPATH."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update({"HOME": str(tmp_path / "home"), "LC_ALL": "C"})
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _write_target(tmp_path, kubeconfig)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / script_name),
+            "--target",
+            str(target),
+            "--dry-run",
+            mode,
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data: dict[str, Any] = loader(result.stdout)
+
+    assert result.returncode == 0
+    assert data["kind"] == kind
+    assert data["status"] == "DRY_RUN"
+    assert data["probes"]
+    assert str(REPO_ROOT) not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
+)
+@pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
+def test_installed_node_entrypoints_normal_smoke_with_fake_native_tools(
+    tmp_path,
+    fake_bin,
+    mode,
+    loader,
+    script_name,
+    kind,
+):
+    """Installed node entrypoints read existing Pods with fake native CLIs."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    for tool in ("gh", "glab", "kubectl"):
+        install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _write_target(tmp_path, kubeconfig)
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "LC_ALL": "C",
+            "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+        }
+    )
+
+    result = _run_installed_node_script(
+        installed,
+        script_name,
+        (
+            "--target",
+            str(target),
+            "--revision",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            mode,
+        ),
+        cwd=unrelated,
+        env=env,
+    )
+    data: dict[str, Any] = loader(result.stdout)
+
+    assert result.returncode == 0
+    assert data["kind"] == kind
+    assert data["status"] == "PASS"
+    assert data["summary"]["record_count"] == 1
+    assert str(REPO_ROOT) not in result.stdout
+
+
+@pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
+def test_installed_node_entrypoints_report_missing_native_dependency(
+    tmp_path,
+    script_name,
+    kind,
+):
+    """Missing native CLIs block before any selected Pod exec."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    empty_path = tmp_path / "empty-bin"
+    unrelated.mkdir()
+    empty_path.mkdir()
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "LC_ALL": "C",
+            "PATH": str(empty_path),
+        }
+    )
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _write_target(tmp_path, kubeconfig)
+
+    result = _run_installed_node_script(
+        installed,
+        script_name,
+        (
+            "--target",
+            str(target),
+            "--revision",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--json",
+        ),
+        cwd=unrelated,
+        env=env,
+    )
+    data = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert data["kind"] == kind
+    assert data["status"] == "BLOCKED"
+    assert data["errors"]
+    assert "missing_tool" in json.dumps(data["access_failures"])
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
+)
+@pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
+def test_installed_node_entrypoints_invalid_args_are_structured(
+    tmp_path,
+    mode,
+    loader,
+    script_name,
+    kind,
+):
+    """Parser failures emit structured stdout and exit 2."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update({"HOME": str(tmp_path / "home"), "LC_ALL": "C"})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / script_name),
+            "--unknown",
+            mode,
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data: dict[str, Any] = loader(result.stdout)
+
+    assert result.returncode == 2
+    assert result.stderr == ""
+    assert data["kind"] == kind
+    assert data["status"] == "BLOCKED"
+    assert data["errors"] == [{"source": "arguments", "reason": "invalid_arguments"}]

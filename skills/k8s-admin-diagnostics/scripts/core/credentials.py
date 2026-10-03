@@ -11,7 +11,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from .catalog import GITLAB_VARIABLES, github_variables
+from .catalog import GITHUB_TOKEN_VARIABLES, GITLAB_VARIABLES, github_variables
 from .gitlab_session import BoundGitLabSession
 from .provenance import ProvenanceError, skill_identity
 from .target import GitLabOperationTarget, Target, TargetError
@@ -25,9 +25,9 @@ class CredentialSource:
 
 @dataclass(frozen=True)
 class Sources:
-    github: CredentialSource
-    gitlab: CredentialSource
-    kubernetes: CredentialSource
+    github: CredentialSource | None
+    gitlab: CredentialSource | None
+    kubernetes: CredentialSource | None
     kubeconfig_files: tuple[Path, ...]
     execution_host: str
     # Content digests captured at bind time. Pinning the FILENAME is not
@@ -52,7 +52,11 @@ def _file_token(path: Path) -> str:
 
 
 def _token_source(
-    path: Path | None, names: tuple[str, ...], store: str
+    path: Path | None,
+    names: tuple[str, ...],
+    store: str,
+    *,
+    clear_names: tuple[str, ...] | None = None,
 ) -> CredentialSource:
     """Pin explicit file, first effective environment variable, or CLI store."""
     selected: str | None = None
@@ -72,12 +76,17 @@ def _token_source(
                 break
         else:
             reference = store
-    overrides = {name: (value if name == selected else None) for name in names}
+    overrides = {
+        name: (value if name == selected else None)
+        for name in (clear_names if clear_names is not None else names)
+    }
     return CredentialSource(reference, overrides)
 
 
 def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ...]]:
     """Pin the effective kubeconfig path set without assuming an auth type."""
+    if target.kubernetes is None:
+        raise TargetError("kubernetes_target_missing")
     if target.kubernetes.kubeconfigs:
         # A declared search path needs no environment export, so a cold run
         # cannot silently fall through to a different cluster's default
@@ -86,7 +95,7 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
         reference = "target:kubernetes.kubeconfigs"
     elif target.kubernetes.kubeconfig is not None:
         paths = (target.kubernetes.kubeconfig.resolve(),)
-        reference = f"file:{paths[0]}"
+        reference = target.kubernetes_source_reference or f"file:{paths[0]}"
     elif "KUBECONFIG" in os.environ:
         parts = os.environ["KUBECONFIG"].split(os.pathsep)
         if any(not part for part in parts):
@@ -94,8 +103,8 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
         paths = tuple(Path(part).expanduser().resolve() for part in parts)
         reference = "env:KUBECONFIG"
     else:
-        paths = (Path.home() / ".kube" / "config",)
-        reference = f"kubectl-default:{paths[0].resolve()}"
+        paths = ((Path.home() / ".kube" / "config").resolve(),)
+        reference = f"kubectl-default:{paths[0]}"
     if not paths:
         raise TargetError("kubeconfig_source_empty")
     for path in paths:
@@ -159,17 +168,30 @@ def assert_kubeconfig_unchanged(sources: object) -> None:
 
 def bind_sources(target: Target, *, revision: str | None = None) -> Target:
     """Freeze effective source selection for access checks and collectors."""
-    github = _token_source(
-        target.github.token_file,
-        github_variables(target.github.host),
-        f"gh-credential-store:{target.github.host}",
+    github = None
+    if "github" in target.active_surfaces:
+        if target.github is None:
+            raise TargetError("github_target_missing")
+        github = _token_source(
+            target.github.token_file,
+            github_variables(target.github.host),
+            f"gh-credential-store:{target.github.host}",
+            clear_names=GITHUB_TOKEN_VARIABLES,
+        )
+    gitlab = None
+    if "gitlab" in target.active_surfaces:
+        if target.gitlab is None:
+            raise TargetError("gitlab_target_missing")
+        gitlab = _token_source(
+            target.gitlab.token_file,
+            GITLAB_VARIABLES,
+            f"glab-credential-store:{target.gitlab.host}",
+        )
+    kube, files = (
+        _kubernetes_source(target)
+        if "kubernetes" in target.active_surfaces
+        else (None, ())
     )
-    gitlab = _token_source(
-        target.gitlab.token_file,
-        GITLAB_VARIABLES,
-        f"glab-credential-store:{target.gitlab.host}",
-    )
-    kube, files = _kubernetes_source(target)
     sources = Sources(
         github,
         gitlab,
