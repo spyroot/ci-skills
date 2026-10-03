@@ -1,6 +1,6 @@
 # Project target and credential binding
 
-API commands resolve the target in this order and report the selected tier
+Commands resolve the target in this order and report the selected tier
 in `target_selection`:
 
 1. Explicit `--target PATH` or `--binding PATH`: `cli:` or `binding:`.

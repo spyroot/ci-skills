@@ -41,51 +41,6 @@ NODE_ENTRYPOINT_CASES = (
     ("ceph_kernel.py", "ceph_kernel"),
 )
 
-FAKE_NODE_SUDO = """#!/usr/bin/env python3
-import json
-import sys
-
-args = sys.argv[1:]
-
-
-def emit(value):
-    print(json.dumps(value))
-    raise SystemExit(0)
-
-
-if args[:2] == ["-n", "crictl"]:
-    cargs = args[2:]
-    if cargs == ["ps", "--output", "json"]:
-        emit({
-            "containers": [{
-                "id": "0123456789abcdef",
-                "metadata": {"name": "cilium-agent"},
-                "state": "CONTAINER_RUNNING",
-            }],
-        })
-    if cargs[:5] == ["exec", "--sync", "--timeout", "30", "0123456789abcdef"]:
-        command = cargs[5:]
-        if command == ["cilium-dbg", "status", "--verbose", "--output", "json"]:
-            emit({"cilium": {"state": "Ok"}})
-        if command == ["cilium-health", "status", "--verbose", "--output", "json"]:
-            emit({"local": {"name": "node-a"}, "nodes": []})
-    raise SystemExit(98)
-
-if args[:2] == ["-n", "journalctl"]:
-    jargs = args[2:]
-    if "-k" in jargs and "--output=json" in jargs:
-        print(json.dumps({
-            "__REALTIME_TIMESTAMP": "1760000000000000",
-            "MESSAGE": "libceph: mon0 connection refused",
-            "PRIORITY": "3",
-        }))
-        raise SystemExit(0)
-    raise SystemExit(98)
-
-raise SystemExit(127)
-"""
-
-
 FAKE_NATIVE_TOOLS = """#!/usr/bin/env python3
 import json
 import pathlib
@@ -146,6 +101,58 @@ if tool == "kubectl":
         raise SystemExit(98)
     context_index = args.index("--context")
     kargs = args[context_index + 2:]
+    if kargs[:2] in (["-n", "cilium"], ["-n", "diagnostics"]):
+        namespace = kargs[1]
+        journal = namespace == "diagnostics"
+        container = "journal-reader" if journal else "cilium-agent"
+        pod = {
+            "metadata": {
+                "namespace": namespace,
+                "name": "selected-node-pod",
+                "uid": "selected-node-pod-uid",
+            },
+            "spec": {
+                "nodeName": "worker-a",
+                "containers": [{"name": container}],
+            },
+            "status": {
+                "phase": "Running",
+                "containerStatuses": [{
+                    "name": container,
+                    "state": {"running": {"startedAt": "now"}},
+                }],
+            },
+        }
+        if journal:
+            pod["spec"]["containers"][0]["volumeMounts"] = [
+                {"name": "journal", "mountPath": "/host-journal"}
+            ]
+            pod["spec"]["volumes"] = [
+                {"name": "journal", "hostPath": {"path": "/var/log/journal"}}
+            ]
+        if "get" in kargs and "pods" in kargs:
+            emit({"items": [pod]})
+        if "get" in kargs and "pod" in kargs:
+            emit(pod)
+        if "exec" in kargs:
+            if "-t" in kargs or "-i" in kargs:
+                raise SystemExit(97)
+            command = kargs[kargs.index("--") + 1:]
+            if command[:1] == ["cilium-dbg"]:
+                emit({"cilium": {"state": "Ok"}})
+            if command[:1] == ["cilium-health"]:
+                emit({"local": {"name": "worker-a"}, "nodes": []})
+            if "--list-boots" in command:
+                print("-1 selected-boot")
+                raise SystemExit(0)
+            if command[:2] == ["journalctl", "-k"]:
+                print(json.dumps({
+                    "__REALTIME_TIMESTAMP": "1760000000000000",
+                    "MESSAGE": "libceph: mon0 connection refused",
+                    "PRIORITY": "3",
+                }))
+                raise SystemExit(0)
+        raise SystemExit(98)
     if kargs in (
         ["config", "view", "-o", "json"],
         ["config", "view", "--raw", "-o", "json"],
@@ -317,6 +324,15 @@ def _write_target(tmp_path: Path, kubeconfig: Path) -> Path:
             'context = "unit-context"\n'
             'server = "https://api.cluster.example.test:6443"\n'
             f'kubeconfig = "{kubeconfig}"\n'
+            "\n[kubernetes.node_diagnostics]\n"
+            'node = "worker-a"\n'
+            "\n[kubernetes.node_diagnostics.cilium]\n"
+            'namespace = "cilium"\nselector = "app=cilium"\n'
+            'container = "cilium-agent"\n'
+            "\n[kubernetes.node_diagnostics.journal]\n"
+            'namespace = "diagnostics"\nselector = "app=journal"\n'
+            'container = "journal-reader"\n'
+            'directory = "/host-journal"\nhost_path = "/var/log/journal"\n'
         ),
         encoding="utf-8",
     )
@@ -405,23 +421,9 @@ def _run_installed_node_script(
     cwd: Path,
     env: dict[str, str],
 ) -> subprocess.CompletedProcess[str]:
-    """Run an installed node script while forcing the Linux-only branch."""
-    wrapper = (
-        "import pathlib, runpy, sys\n"
-        "script = pathlib.Path(sys.argv[1])\n"
-        "sys.path.insert(0, str(script.parent))\n"
-        "sys.platform = 'linux'\n"
-        "sys.argv = [str(script), *sys.argv[2:]]\n"
-        "runpy.run_path(str(script), run_name='__main__')\n"
-    )
+    """Run an installed node script directly from an unrelated directory."""
     return subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            wrapper,
-            str(installed / "scripts" / script_name),
-            *args,
-        ],
+        [sys.executable, str(installed / "scripts" / script_name), *args],
         check=False,
         capture_output=True,
         cwd=cwd,
@@ -539,9 +541,7 @@ def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
     assert result.returncode == 0
     assert data["kind"] == "access_check"
     assert data["status"] == "PASS"
-    assert data["credential_sources"]["kubernetes"] == (
-        "target:kubernetes.kubeconfigs"
-    )
+    assert data["credential_sources"]["kubernetes"] == ("target:kubernetes.kubeconfigs")
     assert str(REPO_ROOT) not in result.stdout
 
 
@@ -601,18 +601,23 @@ def test_installed_node_entrypoints_dry_run_from_unrelated_cwd(
     script_name,
     kind,
 ):
-    """Node-local entrypoints smoke without target, revision, or source PYTHONPATH."""
+    """Installed node commands plan their declared route without source PYTHONPATH."""
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env.update({"HOME": str(tmp_path / "home"), "LC_ALL": "C"})
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _write_target(tmp_path, kubeconfig)
 
     result = subprocess.run(
         [
             sys.executable,
             str(installed / "scripts" / script_name),
+            "--target",
+            str(target),
             "--dry-run",
             mode,
         ],
@@ -644,11 +649,15 @@ def test_installed_node_entrypoints_normal_smoke_with_fake_native_tools(
     script_name,
     kind,
 ):
-    """Installed node entrypoints run normally with fake sudo/native tools."""
+    """Installed node entrypoints read existing Pods with fake native CLIs."""
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
-    install_executable(fake_bin, "sudo", FAKE_NODE_SUDO)
+    for tool in ("gh", "glab", "kubectl"):
+        install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _write_target(tmp_path, kubeconfig)
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env.update(
@@ -662,7 +671,13 @@ def test_installed_node_entrypoints_normal_smoke_with_fake_native_tools(
     result = _run_installed_node_script(
         installed,
         script_name,
-        (mode,),
+        (
+            "--target",
+            str(target),
+            "--revision",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            mode,
+        ),
         cwd=unrelated,
         env=env,
     )
@@ -681,7 +696,7 @@ def test_installed_node_entrypoints_report_missing_native_dependency(
     script_name,
     kind,
 ):
-    """Missing sudo/native access is a structured BLOCKED report."""
+    """Missing native CLIs block before any selected Pod exec."""
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     empty_path = tmp_path / "empty-bin"
@@ -696,11 +711,20 @@ def test_installed_node_entrypoints_report_missing_native_dependency(
             "PATH": str(empty_path),
         }
     )
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _write_target(tmp_path, kubeconfig)
 
     result = _run_installed_node_script(
         installed,
         script_name,
-        ("--json",),
+        (
+            "--target",
+            str(target),
+            "--revision",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--json",
+        ),
         cwd=unrelated,
         env=env,
     )
@@ -710,7 +734,7 @@ def test_installed_node_entrypoints_report_missing_native_dependency(
     assert data["kind"] == kind
     assert data["status"] == "BLOCKED"
     assert data["errors"]
-    assert "missing_tool" in json.dumps(data["errors"])
+    assert "missing_tool" in json.dumps(data["access_failures"])
 
 
 @pytest.mark.parametrize(
@@ -736,8 +760,7 @@ def test_installed_node_entrypoints_invalid_args_are_structured(
         [
             sys.executable,
             str(installed / "scripts" / script_name),
-            "--target",
-            "target.toml",
+            "--unknown",
             mode,
         ],
         check=False,

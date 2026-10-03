@@ -15,6 +15,7 @@ from .cilium import (
     HEALTH_COMMAND,
     agent_selector,
     health_detail,
+    health_findings,
     is_ready,
     matches_selector,
     valid_health,
@@ -549,6 +550,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
             return row
         row["health"] = decoded
         row["health_detail"] = health_detail(decoded)
+        row["findings"] = health_findings(decoded)
         row["status"] = PASS
         return row
 
@@ -560,6 +562,10 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
                         "source": str(row["name"]),
                         "reason": row.get("reason") or "agent_not_ready",
                     }
+                )
+            elif row["findings"]:
+                errors.append(
+                    {"source": str(row["name"]), "reason": "component_unhealthy"}
                 )
             if _search(row, args.search):
                 rows.append(row)

@@ -1,6 +1,6 @@
 ---
 name: k8s-admin-diagnostics
-description: Collect read-only GitLab CI, Kubernetes, and Ceph cluster evidence with verified credential sources, plus local Cilium and Ceph evidence on a selected Linux node.
+description: Collect read-only GitLab CI, Kubernetes, Cilium, and Ceph evidence through verified credentials and selected targets, including existing-Pod node diagnostics.
 metadata:
   manifest: tools.json
   first_call: scripts/access_check.py
@@ -32,10 +32,15 @@ what it used:
 Access is resolved from declared locations, first match wins, and the match is
 reported. The chain per authority is in `tools.json` under `access_protocol`,
 and [references/access.md](references/access.md) is the full contract.
-The target must declare `kubernetes.kubeconfig` or the ordered, combined
-`kubernetes.kubeconfigs` path. For a project-specific kubeconfig resolver, use
-the [project binding](references/project-binding.md) and its declared sources.
-The skill never substitutes an ambient current context or kubeconfig.
+The installed `gh` environment contract uses `GH_TOKEN`/`GITHUB_TOKEN` for
+`github.com` and `*.ghe.com`, and enterprise token variables for other GitHub
+Enterprise Server hosts. A selected token file clears ambient GitHub tokens.
+For Kubernetes, the target may declare `kubernetes.kubeconfig` or the ordered
+`kubernetes.kubeconfigs` path. Otherwise resolution uses `KUBECONFIG`, then
+`~/.kube/config`. Every route must match the target's context and API server;
+the skill does not substitute an ambient current context. For a project-specific
+kubeconfig resolver, use the [project binding](references/project-binding.md)
+and its declared sources.
 
 Provisioning access is not this skill's job. If a kubeconfig has to be fetched
 or minted first, that belongs to the calling project's own instructions.
@@ -43,7 +48,7 @@ or minted first, that belongs to the calling project's own instructions.
 ## 2. Read the command manifest
 
 `tools.json` beside this file is the machine-readable contract for API and
-node-local commands: their purpose, when to use them, required authorities or
+node commands: their purpose, when to use them, required authorities or
 execution surface, options, and symptom routing. `<command> --describe` prints
 one command's contract as JSON and needs no credentials.
 
@@ -57,7 +62,7 @@ Routing, in short:
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |
 | Ceph, OSDs, inactive PGs, OSD/mon Pods | `ceph_cluster.py --namespace NAME` |
-| Cilium CRI status on a selected Linux node | `cilium_node.py` |
+| Cilium daemon and health on a selected node | `cilium_node.py` |
 | Ceph or RBD kernel messages on that node | `ceph_kernel.py` |
 
 ## 3. One API interface
@@ -89,7 +94,8 @@ pair; pass the job's own interval when correlating a job.
 
 - `PASS` — every selected authority and live check passed.
 - `PARTIAL` with `access_proven: true` — the read worked and a component is
-  unhealthy. That is usually the finding, not an obstacle. Say which component.
+  unhealthy. `records[].findings` names explicit Cilium daemon, peer, or
+  endpoint failures with an inspection action. Say which component.
 - `BLOCKED` — see `blocking_live_checks` and the surface `reason`.
 - `DRY_RUN` — a probe plan. Never access evidence.
 - `UNKNOWN` — a per-item reading could not be taken. Preserve it; do not
@@ -125,10 +131,15 @@ the captured form names credential locations under someone's home directory.
 Review any artifact before sharing — event messages and job traces can carry
 sensitive text.
 
-## 7. Read evidence on a selected Linux node
+## 7. Read evidence on a selected node
 
-Run `scripts/cilium_node.py --json` on the selected node to inspect the local
-CRI `cilium-agent` without a TTY. Run `scripts/ceph_kernel.py --json` for recent
-Ceph/RBD kernel messages and action codes. These node-local commands use
-`sudo -n`, accept `--yaml` and `--dry-run`, require no API target file, and do
-not establish the three-surface access receipt.
+Declare `[kubernetes.node_diagnostics]` and an existing Pod route in the
+selected `.ci-skills/target.toml` (see the template). Run
+`scripts/cilium_node.py --json` to execute `cilium-dbg` and `cilium-health`
+inside that agent Pod without a TTY. Run `scripts/ceph_kernel.py --json` to
+classify recent host journal messages through a selected existing Pod whose
+host journal mount is read back first. Both accept `--target` or `--binding`
+and use the same pinned
+kubeconfig/context/server and three-surface access gate as the API commands;
+neither creates a Pod or repairs a node. Both accept `--search TEXT`;
+`ceph_kernel.py` also accepts `--classification NAME`.
