@@ -129,7 +129,9 @@ def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
         "status": {"health": {"status": "HEALTH_WARN"}},
         "osd_tree": {
             "nodes": [
-                {"type": "host", "id": -1, "name": "worker-a"},
+                {"type": "root", "id": -1, "name": "default", "children": [-2]},
+                {"type": "rack", "id": -2, "name": "rack-a", "children": [-3]},
+                {"type": "host", "id": -3, "name": "worker-a", "children": [0, 1]},
                 {"type": "osd", "id": 0, "name": "osd.0", "status": "up"},
                 {"type": "osd", "id": 1, "name": "osd.1", "status": "down"},
             ]
@@ -193,6 +195,47 @@ def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
         {"id": 0, "name": "osd.0", "status": "up"},
         {"id": 1, "name": "osd.1", "status": "down"},
     ]
+    assert result["osd_tree"] == [
+        {
+            "id": -1,
+            "name": "default",
+            "type": "root",
+            "children": [
+                {
+                    "id": -2,
+                    "name": "rack-a",
+                    "type": "rack",
+                    "children": [
+                        {
+                            "id": -3,
+                            "name": "worker-a",
+                            "type": "host",
+                            "children": [
+                                {
+                                    "id": 0,
+                                    "name": "osd.0",
+                                    "type": "osd",
+                                    "status": "up",
+                                    "children": [],
+                                },
+                                {
+                                    "id": 1,
+                                    "name": "osd.1",
+                                    "type": "osd",
+                                    "status": "down",
+                                    "children": [],
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    rendered = import_script_module("core.report").human(result)
+    assert rendered.index("default (root") < rendered.index("rack-a (rack")
+    assert rendered.index("rack-a (rack") < rendered.index("worker-a (host")
+    assert rendered.index("worker-a (host") < rendered.index("osd.1 (osd")
     assert result["inactive_pgs"] == [{"pgid": "1.2", "state": "stale+inactive"}]
     assert result["pod_count"] == 2
     assert [record["name"] for record in result["records"]] == [
@@ -266,6 +309,26 @@ def test_ceph_cluster_parses_live_dump_stuck_envelope():
     ) == [{"pgid": "1.2", "state": "inactive"}]
     with pytest.raises(TypeError, match="inactive_pgs:invalid_response"):
         ceph_cluster._inactive_pgs({"pg_ready": True, "stuck_pg_stats": None})
+
+
+@pytest.mark.parametrize(
+    "nodes",
+    (
+        [{"type": "root", "id": -1, "name": "default", "children": [9]}],
+        [
+            {"type": "root", "id": -1, "name": "default"},
+            {"type": "rack", "id": -1, "name": "rack-a"},
+        ],
+        [
+            {"type": "root", "id": -1, "name": "default", "children": [-2]},
+            {"type": "rack", "id": -2, "name": "rack-a", "children": [-1]},
+        ],
+    ),
+)
+def test_ceph_tree_rejects_missing_duplicate_or_cyclic_hierarchy(nodes):
+    ceph_cluster = import_script_module("core.ceph_cluster")
+    with pytest.raises(TypeError, match="osd_tree:"):
+        ceph_cluster._osd_tree({"nodes": nodes})
 
 
 @pytest.mark.parametrize(

@@ -54,7 +54,7 @@
         "when": "nothing above applies"
       }
     ],
-    "no_search": "Do not hunt for credentials. Run access_check.py once: if it passes, the report names the effective source for each authority and you are done. If it blocks, the surface reason names what to fix.",
+    "no_search": "Do not hunt for credentials. Run the diagnostic you need: its access receipt names the effective source for each required authority. Use access_check.py when you need the full three-authority receipt.",
     "rule": "first match wins; the resolved source is reported in credential_sources",
     "warning": "The default kubeconfig may name another cluster. The selected context and API server are always verified before collection."
   },
@@ -105,7 +105,7 @@
         "kubernetes"
       ],
       "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
-      "use_when": "Before trusting any other command, and whenever you need evidence that a host really had the access it claims."
+      "use_when": "When you need one live receipt proving GitHub, GitLab, and Kubernetes access on the execution host."
     },
     "ceph_cluster.py": {
       "capabilities": [
@@ -129,7 +129,7 @@
         "--target",
         "--yaml"
       ],
-      "purpose": "Read Ceph health, OSDs, inactive PGs, and OSD/monitor Pods.",
+      "purpose": "Read Ceph health, root/rack/host/OSD hierarchy, inactive PGs, and OSD/monitor Pods.",
       "report_kind": "ceph_cluster",
       "required_options": [
         "--namespace"
@@ -137,7 +137,7 @@
       "requires_authorities": [
         "kubernetes"
       ],
-      "returns": "Ceph status, OSD tree, inactive PGs, and filtered OSD/monitor Pod records.",
+      "returns": "Ceph status, nested OSD tree, inactive PGs, and filtered OSD/monitor Pod records.",
       "use_when": "A selected Rook Ceph cluster needs API-backed diagnostics."
     },
     "ceph_kernel.py": {
@@ -163,8 +163,6 @@
         "journalctl in the selected Pod"
       ],
       "requires_authorities": [
-        "github",
-        "gitlab",
         "kubernetes"
       ],
       "returns": "Bounded UTC kernel records and read-only recommended action codes.",
@@ -191,8 +189,6 @@
         "kubectl"
       ],
       "requires_authorities": [
-        "github",
-        "gitlab",
         "kubernetes"
       ],
       "returns": "One Pod record with bounded daemon and health summaries plus findings, or a classified failure.",
@@ -346,7 +342,7 @@
     "a volume or claim is stuck": "storage_report.py",
     "connectivity or CNI health": "cilium_status.py",
     "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
-    "prove access first": "access_check.py",
+    "prove all three authorities": "access_check.py",
     "what the cluster said during an interval": "event_trace.py"
   },
   "schema_version": "1.0",

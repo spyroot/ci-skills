@@ -21,6 +21,22 @@ def _nested(value: Any, search: str | None, *, limit: int = 32) -> list[str]:
     return [sanitize(line, 240) for line in lines[:limit]]
 
 
+def _ceph_tree_lines(roots: list[dict[str, Any]], *, limit: int = 128) -> list[str]:
+    """Render the validated CRUSH hierarchy without flooding a terminal."""
+    lines = []
+    pending = [(node, 0) for node in reversed(roots)]
+    while pending and len(lines) < limit:
+        node, depth = pending.pop()
+        label = f"{node['name']} ({node['type']}, id={node['id']}"
+        if node.get("status") is not None:
+            label += f", status={node['status']}"
+        lines.append("  " + "  " * depth + sanitize(label + ")", 240))
+        pending.extend((child, depth + 1) for child in reversed(node["children"]))
+    if pending:
+        lines.append("  ... additional hierarchy nodes omitted")
+    return lines
+
+
 def report(
     kind: str,
     target: str,
@@ -122,6 +138,9 @@ def human(data: dict[str, Any]) -> str:
         lines.append(
             f"OSDs down: {sum(item.get('status') == 'down' for item in data.get('osds', []))}"
         )
+        if "osd_tree" in data:
+            lines.append("Ceph hierarchy:")
+            lines.extend(_ceph_tree_lines(data["osd_tree"]))
         for action in data.get("actions", []):
             lines.append(f"Action: {action}")
     for error in data.get("errors", []):

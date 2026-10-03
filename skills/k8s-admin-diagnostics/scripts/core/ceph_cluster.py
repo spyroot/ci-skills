@@ -170,6 +170,67 @@ def _health(payload: Any) -> tuple[str, list[dict[str, Any]]]:
     return payload["status"], findings
 
 
+def _osd_tree(payload: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep Ceph's root/bucket/OSD links while validating every referenced node."""
+    nodes = payload.get("nodes") if isinstance(payload, dict) else None
+    if not isinstance(nodes, list):
+        raise TypeError("osd_tree:invalid_response")
+    by_id: dict[int, dict[str, Any]] = {}
+    osds: list[dict[str, Any]] = []
+    for item in nodes:
+        if not isinstance(item, dict):
+            raise TypeError("osd_tree:invalid_node")
+        node_id, name, kind = item.get("id"), item.get("name"), item.get("type")
+        if (
+            type(node_id) is not int
+            or node_id in by_id
+            or not isinstance(name, str)
+            or not name
+            or not isinstance(kind, str)
+            or not kind
+        ):
+            raise TypeError("osd_tree:invalid_node")
+        children = item.get("children", [])
+        if not isinstance(children, list) or any(
+            type(child) is not int for child in children
+        ):
+            raise TypeError("osd_tree:invalid_children")
+        status = item.get("status")
+        if status is not None and (not isinstance(status, str) or not status):
+            raise TypeError("osd_tree:invalid_status")
+        normalized = {"id": node_id, "name": name, "type": kind, "children": children}
+        if status is not None:
+            normalized["status"] = status
+        by_id[node_id] = normalized
+        if kind == "osd":
+            osds.append({"id": node_id, "name": name, "status": status})
+
+    parents: set[int] = set()
+    for node in by_id.values():
+        for child in node["children"]:
+            if child not in by_id or child in parents:
+                raise TypeError("osd_tree:invalid_child_reference")
+            parents.add(child)
+    visiting: set[int] = set()
+    visited: set[int] = set()
+
+    def expand(node_id: int) -> dict[str, Any]:
+        if node_id in visiting or node_id in visited:
+            raise TypeError("osd_tree:cycle")
+        visiting.add(node_id)
+        node = by_id[node_id]
+        result = {key: value for key, value in node.items() if key != "children"}
+        result["children"] = [expand(child) for child in node["children"]]
+        visiting.remove(node_id)
+        visited.add(node_id)
+        return result
+
+    roots = [expand(node_id) for node_id in by_id if node_id not in parents]
+    if len(visited) != len(by_id):
+        raise TypeError("osd_tree:cycle")
+    return roots, osds
+
+
 def collect_ceph_cluster(target: Target, args: Any) -> dict[str, Any]:
     """Run independent read-only Ceph and Pod queries against one pinned target."""
     namespace = args.namespace
@@ -237,22 +298,10 @@ def collect_ceph_cluster(target: Target, args: Any) -> dict[str, Any]:
         except TypeError as exc:
             errors.append({"source": "status", "reason": str(exc)})
     if "osd_tree" in decoded:
-        tree = decoded["osd_tree"]
-        nodes = tree.get("nodes") if isinstance(tree, dict) else None
-        if not isinstance(nodes, list) or any(
-            not isinstance(item, dict) for item in nodes
-        ):
-            errors.append({"source": "osd_tree", "reason": "osd_tree:invalid_response"})
-        else:
-            result["osds"] = [
-                {
-                    "id": item.get("id"),
-                    "name": item.get("name"),
-                    "status": item.get("status"),
-                }
-                for item in nodes
-                if item.get("type") == "osd"
-            ]
+        try:
+            result["osd_tree"], result["osds"] = _osd_tree(decoded["osd_tree"])
+        except TypeError as exc:
+            errors.append({"source": "osd_tree", "reason": str(exc)})
     if "inactive_pgs" in decoded:
         try:
             result["inactive_pgs"] = _inactive_pgs(decoded["inactive_pgs"])

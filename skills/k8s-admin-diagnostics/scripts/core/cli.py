@@ -15,7 +15,9 @@ from typing import Any
 from .access import access_evidence, check_access, dry_run_access
 from .argument_parser import StructuredParser
 from .catalog import (
+    AUTHORITIES,
     COMMAND_BY_KIND,
+    COMMANDS,
     PROJECT_DIR,
     TARGET_FILENAME,
     describe,
@@ -210,8 +212,14 @@ def execute(
         )
     source = "target"
     try:
+        required_surfaces = (
+            tuple(COMMANDS[script]["requires"]) if script else AUTHORITIES
+        )
         target = resolve_project_target(
-            args.target, getattr(args, "binding", None), dry_run=args.dry_run
+            args.target,
+            getattr(args, "binding", None),
+            dry_run=args.dry_run,
+            required_surfaces=required_surfaces,
         )
         publication = bool(getattr(args, "publication", False))
         if not args.dry_run:

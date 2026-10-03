@@ -147,7 +147,8 @@ def test_node_local_commands_publish_their_distinct_interface(script):
 
     assert actual == declared
     assert "--target" in actual
-    assert contract["requires_authorities"] == ["github", "gitlab", "kubernetes"]
+    assert contract["requires_authorities"] == ["kubernetes"]
+    assert set(contract["access_protocol"]) == {"kubernetes"}
     assert contract["execution_surface"] == (
         "Kubernetes API and one existing Pod on the selected node"
     )

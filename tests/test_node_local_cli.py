@@ -76,9 +76,14 @@ def test_node_adapter_uses_the_selected_project_binding(monkeypatch, capsys):
     selected = cli.resolve_project_target
     calls = []
 
-    def resolve(target, binding, *, dry_run):
-        calls.append((target, binding, dry_run))
-        return selected(target, binding, dry_run=dry_run)
+    def resolve(target, binding, *, dry_run, required_surfaces):
+        calls.append((target, binding, dry_run, required_surfaces))
+        return selected(
+            target,
+            binding,
+            dry_run=dry_run,
+            required_surfaces=required_surfaces,
+        )
 
     monkeypatch.setattr(cli, "resolve_project_target", resolve)
     status = cli.run(
@@ -87,7 +92,7 @@ def test_node_adapter_uses_the_selected_project_binding(monkeypatch, capsys):
     )
 
     assert status == 0
-    assert calls == [(None, "/project/.ci-skills/binding.toml", True)]
+    assert calls == [(None, "/project/.ci-skills/binding.toml", True, ("kubernetes",))]
     assert json.loads(capsys.readouterr().out)["status"] == "DRY_RUN"
 
 
@@ -343,5 +348,5 @@ def test_node_local_describe_needs_no_linux_runtime_or_credentials(capsys, kind)
 
     assert exit_status == 0
     assert contract["command"] == f"{kind}.py"
-    assert contract["requires_authorities"] == ["github", "gitlab", "kubernetes"]
+    assert contract["requires_authorities"] == ["kubernetes"]
     assert contract["target_protocol"]

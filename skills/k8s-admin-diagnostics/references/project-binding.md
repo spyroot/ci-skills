@@ -14,8 +14,9 @@ replace that path with a stable digest token.
 
 Two environment selectors set together are an error. An explicit target or a
 declared environment target path that is absent blocks without substituting
-the project or user target. Every target must declare an
-exact Kubernetes context and API server. When a plain target omits its
+the project or user target. Kubernetes commands require an exact context and
+API server in their selected target; GitLab commands require a GitLab origin.
+The full access receipt requires all three sections. When a plain target omits its
 kubeconfig, credential resolution uses `KUBECONFIG`, then `~/.kube/config`.
 The configured context and server still have to match the selected files.
 

@@ -700,13 +700,19 @@ def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
 
 
 def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]:
-    """Probe independent authorities concurrently, then fail closed on any denial."""
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        github_check = github_publication_access if publication else github_access
-        futures = [
-            pool.submit(check, target)
-            for check in (github_check, gitlab_access, kubernetes_access)
-        ]
+    """Probe this command's declared authorities and fail closed on denial."""
+    checks = {
+        "github": github_publication_access if publication else github_access,
+        "gitlab": gitlab_access,
+        "kubernetes": kubernetes_access,
+    }
+    selected = target.active_surfaces
+    if not selected or any(name not in checks for name in selected):
+        raise ValueError("required_target_surfaces_invalid")
+    if publication and "github" not in selected:
+        raise ValueError("publication_requires_github")
+    with ThreadPoolExecutor(max_workers=len(selected)) as pool:
+        futures = [pool.submit(checks[name], target) for name in selected]
         surfaces = [future.result() for future in futures]
     receipt = {
         "schema_version": "1.0",
@@ -716,6 +722,23 @@ def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]
         "surfaces": {item.name: item.as_dict() for item in surfaces},
     }
     if isinstance(target.sources, Sources):
+        source_by_name = {
+            "github": target.sources.github,
+            "gitlab": target.sources.gitlab,
+            "kubernetes": target.sources.kubernetes,
+        }
+        if any(source_by_name[name] is None for name in selected):
+            raise ValueError("required_credential_source_missing")
+        targets = {}
+        if "github" in selected:
+            targets["github"] = f"{target.github.host}/{target.github.repository}"
+        if "gitlab" in selected:
+            targets["gitlab"] = target.gitlab.url
+        if "kubernetes" in selected:
+            targets["kubernetes"] = {
+                "context": target.kubernetes.context,
+                "server": target.kubernetes.server,
+            }
         receipt.update(
             {
                 "execution_host": target.sources.execution_host,
@@ -726,60 +749,57 @@ def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]
                 "skill": target.skill,
                 "consuming_project": (target.skill or {}).get("consuming_project"),
                 "credential_sources": {
-                    "github": target.sources.github.reference,
-                    "gitlab": target.sources.gitlab.reference,
-                    "kubernetes": target.sources.kubernetes.reference,
+                    name: source_by_name[name].reference for name in selected
                 },
                 "target_selection": target.target_reference,
-                "targets": {
-                    "github": f"{target.github.host}/{target.github.repository}",
-                    "gitlab": target.gitlab.url,
-                    "kubernetes": {
-                        "context": target.kubernetes.context,
-                        "server": target.kubernetes.server,
-                    },
-                },
+                "targets": targets,
             }
         )
     return receipt
 
 
 def dry_run_access(target: Target, *, publication: bool = False) -> dict[str, Any]:
+    selected = target.active_surfaces
+    if publication and "github" not in selected:
+        raise ValueError("publication_requires_github")
+    surfaces = {}
+    if "github" in selected:
+        surfaces["github"] = {
+            "target": f"{target.github.host}/{target.github.repository}",
+            "probes": [
+                "gh auth status",
+                "gh api user",
+                "gh api repository",
+                *(["repository admin"] if publication else []),
+            ],
+        }
+    if "gitlab" in selected:
+        surfaces["gitlab"] = {
+            "target": target.gitlab.url,
+            "probes": [
+                "glab auth status",
+                "GET /user is_admin",
+                "GET /runners/all",
+            ],
+        }
+    if "kubernetes" in selected:
+        surfaces["kubernetes"] = {
+            "target": f"{target.kubernetes.context} -> {target.kubernetes.server}",
+            "probes": [
+                "context server",
+                "TLS API version",
+                "auth whoami",
+                "cluster wildcard",
+                "clusterrolebinding admin",
+                "Cilium namespace",
+                "pods/exec",
+            ],
+        }
     return {
         "schema_version": "1.0",
         "kind": "access_check",
         "status": DRY_RUN,
         "publication": publication,
         "target_selection": target.target_reference,
-        "surfaces": {
-            "github": {
-                "target": f"{target.github.host}/{target.github.repository}",
-                "probes": [
-                    "gh auth status",
-                    "gh api user",
-                    "gh api repository",
-                    *(["repository admin"] if publication else []),
-                ],
-            },
-            "gitlab": {
-                "target": target.gitlab.url,
-                "probes": [
-                    "glab auth status",
-                    "GET /user is_admin",
-                    "GET /runners/all",
-                ],
-            },
-            "kubernetes": {
-                "target": f"{target.kubernetes.context} -> {target.kubernetes.server}",
-                "probes": [
-                    "context server",
-                    "TLS API version",
-                    "auth whoami",
-                    "cluster wildcard",
-                    "clusterrolebinding admin",
-                    "Cilium namespace",
-                    "pods/exec",
-                ],
-            },
-        },
+        "surfaces": surfaces,
     }

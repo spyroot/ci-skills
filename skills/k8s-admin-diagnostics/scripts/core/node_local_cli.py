@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .access import access_evidence, check_access
-from .catalog import describe_node
+from .catalog import NODE_LOCAL_COMMANDS, describe_node
 from .credentials import bind_sources
 from .node_local import (
     CEPH_CLASSIFICATIONS,
@@ -183,6 +183,7 @@ def run(kind: str, args: argparse.Namespace) -> int:
             getattr(args, "target", None),
             getattr(args, "binding", None),
             dry_run=getattr(args, "dry_run", False),
+            required_surfaces=NODE_LOCAL_COMMANDS[f"{kind}.py"]["requires"],
         )
         if target.source_file is None or target.source_kind is None:
             raise TargetError("target_source_unresolved")
@@ -211,7 +212,7 @@ def run(kind: str, args: argparse.Namespace) -> int:
         if getattr(args, "dry_run", False):
             data["status"] = DRY_RUN
             data["probes"] = [
-                "verify selected GitHub, GitLab, and Kubernetes credentials and identities",
+                "verify selected Kubernetes credential and identity",
                 "kubectl get one existing Running Pod on the declared node",
                 "kubectl exec without TTY to read Cilium status and health"
                 if kind == "cilium_node"

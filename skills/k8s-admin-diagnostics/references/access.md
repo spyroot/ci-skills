@@ -2,9 +2,10 @@
 
 The installed skill contains instructions and code. Each execution host
 supplies a nonsecret target file and its own credentials. The target file
-identifies one exact GitHub repository, GitLab origin, Kubernetes context, and
-API server. A project can select that target and its kubeconfig through the
-[project binding](project-binding.md).
+identifies the authorities its commands use. A Kubernetes collector needs its
+exact context and API server; a GitLab job needs its exact origin. The full
+access receipt also needs the GitHub repository. A project can select a target
+and its kubeconfig through the [project binding](project-binding.md).
 
 ## Where the target file comes from
 
@@ -50,10 +51,10 @@ an explicit step in the calling project's own instructions.
   key, or an exec provider. No separate token file is assumed.
 
 An explicit missing or unreadable file blocks with no fallback to a different
-credential. The gate selects sources once
-and passes the same sources to every collector. It records source references,
-not token values, private keys, or raw kubeconfig contents. Keep credentials
-outside this repository and the installed skill.
+credential. Each collector selects only its declared authority, checks that
+authority, and uses the same resolved source for its data reads. It records
+source references, not token values, private keys, or raw kubeconfig contents.
+Keep credentials outside this repository and the installed skill.
 
 Example nonsecret target:
 
@@ -73,9 +74,10 @@ server = "https://api.cluster.example.com:6443"
 # kubeconfig = "/home/operator/.kube/config"
 ```
 
-## Mandatory live gate
+## Full three-authority live receipt
 
-Run `access_check.py --target PATH --json --publication` on each intended
+When accepting the full access capability, run
+`access_check.py --target PATH --json --publication` on each intended
 execution host. Supply `--revision SHA` for an installed copy without Git
 metadata, and `--job-url URL` when verifying a requested job. The receipt
 identifies the execution host, time, revision, sources, targets, identities,
@@ -127,10 +129,11 @@ mutable path. This is detect-and-block, not an atomic pin -- a file swapped
 between the check and the command's own open is still possible -- and it closes
 the case that actually happens, a login rewriting the kubeconfig mid-run.
 
-The base gate runs before every collector. The expanded bundle runs in
-`access_check.py`, and every report names which one it passed in
-`access.profile`, so neither is implied for the other. A collector report also
-carries `access`: the identities, credential sources, targets, execution host,
+The command-specific base gate runs before every collector. The expanded
+three-authority bundle runs in `access_check.py`, and every report names which
+one it passed in `access.profile`, so neither is implied for the other. A
+collector report also carries `access`: the identities, credential sources,
+targets, execution host,
 skill digest and a `receipt_sha256` correlating it to the gate that authorized
 it. An `access_check.py` receipt carries `profile` at the top level instead,
 since it IS the gate rather than a report authorized by one.

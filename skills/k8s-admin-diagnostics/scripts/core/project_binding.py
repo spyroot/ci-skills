@@ -13,7 +13,7 @@ from typing import Any
 
 import tomllib
 
-from .catalog import PROJECT_DIR, TARGET_FILENAME
+from .catalog import AUTHORITIES, PROJECT_DIR, TARGET_FILENAME
 from .runtime import error_class, run_command_tail
 from .target import Target, TargetError, load_target
 
@@ -127,7 +127,12 @@ def _source_path(
     raise TargetError("binding_source_kind_invalid")
 
 
-def load_project_binding(path: str | Path, *, dry_run: bool = False) -> Target:
+def load_project_binding(
+    path: str | Path,
+    *,
+    dry_run: bool = False,
+    required_surfaces: tuple[str, ...] = AUTHORITIES,
+) -> Target:
     """Use only declared sources; advance solely when one is absent."""
     binding = Path(path).expanduser().resolve()
     try:
@@ -147,7 +152,14 @@ def load_project_binding(path: str | Path, *, dry_run: bool = False) -> Target:
     if not isinstance(sources, list) or not sources:
         raise TargetError("binding_sources_missing")
     target_path = _path(data["target"], binding.parent)
-    target = load_target(target_path)
+    target = load_target(target_path, required_surfaces=required_surfaces)
+    if "kubernetes" not in required_surfaces:
+        return replace(
+            target,
+            target_reference=f"binding:{binding}",
+            source_file=target_path,
+            source_kind="binding",
+        )
     if target.kubernetes.kubeconfig is not None or target.kubernetes.kubeconfigs:
         raise TargetError("binding_target_kubeconfig_conflict")
     for index, source in enumerate(sources):
@@ -183,7 +195,11 @@ def load_project_binding(path: str | Path, *, dry_run: bool = False) -> Target:
 
 
 def resolve_target(
-    explicit_target: str | None, explicit_binding: str | None, *, dry_run: bool = False
+    explicit_target: str | None,
+    explicit_binding: str | None,
+    *,
+    dry_run: bool = False,
+    required_surfaces: tuple[str, ...] = AUTHORITIES,
 ) -> Target:
     """Resolve explicit, environment, project, then user target without crossover."""
     if explicit_target and explicit_binding:
@@ -191,17 +207,25 @@ def resolve_target(
     if explicit_target:
         selected, source = resolve_target_file(explicit_target)
         return replace(
-            load_target(selected),
+            load_target(selected, required_surfaces=required_surfaces),
             target_reference=f"cli:{selected.resolve()}",
             source_file=selected,
             source_kind=source,
         )
     if explicit_binding:
-        return load_project_binding(explicit_binding, dry_run=dry_run)
+        return load_project_binding(
+            explicit_binding,
+            dry_run=dry_run,
+            required_surfaces=required_surfaces,
+        )
     if TARGET_ENV in os.environ and BINDING_ENV in os.environ:
         raise TargetError("environment_selector_conflict")
     if BINDING_ENV in os.environ:
-        return load_project_binding(os.environ[BINDING_ENV], dry_run=dry_run)
+        return load_project_binding(
+            os.environ[BINDING_ENV],
+            dry_run=dry_run,
+            required_surfaces=required_surfaces,
+        )
     selected, source = resolve_target_file(None)
     reference = (
         f"env:{TARGET_ENV} -> file:{selected.resolve()}"
@@ -209,7 +233,7 @@ def resolve_target(
         else f"{source}:{selected.resolve()}"
     )
     return replace(
-        load_target(selected),
+        load_target(selected, required_surfaces=required_surfaces),
         target_reference=reference,
         source_file=selected,
         source_kind=source,
