@@ -253,6 +253,15 @@ def _install_unlocked(
             raise ValueError("destination_exists")
         if _journal_path(skills_dir).exists():
             raise ValueError("incomplete_install_recover")
+        if (
+            upgrade
+            and destination.exists()
+            and tree_digest(destination) == expected_digest
+        ):
+            result.update(
+                status="DRY_RUN" if dry_run else "PASS", already_installed=True
+            )
+            return result
         if dry_run:
             result["status"] = "DRY_RUN"
             return result
