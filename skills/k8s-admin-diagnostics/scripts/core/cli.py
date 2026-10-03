@@ -30,7 +30,8 @@ from .catalog import (
 )
 from .credentials import bind_gitlab_session, bind_sources
 from .portable import portable
-from .project_binding import BINDING_ENV, resolve_target as resolve_project_target
+from .project_binding import BINDING_ENV
+from .project_binding import resolve_target as resolve_project_target
 from .report import emit, report
 from .runtime import redact_tree, sanitize
 from .status import (

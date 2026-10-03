@@ -21,21 +21,19 @@ def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     ambient = project / ".ci-skills" / "target.toml"
     ambient.parent.mkdir()
     ambient.write_text(
-        '[gitlab]\nurl = "https://ambient.example.test"\n'
-        'project = "team/ambient"\n',
+        '[gitlab]\nurl = "https://ambient.example.test"\nproject = "team/ambient"\n',
         encoding="utf-8",
     )
     bound = project / "bound-target.toml"
     bound.write_text(
-        '[gitlab]\nurl = "https://bound.example.test"\n'
-        'project = "team/bound"\n',
+        '[gitlab]\nurl = "https://bound.example.test"\nproject = "team/bound"\n',
         encoding="utf-8",
     )
     binding = project / "binding.toml"
     binding.write_text(
         'schema_version = "1.0"\n'
         'target = "bound-target.toml"\n'
-        '[kubernetes]\n'
+        "[kubernetes]\n"
         'sources = [{kind = "file", path = "missing-kubeconfig"}]\n',
         encoding="utf-8",
     )
@@ -53,9 +51,7 @@ def _invoke(kind: str, selector: list[str]) -> int:
     if kind == "access":
         return ACCESS.main(["check", "--dry-run", "--json", *selector])
     if kind == "pipeline":
-        return PIPELINE.main(
-            ["--pipeline-id", "17", "--dry-run", "--json", *selector]
-        )
+        return PIPELINE.main(["--pipeline-id", "17", "--dry-run", "--json", *selector])
     args = JOB.build_parser().parse_args(
         [
             "--job-url",
@@ -116,9 +112,7 @@ def test_missing_binding_blocks_without_falling_back_to_project_target(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _selection(tmp_path, monkeypatch)
-    monkeypatch.setenv(
-        "K8S_ADMIN_DIAGNOSTICS_BINDING", str(tmp_path / "missing.toml")
-    )
+    monkeypatch.setenv("K8S_ADMIN_DIAGNOSTICS_BINDING", str(tmp_path / "missing.toml"))
 
     code = _invoke("action", [])
     evidence = json.loads(capsys.readouterr().out)
