@@ -37,6 +37,12 @@ class KubernetesTarget:
     context: str
     server: str
     kubeconfig: Path | None
+    # The full search path, in kubectl's own order. A credential and the context
+    # that selects it often live in different files -- a CA-verified overlay
+    # plus the file holding the token, for instance -- and requiring the
+    # operator to export KUBECONFIG for that is a trap: the default kubeconfig
+    # is usually a DIFFERENT cluster, so a cold run silently aims elsewhere.
+    kubeconfigs: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -46,7 +52,13 @@ class Target:
     kubernetes: KubernetesTarget
     sources: object | None = field(default=None, repr=False, compare=False)
     tested_revision: str | None = None
+    # Which declared source supplied this target, so a report can say where it
+    # came from rather than leaving the reader to guess the search order.
+    source_file: Path | None = None
+    source_kind: str | None = None
     skill: dict[str, Any] | None = None
+    kubernetes_source_reference: str | None = None
+    target_reference: str | None = None
 
 
 def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:
@@ -97,6 +109,31 @@ def kubernetes_label(target: Target) -> str:
     labelled with it cannot be checked against the verified target.
     """
     return f"{target.kubernetes.context} -> {target.kubernetes.server}"
+
+
+def _optional_files(
+    table: dict[str, object], key: str, skill_root: Path
+) -> tuple[Path, ...]:
+    """Read an optional ordered list of readable paths outside the skill."""
+    value = table.get(key)
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not value:
+        raise TargetError(f"{key} must be a nonempty list when supplied")
+    resolved: list[Path] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise TargetError(f"{key} entries must be nonempty paths")
+        selected = Path(item).expanduser()
+        if not selected.is_absolute():
+            raise TargetError(f"{key} entries must be absolute paths")
+        path = selected.resolve()
+        if path.is_relative_to(skill_root):
+            raise TargetError(f"{key} must be stored outside the installed skill")
+        resolved.append(path)
+    if len(set(resolved)) != len(resolved):
+        raise TargetError(f"{key} entries must be unique")
+    return tuple(resolved)
 
 
 def _optional_names(table: dict[str, object], key: str) -> tuple[str, ...]:
@@ -165,10 +202,15 @@ def load_target(path: str | Path) -> Target:
     gitlab_url, gitlab_host = _https_url(_string(gitlab, "url"), "gitlab.url")
 
     kubernetes = _table(
-        data["kubernetes"], "kubernetes", {"context", "server", "kubeconfig"}
+        data["kubernetes"],
+        "kubernetes",
+        {"context", "server", "kubeconfig", "kubeconfigs"},
     )
     server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
     kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
+    kubeconfigs = _optional_files(kubernetes, "kubeconfigs", skill_root)
+    if kubeconfig and kubeconfigs:
+        raise TargetError("declare kubernetes.kubeconfig or kubeconfigs, not both")
     return Target(
         github=GitHubTarget(
             host=github_host,
@@ -185,5 +227,6 @@ def load_target(path: str | Path) -> Target:
             context=_string(kubernetes, "context"),
             server=server,
             kubeconfig=kubeconfig,
+            kubeconfigs=kubeconfigs,
         ),
     )
