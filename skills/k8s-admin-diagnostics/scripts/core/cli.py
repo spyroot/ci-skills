@@ -30,7 +30,7 @@ from .catalog import (
 )
 from .credentials import bind_gitlab_session, bind_sources
 from .portable import portable
-from .project_binding import BINDING_ENV
+from .project_binding import BINDING_ENV, resolve_target_file
 from .project_binding import resolve_target as resolve_project_target
 from .report import emit, report
 from .runtime import redact_tree, sanitize
@@ -64,6 +64,11 @@ COLLECTOR_KINDS = {
     "collect_mtu_consistency": "k8s_verify_mtu_consistency",
 }
 ACCESS_CHECK_KIND = "access_check"
+
+
+def resolve_target(explicit: str | None) -> tuple[Path, str]:
+    """Preserve the target-file resolver used by existing command consumers."""
+    return resolve_target_file(explicit)
 
 
 def resolve_gitlab_target(

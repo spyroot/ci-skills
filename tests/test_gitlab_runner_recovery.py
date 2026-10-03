@@ -132,9 +132,10 @@ def test_live_plan_cli_binds_group_ids_without_post(monkeypatch, tmp_path, capsy
         }
     )
     monkeypatch.setattr(
-        ACTION, "resolve_target", lambda _path: (tmp_path / "target.toml", "test")
+        ACTION,
+        "resolve_gitlab_target",
+        lambda *_args, **_kwargs: (object(), "test"),
     )
-    monkeypatch.setattr(ACTION, "load_gitlab_target", lambda _path: object())
     monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
         ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
