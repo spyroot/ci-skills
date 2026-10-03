@@ -155,6 +155,15 @@ further creation until independent reconciliation. The result records
 `sink_persisted`, not manager readiness. Registration and an online job remain
 separate acceptance work.
 
+For an uncertain create, a later complete empty list read clears the local
+pending marker and blocks without another POST; a subsequent invocation may
+retry the same plan. An existing runner with the description keeps the marker.
+The operator must inspect the exact runner ID and scope in GitLab, then decide
+whether to remove that record through the GitLab UI. A lost one-time token is
+not recoverable from the record. After authorized removal, one apply clears the
+marker and a further apply can create. This is a manual recovery step, not a
+`gitlab_runner.py recover` subcommand.
+
 The suggested API mapping follows GitLab's project
 [milestones](https://docs.gitlab.com/api/milestones/),
 [issues](https://docs.gitlab.com/api/issues/),

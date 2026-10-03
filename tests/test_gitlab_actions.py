@@ -103,8 +103,7 @@ def test_action_uses_project_target_before_user_target_without_selector(
     ):
         path.parent.mkdir(parents=True)
         path.write_text(
-            '[gitlab]\nurl = "https://gitlab.example.test"\n'
-            f'project = "{reference}"\n',
+            f'[gitlab]\nurl = "https://gitlab.example.test"\nproject = "{reference}"\n',
             encoding="utf-8",
         )
     monkeypatch.setenv("HOME", str(home))
@@ -137,8 +136,7 @@ def test_group_action_uses_selected_target_without_group_flag(
     target = home / ".ci-skills" / "target.toml"
     target.parent.mkdir(parents=True)
     target.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\n'
-        'group = "platform/team"\n',
+        '[gitlab]\nurl = "https://gitlab.example.test"\ngroup = "platform/team"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("HOME", str(home))
@@ -160,8 +158,7 @@ def test_declared_project_override_replaces_selected_target_for_one_action(
 ):
     target = tmp_path / "selected.toml"
     target.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\n'
-        'project = "stored/repo"\n',
+        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "stored/repo"\n',
         encoding="utf-8",
     )
 
@@ -546,6 +543,84 @@ def test_action_access_failure_preserves_the_failed_subcheck(
     assert result == 2
     assert data["status"] == "BLOCKED"
     assert data["errors"] == [{"source": f"gitlab_access.{subcheck}", "reason": reason}]
+    assert data["plan_digest"] == plan.digest
+    assert data["phase"] == "ACCESS"
+    assert data["mutated"] is False
+
+
+def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
+    monkeypatch, tmp_path: Path, capsys
+):
+    plan = _plan("gitlab_issue", "open-bug", {"title": "broken"})
+    receipt_out = tmp_path / "blocked-receipt.json"
+    session = SimpleNamespace(
+        origin=plan.origin,
+        target_reference=plan.target_reference,
+        credential_source="env:GITLAB_TOKEN",
+        credential_digest="sha256:unit",
+        skill={"digest": "unit"},
+    )
+    access = {
+        "status": "PASS",
+        "identity": {"username": "operator"},
+        "target": {"kind": "project", "id": 42, "full_path": "team/repo"},
+    }
+    monkeypatch.setattr(
+        ACTION, "resolve_target", lambda _path: (tmp_path / "target.toml", "test")
+    )
+    monkeypatch.setattr(ACTION, "load_gitlab_target", lambda _path: object())
+    monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
+    monkeypatch.setattr(
+        ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+    )
+    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda *, timeout: object())
+    monkeypatch.setattr(
+        ACTION,
+        "check_gitlab_operation_access",
+        lambda _session, api_client: access,
+    )
+
+    def fail_after_write(*_args):
+        raise ACTION.ActionError(
+            "issue_create_outcome_uncertain_check_title_before_retry"
+        )
+
+    monkeypatch.setattr(ACTION, "apply_plan", fail_after_write)
+
+    result = ACTION.run_action_cli(
+        "gitlab_issue",
+        [
+            "open-bug",
+            "--title",
+            "broken",
+            "--apply",
+            "--confirm-plan",
+            plan.digest,
+            "--receipt-out",
+            str(receipt_out),
+            "--json",
+        ],
+    )
+    report = json.loads(capsys.readouterr().out)
+    receipt = json.loads(receipt_out.read_text(encoding="utf-8"))
+
+    assert result == 2
+    assert report["status"] == receipt["status"] == "BLOCKED"
+    assert report["phase"] == receipt["phase"] == "APPLY"
+    assert report["plan_digest"] == receipt["plan_digest"] == plan.digest
+    assert report["verified_target"] == receipt["verified_target"] == access["target"]
+    assert report["credential_source"] == "env:GITLAB_TOKEN"
+    assert report["identity"] == access["identity"]
+    assert report["mutated"] is receipt["mutated"] is None
+    assert report["readback"]["verified"] is False
+    assert report["cleanup"]["status"] == "BLOCKED"
+    assert receipt["target_file"].startswith("path:")
+    assert report["errors"] == [
+        {
+            "source": "gitlab_action",
+            "reason": "issue_create_outcome_uncertain_check_title_before_retry",
+        }
+    ]
 
 
 @pytest.mark.parametrize("dry_run_flag", ([], ["--dry-run"]))

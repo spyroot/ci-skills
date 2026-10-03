@@ -182,6 +182,15 @@ creation requires the same `--token-out PATH` on the dry-run plan and apply to
 bind the one-time token destination into the plan digest. The token is saved at
 that caller-selected path; creating a record does not register or start a runner.
 
+If a create response is lost, the next apply reads the complete exact-title or
+description list. When no record exists, that call clears the pending marker
+and blocks without posting; repeat the same confirmed plan to create it. If a
+runner with the description exists, inspect its numeric ID and scope in GitLab
+before deciding whether to remove that record through the GitLab UI. A lost
+one-time token cannot be recovered from the record. After an authorized removal,
+repeat the confirmed plan once to clear the marker and again to create. Do not
+remove a runner merely because its description matches.
+
 Group runner assignment has one extra read-only step: select `gitlab.group` in
 the target, then call `gitlab_runner.py assign --runner-id ID --live-plan --json`
 to read the exact project IDs. Its `PLANNED` result supplies the digest for

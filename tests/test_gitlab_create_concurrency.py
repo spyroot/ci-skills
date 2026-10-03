@@ -170,6 +170,71 @@ def test_create_reconciles_a_lost_post_response_without_reposting(
     assert next(tmp_path.glob("*.lock")).read_text() == ""
 
 
+@pytest.mark.parametrize(
+    ("module", "kind", "title", "content", "base", "query", "created", "detail"),
+    (
+        (
+            ISSUES,
+            "gitlab_issue",
+            "broken",
+            None,
+            "projects/42/issues",
+            "projects/42/issues?state=all&search=broken&per_page=100&page=1",
+            {"iid": 9},
+            {"iid": 9, "title": "broken", "state": "opened"},
+        ),
+        (
+            MILESTONES,
+            "gitlab_milestone",
+            "release",
+            None,
+            "projects/42/milestones",
+            "projects/42/milestones?title=release&per_page=100&page=1",
+            {"id": 9},
+            {"id": 9, "title": "release"},
+        ),
+        (
+            WIKIS,
+            "gitlab_wiki",
+            "Guide",
+            "body",
+            "projects/42/wikis",
+            "projects/42/wikis?per_page=100&page=1",
+            {"slug": "Guide"},
+            {"slug": "Guide", "title": "Guide", "content": "body"},
+        ),
+    ),
+)
+def test_absent_uncertain_create_clears_marker_but_never_reposts_in_same_call(
+    monkeypatch, tmp_path, module, kind, title, content, base, query, created, detail
+):
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path)
+    resource = f"{base}/{created.get('iid', created.get('id', created.get('slug')))}"
+    api = ScriptedAPI(
+        {
+            ("GET", query): [[], [], [], []],
+            ("POST", base): [API.GitLabAPIError("timeout"), created],
+            ("GET", resource): [detail],
+        }
+    )
+    plan = _plan(kind, title, content=content)
+    session = SimpleNamespace()
+
+    with pytest.raises(ACTION.ActionError, match="outcome_uncertain"):
+        module.apply(api, session, plan, 42)
+    lock_file = next(tmp_path.glob("*.lock"))
+    assert lock_file.read_text() == "pending\n"
+
+    with pytest.raises(API.GitLabAPIError, match="absent_after_readback_retry"):
+        module.apply(api, session, plan, 42)
+    assert lock_file.read_text() == ""
+    assert [method for method, _ in api.calls].count("POST") == 1
+
+    assert module.apply(api, session, plan, 42)["action"] == "APPLIED"
+    assert [method for method, _ in api.calls].count("POST") == 2
+
+
 @pytest.mark.parametrize("reason", ("authentication", "authorization"))
 @pytest.mark.parametrize(
     ("module", "kind", "title", "content", "base", "query"),

@@ -21,7 +21,7 @@ from .gitlab_api import GitLabAPIError, GlabAPIClient
 from .portable import write_portable_receipt
 from .report import emit
 from .runtime import sanitize
-from .status import DRY_RUN, PARTIAL, PASS, PLANNED, exit_code
+from .status import BLOCKED, DRY_RUN, PARTIAL, PASS, PLANNED, exit_code
 from .target import GitLabOperationTarget, TargetError, load_gitlab_target
 
 
@@ -453,6 +453,77 @@ def _access_failure(access: dict[str, Any]) -> tuple[str, str]:
     return "gitlab_access", "gitlab_access_not_pass"
 
 
+def _planned_failure(
+    args: argparse.Namespace,
+    kind: str,
+    plan: ActionPlan,
+    source: str,
+    reason: str,
+    *,
+    phase: str,
+    mutated: bool | None,
+    session: Any = None,
+    access: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+    started: float,
+) -> int:
+    """Keep plan and known write state in every failure after planning."""
+    error = {"source": source, "reason": sanitize(reason, 240)}
+    data = result or _result(
+        plan,
+        BLOCKED,
+        phase=phase,
+        mutated=mutated,
+        readback={"verified": False},
+        cleanup={
+            "status": "BLOCKED" if mutated is None else "NOT_APPLICABLE",
+            "reason": "write_outcome_unverified"
+            if mutated is None
+            else "no_write_attempted",
+        },
+    )
+    data["status"] = BLOCKED
+    data.setdefault("errors", []).append(error)
+    data["summary"]["error_count"] = len(data["errors"])
+    if session is not None:
+        for field in ("credential_source", "credential_digest", "skill"):
+            value = getattr(session, field, None)
+            if value is not None:
+                data[field] = value
+    if access is not None and access.get("status") == PASS:
+        data["identity"] = access.get("identity")
+        data["verified_target"] = access.get("target")
+    if args.receipt_out:
+        try:
+            write_portable_receipt(data, args.receipt_out)
+        except (OSError, RuntimeError, ValueError):
+            data["errors"].append(
+                {"source": "receipt_out", "reason": "receipt_unavailable"}
+            )
+            data["summary"]["error_count"] = len(data["errors"])
+    mode = output_mode(args)
+    try:
+        rendered = emit(data, mode, args.output_dir)
+    except (OSError, RuntimeError):
+        rendered = emit(data, "json")
+    try:
+        log_event(
+            args,
+            kind,
+            "failure",
+            BLOCKED,
+            elapsed=time.monotonic() - started,
+            error_class=source,
+        )
+    except OSError:
+        pass
+    if mode == "human":
+        print(f"BLOCKED: {error['reason']}", file=sys.stderr)
+    else:
+        sys.stdout.write(rendered)
+    return exit_code(BLOCKED)
+
+
 def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
     """Adapter used by every operation entrypoint; no other CLI owns writes."""
     started = time.monotonic()
@@ -479,6 +550,12 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         return _failure(args, kind, "arguments", "receipt_out_requires_apply")
     if not args.apply and not live_plan and (args.output_dir or args.log_file):
         return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
+    plan: ActionPlan | None = None
+    session: Any = None
+    access: dict[str, Any] | None = None
+    data: dict[str, Any] | None = None
+    phase = "OFFLINE_PLAN"
+    mutated: bool | None = False
     try:
         path, target_source = resolve_target(args.target)
         target = load_gitlab_target(path)
@@ -493,6 +570,7 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         if not args.apply and not live_plan:
             data = _result(plan, DRY_RUN, phase="OFFLINE_PLAN", mutated=False)
         else:
+            phase = "ACCESS"
             if (
                 args.apply
                 and not group_assignment
@@ -510,7 +588,17 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
             access = check_gitlab_operation_access(session, api_client=api)
             if access.get("status") != PASS:
                 source, reason = _access_failure(access)
-                return _failure(args, kind, source, reason)
+                return _planned_failure(
+                    args,
+                    kind,
+                    plan,
+                    source,
+                    reason,
+                    phase=phase,
+                    mutated=False,
+                    session=session,
+                    started=started,
+                )
             if group_assignment:
                 from .gitlab_runners import project_ids
 
@@ -524,6 +612,7 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
                     ),
                 )
             if live_plan:
+                phase = "LIVE_PLAN"
                 data = _result(
                     plan,
                     PLANNED,
@@ -542,7 +631,11 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
             else:
                 if not args.confirm_plan or args.confirm_plan != plan.digest:
                     raise ActionError("confirm_plan_mismatch_rerun_live_plan")
+                phase = "APPLY"
+                mutated = None
                 record = apply_plan(api, session, access, plan)
+                if isinstance(record, dict):
+                    mutated = record.get("mutated", record.get("action") == "APPLIED")
                 errors = [
                     {
                         "source": f"project:{error['project_id']}",
@@ -572,6 +665,7 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
                     skill=session.skill,
                     cleanup=cleanup,
                 )
+                mutated = data["mutated"]
         if args.receipt_out:
             write_portable_receipt(data, args.receipt_out)
         rendered = emit(data, output_mode(args), args.output_dir)
@@ -581,6 +675,21 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         sys.stdout.write(rendered)
         return exit_code(data["status"])
     except (ActionError, TargetError, GitLabAPIError, OSError, RuntimeError) as exc:
-        return _failure(args, kind, "gitlab_action", sanitize(str(exc), 240))
+        reason = sanitize(str(exc), 240)
     except Exception:  # noqa: BLE001 - keep malformed provider failures structured
-        return _failure(args, kind, "gitlab_action", "unexpected_runtime_failure")
+        reason = "unexpected_runtime_failure"
+    if plan is None:
+        return _failure(args, kind, "gitlab_action", reason)
+    return _planned_failure(
+        args,
+        kind,
+        plan,
+        "gitlab_action",
+        reason,
+        phase=phase,
+        mutated=mutated,
+        session=session,
+        access=access,
+        result=data,
+        started=started,
+    )

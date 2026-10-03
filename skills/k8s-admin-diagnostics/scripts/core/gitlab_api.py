@@ -197,6 +197,12 @@ class CreateGuard:
         self.require_ready()
         self._set(b"pending\n")
 
+    def reconcile_absent(self) -> None:
+        """Clear an earlier uncertain create only after a complete empty read."""
+        if self.pending:
+            self.clear()
+            raise GitLabAPIError("create_outcome_uncertain_absent_after_readback_retry")
+
     def clear(self) -> None:
         if self.pending:
             self._set(b"")

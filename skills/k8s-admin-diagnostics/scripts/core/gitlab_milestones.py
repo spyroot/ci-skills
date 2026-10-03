@@ -163,6 +163,7 @@ def _create(
                 raise ActionError("existing_milestone_differs_use_update")
             guard.clear()
             return {"action": "NO_OP", "id": identifier, "verified": True}
+        guard.reconcile_absent()
         guard.mark_pending()
         try:
             response = api.post_json(session, base, plan.body)

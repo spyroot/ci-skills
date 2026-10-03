@@ -298,8 +298,10 @@ def _create(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[st
         ) as guard:
             matching = _runner_matches(api, session, scope, description)
             if matching:
-                raise ActionError("runner_description_exists_recover_instead_of_retry")
-            guard.require_ready()
+                raise ActionError(
+                    "runner_description_exists_verify_and_remove_record_before_retry"
+                )
+            guard.reconcile_absent()
             body = dict(plan.body)
             body[f"{plan.target_kind}_id"] = target_id
             guard.mark_pending()

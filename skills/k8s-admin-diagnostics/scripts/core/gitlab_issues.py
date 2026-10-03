@@ -60,6 +60,7 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
                 raise ActionError("existing_issue_differs")
             guard.clear()
             return {"action": "NO_OP", "iid": iid, "verified": True}
+        guard.reconcile_absent()
         guard.mark_pending()
         try:
             response = api.post_json(session, base, plan.body)

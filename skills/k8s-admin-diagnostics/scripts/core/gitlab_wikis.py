@@ -133,6 +133,7 @@ def _create(
                 raise ActionError("existing_wiki_differs_use_update")
             guard.clear()
             return {"action": "NO_OP", "slug": slug, "verified": True}
+        guard.reconcile_absent()
         guard.mark_pending()
         try:
             response = api.post_json(session, base, plan.body)

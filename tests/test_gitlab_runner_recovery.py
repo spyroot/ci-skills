@@ -287,3 +287,54 @@ def test_malformed_runner_create_response_keeps_uncertain_recovery_marker(
     assert [path.read_bytes() for path in (tmp_path / "locks").glob("*.lock")] == [
         b"pending\n"
     ]
+
+
+def test_absent_runner_after_uncertain_post_requires_separate_retry(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
+    token_out = tmp_path / "one-time.token"
+    scope = "groups/42/runners"
+    api = FakeAPI(
+        {
+            ("GET", _list(scope)): [[], [], []],
+            ("POST", "user/runners"): [
+                API.GitLabAPIError("timeout"),
+                API.GitLabAPIError("authentication"),
+            ],
+        }
+    )
+    plan = _plan(operation="create", token_out=token_out)
+    first = RUNNERS.apply(api, object(), plan, 42)
+    assert first["action"] == "PARTIAL"
+    lock_file = next((tmp_path / "locks").glob("*.lock"))
+    assert lock_file.read_text() == "pending\n"
+
+    with pytest.raises(API.GitLabAPIError, match="absent_after_readback_retry"):
+        RUNNERS.apply(api, object(), plan, 42)
+    assert lock_file.read_text() == ""
+    assert [method for method, _, _ in api.calls].count("POST") == 1
+
+    with pytest.raises(API.GitLabAPIError, match="authentication"):
+        RUNNERS.apply(api, object(), plan, 42)
+    assert [method for method, _, _ in api.calls].count("POST") == 2
+    assert not token_out.exists()
+
+
+def test_existing_runner_error_names_manual_recovery_not_missing_command(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
+    token_out = tmp_path / "one-time.token"
+    scope = "groups/42/runners"
+    api = FakeAPI(
+        {
+            ("GET", _list(scope)): [[{"id": 23, "description": "fresh-runner"}]],
+        }
+    )
+    with pytest.raises(
+        ACTION.ActionError, match="verify_and_remove_record_before_retry"
+    ):
+        RUNNERS.apply(api, object(), _plan(operation="create", token_out=token_out), 42)
+    assert not token_out.exists()
+    assert all(method == "GET" for method, _, _ in api.calls)
