@@ -2,8 +2,9 @@
 
 ## Scope
 
-The installable Codex skill is `ci-skills`. Its
-`skills/k8s-admin-diagnostics/` directory is the diagnostic command provider.
+The full Codex skill is `ci-skills`. Its
+`skills/k8s-admin-diagnostics/` directory is the diagnostic command provider;
+the provider can also be installed alone for existing diagnostics users.
 The same skill also includes `bin/ci-api` for bounded Git API reads and
 `bin/ci-binary-build` for exact-commit OpenShift build planning. Separate
 commands read GitLab jobs and pipelines,
@@ -15,18 +16,26 @@ Ceph node diagnostics use non-TTY `kubectl exec` into existing Pods; the
 OpenShift MTU command creates temporary debug Pods only with `--apply` and a
 matching plan digest.
 
-Output follows the reader: a terminal gets a human summary, a pipe or a file
-gets versioned JSON. A program calling these commands therefore needs no
-`--json` flag, though it may pass one.
+The Python diagnostic commands show a human summary at a terminal and
+versioned JSON when piped or redirected; `--json` selects JSON explicitly.
+`ci-api` emits JSON by default, and `ci-binary-build` emits a JSON plan.
 
 ## Install and first run
 
 Five steps. The third sets a default target, so later commands need no target
 argument.
 
-**1. Install the tools.** Python 3.11 or newer with PyYAML, plus `gh`, `glab`
-and `kubectl` for diagnostics. GitLab-only operations need `glab` but do not
-need `gh` or `kubectl`.
+Start from a clean checkout, or enter an existing clean checkout:
+
+```bash
+git clone https://github.com/spyroot/ci-skills.git
+cd ci-skills
+```
+
+**1. Install the tools.** This setup uses `git`, `conda`, and `jq`. Python 3.11
+or newer with PyYAML is required for diagnostics; install `gh`, `glab`, and
+`kubectl` for the authorities you will access. GitLab-only operations need
+`glab` but do not need `gh` or `kubectl`. `ci-binary-build` also needs `yq`.
 Create the `ci-skills` conda environment if it is absent, then install the
 repository dependencies into it:
 
@@ -61,8 +70,9 @@ otherwise the resolver uses a declared `kubeconfig`, `KUBECONFIG`, or
 `--publication` check in step 4, declare the repository's actual
 `github.required_checks` from branch protection.
 
-Keep that file out of this repository, and never point anything that runs
-elsewhere at it. The paths inside are true on one machine only; a pipeline
+Never commit credential values or credential-bearing kubeconfigs. A project
+may keep its target at `./.ci-skills/target.toml`; a pipeline must use paths
+valid on its own runner. The paths inside are true on one machine only; a pipeline
 aimed at a path under someone's home directory fails the moment it runs on a
 runner, and the failure reads like a credential problem rather than the wiring
 mistake it is. A consuming project can provide its own target file or the
@@ -72,15 +82,23 @@ For node diagnostics, declare the selected node and existing Pod routes under
 `[kubernetes.node_diagnostics]`. Provisioning access is the project's job;
 this skill resolves the selected source and reports it.
 
-**4. Prove access, before trusting anything else.**
+**4. Prove access to the authorities you selected.** For a GitLab-only target,
+read back its configured project and administrator identity:
+
+```bash
+conda run -n ci-skills python \
+  skills/k8s-admin-diagnostics/scripts/gitlab_access.py check --json
+```
+
+When all three authorities are configured, run the full publication check:
 
 ```bash
 conda run -n ci-skills python \
   skills/k8s-admin-diagnostics/scripts/access_check.py --publication
 ```
 
-`PASS` means every selected authority was reached and each required live read
-succeeded, and the receipt names the effective source and identity. That
+Its `PASS` means every selected authority was reached and each required live
+read succeeded, and the receipt names the effective source and identity. That
 is the answer to "which credential am I using" — read it rather than searching
 the host.
 
@@ -91,6 +109,7 @@ the top-level skill:
 
 ```bash
 ./install.sh --dry-run
+FINGERPRINT="$(./install.sh --dry-run | jq -r '.fingerprint')"
 ./install.sh --apply --confirm-install "$FINGERPRINT" --timeout 10s
 ```
 
@@ -157,6 +176,9 @@ first one found wins, and every command reports which it used as
 | 4 | one user | `~/.ci-skills/target.toml` | you |
 
 Pick the tier that matches how many targets you have.
+`K8S_ADMIN_DIAGNOSTICS_BINDING` also selects a project binding at the
+environment tier. Setting it together with `CI_SKILLS_TARGET` is an error;
+the resolver will not guess between them.
 
 **One GitLab and one cluster** — put the file at tier 4 once and never pass an
 argument again. Same shape as a single API key living in a user config rather
@@ -185,7 +207,8 @@ For GitLab-only work, the selected target file may contain only `[gitlab]` with
 its exact `url`. Set `gitlab.project` or `gitlab.group` for the intended
 operation. `gitlab_job.py` selects its project from `--job-url`. The same
 four-tier target selection above applies. Storage, event, and Cilium
-diagnostics still need all three authorities. Set `gitlab.project` in the
+diagnostics need only `[kubernetes]`; the full `access_check.py` needs all
+three authorities. Set `gitlab.project` in the
 selected target for the commands below. The declared `--project` flag overrides
 it for one invocation.
 
@@ -261,7 +284,8 @@ is written.
   and controllers. Filters: `--namespace NAME|all`, `--node NAME`,
   `--storage-class NAME`, `--phase Pending|Bound|Lost|Released|Failed|all`,
   and `--search TEXT`.
-- `event_trace.py` reads both Kubernetes event APIs and accepts `--last`
+- `event_trace.py` prefers the `events.k8s.io/v1` API and falls back to core
+  Events only when that API is unavailable. It accepts `--last`
   (`5m`, `90s`, `2h`, `7d`), `--from`, `--to`, `--namespace`, `--kind`,
   `--object`, `--reason`, and `--search`. `--last 15m` is shorter than
   computing an RFC3339 pair; the default window is the previous hour, which is

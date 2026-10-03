@@ -48,7 +48,9 @@ contracts.
 
 The selected target comes from `--target`, `CI_SKILLS_TARGET`, the calling
 project's `.ci-skills/target.toml`, or the user's `~/.ci-skills/target.toml`, in
-that order. The diagnostic provider resolves the effective credentials and
+that order. `K8S_ADMIN_DIAGNOSTICS_BINDING` selects an existing project binding
+at the environment tier; setting both environment selectors blocks. The
+diagnostic provider resolves the effective credentials and
 verifies the exact authority before live reads or writes. Never invent a token
 path, kubeconfig, context, project, or API host. A selected target file is
 complete on its own; missing fields do not come from a lower-priority file.
