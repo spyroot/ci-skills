@@ -4,10 +4,11 @@
 
 This repository provides `k8s-admin-diagnostics`, a skill with eight read-only
 commands for access checks, GitLab jobs, Kubernetes storage and events,
-Cilium status, Ceph cluster state, and node-local Cilium and Ceph kernel diagnostics. The access
-check verifies the selected GitHub, GitLab, and Kubernetes authorities before
-API collectors run. API commands use `gh`, `glab`, and `kubectl`; node-local
-commands use `crictl` or `journalctl` on the selected node.
+Cilium status, Ceph cluster state, and node-local Cilium and Ceph kernel
+diagnostics. The access check verifies the selected GitHub, GitLab, and
+Kubernetes authorities before API collectors run. API commands use `gh`,
+`glab`, and `kubectl`; node-local commands use `crictl` or `journalctl`
+on the selected node.
 
 Output follows the reader: a terminal gets a human summary, a pipe or a file
 gets versioned JSON. A program calling these commands therefore needs no
@@ -107,8 +108,9 @@ elsewhere at it. The paths inside are true on one machine only; a pipeline
 aimed at a path under someone's home directory fails the moment it runs on a
 runner, and the failure reads like a credential problem rather than the wiring
 mistake it is. A consuming project provides its own target or binding;
-the skill does not adopt an ambient `KUBECONFIG`. Provisioning access is the project's job; this skill only
-resolves what is already there and reports which source it used.
+the skill does not adopt an ambient `KUBECONFIG`. Provisioning access is
+the project's job; this skill only resolves what is already there and reports
+which source it used.
 
 **4. Prove access, before trusting anything else.**
 
@@ -160,11 +162,11 @@ Start here and you will not need to read the rest.
    execution surface, its options, and a symptom-to-command routing table.
    `<command> --describe` prints one command's contract and needs no
    credentials.
-3. **Rely on the option tiers.** Every API command takes `--target` or `--binding`, `--json`,
-   `--yaml`, `--human`, `--dry-run`, `--revision`, `--output-dir` and
-   `--describe`. A command that filters records takes `--search`; one scoped to
-   a namespace takes `--namespace`; one reading a time range takes `--last`,
-   `--from` and `--to`. Learn the tier once.
+3. **Rely on the option tiers.** Every API command takes `--target` or
+   `--binding`, `--json`, `--yaml`, `--human`, `--dry-run`, `--revision`,
+   `--output-dir` and `--describe`. A command that filters records takes
+   `--search`; one scoped to a namespace takes `--namespace`; one reading
+   a time range takes `--last`, `--from` and `--to`. Learn the tier once.
 4. **Read the status, not the exit code alone.** `PARTIAL` with
    `access_proven: true` means the read worked and a component is unhealthy —
    usually the finding. `DRY_RUN` is a plan and never evidence.

@@ -14,9 +14,10 @@ replace that path with a stable digest token.
 
 Two environment selectors set together are an error. An explicit target or a
 present but invalid selected file blocks. An environment target path that is
-absent advances to the project or user tier. Every target must declare an exact Kubernetes
-context and API server. A plain target must also declare its kubeconfig; the
-skill never adopts a global current context or ambient `KUBECONFIG`.
+absent advances to the project or user tier. Every target must declare an
+exact Kubernetes context and API server. A plain target must also declare
+its kubeconfig; the skill never adopts a global current context or ambient
+`KUBECONFIG`.
 
 Example nonsecret `./.ci-skills/target.toml`:
 

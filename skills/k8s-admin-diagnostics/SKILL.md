@@ -56,17 +56,17 @@ Routing, in short:
 | why a volume or claim is stuck | `storage_report.py` |
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |
-| Ceph health, OSDs, inactive PGs, and OSD/monitor Pods | `ceph_cluster.py --namespace NAME` |
+| Ceph, OSDs, inactive PGs, OSD/mon Pods | `ceph_cluster.py --namespace NAME` |
 | Cilium CRI status on a selected Linux node | `cilium_node.py` |
 | Ceph or RBD kernel messages on that node | `ceph_kernel.py` |
 
 ## 3. One API interface
 
-Every API command accepts `--target` or `--binding`, `--json`, `--yaml`, `--human`, `--dry-run`,
-`--revision`, `--output-dir` and `--describe`. A command that filters records
-accepts `--search`; one scoped to a namespace accepts `--namespace`; one
-reading a time range accepts `--last`, `--from` and `--to`. Learn the tier
-once and it holds everywhere.
+Every API command accepts `--target` or `--binding`, `--json`, `--yaml`,
+`--human`, `--dry-run`, `--revision`, `--output-dir` and `--describe`.
+A command that filters records accepts `--search`; one scoped to a namespace
+accepts `--namespace`; one reading a time range accepts `--last`, `--from`
+and `--to`. Learn the tier once and it holds everywhere.
 
 `--target` resolves in four declared places — the argument, then
 `$CI_SKILLS_TARGET`, then `./.ci-skills/target.toml`, then
