@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-03T19:06:02.115474+00:00",
+  "captured_at": "2026-10-03T19:16:16.507186+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -22,7 +22,7 @@
       "ciliumnode_count": 9,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "8a4235230e2c98379641ab48b30650126915199f7397f78b9e5d32cc141103e3",
+      "readback_sha256": "7fc52f6d76e63e0b9422dd8f670bcbc58a25d6c89f2954635561cde5405fe46e",
       "record_count": 9,
       "status": "PASS"
     },
@@ -30,15 +30,15 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "367d21aa6c9cd28337417bec990e78edf81e777ec109bffb8c3c5708a1160f94",
-      "record_count": 1294,
+      "readback_sha256": "5b90b987afca60137534106fa1a522c22eea0fd3fee718705f5ac1f6e9e4e9db",
+      "record_count": 1276,
       "status": "PASS"
     },
     "storage_report": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "ca684e31f4468c5a48f6c03dfd3766acadf69b1240afb175076fcb88993b38d7",
+      "readback_sha256": "d122db106938f67e5d3c9b5aa6b89d7539227190962258efd73780a623ee630f",
       "record_count": 65,
       "resource_counts": {
         "attachments": 23,
@@ -66,11 +66,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "d61abbda99ff5fd98563ac1421a465cb7165a73e7add198c2513e1e0d99ba48f",
-    "file_count": 27,
+    "digest": "422737803f8e8e90aa0ca0e200f1e3ae8b62d53f5e09bf926f94230630cb3ce0",
+    "file_count": 32,
     "revision": {
       "source": "git_head",
-      "value": "90f6d9b2dedb7fe6f3f7d61307a667e47ea7c907",
+      "value": "44431e756e177d96870633ddbd84997c00c3bd70",
       "verified": true
     }
   },
@@ -152,6 +152,7 @@
     }
   },
   "target_file": "path:5e5380df1eda",
+  "target_selection": "cli:path:5e5380df1eda",
   "target_source": "argv:--target",
   "targets": {
     "github": "github.com/spyroot/ci-skills",
@@ -161,5 +162,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "90f6d9b2dedb7fe6f3f7d61307a667e47ea7c907"
+  "tested_revision": "44431e756e177d96870633ddbd84997c00c3bd70"
 }
