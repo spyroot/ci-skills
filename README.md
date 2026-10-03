@@ -1,9 +1,12 @@
-# Kubernetes diagnostics and GitLab operations skill
+# CI Skills: GitLab and Kubernetes operations
 
 ## Scope
 
-This repository provides `k8s-admin-diagnostics`, a skill for GitLab CI and
-Kubernetes diagnostics. Separate commands read GitLab jobs and pipelines,
+The installable Codex skill is `ci-skills`. Its
+`skills/k8s-admin-diagnostics/` directory is the diagnostic command provider.
+The same skill also includes `bin/ci-api` for bounded Git API reads and
+`bin/ci-binary-build` for exact-commit OpenShift build planning. Separate
+commands read GitLab jobs and pipelines,
 storage and events, Cilium, Ceph, and physical NIC MTU consistency. GitLab
 milestone, bug, wiki, and runner commands support planned writes with
 independent read-back. Each command checks its selected authority;
@@ -81,9 +84,25 @@ succeeded, and the receipt names the effective source and identity. That
 is the answer to "which credential am I using" — read it rather than searching
 the host.
 
-**5. Install it where your agent looks.** Steps 1 to 4 make the commands work
-in a shell. An agent finds the skill only once it is installed into that
-runtime's skills directory:
+**5. Install the `ci-skills` agent entry point.** Steps 1 to 4 make the
+commands work in a shell. From a clean committed checkout, inspect the
+installer plan, set `FINGERPRINT` to its printed `fingerprint`, then install
+the top-level skill:
+
+```bash
+./install.sh --dry-run
+./install.sh --apply --confirm-install "$FINGERPRINT" --timeout 10s
+```
+
+`install.sh` links this checkout at `$CODEX_HOME/skills/ci-skills`, or
+`~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The source checkout
+must remain available because the link follows it. Its
+[SKILL.md](SKILL.md) routes agent requests to the commands below. For a fresh
+Codex installation, the skill can also be installed directly from the
+repository root on GitHub after this change merges.
+
+Existing users can install the diagnostic provider alone with its separate
+installer:
 
 ```bash
 conda run -n ci-skills python tools/install_k8s_admin_diagnostics.py --json
@@ -99,7 +118,8 @@ conda run -n ci-skills python tools/install_k8s_admin_diagnostics.py \
   --recover --apply --confirm-recover --json
 ```
 
-The default destination is `$CODEX_HOME/skills/k8s-admin-diagnostics`, or
+That provider's default destination is
+`$CODEX_HOME/skills/k8s-admin-diagnostics`, or
 `~/.codex/skills/k8s-admin-diagnostics` when `CODEX_HOME` is unset; pass
 `--skills-dir PATH` for any other runtime. Existing installs require
 `--upgrade --apply --confirm-upgrade`; each previous version is preserved as a
@@ -213,9 +233,10 @@ subcommands and options, and routes an agent to the correct first access call.
 
 ## For agents
 
-Read the installed [SKILL.md](skills/k8s-admin-diagnostics/SKILL.md) for the
-first call, command routing, status interpretation, and evidence handling.
-Its [tools.json](skills/k8s-admin-diagnostics/tools.json) is the machine-readable
+Read the top-level [SKILL.md](SKILL.md) to choose a command. The diagnostic
+provider's [SKILL.md](skills/k8s-admin-diagnostics/SKILL.md) explains target
+resolution, status interpretation, and evidence handling. Its
+[tools.json](skills/k8s-admin-diagnostics/tools.json) is the machine-readable
 command contract.
 
 ## Commands
