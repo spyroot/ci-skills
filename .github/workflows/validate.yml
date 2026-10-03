@@ -76,21 +76,16 @@ jobs:
           --root . --json
 
       - name: Python dependencies
-        if: steps.changes.outputs.non_markdown_count != '0'
         run: python -m pip install -r requirements.txt
 
       - name: Ruff lint
-        if: steps.changes.outputs.non_markdown_count != '0'
         run: ruff check .
 
       - name: Ruff format
-        if: steps.changes.outputs.non_markdown_count != '0'
         run: ruff format --check .
 
       - name: Isolated installed-package smoke
-        if: steps.changes.outputs.non_markdown_count != '0'
         run: pytest -q tests/test_installed_package.py
 
       - name: Tests
-        if: steps.changes.outputs.non_markdown_count != '0'
         run: pytest -q --ignore=tests/test_installed_package.py
