@@ -532,6 +532,18 @@ def _run_installed_node_script(
     )
 
 
+def _assert_sanitized_failure_log(stderr: str, kind: str) -> None:
+    """Installed API commands log one sanitized diagnostic line on stderr."""
+    assert stderr
+    assert "BLOCKED:" not in stderr
+    assert "usage:" not in stderr.lower()
+    assert "--definitely-invalid" not in stderr
+    assert " ERROR " in stderr
+    assert kind in stderr
+    assert " failure " in stderr
+    assert "result=BLOCKED" in stderr
+
+
 @pytest.mark.parametrize(
     ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
 )
@@ -776,7 +788,7 @@ def test_installed_api_and_ceph_invalid_args_are_structured(
     data: dict[str, Any] = loader(result.stdout)
 
     assert result.returncode == 2
-    assert result.stderr == ""
+    _assert_sanitized_failure_log(result.stderr, kind)
     assert data["kind"] == kind
     assert data["status"] == "BLOCKED"
     assert data["errors"] == [{"source": "arguments", "reason": "invalid_arguments"}]
