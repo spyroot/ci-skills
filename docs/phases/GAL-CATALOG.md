@@ -6,9 +6,10 @@ by: GAL-ROUTING.
 ## Goal
 
 One interface over local and vendored skills, named after `glab skills`:
-`list`, `get` and `install`, beside GAL-VENDOR's `update`. It also lists
-the repository's own tools: the root `SKILL.md` and the `bin/ci-*` commands
-that PR #2 adds.
+`list`, `get` and `install`, beside GAL-VENDOR's `update`. `list` returns
+skill records, including the repository's `ci-skills` package; its commands
+are described by that package's `tools.json`. Package consolidation
+(GAL-PHASES) lands before this phase.
 
 ## Block
 
@@ -28,17 +29,18 @@ Discovery only reads: it writes nothing and uses no network.
 
 ### Walk
 
-1. Start at the repository root. A root `SKILL.md`, the `ci-skills` skill
-   that PR #2 adds, is the first record, together with its `bin/ci-*`
-   commands.
-2. Then take each directory directly under `skills/` that holds a
+1. Start at `skills/`. The only local package is `skills/ci-skills/`;
+   the root `SKILL.md` from PR #2 is consolidated and removed before this
+   phase. Root `bin/ci-*` commands are tools, not another skill record.
+2. Take each directory directly under `skills/` that holds a
    `SKILL.md`, in name order.
 3. Skip nested directories, hidden directories and `__pycache__`; they are
    not skills.
 4. Refuse a symbolic link anywhere in a skill (`symlink_unexpected`), as the
-   installer already does.
-5. With `--skills-dir DIR`, walk an installed skills directory the same way,
-   so an installed set can be listed too.
+   copy installer already does. Package delivery replaces PR #2's link
+   installer and defines a confirmed migration for an existing link.
+5. With `--skills-dir DIR`, walk copied installed skills the same way, so an
+   installed set can be listed too.
 
 ### Read, per skill
 
@@ -99,8 +101,9 @@ Exit codes, the result envelope and `safe_next_step` follow GAL-CLI.
     `destination_differs`;
   - keeps today's defaults: `--skills-dir` defaults to `$CODEX_HOME/skills`
     or `~/.codex/skills`, and the source revision must be verified.
-- **Wrapper.** `tools/install_k8s_admin_diagnostics.py` stays a thin wrapper
-  over `skillkit/install.py` until GAL-ROUTING renames the skill. It keeps
+- **Wrapper.** `tools/install_ci_skills.py`, established by package delivery,
+  stays a thin wrapper over `skillkit/install.py` while its callers migrate.
+  It keeps
   `SKILL_NAME`, `install`, `package_files`, `skills_directory` and
   `tree_digest`, which `tests/test_installer.py` and
   `tests/test_installed_package.py` load from the module by path. It puts its
@@ -118,8 +121,8 @@ stale. Its schema is `skill-index` (GAL-SCHEMA).
   "kind": "skill_index",
   "skills": [
     {
-      "name": "k8s-admin-diagnostics",
-      "path": "skills/k8s-admin-diagnostics",
+      "name": "ci-skills",
+      "path": "skills/ci-skills",
       "source": "local",
       "entry": "SKILL.md",
       "manifest": "tools.json",
@@ -153,10 +156,10 @@ Where each field comes from:
 | `references`, `depends_on` | `tools.json` (GAL-ROUTING) | absent |
 | `upstream` | absent | the lock and `skills/vendor.toml` |
 
-`list` adds nothing a skill does not declare. Until GAL-ROUTING, a local
-skill's `tags`, `references` and `depends_on` are empty. Measured as
-single-line JSON in this shape with the real descriptions, a record is
-about 470 bytes (k8s), 565 (`glab-stack`) and 785 (`glab`).
+`list` adds nothing a skill does not declare. Until GAL-ROUTING, the local
+skill's `tags`, `references` and `depends_on` are empty. Historical package
+size measurements are in GAL-ROUTING; measure the consolidated record before
+setting an output budget.
 
 ## Why this shape
 
@@ -170,26 +173,27 @@ about 470 bytes (k8s), 565 (`glab-stack`) and 785 (`glab`).
   to keep current. Computing it reads a few frontmatters, one lock, one
   declaration file and the manifests.
 - **When to revisit.** Past roughly 20 skills, add `--search TEXT` to
-  `list`, reusing the name of the k8s skill's existing filter.
+  `list`, reusing the diagnostics command's existing filter name.
 
 ## Steps
 
-1. Move the installer logic from `tools/install_k8s_admin_diagnostics.py`
-   into `tools/skillkit/install.py`, taking the skill name as a parameter.
-   The old script becomes the wrapper described above.
+1. Move the installer logic from `tools/install_ci_skills.py` into
+   `tools/skillkit/install.py`, taking the skill name as a parameter. Keep
+   that command as the wrapper described above until callers migrate.
 2. Add `tools/skillkit/discover.py` with the walk and read above.
-3. Add the `list`, `get` and `install` verbs to `bin/ci-skills`, a thin
-   wrapper like `bin/ci-api`, each with `--help` and `--describe`
-   (GAL-CLI).
+3. Extend GAL-VENDOR's repository-level `bin/ci-skills` with `list`, `get`
+   and `install`. Each verb has `--help` and `--describe` (GAL-CLI). This
+   maintenance command is outside the installed `skills/ci-skills/` package.
 4. Add the tests GAL-TESTS lists, and open one pull request; the
    `validate` workflow must pass.
-5. Read back: `bin/ci-skills list` shows `ci-skills`, `glab`, `glab-stack`
-   and `k8s-admin-diagnostics`. Comparing `bin/ci-skills get glab` with
+5. Read back: `bin/ci-skills list` shows exactly one `ci-skills` record,
+   plus `glab` and `glab-stack`. Comparing `bin/ci-skills get glab` with
    `glab skills get glab` needs `glab`, which CI does not install, so that
    comparison runs where `glab` is installed.
 
 ## Gates
 
 - **Tests.** As listed in GAL-TESTS, run in CI.
-- **Receipt.** Nothing under `skills/k8s-admin-diagnostics/` changes, so the
-  committed live receipt still applies until it expires (GAL-VENDOR).
+- **Receipt.** This phase does not change `skills/ci-skills/`, so the
+  package-delivery receipt remains valid until expiry. If this phase changes
+  package bytes, capture a fresh receipt after the last edit (GAL-GATES).
