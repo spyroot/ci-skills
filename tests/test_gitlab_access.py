@@ -379,8 +379,7 @@ def test_access_check_uses_user_gitlab_target_without_selector(
     selected = home / ".ci-skills" / "target.toml"
     selected.parent.mkdir(parents=True)
     selected.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\n'
-        'project = "unit/repo"\n',
+        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("HOME", str(home))
