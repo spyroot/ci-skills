@@ -21,7 +21,7 @@ own design, steps and gates.
 | GAL-CLI | one command-line contract and its gate | SCHEMA, GATES |
 | GAL-VENDOR | `glab` agent skills vendored under `skills/` | GATES, SCHEMA |
 | GAL-CATALOG | discover, `list`, `get`, `install` | VENDOR, CLI |
-| GAL-TESTS | CI-run `bin/ci-skills test` for offline skill tests and coverage evidence | GATES, CATALOG |
+| GAL-TESTS | CI-only test command and coverage report | GATES, CATALOG |
 | GAL-ROUTING | three-hop routing; `k8s-diag` on top of `glab` | CATALOG |
 | GAL-REFERENCE | declared tool operations and their check | CATALOG |
 | GAL-HOOKS | advisory local hooks | GATES, VENDOR |
