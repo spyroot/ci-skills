@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-03T19:16:16.507186+00:00",
+  "captured_at": "2026-10-03T19:29:12.574382+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -22,7 +22,7 @@
       "ciliumnode_count": 9,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "7fc52f6d76e63e0b9422dd8f670bcbc58a25d6c89f2954635561cde5405fe46e",
+      "readback_sha256": "270f002ce757fc0b08b0ff6f47f514559043450b7a1b98e9e11f1df67ce43f10",
       "record_count": 9,
       "status": "PASS"
     },
@@ -30,15 +30,15 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "5b90b987afca60137534106fa1a522c22eea0fd3fee718705f5ac1f6e9e4e9db",
-      "record_count": 1276,
+      "readback_sha256": "cceb06ecaee682f43857eea0025e2c049e2fe9665289b81f9021c0f8625cac57",
+      "record_count": 615,
       "status": "PASS"
     },
     "storage_report": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "d122db106938f67e5d3c9b5aa6b89d7539227190962258efd73780a623ee630f",
+      "readback_sha256": "2fb7bda5b1bb8e3295df2f555f4f7fd58ddd9e054b709a34e768be021e3b9d67",
       "record_count": 65,
       "resource_counts": {
         "attachments": 23,
@@ -66,11 +66,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "422737803f8e8e90aa0ca0e200f1e3ae8b62d53f5e09bf926f94230630cb3ce0",
+    "digest": "994aa2151edd566d9b420ef8fb24c2396d849095849ac099c69e986a86b24862",
     "file_count": 32,
     "revision": {
       "source": "git_head",
-      "value": "44431e756e177d96870633ddbd84997c00c3bd70",
+      "value": "1a514b339798557589c61d749a6e2635aed813f9",
       "verified": true
     }
   },
@@ -152,8 +152,8 @@
     }
   },
   "target_file": "path:5e5380df1eda",
-  "target_selection": "cli:path:5e5380df1eda",
-  "target_source": "argv:--target",
+  "target_selection": "user:path:5e5380df1eda",
+  "target_source": "user",
   "targets": {
     "github": "github.com/spyroot/ci-skills",
     "gitlab": "https://gitlab.dcloud.run",
@@ -162,5 +162,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "44431e756e177d96870633ddbd84997c00c3bd70"
+  "tested_revision": "1a514b339798557589c61d749a6e2635aed813f9"
 }
