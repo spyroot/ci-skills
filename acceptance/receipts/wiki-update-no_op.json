@@ -1,0 +1,81 @@
+{
+  "captured_at": "2026-10-03T21:56:09.582872+00:00",
+  "cleanup": {
+    "status": "NOT_APPLICABLE"
+  },
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:2ccda27d0866",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_wiki",
+  "mutated": false,
+  "operation": "update",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "APPLY",
+  "plan": {
+    "body_sha256": "1c896cef7cc55112011f27fbb4a6336bbb3585adcfa846c7480ee26bff9bfefd",
+    "confirmation_ready": true,
+    "fields": [
+      "content"
+    ],
+    "one_time_sink_required": false,
+    "operation": "update",
+    "plan_digest": "216d7efe2477355c526904640c4eb5729342c73647b343baa6082ef399f9b1db",
+    "project_ids": null,
+    "resource_id": "ci-skills-pr13-fdcea49a-wiki",
+    "target_kind": "project",
+    "target_reference": "hott/test"
+  },
+  "plan_digest": "216d7efe2477355c526904640c4eb5729342c73647b343baa6082ef399f9b1db",
+  "readback": {
+    "action": "NO_OP",
+    "slug": "ci-skills-pr13-fdcea49a-wiki",
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "NO_OP",
+      "slug": "ci-skills-pr13-fdcea49a-wiki",
+      "verified": true
+    }
+  ],
+  "result_action": "NO_OP",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "8a7549dcaed525ab366a2cf2880010505a58a16af8c4c5fe5c6ff2665bc88241",
+    "file_count": 48,
+    "revision": {
+      "source": "git_head",
+      "value": "ddd461dce89e690b4854fb0843fd8d5852eaf824",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": {
+    "kind": "project",
+    "reference": "hott/test"
+  },
+  "target_file": "path:5e5380df1eda",
+  "target_source": "argv:--target;argv:--project",
+  "tested_revision": null,
+  "verified_target": {
+    "full_path": "hott/test",
+    "id": 123,
+    "kind": "project",
+    "web_url": "https://gitlab.dcloud.run/hott/test"
+  }
+}

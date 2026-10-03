@@ -9,11 +9,13 @@ import subprocess
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 # How long a killed child is given to be reaped, so the worst case is the
 # caller's timeout plus this, not unbounded.
 REAP_SECONDS = 5
+OUTPUT_LIMIT_EXIT_CODE = 125
 
 
 @dataclass(frozen=True)
@@ -145,6 +147,87 @@ def run_command(
     return CommandResult(command, result.returncode, result.stdout, result.stderr)
 
 
+def run_command_bounded(
+    argv: Sequence[str],
+    *,
+    timeout: int = 25,
+    env: dict[str, str | None] | None = None,
+    max_stdout_bytes: int = 8 * 1024 * 1024,
+) -> CommandResult:
+    """Capture a JSON response with a hard in-memory and process output limit.
+
+    The command is killed when stdout exceeds the limit. Only the last 4096
+    stderr bytes are retained for classification; neither stream is reported
+    directly by an API caller. A timeout or output limit always reaps the child.
+    """
+    if timeout <= 0 or max_stdout_bytes <= 0:
+        raise ValueError("command limits must be positive")
+    command = tuple(str(part) for part in argv)
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            env=_environment(env),
+        )
+    except FileNotFoundError:
+        return CommandResult(command, 127, "", "command unavailable")
+    stdout = bytearray()
+    stderr = bytearray()
+    deadline = time.monotonic() + timeout
+    failure: int | None = None
+    try:
+        with selectors.DefaultSelector() as selector:
+            assert process.stdout is not None and process.stderr is not None
+            selector.register(process.stdout, selectors.EVENT_READ, stdout)
+            selector.register(process.stderr, selectors.EVENT_READ, stderr)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    failure = 124
+                    break
+                for key, _ in selector.select(timeout=min(remaining, 0.5)):
+                    chunk = os.read(key.fileobj.fileno(), 8192)
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        continue
+                    captured = key.data
+                    captured.extend(chunk)
+                    if captured is stdout and len(stdout) > max_stdout_bytes:
+                        failure = OUTPUT_LIMIT_EXIT_CODE
+                        break
+                    if captured is stderr and len(stderr) > 4096:
+                        del stderr[:-4096]
+                if failure is not None:
+                    break
+        if failure is None:
+            remaining = deadline - time.monotonic()
+            try:
+                process.wait(timeout=max(remaining, 0))
+            except subprocess.TimeoutExpired:
+                failure = 124
+    finally:
+        if process.poll() is None:
+            process.kill()
+        try:
+            process.wait(timeout=REAP_SECONDS)
+        except subprocess.TimeoutExpired:
+            failure = 124
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+    return CommandResult(
+        command,
+        failure if failure is not None else process.returncode,
+        stdout.decode("utf-8", errors="replace")
+        if failure != OUTPUT_LIMIT_EXIT_CODE
+        else "",
+        stderr.decode("utf-8", errors="replace"),
+    )
+
+
 def _environment(overrides: dict[str, str | None] | None) -> dict[str, str]:
     environment = os.environ.copy()
     environment.update(
@@ -170,6 +253,7 @@ def run_command_tail(
     max_bytes: int = 65536,
     max_lines: int = 200,
     env: dict[str, str | None] | None = None,
+    cwd: str | Path | None = None,
 ) -> CommandResult:
     """Stream a command and retain only bounded stdout/stderr tail bytes."""
     if max_bytes <= 0 or max_lines <= 0:
@@ -182,6 +266,7 @@ def run_command_tail(
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
             env=_environment(env),
+            cwd=cwd,
         )
     except FileNotFoundError:
         return CommandResult(command, 127, "", "command unavailable")
@@ -238,6 +323,8 @@ def error_class(result: CommandResult) -> str:
         return "missing_tool"
     if result.returncode == 124:
         return "timeout"
+    if result.returncode == OUTPUT_LIMIT_EXIT_CODE:
+        return "response_too_large"
     detail = result.stderr.lower()
     if "unauthorized" in detail or "401" in detail or "not logged in" in detail:
         return "authentication"
@@ -247,6 +334,10 @@ def error_class(result: CommandResult) -> str:
         "could not resolve" in detail
         or "connection refused" in detail
         or "no such host" in detail
+        or "connection reset" in detail
+        or "network is unreachable" in detail
+        or "can't assign requested address" in detail
+        or "timed out" in detail
     ):
         return "transport"
     return "command_failed"

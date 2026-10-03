@@ -16,19 +16,66 @@ from conftest import REPO_ROOT, install_executable, load_module
 SKILL_ROOT = REPO_ROOT / "skills" / "k8s-admin-diagnostics"
 
 ENTRYPOINT_CASES = (
-    ("access_check.py", (), "access_check"),
+    ("access_check.py", (), "access_check", "PASS"),
     (
         "gitlab_job.py",
         ("--job-url", "https://gitlab.example.test/unit/repo/-/jobs/123"),
         "gitlab_job",
+        "PASS",
     ),
-    ("storage_report.py", (), "storage_report"),
+    (
+        "gitlab_pipeline.py",
+        ("--project", "unit/repo", "--pipeline-id", "77"),
+        "gitlab_pipeline",
+        "PASS",
+    ),
+    ("storage_report.py", (), "storage_report", "PASS"),
     (
         "event_trace.py",
         ("--from", "2026-10-01T10:00:00Z", "--to", "2026-10-01T10:10:00Z"),
         "event_trace",
+        "PASS",
     ),
-    ("cilium_status.py", (), "cilium_status"),
+    ("cilium_status.py", (), "cilium_status", "PASS"),
+    ("gitlab_access.py", ("check", "--project", "unit/repo"), "gitlab_access", "PASS"),
+    (
+        "gitlab_milestone.py",
+        ("create", "--project", "unit/repo", "--title", "unit-milestone"),
+        "gitlab_milestone",
+        "DRY_RUN",
+    ),
+    (
+        "gitlab_issue.py",
+        ("open-bug", "--project", "unit/repo", "--title", "unit-bug"),
+        "gitlab_issue",
+        "DRY_RUN",
+    ),
+    (
+        "gitlab_wiki.py",
+        (
+            "create",
+            "--project",
+            "unit/repo",
+            "--title",
+            "unit-page",
+            "--content-file",
+            "@CONTENT@",
+        ),
+        "gitlab_wiki",
+        "DRY_RUN",
+    ),
+    (
+        "gitlab_runner.py",
+        ("assign", "--project", "unit/repo", "--runner-id", "9"),
+        "gitlab_runner",
+        "DRY_RUN",
+    ),
+    (
+        "ceph_cluster.py",
+        ("--namespace", "rook-ceph", "--node", "worker-a", "--ready", "true"),
+        "ceph_cluster",
+        "PASS",
+    ),
 )
 
 NODE_ENTRYPOINT_CASES = (
@@ -64,12 +111,28 @@ if tool == "gh":
 if tool == "glab":
     if args[:2] == ["auth", "status"]:
         raise SystemExit(0)
-    endpoint = args[-1]
+    if args[:3] == ["config", "get", "token"] and args[-2:] == [
+        "--host", "gitlab.example.test"
+    ]:
+        print("unit-token")
+        raise SystemExit(0)
+    endpoint = (
+        args[1]
+        if len(args) > 1 and args[0] == "api" and not args[1].startswith("--")
+        else args[-1]
+    )
     if endpoint == "user":
         emit({
+            "id": 24,
             "username": "unit-gl",
             "is_admin": True,
             "web_url": "https://gitlab.example.test/unit-gl",
+        })
+    if endpoint == "projects/unit%2Frepo":
+        emit({
+            "id": 12,
+            "path_with_namespace": "unit/repo",
+            "web_url": "https://gitlab.example.test/unit/repo",
         })
     if endpoint == "runners/all?per_page=1":
         emit([{"id": 1}])
@@ -84,6 +147,22 @@ if tool == "glab":
         })
     if endpoint == "projects/unit%2Frepo/pipelines/77":
         emit({"id": 77, "status": "success"})
+    if endpoint == "projects/12/pipelines/77":
+        emit({
+            "id": 77,
+            "project_id": 12,
+            "status": "success",
+            "ref": "main",
+            "sha": "a" * 40,
+        })
+    if endpoint == "projects/12/pipelines/77/jobs?per_page=100&page=1":
+        emit([{
+            "id": 123,
+            "name": "selected-job",
+            "stage": "test",
+            "status": "success",
+            "pipeline": {"id": 77},
+        }])
     if endpoint == "runners/9":
         emit({"id": 9, "description": "runner-a"})
     if endpoint == "projects/unit%2Frepo/jobs/123/trace":
@@ -96,6 +175,17 @@ if tool == "kubectl":
         raise SystemExit(98)
     context_index = args.index("--context")
     kargs = args[context_index + 2:]
+    if kargs == ["config", "view", "--minify", "-o", "jsonpath={..namespace}"]:
+        print("default")
+        raise SystemExit(0)
+    if kargs == ["-n", "default", "get", "pods", "-o", "json"]:
+        emit({"items": []})
+    if kargs == ["get", "--raw=/apis/config.openshift.io/v1"]:
+        emit({
+            "kind": "APIResourceList",
+            "groupVersion": "config.openshift.io/v1",
+            "resources": [],
+        })
     if kargs[:2] in (["-n", "cilium"], ["-n", "diagnostics"]):
         namespace = kargs[1]
         journal = namespace == "diagnostics"
@@ -273,6 +363,47 @@ if tool == "kubectl":
         emit({"items": resources.get(resource, [])})
     raise SystemExit(98)
 
+if tool == "oc":
+    if "--context" not in args:
+        raise SystemExit(98)
+    if "debug" in args:
+        if "--to-namespace=default" not in args or "-t" in args or "-i" in args:
+            raise SystemExit(97)
+        emit([{
+            "ifname": "eno1",
+            "mtu": 9000,
+            "operstate": "UP",
+            "link_type": "ether",
+            "parentbus": "pci",
+            "parentdev": "0000:0a:00.0",
+            "addr_info": [{"family": "inet", "local": "192.0.2.10"}],
+        }])
+    if "-n" not in args:
+        raise SystemExit(98)
+    if "exec" in args:
+        if "-s" in args:
+            emit({"health": {"status": "HEALTH_OK"}})
+        if "osd" in args and "tree" in args:
+            emit({"nodes": [{"type": "osd", "id": 0, "name": "osd.0", "status": "up"}]})
+        if "pg" in args and "dump_stuck" in args:
+            emit({"pg_stats": []})
+    if "get" in args and "pods" in args:
+        emit({
+            "items": [{
+                "metadata": {
+                    "namespace": "rook-ceph",
+                    "name": "rook-ceph-osd-0",
+                    "labels": {"app": "rook-ceph-osd", "ceph-osd-id": "0"},
+                },
+                "spec": {"nodeName": "worker-a"},
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }],
+        })
+    raise SystemExit(98)
+
 raise SystemExit(127)
 """
 
@@ -301,6 +432,68 @@ def _write_target(tmp_path: Path, kubeconfig: Path) -> Path:
             'namespace = "diagnostics"\nselector = "app=journal"\n'
             'container = "journal-reader"\n'
             'directory = "/host-journal"\nhost_path = "/var/log/journal"\n'
+        ),
+        encoding="utf-8",
+    )
+    return target
+
+
+def _toml_string(value: str | Path) -> str:
+    """Return one TOML basic string for a synthetic path or name."""
+    return json.dumps(str(value))
+
+
+def _write_kubeconfig_for_target(
+    path: Path,
+    *,
+    context: str = "unit-context",
+    server: str = "https://api.cluster.example.test:6443",
+    cluster: str = "cluster-a",
+) -> Path:
+    """Write a kubeconfig that target.py can match by context and server."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        (
+            "apiVersion: v1\n"
+            "kind: Config\n"
+            "clusters:\n"
+            f"- name: {cluster}\n"
+            "  cluster:\n"
+            f"    server: {server}\n"
+            "contexts:\n"
+            f"- name: {context}\n"
+            "  context:\n"
+            f"    cluster: {cluster}\n"
+            "    user: admin-user\n"
+            "users:\n"
+            "- name: admin-user\n"
+            "  user: {}\n"
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_target_with_kubeconfigs(
+    tmp_path: Path, kubeconfigs: tuple[Path, ...]
+) -> Path:
+    """Write a target with an ordered combined kubeconfig path."""
+    target = tmp_path / "target-kubeconfigs.toml"
+    target.write_text(
+        (
+            "[github]\n"
+            'host = "github.example.test"\n'
+            'repository = "unit/repo"\n'
+            "\n"
+            "[gitlab]\n"
+            'url = "https://gitlab.example.test"\n'
+            "\n"
+            "[kubernetes]\n"
+            'context = "unit-context"\n'
+            'server = "https://api.cluster.example.test:6443"\n'
+            "kubeconfigs = ["
+            + ", ".join(_toml_string(path) for path in kubeconfigs)
+            + "]\n"
         ),
         encoding="utf-8",
     )
@@ -339,10 +532,24 @@ def _run_installed_node_script(
     )
 
 
+def _assert_sanitized_failure_log(stderr: str, kind: str) -> None:
+    """Installed API commands log one sanitized diagnostic line on stderr."""
+    assert stderr
+    assert "BLOCKED:" not in stderr
+    assert "usage:" not in stderr.lower()
+    assert "--definitely-invalid" not in stderr
+    assert " ERROR " in stderr
+    assert kind in stderr
+    assert " failure " in stderr
+    assert "result=BLOCKED" in stderr
+
+
 @pytest.mark.parametrize(
     ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
 )
-@pytest.mark.parametrize(("script_name", "extra_args", "kind"), ENTRYPOINT_CASES)
+@pytest.mark.parametrize(
+    ("script_name", "extra_args", "kind", "expected_status"), ENTRYPOINT_CASES
+)
 def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     tmp_path,
     fake_bin,
@@ -351,18 +558,23 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     script_name,
     extra_args,
     kind,
+    expected_status,
 ):
     """Every installed script renders normal machine output outside the repo."""
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
-    for tool in ("gh", "glab", "kubectl"):
+    for tool in ("gh", "glab", "kubectl", "oc"):
         install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     target = _write_target(tmp_path, kubeconfig)
+    content_file = tmp_path / "content.md"
+    content_file.write_text("unit page\n", encoding="utf-8")
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
+    for name in ("GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN", "CI_JOB_TOKEN"):
+        env.pop(name, None)
     env.update(
         {
             "HOME": str(tmp_path / "home"),
@@ -380,7 +592,10 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
             "--revision",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             mode,
-            *extra_args,
+            *(
+                str(content_file) if item == "@CONTENT@" else item
+                for item in extra_args
+            ),
         ],
         check=False,
         capture_output=True,
@@ -393,8 +608,190 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
 
     assert result.returncode == 0
     assert data["kind"] == kind
-    assert data["status"] == "PASS"
+    assert data["status"] == expected_status
     assert str(REPO_ROOT) not in result.stdout
+
+    failure = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / script_name),
+            "--target",
+            str(tmp_path / "missing-target.toml"),
+            mode,
+            *(
+                str(content_file) if item == "@CONTENT@" else item
+                for item in extra_args
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    blocked = loader(failure.stdout)
+    assert failure.returncode == 2
+    assert blocked["kind"] == kind
+    assert blocked["status"] == "BLOCKED"
+    assert blocked["errors"]
+    assert str(REPO_ROOT) not in failure.stdout
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
+)
+def test_installed_mtu_entrypoint_plans_and_applies_from_unrelated_cwd(
+    tmp_path, fake_bin, mode, loader
+):
+    """The new installed command needs no source PYTHONPATH or ambient context."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    for tool in ("gh", "glab", "kubectl", "oc"):
+        install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _write_target(tmp_path, kubeconfig)
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "LC_ALL": "C",
+            "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+        }
+    )
+    script = installed / "scripts" / "k8s_verify_mtu_consistency.py"
+    base = [sys.executable, str(script), "--target", str(target), mode]
+    plan = subprocess.run(
+        base,
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    planned = loader(plan.stdout)
+    assert plan.returncode == 0
+    assert planned["status"] == "DRY_RUN"
+
+    applied = subprocess.run(
+        [*base, "--apply", "--confirm-plan", planned["plan_digest"]],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data = loader(applied.stdout)
+    assert applied.returncode == 0
+    assert data["status"] == "PASS"
+    assert data["cleanup"]["verified"] is True
+    assert data["summary"]["consistent"] is True
+    assert data["records"][0]["interface"] == "eno1"
+    assert str(REPO_ROOT) not in applied.stdout
+
+
+def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
+    tmp_path,
+    fake_bin,
+):
+    """The installed API gate uses the declared combined kubeconfig path."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    for tool in ("gh", "glab", "kubectl", "oc"):
+        install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
+    matching = _write_kubeconfig_for_target(tmp_path / "matching.yaml")
+    unrelated_kubeconfig = _write_kubeconfig_for_target(
+        tmp_path / "unrelated.yaml",
+        context="other-context",
+        server="https://api.other.example.test:6443",
+        cluster="other-cluster",
+    )
+    target = _write_target_with_kubeconfigs(tmp_path, (matching, unrelated_kubeconfig))
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "LC_ALL": "C",
+            "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+        }
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / "access_check.py"),
+            "--target",
+            str(target),
+            "--revision",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "--json",
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data = json.loads(result.stdout)
+
+    assert result.returncode == 0
+    assert data["kind"] == "access_check"
+    assert data["status"] == "PASS"
+    assert data["credential_sources"]["kubernetes"] == ("target:kubernetes.kubeconfigs")
+    assert str(REPO_ROOT) not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
+)
+@pytest.mark.parametrize(
+    ("script_name", "kind"),
+    (("access_check.py", "access_check"), ("ceph_cluster.py", "ceph_cluster")),
+)
+def test_installed_api_and_ceph_invalid_args_are_structured(
+    tmp_path,
+    mode,
+    loader,
+    script_name,
+    kind,
+):
+    """Shared StructuredParser failures emit machine-readable stdout."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update({"HOME": str(tmp_path / "home"), "LC_ALL": "C"})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / script_name),
+            "--definitely-invalid",
+            mode,
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data: dict[str, Any] = loader(result.stdout)
+
+    assert result.returncode == 2
+    _assert_sanitized_failure_log(result.stderr, kind)
+    assert data["kind"] == kind
+    assert data["status"] == "BLOCKED"
+    assert data["errors"] == [{"source": "arguments", "reason": "invalid_arguments"}]
 
 
 @pytest.mark.parametrize(

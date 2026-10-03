@@ -21,6 +21,22 @@ def _nested(value: Any, search: str | None, *, limit: int = 32) -> list[str]:
     return [sanitize(line, 240) for line in lines[:limit]]
 
 
+def _ceph_tree_lines(roots: list[dict[str, Any]], *, limit: int = 128) -> list[str]:
+    """Render the validated CRUSH hierarchy without flooding a terminal."""
+    lines = []
+    pending = [(node, 0) for node in reversed(roots)]
+    while pending and len(lines) < limit:
+        node, depth = pending.pop()
+        label = f"{node['name']} ({node['type']}, id={node['id']}"
+        if node.get("status") is not None:
+            label += f", status={node['status']}"
+        lines.append("  " + "  " * depth + sanitize(label + ")", 240))
+        pending.extend((child, depth + 1) for child in reversed(node["children"]))
+    if pending:
+        lines.append("  ... additional hierarchy nodes omitted")
+    return lines
+
+
 def report(
     kind: str,
     target: str,
@@ -42,6 +58,38 @@ def report(
 
 
 def human(data: dict[str, Any]) -> str:
+    if data.get("kind") == "k8s_verify_mtu_consistency":
+        records = data.get("records", [])
+        lines = [
+            f"Physical NIC MTU: {data.get('status', 'UNKNOWN')}",
+            f"Target: {data.get('target', 'unknown')}",
+            f"Plan: {data.get('plan_digest', 'unavailable')}",
+            f"Nodes: {len(data.get('planned_nodes', []))} selected",
+            "Selection: PCI Ethernet interfaces with an IPv4 address",
+            "Apply creates temporary oc debug Pods and verifies cleanup.",
+        ]
+        if records:
+            lines.append(
+                "NODE                      INTERFACE     PCI DEVICE       MTU   STATE   IPv4"
+            )
+            for row in records[:128]:
+                lines.append(
+                    f"{sanitize(row['node'], 25):25} "
+                    f"{sanitize(row['interface'], 13):13} "
+                    f"{sanitize(row['pci_device'], 16):16} "
+                    f"{row['mtu']:5} "
+                    f"{sanitize(row['oper_state'], 7):7} "
+                    f"{sanitize(','.join(row['ipv4_addresses']), 48)}"
+                )
+            if len(records) > 128:
+                lines.append(f"... {len(records) - 128} more interfaces in JSON")
+        for finding in data.get("findings", []):
+            lines.append(f"Finding: {finding['code']} MTUs={finding['mtu_values']}")
+        for error in data.get("errors", []):
+            lines.append(f"Error: {error.get('source')}: {error.get('reason')}")
+        if cleanup := data.get("cleanup"):
+            lines.append(f"Cleanup: {cleanup.get('status', 'UNKNOWN')}")
+        return "\n".join(lines) + "\n"
     lines = [
         f"{data.get('kind', 'diagnostic')}: {data.get('status', 'UNKNOWN')}",
         f"Target: {data.get('target', 'unknown')}",
@@ -57,6 +105,9 @@ def human(data: dict[str, Any]) -> str:
             "node",
             "nodes",
             "phase",
+            "role",
+            "osd_id",
+            "ready",
             "status",
             "storage_class",
             "volume",
@@ -86,6 +137,18 @@ def human(data: dict[str, Any]) -> str:
                 ]
             lines.append("    trace_tail:")
             lines.extend("      " + sanitize(line, 240) for line in trace_lines[-40:])
+        elif kind == "gitlab_pipeline":
+            progress = item.get("progress") or {}
+            lines.append(
+                "    jobs: "
+                f"{progress.get('terminal', 0)}/{progress.get('total', 0)} terminal"
+            )
+            for stage in item.get("stages", []):
+                lines.append(
+                    "    stage="
+                    + sanitize(str(stage.get("name", "")), 120)
+                    + f" terminal={stage.get('terminal', 0)}/{stage.get('total', 0)}"
+                )
         elif kind == "storage_report":
             for label in ("pods", "attachments", "controllers"):
                 if item.get(label):
@@ -113,6 +176,17 @@ def human(data: dict[str, Any]) -> str:
                 f"{key}={value}" for key, value in sorted(data["inventory"].items())
             )
         )
+    if data.get("kind") == "ceph_cluster":
+        lines.append(f"Ceph health: {data.get('health', 'UNKNOWN')}")
+        lines.append(f"Inactive PGs: {len(data.get('inactive_pgs', []))}")
+        lines.append(
+            f"OSDs down: {sum(item.get('status') == 'down' for item in data.get('osds', []))}"
+        )
+        if "osd_tree" in data:
+            lines.append("Ceph hierarchy:")
+            lines.extend(_ceph_tree_lines(data["osd_tree"]))
+        for action in data.get("actions", []):
+            lines.append(f"Action: {action}")
     for error in data.get("errors", []):
         lines.append(f"Error: {error.get('source')}: {error.get('reason')}")
     if data.get("kind") == "access_check":

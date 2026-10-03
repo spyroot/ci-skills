@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from types import SimpleNamespace
 from typing import Any
 
+from .ceph_cluster import collect_ceph_cluster
 from .collect import collect_cilium, collect_events, collect_gitlab_job, collect_storage
 from .status import BLOCKED, PARTIAL, PASS
 from .target import Target
@@ -99,6 +100,12 @@ def _evidence(result: dict[str, Any]) -> dict[str, Any]:
                 "runner_id": (job.get("runner") or {}).get("id"),
                 "trace_line_count": len((job.get("trace_tail") or "").splitlines()),
             }
+    elif result.get("kind") == "ceph_cluster":
+        evidence["namespace"] = (result.get("filters") or {}).get("namespace")
+        evidence["health"] = result.get("health")
+        evidence["osd_count"] = len(result.get("osds", []))
+        evidence["inactive_pg_count"] = len(result.get("inactive_pgs", []))
+        evidence["pod_count"] = result.get("pod_count")
     return evidence
 
 
@@ -134,6 +141,18 @@ def collect_live_checks(
         tasks["gitlab_job"] = (
             collect_gitlab_job,
             SimpleNamespace(job_url=args.job_url, search=None),
+        )
+    if getattr(args, "ceph_namespace", None):
+        tasks["ceph_cluster"] = (
+            collect_ceph_cluster,
+            SimpleNamespace(
+                namespace=args.ceph_namespace,
+                operator="rook-ceph-operator",
+                conf=None,
+                node=None,
+                ready="all",
+                condition=None,
+            ),
         )
     checks: dict[str, dict[str, Any]] = {}
     with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
