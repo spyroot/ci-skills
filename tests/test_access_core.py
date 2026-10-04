@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -12,9 +13,15 @@ from conftest import import_script_module
 TEST_REVISION = "a" * 40
 
 
-def _load_target(path: Path) -> Any:
+def _load_target(
+    path: Path, *, required_surfaces: tuple[str, ...] | None = None
+) -> Any:
     """Load the nonsecret target used by access tests."""
-    return import_script_module("core.target").load_target(path)
+    if required_surfaces is None:
+        return import_script_module("core.target").load_target(path)
+    return import_script_module("core.target").load_target(
+        path, required_surfaces=required_surfaces
+    )
 
 
 def _access_modules() -> tuple[Any, Any]:
@@ -282,6 +289,8 @@ def _fake_access_runner(
                     return completed(command, 1, stderr="no")
                 return completed(command, stdout="yes\n")
             if args == ["get", "daemonsets", "--all-namespaces", "-o", "json"]:
+                if scenario == "k8s_cilium_missing":
+                    return completed(command, stdout=json.dumps({"items": []}))
                 return completed(
                     command,
                     stdout=json.dumps(
@@ -348,6 +357,56 @@ def _fake_access_runner(
         return completed(command, 127, stderr="command unavailable")
 
     return run, calls
+
+
+def test_kubernetes_collectors_only_require_their_own_live_access(
+    monkeypatch, target_file, capsys
+):
+    """Absent Cilium cannot block Ceph; a Cilium request must still prove exec."""
+    access, runtime = _access_modules()
+    cli = import_script_module("core.cli")
+    runner, calls = _fake_access_runner(runtime, "k8s_cilium_missing")
+    monkeypatch.setattr(access, "run_command", runner)
+    monkeypatch.setattr(
+        cli,
+        "resolve_project_target",
+        lambda _target, _binding, *, dry_run, required_surfaces: _load_target(
+            target_file, required_surfaces=required_surfaces
+        ),
+    )
+    monkeypatch.setattr(cli, "bind_sources", lambda target, *, revision: target)
+
+    args = argparse.Namespace(
+        target=str(target_file),
+        binding=None,
+        json=True,
+        yaml=False,
+        human=False,
+        dry_run=False,
+        revision=None,
+        output_dir=None,
+        describe=False,
+        publication=False,
+        receipt_out=None,
+        namespace="rook-ceph",
+    )
+
+    def collect_ceph_cluster(_target, _args):
+        return {"kind": "ceph_cluster", "status": "PASS", "records": [], "errors": []}
+
+    assert cli.execute(args, collect_ceph_cluster) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "PASS"
+    assert not any("daemonsets" in call for call in calls)
+
+    def collect_cilium(_target, _args):
+        pytest.fail("Cilium collection must wait for its live access gate")
+
+    assert cli.execute(args, collect_cilium) == 2
+    blocked = json.loads(capsys.readouterr().out)
+    assert blocked["surfaces"]["kubernetes"]["reason"] == (
+        "cilium_namespace_not_unique"
+    )
+    assert any("daemonsets" in call for call in calls)
 
 
 def test_check_access_passes_when_all_three_authorities_are_admin(
@@ -525,6 +584,7 @@ def test_check_access_prefers_explicit_token_files_over_ambient_env(
     (
         ("embedded_token", "embedded-token"),
         ("token_file", "tokenFile"),
+        ("token_file_with_embedded_token", "tokenFile"),
         ("client_certificate", "client-certificate"),
         ("exec", "exec-provider"),
     ),
@@ -544,11 +604,14 @@ def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
     if mechanism == "embedded_token":
         user_auth = {"token": "embedded-secret-token"}
         secret_values.append("embedded-secret-token")
-    elif mechanism == "token_file":
+    elif mechanism in ("token_file", "token_file_with_embedded_token"):
         token_file = tmp_path / "admin.token"
         token_file.write_text("token-file-secret\n", encoding="utf-8")
         user_auth = {"tokenFile": str(token_file)}
         secret_values.append("token-file-secret")
+        if mechanism == "token_file_with_embedded_token":
+            user_auth["token"] = "stale-embedded-secret"
+            secret_values.append("stale-embedded-secret")
     elif mechanism == "client_certificate":
         cert = tmp_path / "admin.crt"
         key = tmp_path / "admin.key"
@@ -614,9 +677,35 @@ def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
     assert details["user_entry"] == "admin-user"
     assert details["api_server"] == "https://api.cluster.example.test:6443"
     assert details["auth_mechanism"]["type"] == expected_type
+    if mechanism == "token_file_with_embedded_token":
+        assert details["auth_mechanism"]["source"] == str(token_file.resolve())
     serialized = json.dumps(report)
     for value in secret_values:
         assert value not in serialized
+
+
+def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
+    monkeypatch, tmp_path
+):
+    """A stale embedded token must not hide an unreadable effective tokenFile."""
+    access, _runtime = _access_modules()
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    token_file = tmp_path / "admin.token"
+    token_file.write_text("secret\n", encoding="utf-8")
+    target = _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig))
+    original_open = Path.open
+
+    def denied_open(path, *args, **kwargs):
+        if path == token_file:
+            raise PermissionError("unit denied")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", denied_open)
+    with pytest.raises(ValueError, match="token_file_unavailable"):
+        access._auth_mechanism(
+            {"tokenFile": str(token_file), "token": "stale-secret"}, target
+        )
 
 
 @pytest.mark.parametrize(

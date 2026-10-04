@@ -1,0 +1,26 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: @NAME@
+  namespace: @NAMESPACE@
+spec:
+  runPolicy: SerialLatestOnly
+  source:
+    type: Dockerfile
+    dockerfile: |
+      FROM @BASE_IMAGE@
+      USER 0
+      RUN apt-get update \
+          && apt-get install --yes --no-install-recommends \
+               @ZIP_PACKAGE@ @UNZIP_PACKAGE@ \
+          && rm -rf /var/lib/apt/lists/*
+      RUN git clone https://github.com/microsoft/vcpkg.git /tmp/vcpkg \
+          && git -C /tmp/vcpkg checkout --detach @VCPKG_REF@ \
+          && /tmp/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+  strategy:
+    type: Docker
+    dockerStrategy:
+      pullSecret:
+        name: @PULL_SECRET@
+  output: {}
+  triggers: []

@@ -20,11 +20,12 @@
 #   2. Do not let anything that runs elsewhere reference it. A pipeline that
 #      points at a path under someone's home directory fails the moment it runs
 #      on a runner, and the failure looks like a credential problem rather than
-#      a wiring mistake. CI declares its own target, or sets KUBECONFIG itself.
+#      a wiring mistake. CI declares its own target or project binding.
 #
-# Using this skill implies you already hold cluster-admin and are already
-# authenticated to the hosts below. Nothing here grants access; it only says
-# WHICH authorities to use, so a report can name the one it actually used.
+# This template shows all three authorities for access_check.py. A Kubernetes
+# command needs only [kubernetes]; a GitLab job needs only [gitlab]. Remove
+# unused sections when making a single-authority target. Nothing here grants
+# access; each command checks the authority it uses.
 
 [github]
 # The exact host and repository. Enterprise Server hosts work too.
@@ -45,9 +46,18 @@ repository = "owner/repository"
 # The exact origin. A job URL on any other host is refused.
 url = "https://gitlab.example.com"
 
-# Optional: a private token file instead of the `glab` credential store. The
-# GitLab surface needs an instance ADMINISTRATOR identity — group Owner is not
-# enough — so this is usually where an admin token belongs.
+# For GitLab-only access and actions, set the exact project or group here.
+# Use one selector at a time for `gitlab_access.py check`.
+# The declared --project / --group flags override that choice for one run.
+# No repository remote or glab profile supplies a fallback target.
+# project = "group/project"
+# group = "group"
+# runner_id = 123
+
+# Optional: a private token file instead of the `glab` credential store.
+# The full diagnostics access check needs an instance administrator identity.
+# The GitLab-only check proves identity and target read access; an action's
+# apply and read-back establish whether that action is authorized.
 # token_file = "/home/operator/.ci-skills/credentials/gitlab.token"
 
 [kubernetes]
@@ -57,12 +67,9 @@ url = "https://gitlab.example.com"
 context = "admin-context"
 server = "https://api.cluster.example.com:6443"
 
-# How the credential is found. Declare ONE of the two forms below, or neither.
-#
-# Declaring it here is strongly preferred: with nothing declared, resolution
-# falls through to KUBECONFIG and then to ~/.kube/config, and that default is
-# usually a DIFFERENT cluster — so a cold run aims elsewhere and only the
-# server comparison catches it.
+# How the credential is found. Declare ONE of the two forms below, or omit
+# both to use KUBECONFIG, then ~/.kube/config. An explicit project binding
+# can also select the kubeconfig. Context and server are verified either way.
 
 # One file:
 # kubeconfig = "/home/operator/.kube/config"

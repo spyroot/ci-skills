@@ -6,13 +6,11 @@ import argparse
 import json
 import socket
 import sys
-from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
 from .access import access_evidence, check_access
-from .catalog import describe_node
-from .cli import resolve_target
+from .catalog import NODE_LOCAL_COMMANDS, describe_node
 from .credentials import bind_sources
 from .node_local import (
     CEPH_CLASSIFICATIONS,
@@ -21,10 +19,11 @@ from .node_local import (
     collect_cilium_node,
 )
 from .node_pod import NodePodError, select_node_pod
+from .project_binding import resolve_target as resolve_project_target
 from .report import emit
 from .runtime import sanitize
 from .status import BLOCKED, DRY_RUN, PASS, exit_code
-from .target import TargetError, load_target
+from .target import TargetError
 
 
 class NodeParser(argparse.ArgumentParser):
@@ -70,11 +69,20 @@ def parser(kind: str) -> argparse.ArgumentParser:
         prog=f"{kind}.py",
         description=f"Collect {kind} evidence through a selected Kubernetes target. Audience: human and agent.",
         epilog=(
-            "Target order: --target, CI_SKILLS_TARGET, ./.ci-skills/target.toml, "
+            "Target order: --target or --binding, CI_SKILLS_TARGET or "
+            "K8S_ADMIN_DIAGNOSTICS_BINDING, ./.ci-skills/target.toml, "
             "~/.ci-skills/target.toml. Example: %(prog)s --json"
         ),
     )
-    result.add_argument("--target", metavar="PATH", help="nonsecret TOML target file")
+    selection = result.add_mutually_exclusive_group()
+    selection.add_argument(
+        "--target", metavar="PATH", help="nonsecret TOML target file"
+    )
+    selection.add_argument(
+        "--binding",
+        metavar="PATH",
+        help="project binding for target and ordered kubeconfig sources",
+    )
     result.add_argument(
         "--revision", metavar="SHA", help="exact installed skill revision"
     )
@@ -171,12 +179,16 @@ def run(kind: str, args: argparse.Namespace) -> int:
             return 2
     source = "target"
     try:
-        target_path, target_source = resolve_target(getattr(args, "target", None))
-        target = replace(
-            load_target(target_path),
-            source_file=target_path,
-            source_kind=target_source,
+        target = resolve_project_target(
+            getattr(args, "target", None),
+            getattr(args, "binding", None),
+            dry_run=getattr(args, "dry_run", False),
+            required_surfaces=NODE_LOCAL_COMMANDS[f"{kind}.py"]["requires"],
         )
+        if target.source_file is None or target.source_kind is None:
+            raise TargetError("target_source_unresolved")
+        target_path = target.source_file
+        target_source = target.source_kind
         selected = target.kubernetes.node_diagnostics
         if selected is None:
             raise TargetError("kubernetes.node_diagnostics is required for node tools")
@@ -200,7 +212,7 @@ def run(kind: str, args: argparse.Namespace) -> int:
         if getattr(args, "dry_run", False):
             data["status"] = DRY_RUN
             data["probes"] = [
-                "verify selected GitHub, GitLab, and Kubernetes credentials and identities",
+                "verify selected Kubernetes credential and identity",
                 "kubectl get one existing Running Pod on the declared node",
                 "kubectl exec without TTY to read Cilium status and health"
                 if kind == "cilium_node"
@@ -211,7 +223,7 @@ def run(kind: str, args: argparse.Namespace) -> int:
         else:
             target = bind_sources(target, revision=getattr(args, "revision", None))
             source = "access_check"
-            gate = check_access(target)
+            gate = check_access(target, cilium=kind == "cilium_node")
             data["access"] = access_evidence(gate)
             if gate["status"] != PASS:
                 data["access_failures"] = [

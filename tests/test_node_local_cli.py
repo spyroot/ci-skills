@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -28,9 +29,18 @@ def _selected_existing_pods(monkeypatch, target_file):
         encoding="utf-8",
     )
     cli = import_script_module("core.node_local_cli")
-    monkeypatch.setattr(cli, "resolve_target", lambda _value: (target_file, "test"))
+    load_target = import_script_module("core.target").load_target
+    monkeypatch.setattr(
+        cli,
+        "resolve_project_target",
+        lambda _target, _binding, **_kwargs: replace(
+            load_target(target_file), source_file=target_file, source_kind="test"
+        ),
+    )
     monkeypatch.setattr(cli, "bind_sources", lambda target, **_kwargs: target)
-    monkeypatch.setattr(cli, "check_access", lambda _target: {"status": "PASS"})
+    monkeypatch.setattr(
+        cli, "check_access", lambda _target, *, cilium=False: {"status": "PASS"}
+    )
     monkeypatch.setattr(cli, "access_evidence", lambda _gate: {"status": "PASS"})
     monkeypatch.setattr(cli, "select_node_pod", lambda *_args, **_kwargs: object())
 
@@ -60,6 +70,32 @@ def _patch_collectors(monkeypatch, report: dict[str, Any] | BaseException) -> No
     monkeypatch.setattr(cli, "collect_ceph_kernel", collect, raising=False)
     monkeypatch.setattr(node_local, "collect_cilium_node", collect, raising=False)
     monkeypatch.setattr(cli, "collect_cilium_node", collect, raising=False)
+
+
+def test_node_adapter_uses_the_selected_project_binding(monkeypatch, capsys):
+    """Node reads pass the project binding to the shared target resolver."""
+    cli = import_script_module("core.node_local_cli")
+    selected = cli.resolve_project_target
+    calls = []
+
+    def resolve(target, binding, *, dry_run, required_surfaces):
+        calls.append((target, binding, dry_run, required_surfaces))
+        return selected(
+            target,
+            binding,
+            dry_run=dry_run,
+            required_surfaces=required_surfaces,
+        )
+
+    monkeypatch.setattr(cli, "resolve_project_target", resolve)
+    status = cli.run(
+        "cilium_node",
+        _args(binding="/project/.ci-skills/binding.toml", dry_run=True),
+    )
+
+    assert status == 0
+    assert calls == [(None, "/project/.ci-skills/binding.toml", True, ("kubernetes",))]
+    assert json.loads(capsys.readouterr().out)["status"] == "DRY_RUN"
 
 
 @pytest.mark.parametrize(
@@ -314,5 +350,5 @@ def test_node_local_describe_needs_no_linux_runtime_or_credentials(capsys, kind)
 
     assert exit_status == 0
     assert contract["command"] == f"{kind}.py"
-    assert contract["requires_authorities"] == ["github", "gitlab", "kubernetes"]
+    assert contract["requires_authorities"] == ["kubernetes"]
     assert contract["target_protocol"]

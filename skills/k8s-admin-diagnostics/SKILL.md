@@ -1,31 +1,46 @@
 ---
 name: k8s-admin-diagnostics
-description: Collect read-only GitLab CI, Kubernetes, Cilium, and Ceph evidence through verified credentials and selected targets.
+description: Diagnose GitLab CI, Kubernetes storage, Cilium, Ceph, and physical NIC MTUs; perform selected GitLab milestone, issue, wiki, and runner operations.
 metadata:
   manifest: tools.json
-  first_call: scripts/access_check.py
-  first_call_scope: api_collectors
   default_output: json when stdout is not a terminal
-  read_only: true
+  read_only: false
 ---
 
-# Kubernetes admin diagnostics
+# Kubernetes diagnostics and GitLab operations
 
-Diagnose a Kubernetes-backed CI, storage or network symptom. Every command is
-read-only: none logs in, changes context, grants a role, or mutates anything.
+Diagnose a Kubernetes-backed CI, storage, or network symptom, or act on an
+explicit GitLab request. GitLab operation commands default to an offline
+dry-run and write only with `--apply` and the printed plan fingerprint.
+`k8s_verify_mtu_consistency.py --apply` creates temporary OpenShift debug Pods
+and verifies cleanup; its default invocation reads the selected node inventory
+and returns a plan.
 
-## 1. First call for API diagnostics: access check
+## 1. Choose the command for the symptom
 
-Run this before any API collector:
+Run the relevant command from `tools.json` directly. Each command resolves and
+checks only its declared authority: GitLab for a job, or Kubernetes for storage,
+events, Cilium, and Ceph. Its `access` field reports the effective source and
+identity. A Kubernetes-only target needs only `[kubernetes]`; a GitLab-only
+target needs only `[gitlab]`. The selected target file never inherits missing
+tables from a lower tier. For a selected GitLab operation, its command also
+reads back GitLab identity and target before applying a change.
 
-    scripts/access_check.py --publication
+For one receipt proving all three authorities, run:
 
-Do not go looking for credentials. This one call resolves them and tells you
-what it used:
+    scripts/access_check.py --json
 
-- `PASS` — `credential_sources` names the effective source per authority and
-  `surfaces.<name>.identity` the identity read back. You now know what you are
-  authenticated as. Stop searching; proceed.
+Add `--publication` when repository administration and required-check read-back
+are part of the requested proof. Add `--ceph-namespace NAME` when the receipt
+must also prove the Ceph collector in that selected namespace. Ceph, storage,
+events, and kernel diagnostics require base Kubernetes access; Cilium discovery
+and health exec are checked only for Cilium commands and the full receipt.
+
+Do not go looking for credentials. The selected command resolves them and
+tells you what it used. For the full access receipt:
+
+- `PASS` — `credential_sources` names the effective source per required
+  authority and `surfaces.<name>.identity` names the identity read back.
 - `BLOCKED` — `surfaces.<name>.reason` names what failed and `next_step` what
   to do. Report that; do not try other credentials.
 
@@ -35,9 +50,12 @@ and [references/access.md](references/access.md) is the full contract.
 The installed `gh` environment contract uses `GH_TOKEN`/`GITHUB_TOKEN` for
 `github.com` and `*.ghe.com`, and enterprise token variables for other GitHub
 Enterprise Server hosts. A selected token file clears ambient GitHub tokens.
-The one trap worth knowing: with no Kubernetes location declared, resolution
-ends at `~/.kube/config`, which is usually a *different* cluster — so a target
-that declares `kubernetes.kubeconfigs` is how you avoid aiming elsewhere.
+For Kubernetes, the target may declare `kubernetes.kubeconfig` or the ordered
+`kubernetes.kubeconfigs` path. Otherwise resolution uses `KUBECONFIG`, then
+`~/.kube/config`. Every route must match the target's context and API server;
+the skill does not substitute an ambient current context. For a project-specific
+kubeconfig resolver, use the [project binding](references/project-binding.md)
+and its declared sources.
 
 Provisioning access is not this skill's job. If a kubeconfig has to be fetched
 or minted first, that belongs to the calling project's own instructions.
@@ -53,29 +71,56 @@ Routing, in short:
 
 | You need | Command |
 | --- | --- |
-| proof of access, before trusting anything | `access_check.py` |
+| proof of access across all three authorities | `access_check.py` |
 | a named CI job's own facts | `gitlab_job.py --job-url URL` |
+| pipeline progress | `gitlab_pipeline.py --project PATH --pipeline-id ID` |
 | why a volume or claim is stuck | `storage_report.py` |
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |
+| read back GitLab target and identity | `gitlab_access.py check` |
+| create, update, or adjust milestone dates | `gitlab_milestone.py` |
+| open a bug issue | `gitlab_issue.py open-bug` |
+| create or update a wiki page | `gitlab_wiki.py` |
+| assign or create a runner record | `gitlab_runner.py` |
+| Ceph hierarchy and Pods | `ceph_cluster.py --namespace NAME` |
+| physical PCI NIC MTU mismatch across nodes | `k8s_verify_mtu_consistency.py` |
 | Cilium daemon and health on a selected node | `cilium_node.py` |
 | Ceph or RBD kernel messages on that node | `ceph_kernel.py` |
 
-## 3. One interface, not five
+## 3. One target and output interface
 
-Every API command accepts `--target`, `--json`, `--yaml`, `--human`, `--dry-run`,
-`--revision`, `--output-dir` and `--describe`. A command that filters records
-accepts `--search`; one scoped to a namespace accepts `--namespace`; one
-reading a time range accepts `--last`, `--from` and `--to`. Learn the tier
-once and it holds everywhere.
+Use `<command> --describe` for its exact options. Commands share `--target`,
+`--json`, `--yaml`, `--human`, `--dry-run`, and `--revision`; diagnostic commands
+also accept `--binding` for a project-selected kubeconfig source. Use native
+filters such as `--namespace`, `--node`, or `--last` where the command declares
+them.
+
+For a GitLab operation, select the exact project or group in the target file or
+with `--project`/`--group`. Run the action without `--apply` to get a
+machine-readable dry-run plan and its `plan_digest`. Only an explicitly
+requested write uses `--apply --confirm-plan DIGEST`; the command reads the
+resource before changing it and verifies it afterward. `--token-out PATH` is
+required for both the plan and apply when creating a runner record because
+GitLab returns its token once and the destination is bound into the plan;
+the token never appears in a report. Runner registration and online readiness
+are separate from creating its record.
+
+For a group runner assignment, the offline plan has no project list and cannot
+authorize apply. Run `gitlab_runner.py assign --group GROUP --runner-id ID
+--live-plan` to read the exact project IDs and obtain an apply-ready digest.
+Apply re-reads that set and blocks if it changed before any assignment.
 
 `--target` resolves in four declared places — the argument, then
 `$CI_SKILLS_TARGET`, then `./.ci-skills/target.toml`, then
-`~/.ci-skills/target.toml` — and every report says which it used as
-`target_source`. One cluster means setting the last one once; many clusters
-mean the environment variable or a per-project file. The common case takes no
-arguments at all. Output needs no flag either: a terminal gets the human
-summary, a pipe or file gets versioned JSON.
+`~/.ci-skills/target.toml` — and live reports and GitLab operation plans name
+the selected source as `target_source`. One cluster means setting the last
+one once; many clusters mean the environment variable or a per-project file.
+The common case takes no arguments at all. Output needs no flag either: a
+terminal gets the human summary, a pipe or file gets versioned JSON.
+
+`--binding PATH` or `K8S_ADMIN_DIAGNOSTICS_BINDING` names a project target and
+ordered file, environment, or command sources for its kubeconfig. The receipt
+records the selected source; see the binding protocol before using it.
 
 Prefer a native filter over a shell pipeline — `--namespace`, `--node`,
 `--reason`, `--search`, `--last` — because a pipeline discards the identity and
@@ -89,14 +134,18 @@ pair; pass the job's own interval when correlating a job.
   unhealthy. `records[].findings` names explicit Cilium daemon, peer, or
   endpoint failures with an inspection action. Say which component.
 - `BLOCKED` — see `blocking_live_checks` and the surface `reason`.
-- `DRY_RUN` — a probe plan. Never access evidence.
+- `DRY_RUN` — a plan, never proof of NIC MTUs. The MTU planner reads the
+  authenticated node inventory; other collectors do not contact their APIs.
+- `PLANNED` — a live, read-only group assignment plan with bound project IDs.
 - `UNKNOWN` — a per-item reading could not be taken. Preserve it; do not
   coerce it to a failure or a pass.
+- For GitLab writes, `PASS` means an applied change or verified no-op with
+  independent read-back. A returned API ID alone is not acceptance evidence.
 - An event read returning zero records with zero errors means the events aged
   out of the cluster, not that the read failed. Say "unverified, evidence
   expired".
 
-Exit 0 is `PASS` or `DRY_RUN`; exit 2 is `BLOCKED` or `PARTIAL`.
+Exit 0 is `PASS`, `DRY_RUN`, or `PLANNED`; exit 2 is `BLOCKED` or `PARTIAL`.
 
 ## 5. Correlate, then state your confidence
 
@@ -130,7 +179,30 @@ selected `.ci-skills/target.toml` (see the template). Run
 `scripts/cilium_node.py --json` to execute `cilium-dbg` and `cilium-health`
 inside that agent Pod without a TTY. Run `scripts/ceph_kernel.py --json` to
 classify recent host journal messages through a selected existing Pod whose
-host journal mount is read back first. Both commands use the same pinned
-kubeconfig/context/server and three-surface access gate as the API commands;
+host journal mount is read back first. Both accept `--target` or `--binding`
+and use the same pinned kubeconfig/context/server and Kubernetes access gate
+as the cluster collectors;
 neither creates a Pod or repairs a node. Both accept `--search TEXT`;
 `ceph_kernel.py` also accepts `--classification NAME`.
+
+## 8. Verify physical uplink MTUs
+
+On OpenShift, for Ceph connectivity, RBD timeout, or cross-node network
+symptoms, check physical MTU consistency before searching node interfaces by
+hand. This command requires `oc` as well as `kubectl`, and blocks if the
+selected API is not OpenShift. Run
+`scripts/k8s_verify_mtu_consistency.py --json` in the selected project. It
+resolves the same exact Kubernetes target, verifies access, reads the node
+inventory, and returns `plan_digest` without creating a Pod. Then run
+`scripts/k8s_verify_mtu_consistency.py --apply --confirm-plan SHA256 --json`
+using that digest. `--node NAME` restricts both calls to one existing node.
+
+The apply uses `oc debug node/NAME` to read `ip -d -j addr show` through
+`chroot /host`. It selects PCI Ethernet interfaces regardless of IP address,
+compares their MTUs, and emits one versioned JSON report or a human table.
+The `ipv4_addresses` field is empty when a selected interface has no IPv4 address.
+The command creates temporary debug Pods in the selected context's namespace,
+tags them for this run, deletes any survivors, and reads back their absence.
+An incomplete read or cleanup is `BLOCKED` or `PARTIAL`; a real MTU mismatch is
+`PARTIAL` with `physical_mtu_mismatch` and an inspection action. It does not
+change host interfaces or repair networking.

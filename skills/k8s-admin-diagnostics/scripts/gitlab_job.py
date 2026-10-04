@@ -3,8 +3,7 @@
 
 import argparse
 
-from core.cli import execute, parser
-from core.collect import collect_gitlab_job
+from core.cli import execute_gitlab_job, parser
 
 
 # The parser is built by its own function so the declared interface can be
@@ -14,7 +13,8 @@ from core.collect import collect_gitlab_job
 def build_parser() -> argparse.ArgumentParser:
     """Return this command's parser: the universal tier plus its own options."""
     cli = parser(
-        "Report job, pipeline, runner, and bounded trace data from the selected GitLab host."
+        "Report job, pipeline, runner, and bounded trace data from the selected GitLab host.",
+        kind="gitlab_job",
     )
     cli.add_argument(
         "--job-url",
@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    return execute(build_parser().parse_args(), collect_gitlab_job)
+    return execute_gitlab_job(build_parser().parse_args())
 
 
 if __name__ == "__main__":

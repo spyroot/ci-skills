@@ -23,7 +23,7 @@ from .cilium import (
 from .report import report
 from .runtime import error_class, run_command, run_command_tail, sanitize
 from .status import PASS, UNKNOWN
-from .target import Target, kubernetes_label
+from .target import GitLabOperationTarget, Target, kubernetes_label
 
 # A cluster-wide list read is legitimately slow and several run concurrently.
 # Measured on one target cluster: `kubectl get events -A -o json` was 7.7 MB and
@@ -64,6 +64,12 @@ def _items(value: Any) -> list[dict[str, Any]]:
         for item in items
     ):
         raise TypeError("invalid_list_response")
+    if any(
+        key in item and not isinstance(item[key], dict)
+        for item in items
+        for key in ("spec", "status")
+    ):
+        raise TypeError("invalid_item_response")
     return items
 
 
@@ -112,6 +118,26 @@ def _batch(
     return data, errors
 
 
+def _controller_counts(
+    kind: str, item: dict[str, Any]
+) -> tuple[int | None, int | None]:
+    """Read the replica counters from the selected controller's API shape."""
+    if kind == "DaemonSet":
+        status = item.get("status", {})
+        return status.get("desiredNumberScheduled"), status.get("numberReady")
+    return item.get("spec", {}).get("replicas"), item.get("status", {}).get(
+        "readyReplicas"
+    )
+
+
+def _controller_record(
+    key: tuple[str, str, str], item: dict[str, Any]
+) -> dict[str, Any]:
+    kind, _namespace, name = key
+    desired, ready = _controller_counts(kind, item)
+    return {"kind": kind, "name": name, "desired": desired, "ready": ready}
+
+
 def collect_storage(target: Target, args: Any) -> dict[str, Any]:
     resources = {
         "nodes": ("nodes", False),
@@ -140,33 +166,54 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
                     "attached": item.get("status", {}).get("attached"),
                 }
             )
-    controller_kinds = ("deployments", "statefulsets", "daemonsets")
+    controller_kinds = {
+        "deployments": "Deployment",
+        "statefulsets": "StatefulSet",
+        "daemonsets": "DaemonSet",
+    }
     controller_items = {
-        (_meta(item).get("namespace"), _meta(item).get("name")): item
-        for kind in controller_kinds
-        for item in data.get(kind, [])
+        (kind, _meta(item).get("namespace"), _meta(item).get("name")): item
+        for resource, kind in controller_kinds.items()
+        for item in data.get(resource, [])
     }
     replica_owners = {
         (_meta(item).get("namespace"), _meta(item).get("name")): [
             ref.get("name")
             for ref in (_meta(item).get("ownerReferences") or [])
-            if ref.get("kind") == "Deployment"
+            if isinstance(ref, dict)
+            and ref.get("kind") == "Deployment"
+            and isinstance(ref.get("name"), str)
+            and ref.get("name")
         ]
         for item in data.get("replicasets", [])
     }
     pods_by_claim: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    controllers_by_claim: dict[tuple[str, str], set[tuple[str, str, str]]] = {}
     for pod in data.get("pods", []):
         meta = _meta(pod)
         namespace = meta.get("namespace")
         owners = meta.get("ownerReferences") or []
         owner_names = [ref.get("name") for ref in owners if isinstance(ref, dict)]
+        controller_refs = {
+            (ref.get("kind"), namespace, ref.get("name"))
+            for ref in owners
+            if isinstance(ref, dict)
+            and ref.get("kind") in controller_kinds.values()
+            and isinstance(ref.get("name"), str)
+            and ref.get("name")
+        }
         for ref in owners:
-            if ref.get("kind") == "ReplicaSet":
-                owner_names += replica_owners.get((namespace, ref.get("name")), [])
+            if isinstance(ref, dict) and ref.get("kind") == "ReplicaSet":
+                deployment_names = replica_owners.get((namespace, ref.get("name")), [])
+                owner_names += deployment_names
+                controller_refs.update(
+                    ("Deployment", namespace, name) for name in deployment_names
+                )
         for volume in pod.get("spec", {}).get("volumes", []):
             claim = volume.get("persistentVolumeClaim", {}).get("claimName")
             if claim:
-                pods_by_claim.setdefault((namespace, claim), []).append(
+                claim_key = (namespace, claim)
+                pods_by_claim.setdefault(claim_key, []).append(
                     {
                         "pod": meta.get("name"),
                         "pod_uid": meta.get("uid"),
@@ -174,6 +221,9 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
                         "owners": owner_names,
                         "phase": pod.get("status", {}).get("phase"),
                     }
+                )
+                controllers_by_claim.setdefault(claim_key, set()).update(
+                    controller_refs
                 )
     rows: list[dict[str, Any]] = []
     claimed_pvs: set[str] = set()
@@ -201,7 +251,9 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
         if args.phase != "all" and args.phase not in (phase, pv_phase):
             continue
         related_controllers = sorted(
-            {owner for pod in pods for owner in pod["owners"] if owner}
+            key
+            for key in controllers_by_claim.get((namespace, name), set())
+            if key in controller_items
         )
         row = {
             "resource_kind": "PersistentVolumeClaim",
@@ -218,17 +270,8 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
             "attachments": attachments.get(pv_name, []),
             "csi_driver": pv.get("spec", {}).get("csi", {}).get("driver"),
             "controllers": [
-                {
-                    "name": owner,
-                    "desired": controller_items[(namespace, owner)]
-                    .get("spec", {})
-                    .get("replicas"),
-                    "ready": controller_items[(namespace, owner)]
-                    .get("status", {})
-                    .get("readyReplicas"),
-                }
-                for owner in related_controllers
-                if (namespace, owner) in controller_items
+                _controller_record(key, controller_items[key])
+                for key in related_controllers
             ],
         }
         if _search(row, args.search):
@@ -338,6 +381,103 @@ def _timestamp(value: str) -> datetime:
     return stamp.astimezone(timezone.utc)
 
 
+def _event_data(
+    target: Target,
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]], str | None]:
+    """Read the stable Event API once, with core/v1 as compatibility fallback."""
+    preferred_key = "events_v1"
+    preferred, error = _read_json(
+        kubectl_argv(target, "get", "events.events.k8s.io", "-A", "-o", "json"),
+        env=kubernetes_env(target),
+    )
+    if not error:
+        try:
+            return {preferred_key: _items(preferred)}, [], None
+        except (ValueError, TypeError) as exc:
+            return (
+                {preferred_key: []},
+                [{"source": preferred_key, "reason": str(exc)}],
+                None,
+            )
+    if error != "resource_unavailable":
+        return {preferred_key: []}, [{"source": preferred_key, "reason": error}], None
+
+    core_key = "core_events"
+    core, core_error = _read_json(
+        kubectl_argv(target, "get", "events", "-A", "-o", "json"),
+        env=kubernetes_env(target),
+    )
+    if not core_error:
+        try:
+            return (
+                {core_key: _items(core)},
+                [{"source": preferred_key, "reason": "compatibility_fallback"}],
+                "resource_unavailable",
+            )
+        except (ValueError, TypeError) as exc:
+            core_error = str(exc)
+    return (
+        {preferred_key: [], core_key: []},
+        [
+            {"source": preferred_key, "reason": error},
+            {"source": core_key, "reason": core_error or "command_failed"},
+        ],
+        "resource_unavailable",
+    )
+
+
+def _event_parts(
+    event: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Validate nested Event fields before filtering or rendering them."""
+    meta = _meta(event)
+    obj = event["regarding"] if "regarding" in event else event.get("involvedObject")
+    series = event.get("series", {})
+    if series is None:
+        series = {}
+    if (
+        not isinstance(obj, dict)
+        or not isinstance(series, dict)
+        or not isinstance(obj.get("name"), str)
+        or not obj["name"]
+    ):
+        raise TypeError("invalid_event_record")
+    # ObjectReference.kind is optional in the Kubernetes Event API. A name
+    # still identifies the record for the filters and report below.
+    for container, fields in (
+        (meta, ("namespace", "creationTimestamp")),
+        (obj, ("kind", "namespace", "name", "uid")),
+        (series, ("lastObservedTime",)),
+        (
+            event,
+            (
+                "eventTime",
+                "firstTimestamp",
+                "lastTimestamp",
+                "deprecatedLastTimestamp",
+                "reason",
+                "type",
+                "note",
+                "message",
+            ),
+        ),
+    ):
+        if any(
+            container.get(field) is not None and not isinstance(container[field], str)
+            for field in fields
+        ):
+            raise TypeError("invalid_event_record")
+    for container, field in (
+        (series, "count"),
+        (event, "deprecatedCount"),
+        (event, "count"),
+    ):
+        value = container.get(field)
+        if value is not None and (type(value) is not int or value < 0):
+            raise TypeError("invalid_event_record")
+    return meta, obj, series
+
+
 def collect_events(target: Target, args: Any) -> dict[str, Any]:
     # `is not None`, not truthiness: `--last ""` was supplied, so it is an input
     # error. Treating it as absent silently returned the default hour, which is
@@ -354,31 +494,29 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
         start = end - DEFAULT_WINDOW
     if start > end:
         raise ValueError("--from must not be after --to")
-    data, errors = _batch(
-        target,
-        {
-            "core_events": ("events", True),
-            "events_v1": ("events.events.k8s.io", True),
-        },
-    )
+    data, errors, fallback_reason = _event_data(target)
     rows: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
     for source in ("core_events", "events_v1"):
         for event in data.get(source, []):
-            meta = _meta(event)
-            obj = event.get("regarding") or event.get("involvedObject") or {}
+            try:
+                meta, obj, series = _event_parts(event)
+            except TypeError as exc:
+                errors.append({"source": source, "reason": str(exc)})
+                continue
             first_source = (
                 event.get("eventTime")
                 or event.get("firstTimestamp")
                 or meta.get("creationTimestamp")
             )
             last_source = (
-                (event.get("series") or {}).get("lastObservedTime")
+                series.get("lastObservedTime")
                 or event.get("lastTimestamp")
                 or event.get("deprecatedLastTimestamp")
                 or first_source
             )
             if not last_source:
+                errors.append({"source": source, "reason": "invalid_event_timestamp"})
                 continue
             try:
                 event_time = _timestamp(last_source)
@@ -386,7 +524,14 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
             except ValueError:
                 errors.append({"source": source, "reason": "invalid_event_timestamp"})
                 continue
-            if event_time < start or event_time > end:
+            # A repeated event can begin inside the requested window and be
+            # updated again after it. Match an observed endpoint in the window.
+            matching_time = None
+            if start <= event_time <= end:
+                matching_time = event_time
+            elif start <= first_time <= end:
+                matching_time = first_time
+            if matching_time is None:
                 continue
             namespace = meta.get("namespace") or obj.get("namespace")
             if args.namespace != "all" and namespace != args.namespace:
@@ -399,7 +544,7 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
             if args.reason and args.reason.casefold() not in (reason or "").casefold():
                 continue
             row = {
-                "timestamp": event_time.isoformat(),
+                "timestamp": matching_time.isoformat(),
                 "namespace": namespace,
                 "first_timestamp": first_time.isoformat(),
                 "last_timestamp": event_time.isoformat(),
@@ -411,7 +556,12 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
                 "message": sanitize(
                     event.get("note") or event.get("message") or "", 1000
                 ),
-                "count": event.get("deprecatedCount") or event.get("count") or 1,
+                "count": (
+                    series.get("count")
+                    or event.get("deprecatedCount")
+                    or event.get("count")
+                    or 1
+                ),
                 "source": source,
             }
             key = (row["timestamp"], row["object_uid"], row["reason"], row["message"])
@@ -425,7 +575,7 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
             item["name"] or "",
         )
     )
-    return report(
+    result = report(
         "event_trace",
         kubernetes_label(target),
         {
@@ -440,6 +590,12 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
         rows,
         errors,
     )
+    if fallback_reason:
+        result["compatibility_fallback"] = {
+            "preferred_api": "events.k8s.io/v1",
+            "reason": fallback_reason,
+        }
+    return result
 
 
 def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
@@ -455,7 +611,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     daemonsets = [
         item
         for item in data.get("daemonsets", [])
-        if _meta(item).get("name", "").startswith(AGENT_DAEMONSET)
+        if _meta(item).get("name") == AGENT_DAEMONSET
     ]
     namespaces = sorted(
         {
@@ -608,13 +764,12 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     return result
 
 
-def collect_gitlab_job(target: Target, args: Any) -> dict[str, Any]:
-    if not getattr(args, "job_url", None):
-        raise ValueError("--job-url is required; see --describe for the contract")
-    parsed = urlsplit(args.job_url)
+def gitlab_job_reference(job_url: str, host: str) -> tuple[str, str]:
+    """Resolve the exact project and numeric job selected by one GitLab URL."""
+    parsed = urlsplit(job_url)
     if (
         parsed.scheme != "https"
-        or parsed.netloc.lower() != target.gitlab.host
+        or parsed.netloc.lower() != host
         or parsed.query
         or parsed.fragment
     ):
@@ -622,8 +777,22 @@ def collect_gitlab_job(target: Target, args: Any) -> dict[str, Any]:
     prefix, marker, job_id = parsed.path.rpartition("/-/jobs/")
     if not marker or not job_id.isdecimal() or not prefix.strip("/"):
         raise ValueError("job URL must contain a project path and numeric job ID")
-    project = prefix.strip("/")
-    credential = gitlab_env(target)
+    return prefix.strip("/"), job_id
+
+
+def collect_gitlab_job(
+    target: Target | GitLabOperationTarget,
+    args: Any,
+    *,
+    credential: dict[str, str | None] | None = None,
+) -> dict[str, Any]:
+    if not getattr(args, "job_url", None):
+        raise ValueError("--job-url is required; see --describe for the contract")
+    project, job_id = gitlab_job_reference(args.job_url, target.gitlab.host)
+    if credential is None:
+        if isinstance(target, GitLabOperationTarget):
+            raise ValueError("bound_gitlab_credential_required")
+        credential = gitlab_env(target)
     encoded = quote(project, safe="")
     base = f"projects/{encoded}"
     job, error = _read_json(glab_argv(target, f"{base}/jobs/{job_id}"), env=credential)
