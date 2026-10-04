@@ -300,3 +300,53 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     assert data["kind"] == kind
     assert data["status"] == "PASS"
     assert str(REPO_ROOT) not in result.stdout
+
+
+def test_installed_copy_rejects_unverified_consumer_ci_revision(
+    tmp_path,
+    fake_bin,
+):
+    """An installed skill must not label itself with an unrelated CI SHA."""
+    installed = tmp_path / "installed" / "k8s-admin-diagnostics"
+    unrelated = tmp_path / "consumer-repo"
+    unrelated.mkdir()
+    shutil.copytree(SKILL_ROOT, installed)
+    for tool in ("gh", "glab", "kubectl"):
+        install_executable(fake_bin, tool, FAKE_NATIVE_TOOLS)
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _write_target(tmp_path, kubeconfig)
+    consumer_sha = "b" * 40
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.update(
+        {
+            "GITHUB_SHA": consumer_sha,
+            "HOME": str(tmp_path / "home"),
+            "LC_ALL": "C",
+            "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+        }
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(installed / "scripts" / "access_check.py"),
+            "--target",
+            str(target),
+            "--json",
+        ],
+        check=False,
+        capture_output=True,
+        cwd=unrelated,
+        env=env,
+        text=True,
+        timeout=10,
+    )
+    data = json.loads(result.stdout)
+
+    assert result.returncode == 2
+    assert data["status"] == "BLOCKED"
+    assert data["tested_revision"] is None
+    assert consumer_sha not in result.stdout
+    assert "pass --revision" in data["errors"][0]["reason"]

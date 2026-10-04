@@ -352,6 +352,53 @@ def test_check_access_receipt_records_metadata_and_resolved_sources(
     }
 
 
+def test_kubernetes_access_does_not_reuse_kubeconfig_changed_after_verification(
+    monkeypatch,
+    tmp_path,
+):
+    """Commands must not keep trusting a kubeconfig that changed after verify."""
+    access, runtime = _access_modules()
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig))
+    runner, _calls = _fake_access_runner(runtime, "success")
+    changed = False
+    reused_mutable_path: list[tuple[str, ...]] = []
+
+    def fake_run(argv, **kwargs):
+        nonlocal changed
+        command = tuple(str(part) for part in argv)
+        if command[0] == "kubectl":
+            context_index = command.index("--context")
+            args = list(command[context_index + 2 :])
+            if args == ["config", "view", "--raw", "-o", "json"]:
+                result = runner(argv, **kwargs)
+                kubeconfig.write_text(
+                    "apiVersion: v1\nclusters: []\n", encoding="utf-8"
+                )
+                changed = True
+                return result
+            if (
+                changed
+                and "--kubeconfig" in command
+                and command[command.index("--kubeconfig") + 1] == str(kubeconfig)
+            ):
+                reused_mutable_path.append(command)
+                return runtime.CommandResult(
+                    command, 1, "", "mutable kubeconfig reused"
+                )
+        return runner(argv, **kwargs)
+
+    monkeypatch.setattr(access, "run_command", fake_run)
+
+    surface = access.kubernetes_access(target)
+
+    if surface.status == "PASS":
+        assert reused_mutable_path == []
+    else:
+        assert surface.reason == "kubeconfig_changed"
+
+
 def test_check_access_resolves_ambient_token_environment_sources(
     monkeypatch,
     tmp_path,
@@ -426,6 +473,99 @@ def test_check_access_prefers_explicit_token_files_over_ambient_env(
     assert "ambient-gitlab-token" not in json.dumps(report)
     assert "github-file-token" not in json.dumps(report)
     assert "gitlab-file-token" not in json.dumps(report)
+
+
+def test_kubernetes_access_execs_cilium_agent_not_operator_pod(
+    monkeypatch,
+    tmp_path,
+):
+    """Cilium health preflight uses the agent selector instead of name prefix."""
+    access, runtime = _access_modules()
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig))
+    runner, _calls = _fake_access_runner(runtime, "success")
+    exec_pods: list[str] = []
+
+    def fake_run(argv, **kwargs):
+        command = tuple(str(part) for part in argv)
+        if command[0] == "kubectl":
+            context_index = command.index("--context")
+            args = list(command[context_index + 2 :])
+            if args == ["get", "daemonsets", "--all-namespaces", "-o", "json"]:
+                return runtime.CommandResult(
+                    command,
+                    0,
+                    json.dumps(
+                        {
+                            "items": [
+                                {
+                                    "metadata": {
+                                        "namespace": "kube-system",
+                                        "name": "cilium",
+                                    },
+                                    "spec": {
+                                        "selector": {
+                                            "matchLabels": {"k8s-app": "cilium"}
+                                        }
+                                    },
+                                }
+                            ]
+                        }
+                    ),
+                    "",
+                )
+            if args == ["-n", "kube-system", "get", "pods", "-o", "json"]:
+                return runtime.CommandResult(
+                    command,
+                    0,
+                    json.dumps(
+                        {
+                            "items": [
+                                {
+                                    "metadata": {
+                                        "name": "cilium-operator-0",
+                                        "labels": {"name": "cilium-operator"},
+                                    },
+                                    "status": {
+                                        "conditions": [
+                                            {"type": "Ready", "status": "True"}
+                                        ]
+                                    },
+                                },
+                                {
+                                    "metadata": {
+                                        "name": "cilium-agent-abc",
+                                        "labels": {"k8s-app": "cilium"},
+                                    },
+                                    "status": {
+                                        "conditions": [
+                                            {"type": "Ready", "status": "True"}
+                                        ]
+                                    },
+                                },
+                            ]
+                        }
+                    ),
+                    "",
+                )
+            if "exec" in args:
+                exec_pods.append(args[args.index("exec") + 1])
+                return runtime.CommandResult(
+                    command,
+                    0,
+                    json.dumps({"local": {"status": "reachable"}}),
+                    "",
+                )
+        return runner(argv, **kwargs)
+
+    monkeypatch.setattr(access, "run_command", fake_run)
+
+    surface = access.kubernetes_access(target)
+
+    assert surface.status == "PASS"
+    assert exec_pods == ["cilium-agent-abc"]
+    assert surface.details["cilium_health_pod"] == "cilium-agent-abc"
 
 
 @pytest.mark.parametrize(

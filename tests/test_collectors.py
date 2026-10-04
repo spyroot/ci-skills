@@ -102,6 +102,56 @@ def test_storage_report_records_malformed_list_envelopes_as_errors(
     assert reasons["attachments"] == "invalid_list_response"
 
 
+def test_storage_report_records_malformed_pv_and_pvc_fields_as_errors(
+    monkeypatch,
+    target_file,
+):
+    """Malformed PV/PVC item fields must not raise or become empty success."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    payloads = _empty_storage_payloads()
+    payloads["persistentvolumeclaims"] = {
+        "items": [
+            {
+                "metadata": {"namespace": "app", "name": "bad-pvc"},
+                "spec": "not-a-mapping",
+                "status": {"phase": "Bound"},
+            }
+        ]
+    }
+    payloads["persistentvolumes"] = {
+        "items": [
+            {
+                "metadata": {"name": "bad-pv"},
+                "spec": {"storageClassName": "fast"},
+                "status": "not-a-mapping",
+            }
+        ]
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, payloads[resource])
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        namespace="all",
+        node=None,
+        storage_class=None,
+        phase="all",
+        search=None,
+    )
+
+    result = collect.collect_storage(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"] == []
+    reasons = {error["source"]: error["reason"] for error in result["errors"]}
+    assert reasons["pvcs"] == "invalid_item_response"
+    assert reasons["pvs"] == "invalid_item_response"
+
+
 @pytest.mark.parametrize(
     ("phase", "expected_volume"),
     (("Released", "pv-released"), ("Failed", "pv-failed")),
@@ -516,6 +566,70 @@ def test_event_trace_reports_malformed_event_items_as_partial(
     assert reasons["events_v1"] == "invalid_list_response"
 
 
+def test_event_trace_reports_missing_named_event_timestamp_and_object_identity(
+    monkeypatch,
+    target_file,
+):
+    """Named event filters require timestamp and object identity evidence."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    events = {
+        "events": [
+            {
+                "metadata": {"namespace": "jobs", "name": "runner-pod.no-time"},
+                "involvedObject": {
+                    "kind": "Pod",
+                    "namespace": "jobs",
+                    "name": "runner-pod",
+                    "uid": "pod-1",
+                },
+                "reason": "FailedScheduling",
+                "message": "missing timestamp",
+            }
+        ],
+        "events.events.k8s.io": [
+            {
+                "metadata": {
+                    "namespace": "jobs",
+                    "name": "runner-pod.no-object",
+                    "creationTimestamp": "2026-10-01T10:05:00Z",
+                },
+                "eventTime": "2026-10-01T10:05:00Z",
+                "regarding": {"kind": "Pod", "namespace": "jobs"},
+                "reason": "FailedScheduling",
+                "note": "missing object name",
+            }
+        ],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": events[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="jobs",
+        kind="Pod",
+        object="runner-pod",
+        reason=None,
+        search=None,
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"] == []
+    assert {"source": "core_events", "reason": "invalid_event_timestamp"} in result[
+        "errors"
+    ]
+    assert {"source": "events_v1", "reason": "invalid_event_object"} in result[
+        "errors"
+    ]
+
+
 def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
     monkeypatch,
     target_file,
@@ -608,6 +722,62 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
         "-o",
         "json",
     )
+
+
+@pytest.mark.parametrize("health_payload", (None, [], "reachable"))
+def test_cilium_status_rejects_invalid_health_json_shapes(
+    monkeypatch,
+    target_file,
+    health_payload,
+):
+    """Parseable JSON is not proof of a Cilium health response."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    resources = {
+        "daemonsets": [
+            {
+                "metadata": {"namespace": "kube-system", "name": "cilium"},
+                "spec": {"selector": {"matchLabels": {"k8s-app": "cilium"}}},
+                "status": {"desiredNumberScheduled": 1, "numberReady": 1},
+            }
+        ],
+        "pods": [
+            {
+                "metadata": {
+                    "namespace": "kube-system",
+                    "name": "cilium-ready",
+                    "uid": "pod-ready",
+                    "labels": {"k8s-app": "cilium"},
+                },
+                "spec": {"nodeName": "worker-a"},
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }
+        ],
+        "deployments": [],
+        "ciliumnodes.cilium.io": [],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        if "exec" in command:
+            return runtime.CommandResult(command, 0, json.dumps(health_payload), "")
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": resources[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(namespace="auto", node=None, search=None)
+
+    result = collect.collect_cilium(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"][0]["status"] == "UNKNOWN"
+    assert result["records"][0]["reason"] == "invalid_health_response"
+    assert {"source": "cilium-ready", "reason": "invalid_health_response"} in result[
+        "errors"
+    ]
 
 
 def test_cilium_status_uses_daemonset_selector_for_agent_pods(

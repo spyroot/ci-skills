@@ -174,7 +174,7 @@ def test_access_check_publication_pass_reports_admin_and_required_check_receipt(
     fake_access_tools,
     live_target_file,
 ):
-    """Publication mode accepts any nonempty required-check read-back."""
+    """Publication mode accepts the expected required-check read-back."""
     result = run_script(
         "access_check.py",
         "--target",
@@ -186,7 +186,7 @@ def test_access_check_publication_pass_reports_admin_and_required_check_receipt(
         fake_bin=fake_access_tools,
         env={
             "FAKE_GH_ADMIN": "true",
-            "FAKE_GH_REQUIRED_CONTEXTS": "portable-required-check",
+            "FAKE_GH_REQUIRED_CONTEXTS": "validate",
         },
     )
     data = parse_json_output(result)
@@ -197,9 +197,34 @@ def test_access_check_publication_pass_reports_admin_and_required_check_receipt(
     assert "repository_admin" in data["surfaces"]["github"]["observed_capability"]
     assert "protection_read" in data["surfaces"]["github"]["observed_capability"]
     assert "required_checks_read" in data["surfaces"]["github"]["observed_capability"]
-    assert data["surfaces"]["github"]["details"]["required_checks"] == [
-        "portable-required-check"
-    ]
+    assert data["surfaces"]["github"]["details"]["required_checks"] == ["validate"]
+
+
+def test_access_check_publication_blocks_when_expected_required_check_absent(
+    fake_access_tools,
+    live_target_file,
+):
+    """Publication mode proves the intended check, not merely any required check."""
+    result = run_script(
+        "access_check.py",
+        "--target",
+        live_target_file,
+        "--revision",
+        TEST_REVISION,
+        "--publication",
+        "--json",
+        fake_bin=fake_access_tools,
+        env={
+            "FAKE_GH_ADMIN": "true",
+            "FAKE_GH_REQUIRED_CONTEXTS": "unrelated-check",
+        },
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 2
+    assert data["status"] == "BLOCKED"
+    assert data["surfaces"]["github"]["status"] == "BLOCKED"
+    assert data["surfaces"]["github"]["reason"] == "required_checks_mismatch"
 
 
 def test_access_check_publication_denies_non_admin_identity(

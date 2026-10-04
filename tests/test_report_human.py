@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from conftest import import_script_module
 
 
@@ -75,3 +77,31 @@ def test_human_cilium_report_includes_health_payload_summary():
     assert "cilium-ready" in text
     assert "worker-a" in text
     assert "reachable" in text
+
+
+def test_machine_report_emission_sanitizes_nested_secret_values():
+    """JSON/YAML report output has a final redaction boundary."""
+    report = import_script_module("core.report")
+    data = {
+        "kind": "gitlab_job",
+        "status": "PASS",
+        "target": "https://gitlab.example.test",
+        "records": [
+            {
+                "trace_tail": (
+                    "CI_JOB_TOKEN=unit-ci-token\n"
+                    '{"password":"unit-json-password","token":"unit-json-token"}'
+                )
+            }
+        ],
+        "errors": [],
+        "summary": {"record_count": 1, "error_count": 0},
+    }
+
+    rendered = report.emit(data, "json")
+    parsed = json.loads(rendered)
+
+    assert parsed["kind"] == "gitlab_job"
+    for secret in ("unit-ci-token", "unit-json-password", "unit-json-token"):
+        assert secret not in rendered
+    assert "[REDACTED]" in rendered
