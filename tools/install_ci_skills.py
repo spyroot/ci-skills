@@ -181,7 +181,10 @@ def _write_journal(skills_dir: Path, data: dict[str, Any]) -> None:
 # Cleanup: restores handlers on every exit
 @contextmanager
 def _recoverable_signals():
-    """Turn process interrupts into exceptions while an install can recover."""
+    """Turn process interrupts into exceptions while an install can recover.
+
+    :returns: Control to the protected install operation.
+    """
     if threading.current_thread() is not threading.main_thread():
         yield
         return

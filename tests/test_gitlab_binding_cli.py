@@ -148,9 +148,7 @@ def test_removed_legacy_binding_variable_does_not_select_a_target(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _selection(tmp_path, monkeypatch)
-    monkeypatch.setenv(
-        "K8S_ADMIN_DIAGNOSTICS_BINDING", str(tmp_path / "missing.toml")
-    )
+    monkeypatch.setenv("K8S_ADMIN_DIAGNOSTICS_BINDING", str(tmp_path / "missing.toml"))
 
     code = _invoke("access", [])
     evidence = json.loads(capsys.readouterr().out)

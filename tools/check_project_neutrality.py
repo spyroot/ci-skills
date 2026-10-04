@@ -20,8 +20,7 @@ def _published_skill_doc(relative: str) -> bool:
     :returns: Whether this path is published skill documentation.
     """
     return relative in {"README.md", "skills/ci-skills/SKILL.md"} or (
-        relative.startswith("skills/ci-skills/references/")
-        and relative.endswith(".md")
+        relative.startswith("skills/ci-skills/references/") and relative.endswith(".md")
     )
 
 
