@@ -26,7 +26,18 @@ from .gitlab_api import (
 )
 
 
+# Summary: Validate one bug issue request before contacting GitLab.
+# Arguments: args supplies title, optional description path, labels, and milestone ID.
+# Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: ActionError for invalid fields; Side effects: reads optional description file.
+# Idempotency: same inputs yield the same body; Cleanup: file reader closes its handle.
 def prepare(args: Namespace) -> tuple[dict[str, Any], None, None]:
+    """Build the issue body for an open-bug or create-bug plan.
+
+    :param args: Parsed issue action and requested fields.
+    :returns: Validated issue body and two absent resource keys.
+    :raises ActionError: If the action, labels, or milestone ID is invalid.
+    """
     if args.action not in {"open-bug", "create-bug"}:
         raise ActionError("unsupported_issue_action")
     body: dict[str, Any] = {"title": _required_text(args.title, "title")}
@@ -43,7 +54,22 @@ def prepare(args: Namespace) -> tuple[dict[str, Any], None, None]:
     return body, None, None
 
 
+# Summary: Create an absent open issue or verify an exact existing one.
+# Arguments: api/session access GitLab, plan selects fields, target_id selects project.
+# Environment inputs: authenticated session; Stdout: none; Stderr: none.
+# Exit classes: ActionError or GitLabAPIError; Side effects: issue reads and possible POST.
+# Idempotency: exact open issue returns NO_OP; Cleanup: guard releases its lock.
 def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
+    """Return APPLIED only after the created issue matches an independent GET.
+
+    :param api: GitLab client for list, create, and read-back calls.
+    :param session: Authenticated GitLab session.
+    :param plan: Confirmed issue creation plan.
+    :param target_id: Numeric project ID that owns the issue.
+    :returns: APPLIED or NO_OP, issue IID, and verification evidence.
+    :raises ActionError: If matching issues are ambiguous or differ from the plan.
+    :raises GitLabAPIError: If a provider request fails without recovery.
+    """
     base = f"projects/{target_id}/issues"
     with create_guard(
         plan.origin, plan.target_kind, target_id, "issue", plan.body["title"]
@@ -105,7 +131,22 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
         }
 
 
+# Summary: Search all issue states for one exact title.
+# Arguments: api/session read GitLab, base is issue API path, title is exact.
+# Environment inputs: authenticated session; Stdout: none; Stderr: none.
+# Exit classes: ActionError for duplicate titles, GitLabAPIError for failed read.
+# Side effects: GitLab list read; Idempotency: follows current issue state.
+# Cleanup: caller owns API session.
 def _find_exact(api: Any, session: Any, base: str, title: str) -> list[dict[str, Any]]:
+    """Return zero or one issue whose title matches exactly.
+
+    :param api: GitLab client used to page through issues.
+    :param session: Authenticated GitLab session.
+    :param base: Issue collection API path.
+    :param title: Requested exact issue title.
+    :returns: Empty list or one matching issue.
+    :raises ActionError: If multiple issues share the exact title.
+    """
     matches = [
         item
         for item in _fields(
@@ -126,10 +167,24 @@ def _find_exact(api: Any, session: Any, base: str, title: str) -> list[dict[str,
     return matches
 
 
+# Summary: Verify an uncertain issue POST without repeating the write.
+# Arguments: api/session read GitLab, plan and base select issue, guard tracks pending create.
+# Environment inputs: authenticated session; Stdout: none; Stderr: none.
+# Exit classes: ActionError or GitLabAPIError; Side effects: issue list and detail reads.
+# Idempotency: no repeat POST; Cleanup: clears the create guard after verified read-back.
 def _reconcile(
     api: Any, session: Any, plan: ActionPlan, base: str, guard: Any
 ) -> dict[str, Any]:
-    """Read after an uncertain POST; never resend the write."""
+    """Read after an uncertain POST without sending another write.
+
+    :param api: GitLab client used for list and read-back calls.
+    :param session: Authenticated GitLab session.
+    :param plan: Creation plan used for exact field comparison.
+    :param base: Issue collection API path.
+    :param guard: Pending create guard cleared after confirmed read-back.
+    :returns: Reconciled APPLIED result with issue IID and URL.
+    :raises ActionError: If the issue is absent or does not match the plan.
+    """
     matches = _find_exact(api, session, base, plan.body["title"])
     if not matches:
         raise ActionError("issue_create_outcome_uncertain_check_title_before_retry")

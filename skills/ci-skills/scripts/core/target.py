@@ -103,6 +103,10 @@ class Target:
     target_reference: str | None = None
 
 
+# Summary: require a TOML table containing only declared keys
+# Arguments: value, table name, allowed keys; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: table or TargetError
+# Side effects: none; Idempotency: same value gives same result; Cleanup: none
 def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:
     """Return one table after rejecting undeclared fields, including credentials."""
     if not isinstance(value, dict):
@@ -115,6 +119,10 @@ def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:
     return value
 
 
+# Summary: read and trim a required nonempty target string
+# Arguments: table and key; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: string or TargetError
+# Side effects: none; Idempotency: same table gives same result; Cleanup: none
 def _string(table: dict[str, object], key: str) -> str:
     """Read a required nonempty string without guessing a default."""
     value = table.get(key)
@@ -123,6 +131,10 @@ def _string(table: dict[str, object], key: str) -> str:
     return value.strip()
 
 
+# Summary: validate HTTPS origin and fully qualified host
+# Arguments: URL and field key; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: origin/host or TargetError
+# Side effects: none; Idempotency: same URL gives same result; Cleanup: none
 def _https_url(value: str, key: str) -> tuple[str, str]:
     """Require an HTTPS authority URL with a fully qualified hostname."""
     parsed = urlsplit(value)
@@ -153,12 +165,20 @@ def kubernetes_label(target: Target) -> str:
     return f"{target.kubernetes.context} -> {target.kubernetes.server}"
 
 
+# Summary: reject selected files located inside the installed skill
+# Arguments: selected path, skill root, field key; Environment inputs: symlink map
+# Stdout: none; Stderr: none; Exit classes: success or TargetError
+# Side effects: resolves paths; Idempotency: depends on symlinks; Cleanup: none
 def assert_external_path(path: Path, skill_root: Path, key: str) -> None:
     """Keep selected credential and target files outside the installed skill."""
     if path.resolve().is_relative_to(skill_root.resolve()):
         raise TargetError(f"{key} must be stored outside the installed skill")
 
 
+# Summary: validate an ordered unique list of external absolute paths
+# Arguments: table, key, skill root; Environment inputs: symlink map
+# Stdout: none; Stderr: none; Exit classes: path tuple or TargetError
+# Side effects: resolves paths; Idempotency: depends on symlinks; Cleanup: none
 def _optional_files(
     table: dict[str, object], key: str, skill_root: Path
 ) -> tuple[Path, ...]:
@@ -183,6 +203,10 @@ def _optional_files(
     return tuple(resolved)
 
 
+# Summary: validate an optional unique list of nonempty names
+# Arguments: table and key; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: name tuple or TargetError
+# Side effects: none; Idempotency: same table gives same result; Cleanup: none
 def _optional_names(table: dict[str, object], key: str) -> tuple[str, ...]:
     """Read an optional list of exact, nonempty names."""
     value = table.get(key)
@@ -200,6 +224,10 @@ def _optional_names(table: dict[str, object], key: str) -> tuple[str, ...]:
     return tuple(names)
 
 
+# Summary: validate one optional external file path
+# Arguments: table, key, skill root; Environment inputs: symlink map
+# Stdout: none; Stderr: none; Exit classes: path, None, or TargetError
+# Side effects: resolves path; Idempotency: depends on symlinks; Cleanup: none
 def _optional_file(table: dict[str, object], key: str, skill_root: Path) -> Path | None:
     value = table.get(key)
     if value is None:
@@ -214,6 +242,10 @@ def _optional_file(table: dict[str, object], key: str, skill_root: Path) -> Path
     return path
 
 
+# Summary: validate a GitLab path or positive numeric target reference
+# Arguments: table and key; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: string, None, or TargetError
+# Side effects: none; Idempotency: same value gives same result; Cleanup: none
 def _optional_reference(table: dict[str, object], key: str) -> str | None:
     """Accept an exact numeric ID or relative GitLab project/group path."""
     value = table.get(key)
@@ -237,6 +269,10 @@ def _optional_reference(table: dict[str, object], key: str) -> str | None:
     return selected
 
 
+# Summary: parse GitLab origin, credential path, and optional target IDs
+# Arguments: GitLab table and skill root; Environment inputs: symlink map
+# Stdout: none; Stderr: none; Exit classes: GitLabTarget or TargetError
+# Side effects: resolves token path; Idempotency: depends on symlinks; Cleanup: none
 def _parse_gitlab(value: object, skill_root: Path) -> GitLabTarget:
     gitlab = _table(
         value,
@@ -259,6 +295,11 @@ def _parse_gitlab(value: object, skill_root: Path) -> GitLabTarget:
     )
 
 
+# Summary: load one selected external TOML target file
+# Arguments: source path and skill root; Environment inputs: target file bytes
+# Stdout: none; Stderr: none; Exit classes: target data or TargetError
+# Side effects: reads file; Idempotency: stable for unchanged file
+# Cleanup: file handle closes
 def _read_target_data(source: Path, skill_root: Path) -> dict[str, object]:
     """Read one selected target file without searching another location."""
     assert_external_path(source, skill_root, "target file")
@@ -270,6 +311,11 @@ def _read_target_data(source: Path, skill_root: Path) -> dict[str, object]:
     return data
 
 
+# Summary: load only the GitLab authority from a selected target file
+# Arguments: target path; Environment inputs: selected TOML file
+# Stdout: none; Stderr: none; Exit classes: GitLabOperationTarget or TargetError
+# Side effects: reads file; Idempotency: stable for unchanged file
+# Cleanup: delegated file handle closes
 def load_gitlab_target(path: str | Path) -> GitLabOperationTarget:
     """Load only GitLab settings, even when other allowed tables are present."""
     source = Path(path).expanduser()
@@ -281,6 +327,10 @@ def load_gitlab_target(path: str | Path) -> GitLabOperationTarget:
     return GitLabOperationTarget(selected, source.resolve())
 
 
+# Summary: choose exactly one GitLab project or group reference
+# Arguments: target and optional overrides; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: kind/reference or TargetError
+# Side effects: none; Idempotency: same target gives same result; Cleanup: none
 def select_gitlab_reference(
     target: GitLabOperationTarget,
     *,
@@ -307,6 +357,10 @@ def select_gitlab_reference(
     )
 
 
+# Summary: validate exact node and optional existing-Pod routes
+# Arguments: node diagnostics table; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: target, None, or TargetError
+# Side effects: none; Idempotency: same table gives same result; Cleanup: none
 def _node_diagnostics(value: object | None) -> NodeDiagnosticsTarget | None:
     if value is None:
         return None
@@ -332,6 +386,10 @@ def _node_diagnostics(value: object | None) -> NodeDiagnosticsTarget | None:
     return NodeDiagnosticsTarget(node=node, cilium=cilium, journal=journal)
 
 
+# Summary: validate namespace, selector, and container route to an existing Pod
+# Arguments: route table, kind, journal flag; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: NodePodRoute or TargetError
+# Side effects: none; Idempotency: same route gives same result; Cleanup: none
 def _node_pod_route(
     value: object, kind: str, *, allow_journal_fields: bool = False
 ) -> NodePodRoute:
@@ -347,6 +405,10 @@ def _node_pod_route(
     return NodePodRoute(namespace=namespace, selector=selector, container=container)
 
 
+# Summary: reject relative, parent-traversal, or root journal paths
+# Arguments: path and field key; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: path or TargetError
+# Side effects: none; Idempotency: same path gives same result; Cleanup: none
 def _absolute_path(value: str, key: str) -> str:
     path = Path(value)
     if not path.is_absolute() or ".." in path.parts or value == "/":
@@ -356,6 +418,11 @@ def _absolute_path(value: str, key: str) -> str:
     return value
 
 
+# Summary: validate only command-required authority tables in a target file
+# Arguments: path and required surfaces; Environment inputs: selected TOML file
+# Stdout: none; Stderr: none; Exit classes: Target or TargetError
+# Side effects: reads file and resolves selected paths
+# Idempotency: stable for unchanged file and symlinks; Cleanup: file handle closes
 def load_target(
     path: str | Path, *, required_surfaces: tuple[str, ...] = AUTHORITIES
 ) -> Target:

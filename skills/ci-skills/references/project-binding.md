@@ -1,10 +1,11 @@
 # Project target and credential binding
 
-Commands resolve the target in this order and report the selected tier
+The selectors defined in `scripts/core/project_binding.py` resolve the target
+in this order and report the selected tier
 in `target_selection`:
 
 1. Explicit `--target PATH` or `--binding PATH`: `cli:` or `binding:`.
-2. `CI_SKILLS_TARGET=PATH` or `K8S_ADMIN_DIAGNOSTICS_BINDING=PATH`:
+2. `CI_SKILLS_TARGET=PATH` or `CI_SKILLS_BINDING=PATH`:
    `env:CI_SKILLS_TARGET -> file:` or `binding:`.
 3. `./.ci-skills/target.toml` in the working directory: `project:`.
 4. `~/.ci-skills/target.toml` for the current user: `user:`.
@@ -56,7 +57,7 @@ keys out of tracked files.
 ## Project-specific kubeconfig resolver
 
 A project with a kubeconfig-producing command can supply `--binding PATH` or
-`K8S_ADMIN_DIAGNOSTICS_BINDING=PATH`. The binding names its nonsecret target
+`CI_SKILLS_BINDING=PATH`. The binding names its nonsecret target
 file and ordered kubeconfig sources. The target it names must omit both
 `kubernetes.kubeconfig` and `kubernetes.kubeconfigs`, because the binding owns
 that selection.

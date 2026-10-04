@@ -57,6 +57,10 @@ class MtuPlan:
 class EventLogger:
     """Emit bounded, credential-free diagnostics without changing report stdout."""
 
+    # Summary: open optional private event log; Arguments: CLI args and run ID
+    # Environment inputs: log path and permissions; Stdout: none; Stderr: none
+    # Exit classes: logger or OSError/ValueError; Side effects: may open log file
+    # Idempotency: repeat appends to same file; Cleanup: caller invokes close
     def __init__(self, args: Any, run_id: str):
         self.args = args
         self.run_id = run_id
@@ -69,6 +73,11 @@ class EventLogger:
                 self.fd = None
                 raise ValueError("log_file_not_private")
 
+    # Summary: emit a selected diagnostic event; Arguments: level, action, result
+    # Environment inputs: UTC clock and log settings; Stdout: none
+    # Stderr: selected log line; Exit classes: return or write error
+    # Side effects: optional file append; Idempotency: repeat appends another line
+    # Cleanup: caller closes file descriptor
     def event(self, level: str, action: str, result: str) -> None:
         levels = ("debug", "info", "warning", "error")
         if levels.index(level) < levels.index(self.args.log_level):
@@ -89,11 +98,20 @@ class EventLogger:
         if self.fd is not None:
             os.write(self.fd, line.encode("utf-8"))
 
+    # Summary: close the optional log file; Arguments: none
+    # Environment inputs: open file descriptor; Stdout: none; Stderr: none
+    # Exit classes: return or close error; Side effects: closes descriptor
+    # Idempotency: caller closes once; a second close may fail
+    # Cleanup: releases descriptor
     def close(self) -> None:
         if self.fd is not None:
             os.close(self.fd)
 
 
+# Summary: validate and decode a bounded CLI response; Arguments: result, source
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: decoded JSON or ValueError; Side effects: none
+# Idempotency: same result gives same value; Cleanup: none
 def _response(result: CommandResult, source: str) -> Any:
     """Reject failed, truncated, or malformed external responses."""
     if result.returncode:
@@ -106,6 +124,10 @@ def _response(result: CommandResult, source: str) -> Any:
         raise ValueError(f"{source}:invalid_json") from exc
 
 
+# Summary: select physical PCI Ethernet links; Arguments: decoded link list
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: selected links or TypeError/ValueError; Side effects: none
+# Idempotency: same list gives same links; Cleanup: none
 def physical_uplinks(payload: Any) -> list[dict[str, Any]]:
     """Select PCI Ethernet links and retain optional IPv4 address metadata."""
     if not isinstance(payload, list):
@@ -161,6 +183,10 @@ def physical_uplinks(payload: Any) -> list[dict[str, Any]]:
     return selected
 
 
+# Summary: read and validate selected node inventory; Arguments: target, node
+# Environment inputs: Kubernetes API state; Stdout: none; Stderr: none
+# Exit classes: node tuple or TypeError/ValueError; Side effects: external GET
+# Idempotency: output follows cluster state; Cleanup: kubectl child exits
 def _read_nodes(target: Target, selected: str | None) -> tuple[str, ...]:
     command = kubectl_argv(target, "get", "nodes", "-o", "json")
     payload = _response(
@@ -195,6 +221,10 @@ def _read_nodes(target: Target, selected: str | None) -> tuple[str, ...]:
     return tuple(sorted(names))
 
 
+# Summary: require OpenShift API and oc before debug; Arguments: target
+# Environment inputs: oc path and Kubernetes API; Stdout: none; Stderr: none
+# Exit classes: return or ValueError; Side effects: external GET
+# Idempotency: output follows tool and API state; Cleanup: child exits
 def _verify_openshift(target: Target) -> None:
     """Block before debug Pods if this target lacks the OpenShift API or CLI."""
     if shutil.which("oc") is None:
@@ -221,6 +251,10 @@ def _verify_openshift(target: Target) -> None:
         raise ValueError("cluster:openshift_api_invalid")
 
 
+# Summary: read the selected context namespace; Arguments: target
+# Environment inputs: kubeconfig context; Stdout: none; Stderr: none
+# Exit classes: namespace or ValueError; Side effects: local kubectl read
+# Idempotency: same context gives same namespace; Cleanup: child exits
 def _read_namespace(target: Target) -> str:
     """Use the selected context's namespace, or Kubernetes' default namespace."""
     command = kubectl_argv(
@@ -237,6 +271,10 @@ def _read_namespace(target: Target) -> str:
     return namespace
 
 
+# Summary: hash target and optional binding files; Arguments: target
+# Environment inputs: selected local files; Stdout: none; Stderr: none
+# Exit classes: digest or TargetError/read error; Side effects: reads files
+# Idempotency: same paths and bytes give same digest; Cleanup: files close
 def _source_digest(target: Target) -> str:
     """Bind the plan to the selected target file and optional project binding."""
     if target.source_file is None:
@@ -254,6 +292,11 @@ def _source_digest(target: Target) -> str:
     return digest.hexdigest()
 
 
+# Summary: bind a read-only MTU plan to target and nodes; Arguments: target, args
+# Environment inputs: OpenShift API, kubeconfig, source files; Stdout: none
+# Stderr: none; Exit classes: plan or validation/read error
+# Side effects: external GETs, no debug Pods; Idempotency: stable inputs give plan
+# Cleanup: child commands exit
 def build_plan(target: Target, args: Any) -> MtuPlan:
     """Read an exact node inventory without creating a debug Pod."""
     _verify_openshift(target)
@@ -281,6 +324,11 @@ def build_plan(target: Target, args: Any) -> MtuPlan:
     return MtuPlan(namespace, nodes, hashlib.sha256(encoded).hexdigest(), inputs)
 
 
+# Summary: find only this run's marked debug Pods
+# Arguments: target, namespace, marker; Environment inputs: Kubernetes Pod list
+# Stdout: none; Stderr: none
+# Exit classes: Pod names or TypeError/ValueError; Side effects: external GET
+# Idempotency: output follows Pod state; Cleanup: child exits
 def _marked_pods(target: Target, namespace: str, marker: str) -> list[str]:
     """Read back only Pods bearing this invocation's unique debug marker."""
     command = kubectl_argv(target, "-n", namespace, "get", "pods", "-o", "json")
@@ -324,6 +372,11 @@ def _marked_pods(target: Target, namespace: str, marker: str) -> list[str]:
     return sorted(set(found))
 
 
+# Summary: delete and verify absence of this run's Pods
+# Arguments: target, namespace, marker; Environment inputs: Kubernetes Pod state
+# Stdout: none; Stderr: none; Exit classes: PASS/BLOCKED cleanup result
+# Side effects: deletes marked Pods; Idempotency: absent Pods remain absent
+# Cleanup: attempts observed Pods and reads survivors when API calls succeed
 def _cleanup(target: Target, namespace: str, marker: str) -> dict[str, Any]:
     """Delete only this run's surviving debug Pods and independently verify absence."""
     try:
@@ -367,6 +420,12 @@ def _cleanup(target: Target, namespace: str, marker: str) -> dict[str, Any]:
         }
 
 
+# Summary: read one node's physical links through a debug Pod
+# Arguments: target, plan, node, marker, timeout
+# Environment inputs: node host interfaces
+# Stdout: none; Stderr: none; Exit classes: rows or classified error
+# Side effects: creates temporary debug Pod; Idempotency: follows node state
+# Cleanup: caller removes marked debug Pods
 def _read_one(
     target: Target, plan: MtuPlan, node: str, marker: str, timeout: int
 ) -> tuple[list[dict[str, Any]], dict[str, str] | None]:
@@ -402,6 +461,12 @@ def _read_one(
         return [], {"source": f"node/{node}", "reason": sanitize(str(exc), 160)}
 
 
+# Summary: compare planned node MTUs and clean debug Pods
+# Arguments: target, args, plan, marker
+# Environment inputs: node links and Kubernetes Pod state
+# Stdout: none; Stderr: none; Exit classes: PASS/PARTIAL/BLOCKED report
+# Side effects: temporary debug Pods; Idempotency: repeated reads do not alter MTU
+# Cleanup: shuts down workers, deletes marked Pods, verifies absence
 def collect_mtu_consistency(
     target: Target, args: Any, plan: MtuPlan, marker: str
 ) -> dict[str, Any]:
@@ -513,6 +578,10 @@ def collect_mtu_consistency(
     return result
 
 
+# Summary: render a plan or blocked result; Arguments: target, plan, gate, status
+# Environment inputs: local host identity; Stdout: none; Stderr: none
+# Exit classes: report mapping; Side effects: none
+# Idempotency: same inputs and hostname give same report; Cleanup: none
 def _base_result(
     target: Target, plan: MtuPlan, gate: dict[str, Any], status: str
 ) -> dict[str, Any]:
@@ -548,10 +617,21 @@ def _base_result(
     return data
 
 
+# Summary: convert an interrupt to a cleanup-safe exception
+# Arguments: signal and frame; Environment inputs: process signal
+# Stdout: none; Stderr: none
+# Exit classes: raises Interrupted; Side effects: none
+# Idempotency: every call raises; Cleanup: outer collector handles cleanup
 def _signal_interrupt(_signum: int, _frame: Any) -> None:
     raise Interrupted("interrupted")
 
 
+# Summary: plan or apply one confirmed MTU check; Arguments: parsed CLI args
+# Environment inputs: selected target, credentials, cluster, clock, log path
+# Stdout: report or describe JSON; Stderr: selected logs and errors
+# Exit classes: 0 success/plan, 2 blocked/partial, or write error
+# Side effects: apply creates temporary debug Pods; Idempotency: plan is stable
+# Cleanup: collector deletes marked Pods; logger and handlers are restored
 def run(args: Any) -> int:
     """Plan by default; apply only the exact confirmed fingerprint."""
     if args.describe:

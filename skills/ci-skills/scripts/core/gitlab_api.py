@@ -45,6 +45,10 @@ _RETRY_AFTER = re.compile(r"(?im)^retry-after\s*:\s*([^\r\n]+)")
 class GitLabAPIError(RuntimeError):
     """A classified API failure with no response body or credential value."""
 
+    # Summary: Preserve a classified reason and attempt count without raw response text.
+    # Arguments: reason is failure class, attempts counts calls; Environment inputs: none.
+    # Stdout: none; Stderr: none; Exit classes: constructs an exception.
+    # Side effects: object state only; Idempotency: same inputs give same fields; Cleanup: none.
     def __init__(self, reason: str, *, attempts: int = 1) -> None:
         self.reason = reason
         self.attempts = attempts
@@ -77,6 +81,10 @@ def unverified_write(
     }
 
 
+# Summary: Reject absolute, host-changing, or traversal GitLab API paths.
+# Arguments: value is caller endpoint; Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: GitLabAPIError for unsafe path; Side effects: none.
+# Idempotency: same endpoint gives same result; Cleanup: none.
 def _endpoint(value: str) -> str:
     """Reject host changes and path traversal before handing a path to glab."""
     parsed = urlsplit(value)
@@ -92,6 +100,10 @@ def _endpoint(value: str) -> str:
     return value
 
 
+# Summary: Split included HTTP headers from a GitLab JSON response.
+# Arguments: stdout is bounded glab output; Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: GitLabAPIError for truncated headers; Side effects: none.
+# Idempotency: same response gives same split; Cleanup: none.
 def _split_response(stdout: str) -> tuple[str, str]:
     """Separate `glab api --include` headers from the JSON body."""
     if not stdout.startswith("HTTP/"):
@@ -111,6 +123,10 @@ def _split_response(stdout: str) -> tuple[str, str]:
     return headers, remaining
 
 
+# Summary: Classify a failed GitLab command without exposing response content.
+# Arguments: result is bounded command outcome, headers are included HTTP metadata.
+# Environment inputs: none; Stdout: none; Stderr: none; Exit classes: no process exit.
+# Side effects: none; Idempotency: same outcome gives same class; Cleanup: none.
 def _failure(result: CommandResult, headers: str) -> str:
     """Classify retryable GitLab HTTP failures without reporting response text."""
     status = re.match(r"HTTP/\S+\s+(\d{3})\b", headers)
@@ -140,6 +156,11 @@ def _failure(result: CommandResult, headers: str) -> str:
     return known
 
 
+# Summary: Bound a retry delay from Retry-After or deterministic jitter.
+# Arguments: stderr carries header text, endpoint/attempt seed fallback delay.
+# Environment inputs: clock for dated Retry-After; Stdout: none; Stderr: none.
+# Exit classes: GitLabAPIError when delay exceeds budget; Side effects: none.
+# Idempotency: numeric header or fallback is stable, dated header follows clock; Cleanup: none.
 def _delay(stderr: str, endpoint: str, attempt: int) -> float:
     """Use Retry-After when surfaced, otherwise bounded backoff with jitter."""
     found = _RETRY_AFTER.search(stderr)
@@ -167,6 +188,10 @@ def _delay(stderr: str, endpoint: str, attempt: int) -> float:
     return base + (digest[0] / 255) * base * 0.2
 
 
+# Summary: Name the current user's local GitLab create-lock directory.
+# Arguments: none; Environment inputs: process UID; Stdout: none; Stderr: none.
+# Exit classes: no process exit; Side effects: none, path is not created here.
+# Idempotency: stable for same UID; Cleanup: none.
 def _lock_root() -> Path:
     return Path("/tmp") / f"ci-skills-gitlab-locks-{os.getuid()}"
 
@@ -174,6 +199,11 @@ def _lock_root() -> Path:
 class CreateGuard:
     """A same-host create lock with a crash-persistent uncertain marker."""
 
+    # Summary: Read one locked descriptor's pending marker into guard state.
+    # Arguments: descriptor is an open lock file; Environment inputs: current file bytes.
+    # Stdout: none; Stderr: none; Exit classes: GitLabAPIError for invalid marker.
+    # Side effects: seeks and reads descriptor; Idempotency: follows marker bytes.
+    # Cleanup: caller owns descriptor and lock release.
     def __init__(self, descriptor: int) -> None:
         self._descriptor = descriptor
         os.lseek(descriptor, 0, os.SEEK_SET)
@@ -182,10 +212,19 @@ class CreateGuard:
             raise GitLabAPIError("create_lock_invalid_state")
         self.pending = state == b"pending\n"
 
+    # Summary: Refuse a second create while an earlier POST remains uncertain.
+    # Arguments: self holds marker state; Environment inputs: none; Stdout: none; Stderr: none.
+    # Exit classes: GitLabAPIError for pending create; Side effects: none.
+    # Idempotency: same guard state gives same outcome; Cleanup: caller owns lock.
     def require_ready(self) -> None:
         if self.pending:
             raise GitLabAPIError("create_outcome_uncertain_reconcile_before_retry")
 
+    # Summary: Write and sync the guard's exact marker bytes.
+    # Arguments: value is pending marker or empty bytes; Environment inputs: lock descriptor.
+    # Stdout: none; Stderr: none; Exit classes: OSError for failed write or sync.
+    # Side effects: updates lock file; Idempotency: same value yields same marker.
+    # Cleanup: caller owns descriptor and lock release.
     def _set(self, value: bytes) -> None:
         os.lseek(self._descriptor, 0, os.SEEK_SET)
         os.write(self._descriptor, value)
@@ -193,21 +232,42 @@ class CreateGuard:
         os.fsync(self._descriptor)
         self.pending = bool(value)
 
+    # Summary: Mark one validated create as in flight before sending POST.
+    # Arguments: self holds lock state; Environment inputs: lock descriptor.
+    # Stdout: none; Stderr: none; Exit classes: GitLabAPIError if already pending.
+    # Side effects: writes pending marker; Idempotency: repeat is refused.
+    # Cleanup: caller owns descriptor and lock release.
     def mark_pending(self) -> None:
         self.require_ready()
         self._set(b"pending\n")
 
+    # Summary: Clear an uncertain marker after a complete empty resource read.
+    # Arguments: self holds lock state; Environment inputs: lock descriptor.
+    # Stdout: none; Stderr: none; Exit classes: GitLabAPIError requests a safe retry.
+    # Side effects: may clear marker; Idempotency: empty state is no-op.
+    # Cleanup: caller owns descriptor and lock release.
     def reconcile_absent(self) -> None:
         """Clear an earlier uncertain create only after a complete empty read."""
         if self.pending:
             self.clear()
             raise GitLabAPIError("create_outcome_uncertain_absent_after_readback_retry")
 
+    # Summary: Remove a pending marker after verified resource state.
+    # Arguments: self holds lock state; Environment inputs: lock descriptor.
+    # Stdout: none; Stderr: none; Exit classes: OSError if marker write fails.
+    # Side effects: may clear lock file; Idempotency: empty state is no-op.
+    # Cleanup: caller owns descriptor and lock release.
     def clear(self) -> None:
         if self.pending:
             self._set(b"")
 
 
+# Summary: Serialize one exact-title GitLab create across local processes.
+# Arguments: origin, target_kind, target_id, kind, title bind lock identity.
+# Environment inputs: process UID and local lock files; Stdout: none; Stderr: none.
+# Exit classes: GitLabAPIError or OSError; Side effects: directory, lock file, and flock.
+# Idempotency: same identity shares a lock, pending marker persists intentionally.
+# Cleanup: unlocks and closes descriptor, lock file and marker remain.
 @contextmanager
 def create_guard(
     origin: str, target_kind: str, target_id: int, kind: str, title: str
@@ -267,6 +327,10 @@ class GlabAPIClient:
     transport never reports raw provider stderr or a response body on failure.
     """
 
+    # Summary: Configure bounded GitLab command transport and retry timing.
+    # Arguments: command runs glab, timeout bounds it, sleep injects retry delay.
+    # Environment inputs: none; Stdout: none; Stderr: none; Exit classes: ValueError for timeout.
+    # Side effects: client state only; Idempotency: same inputs give same state; Cleanup: none.
     def __init__(
         self,
         command: Callable[..., CommandResult] = run_command_bounded,
@@ -293,6 +357,12 @@ class GlabAPIClient:
         """Issue one DELETE and accept GitLab's empty 204 response."""
         return self._request(session, "DELETE", endpoint)
 
+    # Summary: Run one exact-host API request with bounded GET retry and JSON validation.
+    # Arguments: session binds host/auth, method/endpoint select call, body is optional JSON.
+    # Environment inputs: bound session and temporary file directory.
+    # Stdout: none, returns parsed payload; Stderr: none, external diagnostics classified.
+    # Exit classes: GitLabAPIError or OSError; Side effects: glab request and optional temp file.
+    # Idempotency: GET follows server state, writes are sent once; Cleanup: temp file removed.
     def _request(
         self,
         session: Any,

@@ -45,11 +45,19 @@ PATH_MAP_FIELDS = ("credential_sources",)
 COMMAND_MAP_FIELDS = ("queries",)
 
 
+# Summary: hash an absolute path into a short stable token
+# Arguments: path string; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: digest prefix
+# Side effects: none; Idempotency: same path gives same token; Cleanup: none
 def path_token(path: str) -> str:
     """Return a stable, non-reversible token for one absolute path."""
     return hashlib.sha256(path.encode("utf-8")).hexdigest()[:DIGEST_LENGTH]
 
 
+# Summary: replace credential paths while retaining reference schemes
+# Arguments: source reference; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: portable reference
+# Side effects: none; Idempotency: same reference gives same token; Cleanup: none
 def portable_reference(value: str) -> str:
     """Rewrite one credential reference, keeping its scheme.
 
@@ -82,6 +90,10 @@ def portable_reference(value: str) -> str:
     return value
 
 
+# Summary: replace a recorded kubeconfig argument path with a digest
+# Arguments: command tokens; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: portable token list
+# Side effects: none; Idempotency: same tokens give same list; Cleanup: none
 def portable_command(argv: list[Any]) -> list[Any]:
     """Hide the host kubeconfig path in a recorded command argument vector."""
     result = list(argv)
@@ -91,6 +103,10 @@ def portable_command(argv: list[Any]) -> list[Any]:
     return result
 
 
+# Summary: recursively sanitize path-bearing receipt fields
+# Arguments: value and optional field name; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: portable value
+# Side effects: none; Idempotency: same value gives same rendering; Cleanup: none
 def portable(value: Any, *, key: str | None = None) -> Any:
     """Render a receipt, or any part of one, in committable form."""
     if isinstance(value, str):
@@ -113,6 +129,11 @@ def portable(value: Any, *, key: str | None = None) -> Any:
     return value
 
 
+# Summary: redact and atomically publish a portable receipt
+# Arguments: receipt data and destination; Environment inputs: destination directory
+# Stdout: none; Stderr: none; Exit classes: success or filesystem error
+# Side effects: creates directory and replaces receipt file
+# Idempotency: same data yields same final bytes; Cleanup: removes temporary file
 def write_portable_receipt(data: dict[str, Any], selected: str) -> None:
     """Atomically write redacted evidence to a caller-selected 0600 file."""
     destination = Path(selected).expanduser()

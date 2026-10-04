@@ -42,6 +42,11 @@ class Surface:
         return vars(self)
 
 
+# Summary: bind kubectl arguments to the selected context and kubeconfig
+# Arguments: target and kubectl arguments; Environment inputs: target credential sources
+# Stdout: none; Stderr: none; Exit classes: argument list or credential-source error
+# Side effects: checks kubeconfig integrity; Idempotency: stable for unchanged target
+# Cleanup: none
 def kubectl_argv(target: Target, *args: str) -> list[str]:
     """Bind every Kubernetes command to the supplied context and optional file."""
     assert_kubeconfig_unchanged(target.sources)
@@ -72,6 +77,11 @@ def glab_argv(target: Target | GitLabOperationTarget, endpoint: str) -> list[str
     ]
 
 
+# Summary: load a selected token file into a child environment mapping
+# Arguments: optional path and variable name; Environment inputs: token file bytes
+# Stdout: none; Stderr: none; Exit classes: mapping, None, or ValueError
+# Side effects: reads selected file; Idempotency: stable for unchanged file
+# Cleanup: read_text closes the file
 def _token_file(path: Path | None, variable: str) -> dict[str, str] | None:
     """Load one selected host token into a child environment, never a report."""
     if path is None:
@@ -87,6 +97,11 @@ def _token_file(path: Path | None, variable: str) -> dict[str, str] | None:
     return {variable: token}
 
 
+# Summary: select GitHub credentials from resolved sources or token file
+# Arguments: target; Environment inputs: GitHub source or selected token file
+# Stdout: none; Stderr: none; Exit classes: mapping, None, or ValueError
+# Side effects: may read token file; Idempotency: stable for unchanged source
+# Cleanup: token read closes its file
 def github_env(target: Target) -> dict[str, str | None] | None:
     if isinstance(target.sources, Sources):
         return target.sources.github.environment
@@ -95,12 +110,22 @@ def github_env(target: Target) -> dict[str, str | None] | None:
     )
 
 
+# Summary: select GitLab credentials for the exact target host
+# Arguments: target; Environment inputs: GitLab source or selected token file
+# Stdout: none; Stderr: none; Exit classes: mapping, None, or ValueError
+# Side effects: may read token file; Idempotency: stable for unchanged source
+# Cleanup: token read closes its file
 def gitlab_env(target: Target) -> dict[str, str | None] | None:
     if isinstance(target.sources, Sources):
         return {**target.sources.gitlab.environment, "GITLAB_HOST": target.gitlab.host}
     return _token_file(target.gitlab.token_file, GITLAB_VARIABLES[0])
 
 
+# Summary: return the frozen Kubernetes child environment when available
+# Arguments: target; Environment inputs: resolved Kubernetes source
+# Stdout: none; Stderr: none; Exit classes: mapping or None
+# Side effects: none; Idempotency: stable for unchanged target
+# Cleanup: none
 def kubernetes_env(target: Target) -> dict[str, str | None] | None:
     """Use the kubeconfig source frozen before the live access gate."""
     if isinstance(target.sources, Sources):
@@ -108,6 +133,11 @@ def kubernetes_env(target: Target) -> dict[str, str | None] | None:
     return None
 
 
+# Summary: decode successful command output as JSON
+# Arguments: command result; Environment inputs: command stdout and return code
+# Stdout: none; Stderr: none; Exit classes: JSON value or ValueError
+# Side effects: none; Idempotency: stable for unchanged result
+# Cleanup: none
 def _json(result: CommandResult) -> Any:
     if result.returncode:
         raise ValueError(error_class(result))
@@ -130,6 +160,11 @@ def _blocked(
     )
 
 
+# Summary: verify GitHub authentication, identity, and repository access
+# Arguments: target; Environment inputs: selected GitHub credential and live API
+# Stdout: none; Stderr: none; Exit classes: PASS or BLOCKED Surface
+# Side effects: read-only gh child commands; Idempotency: depends on live API
+# Cleanup: run_command reaps child processes
 def github_access(target: Target) -> Surface:
     host = target.github.host
     repo = target.github.repository
@@ -198,6 +233,11 @@ def github_access(target: Target) -> Surface:
     )
 
 
+# Summary: verify admin permission and declared required checks on main
+# Arguments: target; Environment inputs: GitHub credential and live branch protection
+# Stdout: none; Stderr: none; Exit classes: PASS or BLOCKED Surface
+# Side effects: read-only gh API calls; Idempotency: depends on live settings
+# Cleanup: run_command reaps child processes
 def github_publication_access(target: Target) -> Surface:
     """Extra check before changing required-check settings for publication."""
     base = github_access(target)
@@ -307,6 +347,11 @@ def github_publication_access(target: Target) -> Surface:
     )
 
 
+# Summary: verify instance admin identity and runner API access
+# Arguments: target; Environment inputs: selected GitLab credential and live API
+# Stdout: none; Stderr: none; Exit classes: PASS or BLOCKED Surface
+# Side effects: read-only glab child commands; Idempotency: depends on live API
+# Cleanup: run_command reaps child processes
 def gitlab_access(target: Target) -> Surface:
     host = target.gitlab.host
     observed: list[str] = []
@@ -374,10 +419,20 @@ def gitlab_access(target: Target) -> Surface:
     )
 
 
+# Summary: accept positive integer GitLab identifiers without booleans
+# Arguments: candidate value; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same value gives same result
+# Cleanup: none
 def _gitlab_positive_id(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+# Summary: compare a GitLab URL origin to the bound origin
+# Arguments: candidate URL and origin; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same URLs give same result
+# Cleanup: none
 def _gitlab_origin_matches(value: Any, origin: str) -> bool:
     if not isinstance(value, str):
         return False
@@ -391,6 +446,11 @@ def _gitlab_origin_matches(value: Any, origin: str) -> bool:
     )
 
 
+# Summary: reduce an exception to a safe receipt reason
+# Arguments: exception; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: safe reason string
+# Side effects: none; Idempotency: same exception gives same reason
+# Cleanup: none
 def _gitlab_safe_reason(error: Exception) -> str:
     """Never place an API body, stderr, or credential in the access report."""
     reason = getattr(error, "reason", None)
@@ -401,6 +461,11 @@ def _gitlab_safe_reason(error: Exception) -> str:
     return "provider_request_failed"
 
 
+# Summary: read bound GitLab identity and exact project or group target
+# Arguments: bound session and optional API client; Environment inputs: live GitLab API
+# Stdout: none; Stderr: none; Exit classes: PASS or BLOCKED receipt
+# Side effects: two read-only API requests; Idempotency: depends on live API
+# Cleanup: API client owns request resources
 def check_gitlab_operation_access(
     session: BoundGitLabSession, api_client: Any = None
 ) -> dict[str, Any]:
@@ -485,6 +550,11 @@ def check_gitlab_operation_access(
     return receipt
 
 
+# Summary: find the unique Cilium namespace and agent selector
+# Arguments: target; Environment inputs: live Kubernetes DaemonSet list
+# Stdout: none; Stderr: none; Exit classes: namespace and selector, or error
+# Side effects: read-only kubectl child; Idempotency: depends on cluster state
+# Cleanup: run_command reaps the child process
 def cilium_discovery(target: Target) -> tuple[str, dict[str, Any]]:
     """Resolve the agent namespace and its DaemonSet selector in ONE read.
 
@@ -519,6 +589,11 @@ def cilium_discovery(target: Target) -> tuple[str, dict[str, Any]]:
     return namespace, selector
 
 
+# Summary: resolve a kubeconfig credential path against its selected file
+# Arguments: path value and target; Environment inputs: kubeconfig source path
+# Stdout: none; Stderr: none; Exit classes: resolved path or ValueError
+# Side effects: filesystem path resolution; Idempotency: depends on symlink state
+# Cleanup: none
 def _credential_path(value: str, target: Target) -> Path:
     """Resolve a credential path against its sole kubeconfig source."""
     selected = Path(value).expanduser()
@@ -530,6 +605,11 @@ def _credential_path(value: str, target: Target) -> Path:
     return selected.resolve()
 
 
+# Summary: identify exactly one configured kubeconfig user auth mechanism
+# Arguments: user entry and target; Environment inputs: referenced credential files
+# Stdout: none; Stderr: none; Exit classes: mechanism map or ValueError
+# Side effects: reads file presence and token-file first byte
+# Idempotency: stable for unchanged kubeconfig and files; Cleanup: file handle closes
 def _auth_mechanism(user: dict[str, Any], target: Target) -> dict[str, str]:
     """Identify the selected kubeconfig user's configured auth mechanism."""
     options: list[dict[str, str]] = []
@@ -575,6 +655,11 @@ def _auth_mechanism(user: dict[str, Any], target: Target) -> dict[str, str]:
     return options[0]
 
 
+# Summary: verify Cilium pod exec permission and live agent health
+# Arguments: target; Environment inputs: Kubernetes API and selected credentials
+# Stdout: none; Stderr: none; Exit classes: observations or ValueError/TypeError
+# Side effects: read-only kubectl and pod health exec; Idempotency: depends on cluster
+# Cleanup: run_command reaps child processes
 def _cilium_access(target: Target) -> tuple[list[str], dict[str, Any]]:
     """Prove the Cilium-specific exec path after base cluster access succeeds."""
     observed: list[str] = []
@@ -614,6 +699,11 @@ def _cilium_access(target: Target) -> tuple[list[str], dict[str, Any]]:
     return observed, {"cilium_health_pod": pod_name}
 
 
+# Summary: verify context, TLS API, identity, RBAC, and optional Cilium access
+# Arguments: target and Cilium flag; Environment inputs: kubeconfig and live cluster
+# Stdout: none; Stderr: none; Exit classes: PASS or BLOCKED Surface
+# Side effects: reads files and runs read-only kubectl probes
+# Idempotency: depends on live cluster; Cleanup: opened file and children close
 def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
     name = target.kubernetes.context
     server = target.kubernetes.server
@@ -785,6 +875,11 @@ def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
     )
 
 
+# Summary: project a gate receipt into safe collector evidence
+# Arguments: gate receipt; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: evidence mapping
+# Side effects: none; Idempotency: same gate gives same digest and result
+# Cleanup: none
 def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
     """Summarize the gate that authorized one collector run.
 
@@ -823,6 +918,11 @@ def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Summary: probe selected authorities and assemble their live access receipt
+# Arguments: target, publication flag, Cilium flag; Environment inputs: live APIs
+# Stdout: none; Stderr: none; Exit classes: receipt or ValueError
+# Side effects: concurrent read-only authority probes
+# Idempotency: depends on live authorities; Cleanup: executor joins its workers
 def check_access(
     target: Target, *, publication: bool = False, cilium: bool = True
 ) -> dict[str, Any]:
@@ -884,6 +984,11 @@ def check_access(
     return receipt
 
 
+# Summary: list selected authority probes without executing them
+# Arguments: target, publication flag, Cilium flag; Environment inputs: target config
+# Stdout: none; Stderr: none; Exit classes: DRY_RUN receipt or ValueError
+# Side effects: none; Idempotency: same target gives same receipt
+# Cleanup: none
 def dry_run_access(
     target: Target, *, publication: bool = False, cilium: bool = True
 ) -> dict[str, Any]:

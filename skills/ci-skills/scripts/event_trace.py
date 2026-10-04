@@ -11,8 +11,15 @@ from core.collect import collect_events
 # compared with the real one without rendering help text: the epilog names
 # several flags as prose, and a text scan cannot tell those apart from the
 # options argparse actually accepts. See tests/test_catalog.py.
+# Summary: Define event window, object, namespace, and text filters.
+# Arguments: none; Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: no process exit; Side effects: constructs a parser in memory.
+# Idempotency: same options each call; Cleanup: none.
 def build_parser() -> argparse.ArgumentParser:
-    """Return this command's parser: the universal tier plus its own options."""
+    """Create the Kubernetes event CLI parser.
+
+    :returns: Shared options plus time and object filters.
+    """
     cli = parser("Trace Kubernetes events with native time and object filters.")
     cli.add_argument(
         "--from",
@@ -41,7 +48,16 @@ def build_parser() -> argparse.ArgumentParser:
     return cli
 
 
+# Summary: Parse an event request and delegate the live event read.
+# Arguments: none; Environment inputs: process CLI and selected Kubernetes target.
+# Stdout: event report; Stderr: diagnostics or usage errors.
+# Exit classes: command status or argparse usage error; Side effects: cluster event reads.
+# Idempotency: report follows live events and selected time window; Cleanup: delegated to runtime.
 def main() -> int:
+    """Run the bounded Kubernetes event collector.
+
+    :returns: Exit status from the shared collector command.
+    """
     return execute(build_parser().parse_args(), collect_events)
 
 

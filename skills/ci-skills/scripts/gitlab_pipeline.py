@@ -21,8 +21,15 @@ KIND = "gitlab_pipeline"
 SCRIPT = "gitlab_pipeline.py"
 
 
+# Summary: Define project and pipeline selectors on the shared CLI.
+# Arguments: none; Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: no process exit; Side effects: constructs a parser in memory.
+# Idempotency: same option definitions each call; Cleanup: none.
 def build_parser() -> argparse.ArgumentParser:
-    """Expose the common output tier with an exact pipeline selection."""
+    """Create the GitLab pipeline CLI parser.
+
+    :returns: Shared options plus exact project and pipeline selectors.
+    """
     cli = parser(
         "Read one selected GitLab pipeline and summarize job progress by stage.",
         kind=KIND,
@@ -41,8 +48,18 @@ def build_parser() -> argparse.ArgumentParser:
     return cli
 
 
+# Summary: Read one bound GitLab pipeline and emit a bounded report.
+# Arguments: argv optionally supplies CLI arguments; Environment inputs: target and auth.
+# Stdout: pipeline report or command description; Stderr: logs and usage errors.
+# Exit classes: success or classified blocked/usage status
+# Side effects: GitLab GETs and optional report file.
+# Idempotency: read follows live pipeline state; Cleanup: delegated output helper.
 def main(argv: list[str] | None = None) -> int:
-    """Bind once, prove project access, then use that same session for reads."""
+    """Bind one session and report the selected pipeline's current jobs.
+
+    :param argv: Optional arguments, or process arguments when omitted.
+    :returns: Exit status from the pipeline read and report.
+    """
     args = build_parser().parse_args(argv)
     if args.describe:
         sys.stdout.write(json.dumps(describe(SCRIPT), indent=2, sort_keys=True) + "\n")

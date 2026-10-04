@@ -25,6 +25,11 @@ class NodePodReader:
     name: str
     uid: str
 
+    # Summary: re-read selected Pod and reject a changed identity or route
+    # Arguments: reader state; Environment inputs: live Kubernetes Pod
+    # Stdout: none; Stderr: none; Exit classes: success or NodePodError
+    # Side effects: read-only kubectl call; Idempotency: depends on live Pod
+    # Cleanup: run_command reaps child
     def _assert_current(self) -> None:
         result = run_command(
             kubectl_argv(
@@ -52,6 +57,11 @@ class NodePodReader:
             raise NodePodError("pod_readback:identity_changed")
         _selected_pod({"items": [pod]}, self.target, self.route)
 
+    # Summary: build a non-TTY exec command for the selected Pod container
+    # Arguments: command tokens; Environment inputs: bound target and route
+    # Stdout: none; Stderr: none; Exit classes: argument list or source error
+    # Side effects: checks kubeconfig integrity; Idempotency: stable for target
+    # Cleanup: none
     def command(self, *args: str) -> list[str]:
         return kubectl_argv(
             self.target,
@@ -65,6 +75,11 @@ class NodePodReader:
             *args,
         )
 
+    # Summary: verify Pod identity then run a bounded command in its container
+    # Arguments: command tokens and timeout; Environment inputs: live Pod
+    # Stdout: none; Stderr: none; Exit classes: CommandResult or NodePodError
+    # Side effects: kubectl get and caller-supplied exec; Idempotency: depends on Pod
+    # Cleanup: run_command_tail reaps child
     def run(self, *args: str, timeout: int = 35) -> CommandResult:
         self._assert_current()
         return run_command_tail(
@@ -75,6 +90,11 @@ class NodePodReader:
             env=kubernetes_env(self.target),
         )
 
+    # Summary: verify Pod then run a command with caller-selected output limits
+    # Arguments: command tokens and bounds; Environment inputs: live Pod
+    # Stdout: none; Stderr: none; Exit classes: CommandResult or NodePodError
+    # Side effects: kubectl get and caller-supplied exec; Idempotency: depends on Pod
+    # Cleanup: run_command_tail reaps child
     def run_tail(
         self, *args: str, timeout: int, max_bytes: int, max_lines: int
     ) -> CommandResult:
@@ -98,6 +118,10 @@ class NodePodReader:
         }
 
 
+# Summary: require one Running Pod on the selected node and container
+# Arguments: Pod list, target, route; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: Pod map or selection error
+# Side effects: none; Idempotency: same payload gives same selection; Cleanup: none
 def _selected_pod(value: Any, target: Target, route: NodePodRoute) -> dict[str, Any]:
     if not isinstance(value, dict) or not isinstance(value.get("items"), list):
         raise NodePodError("pod_selection:invalid_response")
@@ -151,6 +175,10 @@ def _selected_pod(value: Any, target: Target, route: NodePodRoute) -> dict[str, 
     return pod
 
 
+# Summary: verify the Pod mount maps to the declared host journal path
+# Arguments: Pod and journal route; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same Pod gives same result; Cleanup: none
 def _host_journal_mounted(pod: dict[str, Any], route: JournalPodRoute) -> bool:
     """Map a Pod path through a hostPath mount to the declared host directory."""
     spec = pod["spec"]
@@ -185,6 +213,11 @@ def _host_journal_mounted(pod: dict[str, Any], route: JournalPodRoute) -> bool:
     return False
 
 
+# Summary: discover and verify the single existing Pod for node diagnostics
+# Arguments: target, Pod route, optional journal route; Environment inputs: live Pod
+# Stdout: none; Stderr: none; Exit classes: NodePodReader or selection error
+# Side effects: read-only kubectl list; Idempotency: depends on live Pod
+# Cleanup: run_command reaps child
 def select_node_pod(
     target: Target, route: NodePodRoute, *, journal: JournalPodRoute | None = None
 ) -> NodePodReader:

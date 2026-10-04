@@ -16,6 +16,10 @@ from .runtime import redact_tree, sanitize
 from .status import PARTIAL, PASS
 
 
+# Summary: render bounded nested JSON lines with optional text search
+# Arguments: value, search, line limit; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: sanitized line list
+# Side effects: none; Idempotency: same value gives same lines; Cleanup: none
 def _nested(value: Any, search: str | None, *, limit: int = 32) -> list[str]:
     """Render bounded evidence lines, preserving lines matched by a search filter."""
     lines = json.dumps(value, indent=2, ensure_ascii=False, sort_keys=True).splitlines()
@@ -25,6 +29,10 @@ def _nested(value: Any, search: str | None, *, limit: int = 32) -> list[str]:
     return [sanitize(line, 240) for line in lines[:limit]]
 
 
+# Summary: render bounded Ceph hierarchy lines from validated roots
+# Arguments: roots and line limit; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: hierarchy line list
+# Side effects: none; Idempotency: same roots give same lines; Cleanup: none
 def _ceph_tree_lines(roots: list[dict[str, Any]], *, limit: int = 128) -> list[str]:
     """Render the validated CRUSH hierarchy without flooding a terminal."""
     lines = []
@@ -41,6 +49,10 @@ def _ceph_tree_lines(roots: list[dict[str, Any]], *, limit: int = 128) -> list[s
     return lines
 
 
+# Summary: assemble a versioned diagnostic report with counts and timestamp
+# Arguments: kind, target, filters, records, errors; Environment inputs: UTC clock
+# Stdout: none; Stderr: none; Exit classes: report mapping
+# Side effects: none; Idempotency: timestamp varies; Cleanup: none
 def report(
     kind: str,
     target: str,
@@ -61,6 +73,10 @@ def report(
     }
 
 
+# Summary: render typed diagnostic evidence for terminal reading
+# Arguments: report data; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: human-readable text
+# Side effects: none; Idempotency: same data gives same text; Cleanup: none
 def human(data: dict[str, Any]) -> str:
     if data.get("kind") == "k8s_verify_mtu_consistency":
         records = data.get("records", [])
@@ -208,6 +224,10 @@ def human(data: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+# Summary: render names of persisted paired report files
+# Arguments: report data; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: file label lines
+# Side effects: none; Idempotency: same data gives same lines; Cleanup: none
 def _report_file_lines(data: dict[str, Any]) -> list[str]:
     files = data.get("report_files") or {}
     if not files:
@@ -218,6 +238,12 @@ def _report_file_lines(data: dict[str, Any]) -> list[str]:
     ]
 
 
+# Summary: redact, render, and optionally persist paired report formats
+# Arguments: report, mode, optional directory; Environment inputs: output directory
+# Stdout: none; Stderr: none; Exit classes: text or YAML dependency/file error
+# Side effects: may create directory and atomically replace report pair
+# Idempotency: returned text stable for same data, file path varies
+# Cleanup: removes temporary directory on error
 def emit(data: dict[str, Any], mode: str, output_dir: str | None = None) -> str:
     """Render one in-memory collection and optionally persist paired reports.
 

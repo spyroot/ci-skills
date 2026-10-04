@@ -68,11 +68,20 @@ class AcceptanceError(RuntimeError):
     """Acceptance inputs could not be read."""
 
 
+# Summary: guard reads from an untrusted value; Arguments: value
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: mapping or empty mapping; Side effects: none
+# Idempotency: same value gives same result; Cleanup: none
 def _mapping(value: Any) -> dict[str, Any]:
     """Return a mapping for guarded receipt reads, without accepting its shape."""
     return value if isinstance(value, dict) else {}
 
 
+# Summary: load the operator's required live targets; Arguments: TOML path
+# Environment inputs: expectation file; Stdout: none; Stderr: none
+# Exit classes: validated mapping or AcceptanceError
+# Side effects: reads file; Idempotency: same file gives same result
+# Cleanup: closes file on every exit
 def _load_expected(path: Path) -> dict[str, Any]:
     try:
         with path.open("rb") as handle:
@@ -137,6 +146,11 @@ def _load_expected(path: Path) -> dict[str, Any]:
     return data
 
 
+# Summary: load committed live receipts; Arguments: receipt directory
+# Environment inputs: JSON files; Stdout: none; Stderr: none
+# Exit classes: receipt mapping or AcceptanceError
+# Side effects: reads files; Idempotency: same files give same result
+# Cleanup: closes each file read
 def _load_receipts(directory: Path) -> dict[str, Any]:
     if not directory.is_dir():
         raise AcceptanceError(f"receipt_directory_missing:{directory}")
@@ -154,6 +168,10 @@ def _load_receipts(directory: Path) -> dict[str, Any]:
     return receipts
 
 
+# Summary: parse one receipt timestamp; Arguments: value
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: timezone-aware datetime or None; Side effects: none
+# Idempotency: same text gives same time; Cleanup: none
 def _parse_time(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
@@ -164,6 +182,10 @@ def _parse_time(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+# Summary: check shared receipt provenance; Arguments: receipt and acceptance inputs
+# Environment inputs: current time and skill redactor; Stdout: none; Stderr: none
+# Exit classes: violation list; Side effects: imports redactor when available
+# Idempotency: same inputs give same violations; Cleanup: none
 def _check_common(
     name: str,
     receipt: dict[str, Any],
@@ -197,6 +219,10 @@ def _check_common(
     return problems
 
 
+# Summary: validate full diagnostic publication; Arguments: receipt and policy
+# Environment inputs: current time; Stdout: none; Stderr: none
+# Exit classes: violation list; Side effects: reads no live systems
+# Idempotency: same inputs give same violations; Cleanup: none
 def _check_receipt(
     name: str,
     receipt: dict[str, Any],
@@ -317,6 +343,10 @@ def _check_receipt(
     return problems
 
 
+# Summary: validate one GitLab action read-back; Arguments: receipt and policy
+# Environment inputs: current time; Stdout: none; Stderr: none
+# Exit classes: violation list; Side effects: reads no live systems
+# Idempotency: same inputs give same violations; Cleanup: none
 def _check_gitlab_receipt(
     name: str,
     receipt: dict[str, Any],
@@ -379,6 +409,10 @@ def _check_gitlab_receipt(
     return problems
 
 
+# Summary: verify a disposable runner was removed; Arguments: receipt and policy
+# Environment inputs: current time; Stdout: none; Stderr: none
+# Exit classes: boolean; Side effects: reads committed receipt only
+# Idempotency: same inputs give same result; Cleanup: no live mutation
 def _runner_smoke_cleanup_verified(
     receipt: dict[str, Any],
     required: dict[str, Any],
@@ -443,6 +477,10 @@ def _runner_smoke_cleanup_verified(
     )
 
 
+# Summary: resolve the skill's shared sanitizer; Arguments: none
+# Environment inputs: repository skill path; Stdout: none; Stderr: none
+# Exit classes: callable or None; Side effects: may extend sys.path
+# Idempotency: repeated import resolves same callable; Cleanup: none
 def _redactor():
     """Return the skill's own redactor, so one rule covers capture and review."""
     root = Path(__file__).resolve().parents[1]
@@ -456,6 +494,10 @@ def _redactor():
     return redact_tree
 
 
+# Summary: identify one GitLab action resource; Arguments: receipt
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: key/value pair or None; Side effects: none
+# Idempotency: same receipt gives same identity; Cleanup: none
 def _resource_identity(receipt: dict[str, Any]) -> Any:
     readback = receipt.get("readback") or {}
     if not isinstance(readback, dict):
@@ -466,6 +508,11 @@ def _resource_identity(receipt: dict[str, Any]) -> Any:
     return None
 
 
+# Summary: compare all receipts with operator expectations; Arguments: policy,
+# receipts, skill root, and time; Environment inputs: committed skill tree
+# Stdout: none; Stderr: none; Exit classes: PASS/BLOCKED result or read error
+# Side effects: reads skill files; Idempotency: fixed time and inputs give same result
+# Cleanup: file reads close; no live resource mutation
 def evaluate(
     expected: dict[str, Any],
     receipts: dict[str, Any],
@@ -619,6 +666,12 @@ def evaluate(
     }
 
 
+# Summary: expose the committed live receipt gate; Arguments: CLI argv
+# Environment inputs: expectation, receipt, proof, and skill paths
+# Stdout: selected report format; Stderr: argparse usage diagnostics
+# Exit classes: 0 PASS, 2 BLOCKED, usage error, or YAML import error
+# Side effects: reads files; Idempotency: fixed files/time give same result
+# Cleanup: file reads close; no live resource mutation
 def main() -> int:
     cli = argparse.ArgumentParser(
         description="Verify committed live-access receipts against this revision.",

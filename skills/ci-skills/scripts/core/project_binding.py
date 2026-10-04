@@ -17,12 +17,16 @@ from .catalog import AUTHORITIES, PROJECT_DIR, TARGET_FILENAME
 from .runtime import error_class, run_command_tail
 from .target import Target, TargetError, load_target
 
-BINDING_ENV = "K8S_ADMIN_DIAGNOSTICS_BINDING"
+BINDING_ENV = "CI_SKILLS_BINDING"
 TARGET_ENV = "CI_SKILLS_TARGET"
 DEFAULT_TARGET = Path(PROJECT_DIR) / TARGET_FILENAME
 ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
+# Summary: list environment, project, and user target paths in precedence order
+# Arguments: none; Environment inputs: CI_SKILLS_TARGET, cwd, home
+# Stdout: none; Stderr: none; Exit classes: source and path pairs
+# Side effects: none; Idempotency: depends on environment and cwd; Cleanup: none
 def target_candidates() -> list[tuple[str, Path]]:
     """Return the declared target files in their precedence order."""
     candidates: list[tuple[str, Path]] = []
@@ -34,6 +38,11 @@ def target_candidates() -> list[tuple[str, Path]]:
     return candidates
 
 
+# Summary: find the first declared readable target file
+# Arguments: optional explicit path; Environment inputs: selector, cwd, home
+# Stdout: none; Stderr: none; Exit classes: selected path or TargetError
+# Side effects: checks file existence; Idempotency: depends on filesystem
+# Cleanup: none
 def resolve_target_file(explicit: str | None) -> tuple[Path, str]:
     """Resolve the selected four-tier target file without an ambient profile."""
     if explicit:
@@ -60,6 +69,10 @@ def resolve_target_file(explicit: str | None) -> tuple[Path, str]:
     )
 
 
+# Summary: validate and resolve a binding path against its directory
+# Arguments: path value and base; Environment inputs: filesystem symlinks
+# Stdout: none; Stderr: none; Exit classes: resolved path or TargetError
+# Side effects: path resolution; Idempotency: depends on symlinks; Cleanup: none
 def _path(value: object, base: Path) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise TargetError("binding_path_invalid")
@@ -67,6 +80,11 @@ def _path(value: object, base: Path) -> Path:
     return (selected if selected.is_absolute() else base / selected).resolve()
 
 
+# Summary: resolve one file, environment, or command kubeconfig source
+# Arguments: source, base, dry-run flag; Environment inputs: env, PATH, source output
+# Stdout: none; Stderr: none; Exit classes: path/reference or TargetError
+# Side effects: may execute configured source command
+# Idempotency: depends on source state; Cleanup: run_command_tail reaps child
 def _source_path(
     source: dict[str, Any], base: Path, *, dry_run: bool = False
 ) -> tuple[Path | None, str]:
@@ -127,6 +145,12 @@ def _source_path(
     raise TargetError("binding_source_kind_invalid")
 
 
+# Summary: load ordered kubeconfig sources from one project binding
+# Arguments: binding path, dry-run flag, required surfaces
+# Environment inputs: binding TOML and selected kubeconfig source
+# Stdout: none; Stderr: none; Exit classes: Target or TargetError
+# Side effects: reads binding and selected credential file, may run source command
+# Idempotency: depends on files and command output; Cleanup: opened files close
 def load_project_binding(
     path: str | Path,
     *,
@@ -194,6 +218,12 @@ def load_project_binding(
     raise TargetError("binding_sources_absent")
 
 
+# Summary: resolve target and binding selectors without crossovers
+# Arguments: explicit paths, dry-run flag, required surfaces
+# Environment inputs: selector variables and target files
+# Stdout: none; Stderr: none; Exit classes: Target or TargetError
+# Side effects: reads selected files, may run configured source command
+# Idempotency: depends on selected source; Cleanup: delegated handles close
 def resolve_target(
     explicit_target: str | None,
     explicit_binding: str | None,

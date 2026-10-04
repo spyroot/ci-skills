@@ -20,11 +20,20 @@ POD_ROLES = {"rook-ceph-osd", "rook-ceph-mon"}
 KUBERNETES_NAME = re.compile(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?\Z")
 
 
+# Summary: bind oc commands to the selected context and Ceph namespace
+# Arguments: target and namespace; Environment inputs: target credential source
+# Stdout: none; Stderr: none; Exit classes: command prefix or source error
+# Side effects: checks kubeconfig integrity; Idempotency: stable for unchanged target
+# Cleanup: none
 def _oc_prefix(target: Target, namespace: str) -> list[str]:
     """Bind every oc call to the same credential files and context as the gate."""
     return oc_argv(target, "-n", namespace)
 
 
+# Summary: decode a bounded successful Ceph or Pod JSON response
+# Arguments: command result and source label; Environment inputs: command output
+# Stdout: none; Stderr: none; Exit classes: JSON value or ValueError
+# Side effects: none; Idempotency: same result gives same value; Cleanup: none
 def _json_response(result: CommandResult, source: str) -> Any:
     if result.returncode:
         raise ValueError(f"{source}:{error_class(result)}")
@@ -36,6 +45,10 @@ def _json_response(result: CommandResult, source: str) -> Any:
         raise ValueError(f"{source}:invalid_json") from exc
 
 
+# Summary: parse an optional Pod condition filter
+# Arguments: filter text; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: pair, None, or ValueError
+# Side effects: none; Idempotency: same text gives same result; Cleanup: none
 def _condition_filter(value: str | None) -> tuple[str, str] | None:
     if value is None:
         return None
@@ -45,6 +58,11 @@ def _condition_filter(value: str | None) -> tuple[str, str] | None:
     return kind, state
 
 
+# Summary: validate and filter selected Ceph OSD and monitor Pods
+# Arguments: payload, namespace, node, ready state, condition
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: total and selected Pods, or TypeError; Side effects: none
+# Idempotency: same payload and filters give same result; Cleanup: none
 def _pods(
     payload: Any,
     *,
@@ -106,6 +124,10 @@ def _pods(
     return len(payload["items"]), selected
 
 
+# Summary: normalize inactive placement groups from Ceph JSON
+# Arguments: decoded payload; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: PG list or TypeError
+# Side effects: none; Idempotency: same payload gives same list; Cleanup: none
 def _inactive_pgs(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, dict):
         payload = payload.get(
@@ -121,6 +143,10 @@ def _inactive_pgs(payload: Any) -> list[dict[str, Any]]:
     return result
 
 
+# Summary: validate Ceph health status and preserve named checks
+# Arguments: decoded payload; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: status and findings, or TypeError
+# Side effects: none; Idempotency: same payload gives same findings; Cleanup: none
 def _health(payload: Any) -> tuple[str, list[dict[str, Any]]]:
     """Keep Ceph's named health checks so an alert has an exact cause."""
     if not isinstance(payload, dict) or payload.get("status") not in {
@@ -160,6 +186,10 @@ def _health(payload: Any) -> tuple[str, list[dict[str, Any]]]:
     return payload["status"], findings
 
 
+# Summary: validate and expand Ceph OSD hierarchy without cycles
+# Arguments: decoded tree; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: roots and OSDs, or TypeError
+# Side effects: none; Idempotency: same tree gives same result; Cleanup: none
 def _osd_tree(payload: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Keep Ceph's root/bucket/OSD links while validating every referenced node."""
     nodes = payload.get("nodes") if isinstance(payload, dict) else None
@@ -204,6 +234,11 @@ def _osd_tree(payload: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]
     visiting: set[int] = set()
     visited: set[int] = set()
 
+    # Summary: expand one validated OSD tree node and reject revisits
+    # Arguments: node identifier; Environment inputs: surrounding tree maps
+    # Stdout: none; Stderr: none; Exit classes: node map or TypeError
+    # Side effects: updates traversal sets; Idempotency: depends on traversal state
+    # Cleanup: visiting entry removed after successful expansion
     def expand(node_id: int) -> dict[str, Any]:
         if node_id in visiting or node_id in visited:
             raise TypeError("osd_tree:cycle")
@@ -221,6 +256,11 @@ def _osd_tree(payload: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]
     return roots, osds
 
 
+# Summary: collect Ceph health, OSD tree, inactive PGs, and related Pods
+# Arguments: target and command filters; Environment inputs: live cluster API
+# Stdout: none; Stderr: none; Exit classes: report or invalid-input ValueError
+# Side effects: concurrent read-only oc and Ceph queries
+# Idempotency: depends on live cluster; Cleanup: executor joins child queries
 def collect_ceph_cluster(target: Target, args: Any) -> dict[str, Any]:
     """Run independent read-only Ceph and Pod queries against one pinned target."""
     namespace = args.namespace

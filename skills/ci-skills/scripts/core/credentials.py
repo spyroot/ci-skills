@@ -38,6 +38,10 @@ class Sources:
     kubeconfig_digests: tuple[str, ...] = ()
 
 
+# Summary: Read one selected token file and reject blank or oversized content.
+# Arguments: path names the selected file; Environment inputs: file bytes.
+# Stdout: none; Stderr: none; Exit classes: TargetError for unreadable or invalid token.
+# Side effects: reads file; Idempotency: follows current file bytes; Cleanup: reader closes file.
 def _file_token(path: Path) -> str:
     """Read one selected private token without returning it to a report."""
     try:
@@ -51,6 +55,12 @@ def _file_token(path: Path) -> str:
     return value
 
 
+# Summary: Choose explicit token file, first declared environment value, or CLI store.
+# Arguments: path, names, store, clear_names define source precedence and child env.
+# Environment inputs: selected token file or named process variables.
+# Stdout: none; Stderr: none; Exit classes: TargetError for invalid selected source.
+# Side effects: may read token file or environment; Idempotency: follows selected source.
+# Cleanup: file reader closes its handle.
 def _token_source(
     path: Path | None,
     names: tuple[str, ...],
@@ -83,6 +93,11 @@ def _token_source(
     return CredentialSource(reference, overrides)
 
 
+# Summary: Pin the selected kubeconfig path set and verify every file is readable.
+# Arguments: target defines declared files; Environment inputs: KUBECONFIG or home fallback.
+# Stdout: none; Stderr: none; Exit classes: TargetError for missing or invalid path.
+# Side effects: reads kubeconfig files; Idempotency: follows selected paths and file state.
+# Cleanup: each opened file handle closes before return.
 def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ...]]:
     """Pin the effective kubeconfig path set without assuming an auth type."""
     if target.kubernetes is None:
@@ -122,6 +137,11 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
     ), paths
 
 
+# Summary: Compute installed skill digest and attach an optional revision claim.
+# Arguments: explicit is the claimed source SHA; Environment inputs: skill tree and Git metadata.
+# Stdout: none; Stderr: none; Exit classes: TargetError for provenance failure.
+# Side effects: reads installed files and Git metadata; Idempotency: follows tree content.
+# Cleanup: provenance helper owns transient reads.
 def resolve_skill_identity(explicit: str | None) -> dict[str, Any]:
     """Identify the executed skill by digest, with the revision as a claim.
 
@@ -136,6 +156,11 @@ def resolve_skill_identity(explicit: str | None) -> dict[str, Any]:
         raise TargetError(str(exc)) from exc
 
 
+# Summary: Digest every selected kubeconfig in declared search order.
+# Arguments: paths are kubeconfig files; Environment inputs: current file bytes.
+# Stdout: none; Stderr: none; Exit classes: TargetError for unreadable file.
+# Side effects: reads files; Idempotency: same bytes give same digests.
+# Cleanup: readers close files.
 def kubeconfig_digests(paths: tuple[Path, ...]) -> tuple[str, ...]:
     """Digest each kubeconfig's bytes, in search-path order."""
     digests: list[str] = []
@@ -147,6 +172,11 @@ def kubeconfig_digests(paths: tuple[Path, ...]) -> tuple[str, ...]:
     return tuple(digests)
 
 
+# Summary: Reject a kubeconfig changed since credential binding.
+# Arguments: sources carries saved file paths and digests; Environment inputs: current file bytes.
+# Stdout: none; Stderr: none; Exit classes: TargetError on changed or unreadable file.
+# Side effects: reads files; Idempotency: same bytes preserve the result.
+# Cleanup: readers close files.
 def assert_kubeconfig_unchanged(sources: object) -> None:
     """Refuse a kubeconfig that changed after it was verified.
 
@@ -167,6 +197,12 @@ def assert_kubeconfig_unchanged(sources: object) -> None:
         raise TargetError("kubeconfig_changed_during_invocation")
 
 
+# Summary: Bind effective authority sources and skill identity once per invocation.
+# Arguments: target selects surfaces, revision is optional source claim.
+# Environment inputs: selected token files, variables, kubeconfig, hostname, skill tree.
+# Stdout: none; Stderr: none; Exit classes: TargetError for invalid selected source.
+# Side effects: reads local sources; Idempotency: follows their current content.
+# Cleanup: file and provenance helpers own transient reads.
 def bind_sources(target: Target, *, revision: str | None = None) -> Target:
     """Freeze effective source selection for access checks and collectors."""
     github = None
@@ -210,6 +246,11 @@ def bind_sources(target: Target, *, revision: str | None = None) -> Target:
     )
 
 
+# Summary: Read one exact-host token from the local glab credential store.
+# Arguments: host is the selected GitLab host; Environment inputs: glab store and process env.
+# Stdout: none; Stderr: none; Exit classes: TargetError for failed or malformed lookup.
+# Side effects: bounded local glab subprocess; Idempotency: follows stored token.
+# Cleanup: subprocess.run closes process pipes.
 def _glab_store_token(host: str) -> str:
     """Pin one exact-host stored token noninteractively or refuse that source.
 
@@ -243,6 +284,12 @@ def _glab_store_token(host: str) -> str:
     return value
 
 
+# Summary: Freeze one GitLab credential, target, and skill identity into a session.
+# Arguments: target, kind, reference, source, revision bind the selected operation.
+# Environment inputs: selected token source, glab store, hostname, skill tree.
+# Stdout: none; Stderr: none; Exit classes: TargetError for invalid target or credential.
+# Side effects: reads local credential and provenance; Idempotency: follows current sources.
+# Cleanup: file and subprocess helpers release their transient resources.
 def bind_gitlab_session(
     target: GitLabOperationTarget,
     *,

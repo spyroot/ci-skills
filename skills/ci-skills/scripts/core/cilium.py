@@ -22,6 +22,11 @@ AGENT_DAEMONSET = "cilium"
 HEALTHY_STATES = frozenset({"ok", "reachable", "healthy", "success"})
 
 
+# Summary: match Pod labels against DaemonSet selector rules
+# Arguments: labels and selector; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same labels and selector give same result
+# Cleanup: none
 def matches_selector(labels: dict[str, str], selector: dict[str, Any]) -> bool:
     """Match a DaemonSet's declared Pod selector without guessing labels.
 
@@ -54,6 +59,10 @@ def matches_selector(labels: dict[str, str], selector: dict[str, Any]) -> bool:
     return True
 
 
+# Summary: select the unique Cilium DaemonSet's Pod selector
+# Arguments: DaemonSet list and namespace; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: selector or None
+# Side effects: none; Idempotency: same list gives same result; Cleanup: none
 def agent_selector(
     daemonsets: list[dict[str, Any]], namespace: str
 ) -> dict[str, Any] | None:
@@ -75,6 +84,10 @@ def agent_selector(
     return selector
 
 
+# Summary: detect a true Ready condition on one Pod
+# Arguments: Pod payload; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same Pod gives same result; Cleanup: none
 def is_ready(pod: dict[str, Any]) -> bool:
     """Report whether one Pod carries a true Ready condition."""
     return any(
@@ -85,6 +98,10 @@ def is_ready(pod: dict[str, Any]) -> bool:
     )
 
 
+# Summary: filter ready Cilium agent Pods by selector, namespace, and node
+# Arguments: Pods, selector, namespace, optional node; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: filtered Pod list
+# Side effects: none; Idempotency: same payloads give same list; Cleanup: none
 def ready_agent_pods(
     pods: list[dict[str, Any]],
     selector: dict[str, Any],
@@ -104,6 +121,10 @@ def ready_agent_pods(
     ]
 
 
+# Summary: recognize a structured Cilium health response
+# Arguments: decoded value; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same value gives same result; Cleanup: none
 def valid_health(value: Any) -> bool:
     """Decide whether a decoded health response actually reports health.
 
@@ -121,6 +142,10 @@ def valid_health(value: Any) -> bool:
     return isinstance(value.get("local"), dict) or isinstance(value.get("nodes"), list)
 
 
+# Summary: extract local node and peer count from Cilium health data
+# Arguments: decoded health value; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: detail mapping
+# Side effects: none; Idempotency: same value gives same details; Cleanup: none
 def health_detail(value: Any) -> dict[str, Any]:
     """Summarize a validated health response without asserting its schema."""
     local = value.get("local") if isinstance(value, dict) else None
@@ -132,6 +157,10 @@ def health_detail(value: Any) -> dict[str, Any]:
     }
 
 
+# Summary: recursively collect explicit unhealthy probe status messages
+# Arguments: response subtree and path; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: path and sanitized message pairs
+# Side effects: none; Idempotency: same subtree gives same findings; Cleanup: none
 def _failure_messages(value: Any, path: str) -> list[tuple[str, str]]:
     """Find explicit Cilium probe messages without inferring missing probes failed."""
     if isinstance(value, list):
@@ -156,6 +185,10 @@ def _failure_messages(value: Any, path: str) -> list[tuple[str, str]]:
     return findings
 
 
+# Summary: classify explicit local and peer Cilium health failures
+# Arguments: decoded health response; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: finding list
+# Side effects: none; Idempotency: same response gives same findings; Cleanup: none
 def health_findings(value: Any) -> list[dict[str, Any]]:
     """Return peer and endpoint failures explicitly reported by cilium-health."""
     if not isinstance(value, dict):
@@ -190,6 +223,10 @@ def health_findings(value: Any) -> list[dict[str, Any]]:
     return findings
 
 
+# Summary: classify non-Ok Cilium daemon components
+# Arguments: decoded daemon status; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: finding list
+# Side effects: none; Idempotency: same status gives same findings; Cleanup: none
 def daemon_findings(value: Any) -> list[dict[str, Any]]:
     """Return non-Ok daemon components; optional disabled components are normal."""
     if not isinstance(value, dict):

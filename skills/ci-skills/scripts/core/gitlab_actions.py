@@ -44,6 +44,10 @@ class ActionPlan:
     revision: str | None = None
     project_ids: tuple[int, ...] | None = None
 
+    # Summary: hash exact operation, target, and body into a plan identifier
+    # Arguments: plan fields; Environment inputs: none
+    # Stdout: none; Stderr: none; Exit classes: SHA-256 hex digest
+    # Side effects: none; Idempotency: same plan gives same digest; Cleanup: none
     @property
     def digest(self) -> str:
         data = {
@@ -64,6 +68,10 @@ class ActionPlan:
         encoded = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
 
+    # Summary: expose nonsecret plan shape and body digest
+    # Arguments: plan fields; Environment inputs: none
+    # Stdout: none; Stderr: none; Exit classes: public plan mapping
+    # Side effects: none; Idempotency: same plan gives same map; Cleanup: none
     def public(self) -> dict[str, Any]:
         """Describe the plan without publishing issue/wiki text or a token."""
         return {
@@ -90,6 +98,10 @@ class ActionPlan:
         }
 
 
+# Summary: validate a positive nonboolean integer input
+# Arguments: value and field name; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: integer or ActionError
+# Side effects: none; Idempotency: same value gives same result; Cleanup: none
 def _positive(value: Any, name: str) -> int:
     try:
         number = int(value)
@@ -100,6 +112,10 @@ def _positive(value: Any, name: str) -> int:
     return number
 
 
+# Summary: validate an optional real ISO calendar date
+# Arguments: date text and field name; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: date, None, or ActionError
+# Side effects: none; Idempotency: same text gives same result; Cleanup: none
 def _date(value: str | None, name: str) -> str | None:
     if value is None:
         return None
@@ -112,12 +128,21 @@ def _date(value: str | None, name: str) -> str | None:
     return value
 
 
+# Summary: trim a required nonempty action field
+# Arguments: value and field name; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: text or ActionError
+# Side effects: none; Idempotency: same text gives same result; Cleanup: none
 def _required_text(value: str | None, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ActionError(f"{name}_required")
     return value.strip()
 
 
+# Summary: read an optional bounded UTF-8 action body file
+# Arguments: path and field name; Environment inputs: selected file bytes
+# Stdout: none; Stderr: none; Exit classes: text, None, or ActionError
+# Side effects: reads file; Idempotency: stable for unchanged file
+# Cleanup: read_text closes file
 def _file_text(value: str | None, name: str) -> str | None:
     if value is None:
         return None
@@ -130,6 +155,10 @@ def _file_text(value: str | None, name: str) -> str | None:
         raise ActionError(f"{name}_unreadable") from exc
 
 
+# Summary: select valid project or group for the requested operation
+# Arguments: target, parsed arguments, command kind; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: selection triple or ActionError
+# Side effects: none; Idempotency: same inputs give same target; Cleanup: none
 def _select_target(
     target: GitLabOperationTarget, args: argparse.Namespace, kind: str
 ) -> tuple[str, str, str]:
@@ -183,6 +212,11 @@ def _select_target(
     raise ActionError("project_or_group_target_required")
 
 
+# Summary: construct a fingerprinted action plan from validated inputs
+# Arguments: kind, arguments, target, target source; Environment inputs: body files
+# Stdout: none; Stderr: none; Exit classes: ActionPlan or ActionError
+# Side effects: may read body file; Idempotency: depends on body file bytes
+# Cleanup: delegated file reads close
 def make_plan(
     kind: str,
     args: argparse.Namespace,
@@ -225,12 +259,20 @@ def make_plan(
     )
 
 
+# Summary: require a response object with named fields
+# Arguments: payload, source name, required keys; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: mapping or ActionError
+# Side effects: none; Idempotency: same payload gives same result; Cleanup: none
 def _object(payload: Any, name: str, *required: str) -> dict[str, Any]:
     if not isinstance(payload, dict) or any(field not in payload for field in required):
         raise ActionError(f"{name}_invalid_shape")
     return payload
 
 
+# Summary: require a response list of objects
+# Arguments: payload and source name; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: list or ActionError
+# Side effects: none; Idempotency: same payload gives same result; Cleanup: none
 def _array(payload: Any, name: str) -> list[dict[str, Any]]:
     if not isinstance(payload, list) or any(
         not isinstance(item, dict) for item in payload
@@ -239,6 +281,11 @@ def _array(payload: Any, name: str) -> list[dict[str, Any]]:
     return payload
 
 
+# Summary: collect up to twenty full GitLab list pages for duplicate checks
+# Arguments: API client, session, endpoint; Environment inputs: live GitLab API
+# Stdout: none; Stderr: none; Exit classes: records or ActionError
+# Side effects: read-only API calls; Idempotency: depends on live collection
+# Cleanup: API client owns request resources
 def _pages(api: Any, session: Any, endpoint: str) -> list[dict[str, Any]]:
     """Search a bounded complete result set or refuse an unsafe duplicate guess."""
     records: list[dict[str, Any]] = []
@@ -254,6 +301,10 @@ def _pages(api: Any, session: Any, endpoint: str) -> list[dict[str, Any]]:
     raise ActionError("pagination_limit_blocks_duplicate_check")
 
 
+# Summary: validate required fields in GitLab list entries
+# Arguments: records, source name, required keys; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: validated list or ActionError
+# Side effects: none; Idempotency: same records give same list; Cleanup: none
 def _fields(
     records: list[dict[str, Any]], name: str, *required: str
 ) -> list[dict[str, Any]]:
@@ -276,12 +327,20 @@ def _fields(
     return validated
 
 
+# Summary: require a positive integer ID from a provider response
+# Arguments: value and field name; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: integer or ActionError
+# Side effects: none; Idempotency: same value gives same result; Cleanup: none
 def _id(value: Any, name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ActionError(f"{name}_missing_id")
     return value
 
 
+# Summary: compare requested action fields to live GitLab resource fields
+# Arguments: current resource and requested body; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same fields give same result; Cleanup: none
 def _same(current: dict[str, Any], body: dict[str, Any]) -> bool:
     for field, expected in body.items():
         if field == "state_event":
@@ -299,6 +358,11 @@ def _same(current: dict[str, Any], body: dict[str, Any]) -> bool:
     return True
 
 
+# Summary: dispatch one bound plan to its GitLab resource implementation
+# Arguments: API, session, access receipt, plan; Environment inputs: live GitLab API
+# Stdout: none; Stderr: none; Exit classes: verified action record or ActionError
+# Side effects: delegated GitLab mutation and read-back
+# Idempotency: resource-specific guard decides; Cleanup: delegated code owns it
 def apply_plan(
     api: Any, session: Any, access: dict[str, Any], plan: ActionPlan
 ) -> dict[str, Any]:
@@ -333,6 +397,10 @@ def apply_plan(
     raise ActionError("unsupported_gitlab_action_kind")
 
 
+# Summary: expose bounded GitLab action options through shared CLI parser
+# Arguments: command kind; Environment inputs: catalog metadata
+# Stdout: none; Stderr: none; Exit classes: parser or KeyError
+# Side effects: none; Idempotency: same kind gives equivalent parser; Cleanup: none
 def action_parser(kind: str) -> argparse.ArgumentParser:
     """Keep wrappers thin while exposing the existing universal CLI tier."""
     result = parser(
@@ -414,6 +482,10 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
     return result
 
 
+# Summary: assemble a versioned action receipt with plan and record counts
+# Arguments: plan, status, receipt fields; Environment inputs: UTC clock and host
+# Stdout: none; Stderr: none; Exit classes: receipt mapping
+# Side effects: none; Idempotency: timestamp varies; Cleanup: none
 def _result(plan: ActionPlan, status: str, **fields: Any) -> dict[str, Any]:
     records = fields.pop("records", [])
     errors = fields.pop("errors", [])
@@ -438,6 +510,10 @@ def _result(plan: ActionPlan, status: str, **fields: Any) -> dict[str, Any]:
     }
 
 
+# Summary: extract a safe GitLab access failure class from its receipt
+# Arguments: access receipt; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: source and reason pair
+# Side effects: none; Idempotency: same receipt gives same pair; Cleanup: none
 def _access_failure(access: dict[str, Any]) -> tuple[str, str]:
     """Keep the failed GitLab identity or target check in an action result."""
     errors = access.get("errors")
@@ -453,6 +529,12 @@ def _access_failure(access: dict[str, Any]) -> tuple[str, str]:
     return "gitlab_access", "gitlab_access_not_pass"
 
 
+# Summary: emit a blocked action result retaining plan and write state
+# Arguments: CLI args, plan, failure context, optional session and result
+# Environment inputs: clock and selected output destination
+# Stdout: machine result when selected; Stderr: human BLOCKED line
+# Exit classes: BLOCKED exit code; Side effects: may write receipt and log
+# Idempotency: output timestamp varies; Cleanup: receipt writer removes temporary
 def _planned_failure(
     args: argparse.Namespace,
     kind: str,
@@ -524,6 +606,11 @@ def _planned_failure(
     return exit_code(BLOCKED)
 
 
+# Summary: plan, optionally apply, and report one GitLab action
+# Arguments: command kind and optional argv; Environment inputs: target, auth, live API
+# Stdout: result or describe JSON; Stderr: structured human failure
+# Exit classes: status exit code; Side effects: optional GitLab write and receipt
+# Idempotency: guarded by plan/read-back; Cleanup: delegated receipt writer handles it
 def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
     """Adapter used by every operation entrypoint; no other CLI owns writes."""
     started = time.monotonic()

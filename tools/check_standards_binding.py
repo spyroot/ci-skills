@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import subprocess
 import sys
@@ -13,27 +12,56 @@ from urllib.parse import urlparse
 
 import jsonschema
 import yaml
-from validation_cli import add_options, emit
+from validation_cli import ValidationArgumentParser, add_options, emit
 
 
+# Summary: load a YAML mapping; Arguments: file path
+# Environment inputs: file bytes; Stdout: none; Stderr: none
+# Exit classes: mapping or read/shape error; Side effects: read-only
+# Idempotency: same bytes give same mapping; Cleanup: file closes
 def _read_yaml(path: Path) -> dict:
-    """Read YAML; arg is a file, no environment input or side effect; raises on error."""
+    """Read an authority or binding document as a YAML mapping.
+
+    :param path: File containing the YAML document.
+    :returns: Parsed mapping.
+    :raises ValueError: The document is not a mapping.
+    :raises OSError: The file cannot be read.
+    """
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"invalid_yaml_mapping:{path.name}")
     return data
 
 
+# Summary: keep a declared path inside authority; Arguments: root and relative path
+# Environment inputs: filesystem links; Stdout: none; Stderr: none
+# Exit classes: resolved path or ValueError; Side effects: read-only
+# Idempotency: same tree gives same path; Cleanup: none
 def _inside(root: Path, relative: str) -> Path:
-    """Resolve a declared path; no output, environment input, or side effect."""
+    """Resolve a declared path without escaping its authority root.
+
+    :param root: Root directory owning the declaration.
+    :param relative: Declared path under that root.
+    :returns: Resolved path within the root.
+    :raises ValueError: The path resolves outside the root.
+    """
     path = (root / relative).resolve()
     if not path.is_relative_to(root.resolve()):
         raise ValueError(f"path_outside_authority:{relative}")
     return path
 
 
+# Summary: normalize a Git remote identity; Arguments: URL or scp-style remote
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: host and repository pair or parse error; Side effects: none
+# Idempotency: same remote gives same pair; Cleanup: none
 def _repository_identity(value: str) -> tuple[str, str]:
-    """Normalize a Git remote URL; no environment input, output, or side effect."""
+    """Normalize HTTPS or scp-style Git remotes for identity comparison.
+
+    :param value: Git remote URL or scp-style address.
+    :returns: Lowercase hostname and repository path without a .git suffix.
+    :raises ValueError: A malformed scp-style address has no repository path.
+    """
     if value.startswith("git@"):
         host, path = value.removeprefix("git@").split(":", 1)
     else:
@@ -42,12 +70,19 @@ def _repository_identity(value: str) -> tuple[str, str]:
     return host.lower(), path.strip("/").removesuffix(".git")
 
 
+# Summary: compare binding with pinned Standards; Arguments: project and authority roots
+# Environment inputs: Git objects, manifest, schemas; Stdout: none; Stderr: none
+# Exit classes: problem list or unreadable input; Side effects: read-only
+# Idempotency: same commits give same result; Cleanup: Git child processes exit
 def check(root: Path, standards: Path) -> list[str]:
     """Validate binding and provider declarations against the pinned manifest.
 
-    Args: project root and checked-out Standards root. Environment: none.
-    Stdout/stderr: none. Exit classes: returns problems or raises bad input.
-    Side effects: none. Idempotency: repeated reads agree. Cleanup: none.
+    :param root: Project checkout containing standards-binding.yaml.
+    :param standards: Checkout of the pinned Standards commit.
+    :returns: Exact binding, schema, and provider mismatch reasons.
+    :raises OSError: A required file cannot be read.
+    :raises ValueError: A required YAML or JSON document is invalid.
+    :raises subprocess.CalledProcessError: Git cannot read required identity.
     """
     problems: list[str] = []
     binding = _read_yaml(root / "standards-binding.yaml")
@@ -143,9 +178,16 @@ def check(root: Path, standards: Path) -> list[str]:
     return sorted(set(problems))
 
 
+# Summary: report binding status; Arguments: CLI paths and log options
+# Environment inputs: selected checkouts; Stdout: status JSON; Stderr: safe log
+# Exit classes: 0 pass, 2 invalid binding; Side effects: optional log append
+# Idempotency: repeated checks agree; Cleanup: log handle closes
 def main() -> int:
-    """Render fail-closed JSON; argv only, stdout JSON, stderr errors, no writes."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    """Report binding status using the shared validation output contract.
+
+    :returns: Zero on pass or two when a binding check cannot pass.
+    """
+    parser = ValidationArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--standards", type=Path, required=True)
     add_options(parser)

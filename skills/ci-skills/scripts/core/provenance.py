@@ -49,6 +49,11 @@ class ProvenanceError(ValueError):
     """The executed skill cannot be identified."""
 
 
+# Summary: list regular skill files excluding caches and symlinks
+# Arguments: skill root; Environment inputs: directory tree
+# Stdout: none; Stderr: none; Exit classes: sorted path list
+# Side effects: reads filesystem metadata; Idempotency: depends on tree
+# Cleanup: rglob iterator is exhausted
 def _included(root: Path) -> list[Path]:
     """List the files whose bytes make up the executed skill, sorted."""
     found: list[Path] = []
@@ -63,6 +68,11 @@ def _included(root: Path) -> list[Path]:
     return sorted(found)
 
 
+# Summary: hash path, executable bit, and bytes of the installed skill tree
+# Arguments: skill root; Environment inputs: source files and mode bits
+# Stdout: none; Stderr: none; Exit classes: digest map or ProvenanceError
+# Side effects: reads source files; Idempotency: stable for unchanged tree
+# Cleanup: read_bytes closes each file
 def tree_digest(root: Path) -> dict[str, Any]:
     """Digest an installed skill tree over path, exec bit and content."""
     root = Path(root).resolve()
@@ -85,6 +95,11 @@ def tree_digest(root: Path) -> dict[str, Any]:
     }
 
 
+# Summary: run a bounded read-only Git query and return stdout on success
+# Arguments: checkout root and Git arguments; Environment inputs: Git repository
+# Stdout: none; Stderr: none; Exit classes: text or None
+# Side effects: starts Git child; Idempotency: depends on repository state
+# Cleanup: subprocess.run waits for child
 def _git(root: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
@@ -101,6 +116,11 @@ def _git(root: Path, *args: str) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
+# Summary: mark Git revision verified only for a tracked clean skill subtree
+# Arguments: skill root; Environment inputs: Git HEAD, index, and working tree
+# Stdout: none; Stderr: none; Exit classes: revision map or None
+# Side effects: read-only Git queries; Idempotency: depends on Git state
+# Cleanup: each Git child exits
 def _git_revision(skill_root: Path) -> dict[str, Any] | None:
     """Return a VERIFIED revision only for a clean subtree in its own repo."""
     toplevel = _git(skill_root, "rev-parse", "--show-toplevel")
@@ -128,6 +148,10 @@ def _git_revision(skill_root: Path) -> dict[str, Any] | None:
     return {"value": head.lower(), "source": "git_head", "verified": True}
 
 
+# Summary: identify the invoking project's CI commit separately from skill
+# Arguments: optional environment map; Environment inputs: CI/GitHub SHA variables
+# Stdout: none; Stderr: none; Exit classes: commit/source map
+# Side effects: none; Idempotency: same environment gives same result; Cleanup: none
 def consuming_project(environ: dict[str, str] | None = None) -> dict[str, Any]:
     """Record the CI commit of the project that invoked the skill, separately."""
     environ = os.environ if environ is None else environ
@@ -138,6 +162,11 @@ def consuming_project(environ: dict[str, str] | None = None) -> dict[str, Any]:
     return {"commit": None, "source": None}
 
 
+# Summary: combine source-tree digest with verified or claimed revision
+# Arguments: skill root, claim, environment; Environment inputs: files and Git state
+# Stdout: none; Stderr: none; Exit classes: identity map or ProvenanceError
+# Side effects: reads files and runs Git queries; Idempotency: depends on tree
+# Cleanup: delegated file reads and Git children finish
 def skill_identity(
     skill_root: Path,
     claimed: str | None = None,

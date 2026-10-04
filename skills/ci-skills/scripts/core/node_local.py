@@ -52,6 +52,10 @@ JOURNAL_MAX_LINES = 200
 JOURNAL_MAX_BYTES = 65536
 
 
+# Summary: require a nonempty Cilium component state in daemon JSON
+# Arguments: decoded status; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same payload gives same result; Cleanup: none
 def _valid_daemon_status(value: Any) -> bool:
     """Require the Cilium component state exposed by the status API."""
     if not isinstance(value, dict):
@@ -64,6 +68,10 @@ def _valid_daemon_status(value: Any) -> bool:
     )
 
 
+# Summary: require a named local node in Cilium health JSON
+# Arguments: decoded health; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same payload gives same result; Cleanup: none
 def _valid_node_health(value: Any) -> bool:
     if not valid_health(value):
         return False
@@ -75,6 +83,10 @@ def _valid_node_health(value: Any) -> bool:
     )
 
 
+# Summary: attach selected Pod and execution host to a node report
+# Arguments: kind, reader, records, errors; Environment inputs: host FQDN
+# Stdout: none; Stderr: none; Exit classes: report mapping
+# Side effects: none; Idempotency: depends on host identity; Cleanup: none
 def _node_report(
     kind: str,
     reader: NodePodReader,
@@ -87,6 +99,10 @@ def _node_report(
     return result
 
 
+# Summary: parse successful Pod command output as JSON
+# Arguments: command result and source; Environment inputs: command output
+# Stdout: none; Stderr: none; Exit classes: JSON value or ValueError
+# Side effects: none; Idempotency: same result gives same value; Cleanup: none
 def _json_result(result: CommandResult, *, source: str) -> Any:
     if result.returncode:
         raise ValueError(f"{source}:{error_class(result)}")
@@ -96,6 +112,11 @@ def _json_result(result: CommandResult, *, source: str) -> Any:
         raise ValueError(f"{source}:invalid_json") from exc
 
 
+# Summary: collect Cilium daemon and health evidence from selected Pod
+# Arguments: Pod reader; Environment inputs: live Pod command output
+# Stdout: none; Stderr: none; Exit classes: PASS or PARTIAL report
+# Side effects: two read-only Pod exec calls; Idempotency: depends on live Pod
+# Cleanup: executor joins both commands
 def collect_cilium_node(reader: NodePodReader) -> dict[str, Any]:
     """Execute both Cilium JSON diagnostics in the verified existing Pod."""
     errors: list[dict[str, str]] = []
@@ -161,6 +182,10 @@ def collect_cilium_node(reader: NodePodReader) -> dict[str, Any]:
     return result
 
 
+# Summary: map a Ceph kernel message to category and suggested action
+# Arguments: message and priority; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: category and optional action
+# Side effects: none; Idempotency: same message gives same result; Cleanup: none
 def classify_ceph_message(message: str, priority: int) -> tuple[str, str | None]:
     """Classify a kernel message without claiming a root cause."""
     for pattern, category, action in CEPH_ACTIONS:
@@ -171,6 +196,11 @@ def classify_ceph_message(message: str, priority: int) -> tuple[str, str | None]
     return "observation", None
 
 
+# Summary: read bounded Ceph kernel journal entries through selected Pod
+# Arguments: Pod reader and journal directory; Environment inputs: mounted journal
+# Stdout: none; Stderr: none; Exit classes: PASS, PARTIAL, or BLOCKED report
+# Side effects: read-only Pod exec and report assembly
+# Idempotency: depends on live journal; Cleanup: reader reaps child commands
 def collect_ceph_kernel(reader: NodePodReader, directory: str) -> dict[str, Any]:
     """Read recent kernel Ceph/RBD journal entries and propose read-only actions."""
     journal_access = reader.run_tail(

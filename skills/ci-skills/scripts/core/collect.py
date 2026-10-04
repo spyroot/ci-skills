@@ -36,6 +36,10 @@ LIST_TIMEOUT_SECONDS = 120
 DEFAULT_WINDOW = timedelta(hours=1)
 
 
+# Summary: run one bounded command and decode JSON; Arguments: argv, env, timeout
+# Environment inputs: selected CLI environment; Stdout: none; Stderr: none
+# Exit classes: parsed value or classified error; Side effects: external read
+# Idempotency: result follows remote state; Cleanup: child process exits
 def _read_json(
     command: list[str],
     *,
@@ -51,6 +55,10 @@ def _read_json(
         return None, "invalid_json"
 
 
+# Summary: validate a Kubernetes List body; Arguments: decoded value
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: item list or TypeError; Side effects: none
+# Idempotency: same body gives same items; Cleanup: none
 def _items(value: Any) -> list[dict[str, Any]]:
     """Reject malformed Kubernetes List envelopes rather than hiding data loss."""
     if not isinstance(value, dict) or not isinstance(value.get("items"), list):
@@ -73,10 +81,18 @@ def _items(value: Any) -> list[dict[str, Any]]:
     return items
 
 
+# Summary: extract object metadata; Arguments: Kubernetes item
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: metadata mapping; Side effects: none
+# Idempotency: same item gives same mapping; Cleanup: none
 def _meta(item: dict[str, Any]) -> dict[str, Any]:
     return item.get("metadata") or {}
 
 
+# Summary: match a case-insensitive record filter; Arguments: record and needle
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: boolean; Side effects: none
+# Idempotency: same inputs give same match; Cleanup: none
 def _search(value: dict[str, Any], needle: str | None) -> bool:
     return (
         not needle
@@ -84,6 +100,10 @@ def _search(value: dict[str, Any], needle: str | None) -> bool:
     )
 
 
+# Summary: read a bounded set of Kubernetes lists; Arguments: target and resources
+# Environment inputs: target kubeconfig and cluster state; Stdout: none; Stderr: none
+# Exit classes: keyed lists and per-source errors; Side effects: external reads
+# Idempotency: output follows cluster state; Cleanup: thread pool joins
 def _batch(
     target: Target, resources: dict[str, tuple[str, bool]]
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
@@ -118,6 +138,10 @@ def _batch(
     return data, errors
 
 
+# Summary: read ready and desired controller counts; Arguments: kind and item
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: count pair; Side effects: none
+# Idempotency: same item gives same counts; Cleanup: none
 def _controller_counts(
     kind: str, item: dict[str, Any]
 ) -> tuple[int | None, int | None]:
@@ -130,6 +154,10 @@ def _controller_counts(
     )
 
 
+# Summary: render one controller summary; Arguments: key and item
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: summary mapping; Side effects: none
+# Idempotency: same inputs give same summary; Cleanup: none
 def _controller_record(
     key: tuple[str, str, str], item: dict[str, Any]
 ) -> dict[str, Any]:
@@ -138,6 +166,11 @@ def _controller_record(
     return {"kind": kind, "name": name, "desired": desired, "ready": ready}
 
 
+# Summary: correlate storage claims, volumes, Pods, and owners
+# Arguments: target and filters; Environment inputs: Kubernetes API state
+# Stdout: none; Stderr: none
+# Exit classes: report with rows/errors; Side effects: external list reads
+# Idempotency: output follows cluster state; Cleanup: batch workers join
 def collect_storage(target: Target, args: Any) -> dict[str, Any]:
     resources = {
         "nodes": ("nodes", False),
@@ -358,6 +391,10 @@ RELATIVE_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
 RELATIVE_PATTERN = re.compile(r"\A(\d+)([smhd])\Z")
 
 
+# Summary: parse a positive relative event window; Arguments: duration text
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: timedelta or ValueError; Side effects: none
+# Idempotency: same text gives same duration; Cleanup: none
 def parse_window(value: str) -> timedelta:
     """Parse a relative duration such as `5m`, `90s`, `2h` or `7d`."""
     # Not lowercased: `1M` most likely means one month, which this does not
@@ -373,6 +410,10 @@ def parse_window(value: str) -> timedelta:
     return timedelta(**{RELATIVE_UNITS[match.group(2)]: amount})
 
 
+# Summary: normalize a timestamp to UTC; Arguments: RFC3339 text
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: UTC datetime or ValueError; Side effects: none
+# Idempotency: same text gives same time; Cleanup: none
 def _timestamp(value: str) -> datetime:
     candidate = value.replace("Z", "+00:00")
     stamp = datetime.fromisoformat(candidate)
@@ -381,6 +422,10 @@ def _timestamp(value: str) -> datetime:
     return stamp.astimezone(timezone.utc)
 
 
+# Summary: read Events with a bounded API fallback; Arguments: target
+# Environment inputs: Kubernetes API state; Stdout: none; Stderr: none
+# Exit classes: events, errors, and fallback reason; Side effects: external reads
+# Idempotency: output follows cluster state; Cleanup: child processes exit
 def _event_data(
     target: Target,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]], str | None]:
@@ -426,6 +471,10 @@ def _event_data(
     )
 
 
+# Summary: validate fields needed from one Event; Arguments: event body
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: metadata/object/series or TypeError; Side effects: none
+# Idempotency: same event gives same parts; Cleanup: none
 def _event_parts(
     event: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -478,6 +527,11 @@ def _event_parts(
     return meta, obj, series
 
 
+# Summary: filter and report Events in an exact time window
+# Arguments: target and filters; Environment inputs: Kubernetes API and UTC clock
+# Stdout: none; Stderr: none; Exit classes: report or ValueError on bad window
+# Side effects: external reads; Idempotency: fixed state/time gives same report
+# Cleanup: child processes exit
 def collect_events(target: Target, args: Any) -> dict[str, Any]:
     # `is not None`, not truthiness: `--last ""` was supplied, so it is an input
     # error. Treating it as absent silently returned the default hour, which is
@@ -598,6 +652,10 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
     return result
 
 
+# Summary: report Cilium agents and component health; Arguments: target, filters
+# Environment inputs: Kubernetes API and agent exec; Stdout: none; Stderr: none
+# Exit classes: report with rows/errors; Side effects: external reads and exec
+# Idempotency: output follows cluster state; Cleanup: pool and children finish
 def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     data, errors = _batch(
         target,
@@ -664,6 +722,11 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
             }
         )
 
+    # Summary: read one agent's health; Arguments: selected Pod
+    # Environment inputs: Kubernetes API and Cilium agent; Stdout: none
+    # Stderr: none; Exit classes: health row or classified unknown
+    # Side effects: may exec read command in Pod; Idempotency: follows agent state
+    # Cleanup: kubectl child exits
     def health(pod: dict[str, Any]) -> dict[str, Any]:
         meta = _meta(pod)
         node = pod.get("spec", {}).get("nodeName")
@@ -764,6 +827,10 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     return result
 
 
+# Summary: validate an exact-host GitLab job URL; Arguments: URL and host
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: project/job pair or ValueError; Side effects: none
+# Idempotency: same URL and host give same pair; Cleanup: none
 def gitlab_job_reference(job_url: str, host: str) -> tuple[str, str]:
     """Resolve the exact project and numeric job selected by one GitLab URL."""
     parsed = urlsplit(job_url)
@@ -780,6 +847,11 @@ def gitlab_job_reference(job_url: str, host: str) -> tuple[str, str]:
     return prefix.strip("/"), job_id
 
 
+# Summary: correlate a job with pipeline, runner, and trace
+# Arguments: target, filters, credential; Environment inputs: GitLab API state
+# Stdout: none; Stderr: none; Exit classes: report or ValueError on bad target
+# Side effects: authenticated GETs; Idempotency: output follows server state
+# Cleanup: thread pool joins and child commands exit
 def collect_gitlab_job(
     target: Target | GitLabOperationTarget,
     args: Any,

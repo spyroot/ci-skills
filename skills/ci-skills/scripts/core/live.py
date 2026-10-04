@@ -35,6 +35,10 @@ DENIAL_REASONS = frozenset({"authentication", "authorization", "missing_tool"})
 CILIUM_REPORT_SOURCES = frozenset({"daemonsets", "pods", "operators", "ciliumnodes"})
 
 
+# Summary: decide whether collector evidence proves access despite component health
+# Arguments: collector name and evidence; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same evidence gives same decision; Cleanup: none
 def _access_proven(name: str, evidence: dict[str, Any]) -> bool:
     """Decide whether one collector demonstrated access, health aside.
 
@@ -70,6 +74,10 @@ def _access_proven(name: str, evidence: dict[str, Any]) -> bool:
     return evidence.get("record_count", 0) >= 1
 
 
+# Summary: condense one collector result into bounded read evidence and digest
+# Arguments: collector result; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: evidence mapping
+# Side effects: none; Idempotency: same result gives same digest; Cleanup: none
 def _evidence(result: dict[str, Any]) -> dict[str, Any]:
     """Record bounded, value-free proof of one completed resource read."""
     body = json.dumps(result, sort_keys=True, default=str).encode("utf-8")
@@ -110,6 +118,11 @@ def _evidence(result: dict[str, Any]) -> dict[str, Any]:
     return evidence
 
 
+# Summary: run selected live collectors and attach access decisions to receipt
+# Arguments: target, options, mutable receipt; Environment inputs: live APIs
+# Stdout: none; Stderr: none; Exit classes: updated PASS or BLOCKED receipt
+# Side effects: read-only collector calls and receipt mutation
+# Idempotency: depends on live state; Cleanup: executor joins its workers
 def collect_live_checks(
     target: Target, args: Any, receipt: dict[str, Any]
 ) -> dict[str, Any]:

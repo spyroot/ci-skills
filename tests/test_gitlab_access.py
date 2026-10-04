@@ -13,6 +13,7 @@ ACCESS = import_script_module("core.access")
 CREDENTIALS = import_script_module("core.credentials")
 TARGET = import_script_module("core.target")
 SCRIPT = import_script_module("gitlab_access")
+CLI = import_script_module("core.cli")
 
 
 def _target(tmp_path: Path, *, token_file: Path | None = None, body: str = "") -> Path:
@@ -449,3 +450,67 @@ def test_live_receipt_is_portable_redacted_and_parseable(tmp_path, monkeypatch, 
     assert "file-token" not in receipt_file.read_text(encoding="utf-8")
     assert str(tmp_path) not in receipt_file.read_text(encoding="utf-8")
     assert not list(tmp_path.glob(".receipt.json.*.partial"))
+
+
+@pytest.mark.parametrize("failure", ("write", "replace", "interrupt"))
+def test_failed_receipt_publication_preserves_destination_and_cleans_partial(
+    tmp_path, monkeypatch, failure
+):
+    """An interrupted or failed write leaves no partial or changed receipt."""
+    target_file = _target(tmp_path, body='project = "team/repo"\n')
+    receipt_file = tmp_path / "receipt.json"
+    receipt_file.write_bytes(b"prior receipt\n")
+    _identity(monkeypatch)
+    _clear_gitlab_env(monkeypatch)
+    monkeypatch.setenv("GITLAB_TOKEN", "selected-token")
+    api = FakeAPI(
+        {
+            "user": {
+                "id": 17,
+                "username": "operator",
+                "web_url": "https://gitlab.example.test/operator",
+            },
+            "projects/team%2Frepo": {
+                "id": 42,
+                "path_with_namespace": "team/repo",
+                "web_url": "https://gitlab.example.test/team/repo",
+            },
+        }
+    )
+    monkeypatch.setattr(
+        SCRIPT,
+        "check_gitlab_operation_access",
+        lambda session: ACCESS.check_gitlab_operation_access(session, api_client=api),
+    )
+    if failure in {"write", "interrupt"}:
+        original_write = Path.write_text
+
+        def interrupted_write(path, content, *args, **kwargs):
+            if path.name == ".receipt.json.partial":
+                original_write(path, content[:8], *args, **kwargs)
+                if failure == "interrupt":
+                    raise KeyboardInterrupt
+                raise OSError("injected partial write")
+            return original_write(path, content, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", interrupted_write)
+    else:
+        def failed_replace(*_args):
+            raise OSError("replace failed")
+
+        monkeypatch.setattr(CLI.os, "replace", failed_replace)
+    arguments = [
+        "check",
+        "--target",
+        str(target_file),
+        "--receipt-out",
+        str(receipt_file),
+        "--json",
+    ]
+    if failure == "interrupt":
+        with pytest.raises(KeyboardInterrupt):
+            SCRIPT.main(arguments)
+    else:
+        assert SCRIPT.main(arguments) == 2
+    assert receipt_file.read_bytes() == b"prior receipt\n"
+    assert not (tmp_path / ".receipt.json.partial").exists()

@@ -27,8 +27,19 @@ from .gitlab_api import (
 )
 
 
+# Summary: Validate a milestone create, update, or date adjustment.
+# Arguments: args supplies action, fields, optional description path, and ID.
+# Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: ActionError for invalid fields; Side effects: reads optional description file.
+# Idempotency: same arguments and file content yield the same plan
+# Cleanup: file reader closes its handle.
 def prepare(args: Namespace) -> tuple[dict[str, Any], int | None, None]:
-    """Validate one milestone mutation without calling a provider."""
+    """Build the milestone body before any provider call.
+
+    :param args: Parsed milestone action and requested fields.
+    :returns: Validated body, optional milestone ID, and no extra resource key.
+    :raises ActionError: If the action, dates, or field combination is invalid.
+    """
     body: dict[str, Any] = {}
     identifier: int | None = None
     if args.action == "create":
@@ -67,8 +78,22 @@ def prepare(args: Namespace) -> tuple[dict[str, Any], int | None, None]:
     return body, identifier, None
 
 
+# Summary: Apply one milestone plan and verify its observed GitLab state.
+# Arguments: api and session call GitLab, plan names the change, target_id selects its scope.
+# Environment inputs: authenticated session; Stdout: none; Stderr: none.
+# Exit classes: ActionError or GitLabAPIError; Side effects: reads and may write one milestone.
+# Idempotency: matching state returns NO_OP; Cleanup: caller owns API session.
 def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
-    """Find one exact title or ID, mutate once, then GET independently."""
+    """Return APPLIED only after an independent milestone GET matches the plan.
+
+    :param api: GitLab API client used for reads and the selected write.
+    :param session: Authenticated GitLab session passed to the client.
+    :param plan: Validated action, target, and desired milestone fields.
+    :param target_id: Numeric project or group ID selected by the plan.
+    :returns: Action, ID, and read-back status for the milestone.
+    :raises ActionError: If the resource is ambiguous or observed state differs.
+    :raises GitLabAPIError: If a provider request fails without recovery.
+    """
     base = f"{plan.target_kind}s/{target_id}/milestones"
     if plan.operation == "create":
         return _create(api, session, plan, base, target_id)
@@ -128,7 +153,22 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
     }
 
 
+# Summary: Find milestones with one exact title and reject ambiguity.
+# Arguments: api and session read GitLab, base is the collection URL, title is exact.
+# Environment inputs: authenticated session; Stdout: none; Stderr: none.
+# Exit classes: ActionError for duplicates, GitLabAPIError for a failed read.
+# Side effects: GitLab list read.
+# Idempotency: result follows current GitLab state; Cleanup: caller owns API session.
 def _find_exact(api: Any, session: Any, base: str, title: str) -> list[dict[str, Any]]:
+    """Return zero or one milestone with the requested title.
+
+    :param api: GitLab API client used to page through the collection.
+    :param session: Authenticated GitLab session.
+    :param base: Milestone collection API path.
+    :param title: Title compared exactly after the provider filter.
+    :returns: Empty list or one matching milestone.
+    :raises ActionError: If more than one exact title is present.
+    """
     exact = [
         item
         for item in _fields(
@@ -144,9 +184,25 @@ def _find_exact(api: Any, session: Any, base: str, title: str) -> list[dict[str,
     return exact
 
 
+# Summary: Create an absent milestone while holding the exact-title guard.
+# Arguments: api/session access GitLab, plan, base, target_id bind the create target.
+# Environment inputs: authenticated session; Stdout: none; Stderr: none.
+# Exit classes: ActionError or GitLabAPIError; Side effects: GitLab read and possible create.
+# Idempotency: matching existing milestone returns NO_OP; Cleanup: guard releases its lock.
 def _create(
     api: Any, session: Any, plan: ActionPlan, base: str, target_id: int
 ) -> dict[str, Any]:
+    """Create an absent milestone or confirm an exact existing one.
+
+    :param api: GitLab API client used for list, create, and read-back.
+    :param session: Authenticated GitLab session.
+    :param plan: Confirmed create plan with the exact requested title.
+    :param base: Milestone collection API path.
+    :param target_id: Numeric project or group ID.
+    :returns: APPLIED or NO_OP with the independently observed milestone ID.
+    :raises ActionError: If an existing or uncertain result cannot be reconciled.
+    :raises GitLabAPIError: If a provider request fails without recovery.
+    """
     with create_guard(
         plan.origin, plan.target_kind, target_id, "milestone", plan.body["title"]
     ) as guard:

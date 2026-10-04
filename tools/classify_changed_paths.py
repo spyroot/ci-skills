@@ -32,6 +32,9 @@ class ClassifyError(RuntimeError):
     """The revision range could not be read."""
 
 
+# Summary: decode Git name-status records; Arguments: NUL-delimited Git bytes
+# Environment inputs: none; Stdout: none; Stderr: none; Exit classes: record list
+# Side effects: none; Idempotency: stable bytes; Cleanup: none
 def _records(output: bytes) -> list[tuple[str, list[str]]]:
     """Split `--name-status -z` into (status, paths) pairs.
 
@@ -55,11 +58,18 @@ def _records(output: bytes) -> list[tuple[str, list[str]]]:
     return records
 
 
+# Summary: classify Markdown filename; Arguments: path
+# Environment inputs: none; Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: stable path; Cleanup: none
 def is_markdown(path: str) -> bool:
     """Report whether one path is Markdown by suffix, case-insensitively."""
     return path.lower().endswith(MARKDOWN_SUFFIXES)
 
 
+# Summary: classify all paths in a revision range; Arguments: root and revisions
+# Environment inputs: Git objects; Stdout: none; Stderr: none
+# Exit classes: result map or ClassifyError; Side effects: read-only Git call
+# Idempotency: immutable range; Cleanup: Git child exits
 def classify(root: Path, base: str, head: str) -> dict[str, Any]:
     """Classify every path the range changed, both sides of renames included."""
     result = subprocess.run(
@@ -96,6 +106,10 @@ def classify(root: Path, base: str, head: str) -> dict[str, Any]:
     }
 
 
+# Summary: publish changed-path status; Arguments: CLI argv
+# Environment inputs: Git objects; Stdout: selected format; Stderr: errors
+# Exit classes: 0 success, 2 unreadable; Side effects: optional GitHub output append
+# Idempotency: classification stable, output appends; Cleanup: file handle closes
 def main() -> int:
     cli = argparse.ArgumentParser(
         description="Classify changed paths for a revision range.",

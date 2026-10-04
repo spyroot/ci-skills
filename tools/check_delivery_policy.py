@@ -3,26 +3,39 @@
 
 from __future__ import annotations
 
-import argparse
+import re
 import subprocess
 from pathlib import Path
+from typing import Final
 
 import yaml
-from validation_cli import add_options, emit
+from validation_cli import ValidationArgumentParser, add_options, emit
 
 
-REMOVED_ENTRYPOINTS = {
+REMOVED_ENTRYPOINTS: Final[frozenset[str]] = frozenset({
     "scripts/check.sh",
     "lib/ci/check.bash",
     "tests/check.bats",
-}
-APPROVED_WORKFLOW = ".github/workflows/validate.yml"
+})
+APPROVED_WORKFLOW: Final[str] = ".github/workflows/validate.yml"
+ALWAYS: Final[str] = "${{ always() }}"
+STANDARDS_CHECKOUT_IF: Final[str] = (
+    "always() && steps.standards_pin.outcome == 'success' && "
+    "steps.standards_access.outcome == 'success'"
+)
 
 
+# Summary: inspect the approved GitHub route; Arguments: repository root
+# Environment inputs: Git index and workflow file; Stdout: none; Stderr: none
+# Exit classes: problem list or unreadable input; Side effects: read-only
+# Idempotency: same tree gives same result; Cleanup: Git child process exits
 def check(root: Path) -> list[str]:
-    """Inspect tracked route paths; root arg, no env, output, side effects or cleanup.
+    """Check the one approved GitHub validation route and removed entrypoints.
 
-    Returns named failures, raises for unreadable inputs; repeated reads agree.
+    :param root: Checkout containing the workflow and tracked paths.
+    :returns: Exact route and required-result policy failures.
+    :raises OSError: The workflow cannot be read.
+    :raises subprocess.CalledProcessError: Git cannot list tracked paths.
     """
     found = subprocess.run(
         ["git", "-C", str(root), "ls-files", "--cached", "-z"],
@@ -68,16 +81,34 @@ def check(root: Path) -> list[str]:
         problems.append("required_result_may_be_bypassed")
     if job.get("if"):
         problems.append("required_job_may_be_skipped")
-    if any(step.get("continue-on-error") for step in job.get("steps", [])):
+    steps = job.get("steps", [])
+    if any(step.get("continue-on-error") for step in steps):
         problems.append("step_may_bypass_required_result")
-    if any(step.get("if") for step in job.get("steps", [])):
-        problems.append("required_step_may_be_skipped")
+    for index, step in enumerate(steps):
+        condition = step.get("if")
+        if index == 0 and step.get("uses") == "actions/checkout@v4":
+            if condition:
+                problems.append("initial_checkout_may_be_skipped")
+            continue
+        if step.get("with", {}).get("repository") == "spyroot/standards":
+            if re.sub(r"\s+", " ", str(condition).strip()) != STANDARDS_CHECKOUT_IF:
+                problems.append("standards_checkout_guard_invalid")
+            continue
+        if condition != ALWAYS:
+            problems.append("required_step_may_be_skipped")
     return sorted(problems)
 
 
+# Summary: report route status; Arguments: CLI options from argv
+# Environment inputs: selected repository; Stdout: status JSON; Stderr: safe log
+# Exit classes: 0 pass, 2 policy failure; Side effects: optional log append
+# Idempotency: repeated checks agree; Cleanup: log handle closes
 def main() -> int:
-    """Print status JSON; argv input, stdout result, no mutation or cleanup."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    """Publish delivery route status through shared validation output.
+
+    :returns: Zero on pass or two for a route policy failure.
+    """
+    parser = ValidationArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
     add_options(parser)
     args = parser.parse_args()

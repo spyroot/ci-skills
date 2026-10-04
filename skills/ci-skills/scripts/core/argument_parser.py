@@ -17,10 +17,20 @@ class StructuredParser(argparse.ArgumentParser):
 
     requested: list[str]
 
+    # Summary: remember requested format before argparse validates options
+    # Arguments: optional argv and namespace; Environment inputs: sys.argv fallback
+    # Stdout: none; Stderr: none; Exit classes: namespace or parser exit
+    # Side effects: stores requested argv; Idempotency: depends on argv
+    # Cleanup: none
     def parse_args(self, args=None, namespace=None):
         self.requested = list(sys.argv[1:] if args is None else args)
         return super().parse_args(args, namespace)
 
+    # Summary: emit structured invalid-argument response and exit with status two
+    # Arguments: argparse message; Environment inputs: requested output format
+    # Stdout: structured error; Stderr: none; Exit classes: SystemExit(2)
+    # Side effects: writes stdout; Idempotency: timestamp and host vary
+    # Cleanup: none
     def error(self, message: str) -> None:
         data = {
             "schema_version": "1.0",

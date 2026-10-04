@@ -21,6 +21,11 @@ from .gitlab_api import GitLabAPIError, create_guard, uncertain_write
 from .target import GitLabOperationTarget
 
 
+# Summary: validate runner assignment or create inputs and token destination
+# Arguments: CLI args, target, target kind; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: plan fields or ActionError
+# Side effects: resolves token path; Idempotency: same inputs give same plan
+# Cleanup: none
 def prepare(
     args: Namespace, target: GitLabOperationTarget, target_kind: str
 ) -> tuple[dict[str, Any], int | None, str | None]:
@@ -50,6 +55,11 @@ def prepare(
     return body, None, token_out
 
 
+# Summary: list and validate group and subgroup project IDs for a live plan
+# Arguments: API, session, group ID; Environment inputs: live GitLab API
+# Stdout: none; Stderr: none; Exit classes: sorted IDs or ActionError
+# Side effects: read-only paged API calls; Idempotency: depends on membership
+# Cleanup: API client owns request resources
 def project_ids(api: Any, session: Any, group_id: int) -> tuple[int, ...]:
     """Resolve the complete, validated group membership for a live plan."""
     projects = _pages(
@@ -67,6 +77,11 @@ def project_ids(api: Any, session: Any, group_id: int) -> tuple[int, ...]:
     return tuple(sorted(identifiers))
 
 
+# Summary: read a project runner's direct associated project IDs
+# Arguments: API, session, runner ID; Environment inputs: live GitLab API
+# Stdout: none; Stderr: none; Exit classes: ID set or ActionError
+# Side effects: read-only runner API call; Idempotency: depends on runner
+# Cleanup: API client owns request resources
 def _direct_projects(api: Any, session: Any, runner_id: int) -> frozenset[int]:
     """Use runner details; project runner lists include inherited availability."""
     runner = _object(
@@ -91,10 +106,20 @@ def _direct_projects(api: Any, session: Any, runner_id: int) -> frozenset[int]:
     return frozenset(projects)
 
 
+# Summary: check whether a runner is directly assigned to one project
+# Arguments: API, session, runner ID, project ID; Environment inputs: GitLab API
+# Stdout: none; Stderr: none; Exit classes: boolean or ActionError
+# Side effects: read-only runner API call; Idempotency: depends on runner
+# Cleanup: API client owns request resources
 def _assigned(api: Any, session: Any, runner_id: int, project_id: int) -> bool:
     return project_id in _direct_projects(api, session, runner_id)
 
 
+# Summary: snapshot selected projects' direct runner assignments
+# Arguments: API, session, runner ID, project IDs; Environment inputs: GitLab API
+# Stdout: none; Stderr: none; Exit classes: assignment map or ActionError
+# Side effects: read-only runner API call; Idempotency: depends on runner
+# Cleanup: API client owns request resources
 def _membership_snapshot(
     api: Any,
     session: Any,
@@ -106,6 +131,11 @@ def _membership_snapshot(
     return {project_id: project_id in direct for project_id in identifiers}
 
 
+# Summary: remove attempted assignments and verify original membership
+# Arguments: API, session, runner ID, attempts, baseline
+# Environment inputs: live GitLab API; Stdout: none; Stderr: none
+# Exit classes: cleanup record; Side effects: may delete runner associations
+# Idempotency: repeat checks current membership; Cleanup: verifies baseline
 def _rollback_assignments(
     api: Any,
     session: Any,
@@ -146,6 +176,11 @@ def _rollback_assignments(
     }
 
 
+# Summary: assign project runner with per-project read-back and rollback
+# Arguments: API, session, plan, target ID; Environment inputs: GitLab API
+# Stdout: none; Stderr: none; Exit classes: verified/partial assignment record
+# Side effects: may post and delete runner associations
+# Idempotency: existing assignments become NO_OP; Cleanup: rollback on error
 def _assign(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
     runner_id = _positive(plan.resource_id, "runner_id")
     _direct_projects(api, session, runner_id)
@@ -222,6 +257,11 @@ def _assign(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[st
     }
 
 
+# Summary: find runners with an exact recovery-key description
+# Arguments: API, session, scope, description; Environment inputs: GitLab API
+# Stdout: none; Stderr: none; Exit classes: matching runners or ActionError
+# Side effects: read-only paged API calls; Idempotency: depends on runner list
+# Cleanup: API client owns request resources
 def _runner_matches(
     api: Any, session: Any, scope: str, description: str
 ) -> list[dict[str, Any]]:
@@ -234,6 +274,11 @@ def _runner_matches(
     ]
 
 
+# Summary: verify created runner identity and scope membership
+# Arguments: API, session, scope, ID, description; Environment inputs: GitLab API
+# Stdout: none; Stderr: none; Exit classes: success or ActionError
+# Side effects: read-only API calls; Idempotency: depends on runner state
+# Cleanup: API client owns request resources
 def _runner_readback(
     api: Any, session: Any, scope: str, runner_id: int, description: str
 ) -> None:
@@ -254,6 +299,11 @@ def _runner_readback(
         raise ActionError("runner_scope_readback_mismatch")
 
 
+# Summary: delete a newly identified runner and verify scoped absence
+# Arguments: API, session, scope, ID, description; Environment inputs: GitLab API
+# Stdout: none; Stderr: none; Exit classes: cleanup status mapping
+# Side effects: may delete identified runner; Idempotency: repeat may report missing ID
+# Cleanup: checks absence after delete
 def _rollback_created_runner(
     api: Any, session: Any, scope: str, runner_id: int, description: str
 ) -> dict[str, Any]:
@@ -280,6 +330,12 @@ def _rollback_created_runner(
         return {"status": "BLOCKED", "reason": str(exc)}
 
 
+# Summary: create runner with guarded write, token sink, and live read-back
+# Arguments: API, session, plan, target ID; Environment inputs: GitLab API and sink
+# Stdout: none; Stderr: none; Exit classes: applied/partial record or ActionError
+# Side effects: creates runner and private token file, may roll back runner
+# Idempotency: same-host guard and pre-read refuse known duplicates
+# Cleanup: closes descriptor and removes unsaved token file
 def _create(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
     if not plan.token_out:
         raise ActionError("token_out_required_for_runner_create_plan")
@@ -433,6 +489,11 @@ def _create(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[st
             destination.unlink(missing_ok=True)
 
 
+# Summary: dispatch runner assignment or creation from a verified plan
+# Arguments: API, session, plan, target ID; Environment inputs: live GitLab API
+# Stdout: none; Stderr: none; Exit classes: action record or provider error
+# Side effects: delegated runner mutation; Idempotency: operation-specific guard
+# Cleanup: delegated rollback and token handling
 def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
     if plan.operation == "assign":
         return _assign(api, session, plan, target_id)

@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from textwrap import fill
 from typing import Any
 
 from .access import (
@@ -23,6 +24,7 @@ from .catalog import (
     AUTHORITIES,
     COMMAND_BY_KIND,
     COMMANDS,
+    OUTPUT_MODE_DESCRIPTIONS,
     PROJECT_DIR,
     TARGET_FILENAME,
     describe,
@@ -71,13 +73,25 @@ def resolve_target(explicit: str | None) -> tuple[Path, str]:
     return resolve_target_file(explicit)
 
 
+# Summary: Resolve one GitLab target without merging lower configuration tiers.
+# Arguments: explicit_target/binding select source; dry_run controls required access.
+# Environment inputs: declared target tier or binding environment; Stdout: none; Stderr: none.
+# Exit classes: TargetError for unresolved GitLab target; Side effects: reads selected config.
+# Idempotency: follows unchanged config; Cleanup: file readers close their handles.
 def resolve_gitlab_target(
     explicit_target: str | None,
     explicit_binding: str | None,
     *,
     dry_run: bool = False,
 ) -> tuple[GitLabOperationTarget, str]:
-    """Resolve one GitLab target through the declared target or binding tier."""
+    """Return the selected GitLab target and its reported source.
+
+    :param explicit_target: Optional target TOML path from ``--target``.
+    :param explicit_binding: Optional project binding path from ``--binding``.
+    :param dry_run: Whether the resolver may plan without live credentials.
+    :returns: GitLab operation target and source tier description.
+    :raises TargetError: If GitLab or its selected source file is absent.
+    """
     selected = resolve_project_target(
         explicit_target,
         explicit_binding,
@@ -97,15 +111,15 @@ def resolve_gitlab_target(
     )
 
 
+# Summary: Select an explicit output mode or infer it from stdout TTY state.
+# Arguments: args carries json/yaml/human flags; Environment inputs: stdout TTY state.
+# Stdout: none; Stderr: none; Exit classes: no process exit.
+# Side effects: queries stdout TTY state; Idempotency: stable for same flags and TTY; Cleanup: none.
 def output_mode(args: argparse.Namespace) -> str:
-    """Choose the output format, defaulting to JSON for a non-terminal reader.
+    """Choose human text for a terminal and JSON for a pipe by default.
 
-    An agent should not have to discover `--json`. A human at a terminal wants
-    the summary; anything reading a pipe wants the machine-readable document,
-    and that is the overwhelmingly common case for this skill. So the default
-    follows the reader: a TTY gets `human`, a pipe or file gets `json`. The
-    three flags remain explicit overrides in both directions, `--human`
-    included, so a person piping into a pager still has a way to ask.
+    :param args: Parsed explicit output-mode flags.
+    :returns: ``json``, ``yaml``, or ``human``.
     """
     if args.json:
         return "json"
@@ -123,20 +137,52 @@ def output_mode(args: argparse.Namespace) -> str:
 class MachineArgumentParser(argparse.ArgumentParser):
     """Keep parser failures in the selected machine-readable result shape."""
 
+    # Summary: Initialize a parser with its optional report kind.
+    # Arguments: args/kwargs forward argparse settings; report_kind names result.
+    # Environment inputs: none; Stdout: none; Stderr: none; Exit classes: argparse errors.
+    # Side effects: parser state only; Idempotency: new equivalent parser per call; Cleanup: none.
     def __init__(
         self, *args: Any, report_kind: str | None = None, **kwargs: Any
     ) -> None:
+        """Store the command kind used for structured usage failures.
+
+        :param args: Positional ArgumentParser constructor inputs.
+        :param report_kind: Optional result kind for argument failures.
+        :param kwargs: Keyword ArgumentParser constructor inputs.
+        """
         super().__init__(*args, **kwargs)
         self.report_kind = report_kind
         self._raw_argv: tuple[str, ...] = ()
 
+    # Summary: Preserve requested flags before argparse validates arguments.
+    # Arguments: args optionally overrides process argv; namespace receives parsed values.
+    # Environment inputs: process argv when args is absent; Stdout: none; Stderr: usage on error.
+    # Exit classes: argparse usage exit; Side effects: updates parser argv snapshot.
+    # Idempotency: same argv gives same parse; Cleanup: none.
     def parse_args(
         self, args: list[str] | None = None, namespace: argparse.Namespace | None = None
     ) -> argparse.Namespace:
+        """Parse arguments while retaining the flags needed for error output.
+
+        :param args: Optional explicit argument vector.
+        :param namespace: Optional namespace populated by argparse.
+        :returns: Parsed argument namespace.
+        :raises SystemExit: If argparse rejects an argument or value.
+        """
         self._raw_argv = tuple(sys.argv[1:] if args is None else args)
         return super().parse_args(self._raw_argv, namespace)
 
+    # Summary: Emit usage failure in the caller's requested machine format.
+    # Arguments: message is argparse's validation detail; Environment inputs: prior argv snapshot.
+    # Stdout: structured failure for JSON/YAML; Stderr: ordinary argparse error otherwise.
+    # Exit classes: SystemExit 2; Side effects: writes one error report.
+    # Idempotency: same invalid argv gives same class, timestamps may change; Cleanup: none.
     def error(self, message: str) -> None:
+        """Report invalid arguments and terminate with usage status.
+
+        :param message: Argparse validation detail for human output.
+        :raises SystemExit: Always exits after a usage failure.
+        """
         modes = [
             flag.partition("=")[0]
             for flag in self._raw_argv
@@ -157,10 +203,76 @@ class MachineArgumentParser(argparse.ArgumentParser):
         )
         self.exit(2)
 
+    # Summary: Render every accepted option in the required help section order.
+    # Arguments: self is the configured parser; Environment inputs: none.
+    # Stdout: none, returns help text; Stderr: none; Exit classes: no process exit.
+    # Side effects: none; Idempotency: same parser gives same help; Cleanup: none.
+    def format_help(self) -> str:
+        """Present command help with all parser actions and output modes.
 
+        :returns: Human help with summary, examples, options, modes, and usage.
+        """
+        lines = ["Summary:", f"  {self.description or self.prog}", ""]
+        if self.epilog:
+            lines.extend(
+                [
+                    "Description:",
+                    fill(
+                        self.epilog.replace("%(prog)s", self.prog),
+                        width=88,
+                        initial_indent="  ",
+                        subsequent_indent="  ",
+                    ),
+                    "",
+                ]
+            )
+        lines.extend(
+            [
+                "Examples:",
+                "  # Inspect this command's machine-readable contract.",
+                f"  {self.prog} --describe",
+                "",
+                "Options:",
+            ]
+        )
+        for action in self._actions:
+            if action.help is argparse.SUPPRESS:
+                continue
+            names = ", ".join(action.option_strings) or action.dest
+            if action.nargs != 0:
+                names += f" {action.metavar or action.dest.upper()}"
+            explanation = (action.help or "").replace("%(prog)s", self.prog)
+            lines.append(
+                fill(
+                    f"{names}: {explanation}",
+                    width=88,
+                    initial_indent="  ",
+                    subsequent_indent="    ",
+                )
+            )
+        lines.extend(["", "Output modes:"])
+        for name, explanation in OUTPUT_MODE_DESCRIPTIONS:
+            lines.append(f"  {name}: {explanation}")
+        usage = self.format_usage().strip().removeprefix("usage: ").strip()
+        lines.extend(["", "Usage:", f"  {usage}", ""])
+        return "\n".join(lines)
+
+
+# Summary: Build the shared target, output, logging, and dry-run option parser.
+# Arguments: description is command purpose; output_dir selects file option; kind names report.
+# Environment inputs: none; Stdout: none; Stderr: none; Exit classes: no process exit.
+# Side effects: constructs parser in memory.
+# Idempotency: same inputs give same options; Cleanup: none.
 def parser(
     description: str, *, output_dir: bool = True, kind: str | None = None
 ) -> argparse.ArgumentParser:
+    """Create the universal CLI options used by collector commands.
+
+    :param description: Human command purpose shown in help.
+    :param output_dir: Whether paired report file output is offered.
+    :param kind: Optional report kind for structured argument failures.
+    :returns: Parser that callers extend with command-specific arguments.
+    """
     result = MachineArgumentParser(
         report_kind=kind,
         description=description,
@@ -172,9 +284,8 @@ def parser(
             "Run --describe for this command's machine-readable contract, or "
             "see tools.json for the whole skill. "
             "Target resolves in order: --target or --binding, "
-            "CI_SKILLS_TARGET or K8S_ADMIN_DIAGNOSTICS_BINDING, "
-            f"./{PROJECT_DIR}/{TARGET_FILENAME}, {DEFAULT_TARGET}. "
-            "Example: %(prog)s --json"
+            "CI_SKILLS_TARGET or CI_SKILLS_BINDING, "
+            f"./{PROJECT_DIR}/{TARGET_FILENAME}, {DEFAULT_TARGET}."
         ),
     )
     selection = result.add_mutually_exclusive_group()
@@ -244,6 +355,11 @@ def parser(
     return result
 
 
+# Summary: Write one sanitized diagnostic to stderr and an optional log file.
+# Arguments: args selects format/file; kind, event, status and timing describe result.
+# Environment inputs: current clock; Stdout: none; Stderr: one diagnostic line.
+# Exit classes: OSError if optional file write fails; Side effects: stderr and optional append.
+# Idempotency: repeated call appends a new timestamped record; Cleanup: closes file descriptor.
 def log_event(
     args: argparse.Namespace,
     kind: str,
@@ -254,7 +370,17 @@ def log_event(
     error_class: str | None = None,
     persist: bool = True,
 ) -> None:
-    """Emit one bounded, secret-free diagnostic line to stderr and an optional file."""
+    """Emit a classified and sanitized event for one command action.
+
+    :param args: Parsed log level, format, file, run ID, and mode.
+    :param kind: Command component name.
+    :param event: Diagnostic event name.
+    :param status: Result status used to choose severity.
+    :param elapsed: Duration in seconds for the diagnostic record.
+    :param error_class: Optional classified failure source.
+    :param persist: Whether an optional log-file append is allowed.
+    :raises OSError: If the selected log file cannot be opened or written.
+    """
     level = "error" if status in {BLOCKED, "PARTIAL"} else "info"
     thresholds = {"debug": 0, "info": 1, "warning": 2, "error": 3}
     if thresholds[level] < thresholds[getattr(args, "log_level", "info")]:
@@ -298,8 +424,21 @@ def log_event(
             stream.write(line)
 
 
+# Summary: Emit a classified failure even if ordinary rendering fails.
+# Arguments: args chooses output; kind/source/reason identify failure.
+# Environment inputs: clock and local hostname; Stdout: machine failure if requested.
+# Stderr: human failure and diagnostic log; Exit classes: returns status 2.
+# Side effects: writes output and optional log.
+# Idempotency: new timestamp each call; Cleanup: log helper closes file.
 def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> int:
-    """Emit a stable machine-readable failure even when normal rendering fails."""
+    """Return a structured BLOCKED result for a command failure.
+
+    :param args: Parsed output and logging options.
+    :param kind: Command report kind.
+    :param source: Stage that failed.
+    :param reason: Diagnostic detail sanitized before output.
+    :returns: Blocked exit status 2.
+    """
     data = {
         "schema_version": "1.0",
         "kind": kind,
@@ -338,12 +477,26 @@ def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> i
     return 2
 
 
+# Summary: Resolve access, run a selected collector, and emit its result.
+# Arguments: args holds CLI options; collect selects a reader; live_checks enables full receipt.
+# Environment inputs: selected target, credentials, clock, and host identity.
+# Stdout: versioned report or command contract; Stderr: classified diagnostics.
+# Exit classes: 0 for PASS/DRY_RUN, 2 for BLOCKED/PARTIAL or failure.
+# Side effects: live reads and optional receipt/report files; Idempotency: follows target state.
+# Cleanup: temporary receipt is removed on every exit, output helpers close files.
 def execute(
     args: argparse.Namespace,
     collect: Callable[[Target, argparse.Namespace], dict[str, Any]] | None = None,
     *,
     live_checks: bool = False,
 ) -> int:
+    """Run the shared access gate and selected collection path.
+
+    :param args: Parsed target, mode, filters, and output options.
+    :param collect: Optional collector; omitted for the access receipt.
+    :param live_checks: Whether to run expanded cross-authority checks.
+    :returns: Exit status matching the structured result.
+    """
     started = time.monotonic()
     kind = (
         ACCESS_CHECK_KIND
@@ -457,12 +610,15 @@ def execute(
             destination = Path(receipt_out).expanduser()
             destination.parent.mkdir(parents=True, exist_ok=True)
             partial = destination.with_name(f".{destination.name}.partial")
-            partial.write_text(
-                json.dumps(portable(redact_tree(data)), indent=2, sort_keys=True)
-                + "\n",
-                encoding="utf-8",
-            )
-            os.replace(partial, destination)
+            try:
+                partial.write_text(
+                    json.dumps(portable(redact_tree(data)), indent=2, sort_keys=True)
+                    + "\n",
+                    encoding="utf-8",
+                )
+                os.replace(partial, destination)
+            finally:
+                partial.unlink(missing_ok=True)
         mode = output_mode(args)
         rendered = emit(data, mode, getattr(args, "output_dir", None))
         log_event(
@@ -484,8 +640,19 @@ def execute(
         return _failure(args, kind, source, "unexpected_runtime_failure")
 
 
+# Summary: Bind a GitLab-only session and report one exact job.
+# Arguments: args supplies job URL, target, filter, and output options.
+# Environment inputs: selected GitLab target, credential, clock, and hostname.
+# Stdout: job report or command contract; Stderr: classified diagnostics.
+# Exit classes: 0 for PASS/DRY_RUN, 2 for BLOCKED/PARTIAL or failure.
+# Side effects: GitLab GETs and optional report file; Idempotency: follows live job state.
+# Cleanup: delegated output helper closes report files.
 def execute_gitlab_job(args: argparse.Namespace) -> int:
-    """Read one job through the GitLab-only target and bound access session."""
+    """Read one job through the GitLab-only target and bound session.
+
+    :param args: Parsed job URL, target, filter, and output options.
+    :returns: Exit status matching the job report.
+    """
     from .collect import collect_gitlab_job, gitlab_job_reference
 
     kind = "gitlab_job"

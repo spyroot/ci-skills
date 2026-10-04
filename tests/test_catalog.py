@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 
@@ -26,6 +27,7 @@ CLI = import_script_module("core.cli")
 PROJECT_BINDING = import_script_module("core.project_binding")
 RENDER = load_module("render_manifest", REPO_ROOT / "tools" / "render_manifest.py")
 MANIFEST_PATH = SCRIPT_ROOT.parent / "tools.json"
+HELP_HEADINGS = ("Summary:", "Examples:", "Options:", "Output modes:", "Usage:")
 
 
 def _actual_options(script: str) -> set[str]:
@@ -90,6 +92,75 @@ def test_help_shows_every_declared_option_and_subcommand(script):
             if item.choices and not item.option_strings
         ]
         assert set(declared_actions) in choices
+
+
+@pytest.mark.parametrize(
+    "script", sorted({*CATALOG.COMMANDS, *CATALOG.NODE_LOCAL_COMMANDS})
+)
+def test_human_and_machine_help_follow_pinned_documentation_contract(script):
+    """The existing command interface publishes the same usable help in both modes."""
+    if script in CATALOG.NODE_LOCAL_COMMANDS:
+        parser = import_script_module("core.node_local_cli").parser(
+            script.removesuffix(".py")
+        )
+        contract = CATALOG.describe_node(script)
+    else:
+        module = load_module(
+            f"help_contract_{script.removesuffix('.py')}", SCRIPT_ROOT / script
+        )
+        parser = module.build_parser()
+        contract = CATALOG.describe(script)
+    help_text = parser.format_help()
+    headings = [
+        re.search(r"(?m)^" + re.escape(heading), help_text)
+        for heading in HELP_HEADINGS
+    ]
+    assert all(match is not None for match in headings), script
+    positions = [match.start() for match in headings]
+    assert positions == sorted(positions), script
+    description = re.search(r"(?m)^Description:", help_text)
+    if description is not None:
+        assert positions[0] < description.start() < positions[1]
+    examples = help_text[positions[1] : positions[2]]
+    assert re.search(r"(?m)^\s*#\s*\S.+\n\s*\S+", examples), script
+    assert all(option in help_text for option in contract["options"]), script
+    assert all(help_text.count(mode) > 0 for mode in ("json", "yaml", "human")), script
+    assert all(
+        contract.get(field)
+        for field in (
+            "summary",
+            "description",
+            "examples",
+            "options",
+            "output_modes",
+            "usage",
+        )
+    ), script
+    assert set(contract["output_modes"]) == {"json", "yaml", "human"}, script
+    assert all(
+        isinstance(example, dict)
+        and example.get("purpose")
+        and example.get("command")
+        for example in contract["examples"]
+    ), script
+    assert set(contract["options"]) == (
+        set(CATALOG.options_for(script))
+        if script in CATALOG.COMMANDS
+        else set(CATALOG.describe_node(script)["options"])
+    ), script
+    actual = subprocess.run(
+        [sys.executable, str(SCRIPT_ROOT / script), "--describe"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+        env={"PATH": "/nonexistent", "HOME": "/nonexistent"},
+    )
+    described = json.loads(actual.stdout)
+    for field in (
+        "summary", "description", "examples", "options", "output_modes", "usage"
+    ):
+        assert described[field] == contract[field], (script, field)
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.COMMANDS))

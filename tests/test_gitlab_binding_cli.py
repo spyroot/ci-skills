@@ -39,6 +39,7 @@ def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     monkeypatch.chdir(project)
     monkeypatch.delenv("CI_SKILLS_TARGET", raising=False)
+    monkeypatch.delenv("CI_SKILLS_BINDING", raising=False)
     monkeypatch.delenv("K8S_ADMIN_DIAGNOSTICS_BINDING", raising=False)
     return binding
 
@@ -77,11 +78,11 @@ def test_gitlab_entrypoint_uses_selected_binding_over_project_target(
     if selection == "explicit":
         selector = ["--binding", str(binding)]
         source = "argv:--binding"
-        monkeypatch.setenv("K8S_ADMIN_DIAGNOSTICS_BINDING", str(tmp_path / "missing"))
+        monkeypatch.setenv("CI_SKILLS_BINDING", str(tmp_path / "missing"))
     else:
         selector = []
-        source = "env:K8S_ADMIN_DIAGNOSTICS_BINDING"
-        monkeypatch.setenv("K8S_ADMIN_DIAGNOSTICS_BINDING", str(binding))
+        source = "env:CI_SKILLS_BINDING"
+        monkeypatch.setenv("CI_SKILLS_BINDING", str(binding))
 
     code = _invoke(kind, selector)
     evidence = json.loads(capsys.readouterr().out)
@@ -112,7 +113,7 @@ def test_missing_binding_blocks_without_falling_back_to_project_target(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _selection(tmp_path, monkeypatch)
-    monkeypatch.setenv("K8S_ADMIN_DIAGNOSTICS_BINDING", str(tmp_path / "missing.toml"))
+    monkeypatch.setenv("CI_SKILLS_BINDING", str(tmp_path / "missing.toml"))
 
     code = _invoke("action", [])
     evidence = json.loads(capsys.readouterr().out)
@@ -128,7 +129,7 @@ def test_conflicting_environment_selectors_block_without_target_fallback(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     binding = _selection(tmp_path, monkeypatch)
-    monkeypatch.setenv("K8S_ADMIN_DIAGNOSTICS_BINDING", str(binding))
+    monkeypatch.setenv("CI_SKILLS_BINDING", str(binding))
     monkeypatch.setenv(
         "CI_SKILLS_TARGET", str(binding.parent / ".ci-skills" / "target.toml")
     )
@@ -139,3 +140,22 @@ def test_conflicting_environment_selectors_block_without_target_fallback(
     assert code == 2
     assert evidence["status"] == "BLOCKED"
     assert evidence["errors"][0]["reason"] == "environment_selector_conflict"
+
+
+def test_removed_legacy_binding_variable_does_not_select_a_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _selection(tmp_path, monkeypatch)
+    monkeypatch.setenv(
+        "K8S_ADMIN_DIAGNOSTICS_BINDING", str(tmp_path / "missing.toml")
+    )
+
+    code = _invoke("access", [])
+    evidence = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert evidence["status"] == "DRY_RUN"
+    assert evidence["target"]["reference"] == "team/ambient"
+    assert "K8S_ADMIN_DIAGNOSTICS_BINDING" not in evidence["target_source"]

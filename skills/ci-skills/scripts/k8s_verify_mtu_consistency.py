@@ -7,8 +7,15 @@ from core.cli import parser
 from core.mtu_consistency import run
 
 
+# Summary: Define node selection and guarded MTU debug-Pod options.
+# Arguments: none; Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: no process exit; Side effects: constructs a parser in memory.
+# Idempotency: same options each call; Cleanup: none.
 def build_parser() -> argparse.ArgumentParser:
-    """Expose one named operation with explicit temporary-Pod authorization."""
+    """Create the OpenShift physical MTU CLI parser.
+
+    :returns: Shared options plus node, apply, plan, and timeout fields.
+    """
     cli = parser("Compare selected nodes' physical PCI Ethernet IPv4 uplink MTUs.")
     cli.add_argument(
         "--node", metavar="NAME", help="one existing node; default all nodes"
@@ -39,7 +46,17 @@ def build_parser() -> argparse.ArgumentParser:
     return cli
 
 
+# Summary: Plan MTU reads or run confirmed debug Pods with cleanup.
+# Arguments: none; Environment inputs: process CLI and selected Kubernetes target.
+# Stdout: plan or MTU report; Stderr: diagnostics or usage errors.
+# Exit classes: command status or argparse usage error
+# Side effects: node reads and optional debug Pods.
+# Idempotency: plan is read-only and apply verifies cleanup; Cleanup: delegated to MTU runtime.
 def main() -> int:
+    """Run the MTU plan or exact confirmed collection.
+
+    :returns: Exit status from the MTU runtime.
+    """
     return run(build_parser().parse_args())
 
 

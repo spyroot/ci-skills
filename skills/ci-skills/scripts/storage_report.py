@@ -11,8 +11,15 @@ from core.collect import collect_storage
 # compared with the real one without rendering help text: the epilog names
 # several flags as prose, and a text scan cannot tell those apart from the
 # options argparse actually accepts. See tests/test_catalog.py.
+# Summary: Define storage namespace, node, class, phase, and text filters.
+# Arguments: none; Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: no process exit; Side effects: constructs a parser in memory.
+# Idempotency: same options each call; Cleanup: none.
 def build_parser() -> argparse.ArgumentParser:
-    """Return this command's parser: the universal tier plus its own options."""
+    """Create the Kubernetes storage CLI parser.
+
+    :returns: Shared options plus storage inventory filters.
+    """
     cli = parser("Report PVC, PV, node, workload, CSI, and attachment state.")
     cli.add_argument(
         "--namespace",
@@ -32,7 +39,16 @@ def build_parser() -> argparse.ArgumentParser:
     return cli
 
 
+# Summary: Parse a storage request and delegate the correlated cluster reads.
+# Arguments: none; Environment inputs: process CLI and selected Kubernetes target.
+# Stdout: storage report; Stderr: diagnostics or usage errors.
+# Exit classes: command status or argparse usage error; Side effects: cluster inventory reads.
+# Idempotency: report follows current storage state; Cleanup: delegated to runtime.
 def main() -> int:
+    """Run the correlated Kubernetes storage collector.
+
+    :returns: Exit status from the shared collector command.
+    """
     return execute(build_parser().parse_args(), collect_storage)
 
 

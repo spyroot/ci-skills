@@ -21,7 +21,7 @@ the real one is a test failure rather than a surprise at runtime.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Final
 
 SCHEMA_VERSION = "1.0"
 SKILL_NAME = "ci-skills"
@@ -556,6 +556,12 @@ EXIT_CODES = {
     "2": "BLOCKED or PARTIAL, or an input that could not be used",
 }
 
+OUTPUT_MODE_DESCRIPTIONS: Final[tuple[tuple[str, str], ...]] = (
+    ("json", "versioned JSON; default when stdout is a pipe or file"),
+    ("yaml", "versioned YAML selected with --yaml"),
+    ("human", "text summary; default when stdout is a terminal"),
+)
+
 
 # One command's identity is its report kind, not the name it was invoked under.
 COMMAND_BY_KIND: dict[str, str] = {
@@ -563,12 +569,18 @@ COMMAND_BY_KIND: dict[str, str] = {
 }
 
 
+# Summary: Find catalog-required options absent from parsed arguments.
+# Arguments: script selects a command, args holds parsed option values.
+# Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: KeyError for unknown command; Side effects: none.
+# Idempotency: same catalog and args give same list; Cleanup: none.
 def missing_required_options(script: str, args: Any) -> list[str]:
-    """Return the declared required options this invocation did not supply.
+    """Check declared required options after argparse permits ``--describe``.
 
-    `required_options` is published in `tools.json`, so it has to be the thing
-    that is actually enforced. argparse cannot do it: `--describe` must answer
-    with no other argument. Enforcing it from the declaration keeps one rule.
+    :param script: Command filename in the catalog.
+    :param args: Namespace or object with parsed option attributes.
+    :returns: Missing option names in catalog order.
+    :raises KeyError: If the command is not declared.
     """
     missing = []
     for option in COMMANDS[script].get("required_options", ()):
@@ -578,8 +590,17 @@ def missing_required_options(script: str, args: Any) -> list[str]:
     return missing
 
 
+# Summary: Merge universal, capability, and command-specific option definitions.
+# Arguments: script selects a catalog command; Environment inputs: none.
+# Stdout: none; Stderr: none; Exit classes: KeyError for unknown command.
+# Side effects: none; Idempotency: same catalog gives same map; Cleanup: none.
 def options_for(script: str) -> dict[str, str]:
-    """Return every option one command accepts, tier options included."""
+    """Return the complete declared option map for one command.
+
+    :param script: Command filename in the catalog.
+    :returns: Option names mapped to their documented meanings.
+    :raises KeyError: If the command or a capability is undeclared.
+    """
     entry = COMMANDS[script]
     merged = dict(UNIVERSAL_OPTIONS)
     for capability in entry["capabilities"]:
@@ -588,8 +609,52 @@ def options_for(script: str) -> dict[str, str]:
     return merged
 
 
+# Summary: Derive help fields from one existing command declaration.
+# Arguments: script is executable name, entry holds purpose and options.
+# Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: KeyError for incomplete entry; Side effects: none.
+# Idempotency: same entry gives same help fields; Cleanup: none.
+def _help_fields(script: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """Derive caller-facing help from one catalog entry.
+
+    :param script: Executable name exposed by the skill.
+    :param entry: Command or node command declaration.
+    :returns: Summary, description, example, output modes, and usage.
+    :raises KeyError: If purpose or use_when is absent from the entry.
+    """
+    subcommands = entry.get("subcommands", ())
+    action = " {" + "|".join(subcommands) + "}" if subcommands else ""
+    required = " ".join(
+        f"{option} VALUE" for option in entry.get("required_options", ())
+    )
+    usage = f"{script}{action}"
+    if required:
+        usage += f" {required}"
+    return {
+        "summary": entry["purpose"],
+        "description": entry["use_when"],
+        "examples": [
+            {
+                "purpose": "Inspect the machine-readable command contract",
+                "command": f"{script} --describe",
+            }
+        ],
+        "output_modes": dict(OUTPUT_MODE_DESCRIPTIONS),
+        "usage": f"{usage} [options]",
+    }
+
+
+# Summary: Publish one API command's machine-readable contract.
+# Arguments: script selects a catalog command; Environment inputs: none.
+# Stdout: none, returns a mapping; Stderr: none; Exit classes: KeyError for unknown command.
+# Side effects: none; Idempotency: same catalog gives same contract; Cleanup: none.
 def describe(script: str) -> dict[str, Any]:
-    """Return one command's contract, for `--describe`."""
+    """Return one API command's contract for ``--describe``.
+
+    :param script: Command filename in the catalog.
+    :returns: Versioned command, access, option, help, and result contract.
+    :raises KeyError: If the command is not declared.
+    """
     entry = COMMANDS[script]
     return {
         "schema_version": SCHEMA_VERSION,
@@ -599,6 +664,7 @@ def describe(script: str) -> dict[str, Any]:
         "report_kind": entry["kind"],
         "purpose": entry["purpose"],
         "use_when": entry["use_when"],
+        **_help_fields(script, entry),
         "requires_authorities": list(entry["requires"]),
         "access_protocol": {name: ACCESS_PROTOCOL[name] for name in entry["requires"]},
         "capabilities": list(entry["capabilities"]),
@@ -617,8 +683,17 @@ def describe(script: str) -> dict[str, Any]:
     }
 
 
+# Summary: Publish one existing-Pod diagnostic's machine contract.
+# Arguments: script selects a node command; Environment inputs: none.
+# Stdout: none, returns a mapping; Stderr: none; Exit classes: KeyError for unknown command.
+# Side effects: none; Idempotency: same catalog gives same contract; Cleanup: none.
 def describe_node(script: str) -> dict[str, Any]:
-    """Return the contract for a node read through an existing selected Pod."""
+    """Return the command contract for a selected existing-Pod read.
+
+    :param script: Node command filename in the catalog.
+    :returns: Versioned node command, access, option, help, and result contract.
+    :raises KeyError: If the command is not declared.
+    """
     entry = NODE_LOCAL_COMMANDS[script]
     return {
         "schema_version": SCHEMA_VERSION,
@@ -628,6 +703,7 @@ def describe_node(script: str) -> dict[str, Any]:
         "report_kind": entry["kind"],
         "purpose": entry["purpose"],
         "use_when": entry["use_when"],
+        **_help_fields(script, entry),
         "requires_authorities": list(entry["requires"]),
         "execution_surface": "Kubernetes API and one existing Pod on the selected node",
         "required_tools": list(entry["required_tools"]),
@@ -643,8 +719,15 @@ def describe_node(script: str) -> dict[str, Any]:
     }
 
 
+# Summary: Assemble the generated whole-skill command manifest.
+# Arguments: none; Environment inputs: none; Stdout: none, returns a mapping.
+# Stderr: none; Exit classes: no process exit; Side effects: none.
+# Idempotency: same catalog gives same manifest; Cleanup: none.
 def manifest() -> dict[str, Any]:
-    """Return the whole-skill manifest rendered into `tools.json`."""
+    """Build the catalog used to render ``tools.json``.
+
+    :returns: Versioned skill, authority, option, and command declarations.
+    """
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "skill_manifest",

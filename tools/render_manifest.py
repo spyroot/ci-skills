@@ -27,6 +27,10 @@ DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_RELATIVE = Path("skills") / "ci-skills"
 
 
+# Summary: import this checkout's catalog; Arguments: repository root
+# Environment inputs: source tree; Stdout: none; Stderr: none
+# Exit classes: module or missing-file error; Side effects: updates sys.path
+# Idempotency: stable source; Cleanup: none
 def load_catalog(root: Path) -> Any:
     """Import the catalog module from the skill tree, uninstalled."""
     script_root = root / SKILL_RELATIVE / "scripts"
@@ -39,12 +43,20 @@ def load_catalog(root: Path) -> Any:
     return catalog
 
 
+# Summary: serialize catalog manifest; Arguments: repository root
+# Environment inputs: source catalog; Stdout: none; Stderr: none
+# Exit classes: JSON text or import error; Side effects: imports catalog
+# Idempotency: stable catalog; Cleanup: none
 def render(root: Path) -> str:
     """Return the manifest exactly as it is written, newline included."""
     manifest = load_catalog(root).manifest()
     return json.dumps(manifest, indent=2, sort_keys=True) + "\n"
 
 
+# Summary: check or regenerate tools.json; Arguments: optional CLI argv
+# Environment inputs: catalog and manifest; Stdout: status; Stderr: parser errors
+# Exit classes: 0 current/written, 2 stale; Side effects: write unless --check
+# Idempotency: repeated render converges; Cleanup: file handles close
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)

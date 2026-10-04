@@ -125,7 +125,8 @@ one once; many clusters mean the environment variable or a per-project file.
 The common case takes no arguments at all. Output needs no flag either: a
 terminal gets the human summary, a pipe or file gets versioned JSON.
 
-`--binding PATH` or `K8S_ADMIN_DIAGNOSTICS_BINDING` names a project target and
+`--binding PATH` or `CI_SKILLS_BINDING`, defined in
+`scripts/core/project_binding.py`, names a project target and
 ordered file, environment, or command sources for its kubeconfig. The receipt
 records the selected source; see the binding protocol before using it.
 

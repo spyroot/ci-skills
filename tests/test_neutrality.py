@@ -73,3 +73,30 @@ def test_neutrality_checker_source_does_not_store_marker_literal():
     source = NEUTRALITY_TOOL.read_text(encoding="utf-8").casefold()
 
     assert forbidden_project_term() not in source
+
+
+def test_published_docs_reject_removed_skill_and_binding_names(tmp_path):
+    root = tmp_path / "repo"
+    _init_repo(root)
+    references = root / "skills" / "ci-skills" / "references"
+    references.mkdir(parents=True)
+    (root / "README.md").write_text(
+        "K8S_ADMIN_" + "DIAGNOSTICS_BINDING was the old selector.\n",
+        encoding="utf-8",
+    )
+    (references / "overview.md").write_text(
+        "Old package: k8s-admin-" + "diagnostics.\n", encoding="utf-8"
+    )
+    (root / "tests.txt").write_text(
+        "A negative compatibility fixture may name k8s-admin-" + "diagnostics.\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+
+    result = _run_neutrality(root, "--json")
+    data = json.loads(result.stdout)
+
+    assert result.returncode == 1
+    assert "README.md:legacy-name" in data["violations"]
+    assert "skills/ci-skills/references/overview.md:legacy-name" in data["violations"]
+    assert "tests.txt:legacy-name" not in data["violations"]

@@ -48,7 +48,7 @@ def test_the_live_acceptance_step_is_unconditional_and_may_not_fail():
     ]
     assert len(matching) == 1, "exactly one acceptance step must run the tool"
     step = matching[0]
-    assert "if" not in step, "the acceptance step must not be conditional"
+    assert step.get("if") == "${{ always() }}", "acceptance must run after failure"
     assert step.get("continue-on-error") in (None, False)
     assert "|| true" not in str(step.get("run"))
 
@@ -66,5 +66,5 @@ def test_pinned_standards_and_delivery_route_are_in_required_validate():
     ):
         matches = [step for step in steps if command in str(step.get("run", ""))]
         assert len(matches) == 1
-        assert "if" not in matches[0]
+        assert matches[0].get("if") == "${{ always() }}"
         assert matches[0].get("continue-on-error") in (None, False)

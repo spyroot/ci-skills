@@ -21,8 +21,15 @@ from core.status import DRY_RUN, exit_code
 from core.target import TargetError, select_gitlab_reference
 
 
+# Summary: Define the GitLab access command and its target selectors.
+# Arguments: none; Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: no process exit; Side effects: constructs a parser in memory.
+# Idempotency: same parser definition on each call; Cleanup: none.
 def build_parser() -> argparse.ArgumentParser:
-    """Expose the universal tier and one exact GitLab target selector."""
+    """Create the GitLab access CLI parser.
+
+    :returns: Parser with one check action and project or group selection.
+    """
     cli = parser(
         "Check one GitLab identity and exact project or group for operations.",
         kind="gitlab_access",
@@ -43,10 +50,22 @@ def build_parser() -> argparse.ArgumentParser:
     return cli
 
 
+# Summary: Describe the selected GitLab target without using credentials.
+# Arguments: target_file/source identify configuration, kind/reference select resource.
+# Environment inputs: clock and local host name; Stdout: none; Stderr: none.
+# Exit classes: no process exit; Side effects: reads clock and host name.
+# Idempotency: target intent is stable but capture time changes; Cleanup: none.
 def _dry_run(
     *, target_file: str, target_source: str, target_kind: str, reference: str
 ) -> dict[str, Any]:
-    """Describe intent without loading any credential or contacting GitLab."""
+    """Build a GitLab access plan without a provider call.
+
+    :param target_file: Selected target file path for the report.
+    :param target_source: Configuration tier that selected the file.
+    :param target_kind: Project or group target kind.
+    :param reference: Exact path or numeric ID requested.
+    :returns: DRY_RUN report with no identity or credential claim.
+    """
     return {
         "schema_version": "1.0",
         "kind": "gitlab_access",
@@ -64,7 +83,18 @@ def _dry_run(
     }
 
 
+# Summary: Run the selected GitLab access check and emit its report.
+# Arguments: argv optionally supplies CLI arguments; Environment inputs: selected target and auth.
+# Stdout: report or description; Stderr: diagnostic log and usage errors.
+# Exit classes: success or classified blocked/usage status
+# Side effects: live GET and optional report files.
+# Idempotency: reads current target state; Cleanup: delegated output and API helpers.
 def main(argv: list[str] | None = None) -> int:
+    """Resolve one target, read its GitLab identity, and report the result.
+
+    :param argv: Optional arguments, or process arguments when omitted.
+    :returns: Exit code from the result status or a classified failure.
+    """
     started = time.monotonic()
     args = build_parser().parse_args(argv)
     if args.describe:

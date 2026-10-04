@@ -50,6 +50,10 @@ RECOVERY = {
 }
 
 
+# Summary: locate the Codex skill directory; Arguments: none
+# Environment inputs: CODEX_HOME or user home; Stdout: none; Stderr: none
+# Exit classes: Path result; Side effects: none
+# Idempotency: same environment gives same path; Cleanup: none
 def skills_directory() -> Path:
     """Resolve the user's configured Codex home at invocation time."""
     codex_home = os.environ.get("CODEX_HOME")
@@ -58,6 +62,10 @@ def skills_directory() -> Path:
     ) / "skills"
 
 
+# Summary: bind an install plan to source and destination; Arguments: plan
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: digest or missing-key error; Side effects: none
+# Idempotency: same plan gives same digest; Cleanup: none
 def plan_fingerprint(plan: dict[str, Any]) -> str:
     """Bind a confirmed install to its source bytes, revision and destination."""
     revision = plan["revision"].get("value") or ""
@@ -65,11 +73,19 @@ def plan_fingerprint(plan: dict[str, Any]) -> str:
     return hashlib.sha256("\0".join(values).encode()).hexdigest()
 
 
+# Summary: detect an existing path or broken link; Arguments: path
+# Environment inputs: filesystem metadata; Stdout: none; Stderr: none
+# Exit classes: boolean or filesystem error; Side effects: read-only stat
+# Idempotency: same path state gives same result; Cleanup: none
 def _present(path: Path) -> bool:
     """Include broken links when deciding whether an install path is occupied."""
     return path.is_symlink() or path.exists()
 
 
+# Summary: identify one installed directory or link; Arguments: path
+# Environment inputs: filesystem entry; Stdout: none; Stderr: none
+# Exit classes: digest or read error; Side effects: read-only scan
+# Idempotency: same bytes give same digest; Cleanup: none
 def _entry_digest(path: Path) -> str:
     """Identify a directory or preserved link without traversing link targets."""
     if path.is_symlink():
@@ -77,6 +93,11 @@ def _entry_digest(path: Path) -> str:
     return tree_digest(path)["digest"]
 
 
+# Summary: select installable source files; Arguments: source root
+# Environment inputs: source tree; Stdout: none; Stderr: none
+# Exit classes: file list or ValueError on missing manifest/link
+# Side effects: read-only scan; Idempotency: same tree gives same files
+# Cleanup: none
 def package_files(source: Path) -> list[Path]:
     """Select installable files and refuse links to paths outside the skill."""
     if not (source / "SKILL.md").is_file():
@@ -87,10 +108,19 @@ def package_files(source: Path) -> list[Path]:
     return [path.relative_to(source) for path in _included(source)]
 
 
+# Summary: name the recovery journal; Arguments: skills directory
+# Environment inputs: none; Stdout: none; Stderr: none
+# Exit classes: Path result; Side effects: none
+# Idempotency: same directory gives same path; Cleanup: none
 def _journal_path(skills_dir: Path) -> Path:
     return skills_dir / JOURNAL_NAME
 
 
+# Summary: serialize an install decision; Arguments: directory and deadline
+# Environment inputs: lock path and clock; Stdout: none; Stderr: none
+# Exit classes: context or lock/permission/timeout error
+# Side effects: creates lock file; Idempotency: serializes repeat calls
+# Cleanup: releases lock and closes descriptor on every exit
 @contextmanager
 def _mutation_lock(skills_dir: Path, *, deadline: float | None = None):
     """Serialize destination inspection and mutation across local processes."""
@@ -124,6 +154,10 @@ def _mutation_lock(skills_dir: Path, *, deadline: float | None = None):
         os.close(descriptor)
 
 
+# Summary: publish an install recovery journal; Arguments: directory and data
+# Environment inputs: filesystem; Stdout: none; Stderr: none
+# Exit classes: returns or filesystem error; Side effects: writes journal
+# Idempotency: existing journal link is refused; Cleanup: removes temp file
 def _write_journal(skills_dir: Path, data: dict[str, Any]) -> None:
     """Publish a complete transaction atomically before moving the old skill."""
     descriptor, name = tempfile.mkstemp(
@@ -140,6 +174,11 @@ def _write_journal(skills_dir: Path, data: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+# Summary: convert interrupt signals during install; Arguments: none
+# Environment inputs: process signal handlers; Stdout: none; Stderr: none
+# Exit classes: context or SystemExit on interrupt
+# Side effects: swaps handlers; Idempotency: previous handlers restored
+# Cleanup: restores handlers on every exit
 @contextmanager
 def _recoverable_signals():
     """Turn process interrupts into exceptions while an install can recover."""
@@ -162,6 +201,11 @@ def _recoverable_signals():
             signal.signal(signum, handler)
 
 
+# Summary: validate a saved install transaction; Arguments: skills directory
+# Environment inputs: recovery journal; Stdout: none; Stderr: none
+# Exit classes: parsed state or ValueError/filesystem error
+# Side effects: read-only file access; Idempotency: same journal gives same state
+# Cleanup: closes journal read
 def _read_journal(skills_dir: Path) -> tuple[dict[str, Any], Path, Path]:
     journal = _journal_path(skills_dir)
     metadata = journal.lstat()
@@ -195,6 +239,11 @@ def _read_journal(skills_dir: Path) -> tuple[dict[str, Any], Path, Path]:
     return data, staging, previous
 
 
+# Summary: reconcile a verified interrupted install; Arguments: root, mode, deadline
+# Environment inputs: journal and install paths; Stdout: none; Stderr: none
+# Exit classes: DRY_RUN, PASS, BLOCKED, or propagated interrupt
+# Side effects: apply may rename and delete staged paths and journal
+# Idempotency: repeats inspect current state; Cleanup: removes known staging
 def _recover_install_unlocked(
     skills_dir: Path, *, dry_run: bool, deadline: float | None = None
 ) -> dict[str, Any]:
@@ -263,6 +312,11 @@ def _recover_install_unlocked(
     return result
 
 
+# Summary: recover under the install lock; Arguments: root, mode, deadline
+# Environment inputs: installed tree and journal; Stdout: none; Stderr: none
+# Exit classes: DRY_RUN, PASS, BLOCKED, or propagated interrupt
+# Side effects: apply may change install paths; Idempotency: state is rechecked
+# Cleanup: lock is released on every exit
 def recover_install(
     skills_dir: Path, *, dry_run: bool, deadline: float | None = None
 ) -> dict[str, Any]:
@@ -286,6 +340,12 @@ def recover_install(
         }
 
 
+# Summary: plan or apply one verified skill install; Arguments: source and options
+# Environment inputs: source, destination, Git revision, clock
+# Stdout: none; Stderr: none
+# Exit classes: DRY_RUN, PASS, BLOCKED, or propagated interrupt
+# Side effects: apply stages and renames skill tree; Idempotency: same upgrade is no-op
+# Cleanup: recovery reconciles an interrupted mutation
 def _install_unlocked(
     source: Path,
     skills_dir: Path,
@@ -408,6 +468,11 @@ def _install_unlocked(
     return result
 
 
+# Summary: execute a skill install with serialization; Arguments: source and options
+# Environment inputs: source and destination trees; Stdout: none; Stderr: none
+# Exit classes: DRY_RUN, PASS, BLOCKED, or propagated interrupt
+# Side effects: apply may replace installed tree; Idempotency: state is rechecked
+# Cleanup: lock releases; interrupted mutation uses recovery journal
 def install(
     source: Path,
     skills_dir: Path,
@@ -450,6 +515,12 @@ def install(
         }
 
 
+# Summary: expose planned and confirmed skill installation; Arguments: CLI argv
+# Environment inputs: source checkout, destination, CODEX_HOME, clock
+# Stdout: selected report format; Stderr: errors or selected log format
+# Exit classes: 0 on PASS/DRY_RUN, 2 on BLOCKED, usage error from argparse
+# Side effects: apply installs, optional logging writes; Idempotency: plan is stable
+# Cleanup: installer journal recovery handles interrupted applies
 def main() -> int:
     started = time.monotonic()
     parser = argparse.ArgumentParser(

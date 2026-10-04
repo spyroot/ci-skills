@@ -10,8 +10,37 @@ import subprocess
 from pathlib import Path
 
 
+# Summary: recognize published skill documentation; Arguments: relative path
+# Environment inputs: none; Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: stable path; Cleanup: none
+def _published_skill_doc(relative: str) -> bool:
+    """Select public entrypoint and reference Markdown for naming checks.
+
+    :param relative: Repository-relative file path.
+    :returns: Whether this path is published skill documentation.
+    """
+    return relative in {"README.md", "skills/ci-skills/SKILL.md"} or (
+        relative.startswith("skills/ci-skills/references/")
+        and relative.endswith(".md")
+    )
+
+
+# Summary: find prohibited marker in repository paths and bytes; Arguments: root
+# Environment inputs: Git index and worktree; Stdout: none; Stderr: none
+# Exit classes: result map or scan error; Side effects: read-only
+# Idempotency: stable checkout; Cleanup: Git child exits
 def scan(root: Path) -> dict[str, object]:
+    """Inspect tracked and pending bytes for prohibited public identifiers.
+
+    :param root: Repository checkout whose public files are inspected.
+    :returns: Scan status, file count, and exact violation locations.
+    :raises RuntimeError: Git inventory or a file read fails.
+    """
     marker = (b"GALI" + b"LEO").lower()
+    legacy_names = (
+        (b"k8s-admin-" + b"diagnostics").lower(),
+        (b"K8S_ADMIN_" + b"DIAGNOSTICS_BINDING").lower(),
+    )
     result = subprocess.run(
         [
             "git",
@@ -48,6 +77,11 @@ def scan(root: Path) -> dict[str, object]:
             raise RuntimeError(f"cannot scan {relative}") from exc
         if marker in content.lower():
             violations.append(relative + ":content")
+        if _published_skill_doc(relative) and any(
+            legacy in raw.lower() or legacy in content.lower()
+            for legacy in legacy_names
+        ):
+            violations.append(relative + ":legacy-name")
     return {
         "schema_version": "1.0",
         "kind": "project_neutrality",
@@ -57,6 +91,10 @@ def scan(root: Path) -> dict[str, object]:
     }
 
 
+# Summary: report neutrality scan; Arguments: CLI argv
+# Environment inputs: repository tree; Stdout: selected format; Stderr: errors
+# Exit classes: 0 pass, 1 finding, 2 blocked; Side effects: read-only
+# Idempotency: stable checkout; Cleanup: file and process handles close
 def main() -> int:
     cli = argparse.ArgumentParser(
         description="Scan every tracked and pending repository file, including dotfiles.",

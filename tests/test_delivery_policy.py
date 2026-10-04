@@ -68,3 +68,33 @@ def test_required_step_cannot_be_conditional(tmp_path):
         encoding="utf-8",
     )
     assert "required_step_may_be_skipped" in POLICY.check(root)
+
+
+def test_always_runs_required_step_after_prior_failure(tmp_path):
+    root = _repository(tmp_path)
+    workflow = root / ".github" / "workflows" / "validate.yml"
+    workflow.write_text(
+        "name: validate\non:\n  pull_request:\n  push:\n    branches: [main]\njobs:\n"
+        "  validate:\n    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - run: echo required\n        if: ${{ always() }}\n",
+        encoding="utf-8",
+    )
+    assert POLICY.check(root) == []
+
+
+def test_private_standards_checkout_requires_both_preflights(tmp_path):
+    root = _repository(tmp_path)
+    workflow = root / ".github" / "workflows" / "validate.yml"
+    workflow.write_text(
+        "name: validate\non:\n  pull_request:\n  push:\n    branches: [main]\njobs:\n"
+        "  validate:\n    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - uses: actions/checkout@v4\n"
+        "        if: always()\n"
+        "        with:\n          repository: spyroot/standards\n",
+        encoding="utf-8",
+    )
+    assert "standards_checkout_guard_invalid" in POLICY.check(root)

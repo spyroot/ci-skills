@@ -75,6 +75,10 @@ _URL_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+:[^\s/@]+@")
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
+# Summary: remove known secret forms and terminal escapes from text
+# Arguments: source text; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: redacted string
+# Side effects: none; Idempotency: same text gives same result; Cleanup: none
 def redact(value: str) -> str:
     """Remove credential forms from text, with no length bound.
 
@@ -99,6 +103,10 @@ def is_secret_name(name: str) -> bool:
     return bool(_SECRET_NAME.match(name))
 
 
+# Summary: redact strings and secret-key values throughout nested data
+# Arguments: nested value; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: redacted value
+# Side effects: none; Idempotency: same value gives same result; Cleanup: none
 def redact_tree(value: Any) -> Any:
     """Redact every string in a nested structure, keys included.
 
@@ -125,6 +133,11 @@ def sanitize(value: str, limit: int = 1000) -> str:
     return redact(value)[:limit]
 
 
+# Summary: run a noninteractive child with captured output and timeout
+# Arguments: argv, timeout, environment overrides; Environment inputs: process env
+# Stdout: none; Stderr: none; Exit classes: CommandResult or subprocess error
+# Side effects: executes caller command; Idempotency: depends on command
+# Cleanup: subprocess.run waits or times out
 def run_command(
     argv: Sequence[str],
     *,
@@ -151,6 +164,11 @@ def run_command(
     return CommandResult(command, result.returncode, result.stdout, result.stderr)
 
 
+# Summary: stream a child JSON response under byte and time limits
+# Arguments: argv, timeout, env, stdout limit; Environment inputs: process env
+# Stdout: none; Stderr: none; Exit classes: CommandResult or ValueError
+# Side effects: executes caller command; Idempotency: depends on command
+# Cleanup: kills or waits for child and closes pipes
 def run_command_bounded(
     argv: Sequence[str],
     *,
@@ -232,6 +250,10 @@ def run_command_bounded(
     )
 
 
+# Summary: build noninteractive child environment with explicit overrides
+# Arguments: optional overrides; Environment inputs: parent process environment
+# Stdout: none; Stderr: none; Exit classes: environment mapping
+# Side effects: none; Idempotency: same environment gives same map; Cleanup: none
 def _environment(overrides: dict[str, str | None] | None) -> dict[str, str]:
     environment = os.environ.copy()
     environment.update(
@@ -250,6 +272,11 @@ def _environment(overrides: dict[str, str | None] | None) -> dict[str, str]:
     return environment
 
 
+# Summary: stream a child while retaining bounded stdout and stderr tails
+# Arguments: argv, timeout, output bounds, env, cwd; Environment inputs: process env
+# Stdout: none; Stderr: none; Exit classes: CommandResult or ValueError
+# Side effects: executes caller command; Idempotency: depends on command
+# Cleanup: on normal or timed path, selector closes and child is waited
 def run_command_tail(
     argv: Sequence[str],
     *,
@@ -321,6 +348,10 @@ def run_command_tail(
     )
 
 
+# Summary: classify command failure without exposing raw stderr
+# Arguments: command result; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: safe failure class
+# Side effects: none; Idempotency: same result gives same class; Cleanup: none
 def error_class(result: CommandResult) -> str:
     """Classify an external command without emitting its raw stderr."""
     if result.returncode == 127:

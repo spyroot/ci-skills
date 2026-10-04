@@ -11,6 +11,7 @@ from typing import Any
 
 from .access import access_evidence, check_access
 from .catalog import NODE_LOCAL_COMMANDS, describe_node
+from .cli import MachineArgumentParser
 from .credentials import bind_sources
 from .node_local import (
     CEPH_CLASSIFICATIONS,
@@ -26,16 +27,41 @@ from .status import BLOCKED, DRY_RUN, PASS, exit_code
 from .target import TargetError
 
 
-class NodeParser(argparse.ArgumentParser):
+class NodeParser(MachineArgumentParser):
     """Keep controlled argument failures in the requested output format."""
 
     requested: list[str]
 
-    def parse_args(self, args=None, namespace=None):
+    # Summary: Record requested node flags before shared argparse validation.
+    # Arguments: args overrides process argv, namespace receives parsed values.
+    # Environment inputs: process argv when args is absent; Stdout: none; Stderr: usage on error.
+    # Exit classes: argparse usage exit; Side effects: updates parser request snapshot.
+    # Idempotency: same argv yields same parse; Cleanup: none.
+    def parse_args(
+        self,
+        args: list[str] | None = None,
+        namespace: argparse.Namespace | None = None,
+    ) -> argparse.Namespace:
+        """Parse node command arguments and retain output-mode intent.
+
+        :param args: Optional explicit argument vector.
+        :param namespace: Optional namespace populated by argparse.
+        :returns: Parsed argument namespace.
+        :raises SystemExit: If an argument or value is invalid.
+        """
         self.requested = list(sys.argv[1:] if args is None else args)
         return super().parse_args(args, namespace)
 
+    # Summary: Emit a node usage failure in the requested output mode.
+    # Arguments: message is argparse validation detail; Environment inputs: clock and host.
+    # Stdout: structured failure; Stderr: none; Exit classes: SystemExit 2.
+    # Side effects: writes result to stdout; Idempotency: timestamp changes; Cleanup: none.
     def error(self, message: str) -> None:
+        """Report invalid node arguments with a machine-readable result.
+
+        :param message: Argparse validation detail.
+        :raises SystemExit: Always exits with status 2 after reporting.
+        """
         data = {
             "schema_version": "1.0",
             "kind": self.prog.removesuffix(".py"),
@@ -64,14 +90,24 @@ class NodeParser(argparse.ArgumentParser):
         raise SystemExit(2)
 
 
+# Summary: Build shared target and output options for one node diagnostic.
+# Arguments: kind selects Cilium or Ceph kernel options; Environment inputs: none.
+# Stdout: none; Stderr: none; Exit classes: no process exit.
+# Side effects: constructs parser in memory.
+# Idempotency: same kind gives same options; Cleanup: none.
 def parser(kind: str) -> argparse.ArgumentParser:
+    """Create the node-local CLI parser.
+
+    :param kind: Diagnostic kind selecting optional classification filter.
+    :returns: Parser with target, output, dry-run, and node filters.
+    """
     result = NodeParser(
         prog=f"{kind}.py",
         description=f"Collect {kind} evidence through a selected Kubernetes target. Audience: human and agent.",
         epilog=(
             "Target order: --target or --binding, CI_SKILLS_TARGET or "
-            "K8S_ADMIN_DIAGNOSTICS_BINDING, ./.ci-skills/target.toml, "
-            "~/.ci-skills/target.toml. Example: %(prog)s --json"
+            "CI_SKILLS_BINDING, ./.ci-skills/target.toml, "
+            "~/.ci-skills/target.toml."
         ),
     )
     selection = result.add_mutually_exclusive_group()
@@ -110,16 +146,38 @@ def parser(kind: str) -> argparse.ArgumentParser:
     return result
 
 
+# Summary: Match a case-folded query against one serialized node record.
+# Arguments: record is a report row, search is optional text; Environment inputs: none.
+# Stdout: none; Stderr: none; Exit classes: no process exit; Side effects: none.
+# Idempotency: same row and query give same result; Cleanup: none.
 def _matches_search(record: dict[str, Any], search: str | None) -> bool:
+    """Check whether a node record contains the requested text.
+
+    :param record: Structured Cilium or Ceph kernel row.
+    :param search: Optional case-insensitive query.
+    :returns: True when no query is set or the serialized row contains it.
+    """
     return (
         not search
         or search.casefold() in json.dumps(record, ensure_ascii=False).casefold()
     )
 
 
+# Summary: Filter node records and update the report count and actions.
+# Arguments: data is mutable report; search and classification narrow records.
+# Environment inputs: none; Stdout: none; Stderr: none; Exit classes: no process exit.
+# Side effects: mutates data mapping; Idempotency: repeating same filters leaves same rows.
+# Cleanup: none.
 def _apply_filters(
     data: dict[str, Any], *, search: str | None, classification: str | None
 ) -> dict[str, Any]:
+    """Apply local filters after live evidence has been collected.
+
+    :param data: Mutable report containing records and summary.
+    :param search: Optional case-insensitive text filter.
+    :param classification: Optional Ceph kernel classification filter.
+    :returns: The same report mapping with filtered records and counts.
+    """
     if not search and not classification:
         return data
     filters = data.setdefault("filters", {})
@@ -148,8 +206,21 @@ def _apply_filters(
     return data
 
 
+# Summary: Resolve a selected node and run its existing-Pod diagnostic.
+# Arguments: kind selects Cilium or Ceph, args supplies target and output options.
+# Environment inputs: selected Kubernetes target, credentials, clock, and hostname.
+# Stdout: plan, live report, or command contract; Stderr: usage diagnostics.
+# Exit classes: 0 for PASS/DRY_RUN, 2 for BLOCKED/PARTIAL, ValueError for bad kind.
+# Side effects: Kubernetes reads and existing-Pod exec; Idempotency: follows live node state.
+# Cleanup: no Pod is created, reader owns bounded subprocesses.
 def run(kind: str, args: argparse.Namespace) -> int:
-    """Return structured evidence and a stable exit status for each mode."""
+    """Run one node diagnostic and print its classified report.
+
+    :param kind: ``cilium_node`` or ``ceph_kernel``.
+    :param args: Parsed target, mode, and filter options.
+    :returns: Status code from the structured report.
+    :raises ValueError: If the diagnostic kind is unsupported.
+    """
     if kind not in {"cilium_node", "ceph_kernel"}:
         raise ValueError("unsupported_node_diagnostic")
     if getattr(args, "describe", False):

@@ -10,8 +10,15 @@ from core.cli import execute, parser
 # compared with the real one without rendering help text: the epilog names
 # several flags as prose, and a text scan cannot tell those apart from the
 # options argparse actually accepts. See tests/test_catalog.py.
+# Summary: Define publication, job, Ceph, and receipt options on the shared CLI.
+# Arguments: none; Environment inputs: none; Stdout: none; Stderr: none.
+# Exit classes: no process exit; Side effects: constructs a parser in memory.
+# Idempotency: same options each call; Cleanup: none.
 def build_parser() -> argparse.ArgumentParser:
-    """Return this command's parser: the universal tier plus its own options."""
+    """Create the three-authority access CLI parser.
+
+    :returns: Shared options and optional publication and live check selectors.
+    """
     cli = parser(
         "Check every selected authority; dry run never counts as access.",
     )
@@ -38,7 +45,17 @@ def build_parser() -> argparse.ArgumentParser:
     return cli
 
 
+# Summary: Parse the access request and run the shared live receipt path.
+# Arguments: none; Environment inputs: CLI, selected target, and credentials.
+# Stdout: access report; Stderr: diagnostics or usage errors.
+# Exit classes: command status or argparse usage error
+# Side effects: live API reads and optional receipt file.
+# Idempotency: report follows current authority state; Cleanup: delegated to runtime.
 def main() -> int:
+    """Run the requested GitHub, GitLab, and Kubernetes access checks.
+
+    :returns: Exit status from the shared access command.
+    """
     return execute(build_parser().parse_args(), live_checks=True)
 
 

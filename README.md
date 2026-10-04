@@ -173,8 +173,9 @@ first one found wins, and every command reports which it used as
 | 4 | one user | `~/.ci-skills/target.toml` | you |
 
 Pick the tier that matches how many targets you have.
-`K8S_ADMIN_DIAGNOSTICS_BINDING` also selects a project binding at the
-environment tier. Setting it together with `CI_SKILLS_TARGET` is an error;
+`CI_SKILLS_BINDING`, defined by `skills/ci-skills/scripts/core/project_binding.py`,
+also selects a project binding at the environment tier. Setting it together
+with `CI_SKILLS_TARGET` is an error;
 the resolver will not guess between them.
 
 **One GitLab and one cluster** — put the file at tier 4 once and never pass an
