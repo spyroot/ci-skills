@@ -93,15 +93,24 @@ STUB
     whitespace bash-n:check.sh shellcheck shfmt yaml markdown secrets unit)" ]
 }
 
-@test 'named yaml gate requires only base and yaml tools' {
-  CI_CHECK_CALLS="${BATS_TEST_TMPDIR}/tools"
-  export CI_CHECK_CALLS
+@test 'named yaml gate does not require unrelated gate tools' {
   ci_check_tool_present() {
-    printf '%s\n' "$1" >>"$CI_CHECK_CALLS"
+    case $1 in
+    bash | git | jq | yamllint) return 0 ;;
+    *) return 1 ;;
+    esac
   }
   run ci_check_tools yaml
   [ "$status" -eq 0 ]
-  [ "$(cat "$CI_CHECK_CALLS")" = "$(printf '%s\n' bash git jq yamllint)" ]
+}
+
+@test 'named yaml gate requires yamllint' {
+  ci_check_tool_present() {
+    [ "$1" != yamllint ]
+  }
+  run ci_check_tools yaml
+  [ "$status" -eq 69 ]
+  [[ "$output" == *'required check tool is missing: yamllint'* ]]
 }
 
 @test 'named yaml gate runs only its selected command' {
