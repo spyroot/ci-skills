@@ -18,7 +18,7 @@ from pathlib import Path
 from conftest import REPO_ROOT
 
 TOOL = REPO_ROOT / "tools" / "render_manifest.py"
-MANIFEST = Path("skills") / "k8s-admin-diagnostics" / "tools.json"
+MANIFEST = Path("skills") / "ci-skills" / "tools.json"
 
 
 def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -36,8 +36,8 @@ def _copy_repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     (root / MANIFEST.parent).mkdir(parents=True)
     shutil.copytree(
-        REPO_ROOT / "skills" / "k8s-admin-diagnostics" / "scripts",
-        root / "skills" / "k8s-admin-diagnostics" / "scripts",
+        REPO_ROOT / "skills" / "ci-skills" / "scripts",
+        root / "skills" / "ci-skills" / "scripts",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
     shutil.copy2(REPO_ROOT / MANIFEST, root / MANIFEST)

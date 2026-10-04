@@ -11,6 +11,8 @@ survive, or the receipt is blinded.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from conftest import import_script_module
@@ -97,6 +99,18 @@ def test_a_private_key_block_spanning_lines_is_redacted():
     assert SECRET not in _runtime().redact(f"before\n{block}\nafter")
 
 
+def test_url_userinfo_and_terminal_controls_are_removed():
+    """A trace URL can carry a credential without a token-named field."""
+    value = "callback=https://unit-user:unit-secret@gitlab.example.test/path \x1b[31mred\x1b[0m"
+
+    result = _runtime().redact(value)
+
+    assert "unit-secret" not in result
+    assert "unit-user" not in result
+    assert "https://[REDACTED]@gitlab.example.test/path" in result
+    assert "\x1b" not in result
+
+
 def test_redact_does_not_truncate_but_sanitize_does():
     """A whole report must be redactable without a 1000-character bound."""
     runtime = _runtime()
@@ -168,8 +182,11 @@ def test_every_output_path_redacts(tmp_path, mode):
     rendered = report.emit(data, mode, str(tmp_path))
 
     assert SECRET not in rendered
-    assert SECRET not in (tmp_path / "gitlab_job.json").read_text(encoding="utf-8")
-    assert SECRET not in (tmp_path / "gitlab_job.txt").read_text(encoding="utf-8")
+    run_directory = next(tmp_path.iterdir())
+    assert str(run_directory / "gitlab_job.json") in rendered
+    assert str(run_directory / "gitlab_job.txt") in rendered
+    assert SECRET not in (run_directory / "gitlab_job.json").read_text(encoding="utf-8")
+    assert SECRET not in (run_directory / "gitlab_job.txt").read_text(encoding="utf-8")
 
 
 def test_emit_leaves_no_partial_file_behind(tmp_path):
@@ -186,12 +203,81 @@ def test_emit_leaves_no_partial_file_behind(tmp_path):
         "summary": {"record_count": 0, "error_count": 0},
     }
 
-    report.emit(data, "json", str(tmp_path))
+    returned = json.loads(report.emit(data, "json", str(tmp_path)))
+    files = returned["report_files"]
+    assert (
+        Path(files["json"]).read_text(encoding="utf-8")
+        == json.dumps(returned, indent=2, sort_keys=True) + "\n"
+    )
+    assert "Report JSON: " + files["json"] in Path(files["text"]).read_text(
+        encoding="utf-8"
+    )
+    assert Path(files["json"]).parent == Path(files["text"]).parent
+    assert list(tmp_path.iterdir()) == [Path(files["json"]).parent]
 
-    assert sorted(item.name for item in tmp_path.iterdir()) == [
-        "storage_report.json",
-        "storage_report.txt",
-    ]
+
+def test_concurrent_same_kind_reports_publish_distinct_matching_pairs(tmp_path):
+    """Concurrent collectors cannot replace another run's JSON or text."""
+    report = import_script_module("core.report")
+
+    def emit_one(index):
+        data = {
+            "schema_version": "1.0",
+            "kind": "storage_report",
+            "status": "PASS",
+            "target": "unit",
+            "filters": {},
+            "records": [{"name": f"claim-{index}"}],
+            "errors": [],
+            "summary": {"record_count": 1, "error_count": 0},
+        }
+        return json.loads(report.emit(data, "json", str(tmp_path)))
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        returned = list(pool.map(emit_one, range(20)))
+
+    run_directories = {Path(item["report_files"]["json"]).parent for item in returned}
+    assert len(run_directories) == 20
+    assert set(tmp_path.iterdir()) == run_directories
+    for index, item in enumerate(returned):
+        files = item["report_files"]
+        persisted = json.loads(Path(files["json"]).read_text(encoding="utf-8"))
+        text = Path(files["text"]).read_text(encoding="utf-8")
+        assert persisted == item
+        assert persisted["records"][0]["name"] == f"claim-{index}"
+        assert f"claim-{index}" in text
+        assert files["json"] in text
+        assert files["text"] in text
+        assert sorted(path.name for path in Path(files["json"]).parent.iterdir()) == [
+            "storage_report.json",
+            "storage_report.txt",
+        ]
+
+
+def test_failed_pair_write_does_not_publish_partial_report(tmp_path, monkeypatch):
+    """A failed text write leaves no visible run directory or partial file."""
+    report = import_script_module("core.report")
+    original_write_text = Path.write_text
+
+    def fail_text(path, content, *args, **kwargs):
+        if path.name == "storage_report.txt":
+            raise OSError("unit text failure")
+        return original_write_text(path, content, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_text)
+    with pytest.raises(OSError, match="unit text failure"):
+        report.emit(
+            {
+                "kind": "storage_report",
+                "status": "PASS",
+                "target": "unit",
+                "records": [],
+                "errors": [],
+            },
+            "json",
+            str(tmp_path),
+        )
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize(

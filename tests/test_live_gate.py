@@ -152,6 +152,61 @@ def test_the_receipt_records_which_checks_blocked(monkeypatch):
     assert receipt["live_checks"]["storage_report"]["access_proven"] is True
 
 
+def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(monkeypatch):
+    live, status = _live()
+    monkeypatch.setattr(
+        live,
+        "collect_storage",
+        lambda *_a: {
+            "kind": "storage_report",
+            "status": status.PASS,
+            "records": [],
+            "errors": [],
+        },
+    )
+    monkeypatch.setattr(
+        live,
+        "collect_events",
+        lambda *_a: {
+            "kind": "event_trace",
+            "status": status.PASS,
+            "records": [],
+            "errors": [],
+        },
+    )
+    monkeypatch.setattr(
+        live,
+        "collect_cilium",
+        lambda *_a: {
+            "kind": "cilium_status",
+            "status": status.PASS,
+            "records": [],
+            "errors": [],
+        },
+    )
+    selected = []
+
+    def fake_ceph(_target, options):
+        selected.append(options.namespace)
+        return {
+            "kind": "ceph_cluster",
+            "status": status.PARTIAL,
+            "filters": {"namespace": options.namespace},
+            "records": [],
+            "errors": [{"source": "status", "reason": "authorization"}],
+        }
+
+    monkeypatch.setattr(live, "collect_ceph_cluster", fake_ceph)
+    receipt = live.collect_live_checks(
+        object(), type("Options", (), {"ceph_namespace": "selected-ceph"})(), {}
+    )
+
+    assert selected == ["selected-ceph"]
+    assert receipt["status"] == status.BLOCKED
+    assert receipt["blocking_live_checks"] == ["ceph_cluster"]
+    assert receipt["live_checks"]["ceph_cluster"]["namespace"] == "selected-ceph"
+
+
 def test_cluster_wide_list_reads_use_a_bound_sized_for_a_real_cluster(monkeypatch):
     """A slow but healthy list must not be reported as a timeout."""
     collect = import_script_module("core.collect")

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CI_SKILLS_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+exec "$CI_SKILLS_ROOT/skills/ci-skills/bin/ci-api" "$@"

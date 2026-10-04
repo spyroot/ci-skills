@@ -1,0 +1,129 @@
+{
+  "captured_at": "2026-10-04T03:52:29.640286+00:00",
+  "cleanup": {
+    "reason": "persistent_runner_requested",
+    "status": "NOT_APPLICABLE"
+  },
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:2ccda27d0866",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_runner",
+  "mutated": true,
+  "operation": "create",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "APPLY",
+  "plan": {
+    "body_sha256": "d74e5dcd800f4c486737b3683068a831f5277f75e1596f3d7cbbaf7d5a508bb6",
+    "confirmation_ready": true,
+    "fields": [
+      "description",
+      "runner_type"
+    ],
+    "one_time_sink_required": true,
+    "operation": "create",
+    "plan_digest": "0ea8d864fe51e44e27b08198a55104546c8d3532b7a655a7c18a30c6f30776ea",
+    "project_ids": null,
+    "resource_id": null,
+    "target_kind": "project",
+    "target_reference": "hott/test"
+  },
+  "plan_digest": "0ea8d864fe51e44e27b08198a55104546c8d3532b7a655a7c18a30c6f30776ea",
+  "readback": {
+    "action": "APPLIED",
+    "cleanup": {
+      "reason": "persistent_runner_requested",
+      "status": "NOT_APPLICABLE"
+    },
+    "id": 44,
+    "mutated": true,
+    "sink_persisted": true,
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "APPLIED",
+      "cleanup": {
+        "reason": "persistent_runner_requested",
+        "status": "NOT_APPLICABLE"
+      },
+      "id": 44,
+      "mutated": true,
+      "sink_persisted": true,
+      "verified": true
+    }
+  ],
+  "result_action": "APPLIED",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "62c951b711062cde43875008e26d55504ff67e6f689778554b4a5ea4adfc6148",
+    "file_count": 53,
+    "revision": {
+      "source": "git_head",
+      "value": "d10c7c2c1a1d92371076d0a936d469ba82b92790",
+      "verified": true
+    }
+  },
+  "smoke_cleanup": {
+    "after": {
+      "global_get_exit_code": 1,
+      "global_get_http_status": 404,
+      "project_123_absent": true,
+      "project_124_absent": true
+    },
+    "before": {
+      "active": true,
+      "description": "ci-skills-pr21-39c482a548",
+      "id": 44,
+      "project_ids": [
+        123,
+        124
+      ],
+      "runner_type": "project_type",
+      "status": "never_contacted"
+    },
+    "captured_at": "2026-10-04T03:53:00.430360+00:00",
+    "credential_source": "file:path:2ccda27d0866",
+    "delete": {
+      "endpoint": "runners/44",
+      "exit_code": 0,
+      "method": "DELETE"
+    },
+    "execution_host": "mac.lan",
+    "kind": "gitlab_runner_smoke_cleanup",
+    "origin": "https://gitlab.dcloud.run",
+    "runner_id": 44,
+    "schema_version": "1.0",
+    "skill_digest": "62c951b711062cde43875008e26d55504ff67e6f689778554b4a5ea4adfc6148",
+    "status": "PASS",
+    "tested_revision": "d10c7c2c1a1d92371076d0a936d469ba82b92790"
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": {
+    "kind": "project",
+    "reference": "hott/test"
+  },
+  "target_file": "path:5e5380df1eda",
+  "target_source": "argv:--target;argv:--project",
+  "tested_revision": null,
+  "verified_target": {
+    "full_path": "hott/test",
+    "id": 123,
+    "kind": "project",
+    "web_url": "https://gitlab.dcloud.run/hott/test"
+  }
+}

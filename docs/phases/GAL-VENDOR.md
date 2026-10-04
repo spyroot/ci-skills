@@ -107,8 +107,9 @@ Where each lock field comes from:
 - **`upstream.project` and `upstream.path`:** the skill's frontmatter
   `metadata`, or `null` where it names none. `glab-stack` names neither.
 - **`files`:** the SHA-256 of each file in the set that `tree_digest` covers
-  (`_included` in the k8s skill's `scripts/core/provenance.py`), computed in
-  `tools/skillkit/vendor.py`. `origin` is `upstream` for fetched files and
+  (`_included` in the existing diagnostics skill's
+  `scripts/core/provenance.py`), computed in `tools/skillkit/vendor.py`.
+  `origin` is `upstream` for fetched files and
   `local` for the notice.
 - **`tree`:** `tree_digest` from that same `provenance.py`, the digest the
   installer and the live acceptance check already use.
@@ -180,9 +181,9 @@ reports that it recovered.
   holds one module named `core`, and the installer and the live acceptance
   check bind it to the skill's `scripts/core/` to import `core.provenance`.
   A `tools/core/` package could not be imported beside it.
-- **`skillkit` imports `core.provenance` from the skill**, as
-  `tools/install_k8s_admin_diagnostics.py` already does, and computes the
-  per-file hashes itself. Never the reverse: an installed skill ships without
+- **`skillkit` imports `core.provenance` from the skill**, as the existing
+  installer does, and computes the per-file hashes itself. Never the
+  reverse: an installed skill ships without
   `tools/`, and editing `provenance.py` would change the skill digest.
 
 ## Steps
@@ -220,7 +221,7 @@ Steps 4 and 5 are also the refresh path: `update` shows upstream drift,
   so `git diff --check` passes; no gitleaks finding; no project-neutrality
   violation.
 - **Tests.** As listed in GAL-TESTS, run in CI.
-- **Receipt.** Nothing under `skills/k8s-admin-diagnostics/` changes, so the
+- **Receipt.** Vendoring does not change the local diagnostics skill, so its
   committed live receipt still applies until it expires on
   2026-11-01T22:35:26Z (`captured_at` plus `max_receipt_age_days`). After
   that, every pull request fails until a new receipt is committed

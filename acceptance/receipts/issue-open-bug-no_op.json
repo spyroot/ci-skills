@@ -1,0 +1,81 @@
+{
+  "captured_at": "2026-10-04T03:49:34.754903+00:00",
+  "cleanup": {
+    "status": "NOT_APPLICABLE"
+  },
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:2ccda27d0866",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_issue",
+  "mutated": false,
+  "operation": "open-bug",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "APPLY",
+  "plan": {
+    "body_sha256": "76d34986b13f1dc83072014a5864cb521a578bca5515ade50b8e8463a2dae4d2",
+    "confirmation_ready": true,
+    "fields": [
+      "title"
+    ],
+    "one_time_sink_required": false,
+    "operation": "open-bug",
+    "plan_digest": "f39871dd0691e5a07e39a3ff132e615e388bdf6704c9c769e745f2030b814781",
+    "project_ids": null,
+    "resource_id": null,
+    "target_kind": "project",
+    "target_reference": "hott/test"
+  },
+  "plan_digest": "f39871dd0691e5a07e39a3ff132e615e388bdf6704c9c769e745f2030b814781",
+  "readback": {
+    "action": "NO_OP",
+    "iid": 7,
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "NO_OP",
+      "iid": 7,
+      "verified": true
+    }
+  ],
+  "result_action": "NO_OP",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "62c951b711062cde43875008e26d55504ff67e6f689778554b4a5ea4adfc6148",
+    "file_count": 53,
+    "revision": {
+      "source": "git_head",
+      "value": "d10c7c2c1a1d92371076d0a936d469ba82b92790",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": {
+    "kind": "project",
+    "reference": "hott/test"
+  },
+  "target_file": "path:5e5380df1eda",
+  "target_source": "argv:--target;argv:--project",
+  "tested_revision": null,
+  "verified_target": {
+    "full_path": "hott/test",
+    "id": 123,
+    "kind": "project",
+    "web_url": "https://gitlab.dcloud.run/hott/test"
+  }
+}

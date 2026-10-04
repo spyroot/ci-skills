@@ -1,0 +1,26 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: @NAME@
+  namespace: @NAMESPACE@
+  labels:
+    app.kubernetes.io/name: @NAME@
+    @SOURCE_LABEL_KEY@: @SOURCE_SHA@
+spec:
+  runPolicy: SerialLatestOnly
+  source:
+    type: Binary
+    binary: {}
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: @DOCKERFILE@
+      pullSecret:
+        name: @PULL_SECRET@
+  output:
+    to:
+      kind: DockerImage
+      name: @IMAGE@
+    pushSecret:
+      name: @PUSH_SECRET@
+  triggers: []

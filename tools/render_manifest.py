@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render the skill's `tools.json` from its single declaration.
 
-`skills/k8s-admin-diagnostics/tools.json` is the machine-readable contract an
+`skills/ci-skills/tools.json` is the machine-readable contract an
 agent reads instead of five help texts, and it is generated from
 `scripts/core/catalog.py`. `tests/test_catalog.py` fails when the committed copy
 drifts from that module, so this is the other half: the command that makes the
@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
-SKILL_RELATIVE = Path("skills") / "k8s-admin-diagnostics"
+SKILL_RELATIVE = Path("skills") / "ci-skills"
 
 
 def load_catalog(root: Path) -> Any:

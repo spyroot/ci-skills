@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-03T19:27:06.341315+00:00",
+  "captured_at": "2026-10-04T03:47:04.090157+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -13,6 +13,19 @@
   "execution_host": "mac.lan",
   "kind": "access_check",
   "live_checks": {
+    "ceph_cluster": {
+      "access_proven": true,
+      "error_count": 0,
+      "errors": [],
+      "health": "HEALTH_OK",
+      "inactive_pg_count": 0,
+      "namespace": "openshift-storage",
+      "osd_count": 12,
+      "pod_count": 15,
+      "readback_sha256": "a0ae5234983830fb101b4c790616caebbc4638c86f9f2c8d89bb41dc9e05b951",
+      "record_count": 15,
+      "status": "PASS"
+    },
     "cilium_status": {
       "access_proven": true,
       "agent_health": {
@@ -22,7 +35,7 @@
       "ciliumnode_count": 9,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "8dc1de8fe291238659d5121f04525dcf0dcfdb4b6d8694d6ddaf6f5fc29accc1",
+      "readback_sha256": "6330996059333701278bf924fc0a3a6dd4c93b0be5d3a4f0b74b5edab15cfabc",
       "record_count": 9,
       "status": "PASS"
     },
@@ -30,28 +43,43 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "009805fe27fb2ce01275537d114b41202855dbcb8a28a84234042f3b79de4d46",
-      "record_count": 639,
+      "readback_sha256": "c6100797861a997b943f37c883e3629a61a70d9a34a2a8e89a8690d7ee7d87e1",
+      "record_count": 4413,
+      "status": "PASS"
+    },
+    "gitlab_job": {
+      "access_proven": true,
+      "error_count": 0,
+      "errors": [],
+      "job_readback": {
+        "job_id": 38883,
+        "pipeline_id": 1903,
+        "runner_id": 13,
+        "trace_line_count": 124
+      },
+      "job_url": "https://gitlab.dcloud.run/hott/isovalent/-/jobs/38883",
+      "readback_sha256": "fd0d11ae088d61fc3f6aa5f89535039b82c703525ab9b0abbdcdda56007d9063",
+      "record_count": 1,
       "status": "PASS"
     },
     "storage_report": {
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "32df9cb925ffdde18c6a393aa1c2ac878d71c48bfcac4653da971e1418c72cbf",
-      "record_count": 65,
+      "readback_sha256": "856fca979535edec8cadf3d3ddc03852af6f077e44f820d1c9db52354d23c9a4",
+      "record_count": 38,
       "resource_counts": {
-        "attachments": 23,
+        "attachments": 5,
         "csidrivers": 4,
         "csinodes": 9,
         "daemonsets": 41,
-        "deployments": 189,
+        "deployments": 165,
         "nodes": 9,
-        "pods": 625,
-        "pvcs": 60,
-        "pvs": 65,
-        "replicasets": 504,
-        "statefulsets": 11,
+        "pods": 587,
+        "pvcs": 33,
+        "pvs": 38,
+        "replicasets": 417,
+        "statefulsets": 3,
         "storageclasses": 8
       },
       "status": "PASS"
@@ -66,11 +94,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "e30c80af8762d557c84a51c30361c8dff0ad2c154d4771cd963a4df9ba01a1b7",
-    "file_count": 27,
+    "digest": "62c951b711062cde43875008e26d55504ff67e6f689778554b4a5ea4adfc6148",
+    "file_count": 53,
     "revision": {
       "source": "git_head",
-      "value": "ed7f12395af674f7c615b9a61249e124152c058a",
+      "value": "d10c7c2c1a1d92371076d0a936d469ba82b92790",
       "verified": true
     }
   },
@@ -152,7 +180,8 @@
     }
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "user",
+  "target_selection": "cli:path:5e5380df1eda",
+  "target_source": "argv:--target",
   "targets": {
     "github": "github.com/spyroot/ci-skills",
     "gitlab": "https://gitlab.dcloud.run",
@@ -161,5 +190,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "ed7f12395af674f7c615b9a61249e124152c058a"
+  "tested_revision": "d10c7c2c1a1d92371076d0a936d469ba82b92790"
 }

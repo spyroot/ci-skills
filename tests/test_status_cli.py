@@ -45,7 +45,7 @@ def test_cli_execute_uses_shared_exit_mapping(
     monkeypatch.setattr(
         cli,
         "check_access",
-        lambda _target, publication=False: {"status": status.PASS},
+        lambda _target, publication=False, cilium=False: {"status": status.PASS},
     )
     monkeypatch.setattr(cli, "bind_sources", lambda target, revision=None: target)
     monkeypatch.setattr(cli, "emit", lambda data, _mode, _output_dir: json.dumps(data))
@@ -72,7 +72,7 @@ def test_cli_execute_maps_dry_run_to_success(monkeypatch, target_file):
     monkeypatch.setattr(
         cli,
         "dry_run_access",
-        lambda _target, publication=False: {
+        lambda _target, publication=False, cilium=False: {
             "kind": "access_check",
             "status": status.DRY_RUN,
             "publication": publication,

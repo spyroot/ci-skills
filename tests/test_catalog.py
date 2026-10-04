@@ -13,6 +13,7 @@ what lets a caller learn one interface instead of five.
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
 
 CATALOG = import_script_module("core.catalog")
 CLI = import_script_module("core.cli")
+PROJECT_BINDING = import_script_module("core.project_binding")
 RENDER = load_module("render_manifest", REPO_ROOT / "tools" / "render_manifest.py")
 MANIFEST_PATH = SCRIPT_ROOT.parent / "tools.json"
 
@@ -39,10 +41,17 @@ def _actual_options(script: str) -> set[str]:
         f"entrypoint_{script.removesuffix('.py')}", SCRIPT_ROOT / script
     )
     found: set[str] = set()
-    for action in module.build_parser()._actions:
-        found.update(
-            option for option in action.option_strings if option.startswith("--")
-        )
+
+    def visit(parser: argparse.ArgumentParser) -> None:
+        for action in parser._actions:
+            found.update(
+                option for option in action.option_strings if option.startswith("--")
+            )
+            if isinstance(action, argparse._SubParsersAction):
+                for subparser in action.choices.values():
+                    visit(subparser)
+
+    visit(module.build_parser())
     return found - {"--help"}
 
 
@@ -125,9 +134,18 @@ def test_the_manifest_routes_every_command_and_nothing_else():
     """Routing that omits a command sends an agent to read prose instead."""
     manifest = CATALOG.manifest()
 
-    declared = set(CATALOG.COMMANDS) | set(CATALOG.NODE_LOCAL_COMMANDS)
+    declared = (
+        set(CATALOG.COMMANDS)
+        | set(CATALOG.NODE_LOCAL_COMMANDS)
+        | set(CATALOG.BASH_COMMANDS)
+    )
     assert set(manifest["commands"]) == declared
     assert set(manifest["routing"].values()) == declared
+    for command in CATALOG.BASH_COMMANDS:
+        contract = manifest["commands"][command]
+        assert (SCRIPT_ROOT.parent / command).is_file()
+        assert contract["options"] and contract["required_tools"]
+        assert contract["read_only"] is True
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.NODE_LOCAL_COMMANDS))
@@ -146,7 +164,8 @@ def test_node_local_commands_publish_their_distinct_interface(script):
 
     assert actual == declared
     assert "--target" in actual
-    assert contract["requires_authorities"] == ["github", "gitlab", "kubernetes"]
+    assert contract["requires_authorities"] == ["kubernetes"]
+    assert set(contract["access_protocol"]) == {"kubernetes"}
     assert contract["execution_surface"] == (
         "Kubernetes API and one existing Pod on the selected node"
     )
@@ -166,12 +185,14 @@ def test_each_command_declares_the_authorities_it_needs_and_their_protocol():
         assert set(contract["access_protocol"]) == set(entry["requires"])
 
 
-def test_the_kubernetes_chain_prefers_the_target_over_the_ambient_default():
-    """The declared path must win, or a cold run aims at another cluster."""
+def test_the_kubernetes_chain_declares_ambient_fallback_after_selected_sources():
+    """The published order matches the effective kubeconfig source binder."""
     chain = [step["source"] for step in CATALOG.ACCESS_PROTOCOL["kubernetes"]]
 
     assert chain[0] == "target:kubernetes.kubeconfigs"
-    assert chain.index("env:KUBECONFIG") < chain.index("kubectl-default:~/.kube/config")
+    assert "target:kubernetes.kubeconfig" in chain
+    assert "binding:kubernetes.sources" in chain
+    assert chain[-2:] == ["env:KUBECONFIG", "kubectl-default:~/.kube/config"]
     assert "first match wins" in CATALOG.ACCESS_PROTOCOL["rule"]
 
 
@@ -191,9 +212,26 @@ def test_every_report_kind_the_cli_can_produce_is_a_declared_command():
     """
     produced = {CLI.ACCESS_CHECK_KIND, *CLI.COLLECTOR_KINDS.values()}
 
-    assert produced == set(CATALOG.COMMAND_BY_KIND)
+    assert produced <= set(CATALOG.COMMAND_BY_KIND)
+    assert len(CATALOG.COMMAND_BY_KIND) == len(CATALOG.COMMANDS)
     for kind in produced:
         assert CATALOG.COMMAND_BY_KIND[kind] in CATALOG.COMMANDS
+
+
+def test_mutating_commands_are_identified_in_the_manifest():
+    """An agent must see the write boundary before it chooses a command."""
+    manifest = CATALOG.manifest()
+    assert manifest["read_only"] is False
+    for script, entry in CATALOG.COMMANDS.items():
+        assert manifest["commands"][script]["read_only"] is not entry.get(
+            "mutates", False
+        )
+        if entry.get("mutates", False):
+            command = manifest["commands"][script]
+            assert command["subcommands"] or {
+                "--apply",
+                "--confirm-plan",
+            } <= set(command["options"])
 
 
 def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
@@ -242,7 +280,7 @@ def test_the_declared_target_protocol_is_the_chain_the_code_searches():
     declared = [step["source"] for step in CATALOG.TARGET_PROTOCOL]
     searched = [
         "argv:--target",
-        *(source for source, _path in CLI._target_candidates()),
+        *(source for source, _path in PROJECT_BINDING.target_candidates()),
     ]
 
     # No CI_SKILLS_TARGET in this environment, so that tier is absent from the
