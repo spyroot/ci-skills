@@ -159,7 +159,7 @@ Crawl the tools, commit the normalized result, and check it is current, as
 
 Declare each operation our code uses, as above, in one file in
 `tools/skillkit/`. A contract test checks every declared command and flag
-against the installed binary, the same pattern `tests/test_catalog.py` uses
+against the installed binary, the same pattern `../../tests/python/test_catalog.py` uses
 for the k8s skill's parsers.
 
 - **Pros:**

@@ -24,7 +24,7 @@ was whether the location was declared.
 After declaring `kubernetes.kubeconfigs`, a zero-argument run from an unrelated
 working directory returned `PASS` with 65 storage records and reported
 `target:kubernetes.kubeconfigs` as the source it used. That resolution order is
-locked by `tests/test_catalog.py` and visible in every receipt as
+locked by `../tests/python/test_catalog.py` and visible in every receipt as
 `credential_sources.kubernetes`; the probe count is session recollection and is
 not citable from this repository.
 
@@ -36,7 +36,7 @@ the target declared one, that subagent ran the briefing anyway and then reported
 back that the export was *not* what resolved the cluster —
 `credential_sources.kubernetes` read `target:kubernetes.kubeconfigs`, which
 precedes the environment in the chain (`core/credentials.py`, order locked by
-`tests/test_catalog.py`).
+`../tests/python/test_catalog.py`).
 
 Only the report noticed the instruction had gone dead. A briefing that restates
 a declaration cannot be kept correct; one that cites the declaration cannot go
@@ -65,7 +65,7 @@ defined them or not. There was no drift at the time — the catalog and the
 parsers agreed. The gate asserting that guarantee was the thing that did not
 hold.
 
-**Fixed** in `tests/test_catalog.py`: `_actual_options` reads
+**Fixed** in `../tests/python/test_catalog.py`: `_actual_options` reads
 `build_parser()._actions` instead of rendered help, and each entrypoint exposes
 `build_parser()` for it. A parser object carries no prose.
 
@@ -80,7 +80,7 @@ identifies no file and means a different place for every caller.
 
 **Fixed** in `core/cli.py`, where the candidate is now
 `Path.cwd() / PROJECT_DIR / TARGET_FILENAME`, with the tier tests in
-`tests/test_target_resolution.py`. Worth knowing that the same shape can
+`../tests/python/test_target_resolution.py`. Worth knowing that the same shape can
 reappear in a module of its own: a `DEFAULT_TARGET = Path(".ci-skills/…")` has
 been seen on an unmerged branch, where no tier test covers it.
 
@@ -165,7 +165,7 @@ owns.
 shape is covered. A row per command would catch an adapter that bypasses the
 shared failure path.
 
-**From 5 — one fixture can hide a tier test.** `tests/conftest.py` sets `HOME`
+**From 5 — one fixture can hide a tier test.** `../tests/python/conftest.py` sets `HOME`
 to the working directory, so under `run_script` the project and user tiers
 resolve to the same path. A tier test written against that fixture would be
 degenerate without failing.

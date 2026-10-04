@@ -35,11 +35,11 @@ These stay. Each one moves behind `./scripts/check.sh` without losing its
 guarantee.
 
 - **Branch protection** enforces the `validate` workflow.
-- **`tests/test_validate_workflow_policy.py`** checks that the static steps
+- **`../../tests/python/test_validate_workflow_policy.py`** checks that the static steps
   exist and that live acceptance is unconditional and runs first.
 - **`tools/check_live_acceptance.py`** checks that the receipt's digest
   equals the skill digest.
-- **The byte-equality test in `tests/test_catalog.py`** checks that
+- **The byte-equality test in `../../tests/python/test_catalog.py`** checks that
   `tools.json` equals the catalog.
 
 ## Gaps
@@ -61,7 +61,7 @@ change that closes it.
     (CI-SCHEMA), the `cli` gate (CI02-CLI) and, after CI-VENDOR, `verify`;
   - add a way to run one gate, or the static subset, for the hooks;
   - make each `validate.yml` step call it;
-  - extend `tests/test_validate_workflow_policy.py` so that every gate is
+  - extend `../../tests/python/test_validate_workflow_policy.py` so that every gate is
     called and live acceptance stays unconditional and first.
 
 ### G2. Exact tool versions

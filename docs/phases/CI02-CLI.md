@@ -51,7 +51,7 @@ Reading the parsers shows two defects:
   "also require repository administration and the declared required
   checks" in the catalog and "also require GitHub repository
   administration before configuring checks" in the parser.
-  `tests/test_catalog.py` compares option names, not their text.
+  `../../tests/python/test_catalog.py` compares option names, not their text.
 
 ## The contract
 
@@ -110,7 +110,7 @@ The `cli` gate of `./scripts/check.sh` (CI03-GATES) runs in CI.
   - each option's help text comes from one declaration, the catalog, which
     the parser reads; the gate fails when the two differ;
   - for a mutating command, the default run writes nothing.
-- **Existing pattern.** `tests/test_catalog.py` already compares the k8s
+- **Existing pattern.** `../../tests/python/test_catalog.py` already compares the k8s
   skill's declared options with each script's real parser. The gate extends
   that check to every command.
 

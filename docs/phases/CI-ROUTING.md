@@ -77,7 +77,7 @@ The last two rows use Python's default JSON separators.
    - Sections 4 to 6 (statuses, correlation, persisting evidence) move
      unchanged to `references/reading-reports.md`.
    - The router keeps the literal `references/access.md` link, which
-     `tests/test_skill_package.py` requires.
+     `../../tests/python/test_skill_package.py` requires.
    - The router keeps the moved sections' safety rules as a short list:
      - `DRY_RUN` is never evidence.
      - `UNKNOWN` is never coerced.
@@ -138,7 +138,7 @@ final package bytes. Which host may serve as release evidence is open
 
 ## Gates
 
-- **Kept CI gates.** `tests/test_catalog.py` keeps `tools.json` byte-equal to
+- **Kept CI gates.** `../../tests/python/test_catalog.py` keeps `tools.json` byte-equal to
   the catalog. Its routing test is changed in step 2 to read `.command`.
 - **Live acceptance.** The workflow accepts the new receipt.
 - **Closed world**, enforced by the `schemas` gate (CI-SCHEMA) before a

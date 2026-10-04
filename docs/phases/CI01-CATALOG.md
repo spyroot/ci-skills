@@ -105,8 +105,8 @@ Exit codes, the result envelope and `safe_next_step` follow CI02-CLI.
   stays a thin wrapper over `skillkit/install.py` while its callers migrate.
   It keeps
   `SKILL_NAME`, `install`, `package_files`, `skills_directory` and
-  `tree_digest`, which `tests/test_installer.py` and
-  `tests/test_installed_package.py` load from the module by path. It puts its
+  `tree_digest`, which `../../tests/python/test_installer.py` and
+  `../../tests/python/test_installed_package.py` load from the module by path. It puts its
   own directory on `sys.path` so that `import skillkit` works when a test
   loads it that way.
 

@@ -61,7 +61,7 @@ own design, steps and gates.
   - its own files;
   - the shared files its gates need: `.github/workflows/validate.yml`,
     `scripts/check.sh` and its library, `requirements.txt`, `schemas/`, and
-    `tests/test_validate_workflow_policy.py`.
+    `../../tests/python/test_validate_workflow_policy.py`.
 - **Before merge**, all of these hold for the exact head commit:
   - a review, with its findings fixed in the same pull request. What makes
     a review block a merge is open (CI03-GATES, G3);

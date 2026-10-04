@@ -29,7 +29,7 @@ its own tests; this page says which tests and why.
 - **Idempotency.** The same input run twice is a no-op that reports `PASS`
   and writes nothing. A different input against an existing target is
   refused, never overwritten.
-- **External commands are faked, never called.** `tests/conftest.py`
+- **External commands are faked, never called.** `../../tests/python/conftest.py`
   provides `fake_bin`, `install_executable` and `call_journal`. Its
   `run_script` drives only the k8s skill's scripts, so a sibling `run_tool`
   fixture drives `bin/ci-skills` and the hook scripts with the same fake
@@ -186,8 +186,8 @@ The contract test runs over every entrypoint discovery finds:
   - a different digest gives `destination_differs`;
   - a failed copy removes the staging directory;
   - a read-back mismatch gives `installed_digest_mismatch`.
-- **Regression.** `tests/test_installer.py` and
-  `tests/test_installed_package.py` pass against the compatibility wrapper;
+- **Regression.** `../../tests/python/test_installer.py` and
+  `../../tests/python/test_installed_package.py` pass against the compatibility wrapper;
   package delivery updates path assertions for `skills/ci-skills/` first.
 - **Offline smoke.** The installed-package smoke also installs a vendored
   skill and compares digests. `bin/ci-skills` runs from the repository as

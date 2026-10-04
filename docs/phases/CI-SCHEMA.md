@@ -34,7 +34,7 @@ Upstream authors write the frontmatter of vendored skills.
 - **Identity.** Every record carries `kind`, a constant per schema, and
   `schema_version`.
 - **Names.** Names match `^[a-z0-9]+(-[a-z0-9]+)*$`. A skill's `name` equals
-  its directory name, which `tests/test_skill_package.py` already checks.
+  its directory name, which `../../tests/python/test_skill_package.py` already checks.
 - **Paths.** Relative POSIX paths inside the owning skill. No leading `/`,
   and no `..` segment.
 - **Digests.** 64 lowercase hexadecimal characters. A tree digest names its

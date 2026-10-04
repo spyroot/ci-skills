@@ -121,6 +121,6 @@ reading source trees, credentials, providers, or Kubernetes.
 
 `event_trace_evidence.py` owns response validation and acceptance calculations;
 `source_identity.py` owns exact-subtree provenance. The normal CI test step
-discovers `tests/test_event_trace_benchmark.py`, which covers malformed worker
+discovers `../tests/python/test_event_trace_benchmark.py`, which covers malformed worker
 responses, identity drift, thresholds, alternating order, provenance, and run
 limits without contacting a cluster.
