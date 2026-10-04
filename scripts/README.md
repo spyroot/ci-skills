@@ -1,19 +1,10 @@
-## Repository Structure
+# Repository scripts
 
-```text
-ci-skills/
-├── skills/k8s-admin-diagnostics/
-│   ├── SKILL.md              # agent entry point
-│   ├── scripts/bash/core/    # reusable bash behavior
-|   |---scripts/python/core/  # reusable Python behavior
-│   ├── references/           # skill reference material
-│   └── tools.json            # generated command manifest
-├── tools/                    # repository maintenance commands
-├── tests/                    # pytest cases
-├── acceptance/               # live receipt contract and sanitized receipts
-├── docs/field-notes.md
-├── .github/workflows/validate.yml
-├── standards-binding.yaml
-├── requirements.txt
-└── target.toml.template
-```
+The repository entry point for validation is [`check.sh`](check.sh).
+Reusable shell helpers live in [`bash/core/`](bash/core/).
+
+The installable skill has its own
+[command scripts](../skills/ci-skills/scripts/) and
+[reusable Python core](../skills/ci-skills/scripts/core/). Its packaged
+executables live in [`skills/ci-skills/bin/`](../skills/ci-skills/bin/).
+See the root [README](../README.md) for installation and use.
