@@ -9,7 +9,7 @@ source "$CI_CHECK_ROOT/skills/ci-skills/lib/core/runtime.bash"
 CI_CHECK_GATES=(whitespace bash-n shellcheck shfmt yaml markdown secrets neutrality manifest unit)
 declare -gA CI_CHECK_CLASS_BY_GATE=(
   [whitespace]=static
-  [bash-n]=static
+  ["bash-n"]=static
   [shellcheck]=static
   [shfmt]=static
   [yaml]=static
@@ -75,7 +75,7 @@ ci_check_gate_valid() {
 ci_check_gate_selected() {
   local selection=$1 gate=$2
   [[ $selection == all || $selection == "$gate" ||
-    ( $selection == static && ${CI_CHECK_CLASS_BY_GATE[$gate]:-} == static ) ]]
+    ($selection == static && ${CI_CHECK_CLASS_BY_GATE[$gate]:-} == static) ]]
 }
 
 # Summary: Check whether a required gate executable is available.
