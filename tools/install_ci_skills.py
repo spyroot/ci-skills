@@ -43,8 +43,10 @@ RECOVERY = {
     "install_io_failure": "Run --recover --apply --confirm-recover, then retry installation.",
     "install_lock_timeout": "Wait for the other installer process to finish, then retry.",
     "install_deadline_expired": "Make a new plan and choose a longer --timeout.",
+    "installation_fingerprint_changed": "Make a new plan from the current committed source and confirm it.",
     "installed_digest_mismatch": "Inspect source changes and retry from a clean checkout.",
     "pyyaml_unavailable": "Install PyYAML in the project environment or select --json.",
+    "log_file_unwritable": "Inspect the requested log path and installed destination before retrying.",
 }
 
 
@@ -58,7 +60,7 @@ def skills_directory() -> Path:
 
 def plan_fingerprint(plan: dict[str, Any]) -> str:
     """Bind a confirmed install to its source bytes, revision and destination."""
-    revision = plan["revision"]["value"]
+    revision = plan["revision"].get("value") or ""
     values = (plan["source"], plan["destination"], revision, plan["digest"])
     return hashlib.sha256("\0".join(values).encode()).hexdigest()
 
@@ -193,7 +195,9 @@ def _read_journal(skills_dir: Path) -> tuple[dict[str, Any], Path, Path]:
     return data, staging, previous
 
 
-def _recover_install_unlocked(skills_dir: Path, *, dry_run: bool) -> dict[str, Any]:
+def _recover_install_unlocked(
+    skills_dir: Path, *, dry_run: bool, deadline: float | None = None
+) -> dict[str, Any]:
     """Reconcile one interrupted install without deleting an unknown skill."""
     skills_dir = skills_dir.expanduser().resolve()
     destination = skills_dir / SKILL_NAME
@@ -239,6 +243,9 @@ def _recover_install_unlocked(skills_dir: Path, *, dry_run: bool) -> dict[str, A
         if dry_run:
             result["status"] = "DRY_RUN"
             return result
+        # Once recovery starts changing paths, finish it even if time expires.
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ValueError("install_deadline_expired")
         if action == "restore_previous":
             previous.rename(destination)
         if staging.exists():
@@ -256,13 +263,17 @@ def _recover_install_unlocked(skills_dir: Path, *, dry_run: bool) -> dict[str, A
     return result
 
 
-def recover_install(skills_dir: Path, *, dry_run: bool) -> dict[str, Any]:
+def recover_install(
+    skills_dir: Path, *, dry_run: bool, deadline: float | None = None
+) -> dict[str, Any]:
     """Recover under the same lock as installation and upgrade."""
     if dry_run:
         return _recover_install_unlocked(skills_dir, dry_run=True)
     try:
-        with _mutation_lock(skills_dir.expanduser().resolve()):
-            return _recover_install_unlocked(skills_dir, dry_run=False)
+        with _mutation_lock(skills_dir.expanduser().resolve(), deadline=deadline):
+            return _recover_install_unlocked(
+                skills_dir, dry_run=False, deadline=deadline
+            )
     except (OSError, ValueError) as exc:
         reason = str(exc) if isinstance(exc, ValueError) else "install_io_failure"
         return {
@@ -283,6 +294,7 @@ def _install_unlocked(
     require_verified: bool = True,
     upgrade: bool = False,
     deadline: float | None = None,
+    expected_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     """Stage and verify a skill with a recoverable cross-rename journal."""
     skills_dir = skills_dir.expanduser().resolve()
@@ -301,6 +313,11 @@ def _install_unlocked(
             raise ValueError("source_revision_unverified")
         expected_digest = tree_digest(source)
         result.update(**expected_digest, revision=identity["revision"])
+        if (
+            expected_fingerprint is not None
+            and plan_fingerprint(result) != expected_fingerprint
+        ):
+            raise ValueError("installation_fingerprint_changed")
         if destination.is_symlink() and not upgrade:
             raise ValueError("destination_symlink")
         if (
@@ -353,6 +370,16 @@ def _install_unlocked(
                     shutil.copy2(source / relative, target)
                 if tree_digest(staging) != expected_digest:
                     raise ValueError("installed_digest_mismatch")
+                if expected_fingerprint is not None:
+                    current_identity = skill_identity(source, environ={})
+                    current = {
+                        **tree_digest(source),
+                        "revision": current_identity["revision"],
+                        "source": str(source.resolve()),
+                        "destination": str(destination),
+                    }
+                    if plan_fingerprint(current) != expected_fingerprint:
+                        raise ValueError("installation_fingerprint_changed")
                 if deadline is not None and time.monotonic() >= deadline:
                     raise ValueError("install_deadline_expired")
                 if _present(destination):
@@ -389,6 +416,7 @@ def install(
     require_verified: bool = True,
     upgrade: bool = False,
     deadline: float | None = None,
+    expected_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     """Serialize the full install decision and mutation for one skill root."""
     preflight = _install_unlocked(
@@ -397,6 +425,7 @@ def install(
         dry_run=True,
         require_verified=require_verified,
         upgrade=upgrade,
+        expected_fingerprint=expected_fingerprint,
     )
     if dry_run or preflight["status"] == "BLOCKED":
         return preflight
@@ -409,6 +438,7 @@ def install(
                 require_verified=require_verified,
                 upgrade=upgrade,
                 deadline=deadline,
+                expected_fingerprint=expected_fingerprint,
             )
     except (OSError, ValueError) as exc:
         reason = str(exc) if isinstance(exc, ValueError) else "install_io_failure"
@@ -471,6 +501,10 @@ def main() -> int:
         "--timeout",
         help="apply deadline, for example 10s",
     )
+    parser.add_argument("--log-format", choices=("text", "json"))
+    parser.add_argument("--log-level", choices=("debug", "info", "warning", "error"))
+    parser.add_argument("--log-file", type=Path)
+    parser.add_argument("--run-id")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print JSON")
     modes.add_argument("--yaml", action="store_true", help="print YAML")
@@ -480,6 +514,12 @@ def main() -> int:
         if not args.destination.is_absolute() or args.destination.name != SKILL_NAME:
             parser.error("--destination must be an absolute path ending in /ci-skills")
         skills_dir = args.destination.parent
+    explicit_logging = any(
+        value is not None
+        for value in (args.log_format, args.log_level, args.log_file, args.run_id)
+    )
+    args.log_format = args.log_format or "text"
+    args.log_level = args.log_level or "info"
     if args.yaml:
         try:
             import yaml
@@ -517,8 +557,22 @@ def main() -> int:
             "reason": "confirmation_required",
             "safe_next_step": "Use --confirm-recover with --recover --apply.",
         }
+    elif (
+        args.recover
+        and args.apply
+        and (not args.timeout or not re.fullmatch(r"[1-9][0-9]*s", args.timeout))
+    ):
+        result = {
+            "schema_version": "1.0",
+            "kind": "skill_install_recovery",
+            "status": "BLOCKED",
+            "destination": str(skills_dir.expanduser().resolve() / SKILL_NAME),
+            "reason": "timeout_required",
+            "safe_next_step": "Pass --timeout DURATION, for example 10s.",
+        }
     elif args.recover:
-        result = recover_install(skills_dir, dry_run=not args.apply)
+        deadline = started + int(args.timeout[:-1]) if args.apply else None
+        result = recover_install(skills_dir, dry_run=not args.apply, deadline=deadline)
     else:
         plan = install(SOURCE, skills_dir, dry_run=True, upgrade=args.upgrade)
         if plan["status"] == "DRY_RUN":
@@ -552,10 +606,29 @@ def main() -> int:
                 dry_run=False,
                 upgrade=args.upgrade,
                 deadline=started + seconds,
+                expected_fingerprint=plan["fingerprint"],
             )
             result["fingerprint"] = plan["fingerprint"]
-            result["source_revision"] = plan["source_revision"]
+            result["source_revision"] = result.get("revision", {}).get("value")
             result["mutable_link"] = False
+    if explicit_logging:
+        from core.cli import log_event
+
+        try:
+            log_event(
+                args,
+                result.get("kind", "skill_install"),
+                "finished",
+                result["status"],
+                elapsed=time.monotonic() - started,
+                error_class=result.get("reason"),
+            )
+        except OSError:
+            result.update(
+                status="BLOCKED",
+                reason="log_file_unwritable",
+                safe_next_step=RECOVERY["log_file_unwritable"],
+            )
     if args.yaml:
         print(yaml.safe_dump(result, sort_keys=True), end="")
     elif args.json:

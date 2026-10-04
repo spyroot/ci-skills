@@ -117,6 +117,83 @@
       "subcommands": {},
       "use_when": "When you need one live receipt proving GitHub, GitLab, and Kubernetes access on the execution host."
     },
+    "bin/ci-api": {
+      "execution_surface": "local CLI and one caller-selected provider API",
+      "options": [
+        "--provider",
+        "--host",
+        "--token-file",
+        "--endpoint",
+        "--field",
+        "--decode-base64",
+        "--lines",
+        "--paginate",
+        "--output",
+        "--dry-run",
+        "--log-format",
+        "--log-level",
+        "--log-file",
+        "--run-id",
+        "--help"
+      ],
+      "purpose": "Read one caller-selected GitHub or GitLab API endpoint with bounded output.",
+      "read_only": true,
+      "report_kind": "ci_api",
+      "required_options": [
+        "--provider",
+        "--endpoint for get"
+      ],
+      "required_tools": [
+        "bash",
+        "jq",
+        "gh or glab"
+      ],
+      "requires_authorities": [
+        "one caller-selected GitHub or GitLab host"
+      ],
+      "returns": "Bounded JSON or selected text; dry-run returns a request plan.",
+      "side_effects": "none",
+      "subcommands": [
+        "check",
+        "get"
+      ],
+      "use_when": "A supported domain command does not expose the selected GET resource."
+    },
+    "bin/ci-binary-build": {
+      "execution_surface": "local Git checkout; no cluster call",
+      "options": [
+        "--spec",
+        "--source-repo",
+        "--source-commit",
+        "--commit-label",
+        "--context",
+        "--dry-run",
+        "--log-format",
+        "--log-level",
+        "--log-file",
+        "--run-id",
+        "--help"
+      ],
+      "purpose": "Plan an exact-commit OpenShift Binary BuildConfig without applying it.",
+      "read_only": true,
+      "report_kind": "ci_binary_build",
+      "required_options": [
+        "--spec",
+        "--source-repo",
+        "--source-commit",
+        "--commit-label"
+      ],
+      "required_tools": [
+        "bash",
+        "git",
+        "jq",
+        "yq"
+      ],
+      "requires_authorities": [],
+      "returns": "A JSON plan and fingerprint bound to one Git tree and BuildConfig.",
+      "side_effects": "none",
+      "use_when": "A selected BuildConfig and source commit need validation before a build."
+    },
     "ceph_cluster.py": {
       "capabilities": [
         "namespaced",
@@ -736,7 +813,9 @@
     "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
     "open a GitLab bug": "gitlab_issue.py",
     "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
+    "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
     "prove all three authorities": "access_check.py",
+    "read a caller-selected Git API resource": "bin/ci-api",
     "what the cluster said during an interval": "event_trace.py"
   },
   "schema_version": "1.0",

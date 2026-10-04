@@ -475,6 +475,69 @@ NODE_LOCAL_COMMANDS: dict[str, dict[str, Any]] = {
     },
 }
 
+BASH_COMMANDS: dict[str, dict[str, Any]] = {
+    "bin/ci-api": {
+        "report_kind": "ci_api",
+        "purpose": "Read one caller-selected GitHub or GitLab API endpoint with bounded output.",
+        "use_when": "A supported domain command does not expose the selected GET resource.",
+        "requires_authorities": ["one caller-selected GitHub or GitLab host"],
+        "required_tools": ["bash", "jq", "gh or glab"],
+        "required_options": ["--provider", "--endpoint for get"],
+        "options": [
+            "--provider",
+            "--host",
+            "--token-file",
+            "--endpoint",
+            "--field",
+            "--decode-base64",
+            "--lines",
+            "--paginate",
+            "--output",
+            "--dry-run",
+            "--log-format",
+            "--log-level",
+            "--log-file",
+            "--run-id",
+            "--help",
+        ],
+        "subcommands": ["check", "get"],
+        "returns": "Bounded JSON or selected text; dry-run returns a request plan.",
+        "read_only": True,
+        "side_effects": "none",
+        "execution_surface": "local CLI and one caller-selected provider API",
+    },
+    "bin/ci-binary-build": {
+        "report_kind": "ci_binary_build",
+        "purpose": "Plan an exact-commit OpenShift Binary BuildConfig without applying it.",
+        "use_when": "A selected BuildConfig and source commit need validation before a build.",
+        "requires_authorities": [],
+        "required_tools": ["bash", "git", "jq", "yq"],
+        "required_options": [
+            "--spec",
+            "--source-repo",
+            "--source-commit",
+            "--commit-label",
+        ],
+        "options": [
+            "--spec",
+            "--source-repo",
+            "--source-commit",
+            "--commit-label",
+            "--context",
+            "--dry-run",
+            "--log-format",
+            "--log-level",
+            "--log-file",
+            "--run-id",
+            "--help",
+        ],
+        "returns": "A JSON plan and fingerprint bound to one Git tree and BuildConfig.",
+        "read_only": True,
+        "side_effects": "none",
+        "execution_surface": "local Git checkout; no cluster call",
+    },
+}
+
 STATUS_MEANING = {
     "PASS": "every selected authority and live check passed",
     "PARTIAL": "the read completed and a component is unhealthy; see access_proven",
@@ -632,6 +695,7 @@ def manifest() -> dict[str, Any]:
                 }
                 for script, entry in NODE_LOCAL_COMMANDS.items()
             },
+            **BASH_COMMANDS,
         },
         "routing": {
             "prove all three authorities": "access_check.py",
@@ -649,5 +713,7 @@ def manifest() -> dict[str, Any]:
             "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
             "Ceph cluster health and OSD/monitor Pods": "ceph_cluster.py",
             "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
+            "read a caller-selected Git API resource": "bin/ci-api",
+            "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
         },
     }

@@ -134,9 +134,18 @@ def test_the_manifest_routes_every_command_and_nothing_else():
     """Routing that omits a command sends an agent to read prose instead."""
     manifest = CATALOG.manifest()
 
-    declared = set(CATALOG.COMMANDS) | set(CATALOG.NODE_LOCAL_COMMANDS)
+    declared = (
+        set(CATALOG.COMMANDS)
+        | set(CATALOG.NODE_LOCAL_COMMANDS)
+        | set(CATALOG.BASH_COMMANDS)
+    )
     assert set(manifest["commands"]) == declared
     assert set(manifest["routing"].values()) == declared
+    for command in CATALOG.BASH_COMMANDS:
+        contract = manifest["commands"][command]
+        assert (SCRIPT_ROOT.parent / command).is_file()
+        assert contract["options"] and contract["required_tools"]
+        assert contract["read_only"] is True
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.NODE_LOCAL_COMMANDS))

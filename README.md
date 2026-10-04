@@ -101,10 +101,12 @@ is the answer to "which credential am I using" — read it rather than searching
 the host.
 
 **5. Install the `ci-skills` skill.** Steps 1 to 4 make the commands work in a
-shell. From a clean committed checkout, inspect the copy installer plan, set
+shell. Activate the `ci-skills` conda environment on a workstation. From a
+clean committed checkout, inspect the copy installer plan, set
 `FINGERPRINT` to its printed value, then install the package:
 
 ```bash
+conda activate ci-skills
 ./install.sh --dry-run
 FINGERPRINT="$(./install.sh --dry-run | jq -r '.fingerprint')"
 ./install.sh --apply --confirm-install "$FINGERPRINT" --timeout 10s
@@ -136,7 +138,7 @@ Interrupted installations have a separate recovery path:
 conda run -n ci-skills python tools/install_ci_skills.py \
   --recover --json
 conda run -n ci-skills python tools/install_ci_skills.py \
-  --recover --apply --confirm-recover --json
+  --recover --apply --confirm-recover --timeout 10s --json
 ```
 
 An upgrade preserves the previous copy or link as a hidden sibling and reads

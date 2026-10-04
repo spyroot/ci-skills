@@ -36,6 +36,17 @@ make_install_fixture() {
   [ ! -e "$destination" ]
 }
 
+@test 'requested diagnostics record a correlated structured installer result' {
+  make_install_fixture
+  log_file="${BATS_TEST_TMPDIR}/installer.log"
+  run "$tool" --destination "$destination" --dry-run \
+    --log-format json --log-level info --log-file "$log_file" --run-id unit-install
+  [ "$status" -eq 0 ]
+  jq -e '.component == "skill_install" and .run_id == "unit-install" and .result == "DRY_RUN"' \
+    "$log_file" >/dev/null
+  [[ "$output" == *'"fingerprint"'* ]]
+}
+
 @test 'apply copies the selected package and upgrade reads back an identical copy' {
   make_install_fixture
   run "$tool" --destination "$destination" --dry-run
