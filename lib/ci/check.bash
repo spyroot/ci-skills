@@ -7,7 +7,7 @@ CI_CHECK_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 source "$CI_CHECK_ROOT/skills/ci-skills/lib/core/runtime.bash"
 
 CI_CHECK_GATES=(whitespace bash-n shellcheck shfmt yaml markdown secrets unit)
-declare -A CI_CHECK_TOOL_BY_GATE=(
+declare -gA CI_CHECK_TOOL_BY_GATE=(
   [shellcheck]=shellcheck
   [shfmt]=shfmt
   [yaml]=yamllint
