@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-04T01:45:50.911356+00:00",
+  "captured_at": "2026-10-04T02:11:02.710200+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,29 +18,29 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "fb632239286b28f69863bba6211d453630d71a463ca0147cc96722105df254d5",
+    "body_sha256": "4270c1449ac932667478b6a15e499cf4f605fa4f4575fbf5a9f6db42eaae308e",
     "confirmation_ready": true,
     "fields": [
       "content"
     ],
     "one_time_sink_required": false,
     "operation": "update",
-    "plan_digest": "7866fcf2f8ac439db916efe019652bcde0407d4076821b6c123b0dcb07a08c59",
+    "plan_digest": "282cf5d5ba43461c5a405ed780ae7f117fd79dacf1ef1f26095f2c38cc15d9ca",
     "project_ids": null,
-    "resource_id": "HOTT-team-ci-skills-PR16-87daec4-wiki-20261004",
+    "resource_id": "HOTT-team-ci-skills-PR16-25cfdcf-wiki-verification-20261004",
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "7866fcf2f8ac439db916efe019652bcde0407d4076821b6c123b0dcb07a08c59",
+  "plan_digest": "282cf5d5ba43461c5a405ed780ae7f117fd79dacf1ef1f26095f2c38cc15d9ca",
   "readback": {
     "action": "NO_OP",
-    "slug": "HOTT-team-ci-skills-PR16-87daec4-wiki-20261004",
+    "slug": "HOTT-team-ci-skills-PR16-25cfdcf-wiki-verification-20261004",
     "verified": true
   },
   "records": [
     {
       "action": "NO_OP",
-      "slug": "HOTT-team-ci-skills-PR16-87daec4-wiki-20261004",
+      "slug": "HOTT-team-ci-skills-PR16-25cfdcf-wiki-verification-20261004",
       "verified": true
     }
   ],
@@ -52,11 +52,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "6b8afae827f0eb89607aca9d3705608b73a6daaa42a905f6fe0fa122b0b19ab8",
+    "digest": "552c72f8be1a8986efa818b74842c7f435830a3911615e4dce49f1b200deb8d0",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "87daec4f5839b1edccea8bf7961665aad9cad4d5",
+      "value": "25cfdcf92fbcbffec4943fca3e6e64ddeac67d2b",
       "verified": true
     }
   },

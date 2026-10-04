@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-04T01:44:10.914407+00:00",
+  "captured_at": "2026-10-04T02:07:32.871379+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,31 +18,31 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "bb9e868a17574eb338048ec27b983ed08a2c2c07975ae2dcab1dd07f8c1b3920",
+    "body_sha256": "ea77e1bcf8bc4c279ffa5f809e76a0d6265604217d5ca32be850375bc20199c0",
     "confirmation_ready": true,
     "fields": [
       "title"
     ],
     "one_time_sink_required": false,
     "operation": "create",
-    "plan_digest": "95ac55991d3c3702fdd280324b40df4f6c7cefe088cb40f65d8a30d1b5638836",
+    "plan_digest": "7ae180890db745863ce76bb636f6b637e3b2191e20a53e18434cd2bdcdf64922",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "95ac55991d3c3702fdd280324b40df4f6c7cefe088cb40f65d8a30d1b5638836",
+  "plan_digest": "7ae180890db745863ce76bb636f6b637e3b2191e20a53e18434cd2bdcdf64922",
   "readback": {
     "action": "APPLIED",
-    "id": 79,
-    "title": "HOTT team ci-skills PR16 87daec4 milestone 20261004",
+    "id": 80,
+    "title": "HOTT team ci-skills PR16 25cfdcf verification 20261004",
     "verified": true
   },
   "records": [
     {
       "action": "APPLIED",
-      "id": 79,
-      "title": "HOTT team ci-skills PR16 87daec4 milestone 20261004",
+      "id": 80,
+      "title": "HOTT team ci-skills PR16 25cfdcf verification 20261004",
       "verified": true
     }
   ],
@@ -54,11 +54,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "6b8afae827f0eb89607aca9d3705608b73a6daaa42a905f6fe0fa122b0b19ab8",
+    "digest": "552c72f8be1a8986efa818b74842c7f435830a3911615e4dce49f1b200deb8d0",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "87daec4f5839b1edccea8bf7961665aad9cad4d5",
+      "value": "25cfdcf92fbcbffec4943fca3e6e64ddeac67d2b",
       "verified": true
     }
   },

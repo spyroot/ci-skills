@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-04T01:45:29.309877+00:00",
+  "captured_at": "2026-10-04T02:10:29.118059+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,7 +18,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "0fda5a6dc96c43592d20691ff71c2d94cd125abcbaa5c0773cac2714e4f4579e",
+    "body_sha256": "6638c4c8d596a0d912750d9a6bf9d5b7df99ae6125ecb7475966a082096bbb85",
     "confirmation_ready": true,
     "fields": [
       "content",
@@ -26,22 +26,22 @@
     ],
     "one_time_sink_required": false,
     "operation": "create",
-    "plan_digest": "4a75cee046a3b5294b197fe59b26e76cdad58783d99c7da809353eee3cf6d6e5",
+    "plan_digest": "4138fec2c68aabf74c8ef6cef8cbed0750f84de2eedcca67810debb6616d7f7c",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "4a75cee046a3b5294b197fe59b26e76cdad58783d99c7da809353eee3cf6d6e5",
+  "plan_digest": "4138fec2c68aabf74c8ef6cef8cbed0750f84de2eedcca67810debb6616d7f7c",
   "readback": {
     "action": "NO_OP",
-    "slug": "HOTT-team-ci-skills-PR16-87daec4-wiki-20261004",
+    "slug": "HOTT-team-ci-skills-PR16-25cfdcf-wiki-verification-20261004",
     "verified": true
   },
   "records": [
     {
       "action": "NO_OP",
-      "slug": "HOTT-team-ci-skills-PR16-87daec4-wiki-20261004",
+      "slug": "HOTT-team-ci-skills-PR16-25cfdcf-wiki-verification-20261004",
       "verified": true
     }
   ],
@@ -53,11 +53,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "6b8afae827f0eb89607aca9d3705608b73a6daaa42a905f6fe0fa122b0b19ab8",
+    "digest": "552c72f8be1a8986efa818b74842c7f435830a3911615e4dce49f1b200deb8d0",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "87daec4f5839b1edccea8bf7961665aad9cad4d5",
+      "value": "25cfdcf92fbcbffec4943fca3e6e64ddeac67d2b",
       "verified": true
     }
   },

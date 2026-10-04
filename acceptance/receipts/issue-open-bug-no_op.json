@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-04T01:45:08.571194+00:00",
+  "captured_at": "2026-10-04T02:09:35.843140+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,29 +18,29 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "944ba6803f3247dba0a40e544d0a8c454d4862eede232300b551a639a513c8df",
+    "body_sha256": "bddc9a03adfe71813144292682706dd7322a5e1bf9d0661bb04c2c8941a3f078",
     "confirmation_ready": true,
     "fields": [
       "title"
     ],
     "one_time_sink_required": false,
     "operation": "open-bug",
-    "plan_digest": "6ca203224b78393921fcd53ab23fd15577a9f19d67a7aa9fe12da000073d6e9a",
+    "plan_digest": "14ed0f92be720d855ec0f241db4a4dd94141491e48f738d8dd3f915c865aee8a",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "6ca203224b78393921fcd53ab23fd15577a9f19d67a7aa9fe12da000073d6e9a",
+  "plan_digest": "14ed0f92be720d855ec0f241db4a4dd94141491e48f738d8dd3f915c865aee8a",
   "readback": {
     "action": "NO_OP",
-    "iid": 5,
+    "iid": 6,
     "verified": true
   },
   "records": [
     {
       "action": "NO_OP",
-      "iid": 5,
+      "iid": 6,
       "verified": true
     }
   ],
@@ -52,11 +52,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "6b8afae827f0eb89607aca9d3705608b73a6daaa42a905f6fe0fa122b0b19ab8",
+    "digest": "552c72f8be1a8986efa818b74842c7f435830a3911615e4dce49f1b200deb8d0",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "87daec4f5839b1edccea8bf7961665aad9cad4d5",
+      "value": "25cfdcf92fbcbffec4943fca3e6e64ddeac67d2b",
       "verified": true
     }
   },
