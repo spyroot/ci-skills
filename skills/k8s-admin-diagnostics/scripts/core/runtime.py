@@ -71,6 +71,9 @@ _QUOTED_PATTERNS = (
     re.compile(rf"(?i)({_NAME}\s*[:=]\s*)'[^']*'"),
 )
 
+_URL_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+:[^\s/@]+@")
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
 
 def redact(value: str) -> str:
     """Remove credential forms from text, with no length bound.
@@ -79,7 +82,10 @@ def redact(value: str) -> str:
     boundary without the 1000-character truncation that bounds one command's
     captured output.
     """
-    result = value
+    result = _ANSI_ESCAPE.sub("", value).replace("\x1b", "")
+    result = _URL_USERINFO.sub(
+        lambda match: match.group(1) + "[REDACTED]@", result
+    )
     for pattern in (*_QUOTED_PATTERNS, *_SECRET_PATTERNS):
         result = pattern.sub(
             lambda match: (

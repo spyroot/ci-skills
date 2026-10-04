@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
+from pathlib import Path
 
 import pytest
 from conftest import import_script_module
@@ -49,6 +51,33 @@ def test_load_target_accepts_optional_gitlab_token_file_path(tmp_path):
 
     assert target.gitlab.token_file == token_file
     assert not hasattr(target.gitlab, "token")
+
+
+def test_ambient_kubeconfig_cannot_point_into_installed_skill(
+    monkeypatch, target_file
+):
+    """An environment override cannot bypass the declared file boundary."""
+    target_mod = import_script_module("core.target")
+    credentials = import_script_module("core.credentials")
+    skill_root = Path(credentials.__file__).resolve().parents[2]
+    monkeypatch.setenv("KUBECONFIG", str(skill_root / "inside.kubeconfig"))
+
+    with pytest.raises(target_mod.TargetError, match="stored outside"):
+        credentials._kubernetes_source(target_mod.load_target(target_file))
+
+
+def test_default_kubeconfig_cannot_point_into_installed_skill(
+    monkeypatch, target_file
+):
+    """The kubectl default obeys the same selected-file boundary."""
+    target_mod = import_script_module("core.target")
+    credentials = import_script_module("core.credentials")
+    skill_root = Path(credentials.__file__).resolve().parents[2]
+    monkeypatch.delenv("KUBECONFIG", raising=False)
+    monkeypatch.setenv("HOME", str(skill_root))
+
+    with pytest.raises(target_mod.TargetError, match="stored outside"):
+        credentials._kubernetes_source(target_mod.load_target(target_file))
 
 
 @pytest.mark.parametrize(
@@ -219,6 +248,26 @@ def test_run_command_tail_rejects_unbounded_limits():
 
     with pytest.raises(ValueError, match="tail limits"):
         runtime.run_command_tail(["tool"], max_lines=0)
+
+
+def test_run_command_tail_times_out_after_child_closes_pipes_then_lingers():
+    """A child that closes output pipes must still be reaped by the deadline."""
+    runtime = import_script_module("core.runtime")
+    start = time.monotonic()
+
+    result = runtime.run_command_tail(
+        [
+            sys.executable,
+            "-c",
+            "import os, time\nos.close(1)\nos.close(2)\ntime.sleep(2)\n",
+        ],
+        timeout=0.2,
+        max_lines=5,
+        max_bytes=1000,
+    )
+
+    assert result.returncode == 124
+    assert time.monotonic() - start < 1.0
 
 
 @pytest.mark.parametrize(

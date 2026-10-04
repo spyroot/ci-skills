@@ -12,7 +12,11 @@
 max_receipt_age_days = 30
 
 # Every one of these live checks must be present and access_proven.
-required_live_checks = ["storage_report", "event_trace", "cilium_status", "ceph_cluster"]
+required_live_checks = ["storage_report", "event_trace", "cilium_status", "ceph_cluster", "gitlab_job"]
+
+# A completed job on the selected GitLab host with readable pipeline, runner,
+# and trace data. This is an exact acceptance target, not a skill default.
+job_url = "https://gitlab.dcloud.run/hott/galileo/-/jobs/40563"
 
 # The namespace selected for this repository's Ceph live check. The generic
 # skill takes it from --ceph-namespace; no namespace is built into the tool.

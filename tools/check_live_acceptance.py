@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,11 @@ REQUIRED_GITLAB_OPERATIONS = {
 
 class AcceptanceError(RuntimeError):
     """Acceptance inputs could not be read."""
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    """Return a mapping for guarded receipt reads, without accepting its shape."""
+    return value if isinstance(value, dict) else {}
 
 
 def _load_expected(path: Path) -> dict[str, Any]:
@@ -126,6 +132,8 @@ def _load_expected(path: Path) -> dict[str, Any]:
         not isinstance(ceph_namespace, str) or not ceph_namespace
     ):
         raise AcceptanceError("expectation_not_declared:ceph_namespace")
+    if "gitlab_job" in data["required_live_checks"] and not data.get("job_url"):
+        raise AcceptanceError("expectation_not_declared:job_url")
     return data
 
 
@@ -169,7 +177,7 @@ def _check_common(
         problems.append(f"{name}:schema_version_unexpected")
     if receipt.get("status") != "PASS":
         problems.append(f"{name}:status_not_pass")
-    reported = (receipt.get("skill") or {}).get("digest")
+    reported = _mapping(receipt.get("skill")).get("digest")
     if not reported:
         problems.append(f"{name}:skill_digest_absent")
     elif reported != digest:
@@ -210,26 +218,82 @@ def _check_receipt(
     # exact string equality.
     if receipt.get("execution_host") != executor.get("host"):
         problems.append(f"{name}:execution_host_not_declared")
-    surfaces = receipt.get("surfaces") or {}
-    for surface, identity in (executor.get("identities") or {}).items():
-        observed = (surfaces.get(surface) or {}).get("identity")
-        if observed != identity:
+    revision = _mapping(_mapping(receipt.get("skill")).get("revision"))
+    tested_revision = receipt.get("tested_revision")
+    if (
+        not isinstance(revision, dict)
+        or revision.get("verified") is not True
+        or not isinstance(tested_revision, str)
+        or re.fullmatch(r"[0-9a-f]{40}", tested_revision) is None
+        or revision.get("value") != tested_revision
+    ):
+        problems.append(f"{name}:tested_revision_unverified")
+    surfaces = receipt.get("surfaces")
+    if not isinstance(surfaces, dict):
+        problems.append(f"{name}:surfaces_invalid")
+        surfaces = {}
+    sources = receipt.get("credential_sources")
+    if not isinstance(sources, dict):
+        problems.append(f"{name}:credential_sources_unresolved")
+        sources = {}
+    for surface, identity in _mapping(executor.get("identities")).items():
+        observed_surface = surfaces.get(surface)
+        if not isinstance(observed_surface, dict):
+            problems.append(f"{name}:surface_missing:{surface}")
+            continue
+        if observed_surface.get("identity") != identity:
             problems.append(f"{name}:identity_mismatch:{surface}")
+        if observed_surface.get("status") != "PASS":
+            problems.append(f"{name}:surface_not_pass:{surface}")
+        source = sources.get(surface)
+        if not isinstance(source, str) or not source or observed_surface.get(
+            "credential_source"
+        ) != source:
+            problems.append(f"{name}:credential_source_mismatch:{surface}")
+        target = expected["targets"].get(surface)
+        if surface == "kubernetes":
+            target = f"{target['context']} -> {target['server']}"
+        if observed_surface.get("target") != target:
+            problems.append(f"{name}:surface_target_mismatch:{surface}")
 
     # Wrong target: deep equality, so an extra or missing authority is caught.
     if "targets" in expected and receipt.get("targets") != expected["targets"]:
         problems.append(f"{name}:targets_mismatch")
 
     # Required results: every declared live check present, proven, none blocking.
-    live = receipt.get("live_checks") or {}
+    live = receipt.get("live_checks")
+    if not isinstance(live, dict):
+        problems.append(f"{name}:live_checks_invalid")
+        live = {}
     for required in expected.get("required_live_checks") or []:
         check = live.get(required)
         if check is None:
             problems.append(f"{name}:live_check_missing:{required}")
+        elif not isinstance(check, dict):
+            problems.append(f"{name}:live_check_invalid:{required}")
         elif check.get("access_proven") is not True:
             problems.append(f"{name}:live_check_unproven:{required}")
+        if isinstance(check, dict) and (
+            check.get("status") not in {"PASS", "PARTIAL"}
+            or not isinstance(check.get("readback_sha256"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", check["readback_sha256"]) is None
+        ):
+            problems.append(f"{name}:live_readback_missing:{required}")
+    if "gitlab_job" in expected.get("required_live_checks", ()):
+        job = _mapping(live.get("gitlab_job"))
+        readback = job.get("job_readback")
+        if job.get("job_url") != expected.get("job_url"):
+            problems.append(f"{name}:job_target_mismatch")
+        if not isinstance(readback, dict) or any(
+            type(readback.get(field)) is not int or readback[field] <= 0
+            for field in ("job_id", "pipeline_id", "runner_id")
+        ) or (
+            type(_mapping(readback).get("trace_line_count")) is not int
+            or readback["trace_line_count"] < 0
+        ):
+            problems.append(f"{name}:job_readback_missing")
     if "ceph_cluster" in expected.get("required_live_checks", ()):
-        ceph = live.get("ceph_cluster") or {}
+        ceph = _mapping(live.get("ceph_cluster"))
         if ceph.get("namespace") != expected.get("ceph_namespace"):
             problems.append(f"{name}:ceph_namespace_mismatch")
     if receipt.get("blocking_live_checks"):
@@ -238,7 +302,9 @@ def _check_receipt(
     # The required GitHub checks the publication gate read back.
     declared = set(expected.get("required_checks") or [])
     observed_checks = set(
-        ((surfaces.get("github") or {}).get("details") or {}).get("required_checks")
+        _mapping(_mapping(surfaces.get("github")).get("details")).get(
+            "required_checks"
+        )
         or []
     )
     for missing in sorted(declared - observed_checks):

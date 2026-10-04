@@ -99,6 +99,18 @@ def test_a_private_key_block_spanning_lines_is_redacted():
     assert SECRET not in _runtime().redact(f"before\n{block}\nafter")
 
 
+def test_url_userinfo_and_terminal_controls_are_removed():
+    """A trace URL can carry a credential without a token-named field."""
+    value = "callback=https://unit-user:unit-secret@gitlab.example.test/path \x1b[31mred\x1b[0m"
+
+    result = _runtime().redact(value)
+
+    assert "unit-secret" not in result
+    assert "unit-user" not in result
+    assert "https://[REDACTED]@gitlab.example.test/path" in result
+    assert "\x1b" not in result
+
+
 def test_redact_does_not_truncate_but_sanitize_does():
     """A whole report must be redactable without a 1000-character bound."""
     runtime = _runtime()

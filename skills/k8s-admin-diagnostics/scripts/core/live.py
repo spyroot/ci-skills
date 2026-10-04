@@ -91,6 +91,7 @@ def _evidence(result: dict[str, Any]) -> dict[str, Any]:
         }
         evidence["ciliumnode_count"] = len(result.get("ciliumnodes", []))
     elif result.get("kind") == "gitlab_job":
+        evidence["job_url"] = (result.get("filters") or {}).get("job_url")
         records = result.get("records", [])
         if records:
             job = records[0]

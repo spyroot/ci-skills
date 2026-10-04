@@ -64,6 +64,12 @@ def _items(value: Any) -> list[dict[str, Any]]:
         for item in items
     ):
         raise TypeError("invalid_list_response")
+    if any(
+        key in item and not isinstance(item[key], dict)
+        for item in items
+        for key in ("spec", "status")
+    ):
+        raise TypeError("invalid_item_response")
     return items
 
 
@@ -605,7 +611,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     daemonsets = [
         item
         for item in data.get("daemonsets", [])
-        if _meta(item).get("name", "").startswith(AGENT_DAEMONSET)
+        if _meta(item).get("name") == AGENT_DAEMONSET
     ]
     namespaces = sorted(
         {

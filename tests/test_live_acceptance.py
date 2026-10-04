@@ -66,7 +66,11 @@ def _expected() -> dict:
 
 def _receipt() -> dict:
     checks = {
-        name: {"status": "PASS", "access_proven": True}
+        name: {
+            "status": "PASS",
+            "access_proven": True,
+            "readback_sha256": "f" * 64,
+        }
         for name in ("storage_report", "event_trace", "cilium_status", "ceph_cluster")
     }
     checks["ceph_cluster"]["namespace"] = "selected-ceph"
@@ -77,15 +81,37 @@ def _receipt() -> dict:
         "publication": True,
         "execution_host": HOST,
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
-        "skill": {"digest": _digest()},
+        "tested_revision": "a" * 40,
+        "skill": {
+            "digest": _digest(),
+            "revision": {"value": "a" * 40, "verified": True},
+        },
         "targets": _expected()["targets"],
+        "credential_sources": {
+            "github": "gh-credential-store:github.com",
+            "gitlab": "file:path:unit",
+            "kubernetes": "env:KUBECONFIG",
+        },
         "surfaces": {
             "github": {
                 "identity": "unit-gh",
+                "status": "PASS",
+                "target": "github.com/owner/repository",
+                "credential_source": "gh-credential-store:github.com",
                 "details": {"required_checks": ["validate"]},
             },
-            "gitlab": {"identity": "unit-gl"},
-            "kubernetes": {"identity": "unit-admin"},
+            "gitlab": {
+                "identity": "unit-gl",
+                "status": "PASS",
+                "target": "https://gitlab.example.test",
+                "credential_source": "file:path:unit",
+            },
+            "kubernetes": {
+                "identity": "unit-admin",
+                "status": "PASS",
+                "target": "unit-context -> https://api.cluster.example.test:6443",
+                "credential_source": "env:KUBECONFIG",
+            },
         },
         "live_checks": checks,
         "blocking_live_checks": [],
@@ -118,6 +144,35 @@ def test_ceph_namespace_must_match_operator_selection():
     assert "declared.json:ceph_namespace_mismatch" in result["problems"]
 
 
+def test_requested_gitlab_job_requires_exact_target_and_all_readbacks():
+    expected = _expected()
+    expected["required_live_checks"].append("gitlab_job")
+    expected["job_url"] = "https://gitlab.example.test/unit/repo/-/jobs/42"
+    receipt = _receipt()
+    receipt["live_checks"]["gitlab_job"] = {
+        "status": "PASS",
+        "access_proven": True,
+        "readback_sha256": "e" * 64,
+        "job_url": expected["job_url"],
+        "job_readback": {
+            "job_id": 42,
+            "pipeline_id": 7,
+            "runner_id": 3,
+            "trace_line_count": 0,
+        },
+    }
+
+    assert _evaluate(receipt, expected)["status"] == "PASS"
+    receipt["live_checks"]["gitlab_job"]["job_readback"].pop("runner_id")
+    assert "declared.json:job_readback_missing" in _evaluate(receipt, expected)[
+        "problems"
+    ]
+    receipt["live_checks"]["gitlab_job"]["job_url"] = "https://elsewhere.test"
+    assert "declared.json:job_target_mismatch" in _evaluate(receipt, expected)[
+        "problems"
+    ]
+
+
 @pytest.mark.parametrize(
     ("mutate", "reason"),
     (
@@ -131,6 +186,19 @@ def test_ceph_namespace_must_match_operator_selection():
         (lambda r: r.update({"schema_version": "2.0"}), "schema_version_unexpected"),
         (lambda r: r["skill"].update({"digest": "0" * 64}), "skill_digest_mismatch"),
         (lambda r: r.pop("skill"), "skill_digest_absent"),
+        (lambda r: r.pop("tested_revision"), "tested_revision_unverified"),
+        (
+            lambda r: r["credential_sources"].update({"gitlab": "env:OTHER"}),
+            "credential_source_mismatch:gitlab",
+        ),
+        (
+            lambda r: r["surfaces"]["github"].update({"status": "BLOCKED"}),
+            "surface_not_pass:github",
+        ),
+        (
+            lambda r: r["surfaces"]["kubernetes"].update({"target": "other"}),
+            "surface_target_mismatch:kubernetes",
+        ),
         (
             lambda r: r["surfaces"]["kubernetes"].update({"identity": "someone"}),
             "identity_mismatch:kubernetes",
@@ -148,6 +216,10 @@ def test_ceph_namespace_must_match_operator_selection():
         (
             lambda r: r["live_checks"].pop("event_trace"),
             "live_check_missing:event_trace",
+        ),
+        (
+            lambda r: r["live_checks"]["event_trace"].pop("readback_sha256"),
+            "live_readback_missing:event_trace",
         ),
         (lambda r: r.update({"blocking_live_checks": ["x"]}), "live_checks_blocking"),
         (

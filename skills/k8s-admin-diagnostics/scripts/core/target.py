@@ -153,6 +153,12 @@ def kubernetes_label(target: Target) -> str:
     return f"{target.kubernetes.context} -> {target.kubernetes.server}"
 
 
+def assert_external_path(path: Path, skill_root: Path, key: str) -> None:
+    """Keep selected credential and target files outside the installed skill."""
+    if path.resolve().is_relative_to(skill_root.resolve()):
+        raise TargetError(f"{key} must be stored outside the installed skill")
+
+
 def _optional_files(
     table: dict[str, object], key: str, skill_root: Path
 ) -> tuple[Path, ...]:
@@ -170,8 +176,7 @@ def _optional_files(
         if not selected.is_absolute():
             raise TargetError(f"{key} entries must be absolute paths")
         path = selected.resolve()
-        if path.is_relative_to(skill_root):
-            raise TargetError(f"{key} must be stored outside the installed skill")
+        assert_external_path(path, skill_root, key)
         resolved.append(path)
     if len(set(resolved)) != len(resolved):
         raise TargetError(f"{key} entries must be unique")
@@ -205,8 +210,7 @@ def _optional_file(table: dict[str, object], key: str, skill_root: Path) -> Path
     if key == "token_file" and not selected.is_absolute():
         raise TargetError("token_file must be an absolute path")
     path = selected.resolve()
-    if path.is_relative_to(skill_root):
-        raise TargetError(f"{key} must be stored outside the installed skill")
+    assert_external_path(path, skill_root, key)
     return path
 
 
@@ -257,8 +261,7 @@ def _parse_gitlab(value: object, skill_root: Path) -> GitLabTarget:
 
 def _read_target_data(source: Path, skill_root: Path) -> dict[str, object]:
     """Read one selected target file without searching another location."""
-    if source.resolve().is_relative_to(skill_root):
-        raise TargetError("target file must be stored outside the installed skill")
+    assert_external_path(source, skill_root, "target file")
     try:
         with source.open("rb") as handle:
             data = tomllib.load(handle)

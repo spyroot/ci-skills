@@ -102,6 +102,50 @@ def test_storage_report_records_malformed_list_envelopes_as_errors(
     assert reasons["attachments"] == "invalid_list_response"
 
 
+def test_storage_report_records_malformed_pv_and_pvc_fields_as_errors(
+    monkeypatch,
+    target_file,
+):
+    """Malformed nested API fields produce source errors instead of exceptions."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    payloads = _empty_storage_payloads()
+    payloads["persistentvolumeclaims"] = {
+        "items": [
+            {
+                "metadata": {"namespace": "app", "name": "bad-pvc"},
+                "spec": "not-a-mapping",
+            }
+        ]
+    }
+    payloads["persistentvolumes"] = {
+        "items": [
+            {
+                "metadata": {"name": "bad-pv"},
+                "status": "not-a-mapping",
+            }
+        ]
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, payloads[resource])
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        namespace="all", node=None, storage_class=None, phase="all", search=None
+    )
+
+    result = collect.collect_storage(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"] == []
+    reasons = {error["source"]: error["reason"] for error in result["errors"]}
+    assert reasons["pvcs"] == "invalid_item_response"
+    assert reasons["pvs"] == "invalid_item_response"
+
+
 @pytest.mark.parametrize(
     ("phase", "expected_volume"),
     (("Released", "pv-released"), ("Failed", "pv-failed")),
@@ -1021,7 +1065,11 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
                 "metadata": {"namespace": "kube-system", "name": "cilium"},
                 "spec": {"selector": {"matchLabels": {"k8s-app": "cilium"}}},
                 "status": {"desiredNumberScheduled": 2, "numberReady": 1},
-            }
+            },
+            {
+                "metadata": {"namespace": "other", "name": "cilium-operator"},
+                "spec": {"selector": {"matchLabels": {"app": "operator"}}},
+            },
         ],
         "pods": [
             {
