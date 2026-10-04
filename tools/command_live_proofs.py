@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import re
 import subprocess
 from collections.abc import Callable
@@ -22,7 +22,11 @@ def _project_python(argv: Any) -> bool:
     :returns: Whether it starts with the approved conda environment invocation.
     """
     return isinstance(argv, list) and argv[:5] == [
-        "conda", "run", "-n", "ci-skills", "python"
+        "conda",
+        "run",
+        "-n",
+        "ci-skills",
+        "python",
     ]
 
 
@@ -112,18 +116,12 @@ def _observed_state(value: Any) -> dict[str, Any] | None:
     body = value.get("body")
     if isinstance(body, list):
         endpoint = value.get("endpoint")
-        if (
-            value["http_status"] != 200
-            or not isinstance(endpoint, str)
-            or not endpoint
-        ):
+        if value["http_status"] != 200 or not isinstance(endpoint, str) or not endpoint:
             return None
         return {"http_status": 200, "endpoint": endpoint, "body": body}
     if not isinstance(body, dict) or not body:
         return None
-    if value["http_status"] == 200 and (
-        _resource_id(body) is None or len(body) < 2
-    ):
+    if value["http_status"] == 200 and (_resource_id(body) is None or len(body) < 2):
         return None
     if value["http_status"] == 404 and not any(
         marker in str(body.get("message", "")).lower()
@@ -154,19 +152,33 @@ def _steps_for(script: str, catalog: Any) -> list[tuple[str | None, str]]:
     if not entry.get("mutates"):
         return [(None, phase) for phase in ("before", "action", "after")]
     if script == "gitlab_runner.py":
-        return [
-            ("create", phase)
-            for phase in (
-                "before", "plan", "apply", "after", "safe_repeat_refusal",
-                "repeat_get",
-            )
-        ] + [
-            ("assign", phase)
-            for phase in (
-                "before", "plan", "apply", "after", "no_op_repeat",
-                "repeat_get", "cleanup", "final_read",
-            )
-        ] + [("create", "cleanup"), ("create", "final_read")]
+        return (
+            [
+                ("create", phase)
+                for phase in (
+                    "before",
+                    "plan",
+                    "apply",
+                    "after",
+                    "safe_repeat_refusal",
+                    "repeat_get",
+                )
+            ]
+            + [
+                ("assign", phase)
+                for phase in (
+                    "before",
+                    "plan",
+                    "apply",
+                    "after",
+                    "no_op_repeat",
+                    "repeat_get",
+                    "cleanup",
+                    "final_read",
+                )
+            ]
+            + [("create", "cleanup"), ("create", "final_read")]
+        )
     operations = sorted(entry.get("subcommands") or {"apply": {}})
     return [
         (operation, phase)
@@ -266,9 +278,7 @@ def _installed_candidate(
     ):
         problems.append(f"{name}:installed_destination_invalid")
         destination = None
-    entrypoint = (
-        f"installed:{destination}/scripts/{script}" if destination else None
-    )
+    entrypoint = f"installed:{destination}/scripts/{script}" if destination else None
     source: str | None = None
     fingerprint: str | None = None
     action: str | None = None
@@ -294,9 +304,7 @@ def _installed_candidate(
             argv = []
         if not _project_python(argv):
             problems.append(f"{label}:project_python_missing")
-        if "--json" not in argv or (
-            phase == "readback" and "--upgrade" not in argv
-        ):
+        if "--json" not in argv or (phase == "readback" and "--upgrade" not in argv):
             problems.append(f"{label}:installer_flags_missing")
         if phase == "apply":
             if "--apply" not in argv or "--timeout" not in argv:
@@ -332,10 +340,7 @@ def _installed_candidate(
             or output.get("mutable_link") is not False
         ):
             problems.append(f"{label}:candidate_identity_mismatch")
-        if (
-            type(output.get("file_count")) is not int
-            or output["file_count"] < 1
-        ):
+        if type(output.get("file_count")) is not int or output["file_count"] < 1:
             problems.append(f"{label}:file_inventory_missing")
         if source is None:
             source = output.get("source")
@@ -355,16 +360,15 @@ def _installed_candidate(
             problems.append(f"{label}:mode_mismatch")
         if phase == "plan":
             fingerprint = output.get("fingerprint")
-            if not isinstance(fingerprint, str) or re.fullmatch(
-                r"[0-9a-f]{64}", fingerprint
-            ) is None:
+            if (
+                not isinstance(fingerprint, str)
+                or re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None
+            ):
                 problems.append(f"{label}:fingerprint_invalid")
                 fingerprint = None
         elif phase == "apply" and output.get("fingerprint") != fingerprint:
             problems.append(f"{label}:fingerprint_mismatch")
-        elif phase == "readback" and not isinstance(
-            output.get("fingerprint"), str
-        ):
+        elif phase == "readback" and not isinstance(output.get("fingerprint"), str):
             problems.append(f"{label}:fingerprint_missing")
         if phase == "readback" and output.get("already_installed") is not True:
             problems.append(f"{label}:installed_readback_missing")
@@ -644,7 +648,11 @@ def _check_one(
             if output_time and timestamp and output_time > timestamp:
                 problems.append(f"{label}:output_time_mismatch")
         if entry.get("mutates") and phase in {
-            "plan", "apply", "no_op_repeat", "repeat_apply", "safe_repeat_refusal"
+            "plan",
+            "apply",
+            "no_op_repeat",
+            "repeat_apply",
+            "safe_repeat_refusal",
         }:
             declared_targets = [
                 item

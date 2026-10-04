@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Check the project binding against its exact checked-out Standards revision."""
 
 from __future__ import annotations
@@ -6,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -24,12 +23,12 @@ def _read_yaml(path: Path) -> dict:
 
     :param path: File containing the YAML document.
     :returns: Parsed mapping.
-    :raises ValueError: The document is not a mapping.
+    :raises TypeError: The document is not a mapping.
     :raises OSError: The file cannot be read.
     """
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError(f"invalid_yaml_mapping:{path.name}")
+        raise TypeError(f"invalid_yaml_mapping:{path.name}")
     return data
 
 
@@ -143,6 +142,7 @@ def check(root: Path, standards: Path) -> list[str]:
             ["git", "-C", str(root), "ls-files", "--error-unmatch", relative],
             capture_output=True,
             text=True,
+            check=False,
         )
         if tracked.returncode == 0:
             problems.append(f"forbidden_tracked_pointer:{relative}")
@@ -171,7 +171,10 @@ def check(root: Path, standards: Path) -> list[str]:
                 )
     for exception in binding.get("spec", {}).get("exceptions", []):
         try:
-            if date.fromisoformat(exception["expires"]) < date.today():
+            if (
+                date.fromisoformat(exception["expires"])
+                < datetime.now(tz=timezone.utc).date()
+            ):
                 problems.append(f"exception_expired:{exception['id']}")
         except (KeyError, TypeError, ValueError):
             problems.append("exception_expiry_invalid")

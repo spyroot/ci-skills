@@ -657,6 +657,12 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
 # Exit classes: report with rows/errors; Side effects: external reads and exec
 # Idempotency: output follows cluster state; Cleanup: pool and children finish
 def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
+    """Read Cilium agents and component health from the selected cluster.
+
+    :param target: Configured Kubernetes target.
+    :param args: Command filters and namespace selection.
+    :returns: Structured Cilium health report with rows and errors.
+    """
     data, errors = _batch(
         target,
         {

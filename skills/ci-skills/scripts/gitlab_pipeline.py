@@ -59,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
 
     :param argv: Optional arguments, or process arguments when omitted.
     :returns: Exit status from the pipeline read and report.
+    :raises TargetError: Raised in target validation, then reported as BLOCKED.
     """
     args = build_parser().parse_args(argv)
     if args.describe:

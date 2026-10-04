@@ -10,7 +10,6 @@ import sys
 import pytest
 from conftest import REPO_ROOT
 
-
 TOOLS = (
     "check_delivery_policy.py",
     "check_function_docs.py",
@@ -36,7 +35,12 @@ def test_changed_validation_cli_help_is_complete_and_machine_readable(script):
     )
     contract = json.loads(machine.stdout)
     assert set(contract) == {
-        "summary", "description", "examples", "options", "output_modes", "usage"
+        "summary",
+        "description",
+        "examples",
+        "options",
+        "output_modes",
+        "usage",
     }
     assert contract["summary"] and contract["usage"]
     assert contract["examples"] == [
@@ -47,15 +51,20 @@ def test_changed_validation_cli_help_is_complete_and_machine_readable(script):
     ]
     assert contract["output_modes"] == {"json": "status JSON on stdout"}
     positions = [
-        re.search(r"(?m)^" + re.escape(heading), human).start()
-        for heading in HEADINGS
+        re.search(r"(?m)^" + re.escape(heading), human).start() for heading in HEADINGS
     ]
     assert positions == sorted(positions)
     assert re.search(r"(?m)^  # .+\n  \S+ --describe$", human)
     assert all(option in human for option in contract["options"])
     assert {
-        "--help", "--describe", "--root", "--dry-run", "--log-format",
-        "--log-level", "--log-file", "--run-id",
+        "--help",
+        "--describe",
+        "--root",
+        "--dry-run",
+        "--log-format",
+        "--log-level",
+        "--log-file",
+        "--run-id",
     } <= set(contract["options"])
     extra = {
         "check_function_docs.py": "--base",

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Keep this GitHub-only project's required validation route singular."""
 
 from __future__ import annotations
@@ -11,12 +10,13 @@ from typing import Final
 import yaml
 from validation_cli import ValidationArgumentParser, add_options, emit
 
-
-REMOVED_ENTRYPOINTS: Final[frozenset[str]] = frozenset({
-    "scripts/check.sh",
-    "lib/ci/check.bash",
-    "tests/check.bats",
-})
+REMOVED_ENTRYPOINTS: Final[frozenset[str]] = frozenset(
+    {
+        "scripts/check.sh",
+        "lib/ci/check.bash",
+        "tests/check.bats",
+    }
+)
 APPROVED_WORKFLOW: Final[str] = ".github/workflows/validate.yml"
 ALWAYS: Final[str] = "${{ always() }}"
 STANDARDS_CHECKOUT_IF: Final[str] = (

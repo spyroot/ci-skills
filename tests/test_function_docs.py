@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import sys
 import subprocess
+import sys
 
 from conftest import REPO_ROOT, load_module
 
@@ -18,10 +18,10 @@ def _source(tmp_path, content, *, add_rest_doc=True):
         content = content.replace(
             "def validate(value):\n",
             "def validate(value):\n"
-            "    \"\"\"Validate one value.\n\n"
+            '    """Validate one value.\n\n'
             "    :param value: Value to inspect.\n"
             "    :returns: Whether the value is accepted.\n"
-            "    \"\"\"\n",
+            '    """\n',
         )
     scripts = tmp_path / "skills" / "ci-skills" / "scripts"
     scripts.mkdir(parents=True)
@@ -225,7 +225,9 @@ def test_rest_scope_follows_changed_function_lines(tmp_path):
     ).stdout.strip()
     assert DOCS.check(root, base=base) == []
     path = root / "skills" / "ci-skills" / "scripts" / "sample.py"
-    path.write_text(body.replace("# Summary: described", "# Summary: updated"))
+    revised = body.replace("# summary: described", "# summary: updated")
+    assert revised != body
+    path.write_text(revised, encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "add", "."], check=True)
     subprocess.run(
         ["git", "-C", str(root), "commit", "-qm", "change adjacent API docs"],
@@ -233,9 +235,7 @@ def test_rest_scope_follows_changed_function_lines(tmp_path):
     )
     assert DOCS.check(root, base=base) == []
     path.write_text(
-        body.replace("# Summary: described", "# Summary: updated").replace(
-            "return True", "return bool(value)"
-        ),
+        revised.replace("return True", "return bool(value)"),
         encoding="utf-8",
     )
     subprocess.run(["git", "-C", str(root), "add", "."], check=True)

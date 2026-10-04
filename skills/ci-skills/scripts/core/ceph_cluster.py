@@ -191,7 +191,12 @@ def _health(payload: Any) -> tuple[str, list[dict[str, Any]]]:
 # Stdout: none; Stderr: none; Exit classes: roots and OSDs, or TypeError
 # Side effects: none; Idempotency: same tree gives same result; Cleanup: none
 def _osd_tree(payload: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Keep Ceph's root/bucket/OSD links while validating every referenced node."""
+    """Keep Ceph's root/bucket/OSD links while validating every referenced node.
+
+    :param payload: Decoded Ceph ``osd tree`` response.
+    :returns: Expanded hierarchy roots and normalized OSD records.
+    :raises TypeError: If nodes, links, or hierarchy cycles are invalid.
+    """
     nodes = payload.get("nodes") if isinstance(payload, dict) else None
     if not isinstance(nodes, list):
         raise TypeError("osd_tree:invalid_response")

@@ -13,7 +13,7 @@ ACCESS = import_script_module("core.access")
 CREDENTIALS = import_script_module("core.credentials")
 TARGET = import_script_module("core.target")
 SCRIPT = import_script_module("gitlab_access")
-CLI = import_script_module("core.cli")
+PORTABLE = import_script_module("core.portable")
 
 
 def _target(tmp_path: Path, *, token_file: Path | None = None, body: str = "") -> Path:
@@ -483,22 +483,19 @@ def test_failed_receipt_publication_preserves_destination_and_cleans_partial(
         lambda session: ACCESS.check_gitlab_operation_access(session, api_client=api),
     )
     if failure in {"write", "interrupt"}:
-        original_write = Path.write_text
 
-        def interrupted_write(path, content, *args, **kwargs):
-            if path.name == ".receipt.json.partial":
-                original_write(path, content[:8], *args, **kwargs)
-                if failure == "interrupt":
-                    raise KeyboardInterrupt
-                raise OSError("injected partial write")
-            return original_write(path, content, *args, **kwargs)
+        def failed_sync(_descriptor):
+            if failure == "interrupt":
+                raise KeyboardInterrupt
+            raise OSError("injected partial write")
 
-        monkeypatch.setattr(Path, "write_text", interrupted_write)
+        monkeypatch.setattr(PORTABLE.os, "fsync", failed_sync)
     else:
+
         def failed_replace(*_args):
             raise OSError("replace failed")
 
-        monkeypatch.setattr(CLI.os, "replace", failed_replace)
+        monkeypatch.setattr(PORTABLE.os, "replace", failed_replace)
     arguments = [
         "check",
         "--target",
@@ -513,4 +510,4 @@ def test_failed_receipt_publication_preserves_destination_and_cleans_partial(
     else:
         assert SCRIPT.main(arguments) == 2
     assert receipt_file.read_bytes() == b"prior receipt\n"
-    assert not (tmp_path / ".receipt.json.partial").exists()
+    assert not list(tmp_path.glob(".receipt.json.*.partial"))

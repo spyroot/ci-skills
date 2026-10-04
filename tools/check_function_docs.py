@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Enforce the pinned Automation Standard's adjacent function documentation."""
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ from pathlib import Path
 from typing import Final
 
 from validation_cli import ValidationArgumentParser, add_options, emit
-
 
 REQUIRED_FIELDS: Final[tuple[str, ...]] = (
     "summary",
@@ -39,7 +37,10 @@ NONTRIVIAL_NODES: Final[tuple[type[ast.AST], ...]] = (
     ast.YieldFrom,
 )
 ASSIGNMENT_NODES: Final[tuple[type[ast.AST], ...]] = (
-    ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr
+    ast.Assign,
+    ast.AnnAssign,
+    ast.AugAssign,
+    ast.NamedExpr,
 )
 TRANSFORMATION_NODES: Final[tuple[type[ast.AST], ...]] = (
     ast.BinOp,
@@ -181,9 +182,7 @@ def _docstring_issues(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]
     problems: list[str] = []
     if not doc.splitlines()[0].strip() or doc.splitlines()[0].lstrip().startswith(":"):
         problems.append("summary_missing")
-    documented = re.findall(
-        r"(?m)^[ \t]*:param[ \t]+(\w+):[ \t]*(\S.*?)[ \t]*$", doc
-    )
+    documented = re.findall(r"(?m)^[ \t]*:param[ \t]+(\w+):[ \t]*(\S.*?)[ \t]*$", doc)
     names = [name for name, _description in documented]
     declared = _parameters(node)
     for name in declared:
@@ -201,15 +200,11 @@ def _docstring_issues(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]
         or (
             isinstance(item, ast.Return)
             and item.value is not None
-            and not (
-                isinstance(item.value, ast.Constant) and item.value.value is None
-            )
+            and not (isinstance(item.value, ast.Constant) and item.value.value is None)
         )
         for item in own_nodes
     )
-    if returns_value and not re.search(
-        r"(?m)^[ \t]*:returns:[ \t]*\S", doc
-    ):
+    if returns_value and not re.search(r"(?m)^[ \t]*:returns:[ \t]*\S", doc):
         problems.append("returns_missing")
     documented_raises = set(
         re.findall(r"(?m)^[ \t]*:raises[ \t]+([\w.]+):[ \t]*\S", doc)
@@ -262,9 +257,7 @@ def _changed_lines(root: Path, base: str) -> dict[str, set[int]]:
                 continue
             start = int(match.group(1))
             count = int(match.group(2) or "1")
-            changed.setdefault(path, set()).update(
-                range(start, start + max(count, 1))
-            )
+            changed.setdefault(path, set()).update(range(start, start + max(count, 1)))
     return changed
 
 

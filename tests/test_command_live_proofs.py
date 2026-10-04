@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import sys
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 
 from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
@@ -43,7 +43,11 @@ def _proof() -> dict:
             "operation": None,
             "captured_at": (start + timedelta(minutes=index)).isoformat(),
             "command": [
-                "conda", "run", "-n", "ci-skills", "python",
+                "conda",
+                "run",
+                "-n",
+                "ci-skills",
+                "python",
                 installed,
                 "check",
                 "--revision",
@@ -58,8 +62,14 @@ def _proof() -> dict:
     installation = {}
     for index, phase in enumerate(("plan", "apply", "readback")):
         argv = [
-            "conda", "run", "-n", "ci-skills", "python",
-            "tools/install_ci_skills.py", "--upgrade", "--json",
+            "conda",
+            "run",
+            "-n",
+            "ci-skills",
+            "python",
+            "tools/install_ci_skills.py",
+            "--upgrade",
+            "--json",
         ]
         if phase == "apply":
             argv.extend(
@@ -122,7 +132,7 @@ def _check(proof: dict) -> list[str]:
         proof,
         SCRIPT,
         CATALOG,
-        proof["skill"]["digest"],
+        PROVENANCE.tree_digest(SCRIPT_ROOT.parent)["digest"],
         expected,
         {HOST: {"gitlab": "file:path:unit"}},
         NOW,
@@ -168,7 +178,8 @@ def test_installed_command_and_installer_require_project_conda_environment():
     proof = _proof()
     proof["steps"][1]["command"] = ["python", *proof["steps"][1]["command"][5:]]
     proof["installation"]["apply"]["command"] = [
-        "python", *proof["installation"]["apply"]["command"][5:]
+        "python",
+        *proof["installation"]["apply"]["command"][5:],
     ]
     problems = _check(proof)
     assert sum("project_python_missing" in item for item in problems) == 2
@@ -207,9 +218,12 @@ def test_cleanup_compares_actual_before_and_final_get_bodies():
 
 
 def test_failed_or_empty_get_body_cannot_prove_restored_state():
-    assert PROOFS._observed_state(
-        {"http_status": 500, "body": {"message": "server error"}}
-    ) is None
+    assert (
+        PROOFS._observed_state(
+            {"http_status": 500, "body": {"message": "server error"}}
+        )
+        is None
+    )
     assert PROOFS._observed_state({"http_status": 200, "body": {"id": 42}}) is None
     assert PROOFS._observed_state(
         {"http_status": 404, "body": {"message": "not found"}}
@@ -238,9 +252,7 @@ def test_catalog_drives_the_full_mutating_phase_order():
 def test_runner_creation_precedes_assignment_and_cleanup_is_deferred():
     phases = PROOFS._steps_for("gitlab_runner.py", CATALOG)
     assert phases.index(("create", "apply")) < phases.index(("assign", "apply"))
-    assert phases.index(("assign", "final_read")) < phases.index(
-        ("create", "cleanup")
-    )
+    assert phases.index(("assign", "final_read")) < phases.index(("create", "cleanup"))
     assert phases[-1] == ("create", "final_read")
 
 

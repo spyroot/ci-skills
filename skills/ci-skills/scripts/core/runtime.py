@@ -98,6 +98,10 @@ def redact(value: str) -> str:
     return result
 
 
+# Summary: identify credential-bearing field names for whole-value redaction
+# Arguments: field name; Environment inputs: none
+# Stdout: none; Stderr: none; Exit classes: boolean
+# Side effects: none; Idempotency: same name gives same result; Cleanup: none
 def is_secret_name(name: str) -> bool:
     """Report whether a field name declares its value to be a credential."""
     return bool(_SECRET_NAME.match(name))

@@ -673,6 +673,10 @@ def evaluate(
 # Side effects: reads files; Idempotency: fixed files/time give same result
 # Cleanup: file reads close; no live resource mutation
 def main() -> int:
+    """Run the committed live receipt checks and report their result.
+
+    :returns: Zero when every required receipt passes, otherwise a failure code.
+    """
     cli = argparse.ArgumentParser(
         description="Verify committed live-access receipts against this revision.",
         epilog="Example: check_live_acceptance.py --root . --json",

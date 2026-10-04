@@ -220,6 +220,8 @@ def run(kind: str, args: argparse.Namespace) -> int:
     :param args: Parsed target, mode, and filter options.
     :returns: Status code from the structured report.
     :raises ValueError: If the diagnostic kind is unsupported.
+    :raises NodePodError: Raised inside the live path, then reported as BLOCKED.
+    :raises TargetError: Raised inside target validation, then reported as BLOCKED.
     """
     if kind not in {"cilium_node", "ceph_kernel"}:
         raise ValueError("unsupported_node_diagnostic")

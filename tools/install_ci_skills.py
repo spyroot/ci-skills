@@ -189,7 +189,19 @@ def _recoverable_signals():
         signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)
     }
 
+    # Summary: convert an install signal into a recoverable exception
+    # Arguments: signal number and unused signal frame
+    # Environment inputs: process signal delivery; Stdout: none; Stderr: none
+    # Exit classes: SystemExit with signal status
+    # Side effects: raises SystemExit; Idempotency: same signal gives same status
+    # Cleanup: surrounding context restores the prior handlers
     def interrupt(signum: int, _frame: Any) -> None:
+        """Raise a signal-derived exit while the outer context restores handlers.
+
+        :param signum: Delivered process signal number.
+        :param _frame: Interrupted frame, unused by this handler.
+        :raises SystemExit: Always, with the conventional signal exit status.
+        """
         raise SystemExit(128 + signum)
 
     try:

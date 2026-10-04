@@ -148,19 +148,25 @@ def add_options(parser: argparse.ArgumentParser) -> None:
         "--dry-run", action="store_true", help="inspect without changing state"
     )
     parser.add_argument(
-        "--log-format", choices=("text", "json"), default="text",
+        "--log-format",
+        choices=("text", "json"),
+        default="text",
         help="stderr and log-file diagnostic format (default: text)",
     )
     parser.add_argument(
-        "--log-level", choices=("debug", "info", "warning", "error"),
-        default="info", help="minimum diagnostic severity (default: info)",
+        "--log-level",
+        choices=("debug", "info", "warning", "error"),
+        default="info",
+        help="minimum diagnostic severity (default: info)",
     )
     parser.add_argument("--log-file", type=Path, help="append sanitized status log")
     parser.add_argument(
         "--run-id", default="", help="caller-selected log correlation ID"
     )
     parser.add_argument(
-        "--describe", action=DescribeAction, nargs=0,
+        "--describe",
+        action=DescribeAction,
+        nargs=0,
         help="print this command's machine-readable interface and exit",
     )
 

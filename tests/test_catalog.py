@@ -112,8 +112,7 @@ def test_human_and_machine_help_follow_pinned_documentation_contract(script):
         contract = CATALOG.describe(script)
     help_text = parser.format_help()
     headings = [
-        re.search(r"(?m)^" + re.escape(heading), help_text)
-        for heading in HELP_HEADINGS
+        re.search(r"(?m)^" + re.escape(heading), help_text) for heading in HELP_HEADINGS
     ]
     assert all(match is not None for match in headings), script
     positions = [match.start() for match in headings]
@@ -138,9 +137,7 @@ def test_human_and_machine_help_follow_pinned_documentation_contract(script):
     ), script
     assert set(contract["output_modes"]) == {"json", "yaml", "human"}, script
     assert all(
-        isinstance(example, dict)
-        and example.get("purpose")
-        and example.get("command")
+        isinstance(example, dict) and example.get("purpose") and example.get("command")
         for example in contract["examples"]
     ), script
     assert set(contract["options"]) == (
@@ -158,7 +155,12 @@ def test_human_and_machine_help_follow_pinned_documentation_contract(script):
     )
     described = json.loads(actual.stdout)
     for field in (
-        "summary", "description", "examples", "options", "output_modes", "usage"
+        "summary",
+        "description",
+        "examples",
+        "options",
+        "output_modes",
+        "usage",
     ):
         assert described[field] == contract[field], (script, field)
 
