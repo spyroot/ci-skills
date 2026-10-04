@@ -1,4 +1,7 @@
-"""Bound GitLab operation identity without reportable credential values."""
+"""
+Bound GitLab operation identity without reportable credential values.
+Mustafa Bayramov mbayramo@cisco.com spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -15,6 +18,9 @@ class BoundGitLabSession:
     ``environment`` is only for a child API process. Reports must select the
     public fields explicitly; serializing this object would expose a token.
     """
+
+    def __init__(self):
+        pass
 
     origin: str
     host: str

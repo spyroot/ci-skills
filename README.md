@@ -26,7 +26,7 @@ configured binding and returns evidence that an operator or agent can inspect.
   OpenShift build planning.
 
 The Python commands use small entry points over reusable code in
-[scripts/core](ci-skills/scripts/core/). Their `--help` output serves
+[scripts/core](ci-skills/lib/core/). Their `--help` output serves
 people, while `--json`, `--yaml`, and `--describe` expose versioned reports and
 command contracts. The generated [tools.json](ci-skills/tools.json)
 records options, access protocols, and target protocols. GitLab writes start
@@ -82,11 +82,11 @@ may also provide visibility.
 This `CI_SKILL` specification adds GitLab issue, milestone, board, label,
 pipeline, job, schedule, and wiki workflows, plus issue-to-merge-request-to-QA
 evidence. The commands below are proposed; they are not yet present in the
-[command catalog](ci-skills/scripts/core/catalog.py).
+[command catalog](ci-skills/lib/core/catalog.py).
 
 Every new action needs a concrete script name, arguments, behavior, result,
 and independent read-back. Its Python entry point must stay small and call
-reusable code in [scripts/core](ci-skills/scripts/core/). It must offer
+reusable code in [scripts/core](ci-skills/lib/core/). It must offer
 `--help` for people, `--json` and `--yaml` for machines, and `--describe` for
 its command contract. [tools.json](ci-skills/tools.json) must declare
 its options and access and target protocols. Each versioned report kind must

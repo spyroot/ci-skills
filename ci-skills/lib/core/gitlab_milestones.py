@@ -27,7 +27,13 @@ from .gitlab_api import (
 )
 
 
-def prepare(args: Namespace) -> tuple[dict[str, Any], int | None, None]:
+def prepare(
+        args: Namespace) -> tuple[dict[str, Any], int | None, None]:
+    """
+
+    :param args:
+    :return:
+    """
     """Validate one milestone mutation without calling a provider."""
     body: dict[str, Any] = {}
     identifier: int | None = None
@@ -147,6 +153,15 @@ def _find_exact(api: Any, session: Any, base: str, title: str) -> list[dict[str,
 def _create(
     api: Any, session: Any, plan: ActionPlan, base: str, target_id: int
 ) -> dict[str, Any]:
+    """
+
+    :param api:
+    :param session:
+    :param plan:
+    :param base:
+    :param target_id:
+    :return:
+    """
     with create_guard(
         plan.origin, plan.target_kind, target_id, "milestone", plan.body["title"]
     ) as guard:

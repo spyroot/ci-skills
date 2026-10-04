@@ -35,12 +35,18 @@ DENIAL_REASONS = frozenset({"authentication", "authorization", "missing_tool"})
 CILIUM_REPORT_SOURCES = frozenset({"daemonsets", "pods", "operators", "ciliumnodes"})
 
 
-def _access_proven(name: str, evidence: dict[str, Any]) -> bool:
+def _access_proven(
+        name: str,
+        evidence: dict[str, Any]
+) -> bool:
     """Decide whether one collector demonstrated access, health aside.
 
     A read that failed blocks. A read that succeeded while reporting an
     unhealthy component does not, provided the capability it exists to prove was
     demonstrated at least once.
+    :param name:
+    :param evidence:
+    :return:
     """
     if evidence.get("status") == PASS:
         return True
@@ -71,7 +77,11 @@ def _access_proven(name: str, evidence: dict[str, Any]) -> bool:
 
 
 def _evidence(result: dict[str, Any]) -> dict[str, Any]:
-    """Record bounded, value-free proof of one completed resource read."""
+    """
+
+    :param result:
+    :return:
+    """
     body = json.dumps(result, sort_keys=True, default=str).encode("utf-8")
     evidence = {
         "status": result.get("status", BLOCKED),

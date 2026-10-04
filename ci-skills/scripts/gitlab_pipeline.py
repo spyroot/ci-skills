@@ -21,8 +21,11 @@ KIND = "gitlab_pipeline"
 SCRIPT = "gitlab_pipeline.py"
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Expose the common output tier with an exact pipeline selection."""
+def build_parser(
+) -> argparse.ArgumentParser:
+    """Expose the common output tier with an exact pipeline selection.
+    :return:
+    """
     cli = parser(
         "Read one selected GitLab pipeline and summarize job progress by stage.",
         kind=KIND,

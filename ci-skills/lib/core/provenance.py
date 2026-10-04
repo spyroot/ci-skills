@@ -22,6 +22,8 @@ So this module separates the claim from the evidence:
 Verification against the claim happens where the Git objects are -- see
 `tools/check_live_acceptance.py`, which recomputes the digest from the claimed
 revision's tree and compares.
+
+Mustafa Bayramov mbayramo@ciso.com spyroot@gmail.com
 """
 
 from __future__ import annotations

@@ -1,4 +1,8 @@
-"""Read-only verification of the three explicitly selected live authorities."""
+"""
+Read-only verification of the three explicitly selected live authorities.
+
+Mustafa Bayramov mbayramo@ciso.com spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -42,8 +46,15 @@ class Surface:
         return vars(self)
 
 
-def kubectl_argv(target: Target, *args: str) -> list[str]:
-    """Bind every Kubernetes command to the supplied context and optional file."""
+def kubectl_argv(
+        target: Target,
+        *args: str
+) -> list[str]:
+    """Bind every Kubernetes command to the supplied context and optional file
+    :param target:
+    :param args:
+    :return:
+    """
     assert_kubeconfig_unchanged(target.sources)
     command = ["kubectl"]
     sources = target.sources if isinstance(target.sources, Sources) else None
@@ -56,7 +67,11 @@ def kubectl_argv(target: Target, *args: str) -> list[str]:
 
 
 def oc_argv(target: Target, *args: str) -> list[str]:
-    """Use the same pinned kubeconfig and context for OpenShift commands."""
+    """Use the same pinned kubeconfig and context for OpenShift commands.
+    :param target:
+    :param args:
+    :return:
+    """
     return ["oc", *kubectl_argv(target, *args)[1:]]
 
 
@@ -785,7 +800,9 @@ def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
     )
 
 
-def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
+def access_evidence(
+        gate: dict[str, Any]
+) -> dict[str, Any]:
     """Summarize the gate that authorized one collector run.
 
     A collector report used to replace the gate result entirely, so it carried
@@ -797,6 +814,9 @@ def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
     and two gates never do. It is deliberately NOT a match against a written
     receipt: `--receipt-out` writes the portable, redacted form, so the bytes
     would never agree.
+
+    :param gate:
+    :return:
     """
     body = json.dumps(gate, sort_keys=True, default=str).encode("utf-8")
     surfaces = gate.get("surfaces") or {}
@@ -824,9 +844,16 @@ def access_evidence(gate: dict[str, Any]) -> dict[str, Any]:
 
 
 def check_access(
-    target: Target, *, publication: bool = False, cilium: bool = True
+    target: Target, *,
+        publication: bool = False,
+        cilium: bool = True
 ) -> dict[str, Any]:
-    """Probe this command's declared authorities and fail closed on denial."""
+    """Probe this command's declared authorities and fail closed on denial.
+    :param target:
+    :param publication:
+    :param cilium:
+    :return:
+    """
     checks = {
         "github": github_publication_access if publication else github_access,
         "gitlab": gitlab_access,
@@ -887,6 +914,13 @@ def check_access(
 def dry_run_access(
     target: Target, *, publication: bool = False, cilium: bool = True
 ) -> dict[str, Any]:
+    """
+
+    :param target:
+    :param publication:
+    :param cilium:
+    :return:
+    """
     selected = target.active_surfaces
     if publication and "github" not in selected:
         raise ValueError("publication_requires_github")
