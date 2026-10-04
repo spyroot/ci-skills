@@ -652,9 +652,7 @@ def main() -> int:
     receipts_path = (
         Path(args.receipts) if args.receipts else root / "acceptance" / "receipts"
     )
-    skill_path = (
-        Path(args.skill) if args.skill else root / "skills" / "ci-skills"
-    )
+    skill_path = Path(args.skill) if args.skill else root / "skills" / "ci-skills"
     _redactor()
     try:
         data = evaluate(

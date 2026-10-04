@@ -12,9 +12,7 @@ from conftest import REPO_ROOT, load_module
 
 
 def _installer():
-    return load_module(
-        "skill_installer", REPO_ROOT / "tools" / "install_ci_skills.py"
-    )
+    return load_module("skill_installer", REPO_ROOT / "tools" / "install_ci_skills.py")
 
 
 def _source(tmp_path: Path) -> Path:
