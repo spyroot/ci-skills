@@ -446,7 +446,7 @@ def _runner_smoke_cleanup_verified(
 def _redactor():
     """Return the skill's own redactor, so one rule covers capture and review."""
     root = Path(__file__).resolve().parents[1]
-    scripts = root / "skills" / "k8s-admin-diagnostics" / "scripts"
+    scripts = root / "skills" / "ci-skills" / "scripts"
     if str(scripts) not in sys.path:
         sys.path.insert(0, str(scripts))
     try:
@@ -638,7 +638,7 @@ def main() -> int:
     cli.add_argument(
         "--skill",
         metavar="PATH",
-        help="skill root (default: <root>/skills/k8s-admin-diagnostics)",
+        help="skill root (default: <root>/skills/ci-skills)",
     )
     modes = cli.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print JSON")
@@ -653,7 +653,7 @@ def main() -> int:
         Path(args.receipts) if args.receipts else root / "acceptance" / "receipts"
     )
     skill_path = (
-        Path(args.skill) if args.skill else root / "skills" / "k8s-admin-diagnostics"
+        Path(args.skill) if args.skill else root / "skills" / "ci-skills"
     )
     _redactor()
     try:

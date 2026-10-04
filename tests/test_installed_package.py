@@ -13,7 +13,7 @@ import pytest
 import yaml
 from conftest import REPO_ROOT, install_executable, load_module
 
-SKILL_ROOT = REPO_ROOT / "skills" / "k8s-admin-diagnostics"
+SKILL_ROOT = REPO_ROOT / "skills" / "ci-skills"
 
 ENTRYPOINT_CASES = (
     ("access_check.py", (), "access_check", "PASS"),
@@ -501,9 +501,9 @@ def _write_target_with_kubeconfigs(
 
 
 def _install_skill(tmp_path: Path) -> Path:
-    installed = tmp_path / "installed" / "k8s-admin-diagnostics"
+    installed = tmp_path / "installed" / "ci-skills"
     installer = load_module(
-        "skill_installer", REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"
+        "skill_installer", REPO_ROOT / "tools" / "install_ci_skills.py"
     )
     installation = installer.install(SKILL_ROOT, installed.parent, dry_run=False)
     assert installation["status"] == "PASS"

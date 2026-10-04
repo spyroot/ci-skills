@@ -80,8 +80,10 @@ jobs:
           shell_files=(
             install.sh scripts/check.sh
             bin/ci-api bin/ci-binary-build
-            lib/core/runtime.bash lib/ci/api.bash lib/ci/check.bash
-            lib/automation/binary_build.bash
+            skills/ci-skills/bin/ci-api skills/ci-skills/bin/ci-binary-build
+            skills/ci-skills/lib/core/runtime.bash
+            skills/ci-skills/lib/ci/api.bash lib/ci/check.bash
+            skills/ci-skills/lib/automation/binary_build.bash
             examples/emit-binary-buildconfig.sh
             examples/emit-vcpkg-prereq.sh
           )

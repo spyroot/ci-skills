@@ -18,9 +18,11 @@ make_clean_git_fixture() {
 
 make_check_run_fixture() {
   make_clean_git_fixture
+  mkdir -p "${fixture}/skills/ci-skills"
+  printf '%s\n' '# Fixture skill' >"${fixture}/skills/ci-skills/SKILL.md"
   printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"${fixture}/check.sh"
   printf '%s\n' 'name: fixture' >"${fixture}/fixture.yaml"
-  git -C "$fixture" add check.sh fixture.yaml
+  git -C "$fixture" add check.sh fixture.yaml skills/ci-skills/SKILL.md
   git -C "$fixture" commit --quiet -m 'add gate inputs'
 }
 

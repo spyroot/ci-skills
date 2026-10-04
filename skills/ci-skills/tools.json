@@ -740,7 +740,7 @@
     "what the cluster said during an interval": "event_trace.py"
   },
   "schema_version": "1.0",
-  "skill": "k8s-admin-diagnostics",
+  "skill": "ci-skills",
   "status_values": {
     "BLOCKED": "an authority or a required read failed; see blocking_live_checks",
     "DRY_RUN": "a probe plan only, never access evidence",

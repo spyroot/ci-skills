@@ -13,7 +13,7 @@ from conftest import REPO_ROOT, load_module
 
 def _installer():
     return load_module(
-        "skill_installer", REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"
+        "skill_installer", REPO_ROOT / "tools" / "install_ci_skills.py"
     )
 
 
@@ -294,7 +294,7 @@ module.install(Path(sys.argv[2]), Path(sys.argv[3]), dry_run=False,
             sys.executable,
             "-c",
             script,
-            str(REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"),
+            str(REPO_ROOT / "tools" / "install_ci_skills.py"),
             str(source),
             str(skills_dir),
             str(destination),

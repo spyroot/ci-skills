@@ -35,7 +35,7 @@ def _digest(value: Any) -> str:
 
 def _source(root: Path, revision: str) -> Path:
     root = root.resolve()
-    scripts = root / "skills" / "k8s-admin-diagnostics" / "scripts"
+    scripts = root / "skills" / "ci-skills" / "scripts"
     if not scripts.is_dir():
         raise RuntimeError("skill_scripts_missing")
     source_identity(root, revision, scripts.parent)

@@ -1,13 +1,20 @@
 ---
-name: k8s-admin-diagnostics
-description: Diagnose GitLab CI, Kubernetes storage, Cilium, Ceph, and physical NIC MTUs; perform selected GitLab milestone, issue, wiki, and runner operations.
+name: ci-skills
+description: Use repeatable GitLab CI and Kubernetes/OpenShift tools for jobs, milestones, issues, runners, storage, events, Cilium, Ceph, node MTUs, API reads, and exact-commit build plans.
 metadata:
   manifest: tools.json
   default_output: json when stdout is not a terminal
   read_only: false
 ---
 
-# Kubernetes diagnostics and GitLab operations
+# CI Skills
+
+The directory containing this file is the installed skill root. Keep the
+working directory at the calling project root so its `.ci-skills/target.toml`
+can be selected. Run Python entrypoints under `scripts/` with Python 3.11 or
+newer; the documented environment uses `conda run -n ci-skills python`.
+Run Bash entrypoints under `bin/` by path. Use these commands for supported
+operations instead of rebuilding them with one-off CLI parsing.
 
 Diagnose a Kubernetes-backed CI, storage, or network symptom, or act on an
 explicit GitLab request. GitLab operation commands default to an offline
@@ -206,3 +213,17 @@ tags them for this run, deletes any survivors, and reads back their absence.
 An incomplete read or cleanup is `BLOCKED` or `PARTIAL`; a real MTU mismatch is
 `PARTIAL` with `physical_mtu_mismatch` and an inspection action. It does not
 change host interfaces or repair networking.
+
+## 9. Use the Bash tools
+
+`bin/ci-api` performs a bounded GET against a caller-selected GitHub or
+GitLab API endpoint. Supply its exact provider, host, endpoint, and token file
+when the target declares one. It does not resolve `target.toml`; its result is
+separate from an exact-target access receipt. `bin/ci-binary-build` produces
+an exact-commit OpenShift Binary BuildConfig plan and does not change the
+cluster. Both commands expose `--help` and machine-readable output.
+
+For a Ceph network or RBD timeout, start with `ceph_cluster.py` and
+`event_trace.py`, then run the MTU command when physical network consistency
+matters. For Cilium, run `cilium_status.py` first and `cilium_node.py` for an
+affected node. `tools.json` describes every command and its filters.

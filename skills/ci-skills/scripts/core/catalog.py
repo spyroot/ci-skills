@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 SCHEMA_VERSION = "1.0"
-SKILL_NAME = "k8s-admin-diagnostics"
+SKILL_NAME = "ci-skills"
 
 # Every API command accepts these. Node diagnostics share the target protocol.
 UNIVERSAL_OPTIONS: dict[str, str] = {

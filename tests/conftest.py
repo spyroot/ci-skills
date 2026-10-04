@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_ROOT = REPO_ROOT / "skills" / "k8s-admin-diagnostics" / "scripts"
+SCRIPT_ROOT = REPO_ROOT / "skills" / "ci-skills" / "scripts"
 CORE_ROOT = SCRIPT_ROOT / "core"
 
 
