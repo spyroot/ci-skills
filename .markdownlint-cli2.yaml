@@ -11,6 +11,3 @@ ignores:
   - "docs/vendor/original/**"
   - "docs/vendor/**"
   - "docs/thirdparty/**"
-
-
-

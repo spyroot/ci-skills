@@ -1,4 +1,4 @@
-# GAL-GATES: verification gates
+# CI03-GATES: verification gates
 
 Status: proposed. Depends on the merged `scripts/check.sh`. Used by: every
 other phase.
@@ -58,7 +58,7 @@ change that closes it.
   `--help`, and exits 0, 64 or 69.
 - **Smallest change.** Extend that script instead of adding a second one:
   - add the checks `validate` runs today, plus the `schemas` gate
-    (GAL-SCHEMA), the `cli` gate (GAL-CLI) and, after GAL-VENDOR, `verify`;
+    (CI-SCHEMA), the `cli` gate (CI02-CLI) and, after CI-VENDOR, `verify`;
   - add a way to run one gate, or the static subset, for the hooks;
   - make each `validate.yml` step call it;
   - extend `tests/test_validate_workflow_policy.py` so that every gate is
@@ -70,8 +70,8 @@ change that closes it.
 - **Failure today.** `requirements.txt` holds ranges (`ruff>=0.13,<1`), so
   CI and a contributor can format differently.
 - **Smallest change.** Pin exact versions, taken from what a `validate` run
-  resolves. That includes `check-jsonschema` (GAL-SCHEMA) and coverage.py
-  (GAL-TESTS).
+  resolves. That includes `check-jsonschema` (CI-SCHEMA) and coverage.py
+  (CI-TESTS).
 
 ### G3. A review that blocks a merge
 
@@ -88,7 +88,7 @@ change that closes it.
 ### G4. Vendored skills checked on every change
 
 - **Requirement.** A change to a vendored skill is always verified
-  (GAL-VENDOR).
+  (CI-VENDOR).
 - **Failure today.** A change to Markdown files alone skips the gated
   workflow steps, and a vendored skill is almost all Markdown.
 - **Smallest change.** The `verify` gate runs unconditionally, under the
@@ -96,7 +96,7 @@ change that closes it.
 
 ### G5. Release receipt host
 
-- **Requirement.** GAL-ROUTING needs a new live receipt for the exact skill
+- **Requirement.** CI-ROUTING needs a new live receipt for the exact skill
   digest, captured on the executor that `acceptance/expected.toml` declares.
 - **Conflict.** That executor is a laptop, and the project's guide says a
   laptop is not release evidence.
@@ -156,7 +156,7 @@ change that closes it.
 
 ## Local and CI
 
-- **Local:** static checks, through the hooks (GAL-HOOKS), and advisory
+- **Local:** static checks, through the hooks (CI04-HOOKS), and advisory
   only.
 - **CI only:** tests and live checks. A local result never replaces
   `validate`.

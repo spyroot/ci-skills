@@ -1,15 +1,15 @@
-# GAL-CATALOG: discover, list, get and install every skill
+# CI01-CATALOG: discover, list, get and install every skill
 
-Status: proposed. Depends on: GAL-VENDOR, GAL-SCHEMA and GAL-CLI. Followed
-by: GAL-ROUTING.
+Status: proposed. Depends on: CI-VENDOR, CI-SCHEMA and CI02-CLI. Followed
+by: CI-ROUTING.
 
 ## Goal
 
 One interface over local and vendored skills, named after `glab skills`:
-`list`, `get` and `install`, beside GAL-VENDOR's `update`. `list` returns
+`list`, `get` and `install`, beside CI-VENDOR's `update`. `list` returns
 skill records, including the repository's `ci-skills` package; its commands
 are described by that package's `tools.json`. Package consolidation
-(GAL-PHASES) lands before this phase.
+(CI-PHASES) lands before this phase.
 
 ## Block
 
@@ -46,11 +46,11 @@ Discovery only reads: it writes nothing and uses no network.
 
 1. **`SKILL.md`.** The frontmatter is the block between a first line `---`
    and the next line `---`. It is parsed as YAML and checked against
-   `skill-frontmatter` (GAL-SCHEMA). Its `name` must equal the directory
+   `skill-frontmatter` (CI-SCHEMA). Its `name` must equal the directory
    name.
 2. **`tools.json`**, for a local skill, checked against `skill-manifest`. It
    supplies the tags, references, routing and tool operations used
-   (GAL-ROUTING).
+   (CI-ROUTING).
 3. **The lock and declarations**, for a vendored skill: its entry in
    `skills/vendor.lock.json` and in `skills/vendor.toml`, each checked
    against its schema.
@@ -80,7 +80,7 @@ bin/ci-skills install NAME [--skills-dir DIR] [--confirm]
                            [--json | --yaml | --human]
 ```
 
-Exit codes, the result envelope and `safe_next_step` follow GAL-CLI.
+Exit codes, the result envelope and `safe_next_step` follow CI02-CLI.
 
 - **`NAME`.** Resolved only from the discovered map. A name with a path
   separator, `.`, `..`, or a symlinked skill root is refused with
@@ -90,7 +90,7 @@ Exit codes, the result envelope and `safe_next_step` follow GAL-CLI.
   `..` segment, or a symbolic link that leads outside is refused with
   `path_outside_skill`.
 - **`install` plans by default** and copies only with `--confirm`
-  (GAL-CLI). It also:
+  (CI02-CLI). It also:
   - runs `verify` first for a vendored skill, refusing with
     `vendor_unverified` on any mismatch;
   - checks every skill named in `depends_on` is already installed in the
@@ -113,7 +113,7 @@ Exit codes, the result envelope and `safe_next_step` follow GAL-CLI.
 ## Index record
 
 `list` builds the index on every call; nothing is committed, so it cannot go
-stale. Its schema is `skill-index` (GAL-SCHEMA).
+stale. Its schema is `skill-index` (CI-SCHEMA).
 
 ```json
 {
@@ -149,16 +149,16 @@ Where each field comes from:
 | Field | Local skill | Vendored skill |
 | --- | --- | --- |
 | `name`, `description` | `SKILL.md` frontmatter | `SKILL.md` frontmatter |
-| `source` | `local` | the lock (GAL-VENDOR) |
+| `source` | `local` | the lock (CI-VENDOR) |
 | `entry` | `SKILL.md` | `SKILL.md` |
 | `manifest` | `tools.json` | absent |
-| `tags` | `tools.json` (GAL-ROUTING) | `skills/vendor.toml` |
-| `references`, `depends_on` | `tools.json` (GAL-ROUTING) | absent |
+| `tags` | `tools.json` (CI-ROUTING) | `skills/vendor.toml` |
+| `references`, `depends_on` | `tools.json` (CI-ROUTING) | absent |
 | `upstream` | absent | the lock and `skills/vendor.toml` |
 
-`list` adds nothing a skill does not declare. Until GAL-ROUTING, the local
+`list` adds nothing a skill does not declare. Until CI-ROUTING, the local
 skill's `tags`, `references` and `depends_on` are empty. Historical package
-size measurements are in GAL-ROUTING; measure the consolidated record before
+size measurements are in CI-ROUTING; measure the consolidated record before
 setting an output budget.
 
 ## Why this shape
@@ -181,10 +181,10 @@ setting an output budget.
    `tools/skillkit/install.py`, taking the skill name as a parameter. Keep
    that command as the wrapper described above until callers migrate.
 2. Add `tools/skillkit/discover.py` with the walk and read above.
-3. Extend GAL-VENDOR's repository-level `bin/ci-skills` with `list`, `get`
-   and `install`. Each verb has `--help` and `--describe` (GAL-CLI). This
+3. Extend CI-VENDOR's repository-level `bin/ci-skills` with `list`, `get`
+   and `install`. Each verb has `--help` and `--describe` (CI02-CLI). This
    maintenance command is outside the installed `skills/ci-skills/` package.
-4. Add the tests GAL-TESTS lists, and open one pull request; the
+4. Add the tests CI-TESTS lists, and open one pull request; the
    `validate` workflow must pass.
 5. Read back: `bin/ci-skills list` shows exactly one `ci-skills` record,
    plus `glab` and `glab-stack`. Comparing `bin/ci-skills get glab` with
@@ -193,7 +193,7 @@ setting an output budget.
 
 ## Gates
 
-- **Tests.** As listed in GAL-TESTS, run in CI.
+- **Tests.** As listed in CI-TESTS, run in CI.
 - **Receipt.** This phase does not change `skills/ci-skills/`, so the
   package-delivery receipt remains valid until expiry. If this phase changes
-  package bytes, capture a fresh receipt after the last edit (GAL-GATES).
+  package bytes, capture a fresh receipt after the last edit (CI03-GATES).

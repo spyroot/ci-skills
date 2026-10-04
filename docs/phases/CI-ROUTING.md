@@ -1,6 +1,6 @@
-# GAL-ROUTING: routing, lazy loading and compact representation
+# CI-ROUTING: routing, lazy loading and compact representation
 
-Status: proposed. Depends on: GAL-VENDOR and GAL-CATALOG.
+Status: proposed. Depends on: CI-VENDOR and CI01-CATALOG.
 
 ## Goal
 
@@ -28,7 +28,7 @@ The last two rows use Python's default JSON separators.
 
 | Hop | Answers | An agent reads |
 | --- | --- | --- |
-| L0 | which skill | `bin/ci-skills list` (GAL-CATALOG) |
+| L0 | which skill | `bin/ci-skills list` (CI01-CATALOG) |
 | L1 | which command or reference | the skill's `SKILL.md` and its routing |
 | L2 | the one thing to read or run | one reference, or `<command> --describe` |
 
@@ -65,7 +65,7 @@ The last two rows use Python's default JSON separators.
    - the tags;
    - the `load_when` entries;
    - an optional `points_to` skill;
-   - the tool operations it describes, in `uses` (GAL-SCHEMA, GAL-REFERENCE).
+   - the tool operations it describes, in `uses` (CI-SCHEMA, CI-REFERENCE).
 
    Each command declares its `uses` too. Everything renders into
    `tools.json` with the rest of the catalog. `depends_on` is derived from
@@ -92,7 +92,7 @@ The last two rows use Python's default JSON separators.
    `install.sh`, `tools/install_ci_skills.py` and `bin/ci-skills install`
    call the same `tools/skillkit/install.py` core. Its `depends_on` check
    refuses either installation path until `glab` is beside this skill
-   (GAL-CATALOG), so an installed copy never points at an absent skill.
+   (CI01-CATALOG), so an installed copy never points at an absent skill.
 
 There are no platform-specific references (OpenShift, EKS and so on).
 Nothing in the code reads them, so their content would be invented.
@@ -126,7 +126,7 @@ How `ci-skills` comes to sit on top of `glab`:
 
 ## Live receipt
 
-The package delivery in GAL-PHASES first changes the live acceptance checker
+The package delivery in CI-PHASES first changes the live acceptance checker
 to compare the receipt with `skills/ci-skills/` and captures a new receipt.
 The workflow step remains unconditional. This phase changes that package
 again, so its own pull request also needs a fresh receipt after its last
@@ -134,18 +134,18 @@ skill edit. PRs #5, #7 and #8 have been integrated, so this phase routes their
 commands (`cilium_node.py`, `ceph_kernel.py`, `ceph_cluster.py`) and the
 `project-binding.md` reference. Its new receipt covers this pull request's
 final package bytes. Which host may serve as release evidence is open
-(GAL-GATES, G5).
+(CI03-GATES, G5).
 
 ## Gates
 
 - **Kept CI gates.** `tests/test_catalog.py` keeps `tools.json` byte-equal to
   the catalog. Its routing test is changed in step 2 to read `.command`.
 - **Live acceptance.** The workflow accepts the new receipt.
-- **Closed world**, enforced by the `schemas` gate (GAL-SCHEMA) before a
+- **Closed world**, enforced by the `schemas` gate (CI-SCHEMA) before a
   pull request can pass. Every one of these must hold:
   - every `REFERENCES` path exists in the packaged skill;
   - every `points_to` names a skill that discovery finds;
   - every `uses` id resolves to a declared operation.
 
   A dangling entry fails the gate.
-- **Tests**, as listed in GAL-TESTS, run in CI.
+- **Tests**, as listed in CI-TESTS, run in CI.

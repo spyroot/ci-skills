@@ -1,4 +1,4 @@
-# GAL-TESTS: testing strategy
+# CI-TESTS: testing strategy
 
 Status: proposed. Covers every GAL phase. Each phase's pull request carries
 its own tests; this page says which tests and why.
@@ -12,7 +12,7 @@ its own tests; this page says which tests and why.
   `unit-testing` contract).
 - **No skipped required tests.** The suite has no `skip` markers today.
   But the workflow skips pytest entirely on a Markdown-only change, and that
-  also counts as skipping required tests (GAL-GATES, G6).
+  also counts as skipping required tests (CI03-GATES, G6).
 - **Mutating commands get the full matrix.** The pinned `unit-testing`
   contract lists the tests every mutating command needs. The mutating
   commands here are `update`, `install` and the hook installer. The matrix
@@ -35,7 +35,7 @@ its own tests; this page says which tests and why.
   fixture drives `bin/ci-skills` and the hook scripts with the same fake
   `PATH`.
 - **Tests ride with their capability.** Each phase carries its focused tests;
-  GAL-TESTS separately delivers only the reusable test command and coverage
+  CI-TESTS separately delivers only the reusable test command and coverage
   report.
 
 ## Layers
@@ -60,7 +60,7 @@ Contract tests compare declarations that must agree:
 - **Reason tokens.** Every reason token and status a command can emit has
   at least one test that produces it.
 - **Mutating commands.** Each covers the full matrix above.
-- **Lines.** coverage.py, pinned in `requirements.txt` (GAL-GATES, G2),
+- **Lines.** coverage.py, pinned in `requirements.txt` (CI03-GATES, G2),
   runs as `coverage run -m pytest` inside the tests gate and prints a
   report. No threshold exists today; whether to set one is an open decision.
 
@@ -76,12 +76,12 @@ Observed 2026-10-02:
   - `pyyaml_unavailable`.
 - **Second runs.** Today the installer refuses any existing destination,
   so a second run is a refusal, not a no-op. Package delivery preserves
-  its tests while changing the package path. GAL-CATALOG's `install` makes
+  its tests while changing the package path. CI01-CATALOG's `install` makes
   the same digest a no-op and refuses a different one.
 
 ## `ci-skills` package delivery
 
-The separate delivery pull request in GAL-PHASES tests:
+The separate delivery pull request in CI-PHASES tests:
 
 - the sole `ci-skills` entry and path assertions;
 - the thin checkout adapters and installed diagnostics and PR #2 commands
@@ -90,7 +90,7 @@ The separate delivery pull request in GAL-PHASES tests:
   revision-bound fingerprint, timeout, and installed digest read-back;
 - manifest equality in CI and a fresh live receipt for the final package.
 
-## GAL-GATES
+## CI03-GATES
 
 - **Contract.**
   - Registry gates have unique ids, and every gate is called by exactly one
@@ -106,7 +106,7 @@ The separate delivery pull request in GAL-PHASES tests:
   - The static subset runs only static gates.
   - A failing gate fails the run and names the gate.
 
-## GAL-SCHEMA
+## CI-SCHEMA
 
 - Every schema validates against the 2020-12 metaschema.
 - Per schema, fixtures for:
@@ -118,7 +118,7 @@ The separate delivery pull request in GAL-PHASES tests:
 - **Runtime.** An invalid record makes a producer exit 65, naming the file,
   the JSON path and the rule.
 
-## GAL-CLI
+## CI02-CLI
 
 The contract test runs over every entrypoint discovery finds:
 
@@ -129,7 +129,7 @@ The contract test runs over every entrypoint discovery finds:
 - the default run of a mutating command writes nothing;
 - exit codes come only from the shared table.
 
-## GAL-VENDOR
+## CI-VENDOR
 
 - **Unit, with a fake `glab`.**
   - `verify` passes on a fixture tree and lock.
@@ -160,7 +160,7 @@ The contract test runs over every entrypoint discovery finds:
 - **Offline smoke.** `bin/ci-skills verify --json` on the committed vendored
   tree reports `PASS`.
 
-## GAL-CATALOG
+## CI01-CATALOG
 
 - **Discovery.**
   - The walk order is the direct children of `skills/` in name order;
@@ -196,7 +196,7 @@ The contract test runs over every entrypoint discovery finds:
 - **Outside CI.** `get glab` is compared byte for byte with
   `glab skills get glab` where `glab` is installed.
 
-## GAL-ROUTING
+## CI-ROUTING
 
 - **Closed world.**
   - Every `REFERENCES` path exists.
@@ -217,7 +217,7 @@ The contract test runs over every entrypoint discovery finds:
 - **Live.** A new receipt from the approved executor, accepted by the live
   acceptance gate.
 
-## GAL-REFERENCE
+## CI-REFERENCE
 
 - **Declarations.** Every call site's argument prefix maps to a declared
   operation, found by scanning the code. No unbounded `api` or `exec`
@@ -230,7 +230,7 @@ The contract test runs over every entrypoint discovery finds:
 - **Results.** `tool_missing` carries a safe next step. `used_by` is
   computed, and matches the `uses` pointers.
 
-## GAL-HOOKS
+## CI04-HOOKS
 
 - **Shell (bats), in temporary git repositories.**
   - A staged defect with an unstaged fix is refused, because the checks
@@ -253,5 +253,5 @@ Agent-harness hooks are outside the deliverable, so they have no tests here.
   measured.
 - **`bats` in CI.** PR #2 runs its Bats suite in an approved CI image that
   holds every declared tool. Whether `validate` uses that image depends on
-  the test route (GAL-GATES, G8); the pinned standards forbid ad hoc tool
+  the test route (CI03-GATES, G8); the pinned standards forbid ad hoc tool
   installs inside a required job.
