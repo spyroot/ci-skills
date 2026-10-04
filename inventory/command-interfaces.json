@@ -4,12 +4,19 @@
   "evidence_class": "offline installed-command interface",
   "base_revision": "af0814f1bc1479dc824cd17b898e10409cdd7678",
   "standards_binding": "standards-binding.yaml",
-  "standards_revision": "dca62dec9bdb93af1c75aa58504f3ea2463e186c",
+  "standards_revision": "622d23408c530896ad860748b88c8711167e1199",
   "applicable_contracts": [
     "ci",
     "unit-testing",
     "smoke-testing",
-    "automation"
+    "blockers",
+    "agent-workspace",
+    "automation",
+    "project-consumer",
+    "provider-escalation",
+    "bash-shell-standards",
+    "helm-ci-standards",
+    "policy-authority-standards"
   ],
   "commands": {
     "access_check.py": {

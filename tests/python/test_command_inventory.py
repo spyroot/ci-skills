@@ -37,15 +37,7 @@ def test_inventory_covers_exactly_the_shipped_commands_and_binding() -> None:
         (REPO_ROOT / "standards-binding.yaml").read_text(encoding="utf-8")
     )
     assert INVENTORY["standards_revision"] == binding["spec"]["source"]["revision"]
-    assert INVENTORY["applicable_contracts"] == [
-        "ci",
-        "unit-testing",
-        "smoke-testing",
-        "automation",
-    ]
-    assert set(INVENTORY["applicable_contracts"]) <= set(
-        binding["spec"]["requiredContracts"]
-    )
+    assert INVENTORY["applicable_contracts"] == binding["spec"]["requiredContracts"]
     assert INVENTORY["evidence_class"] == "offline installed-command interface"
     assert set(INVENTORY["commands"]) == set(MANIFEST["commands"])
 

@@ -11,7 +11,7 @@ root_env = "STANDARDS_ROOT"
 default_local_path = "/Users/spyroot/dev/standards"
 binding_local_path = "/Users/spyroot/dev/standards"
 repository = "https://github.com/spyroot/standards"
-revision = "dca62dec9bdb93af1c75aa58504f3ea2463e186c"
+revision = "622d23408c530896ad860748b88c8711167e1199"
 binding_file = "standards-binding.yaml"
 internal_templates = "templates/internal"
 required_contracts = [
@@ -23,6 +23,9 @@ required_contracts = [
   "automation",
   "project-consumer",
   "provider-escalation",
+  "bash-shell-standards",
+  "helm-ci-standards",
+  "policy-authority-standards",
 ]
 project_additions = ["TEAM_GUIDE.md"]
 
