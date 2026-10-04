@@ -10,8 +10,12 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import REPO_ROOT
-from test_installed_package import ENTRYPOINT_CASES, NODE_ENTRYPOINT_CASES
+from conftest import REPO_ROOT, install_executable
+from test_installed_package import (
+    ENTRYPOINT_CASES,
+    NODE_ENTRYPOINT_CASES,
+    _install_skill,
+)
 
 INVENTORY = json.loads(
     (REPO_ROOT / "inventory" / "command-interfaces.json").read_text(encoding="utf-8")
@@ -21,12 +25,24 @@ MANIFEST = json.loads(
 )
 
 
+@pytest.fixture(scope="module")
+def installed_skill(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Probe the installed copy, using the repository's existing installer."""
+    return _install_skill(tmp_path_factory.mktemp("inventory-installed"))
+
+
 def test_inventory_covers_exactly_the_shipped_commands_and_binding() -> None:
     """No command, implementation, authority, or mode finding may disappear."""
     binding = yaml.safe_load(
         (REPO_ROOT / "standards-binding.yaml").read_text(encoding="utf-8")
     )
     assert INVENTORY["standards_revision"] == binding["spec"]["source"]["revision"]
+    assert INVENTORY["applicable_contracts"] == [
+        "ci",
+        "unit-testing",
+        "smoke-testing",
+        "automation",
+    ]
     assert set(INVENTORY["applicable_contracts"]) <= set(
         binding["spec"]["requiredContracts"]
     )
@@ -49,17 +65,29 @@ def test_inventory_covers_exactly_the_shipped_commands_and_binding() -> None:
         assert row["help"] == "supported"
         assert row["json_flag"] in {"supported", "missing"}
         assert row["yaml_flag"] in {"supported", "missing"}
-        assert row["current_output"].strip()
+        observed = row["observed_output"]
+        assert observed["json_type"] in {"object", "boolean"}
+        assert isinstance(observed["required_fields"], list)
+        assert all(
+            isinstance(field, str) and field for field in observed["required_fields"]
+        )
+        if name.endswith(".py"):
+            assert observed["json_type"] == "object"
+            assert observed["required_fields"] == ["schema_version", "kind", "status"]
+            assert observed["expected_kind"] == row["report_kind"]
+            assert observed["expected_status"] in {"PASS", "DRY_RUN"}
         assert (REPO_ROOT / row["evidence"]).is_file()
 
 
 @pytest.mark.parametrize("name", sorted(INVENTORY["commands"]))
 def test_help_matches_the_recorded_json_and_yaml_flags(
-    name: str, tmp_path: Path
+    name: str, tmp_path: Path, installed_skill: Path
 ) -> None:
     """Inspect the real shipped entrypoint without contacting an authority."""
     row = INVENTORY["commands"][name]
-    entrypoint = REPO_ROOT / row["entrypoint"]
+    entrypoint = installed_skill / Path(row["entrypoint"]).relative_to(
+        "skills/ci-skills"
+    )
     argv = (
         [str(entrypoint)]
         if name.startswith("bin/")
@@ -105,27 +133,28 @@ def test_existing_installed_mode_cases_cover_every_python_command() -> None:
 @pytest.mark.parametrize("name", ("bin/ci-api", "bin/ci-binary-build"))
 @pytest.mark.parametrize("flag", ("--json", "--yaml"))
 def test_bash_mode_gap_is_observed_without_a_provider_call(
-    name: str, flag: str, tmp_path: Path
+    name: str, flag: str, tmp_path: Path, fake_bin: Path, installed_skill: Path
 ) -> None:
     """The Bash mode gaps remain visible until the owning tools are repaired."""
     row = INVENTORY["commands"][name]
     assert row["json_flag" if flag == "--json" else "yaml_flag"] == "missing"
     marker = tmp_path / "provider-called"
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
     for provider in ("gh", "glab", "kubectl", "oc"):
-        script = fake_bin / provider
-        script.write_text(
-            f"#!/bin/sh\nprintf called >> '{marker}'\nexit 99\n",
-            encoding="utf-8",
+        install_executable(
+            fake_bin,
+            provider,
+            '#!/bin/sh\nprintf called >> "$INVENTORY_MARKER"\nexit 99\n',
         )
-        script.chmod(0o755)
     args = ["check", "--provider", "github", flag] if name == "bin/ci-api" else [flag]
     env = os.environ.copy()
     env["HOME"] = str(tmp_path)
     env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+    env["INVENTORY_MARKER"] = str(marker)
+    entrypoint = installed_skill / Path(row["entrypoint"]).relative_to(
+        "skills/ci-skills"
+    )
     result = subprocess.run(
-        [str(REPO_ROOT / row["entrypoint"]), *args],
+        [str(entrypoint), *args],
         capture_output=True,
         check=False,
         cwd=tmp_path,

@@ -25,8 +25,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "access_check",
+        "expected_status": "PASS",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "bin/ci-api": {
       "entrypoint": "skills/ci-skills/bin/ci-api",
@@ -39,8 +49,13 @@
       "help": "supported",
       "json_flag": "missing",
       "yaml_flag": "missing",
-      "current_output": "JSON provider value or request plan by default; optional text output",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "boolean",
+        "required_fields": [],
+        "sample_value": false,
+        "probe": "installed get --field enabled --output json"
+      }
     },
     "bin/ci-binary-build": {
       "entrypoint": "skills/ci-skills/bin/ci-binary-build",
@@ -51,8 +66,17 @@
       "help": "supported",
       "json_flag": "missing",
       "yaml_flag": "missing",
-      "current_output": "JSON dry-run build plan by default",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "mode",
+          "fingerprint",
+          "plan"
+        ],
+        "expected_mode": "dry-run",
+        "probe": "installed dry-run build plan"
+      }
     },
     "ceph_cluster.py": {
       "entrypoint": "skills/ci-skills/scripts/ceph_cluster.py",
@@ -65,8 +89,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "ceph_cluster",
+        "expected_status": "PASS",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "ceph_kernel.py": {
       "entrypoint": "skills/ci-skills/scripts/ceph_kernel.py",
@@ -79,8 +113,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "ceph_kernel",
+        "expected_status": "DRY_RUN",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "cilium_node.py": {
       "entrypoint": "skills/ci-skills/scripts/cilium_node.py",
@@ -93,8 +137,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "cilium_node",
+        "expected_status": "DRY_RUN",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "cilium_status.py": {
       "entrypoint": "skills/ci-skills/scripts/cilium_status.py",
@@ -107,8 +161,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "cilium_status",
+        "expected_status": "PASS",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "event_trace.py": {
       "entrypoint": "skills/ci-skills/scripts/event_trace.py",
@@ -121,8 +185,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "event_trace",
+        "expected_status": "PASS",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "gitlab_access.py": {
       "entrypoint": "skills/ci-skills/scripts/gitlab_access.py",
@@ -135,8 +209,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "gitlab_access",
+        "expected_status": "PASS",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "gitlab_issue.py": {
       "entrypoint": "skills/ci-skills/scripts/gitlab_issue.py",
@@ -149,8 +233,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "gitlab_issue",
+        "expected_status": "DRY_RUN",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "gitlab_job.py": {
       "entrypoint": "skills/ci-skills/scripts/gitlab_job.py",
@@ -163,8 +257,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "gitlab_job",
+        "expected_status": "PASS",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "gitlab_milestone.py": {
       "entrypoint": "skills/ci-skills/scripts/gitlab_milestone.py",
@@ -177,8 +281,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "gitlab_milestone",
+        "expected_status": "DRY_RUN",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "gitlab_pipeline.py": {
       "entrypoint": "skills/ci-skills/scripts/gitlab_pipeline.py",
@@ -191,8 +305,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "gitlab_pipeline",
+        "expected_status": "PASS",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "gitlab_runner.py": {
       "entrypoint": "skills/ci-skills/scripts/gitlab_runner.py",
@@ -205,8 +329,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "gitlab_runner",
+        "expected_status": "DRY_RUN",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "gitlab_wiki.py": {
       "entrypoint": "skills/ci-skills/scripts/gitlab_wiki.py",
@@ -219,8 +353,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "gitlab_wiki",
+        "expected_status": "DRY_RUN",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "k8s_verify_mtu_consistency.py": {
       "entrypoint": "skills/ci-skills/scripts/k8s_verify_mtu_consistency.py",
@@ -233,8 +377,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "k8s_verify_mtu_consistency",
+        "expected_status": "DRY_RUN",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     },
     "storage_report.py": {
       "entrypoint": "skills/ci-skills/scripts/storage_report.py",
@@ -247,8 +401,18 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "current_output": "versioned JSON or YAML report with kind and status",
-      "evidence": "tests/test_installed_package.py"
+      "evidence": "tests/test_installed_package.py",
+      "observed_output": {
+        "json_type": "object",
+        "required_fields": [
+          "schema_version",
+          "kind",
+          "status"
+        ],
+        "expected_kind": "storage_report",
+        "expected_status": "PASS",
+        "probe": "installed fixture in JSON and YAML modes"
+      }
     }
   }
 }
