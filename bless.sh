@@ -5,7 +5,7 @@
 # Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
 set -Eeuo pipefail
 
-GALILEO_ROOT="$({
+REPO_ROOT="$({
 	cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 	pwd -P
 })"
@@ -69,11 +69,12 @@ main() {
 	done
 
     # handle 5, cases
-    #    - case 1: mac os local execution on pre-commit
+    #    - case 1: macOS local execution on pre-commit
     #    - case 2: Same logic, but we execute inside a docker and test and validate.
     #    - case 3: We run runner and ci.
-    #    - case 4: We need do hosted runner on github actions.
-    #    - case 5: We run github action but on normal github runner. (which is default maxed to 4)
+    #    - case 4: We need do hosted runner on GitHub Actions.
+    #    - case 5: We run GitHub Action but on normal GitHub runner. (which is default maxed to 4)
+
 	local maximum="${MAX_JOBS:-4}" available jobs
 	available="$(toolchain_cpu_count)" || return
 

@@ -11,7 +11,7 @@ metadata:
 
 The directory containing this file is the installed skill root. Keep the
 working directory at the calling project root so its `.ci-skills/target.toml`
-can be selected. Run Python entrypoints under `scripts/` with Python 3.11 or
+can be selected. Run Python entrypoints under `../scripts` with Python 3.11 or
 newer; the documented environment uses `conda run -n ci-skills python`.
 Run Bash entrypoints under `bin/` by path. Use these commands for supported
 operations instead of rebuilding them with one-off CLI parsing.
@@ -216,7 +216,7 @@ change host interfaces or repair networking.
 
 ## 9. Use the Bash tools
 
-`bin/ci-api` performs a bounded GET against a caller-selected GitHub or
+`../bin/ci-api` performs a bounded GET against a caller-selected GitHub or
 GitLab API endpoint. Supply its exact provider, host, endpoint, and token file
 when the target declares one. It does not resolve `target.toml`; its result is
 separate from an exact-target access receipt. `bin/ci-binary-build` produces
