@@ -8,7 +8,7 @@ import pytest
 import yaml
 from conftest import REPO_ROOT
 
-SKILL_ROOT = REPO_ROOT / "skills" / "k8s-admin-diagnostics"
+SKILL_ROOT = REPO_ROOT / "skills" / "ci-skills"
 REQUIRED_PACKAGE_PATHS = (
     "SKILL.md",
     # Declared by SKILL.md's own frontmatter as the manifest, and step 2 of the
@@ -70,7 +70,7 @@ def test_skill_package_frontmatter_references_and_scripts_are_valid():
     """The committed skill package has installer-visible metadata and files."""
     frontmatter = _validate_skill_package(SKILL_ROOT)
 
-    assert frontmatter["name"] == "k8s-admin-diagnostics"
+    assert frontmatter["name"] == "ci-skills"
     assert "Kubernetes" in frontmatter["description"]
 
 

@@ -24,81 +24,101 @@ make_install_fixture() {
   tool="${source_root}/install.sh"
 }
 
-@test 'dry-run reports a fingerprint without creating the destination' {
+@test 'dry-run binds a clean package and destination without writing' {
   make_install_fixture
   run "$tool" --destination "$destination" --dry-run
   [ "$status" -eq 0 ]
   [ "$(jq -r .mode <<<"$output")" = "dry-run" ]
-  [ "$(jq -r .source <<<"$output")" = "$source_root" ]
+  [ "$(jq -r .source <<<"$output")" = "$source_root/skills/ci-skills" ]
   [ "$(jq -r .destination <<<"$output")" = "$destination" ]
   [ "$(jq -r .source_revision <<<"$output")" = "$source_revision" ]
-  jq -e '.mutable_link == true' <<<"$output" >/dev/null
-  jq -e '.fingerprint | type == "string" and length > 0' <<<"$output" >/dev/null
+  jq -e '.mutable_link == false and (.fingerprint | length == 64)' <<<"$output" >/dev/null
   [ ! -e "$destination" ]
 }
 
-@test 'apply creates the requested link and repetition is a no-op' {
+@test 'requested diagnostics record a correlated structured installer result' {
+  make_install_fixture
+  log_file="${BATS_TEST_TMPDIR}/installer.log"
+  run "$tool" --destination "$destination" --dry-run \
+    --log-format json --log-level info --log-file "$log_file" --run-id unit-install
+  [ "$status" -eq 0 ]
+  jq -e '.component == "skill_install" and .run_id == "unit-install" and .result == "DRY_RUN"' \
+    "$log_file" >/dev/null
+  [[ "$output" == *'"fingerprint"'* ]]
+}
+
+@test 'apply copies the selected package and upgrade reads back an identical copy' {
   make_install_fixture
   run "$tool" --destination "$destination" --dry-run
   [ "$status" -eq 0 ]
   fingerprint=$(jq -r .fingerprint <<<"$output")
   run "$tool" --destination "$destination" --apply \
-    --timeout 10s --confirm-install "$fingerprint" --log-level error
+    --timeout 10s --confirm-install "$fingerprint"
   [ "$status" -eq 0 ]
-  [ -L "$destination" ]
-  [ "$(readlink "$destination")" = "$source_root" ]
-  [ "$(jq -r .status <<<"$output")" = "READY" ]
-  [ "$(jq -r .destination <<<"$output")" = "$destination" ]
-  [ "$(jq -r .source <<<"$output")" = "$source_root" ]
-  [ "$(jq -r .source_revision <<<"$output")" = "$source_revision" ]
-  jq -e '.mutable_link == true' <<<"$output" >/dev/null
-  run "$tool" --destination "$destination" --apply \
-    --timeout 10s --confirm-install "$fingerprint" --log-level error
+  [ -d "$destination" ]
+  [ ! -L "$destination" ]
+  [ "$(jq -r .status <<<"$output")" = "PASS" ]
+  cmp "$source_root/skills/ci-skills/SKILL.md" "$destination/SKILL.md"
+  run "$tool" --destination "$destination" --upgrade --dry-run
   [ "$status" -eq 0 ]
-  [ "$(jq -r .status <<<"$output")" = "NO_OP" ]
-  [ "$(jq -r .destination <<<"$output")" = "$destination" ]
-  [ "$(jq -r .source <<<"$output")" = "$source_root" ]
-  [ "$(jq -r .source_revision <<<"$output")" = "$source_revision" ]
-  jq -e '.mutable_link == true' <<<"$output" >/dev/null
+  upgrade_fingerprint=$(jq -r .fingerprint <<<"$output")
+  run "$tool" --destination "$destination" --upgrade --apply \
+    --timeout 10s --confirm-upgrade "$upgrade_fingerprint"
+  [ "$status" -eq 0 ]
+  jq -e '.status == "PASS" and .already_installed == true' <<<"$output" >/dev/null
 }
 
-@test 'apply preserves a destination owned by something else' {
+@test 'install preserves an existing destination' {
   make_install_fixture
   mkdir -p "$destination"
   run "$tool" --destination "$destination" --dry-run
-  [ "$status" -eq 0 ]
-  fingerprint=$(jq -r .fingerprint <<<"$output")
-  run "$tool" --destination "$destination" --apply \
-    --timeout 10s --confirm-install "$fingerprint" --log-level error
-  [ "$status" -eq 69 ]
+  [ "$status" -eq 2 ]
+  jq -e '.status == "BLOCKED" and .reason == "destination_exists"' <<<"$output" >/dev/null
   [ -d "$destination" ]
-  [ ! -L "$destination" ]
 }
 
-@test 'apply blocks when tracked source bytes changed after dry-run' {
+@test 'confirmed upgrade replaces a checkout link and preserves it as backup' {
+  make_install_fixture
+  mkdir -p "$(dirname "$destination")"
+  ln -s "$source_root" "$destination"
+  run "$tool" --destination "$destination" --upgrade --dry-run
+  [ "$status" -eq 0 ]
+  fingerprint=$(jq -r .fingerprint <<<"$output")
+  run "$tool" --destination "$destination" --upgrade --apply \
+    --timeout 10s --confirm-upgrade "$fingerprint"
+  [ "$status" -eq 0 ]
+  [ -d "$destination" ]
+  [ ! -L "$destination" ]
+  backup=$(jq -r .previous_version <<<"$output")
+  [ -L "$backup" ]
+  [ "$(readlink "$backup")" = "$source_root" ]
+  cmp "$source_root/skills/ci-skills/SKILL.md" "$destination/SKILL.md"
+}
+
+@test 'apply blocks when tracked source bytes changed after planning' {
   make_install_fixture
   run "$tool" --destination "$destination" --dry-run
   [ "$status" -eq 0 ]
   fingerprint=$(jq -r .fingerprint <<<"$output")
-  printf '\nchanged after dry-run\n' >>"${source_root}/README.md"
-  [ "$(git -C "$source_root" rev-parse HEAD)" = "$source_revision" ]
+  printf '\nchanged after dry-run\n' >>"${source_root}/skills/ci-skills/SKILL.md"
   run "$tool" --destination "$destination" --apply \
-    --timeout 10s --confirm-install "$fingerprint" --log-level error
-  [ "$status" -eq 69 ]
+    --timeout 10s --confirm-install "$fingerprint"
+  [ "$status" -eq 2 ]
+  jq -e '.status == "BLOCKED" and .reason == "source_revision_unverified"' <<<"$output" >/dev/null
   [ ! -e "$destination" ]
 }
 
-@test 'apply blocks when source revision changed after dry-run' {
+@test 'apply blocks when source revision changed after planning' {
   make_install_fixture
   run "$tool" --destination "$destination" --dry-run
   [ "$status" -eq 0 ]
   fingerprint=$(jq -r .fingerprint <<<"$output")
-  printf '\nchanged and committed after dry-run\n' >>"${source_root}/README.md"
-  git -C "$source_root" add README.md
-  git -C "$source_root" commit --quiet -m "change source after dry-run"
-  [ "$(git -C "$source_root" rev-parse HEAD)" != "$source_revision" ]
+  printf '\nnew committed skill\n' >>"${source_root}/skills/ci-skills/SKILL.md"
+  git -C "$source_root" add skills/ci-skills/SKILL.md
+  git -C "$source_root" commit --quiet -m "change skill"
   run "$tool" --destination "$destination" --apply \
-    --timeout 10s --confirm-install "$fingerprint" --log-level error
-  [ "$status" -eq 69 ]
+    --timeout 10s --confirm-install "$fingerprint"
+  [ "$status" -eq 2 ]
+  jq -e '.status == "BLOCKED" and .reason == "confirmation_required"' <<<"$output" >/dev/null
   [ ! -e "$destination" ]
 }

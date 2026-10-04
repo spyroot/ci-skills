@@ -2,7 +2,7 @@
 
 ## Outcome and boundary
 
-This delivery extends `k8s-admin-diagnostics` with project-neutral GitLab
+This delivery extends `ci-skills` with project-neutral GitLab
 commands. Its diagnostic commands remain read-only, while
 each operation is marked mutating in the generated manifest.
 The GitLab target resolution, effective credential selection, response-size
@@ -25,7 +25,7 @@ result shape, and user instructions land with the capability.
 ## Agent invocation and target contract
 
 The agent routes and first calls are in
-[SKILL.md](../skills/k8s-admin-diagnostics/SKILL.md). Its generated `tools.json`
+[SKILL.md](../skills/ci-skills/SKILL.md). Its generated `tools.json`
 is the command catalog. The catalog and parser must accept the same
 subcommands and options; `--describe` and `--help` work without credentials.
 Agents call installed executables directly; no MCP server or separate provider

@@ -90,7 +90,7 @@ Live acceptance pins a digest of the skill tree, so any byte under it
 invalidates the committed receipt. Three recaptures were needed in one pass
 before the order became deliberate: finish every edit, then capture.
 
-The scope is exactly `skills/k8s-admin-diagnostics` — 22 files, as the
+The scope is exactly `skills/ci-skills` — 22 files, as the
 receipt's own `file_count` records — so a typo in `SKILL.md` or under
 `references/` costs a recapture, while this document does not: `docs/` is
 outside the digest. Still open as a cost, not a defect.
@@ -158,7 +158,7 @@ documentation is not obviously outside the executed surface.
 template to the user tier and opens it would remove the gap between "install
 the skill" and "create your target". Copying a *template* is not provisioning a
 credential, so this stays inside the resolve-never-provision rule that
-[references/access.md](../skills/k8s-admin-diagnostics/references/access.md)
+[references/access.md](../skills/ci-skills/references/access.md)
 owns.
 
 **From 3 — assert the cold-run failure per command.** One command's failure
@@ -196,7 +196,7 @@ host should record its own.
 
 Declare, resolve, and report — in that order. The chain itself is an ordered
 search with four declared tiers, and
-[references/access.md](../skills/k8s-admin-diagnostics/references/access.md)
+[references/access.md](../skills/ci-skills/references/access.md)
 owns it; what this adds is only that a *caller* should not run its own search
 alongside it. One call, then read the answer, and no stale instruction,
 forgotten export or quietly winning lower tier can aim the run at the wrong

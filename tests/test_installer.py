@@ -12,9 +12,7 @@ from conftest import REPO_ROOT, load_module
 
 
 def _installer():
-    return load_module(
-        "skill_installer", REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"
-    )
+    return load_module("skill_installer", REPO_ROOT / "tools" / "install_ci_skills.py")
 
 
 def _source(tmp_path: Path) -> Path:
@@ -212,6 +210,12 @@ def test_recovery_restores_old_skill_after_interrupted_upgrade(tmp_path):
     )
     destination.rename(previous)
 
+    expired = installer.recover_install(skills_dir, dry_run=False, deadline=0.0)
+    assert expired["status"] == "BLOCKED"
+    assert expired["reason"] == "install_deadline_expired"
+    assert previous.exists() and not destination.exists()
+    assert (skills_dir / installer.JOURNAL_NAME).exists()
+
     planned = installer.recover_install(skills_dir, dry_run=True)
     assert planned["status"] == "DRY_RUN"
     assert planned["action"] == "restore_previous"
@@ -294,7 +298,7 @@ module.install(Path(sys.argv[2]), Path(sys.argv[3]), dry_run=False,
             sys.executable,
             "-c",
             script,
-            str(REPO_ROOT / "tools" / "install_k8s_admin_diagnostics.py"),
+            str(REPO_ROOT / "tools" / "install_ci_skills.py"),
             str(source),
             str(skills_dir),
             str(destination),
@@ -358,7 +362,7 @@ def test_explicit_upgrade_preserves_previous_copy_and_is_idempotent(tmp_path):
     assert (backup / "scripts" / "check.py").read_text() == "print('ok')\n"
 
 
-def test_upgrade_refuses_symlink_destination(tmp_path):
+def test_explicit_upgrade_preserves_symlink_destination(tmp_path):
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -369,9 +373,32 @@ def test_upgrade_refuses_symlink_destination(tmp_path):
     result = installer.install(
         source, skills_dir, dry_run=False, require_verified=False, upgrade=True
     )
+    assert result["status"] == "PASS"
+    assert destination.is_dir() and not destination.is_symlink()
+    previous = Path(result["previous_version"])
+    assert previous.is_symlink()
+    assert previous.readlink() == source
+    assert (destination / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
+
+
+def test_confirmed_install_rejects_changed_source_bytes(tmp_path):
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    plan = installer.install(source, skills_dir, dry_run=True, require_verified=False)
+    fingerprint = installer.plan_fingerprint(plan)
+    (source / "SKILL.md").write_text("changed after plan\n", encoding="utf-8")
+
+    result = installer.install(
+        source,
+        skills_dir,
+        dry_run=False,
+        require_verified=False,
+        expected_fingerprint=fingerprint,
+    )
     assert result["status"] == "BLOCKED"
-    assert result["reason"] == "destination_symlink"
-    assert destination.is_symlink()
+    assert result["reason"] == "installation_fingerprint_changed"
+    assert not (skills_dir / installer.SKILL_NAME).exists()
 
 
 def test_default_destination_uses_codex_home(monkeypatch, tmp_path):

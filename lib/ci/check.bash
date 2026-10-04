@@ -3,8 +3,8 @@
 [[ ${CI_SKILLS_CHECK_LOADED:-0} == 1 ]] && return 0
 CI_SKILLS_CHECK_LOADED=1
 CI_CHECK_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
-# shellcheck source=lib/core/runtime.bash
-source "$CI_CHECK_ROOT/lib/core/runtime.bash"
+# shellcheck source=skills/ci-skills/lib/core/runtime.bash
+source "$CI_CHECK_ROOT/skills/ci-skills/lib/core/runtime.bash"
 
 ci_check_help() {
   cat <<'HELP'
@@ -99,7 +99,8 @@ ci_check_run() {
   local file empty_tree verified_revision final_revision
   local -a shell_files=() yaml_files=() markdown_files=()
   cd "$CI_CHECK_ROOT" || return "$CI_EXIT_BLOCKED"
-  verified_revision=$(ci_verified_source_revision "$CI_CHECK_ROOT") || return $?
+  verified_revision=$(ci_verified_source_revision "$CI_CHECK_ROOT" \
+    'skills/ci-skills/SKILL.md') || return $?
   while IFS= read -r -d '' file; do shell_files+=("$file"); done \
     < <(git ls-files -z -- '*.sh' '*.bash' 'bin/*')
   while IFS= read -r -d '' file; do yaml_files+=("$file"); done \
@@ -124,7 +125,8 @@ ci_check_run() {
   ci_check_step markdown markdownlint-cli2 "${markdown_files[@]}" || return $?
   ci_check_step secrets gitleaks git --redact --no-banner . || return $?
   ci_check_step unit bats --tap tests || return $?
-  final_revision=$(ci_verified_source_revision "$CI_CHECK_ROOT") || return $?
+  final_revision=$(ci_verified_source_revision "$CI_CHECK_ROOT" \
+    'skills/ci-skills/SKILL.md') || return $?
   [[ $final_revision == "$verified_revision" ]] || ci_fail "$CI_EXIT_BLOCKED" \
     'source revision changed during validation' \
     'Rerun this gate against one stable exact source commit.' || return $?

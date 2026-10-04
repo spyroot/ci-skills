@@ -3,7 +3,7 @@
 [[ ${CI_SKILLS_BINARY_BUILD_LOADED:-0} == 1 ]] && return 0
 CI_SKILLS_BINARY_BUILD_LOADED=1
 CI_BINARY_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
-# shellcheck source=lib/core/runtime.bash
+# shellcheck source=skills/ci-skills/lib/core/runtime.bash
 source "$CI_BINARY_ROOT/lib/core/runtime.bash"
 
 ci_binary_build_help() {

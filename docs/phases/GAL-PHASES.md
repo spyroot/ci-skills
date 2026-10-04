@@ -84,7 +84,6 @@ The canonical package is `skills/ci-skills/`, with
 is `~/.ci-skills/target.toml`, and Codex installs it at
 `~/.codex/skills/ci-skills` (or `$CODEX_HOME/skills/ci-skills`).
 
-The merged root `SKILL.md` and `install.sh` still use the checkout layout.
 Package delivery moves the diagnostic skill,
 the merged `bin/ci-api`, `bin/ci-binary-build`, `lib/ci/api.bash`,
 `lib/automation/binary_build.bash`, and `lib/core/runtime.bash` into
@@ -104,8 +103,7 @@ An existing link requires an explicit confirmed upgrade, backup and read-back
 before replacement. `bin/ci-skills` stays a repository maintenance command:
 GAL-VENDOR creates it, and GAL-CATALOG adds `list`, `get` and `install`.
 It is not a second installed skill command. Each package-byte change changes
-the digest and requires a new live receipt. The current tree has not yet made
-these moves.
+the digest and requires a new live receipt.
 
 ## Open decisions
 
