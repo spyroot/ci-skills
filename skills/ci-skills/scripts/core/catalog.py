@@ -260,6 +260,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "--apply creates or updates the selected GitLab milestone; dry-run does not write",
         "options": {
             "--project": "exact project path or numeric ID",
             "--group": "exact group path or numeric ID",
@@ -288,6 +289,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "--apply creates the selected GitLab issue; dry-run does not write",
         "options": {
             "--project": "exact project path or numeric ID",
             "--title": "bug title",
@@ -312,6 +314,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "--apply creates or updates the selected GitLab wiki page; dry-run does not write",
         "options": {
             "--project": "exact project path or numeric ID",
             "--title": "page title for create",
@@ -335,6 +338,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "--apply assigns or creates a GitLab runner; creation writes a one-time token to the selected private file",
         "options": {
             "--project": "exact project path or numeric ID",
             "--group": "exact group path or numeric ID",

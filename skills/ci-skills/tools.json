@@ -445,7 +445,7 @@
         "gitlab"
       ],
       "returns": "A sanitized plan or verified issue IID and independent GET evidence.",
-      "side_effects": "none",
+      "side_effects": "--apply creates the selected GitLab issue; dry-run does not write",
       "subcommands": {
         "create-bug": {
           "required_options": [
@@ -536,7 +536,7 @@
         "gitlab"
       ],
       "returns": "A sanitized plan or verified milestone record and independent GET evidence.",
-      "side_effects": "none",
+      "side_effects": "--apply creates or updates the selected GitLab milestone; dry-run does not write",
       "subcommands": {
         "adjust-time": {
           "required_options": [
@@ -630,7 +630,7 @@
         "gitlab"
       ],
       "returns": "A sanitized plan or verified runner record and assignment evidence.",
-      "side_effects": "none",
+      "side_effects": "--apply assigns or creates a GitLab runner; creation writes a one-time token to the selected private file",
       "subcommands": {
         "assign": {
           "required_options": [
@@ -682,7 +682,7 @@
         "gitlab"
       ],
       "returns": "A sanitized plan or verified wiki slug and independent GET evidence.",
-      "side_effects": "none",
+      "side_effects": "--apply creates or updates the selected GitLab wiki page; dry-run does not write",
       "subcommands": {
         "create": {
           "required_options": [
