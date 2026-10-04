@@ -1,0 +1,51 @@
+[repo]
+name = "ci-skills"
+github_repository = "spyroot/ci-skills"
+canonical_checkout = "/Users/spyroot/dev/ci-skills"
+coordination_file = ".coordination/coordination.md"
+handoff_files = ["TEAM_GUIDE.md", "README.md"]
+default_base = "main"
+
+[standards]
+root_env = "STANDARDS_ROOT"
+default_local_path = "/Users/spyroot/dev/standards"
+binding_local_path = "/Users/spyroot/dev/standards"
+repository = "https://github.com/spyroot/standards"
+revision = "dca62dec9bdb93af1c75aa58504f3ea2463e186c"
+binding_file = "standards-binding.yaml"
+internal_templates = "templates/internal"
+required_contracts = [
+  "ci",
+  "unit-testing",
+  "smoke-testing",
+  "blockers",
+  "agent-workspace",
+  "automation",
+  "project-consumer",
+  "provider-escalation",
+]
+project_additions = ["TEAM_GUIDE.md"]
+
+[workspace]
+approved_pipeline_route = "https://github.com/spyroot/ci-skills/actions/workflows/validate.yml"
+approved_gate_wrapper = "gh pr checks"
+
+[forge]
+provider = "github"
+
+[forge.github]
+remote = "origin"
+repository = "spyroot/ci-skills"
+
+[gates]
+authority = "github"
+required = ["validate"]
+disallow_local_tests = true
+
+[reviews]
+require_brain = false
+require_human = true
+fallback_when_unavailable = "hold"
+
+[live]
+mutations_allowed = false
