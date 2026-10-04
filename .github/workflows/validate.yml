@@ -47,10 +47,63 @@ jobs:
           python-version: '3.11'
 
       - name: YAML tooling
-        run: python -m pip install yamllint==1.38.0
+        run: python -m pip install yamllint==1.38.0 -r requirements.txt
 
       - name: YAML validation
         run: yamllint .github/workflows/validate.yml standards-binding.yaml
+
+      - name: Approved delivery route
+        run: python tools/check_delivery_policy.py --root .
+
+      - name: Function documentation contract
+        run: python tools/check_function_docs.py --root .
+
+      - name: Resolve pinned Standards
+        id: standards_pin
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          import yaml
+
+          binding = yaml.safe_load(Path('standards-binding.yaml').read_text())
+          source = binding['spec']['source']
+          parsed = urlparse(source['repository'])
+          repository = parsed.path.strip('/')
+          revision = source['revision']
+          if parsed.scheme != 'https' or parsed.netloc != 'github.com' or repository != 'spyroot/standards':
+              raise SystemExit('Standards binding repository is not the approved private repository')
+          if not re.fullmatch(r'[0-9a-f]{40}', revision):
+              raise SystemExit('Standards revision must be an exact commit')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write(f'revision={revision}\n')
+          PY
+
+      - name: Require private Standards CI read access
+        env:
+          STANDARDS_READ_TOKEN: ${{ secrets.STANDARDS_READ_TOKEN }}
+        run: |
+          if [[ -z "$STANDARDS_READ_TOKEN" ]]; then
+            echo '::error::STANDARDS_READ_TOKEN must read the pinned Standards repository'
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          repository: spyroot/standards
+          ref: ${{ steps.standards_pin.outputs.revision }}
+          path: .pinned-standards
+          token: ${{ secrets.STANDARDS_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: Pinned Standards binding
+        run: >-
+          python tools/check_standards_binding.py
+          --root . --standards .pinned-standards
 
       - name: Markdown validation
         run: >-
@@ -66,23 +119,18 @@ jobs:
       - name: Project neutrality
         run: python tools/check_project_neutrality.py --root . --json
 
-      - name: Python dependencies
-        if: steps.changes.outputs.non_markdown_count != '0'
-        run: python -m pip install -r requirements.txt
-
       - name: Bash tools and Bats
-        if: steps.changes.outputs.non_markdown_count != '0'
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y bats shfmt
           shell_files=(
-            install.sh scripts/check.sh
+            install.sh
             bin/ci-api bin/ci-binary-build
             skills/ci-skills/bin/ci-api skills/ci-skills/bin/ci-binary-build
             skills/ci-skills/lib/core/runtime.bash
-            skills/ci-skills/lib/ci/api.bash lib/ci/check.bash
+            skills/ci-skills/lib/ci/api.bash
             skills/ci-skills/lib/automation/binary_build.bash
             examples/emit-binary-buildconfig.sh
             examples/emit-vcpkg-prereq.sh
@@ -95,19 +143,15 @@ jobs:
           bats --tap tests/*.bats
 
       - name: Ruff lint
-        if: steps.changes.outputs.non_markdown_count != '0'
         run: ruff check .
 
       - name: Ruff format
-        if: steps.changes.outputs.non_markdown_count != '0'
         run: ruff format --check .
 
       - name: Isolated installed-package smoke
-        if: steps.changes.outputs.non_markdown_count != '0'
         run: pytest -q tests/test_installed_package.py
 
       - name: Tests
-        if: steps.changes.outputs.non_markdown_count != '0'
         run: pytest -q --ignore=tests/test_installed_package.py
 
       # Unconditional and never allowed to fail: Markdown-only changes can edit

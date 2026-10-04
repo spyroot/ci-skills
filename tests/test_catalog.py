@@ -76,6 +76,19 @@ def test_declared_options_are_the_options_the_command_accepts(script):
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.COMMANDS))
+def test_help_shows_every_declared_option_and_subcommand(script):
+    """Parser help and the machine contract must name the same interface."""
+    module = load_module(f"help_{script.removesuffix('.py')}", SCRIPT_ROOT / script)
+    parser = module.build_parser()
+    help_text = parser.format_help()
+    assert all(option in help_text for option in CATALOG.options_for(script))
+    declared_actions = CATALOG.COMMANDS[script].get("subcommands", {})
+    if declared_actions:
+        action = next(item for item in parser._actions if item.dest == "action")
+        assert set(action.choices) == set(declared_actions)
+
+
+@pytest.mark.parametrize("script", sorted(CATALOG.COMMANDS))
 def test_each_capability_brings_its_whole_tier(script):
     """A command claiming a capability accepts every option in that tier."""
     actual = _actual_options(script)
@@ -163,6 +176,8 @@ def test_node_local_commands_publish_their_distinct_interface(script):
     declared = set(contract["options"])
 
     assert actual == declared
+    help_text = node_cli.parser(kind).format_help()
+    assert all(option in help_text for option in declared)
     assert "--target" in actual
     assert contract["requires_authorities"] == ["kubernetes"]
     assert set(contract["access_protocol"]) == {"kubernetes"}
@@ -232,6 +247,8 @@ def test_mutating_commands_are_identified_in_the_manifest():
                 "--apply",
                 "--confirm-plan",
             } <= set(command["options"])
+            assert command["side_effects"] not in (None, "none"), script
+            assert CATALOG.describe(script)["side_effects"] == command["side_effects"]
 
 
 def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):

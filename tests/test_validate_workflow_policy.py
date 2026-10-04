@@ -52,6 +52,19 @@ def test_the_live_acceptance_step_is_unconditional_and_may_not_fail():
     assert step.get("continue-on-error") in (None, False)
     assert "|| true" not in str(step.get("run"))
 
-    assert any("non_markdown_count" in str(item.get("if", "")) for item in steps), (
-        "the gated Python steps should still exist"
-    )
+    assert not any("non_markdown_count" in str(item.get("if", "")) for item in steps)
+
+
+def test_pinned_standards_and_delivery_route_are_in_required_validate():
+    """The required check runs binding and route enforcement on every change."""
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["validate"]["steps"]
+    for command in (
+        "check_standards_binding.py",
+        "check_delivery_policy.py",
+        "check_function_docs.py",
+    ):
+        matches = [step for step in steps if command in str(step.get("run", ""))]
+        assert len(matches) == 1
+        assert "if" not in matches[0]
+        assert matches[0].get("continue-on-error") in (None, False)

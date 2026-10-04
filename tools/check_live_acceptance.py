@@ -640,6 +640,11 @@ def main() -> int:
         metavar="PATH",
         help="skill root (default: <root>/skills/ci-skills)",
     )
+    cli.add_argument(
+        "--command-proofs",
+        metavar="PATH",
+        help="live command proof directory (default: <root>/acceptance/command-proofs)",
+    )
     modes = cli.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print JSON")
     modes.add_argument("--yaml", action="store_true", help="print YAML")
@@ -653,11 +658,30 @@ def main() -> int:
         Path(args.receipts) if args.receipts else root / "acceptance" / "receipts"
     )
     skill_path = Path(args.skill) if args.skill else root / "skills" / "ci-skills"
+    proof_path = (
+        Path(args.command_proofs)
+        if args.command_proofs
+        else root / "acceptance" / "command-proofs"
+    )
     _redactor()
     try:
-        data = evaluate(
-            _load_expected(expected_path), _load_receipts(receipts_path), skill_path
+        expected = _load_expected(expected_path)
+        receipts = _load_receipts(receipts_path)
+        data = evaluate(expected, receipts, skill_path)
+        from command_live_proofs import evaluate as evaluate_proofs
+
+        proof_result = evaluate_proofs(
+            proof_path,
+            expected,
+            receipts,
+            skill_path,
+            now=datetime.now(timezone.utc),
+            redact=_redactor(),
         )
+        data["command_proofs"] = proof_result
+        data["accepted"].extend(proof_result["accepted"])
+        data["problems"].extend(proof_result["problems"])
+        data["status"] = "PASS" if not data["problems"] else "BLOCKED"
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {
             "schema_version": SCHEMA_VERSION,
