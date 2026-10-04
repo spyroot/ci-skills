@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-04T02:11:47.544263+00:00",
+  "captured_at": "2026-10-04T03:52:29.640286+00:00",
   "cleanup": {
     "reason": "persistent_runner_requested",
     "status": "NOT_APPLICABLE"
@@ -19,7 +19,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "361507f688e70eaeb4fa6a09dd2ecdf6a8d518009fe7d1355b7ed85ee0c9809d",
+    "body_sha256": "d74e5dcd800f4c486737b3683068a831f5277f75e1596f3d7cbbaf7d5a508bb6",
     "confirmation_ready": true,
     "fields": [
       "description",
@@ -27,20 +27,20 @@
     ],
     "one_time_sink_required": true,
     "operation": "create",
-    "plan_digest": "841eba05fa4db892ee9b5a6b3a5e3e56fce362edbe256dce25d48613c5cd2826",
+    "plan_digest": "0ea8d864fe51e44e27b08198a55104546c8d3532b7a655a7c18a30c6f30776ea",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "841eba05fa4db892ee9b5a6b3a5e3e56fce362edbe256dce25d48613c5cd2826",
+  "plan_digest": "0ea8d864fe51e44e27b08198a55104546c8d3532b7a655a7c18a30c6f30776ea",
   "readback": {
     "action": "APPLIED",
     "cleanup": {
       "reason": "persistent_runner_requested",
       "status": "NOT_APPLICABLE"
     },
-    "id": 43,
+    "id": 44,
     "mutated": true,
     "sink_persisted": true,
     "verified": true
@@ -52,7 +52,7 @@
         "reason": "persistent_runner_requested",
         "status": "NOT_APPLICABLE"
       },
-      "id": 43,
+      "id": 44,
       "mutated": true,
       "sink_persisted": true,
       "verified": true
@@ -66,13 +66,47 @@
       "commit": null,
       "source": null
     },
-    "digest": "552c72f8be1a8986efa818b74842c7f435830a3911615e4dce49f1b200deb8d0",
-    "file_count": 48,
+    "digest": "62c951b711062cde43875008e26d55504ff67e6f689778554b4a5ea4adfc6148",
+    "file_count": 53,
     "revision": {
       "source": "git_head",
-      "value": "25cfdcf92fbcbffec4943fca3e6e64ddeac67d2b",
+      "value": "d10c7c2c1a1d92371076d0a936d469ba82b92790",
       "verified": true
     }
+  },
+  "smoke_cleanup": {
+    "after": {
+      "global_get_exit_code": 1,
+      "global_get_http_status": 404,
+      "project_123_absent": true,
+      "project_124_absent": true
+    },
+    "before": {
+      "active": true,
+      "description": "ci-skills-pr21-39c482a548",
+      "id": 44,
+      "project_ids": [
+        123,
+        124
+      ],
+      "runner_type": "project_type",
+      "status": "never_contacted"
+    },
+    "captured_at": "2026-10-04T03:53:00.430360+00:00",
+    "credential_source": "file:path:2ccda27d0866",
+    "delete": {
+      "endpoint": "runners/44",
+      "exit_code": 0,
+      "method": "DELETE"
+    },
+    "execution_host": "mac.lan",
+    "kind": "gitlab_runner_smoke_cleanup",
+    "origin": "https://gitlab.dcloud.run",
+    "runner_id": 44,
+    "schema_version": "1.0",
+    "skill_digest": "62c951b711062cde43875008e26d55504ff67e6f689778554b4a5ea4adfc6148",
+    "status": "PASS",
+    "tested_revision": "d10c7c2c1a1d92371076d0a936d469ba82b92790"
   },
   "status": "PASS",
   "summary": {
@@ -91,39 +125,5 @@
     "id": 123,
     "kind": "project",
     "web_url": "https://gitlab.dcloud.run/hott/test"
-  },
-  "smoke_cleanup": {
-    "schema_version": "1.0",
-    "kind": "gitlab_runner_smoke_cleanup",
-    "status": "PASS",
-    "captured_at": "2026-10-04T02:13:55Z",
-    "execution_host": "mac.lan",
-    "tested_revision": "25cfdcf92fbcbffec4943fca3e6e64ddeac67d2b",
-    "skill_digest": "552c72f8be1a8986efa818b74842c7f435830a3911615e4dce49f1b200deb8d0",
-    "origin": "https://gitlab.dcloud.run",
-    "credential_source": "file:path:2ccda27d0866",
-    "runner_id": 43,
-    "before": {
-      "id": 43,
-      "description": "HOTT team ci-skills PR16 25cfdcf runner verification 20261004",
-      "runner_type": "project_type",
-      "status": "never_contacted",
-      "active": true,
-      "project_ids": [
-        123,
-        124
-      ]
-    },
-    "delete": {
-      "method": "DELETE",
-      "endpoint": "runners/43",
-      "exit_code": 0
-    },
-    "after": {
-      "global_get_http_status": 404,
-      "global_get_exit_code": 1,
-      "project_123_absent": true,
-      "project_124_absent": true
-    }
   }
 }

@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-04T02:09:27.893530+00:00",
+  "captured_at": "2026-10-04T03:49:26.470348+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,32 +18,32 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "bddc9a03adfe71813144292682706dd7322a5e1bf9d0661bb04c2c8941a3f078",
+    "body_sha256": "76d34986b13f1dc83072014a5864cb521a578bca5515ade50b8e8463a2dae4d2",
     "confirmation_ready": true,
     "fields": [
       "title"
     ],
     "one_time_sink_required": false,
     "operation": "open-bug",
-    "plan_digest": "14ed0f92be720d855ec0f241db4a4dd94141491e48f738d8dd3f915c865aee8a",
+    "plan_digest": "f39871dd0691e5a07e39a3ff132e615e388bdf6704c9c769e745f2030b814781",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "14ed0f92be720d855ec0f241db4a4dd94141491e48f738d8dd3f915c865aee8a",
+  "plan_digest": "f39871dd0691e5a07e39a3ff132e615e388bdf6704c9c769e745f2030b814781",
   "readback": {
     "action": "APPLIED",
-    "iid": 6,
+    "iid": 7,
     "verified": true,
-    "web_url": "https://gitlab.dcloud.run/hott/test/-/issues/6"
+    "web_url": "https://gitlab.dcloud.run/hott/test/-/issues/7"
   },
   "records": [
     {
       "action": "APPLIED",
-      "iid": 6,
+      "iid": 7,
       "verified": true,
-      "web_url": "https://gitlab.dcloud.run/hott/test/-/issues/6"
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/issues/7"
     }
   ],
   "result_action": "APPLIED",
@@ -54,11 +54,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "552c72f8be1a8986efa818b74842c7f435830a3911615e4dce49f1b200deb8d0",
-    "file_count": 48,
+    "digest": "62c951b711062cde43875008e26d55504ff67e6f689778554b4a5ea4adfc6148",
+    "file_count": 53,
     "revision": {
       "source": "git_head",
-      "value": "25cfdcf92fbcbffec4943fca3e6e64ddeac67d2b",
+      "value": "d10c7c2c1a1d92371076d0a936d469ba82b92790",
       "verified": true
     }
   },

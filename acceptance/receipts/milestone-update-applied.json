@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-04T02:08:14.961466+00:00",
+  "captured_at": "2026-10-04T03:48:53.908342+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,31 +18,31 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "3edf7def610e78a18e01ccdd4e79ac1b2a9af1cb5daa6b4cc9a882779337b4b9",
+    "body_sha256": "7fdaece19e265e6de311525cd64f8a3e0712a05c9fbf4af62db0f7513395b42b",
     "confirmation_ready": true,
     "fields": [
       "title"
     ],
     "one_time_sink_required": false,
     "operation": "update",
-    "plan_digest": "93980e92f8d1ea6dc2a3dd481e8cf46e16e9938f7ccc05d829cc7cbb060e73cf",
+    "plan_digest": "b6fdf37d1fc519a7b16d4292746df27ff6a9d12e5c14ad2f2dd23dcc4e397d0a",
     "project_ids": null,
-    "resource_id": 80,
+    "resource_id": 81,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "93980e92f8d1ea6dc2a3dd481e8cf46e16e9938f7ccc05d829cc7cbb060e73cf",
+  "plan_digest": "b6fdf37d1fc519a7b16d4292746df27ff6a9d12e5c14ad2f2dd23dcc4e397d0a",
   "readback": {
     "action": "APPLIED",
-    "id": 80,
-    "title": "HOTT team ci-skills PR16 25cfdcf updated verification 20261004",
+    "id": 81,
+    "title": "ci-skills-pr13-c2e4dac1-updated",
     "verified": true
   },
   "records": [
     {
       "action": "APPLIED",
-      "id": 80,
-      "title": "HOTT team ci-skills PR16 25cfdcf updated verification 20261004",
+      "id": 81,
+      "title": "ci-skills-pr13-c2e4dac1-updated",
       "verified": true
     }
   ],
@@ -54,11 +54,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "552c72f8be1a8986efa818b74842c7f435830a3911615e4dce49f1b200deb8d0",
-    "file_count": 48,
+    "digest": "62c951b711062cde43875008e26d55504ff67e6f689778554b4a5ea4adfc6148",
+    "file_count": 53,
     "revision": {
       "source": "git_head",
-      "value": "25cfdcf92fbcbffec4943fca3e6e64ddeac67d2b",
+      "value": "d10c7c2c1a1d92371076d0a936d469ba82b92790",
       "verified": true
     }
   },
