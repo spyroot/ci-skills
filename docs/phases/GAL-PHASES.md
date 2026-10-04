@@ -16,7 +16,7 @@ own design, steps and gates.
 
 | Phase | Delivers | Depends on |
 | --- | --- | --- |
-| GAL-GATES | the shared check entrypoint, aggregator, pins | PR #2's entrypoint, directly or through PR #16 |
+| GAL-GATES | check entrypoint, aggregator, pins | PR #2 or #16 |
 | GAL-SCHEMA | the record schemas under `schemas/` | nothing |
 | GAL-CLI | one command-line contract and its gate | SCHEMA, GATES |
 | GAL-VENDOR | `glab` agent skills vendored under `skills/` | GATES, SCHEMA |
