@@ -2,6 +2,6 @@
 set -Eeuo pipefail
 
 CI_SKILLS_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-# shellcheck source=lib/automation/binary_build.bash
+# shellcheck source=skills/ci-skills/lib/automation/binary_build.bash
 source "$CI_SKILLS_ROOT/lib/automation/binary_build.bash"
 ci_binary_build_main "$@"

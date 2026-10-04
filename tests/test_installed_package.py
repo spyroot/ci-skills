@@ -512,6 +512,103 @@ def _install_skill(tmp_path: Path) -> Path:
     return installed
 
 
+def test_installed_bash_entrypoints_run_from_unrelated_directory(tmp_path: Path):
+    """Copied Bash commands resolve their own libraries, not checkout libraries."""
+    installed = _install_skill(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    install_executable(
+        fake_bin, "gh", "#!/bin/sh\nprintf '%s\\n' '{\"enabled\":false}'\n"
+    )
+    env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+    api = subprocess.run(
+        [
+            str(installed / "bin" / "ci-api"),
+            "get",
+            "--provider",
+            "github",
+            "--endpoint",
+            "repos/unit/repo",
+            "--field",
+            "enabled",
+            "--output",
+            "json",
+            "--log-level",
+            "error",
+        ],
+        cwd=elsewhere,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert api.returncode == 0, api.stderr
+    assert json.loads(api.stdout) is False
+
+    source = tmp_path / "source"
+    source.mkdir()
+    subprocess.run(["git", "init", "-q", str(source)], check=True)
+    (source / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(source), "add", "Dockerfile"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        check=True,
+    )
+    commit = subprocess.check_output(
+        ["git", "-C", str(source), "rev-parse", "HEAD"], text=True
+    ).strip()
+    spec = tmp_path / "buildconfig.yaml"
+    spec.write_text(
+        "apiVersion: build.openshift.io/v1\n"
+        "kind: BuildConfig\n"
+        "metadata:\n  name: fixture-build\n  namespace: fixture-ns\n"
+        f"  labels:\n    example.invalid/source-commit: {commit}\n"
+        "spec:\n  source:\n    type: Binary\n    binary: {}\n"
+        "  strategy:\n    type: Docker\n    dockerStrategy:\n"
+        "      dockerfilePath: Dockerfile\n"
+        "  output:\n    to:\n      kind: DockerImage\n"
+        "      name: registry.example.invalid/demo/image:candidate\n"
+        "  triggers: []\n",
+        encoding="utf-8",
+    )
+    build = subprocess.run(
+        [
+            str(installed / "bin" / "ci-binary-build"),
+            "--spec",
+            str(spec),
+            "--source-repo",
+            str(source),
+            "--source-commit",
+            commit,
+            "--commit-label",
+            "example.invalid/source-commit",
+            "--dry-run",
+        ],
+        cwd=elsewhere,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert build.returncode == 0, build.stderr
+    assert json.loads(build.stdout)["mode"] == "dry-run"
+
+
 def _run_installed_node_script(
     installed: Path,
     script_name: str,

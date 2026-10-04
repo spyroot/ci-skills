@@ -42,6 +42,7 @@ RECOVERY = {
     "install_recovery_unsafe": "Inspect the installed skill and transaction journal before changing either.",
     "install_io_failure": "Run --recover --apply --confirm-recover, then retry installation.",
     "install_lock_timeout": "Wait for the other installer process to finish, then retry.",
+    "install_deadline_expired": "Make a new plan and choose a longer --timeout.",
     "installed_digest_mismatch": "Inspect source changes and retry from a clean checkout.",
     "pyyaml_unavailable": "Install PyYAML in the project environment or select --json.",
 }
@@ -89,7 +90,7 @@ def _journal_path(skills_dir: Path) -> Path:
 
 
 @contextmanager
-def _mutation_lock(skills_dir: Path):
+def _mutation_lock(skills_dir: Path, *, deadline: float | None = None):
     """Serialize destination inspection and mutation across local processes."""
     skills_dir.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(
@@ -101,7 +102,10 @@ def _mutation_lock(skills_dir: Path):
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
             raise ValueError("install_recovery_unsafe")
-        deadline = time.monotonic() + LOCK_WAIT_SECONDS
+        lock_deadline = min(
+            time.monotonic() + LOCK_WAIT_SECONDS,
+            deadline if deadline is not None else float("inf"),
+        )
         while True:
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -109,7 +113,7 @@ def _mutation_lock(skills_dir: Path):
             except OSError as exc:
                 if exc.errno not in {errno.EACCES, errno.EAGAIN}:
                     raise
-                if time.monotonic() >= deadline:
+                if time.monotonic() >= lock_deadline:
                     raise ValueError("install_lock_timeout") from exc
                 time.sleep(0.1)
         yield
@@ -241,9 +245,7 @@ def _recover_install_unlocked(skills_dir: Path, *, dry_run: bool) -> dict[str, A
             shutil.rmtree(staging)
         _journal_path(skills_dir).unlink()
         result["status"] = "PASS"
-        result["digest"] = (
-            _entry_digest(destination) if _present(destination) else None
-        )
+        result["digest"] = _entry_digest(destination) if _present(destination) else None
     except (OSError, ValueError) as exc:
         reason = str(exc) if isinstance(exc, ValueError) else "install_io_failure"
         result.update(
@@ -280,6 +282,7 @@ def _install_unlocked(
     dry_run: bool,
     require_verified: bool = True,
     upgrade: bool = False,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Stage and verify a skill with a recoverable cross-rename journal."""
     skills_dir = skills_dir.expanduser().resolve()
@@ -300,7 +303,11 @@ def _install_unlocked(
         result.update(**expected_digest, revision=identity["revision"])
         if destination.is_symlink() and not upgrade:
             raise ValueError("destination_symlink")
-        if _present(destination) and not destination.is_dir() and not destination.is_symlink():
+        if (
+            _present(destination)
+            and not destination.is_dir()
+            and not destination.is_symlink()
+        ):
             raise ValueError("destination_not_directory")
         if _present(destination) and not upgrade:
             raise ValueError("destination_exists")
@@ -308,6 +315,7 @@ def _install_unlocked(
             raise ValueError("incomplete_install_recover")
         if (
             upgrade
+            and not destination.is_symlink()
             and destination.is_dir()
             and tree_digest(destination) == expected_digest
         ):
@@ -318,6 +326,8 @@ def _install_unlocked(
         if dry_run:
             result["status"] = "DRY_RUN"
             return result
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ValueError("install_deadline_expired")
         skills_dir.mkdir(parents=True, exist_ok=True)
         nonce = uuid.uuid4().hex
         staging = skills_dir / f".{SKILL_NAME}.stage-{nonce}"
@@ -343,6 +353,8 @@ def _install_unlocked(
                     shutil.copy2(source / relative, target)
                 if tree_digest(staging) != expected_digest:
                     raise ValueError("installed_digest_mismatch")
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ValueError("install_deadline_expired")
                 if _present(destination):
                     destination.rename(previous)
                     result["previous_version"] = str(previous)
@@ -376,6 +388,7 @@ def install(
     dry_run: bool,
     require_verified: bool = True,
     upgrade: bool = False,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """Serialize the full install decision and mutation for one skill root."""
     preflight = _install_unlocked(
@@ -388,13 +401,14 @@ def install(
     if dry_run or preflight["status"] == "BLOCKED":
         return preflight
     try:
-        with _mutation_lock(skills_dir.expanduser().resolve()):
+        with _mutation_lock(skills_dir.expanduser().resolve(), deadline=deadline):
             return _install_unlocked(
                 source,
                 skills_dir,
                 dry_run=False,
                 require_verified=require_verified,
                 upgrade=upgrade,
+                deadline=deadline,
             )
     except (OSError, ValueError) as exc:
         reason = str(exc) if isinstance(exc, ValueError) else "install_io_failure"
@@ -407,6 +421,7 @@ def install(
 
 
 def main() -> int:
+    started = time.monotonic()
     parser = argparse.ArgumentParser(
         description="Install ci-skills from this checkout. Audience: human and agent.",
         epilog="Example: tools/install_ci_skills.py --dry-run --json",
@@ -514,13 +529,30 @@ def main() -> int:
         if not args.apply or plan["status"] != "DRY_RUN":
             result = plan
         elif not args.timeout or not re.fullmatch(r"[1-9][0-9]*s", args.timeout):
-            result = {**plan, "status": "BLOCKED", "reason": "timeout_required",
-                      "safe_next_step": "Pass --timeout DURATION, for example 10s."}
-        elif (args.confirm_upgrade if args.upgrade else args.confirm_install) != plan["fingerprint"]:
-            result = {**plan, "status": "BLOCKED", "reason": "confirmation_required",
-                      "safe_next_step": "Pass the current dry-run fingerprint with the matching confirmation option."}
+            result = {
+                **plan,
+                "status": "BLOCKED",
+                "reason": "timeout_required",
+                "safe_next_step": "Pass --timeout DURATION, for example 10s.",
+            }
+        elif (args.confirm_upgrade if args.upgrade else args.confirm_install) != plan[
+            "fingerprint"
+        ]:
+            result = {
+                **plan,
+                "status": "BLOCKED",
+                "reason": "confirmation_required",
+                "safe_next_step": "Pass the current dry-run fingerprint with the matching confirmation option.",
+            }
         else:
-            result = install(SOURCE, skills_dir, dry_run=False, upgrade=args.upgrade)
+            seconds = int(args.timeout[:-1])
+            result = install(
+                SOURCE,
+                skills_dir,
+                dry_run=False,
+                upgrade=args.upgrade,
+                deadline=started + seconds,
+            )
             result["fingerprint"] = plan["fingerprint"]
             result["source_revision"] = plan["source_revision"]
             result["mutable_link"] = False
