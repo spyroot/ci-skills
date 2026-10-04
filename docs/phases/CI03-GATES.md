@@ -97,12 +97,12 @@ change that closes it.
 ### G5. Release receipt host
 
 - **Requirement.** CI-ROUTING needs a new live receipt for the exact skill
-  digest, captured on the executor that `acceptance/expected.toml` declares.
+  digest, captured on the executor that `../../tests/acceptance` declares.
 - **Conflict.** That executor is a laptop, and the project's guide says a
   laptop is not release evidence.
 - **Smallest change.**
   1. Name an approved executor and its capture route.
-  2. Update `acceptance/expected.toml` to declare it.
+  2. Update `../../tests/acceptance` to declare it.
   3. Capture the receipt there, and read it back.
 
 ### G6. The pinned standards' CI evidence model

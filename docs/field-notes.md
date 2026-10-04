@@ -189,7 +189,7 @@ not to the environment and default branches; `emit` writing `<kind>.json`, so a
 second run into one `--output-dir` overwrites the first.
 
 **One host is not a fleet.** A receipt is per host and not transferable, and
-`acceptance/expected.toml` declares exactly one executor. A second execution
+`../tests/acceptance` declares exactly one executor. A second execution
 host should record its own.
 
 ## The one rule the rest of this follows

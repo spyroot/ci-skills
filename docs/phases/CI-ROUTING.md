@@ -118,7 +118,7 @@ How `ci-skills` comes to sit on top of `glab`:
 5. Declare the skill's tags, so that `bin/ci-skills list` shows them
    with the derived dependency on `glab`.
 6. After the last skill edit, capture a new receipt on the executor that
-   `acceptance/expected.toml` declares, with
+   `../../tests/acceptance` declares, with
    `skills/ci-skills/scripts/access_check.py --publication` and
    `--receipt-out acceptance/receipts/<label>.json`. Commit it.
 7. Open one pull request. The `validate` workflow must pass, including live
