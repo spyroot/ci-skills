@@ -1,7 +1,6 @@
 # CI01-CATALOG: discover, list, get and install every skill
 
-Status: proposed. Depends on: CI-VENDOR, CI-SCHEMA and CI02-CLI. Followed
-by: CI-ROUTING.
+Status: proposed. Depends on: CI-VENDOR, CI-SCHEMA and CI02-CLI. Followed by: CI-ROUTING.
 
 ## Goal
 
