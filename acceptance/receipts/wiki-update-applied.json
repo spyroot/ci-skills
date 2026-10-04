@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-03T23:14:31.930616+00:00",
+  "captured_at": "2026-10-04T01:45:43.992809+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,29 +18,29 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "d2bad96d3790d72fa6deeb2979f5834bfdfbdc48f9fb16fbca0a997a183959cc",
+    "body_sha256": "fb632239286b28f69863bba6211d453630d71a463ca0147cc96722105df254d5",
     "confirmation_ready": true,
     "fields": [
       "content"
     ],
     "one_time_sink_required": false,
     "operation": "update",
-    "plan_digest": "ce73f7f9b2df48cf157f75e90ee5c4ec15a6c4bf7fce86809e254846aada442c",
+    "plan_digest": "7866fcf2f8ac439db916efe019652bcde0407d4076821b6c123b0dcb07a08c59",
     "project_ids": null,
-    "resource_id": "HOTT-team-ci-skills-PR16-4a57607-wiki-20261003",
+    "resource_id": "HOTT-team-ci-skills-PR16-87daec4-wiki-20261004",
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "ce73f7f9b2df48cf157f75e90ee5c4ec15a6c4bf7fce86809e254846aada442c",
+  "plan_digest": "7866fcf2f8ac439db916efe019652bcde0407d4076821b6c123b0dcb07a08c59",
   "readback": {
     "action": "APPLIED",
-    "slug": "HOTT-team-ci-skills-PR16-4a57607-wiki-20261003",
+    "slug": "HOTT-team-ci-skills-PR16-87daec4-wiki-20261004",
     "verified": true
   },
   "records": [
     {
       "action": "APPLIED",
-      "slug": "HOTT-team-ci-skills-PR16-4a57607-wiki-20261003",
+      "slug": "HOTT-team-ci-skills-PR16-87daec4-wiki-20261004",
       "verified": true
     }
   ],
@@ -52,11 +52,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
+    "digest": "6b8afae827f0eb89607aca9d3705608b73a6daaa42a905f6fe0fa122b0b19ab8",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "4a576077ed44adf8c352b789ae41321c906beeb2",
+      "value": "87daec4f5839b1edccea8bf7961665aad9cad4d5",
       "verified": true
     }
   },
@@ -70,7 +70,7 @@
     "reference": "hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "user;argv:--project",
+  "target_source": "argv:--target;argv:--project",
   "tested_revision": null,
   "verified_target": {
     "full_path": "hott/test",

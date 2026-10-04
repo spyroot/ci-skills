@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-03T23:13:33.511032+00:00",
+  "captured_at": "2026-10-04T01:44:42.905008+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,7 +18,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "101adc7abcd2e0380e645016c004ba6f738582c5d414daf09a63e5f33f89ba61",
+    "body_sha256": "a9fd1da193d4447a0a4a2dd5cca3f1e70dde4307da2233b3df5d986bbccc34ce",
     "confirmation_ready": true,
     "fields": [
       "due_date",
@@ -26,24 +26,24 @@
     ],
     "one_time_sink_required": false,
     "operation": "adjust-time",
-    "plan_digest": "e10a9df606a91c7e7ce7f59f5f0887b0b5408f93e72e96a880a19064c05c3878",
+    "plan_digest": "2d5964899f87593569966fd328c75778897b743d86f031ff1703ed5d3194392b",
     "project_ids": null,
-    "resource_id": 78,
+    "resource_id": 79,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "e10a9df606a91c7e7ce7f59f5f0887b0b5408f93e72e96a880a19064c05c3878",
+  "plan_digest": "2d5964899f87593569966fd328c75778897b743d86f031ff1703ed5d3194392b",
   "readback": {
     "action": "APPLIED",
-    "id": 78,
-    "title": "HOTT team ci-skills PR16 4a57607 milestone 20261003 updated",
+    "id": 79,
+    "title": "HOTT team ci-skills PR16 87daec4 milestone 20261004 updated",
     "verified": true
   },
   "records": [
     {
       "action": "APPLIED",
-      "id": 78,
-      "title": "HOTT team ci-skills PR16 4a57607 milestone 20261003 updated",
+      "id": 79,
+      "title": "HOTT team ci-skills PR16 87daec4 milestone 20261004 updated",
       "verified": true
     }
   ],
@@ -55,11 +55,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
+    "digest": "6b8afae827f0eb89607aca9d3705608b73a6daaa42a905f6fe0fa122b0b19ab8",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "4a576077ed44adf8c352b789ae41321c906beeb2",
+      "value": "87daec4f5839b1edccea8bf7961665aad9cad4d5",
       "verified": true
     }
   },
@@ -73,7 +73,7 @@
     "reference": "hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "user;argv:--project",
+  "target_source": "argv:--target;argv:--project",
   "tested_revision": null,
   "verified_target": {
     "full_path": "hott/test",

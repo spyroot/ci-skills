@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-03T23:14:48.918277+00:00",
+  "captured_at": "2026-10-04T01:47:05.272987+00:00",
   "cleanup": {
     "reason": "persistent_runner_requested",
     "status": "NOT_APPLICABLE"
@@ -19,7 +19,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "9d90d598b9d4ee4ef73f7ff4fc05ba59774bbd7b585e9dcf1c28cf806de27615",
+    "body_sha256": "1a56c64dc097649078121c6c019dc61f71edf9a09e995c9938259a309a51cc2e",
     "confirmation_ready": true,
     "fields": [
       "description",
@@ -27,20 +27,20 @@
     ],
     "one_time_sink_required": true,
     "operation": "create",
-    "plan_digest": "cc16785a809c93fd3653a40ccbd543b0d1093d682a86bb12f544359e3f9e7bce",
+    "plan_digest": "c901a3d99d1e6684352e5692561f8d12dd31b4d47dec6ef33da12cdddb73182b",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "cc16785a809c93fd3653a40ccbd543b0d1093d682a86bb12f544359e3f9e7bce",
+  "plan_digest": "c901a3d99d1e6684352e5692561f8d12dd31b4d47dec6ef33da12cdddb73182b",
   "readback": {
     "action": "APPLIED",
     "cleanup": {
       "reason": "persistent_runner_requested",
       "status": "NOT_APPLICABLE"
     },
-    "id": 41,
+    "id": 42,
     "mutated": true,
     "sink_persisted": true,
     "verified": true
@@ -52,7 +52,7 @@
         "reason": "persistent_runner_requested",
         "status": "NOT_APPLICABLE"
       },
-      "id": 41,
+      "id": 42,
       "mutated": true,
       "sink_persisted": true,
       "verified": true
@@ -66,11 +66,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
+    "digest": "6b8afae827f0eb89607aca9d3705608b73a6daaa42a905f6fe0fa122b0b19ab8",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "4a576077ed44adf8c352b789ae41321c906beeb2",
+      "value": "87daec4f5839b1edccea8bf7961665aad9cad4d5",
       "verified": true
     }
   },
@@ -84,7 +84,7 @@
     "reference": "hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "user;argv:--project",
+  "target_source": "argv:--target;argv:--project",
   "tested_revision": null,
   "verified_target": {
     "full_path": "hott/test",
@@ -96,16 +96,16 @@
     "schema_version": "1.0",
     "kind": "gitlab_runner_smoke_cleanup",
     "status": "PASS",
-    "captured_at": "2026-10-03T23:21:45Z",
+    "captured_at": "2026-10-04T01:50:26Z",
     "execution_host": "mac.lan",
-    "tested_revision": "4a576077ed44adf8c352b789ae41321c906beeb2",
-    "skill_digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
+    "tested_revision": "87daec4f5839b1edccea8bf7961665aad9cad4d5",
+    "skill_digest": "6b8afae827f0eb89607aca9d3705608b73a6daaa42a905f6fe0fa122b0b19ab8",
     "origin": "https://gitlab.dcloud.run",
     "credential_source": "file:path:2ccda27d0866",
-    "runner_id": 41,
+    "runner_id": 42,
     "before": {
-      "id": 41,
-      "description": "HOTT team ci-skills PR16 4a57607 runner 20261003",
+      "id": 42,
+      "description": "HOTT team ci-skills PR16 87daec4 runner 20261004",
       "runner_type": "project_type",
       "status": "never_contacted",
       "active": true,
@@ -116,7 +116,7 @@
     },
     "delete": {
       "method": "DELETE",
-      "endpoint": "runners/41",
+      "endpoint": "runners/42",
       "exit_code": 0
     },
     "after": {

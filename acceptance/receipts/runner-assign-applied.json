@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-03T23:15:02.980386+00:00",
+  "captured_at": "2026-10-04T01:47:42.476544+00:00",
   "cleanup": {
     "reason": "persistent_assignment_requested",
     "status": "NOT_APPLICABLE"
@@ -24,13 +24,13 @@
     "fields": [],
     "one_time_sink_required": false,
     "operation": "assign",
-    "plan_digest": "538ee537d54b07e4652d725c2cd632703b1f6265004c42dce1e8f19b70129447",
+    "plan_digest": "3aeeb116207219320cabacd6c98f41928167dbab799a37e042957abb6182905c",
     "project_ids": null,
-    "resource_id": 41,
+    "resource_id": 42,
     "target_kind": "project",
     "target_reference": "hott/ci-skills-runner-proof"
   },
-  "plan_digest": "538ee537d54b07e4652d725c2cd632703b1f6265004c42dce1e8f19b70129447",
+  "plan_digest": "3aeeb116207219320cabacd6c98f41928167dbab799a37e042957abb6182905c",
   "readback": {
     "action": "APPLIED",
     "cleanup": {
@@ -38,7 +38,7 @@
       "status": "NOT_APPLICABLE"
     },
     "errors": [],
-    "id": 41,
+    "id": 42,
     "mutated": true,
     "projects": [
       {
@@ -57,7 +57,7 @@
         "status": "NOT_APPLICABLE"
       },
       "errors": [],
-      "id": 41,
+      "id": 42,
       "mutated": true,
       "projects": [
         {
@@ -77,11 +77,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "86f7aa4c5f9574e01e65b9216fc2d6f9e9db5169360ab206affbabf243f8cf98",
+    "digest": "6b8afae827f0eb89607aca9d3705608b73a6daaa42a905f6fe0fa122b0b19ab8",
     "file_count": 48,
     "revision": {
       "source": "git_head",
-      "value": "4a576077ed44adf8c352b789ae41321c906beeb2",
+      "value": "87daec4f5839b1edccea8bf7961665aad9cad4d5",
       "verified": true
     }
   },
@@ -95,7 +95,7 @@
     "reference": "hott/ci-skills-runner-proof"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "user;argv:--project",
+  "target_source": "argv:--target;argv:--project",
   "tested_revision": null,
   "verified_target": {
     "full_path": "hott/ci-skills-runner-proof",
