@@ -45,6 +45,109 @@ STUB
   [[ "$output" == *'"unit"'* ]]
 }
 
+@test 'check dry-run selects exactly one named gate' {
+  run "$tool" --dry-run --gate yaml
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"checks":["yaml"]'* ]]
+  [[ "$output" != *'"unit"'* ]]
+}
+
+@test 'check rejects an unknown gate before execution' {
+  run "$tool" --dry-run --gate missing
+  [ "$status" -eq 64 ]
+  [[ "$output" == *'unknown gate: missing'* ]]
+}
+
+@test 'check help names every accepted gate and the all default' {
+  run "$tool" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'all (default)'* ]]
+  for gate in "${CI_CHECK_GATES[@]}"; do
+    [[ "$output" == *"$gate"* ]]
+  done
+}
+
+@test 'each named gate dispatches only its own steps' {
+  make_check_run_fixture
+  CI_CHECK_ROOT="$fixture"
+  CI_CHECK_CALLS="${BATS_TEST_TMPDIR}/calls"
+  export CI_CHECK_CALLS
+  ci_check_step() {
+    printf '%s\n' "$1" >>"$CI_CHECK_CALLS"
+  }
+  for gate in "${CI_CHECK_GATES[@]}"; do
+    : >"$CI_CHECK_CALLS"
+    run ci_check_run "$gate"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"\"checks\":[\"$gate\"]"* ]]
+    expected=$gate
+    if [ "$gate" = bash-n ]; then
+      expected='bash-n:check.sh'
+    fi
+    [ "$(cat "$CI_CHECK_CALLS")" = "$expected" ]
+  done
+  : >"$CI_CHECK_CALLS"
+  run ci_check_run all
+  [ "$status" -eq 0 ]
+  [ "$(cat "$CI_CHECK_CALLS")" = "$(printf '%s\n' \
+    whitespace bash-n:check.sh shellcheck shfmt yaml markdown secrets unit)" ]
+}
+
+@test 'named yaml gate requires only base and yaml tools' {
+  CI_CHECK_CALLS="${BATS_TEST_TMPDIR}/tools"
+  export CI_CHECK_CALLS
+  ci_check_tool_present() {
+    printf '%s\n' "$1" >>"$CI_CHECK_CALLS"
+  }
+  run ci_check_tools yaml
+  [ "$status" -eq 0 ]
+  [ "$(cat "$CI_CHECK_CALLS")" = "$(printf '%s\n' bash git jq yamllint)" ]
+}
+
+@test 'named yaml gate runs only its selected command' {
+  make_check_run_fixture
+  make_success_stubs
+  for command in shellcheck shfmt yamllint markdownlint-cli2 gitleaks bats; do
+    cat >"${stubs}/${command}" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "${0##*/}" >>"$CI_CHECK_CALLS"
+exit 0
+STUB
+    chmod +x "${stubs}/${command}"
+  done
+  CI_CHECK_CALLS="${BATS_TEST_TMPDIR}/calls"
+  export CI_CHECK_CALLS
+  CI_CHECK_ROOT="$fixture"
+  KUBERNETES_SERVICE_HOST=fixture
+  export KUBERNETES_SERVICE_HOST
+  old_path=$PATH
+  PATH="${stubs}:$PATH"
+  run ci_check_main --gate yaml
+  PATH=$old_path
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"checks":["yaml"]'* ]]
+  [ "$(cat "$CI_CHECK_CALLS")" = yamllint ]
+}
+
+@test 'named gate failure blocks the selected gate' {
+  make_check_run_fixture
+  make_success_stubs
+  cat >"${stubs}/yamllint" <<'STUB'
+#!/usr/bin/env bash
+exit 7
+STUB
+  chmod +x "${stubs}/yamllint"
+  CI_CHECK_ROOT="$fixture"
+  KUBERNETES_SERVICE_HOST=fixture
+  export KUBERNETES_SERVICE_HOST
+  old_path=$PATH
+  PATH="${stubs}:$PATH"
+  run ci_check_main --gate yaml
+  PATH=$old_path
+  [ "$status" -eq 69 ]
+  [[ "$output" == *'yaml failed (exit 7)'* ]]
+}
+
 @test 'check refuses execution outside Kubernetes' {
   run env -u KUBERNETES_SERVICE_HOST "$tool" --log-level error
   [ "$status" -eq 69 ]
