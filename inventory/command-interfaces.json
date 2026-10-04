@@ -1,0 +1,254 @@
+{
+  "schema_version": "1.0",
+  "kind": "command_interface_inventory",
+  "evidence_class": "offline installed-command interface",
+  "base_revision": "d6bba3d7db21d9361ec3a3561beaaa455b64a7e7",
+  "standards_binding": "standards-binding.yaml",
+  "standards_revision": "dca62dec9bdb93af1c75aa58504f3ea2463e186c",
+  "applicable_contracts": [
+    "ci",
+    "unit-testing",
+    "smoke-testing",
+    "automation"
+  ],
+  "commands": {
+    "access_check.py": {
+      "entrypoint": "skills/ci-skills/scripts/access_check.py",
+      "implementation": "skills/ci-skills/scripts/core/cli.py",
+      "report_kind": "access_check",
+      "requires_authorities": [
+        "github",
+        "gitlab",
+        "kubernetes"
+      ],
+      "read_only_declared": true,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "bin/ci-api": {
+      "entrypoint": "skills/ci-skills/bin/ci-api",
+      "implementation": "skills/ci-skills/lib/ci/api.bash",
+      "report_kind": "ci_api",
+      "requires_authorities": [
+        "one caller-selected GitHub or GitLab host"
+      ],
+      "read_only_declared": true,
+      "help": "supported",
+      "json_flag": "missing",
+      "yaml_flag": "missing",
+      "current_output": "JSON provider value or request plan by default; optional text output",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "bin/ci-binary-build": {
+      "entrypoint": "skills/ci-skills/bin/ci-binary-build",
+      "implementation": "skills/ci-skills/lib/automation/binary_build.bash",
+      "report_kind": "ci_binary_build",
+      "requires_authorities": [],
+      "read_only_declared": true,
+      "help": "supported",
+      "json_flag": "missing",
+      "yaml_flag": "missing",
+      "current_output": "JSON dry-run build plan by default",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "ceph_cluster.py": {
+      "entrypoint": "skills/ci-skills/scripts/ceph_cluster.py",
+      "implementation": "skills/ci-skills/scripts/core/ceph_cluster.py",
+      "report_kind": "ceph_cluster",
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "read_only_declared": true,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "ceph_kernel.py": {
+      "entrypoint": "skills/ci-skills/scripts/ceph_kernel.py",
+      "implementation": "skills/ci-skills/scripts/core/node_local.py",
+      "report_kind": "ceph_kernel",
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "read_only_declared": null,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "cilium_node.py": {
+      "entrypoint": "skills/ci-skills/scripts/cilium_node.py",
+      "implementation": "skills/ci-skills/scripts/core/node_local.py",
+      "report_kind": "cilium_node",
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "read_only_declared": null,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "cilium_status.py": {
+      "entrypoint": "skills/ci-skills/scripts/cilium_status.py",
+      "implementation": "skills/ci-skills/scripts/core/cilium.py",
+      "report_kind": "cilium_status",
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "read_only_declared": true,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "event_trace.py": {
+      "entrypoint": "skills/ci-skills/scripts/event_trace.py",
+      "implementation": "skills/ci-skills/scripts/core/collect.py",
+      "report_kind": "event_trace",
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "read_only_declared": true,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "gitlab_access.py": {
+      "entrypoint": "skills/ci-skills/scripts/gitlab_access.py",
+      "implementation": "skills/ci-skills/scripts/core/access.py",
+      "report_kind": "gitlab_access",
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "read_only_declared": true,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "gitlab_issue.py": {
+      "entrypoint": "skills/ci-skills/scripts/gitlab_issue.py",
+      "implementation": "skills/ci-skills/scripts/core/gitlab_issues.py",
+      "report_kind": "gitlab_issue",
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "read_only_declared": false,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "gitlab_job.py": {
+      "entrypoint": "skills/ci-skills/scripts/gitlab_job.py",
+      "implementation": "skills/ci-skills/scripts/core/cli.py",
+      "report_kind": "gitlab_job",
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "read_only_declared": true,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "gitlab_milestone.py": {
+      "entrypoint": "skills/ci-skills/scripts/gitlab_milestone.py",
+      "implementation": "skills/ci-skills/scripts/core/gitlab_milestones.py",
+      "report_kind": "gitlab_milestone",
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "read_only_declared": false,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "gitlab_pipeline.py": {
+      "entrypoint": "skills/ci-skills/scripts/gitlab_pipeline.py",
+      "implementation": "skills/ci-skills/scripts/core/gitlab_pipelines.py",
+      "report_kind": "gitlab_pipeline",
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "read_only_declared": true,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "gitlab_runner.py": {
+      "entrypoint": "skills/ci-skills/scripts/gitlab_runner.py",
+      "implementation": "skills/ci-skills/scripts/core/gitlab_runners.py",
+      "report_kind": "gitlab_runner",
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "read_only_declared": false,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "gitlab_wiki.py": {
+      "entrypoint": "skills/ci-skills/scripts/gitlab_wiki.py",
+      "implementation": "skills/ci-skills/scripts/core/gitlab_wikis.py",
+      "report_kind": "gitlab_wiki",
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "read_only_declared": false,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "k8s_verify_mtu_consistency.py": {
+      "entrypoint": "skills/ci-skills/scripts/k8s_verify_mtu_consistency.py",
+      "implementation": "skills/ci-skills/scripts/core/mtu_consistency.py",
+      "report_kind": "k8s_verify_mtu_consistency",
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "read_only_declared": false,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    },
+    "storage_report.py": {
+      "entrypoint": "skills/ci-skills/scripts/storage_report.py",
+      "implementation": "skills/ci-skills/scripts/core/collect.py",
+      "report_kind": "storage_report",
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "read_only_declared": true,
+      "help": "supported",
+      "json_flag": "supported",
+      "yaml_flag": "supported",
+      "current_output": "versioned JSON or YAML report with kind and status",
+      "evidence": "tests/test_installed_package.py"
+    }
+  }
+}
