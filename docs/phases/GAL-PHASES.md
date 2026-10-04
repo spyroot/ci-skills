@@ -16,7 +16,7 @@ own design, steps and gates.
 
 | Phase | Delivers | Depends on |
 | --- | --- | --- |
-| GAL-GATES | check entrypoint, aggregator, pins | PR #2 or #16 |
+| GAL-GATES | check entrypoint, aggregator, pins | merged `scripts/check.sh` |
 | GAL-SCHEMA | the record schemas under `schemas/` | nothing |
 | GAL-CLI | one command-line contract and its gate | SCHEMA, GATES |
 | GAL-VENDOR | `glab` agent skills vendored under `skills/` | GATES, SCHEMA |
@@ -29,27 +29,25 @@ own design, steps and gates.
 - **GAL-TESTS** has its own delivery pull request for the reusable test
   command. Every phase still carries its own focused tests in its own pull
   request; GAL-TESTS does not defer those tests.
-- **GAL-ROUTING** also waits for pull requests #7 and #8, and for an
-  approved receipt host (GAL-GATES, G5).
+- **GAL-ROUTING** also waits for an approved receipt host (GAL-GATES, G5).
 
 ## Order
 
 1. These phase documents land first, in one pull request, so they can be
    read and reviewed before any implementation starts.
-2. GAL-GATES, once PR #2's check entrypoint is integrated, either directly or
-   through draft PR #16, because every other phase adds gates to it.
+2. GAL-GATES extends the merged `scripts/check.sh`, because every other phase
+   adds gates to it.
 3. GAL-SCHEMA, then GAL-CLI.
 4. GAL-VENDOR.
 5. A separate package delivery pull request consolidates the one `ci-skills`
-   skill after the source work in PRs #2, #7, #8 and #13 is integrated,
-   individually or through draft integration PR #16, and before GAL-CATALOG.
+   skill from the source work merged through PR #16, before GAL-CATALOG.
    Its tests, fresh live receipt and exact-head `validate` result land in
    that pull request.
 6. GAL-CATALOG.
 7. GAL-TESTS, after GAL-CATALOG adds `list`, `get` and `install` to
    `bin/ci-skills`.
 8. GAL-REFERENCE and GAL-ROUTING. Both need GAL-CATALOG; GAL-ROUTING also
-   needs PRs #7 and #8 and the receipt host.
+   needs the receipt host.
 9. GAL-HOOKS, after GAL-GATES and GAL-VENDOR.
 
 ## How a phase lands
@@ -74,32 +72,10 @@ own design, steps and gates.
 
 ## Pull request status
 
-Checked on 2026-10-04. These phases build on them, not around them.
-
-- **#2 (draft): `ci-api`, `ci-binary-build`, `scripts/check.sh`.** Our own
-  tools and the existing gate script. GAL-GATES extends its
-  `scripts/check.sh`, GAL-CATALOG exposes the package record, and
-  GAL-REFERENCE reads the tools' capabilities.
-- **#5 (merged), #7 and #8: more Kubernetes diagnostics.** They add:
-  - the commands `cilium_node.py`, `ceph_kernel.py` and `ceph_cluster.py`;
-  - the `project-binding.md` reference;
-  - an Event API fallback.
-
-  GAL-ROUTING lands after the open diagnostics work and routes its commands.
-  Each package-changing pull request carries its own fresh live receipt.
-- **#9 (draft): an Event API benchmark** under `benchmarks/`, also folded
-  into draft PR #16.
-- **#13 (draft): GitLab operations in the diagnostics package.** Reconcile
-  its package edits before the package move.
-- **#16 (draft): root `ci-skills` integration candidate.** It folds PRs #2,
-  #7, #8, #9, #13 and #14, and still ships a root skill alongside the old
-  diagnostics path. `validate` passed on 2026-10-04 at head
-  `848c937ba1d1a7bd2f85f697f09efb3ce70e5bac`. Open corrections and human
-  review remain; the corrected head needs a new gate run before
-  treating its source work as integrated. The separate package delivery moves
-  that source into the sole installable `skills/ci-skills/` package; it does not
-  create another skill.
-- **#10: field notes.** Merged on 2026-10-02.
+Checked on 2026-10-04. PR #16 merged the root tools, Kubernetes diagnostics,
+Event API benchmark, GitLab operations and live receipts from PRs #2, #7, #8,
+#9, #13 and #14. Those source PRs are closed. PR #15 merged the GAL-TESTS
+phase entry. The package delivery described below remains proposed.
 
 ## One installable skill
 
@@ -108,10 +84,9 @@ The canonical package is `skills/ci-skills/`, with
 is `~/.ci-skills/target.toml`, and Codex installs it at
 `~/.codex/skills/ci-skills` (or `$CODEX_HOME/skills/ci-skills`).
 
-PR #2 adds a root `SKILL.md` with the same name and a root `install.sh` that
-links the whole checkout; draft PR #16 also contains that root layout.
+The merged root `SKILL.md` and `install.sh` still use the checkout layout.
 Package delivery moves the diagnostic skill,
-PR #2's `bin/ci-api`, `bin/ci-binary-build`, `lib/ci/api.bash`,
+the merged `bin/ci-api`, `bin/ci-binary-build`, `lib/ci/api.bash`,
 `lib/automation/binary_build.bash`, and `lib/core/runtime.bash` into
 `skills/ci-skills/`, preserving their relative paths. Root `bin/ci-api` and
 `bin/ci-binary-build` become thin checkout adapters. The merged skill
@@ -122,7 +97,7 @@ and `lib/ci/check.bash` at the repository root, pointed at the package runtime.
 
 Retarget the digest-verified copy installer as `tools/install_ci_skills.py`;
 root `install.sh` becomes its thin adapter and no longer links the checkout.
-Keep PR #2's revision-bound dry-run fingerprint, `--apply`,
+Keep the existing revision-bound dry-run fingerprint, `--apply`,
 `--confirm-install FINGERPRINT`, and `--timeout DURATION` checks in that
 adapter; the copy installer enforces the same plan before writing.
 An existing link requires an explicit confirmed upgrade, backup and read-back

@@ -130,8 +130,7 @@ The package delivery in GAL-PHASES first changes the live acceptance checker
 to compare the receipt with `skills/ci-skills/` and captures a new receipt.
 The workflow step remains unconditional. This phase changes that package
 again, so its own pull request also needs a fresh receipt after its last
-skill edit. PR #5 has merged; open pull requests #7 and #8 still change the
-diagnostics code, so this phase lands after them. Its routing covers their
+skill edit. PRs #5, #7 and #8 have been integrated, so this phase routes their
 commands (`cilium_node.py`, `ceph_kernel.py`, `ceph_cluster.py`) and the
 `project-binding.md` reference. Its new receipt covers this pull request's
 final package bytes. Which host may serve as release evidence is open

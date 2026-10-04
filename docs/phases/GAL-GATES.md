@@ -1,7 +1,7 @@
 # GAL-GATES: verification gates
 
-Status: proposed. Depends on: `scripts/check.sh` from PR #2, directly or
-through its draft integration in PR #16. Used by: every other phase.
+Status: proposed. Depends on the merged `scripts/check.sh`. Used by: every
+other phase.
 
 ## Goal
 
@@ -52,11 +52,10 @@ change that closes it.
 - **Requirement.** Local runs and CI invoke the same repository-owned
   entrypoint. The pinned standards' workspace index names `scripts/check.sh`
   as the gate entrypoint.
-- **Existing mechanism.** PR #2 adds `scripts/check.sh` and
-  `lib/ci/check.bash`. They check tracked shell, YAML and Markdown, scan for
-  secrets and run the Bats suite. The script takes `--dry-run`,
-  `--log-format` and `--help`, and exits 0, 64 or 69. Draft PR #16 folds
-  those files into the root integration candidate.
+- **Existing mechanism.** The merged `scripts/check.sh` and
+  `lib/ci/check.bash` check tracked shell, YAML and Markdown, scan for secrets
+  and run the Bats suite. The script takes `--dry-run`, `--log-format` and
+  `--help`, and exits 0, 64 or 69.
 - **Smallest change.** Extend that script instead of adding a second one:
   - add the checks `validate` runs today, plus the `schemas` gate
     (GAL-SCHEMA), the `cli` gate (GAL-CLI) and, after GAL-VENDOR, `verify`;
@@ -149,7 +148,7 @@ change that closes it.
 ### G8. Test execution route
 
 - **Requirement.** Tests run on the approved CI surface, never on a laptop.
-- **Today.** `validate` runs tests on GitHub-hosted runners. PR #2's gate
+- **Today.** `validate` runs tests on GitHub-hosted runners. The root gate
   runs its live checks only inside a Kubernetes pod, and the project's agent
   guide asks for Kubernetes CI.
 - **Open.** The route from the GitHub check to that pod job is not defined.
@@ -164,8 +163,7 @@ change that closes it.
 
 ## Steps
 
-1. After PR #2's entrypoint lands, directly or through PR #16, extend
-   `scripts/check.sh` as in G1. The new checks
+1. Extend `scripts/check.sh` as in G1. The new checks
    live in `lib/ci/check.bash`, and `--help` lists every argument and output
    mode.
 2. Switch the `validate.yml` steps to call it, add the final aggregator
