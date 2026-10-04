@@ -16,7 +16,7 @@ required_live_checks = ["storage_report", "event_trace", "cilium_status", "ceph_
 
 # A completed job on the selected GitLab host with readable pipeline, runner,
 # and trace data. This is an exact acceptance target, not a skill default.
-job_url = "https://gitlab.dcloud.run/hott/galileo/-/jobs/40563"
+job_url = "https://gitlab.dcloud.run/hott/isovalent/-/jobs/38883"
 
 # The namespace selected for this repository's Ceph live check. The generic
 # skill takes it from --ceph-namespace; no namespace is built into the tool.
