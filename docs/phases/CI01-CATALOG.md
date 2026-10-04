@@ -29,7 +29,7 @@ Discovery only reads: it writes nothing and uses no network.
 
 ### Walk
 
-1. Start at `skills/`. The only local package is `skills/ci-skills/`;
+1. Start at `skills/`. The only local package is `../../ci-skills`;
    the root `SKILL.md` from PR #2 is consolidated and removed before this
    phase. Root `bin/ci-*` commands are tools, not another skill record.
 2. Take each directory directly under `skills/` that holds a
@@ -183,7 +183,7 @@ setting an output budget.
 2. Add `tools/skillkit/discover.py` with the walk and read above.
 3. Extend CI-VENDOR's repository-level `bin/ci-skills` with `list`, `get`
    and `install`. Each verb has `--help` and `--describe` (CI02-CLI). This
-   maintenance command is outside the installed `skills/ci-skills/` package.
+   maintenance command is outside the installed `../../ci-skills` package.
 4. Add the tests CI-TESTS lists, and open one pull request; the
    `validate` workflow must pass.
 5. Read back: `bin/ci-skills list` shows exactly one `ci-skills` record,
@@ -194,6 +194,6 @@ setting an output budget.
 ## Gates
 
 - **Tests.** As listed in CI-TESTS, run in CI.
-- **Receipt.** This phase does not change `skills/ci-skills/`, so the
+- **Receipt.** This phase does not change `../../ci-skills`, so the
   package-delivery receipt remains valid until expiry. If this phase changes
   package bytes, capture a fresh receipt after the last edit (CI03-GATES).

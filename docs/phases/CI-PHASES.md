@@ -79,17 +79,17 @@ phase entry. The package delivery described below remains proposed.
 
 ## One installable skill
 
-The canonical package is `skills/ci-skills/`, with
-`skills/ci-skills/SKILL.md` declaring `name: ci-skills`. Its user target file
+The canonical package is `../../ci-skills`, with
+`../../ci-skills` declaring `name: ci-skills`. Its user target file
 is `~/.ci-skills/target.toml`, and Codex installs it at
 `~/.codex/skills/ci-skills` (or `$CODEX_HOME/skills/ci-skills`).
 
 Package delivery moves the diagnostic skill,
 the merged `bin/ci-api`, `bin/ci-binary-build`, `lib/ci/api.bash`,
 `lib/automation/binary_build.bash`, and `lib/core/runtime.bash` into
-`skills/ci-skills/`, preserving their relative paths. Root `bin/ci-api` and
+`../../ci-skills`, preserving their relative paths. Root `bin/ci-api` and
 `bin/ci-binary-build` become thin checkout adapters. The merged skill
-instructions live only in `skills/ci-skills/SKILL.md`; remove the root
+instructions live only in `../../ci-skills`; remove the root
 `SKILL.md`. `ci-api` owns caller-selected API reads; the diagnostics core
 owns target-bound access, collectors and receipts. Keep `scripts/check.sh`
 and `lib/ci/check.bash` at the repository root, pointed at the package runtime.

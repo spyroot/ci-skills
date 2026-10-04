@@ -52,7 +52,7 @@ The last two rows use Python's default JSON separators.
 | Part | Value |
 | --- | --- |
 | Capability | route an agent to one file |
-| Owner | `scripts/core/catalog.py` in `skills/ci-skills/` |
+| Owner | `scripts/core/catalog.py` in `../../ci-skills` |
 | Entrypoint | `tools/render_manifest.py` |
 | Result | `skill_manifest` (today's `tools.json` shape) |
 | Read-back | byte-equality test on `tools.json`; a fresh live receipt |
@@ -127,7 +127,7 @@ How `ci-skills` comes to sit on top of `glab`:
 ## Live receipt
 
 The package delivery in CI-PHASES first changes the live acceptance checker
-to compare the receipt with `skills/ci-skills/` and captures a new receipt.
+to compare the receipt with `../../ci-skills` and captures a new receipt.
 The workflow step remains unconditional. This phase changes that package
 again, so its own pull request also needs a fresh receipt after its last
 skill edit. PRs #5, #7 and #8 have been integrated, so this phase routes their

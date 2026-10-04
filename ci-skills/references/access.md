@@ -146,7 +146,7 @@ since it IS the gate rather than a report authorized by one.
 `--receipt-out PATH` writes the committable form, with every absolute host path
 replaced by a digest token. That is what makes a real receipt publishable: the
 captured form names credential locations under the operator's home directory.
-`tools/check_live_acceptance.py` compares committed receipts against
+`../../tools/check_live_acceptance.py` compares committed receipts against
 `acceptance/expected.toml` and refuses one that is missing, stale, from an
 undeclared executor or identity, aimed at different targets, missing a required
 live check, carrying an unproven one, or produced by a different skill digest.

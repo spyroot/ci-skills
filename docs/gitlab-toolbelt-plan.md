@@ -15,24 +15,19 @@ project-specific default hosts, groups, token aliases, and unrelated deployment 
 This is the delivery plan, not a live acceptance receipt. Each stage below is an independently runnable block and 
 review checkpoint. Code, tests, manifest, result shape, and user instructions land with the capability.
 
-## Agent invocation and target contract
+## SKILL and Agent invocation and target contract
 
-The agent routes and first calls are in
-[SKILL.md](../skills/ci-skills/SKILL.md). Its generated `tools.json`is the command catalog. The catalog and parser must accept the same
-subcommands and options; `--describe` and `--help` work without credentials.
-Agents call installed executables directly; no MCP server or separate provider
-deployment is implied.
+The agent routes and first calls are in [SKILL.md](../ci-skills/SKILL.md). Its generated `tools.json`is the command catalog.
+The catalog and parser must accept the same subcommands and options; `--describe` and `--help` work 
+without credentials.  Agents call installed executables directly; no MCP server or separate provider deployment
+is implied.
 
-Target precedence is defined in the [README](../README.md#target-selection).
-The access block supports a GitLab-only target profile and permits
+Target precedence is defined in the [README](../README.md#target-selection). The access block supports a GitLab-only target profile and permits
 `gitlab.project`, `gitlab.group`, and `gitlab.runner_id` in the selected file.
-The three-authority diagnostic loader still requires all three tables.
-Explicit `--project`, `--group`, or `--runner-id` overrides its matching target
-field. A missing or conflicting identifier blocks. Neither the Git remote nor
-the `glab` profile supplies a target fallback. The access check resolves a
-project/group to a numeric ID;
-all later API paths use that ID, never a context-sensitive placeholder. Live
-results name the resolved origin, numeric IDs, and target source.
+The three-authority diagnostic loader still requires all three tables.  Explicit `--project`, `--group`, or `--runner-id` 
+overrides its matching target field. A missing or conflicting identifier blocks. Neither the Git remote nor the `glab` 
+profile supplies a target fallback. The access check resolves a project/group to a numeric ID; all later API paths 
+use that ID, never a context-sensitive placeholder. Live results name the resolved origin, numeric IDs, and target source.
 
 The GitLab-only check reuses effective-source precedence: declared token
 file, named token environment variable, then the exact-host `glab` store.

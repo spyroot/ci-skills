@@ -165,7 +165,7 @@ The contract test runs over every entrypoint discovery finds:
 - **Discovery.**
   - The walk order is the direct children of `skills/` in name order;
     the repository root is not a second skill.
-  - Exactly one `ci-skills` record resolves to `skills/ci-skills/`.
+  - Exactly one `ci-skills` record resolves to `../../ci-skills`.
   - `list --skills-dir DIR` reads a copied installed package; an unconverted
     symbolic link reports `symlink_unexpected` with the upgrade command.
   - Nested and hidden directories are skipped.
@@ -188,7 +188,7 @@ The contract test runs over every entrypoint discovery finds:
   - a read-back mismatch gives `installed_digest_mismatch`.
 - **Regression.** `../../tests/python/test_installer.py` and
   `../../tests/python/test_installed_package.py` pass against the compatibility wrapper;
-  package delivery updates path assertions for `skills/ci-skills/` first.
+  package delivery updates path assertions for `../../ci-skills` first.
 - **Offline smoke.** The installed-package smoke also installs a vendored
   skill and compares digests. `bin/ci-skills` runs from the repository as
   a maintenance command; installed-package smoke exercises the diagnostics

@@ -15,6 +15,8 @@ code under review -- which is what "wrong revision" has to mean.
 
 This is plain data: an operator-owned expectations file, receipts as files, and
 one comparison function.
+
+Mustafa Byarmov mbayramo@ciso.com / spyroot@gmail.com
 """
 
 from __future__ import annotations
