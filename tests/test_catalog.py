@@ -84,8 +84,12 @@ def test_help_shows_every_declared_option_and_subcommand(script):
     assert all(option in help_text for option in CATALOG.options_for(script))
     declared_actions = CATALOG.COMMANDS[script].get("subcommands", {})
     if declared_actions:
-        action = next(item for item in parser._actions if item.dest == "action")
-        assert set(action.choices) == set(declared_actions)
+        choices = [
+            set(item.choices)
+            for item in parser._actions
+            if item.choices and not item.option_strings
+        ]
+        assert set(declared_actions) in choices
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.COMMANDS))
