@@ -1,22 +1,148 @@
 # CI Skills: GitLab and Kubernetes operations
 
-## Scope
+CI Skills provides project-neutral commands for GitLab, GitHub, and
+Kubernetes/OpenShift. Each command selects its target from caller input or the
+configured binding and returns evidence that an operator or agent can inspect.
 
-The one installable Codex skill is `skills/ci-skills/`. It includes
-`bin/ci-api` for bounded Git API reads and `bin/ci-binary-build` for
-exact-commit OpenShift build planning. Separate
-commands read GitLab jobs and pipelines,
-storage and events, Cilium, Ceph, and physical NIC MTU consistency. GitLab
-milestone, bug, wiki, and runner commands support planned writes with
-independent read-back. Each command checks its selected authority;
-`access_check.py` proves GitHub, GitLab, and Kubernetes together. Cilium and
-Ceph node diagnostics use non-TTY `kubectl exec` into existing Pods; the
-OpenShift MTU command creates temporary debug Pods only with `--apply` and a
-matching plan digest.
+## Current capabilities
 
-The Python diagnostic commands show a human summary at a terminal and
-versioned JSON when piped or redirected; `--json` selects JSON explicitly.
-`ci-api` emits JSON by default, and `ci-binary-build` emits a JSON plan.
+- [Check GitLab access](skills/ci-skills/scripts/gitlab_access.py): identify
+  the effective credential source and read back the selected project or group.
+- [Inspect pipelines](skills/ci-skills/scripts/gitlab_pipeline.py) and
+  [jobs](skills/ci-skills/scripts/gitlab_job.py): read status, stage progress,
+  runner details, and bounded traces; search within a job trace.
+- [Manage milestones](skills/ci-skills/scripts/gitlab_milestone.py): create or
+  update a milestone's title, description, dates, and state.
+- [Open bug issues](skills/ci-skills/scripts/gitlab_issue.py): create or reuse
+  an issue with caller-supplied labels and an optional milestone.
+- [Write wiki pages](skills/ci-skills/scripts/gitlab_wiki.py): create or update
+  a page from supplied content, including documentation links.
+- [Manage runners](skills/ci-skills/scripts/gitlab_runner.py): assign an
+  existing runner or create a runner record with runner tags.
+- [Diagnose Kubernetes and OpenShift](skills/ci-skills/scripts/): inspect
+  storage, events, Cilium, Ceph, and node MTU consistency.
+- Use [ci-api](skills/ci-skills/bin/ci-api) for bounded Git API reads and
+  [ci-binary-build](skills/ci-skills/bin/ci-binary-build) for exact-commit
+  OpenShift build planning.
+
+The Python commands use small entry points over reusable code in
+[scripts/core](skills/ci-skills/scripts/core/). Their `--help` output serves
+people, while `--json`, `--yaml`, and `--describe` expose versioned reports and
+command contracts. The generated [tools.json](skills/ci-skills/tools.json)
+records options, access protocols, and target protocols. GitLab writes start
+with a dry-run plan and require a confirmed plan digest to apply.
+
+Cilium and Ceph node diagnostics use non-TTY `kubectl exec` in existing Pods.
+The OpenShift MTU command creates temporary debug Pods only with `--apply` and
+its matching plan digest.
+
+## Tool grouping
+
+Four patterns describe what a tool does. They can overlap: a combined report
+may also provide visibility.
+
+- **Visibility:** Collects evidence and answers a status question in one
+  report. A sanity check could compare MTU values across Kubernetes nodes; a
+  project overview could summarize milestones, issues, merge requests, failed
+  jobs, and failed pipelines.
+- **CI Combo:** Focuses on agentic CI behavior. One defined action combines
+  the `glab`, `glab api`, `gh`, or GitHub Actions steps an agent would otherwise
+  invoke separately. For example, it could locate a pipeline, inspect its
+  jobs, search relevant output, and return one structured result.
+- **Generic Combo:** Assembles a view of a complex object from related
+  components. A Ceph report in OpenShift could combine cluster health,
+  storage components, workloads, and events.
+- **Toolchain Combination:** Follows a prescribed sequence to create or
+  configure a complex object for a selected scenario. Examples include
+  building an OpenShift image with native build mechanics and publishing it
+  to a linked Harbor registry, or creating and attaching a CI runner for a
+  project and target cluster.
+
+### Current mapping
+
+- **Visibility:** [Access checks](skills/ci-skills/scripts/access_check.py),
+  [Kubernetes events](skills/ci-skills/scripts/event_trace.py), and
+  [node MTU consistency](skills/ci-skills/scripts/k8s_verify_mtu_consistency.py).
+- **CI Combo:** [Pipeline inspection](skills/ci-skills/scripts/gitlab_pipeline.py)
+  and [job and trace inspection](skills/ci-skills/scripts/gitlab_job.py)
+  combine related CI records. [ci-api](skills/ci-skills/bin/ci-api) supplies
+  bounded API reads for such workflows.
+- **Generic Combo:** [Ceph cluster diagnostics](skills/ci-skills/scripts/ceph_cluster.py)
+  combines cluster health, OSD hierarchy, placement groups, and Pods;
+  [Ceph kernel diagnostics](skills/ci-skills/scripts/ceph_kernel.py) adds
+  selected node events.
+- **Toolchain Combination:** [ci-binary-build](skills/ci-skills/bin/ci-binary-build)
+  plans an exact-commit OpenShift build, and
+  [gitlab_runner.py](skills/ci-skills/scripts/gitlab_runner.py) plans and
+  applies runner creation or assignment. The complete example workflows
+  above remain proposed.
+
+## Required next delivery
+
+This `CI_SKILL` specification adds GitLab issue, milestone, board, label,
+pipeline, job, schedule, and wiki workflows, plus issue-to-merge-request-to-QA
+evidence. The commands below are proposed; they are not yet present in the
+[command catalog](skills/ci-skills/scripts/core/catalog.py).
+
+Every new action needs a concrete script name, arguments, behavior, result,
+and independent read-back. Its Python entry point must stay small and call
+reusable code in [scripts/core](skills/ci-skills/scripts/core/). It must offer
+`--help` for people, `--json` and `--yaml` for machines, and `--describe` for
+its command contract. [tools.json](skills/ci-skills/tools.json) must declare
+its options and access and target protocols. Each versioned report kind must
+have a paired formal JSON Schema under `schemas/`, declared in the manifest
+and checked by validation.
+Project, group, board, runner, and label values come from caller input, the
+selected binding, or GitLab; reusable code must not hardcode them.
+
+### Proposed GitLab actions
+
+- `skills/ci-skills/scripts/gitlab_pipeline_action.py`:
+  `start --project PATH --ref REF`, `retry --project PATH --pipeline-id ID`,
+  and `cancel --project PATH --pipeline-id ID`; read back pipeline ID,
+  status, ref, SHA, and jobs.
+- `skills/ci-skills/scripts/gitlab_job_action.py`:
+  `play|retry|cancel --project PATH --job-id ID`; read back the job status
+  and linked pipeline.
+- `skills/ci-skills/scripts/gitlab_pipeline_schedule.py`:
+  `list|play|create|update --project PATH [--schedule-id ID] [--ref REF]`;
+  read back the schedule state and any resulting pipeline.
+- `skills/ci-skills/scripts/gitlab_search.py`:
+  `--project PATH|--group PATH --scope SCOPE --query TEXT`; search the selected
+  GitLab scope and report each matching object's type, ID, title, and URL.
+- `skills/ci-skills/scripts/gitlab_milestone_search.py`:
+  `--project PATH|--group PATH [--search TEXT] [--state active|closed|all]`;
+  report dates, state, linked issue counts, and completion progress.
+- `skills/ci-skills/scripts/gitlab_issue_search.py`:
+  `--project PATH [--search TEXT] [--label LABEL] [--milestone-id ID]`;
+  report matching issues, labels, milestones, state, and linked merge requests.
+- `skills/ci-skills/scripts/gitlab_issue_update.py`:
+  `--project PATH --issue-iid IID [--milestone-id ID] [--label LABEL]`
+  `[--unlabel LABEL] [--due-date YYYY-MM-DD] [--state opened|closed]`;
+  read back the issue's labels, milestone, due date, and state.
+- `skills/ci-skills/scripts/gitlab_issue_board.py`:
+  `list|cards|move --project PATH --board-id ID [--list-id ID]`
+  `[--issue-iid IID]`; read boards, lists, and cards, and read back an
+  issue's state and labels after a move.
+- `skills/ci-skills/scripts/gitlab_label.py`:
+  `list|create|update --project PATH|--group PATH [--name NAME]`
+  `[--color HEX] [--description TEXT]`; manage native GitLab labels using
+  structured, extensible naming conventions. Values such as `p0`, `p1`,
+  `fix-first`, and `baseline-ready` are examples of data, not constants.
+- `skills/ci-skills/scripts/gitlab_work_item_link.py`:
+  `read|record-qa --project PATH --issue-iid IID`
+  `[--merge-request-iid IID] [--evidence-url URL]`; show the issue,
+  merge-request, and QA evidence relationship using GitLab-native links.
+- `skills/ci-skills/scripts/gitlab_wiki_link.py`:
+  `sync --project PATH --slug SLUG --doc-path PATH|--doc-url URL`;
+  update a wiki page's repository documentation link and read back its
+  slug and content digest.
+- `skills/ci-skills/scripts/gitlab_report_schema.py`:
+  `validate --report PATH --schema KIND`; validate a result against its
+  paired formal JSON Schema and report any contract errors.
+
+Pipeline and job actions must support status and output read-back; schedules
+need equivalent state read-back after changes.
 
 ## Install and first run
 
@@ -254,10 +380,8 @@ subcommands and options, and routes an agent to the correct first access call.
 ## For agents
 
 Read the package [SKILL.md](skills/ci-skills/SKILL.md) to choose a command and
-understand target
-resolution, status interpretation, and evidence handling. Its
-[tools.json](skills/ci-skills/tools.json) is the machine-readable
-command contract.
+understand target resolution, status interpretation, and evidence handling. Its
+[tools.json](skills/ci-skills/tools.json) is the machine-readable command contract.
 
 ## Commands
 

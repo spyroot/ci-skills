@@ -1,7 +1,7 @@
-# GAL-SCHEMA: record schemas
+# CI-SCHEMA: record schemas
 
-Status: proposed. Depends on: nothing. Used by GAL-VENDOR, GAL-CATALOG,
-GAL-ROUTING, GAL-REFERENCE and GAL-CLI.
+Status: proposed. Depends on: nothing. Used by CI-VENDOR, CI01-CATALOG,
+CI-ROUTING, CI-REFERENCE and CI02-CLI.
 
 ## Goal
 
@@ -23,9 +23,9 @@ shared standards' own schemas: `$schema`, `$id`, `title`, `type`, `required`,
 | `skill-index` | `bin/ci-skills list --json` | discovery |
 | `vendor-lock` | `skills/vendor.lock.json` | `ci-skills update` |
 | `vendor-declarations` | `skills/vendor.toml` | maintainers |
-| `tool-operations` | `bin/ci-skills tools --json` | GAL-REFERENCE |
-| `command-contract` | each command's `--describe` | GAL-CLI |
-| `command-result` | each command's JSON result | GAL-CLI |
+| `tool-operations` | `bin/ci-skills tools --json` | CI-REFERENCE |
+| `command-contract` | each command's `--describe` | CI02-CLI |
+| `command-result` | each command's JSON result | CI02-CLI |
 
 Upstream authors write the frontmatter of vendored skills.
 
@@ -49,7 +49,7 @@ Upstream authors write the frontmatter of vendored skills.
 ## Pointers between references and tools
 
 A skill's references are its documents under `references/`. The tools it
-calls are described by operations (GAL-REFERENCE). One declaration links
+calls are described by operations (CI-REFERENCE). One declaration links
 them:
 
 - **Operation ids.** Each tool operation has an id `<tool>:<operation>`, for
@@ -70,7 +70,7 @@ them:
 - **Tool.** `check-jsonschema`, the validator the shared standards' own check
   uses, pinned to an exact version in `requirements.txt`. Version 0.38.0 is
   in the toolchain contract today.
-- **Gate.** A `schemas` gate in `./scripts/check.sh` (GAL-GATES):
+- **Gate.** A `schemas` gate in `./scripts/check.sh` (CI03-GATES):
   - checks every schema against the 2020-12 metaschema;
   - validates `tools.json` and `skills/vendor.lock.json`;
   - validates `skills/vendor.toml`, parsed to JSON first;
@@ -82,7 +82,7 @@ them:
   checks hashes only and stays on the standard library; full schema
   validation is the `schemas` gate's job.
 - **Tests.** Each schema has fixtures: one valid record, one per missing
-  required field, and one per broken conditional rule (GAL-TESTS).
+  required field, and one per broken conditional rule (CI-TESTS).
 
 ## Versions
 

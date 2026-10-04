@@ -1,9 +1,9 @@
-# GAL-REFERENCE: collecting and indexing reference tools
+# CI-REFERENCE: collecting and indexing reference tools
 
 **Status:** Proposed
 **Date:** 2026-10-02
 **Deciders:** repository maintainers
-**Depends on:** GAL-CATALOG, GAL-SCHEMA and GAL-CLI
+**Depends on:** CI01-CATALOG, CI-SCHEMA and CI02-CLI
 
 ## Context
 
@@ -23,7 +23,7 @@ upstream documentation. Two things are missing:
 - a record of which operations our skills rely on;
 - a check that fails when an upgrade renames or removes one.
 
-GAL-VENDOR copies upstream skills, which are prose about tools. This record
+CI-VENDOR copies upstream skills, which are prose about tools. This record
 covers the tools themselves.
 
 Measured on 2026-10-02 against the local binaries:
@@ -89,7 +89,7 @@ Constraints:
     fixed. An unbounded `api` or `exec` call counts as mutating.
 - **Option:** a `flag` and its `summary`.
 
-Schema: `tool-operations` (GAL-SCHEMA).
+Schema: `tool-operations` (CI-SCHEMA).
 
 ```json
 {
@@ -110,7 +110,7 @@ Schema: `tool-operations` (GAL-SCHEMA).
 ## How references relate to tools
 
 Skill commands and references point at operations through `uses`, declared
-once on the user's side (GAL-SCHEMA, "Pointers"). For example,
+once on the user's side (CI-SCHEMA, "Pointers"). For example,
 `references/access.md` uses `gh:auth.status`, `glab:auth.status`,
 `kubectl:auth.whoami` and `kubectl:auth.can-i`.
 
@@ -199,10 +199,10 @@ Proposed: **D, with C as optional navigation.**
   Every query is bounded in time and output, argument values are never
   completed, directive and active-help lines are dropped, and the parser is
   tested against recorded and hostile output.
-- **Our own tools.** Each `bin/ci-*` command gains `--describe` (GAL-CLI).
+- **Our own tools.** Each `bin/ci-*` command gains `--describe` (CI02-CLI).
   Discovery reads that instead of help text; these tools are Bash, not
   cobra.
-- **Contract.** The `tools` verb follows GAL-CLI: bounded JSON, the shared
+- **Contract.** The `tools` verb follows CI02-CLI: bounded JSON, the shared
   exit codes, and `tool_missing` with a safe next step when a binary is
   absent.
 
@@ -223,11 +223,11 @@ Proposed: **D, with C as optional navigation.**
 
 1. Derive the declared operations from every call site, including
    `kubectl auth can-i` and the fixed `exec` arguments.
-2. Add the `tool-operations` schema (GAL-SCHEMA) and the declaration file.
+2. Add the `tool-operations` schema (CI-SCHEMA) and the declaration file.
 3. Add the `tools` verb and the contract test, with recorded fixtures for
    `glab` 1.120.0, `gh` 2.98.0 and `kubectl` v1.36.4.
-4. Add the `uses` pointers (GAL-ROUTING).
-5. Open one pull request after GAL-CATALOG; the `validate` workflow must
+4. Add the `uses` pointers (CI-ROUTING).
+5. Open one pull request after CI01-CATALOG; the `validate` workflow must
    pass.
 6. Read back: `bin/ci-skills tools` lists every tool and operation, and each
    operation shows `used_by`.

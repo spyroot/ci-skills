@@ -1,7 +1,7 @@
-# GAL-HOOKS: local hooks
+# CI04-HOOKS: local hooks
 
-Status: proposed; none installed. Depends on: GAL-GATES for the entrypoint,
-and GAL-VENDOR for its `verify` gate.
+Status: proposed; none installed. Depends on: CI03-GATES for the entrypoint,
+and CI-VENDOR for its `verify` gate.
 
 ## Goal
 
@@ -15,14 +15,14 @@ workflow would reject, using the entrypoint CI runs. Hooks are advisory:
 | --- | --- |
 | Capability | run the static gates before a commit or push |
 | Owner | the hook scripts under `scripts/hooks/` |
-| Entrypoint | `./scripts/check.sh` (PR #2, extended in GAL-GATES) |
+| Entrypoint | `./scripts/check.sh` (PR #2, extended in CI03-GATES) |
 | Result | the script's result: `PASS`, or the failing gate |
 | Read-back | a failing staged file is refused, naming its gate |
 
 ## Rules
 
 - **Same entrypoint as CI.** Hooks call `./scripts/check.sh`, the entrypoint
-  CI calls (GAL-GATES, G1), with the same pinned tool versions.
+  CI calls (CI03-GATES, G1), with the same pinned tool versions.
 - **Static checks only.** That means lint, format check, secret scan,
   neutrality and generated-file checks. Tests and live checks run in CI.
 - **Check what will be committed.** Checks run against a snapshot of the
@@ -49,7 +49,7 @@ workflow would reject, using the entrypoint CI runs. Hooks are advisory:
 - The live-acceptance gate, run on the commit being pushed after it is
   exported to a temporary directory, as CI runs it.
   - It fails on any skill edit until a new receipt is committed
-    (GAL-ROUTING).
+    (CI-ROUTING).
   - It fails on every push once the committed receipt is older than
     `max_receipt_age_days` in `acceptance/expected.toml`.
   - Running it at push rather than at commit keeps intermediate commits
@@ -66,7 +66,7 @@ workflow would reject, using the entrypoint CI runs. Hooks are advisory:
   global `core.hooksPath` is set, that returns the global hook directory.
   A global dispatcher that delegates per repository reads
   `<git-common-dir>/hooks/<name>`.
-- **Contract (GAL-CLI).** The installer:
+- **Contract (CI02-CLI).** The installer:
   - has `--help`;
   - plans by default and installs only with `--confirm`;
   - refuses to replace a hook it did not install, with `hook_exists` and a
@@ -99,7 +99,7 @@ command itself checks the file path or command line.
 
 ## Steps
 
-1. After GAL-GATES lands, add `scripts/hooks/pre-commit` and
+1. After CI03-GATES lands, add `scripts/hooks/pre-commit` and
    `scripts/hooks/pre-push`. Both call `./scripts/check.sh`.
 2. Add the installer, with the contract above.
 3. Open one pull request; the `validate` workflow must pass.
