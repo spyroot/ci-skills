@@ -52,6 +52,25 @@ STUB
   [[ "$output" != *'"unit"'* ]]
 }
 
+@test 'check dry-run expands static gate to non-unit checks' {
+  run "$tool" --dry-run --gate static
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"checks":["whitespace","bash-n","shellcheck","shfmt","yaml","markdown","secrets","neutrality","manifest"]'* ]]
+  [[ "$output" != *'"unit"'* ]]
+}
+
+@test 'every registered gate has an explicit static or CI class' {
+  for gate in "${CI_CHECK_GATES[@]}"; do
+    case ${CI_CHECK_CLASS_BY_GATE[$gate]:-} in
+    static | ci) ;;
+    *) false ;;
+    esac
+  done
+  [ "${CI_CHECK_CLASS_BY_GATE[unit]}" = ci ]
+  [ "${CI_CHECK_CLASS_BY_GATE[neutrality]}" = static ]
+  [ "${CI_CHECK_CLASS_BY_GATE[manifest]}" = static ]
+}
+
 @test 'check rejects an unknown gate before execution' {
   run "$tool" --dry-run --gate missing
   [ "$status" -eq 64 ]
@@ -62,6 +81,7 @@ STUB
   run "$tool" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *'all (default)'* ]]
+  [[ "$output" == *'static'* ]]
   for gate in "${CI_CHECK_GATES[@]}"; do
     [[ "$output" == *"$gate"* ]]
   done
@@ -90,7 +110,24 @@ STUB
   run ci_check_run all
   [ "$status" -eq 0 ]
   [ "$(cat "$CI_CHECK_CALLS")" = "$(printf '%s\n' \
-    whitespace bash-n:check.sh shellcheck shfmt yaml markdown secrets unit)" ]
+    whitespace bash-n:check.sh shellcheck shfmt yaml markdown secrets \
+    neutrality manifest unit)" ]
+}
+
+@test 'static gate dispatches all non-unit steps and reports them' {
+  make_check_run_fixture
+  CI_CHECK_ROOT="$fixture"
+  CI_CHECK_CALLS="${BATS_TEST_TMPDIR}/calls"
+  export CI_CHECK_CALLS
+  ci_check_step() {
+    printf '%s\n' "$1" >>"$CI_CHECK_CALLS"
+  }
+  run ci_check_run static
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"checks":["whitespace","bash-n","shellcheck","shfmt","yaml","markdown","secrets","neutrality","manifest"]'* ]]
+  [ "$(cat "$CI_CHECK_CALLS")" = "$(printf '%s\n' \
+    whitespace whitespace-staged whitespace-unstaged bash-n:check.sh \
+    shellcheck shfmt yaml markdown secrets neutrality manifest)" ]
 }
 
 @test 'named yaml gate does not require unrelated gate tools' {
@@ -111,6 +148,30 @@ STUB
   run ci_check_tools yaml
   [ "$status" -eq 69 ]
   [[ "$output" == *'required check tool is missing: yamllint'* ]]
+}
+
+@test 'static gate requires only non-unit gate tools' {
+  CI_CHECK_CALLS="${BATS_TEST_TMPDIR}/tool-calls"
+  export CI_CHECK_CALLS
+  ci_check_tool_present() {
+    printf '%s\n' "$1" >>"$CI_CHECK_CALLS"
+    case $1 in
+    bash | git | jq | shellcheck | shfmt | yamllint | markdownlint-cli2 | gitleaks | python)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+    esac
+  }
+  run ci_check_tools static
+  [ "$status" -eq 0 ]
+  for tool in bash git jq shellcheck shfmt yamllint markdownlint-cli2 gitleaks python; do
+    grep -qx "$tool" "$CI_CHECK_CALLS"
+  done
+  for tool in bats yq gh glab; do
+    ! grep -qx "$tool" "$CI_CHECK_CALLS"
+  done
 }
 
 @test 'named yaml gate runs only its selected command' {
@@ -155,6 +216,48 @@ STUB
   PATH=$old_path
   [ "$status" -eq 69 ]
   [[ "$output" == *'yaml failed (exit 7)'* ]]
+}
+
+@test 'static gate reports the first failing selected gate' {
+  make_check_run_fixture
+  make_success_stubs
+  cat >"${stubs}/shellcheck" <<'STUB'
+#!/usr/bin/env bash
+exit 7
+STUB
+  chmod +x "${stubs}/shellcheck"
+  CI_CHECK_ROOT="$fixture"
+  KUBERNETES_SERVICE_HOST=fixture
+  export KUBERNETES_SERVICE_HOST
+  old_path=$PATH
+  PATH="${stubs}:$PATH"
+  run ci_check_main --gate static
+  PATH=$old_path
+  [ "$status" -eq 69 ]
+  [[ "$output" == *'shellcheck failed (exit 7)'* ]]
+}
+
+@test 'static gate runs locally on a dirty worktree without claiming a commit' {
+  make_check_run_fixture
+  make_success_stubs
+  cat >"${stubs}/python" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "python:$1" >>"$CI_CHECK_CALLS"
+exit 0
+STUB
+  chmod +x "${stubs}/python"
+  CI_CHECK_CALLS="${BATS_TEST_TMPDIR}/calls"
+  export CI_CHECK_CALLS
+  printf '%s\n' '# pending edit' >>"${fixture}/check.sh"
+  CI_CHECK_ROOT="$fixture"
+  old_path=$PATH
+  PATH="${stubs}:$PATH"
+  run env -u KUBERNETES_SERVICE_HOST bash -c 'source "$1"; CI_CHECK_ROOT="$2"; ci_check_main --gate static' \
+    _ "${BATS_TEST_DIRNAME}/../lib/ci/check.bash" "$fixture"
+  PATH=$old_path
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"source":"working-tree","commit":null'* ]]
+  [ "$(grep -c '^python:' "$CI_CHECK_CALLS")" -eq 2 ]
 }
 
 @test 'check refuses execution outside Kubernetes' {
@@ -239,7 +342,7 @@ STUB
   CI_CHECK_ROOT="$fixture"
   old_path=$PATH
   PATH="${stubs}:$PATH"
-  run ci_check_run
+  run ci_check_run unit
   PATH=$old_path
   [ "$status" -eq 69 ]
   [[ "$output" == *'source revision changed during validation'* ]]

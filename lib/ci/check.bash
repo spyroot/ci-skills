@@ -6,13 +6,27 @@ CI_CHECK_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 # shellcheck source=skills/ci-skills/lib/core/runtime.bash
 source "$CI_CHECK_ROOT/skills/ci-skills/lib/core/runtime.bash"
 
-CI_CHECK_GATES=(whitespace bash-n shellcheck shfmt yaml markdown secrets unit)
+CI_CHECK_GATES=(whitespace bash-n shellcheck shfmt yaml markdown secrets neutrality manifest unit)
+declare -gA CI_CHECK_CLASS_BY_GATE=(
+  [whitespace]=static
+  [bash-n]=static
+  [shellcheck]=static
+  [shfmt]=static
+  [yaml]=static
+  [markdown]=static
+  [secrets]=static
+  [neutrality]=static
+  [manifest]=static
+  [unit]=ci
+)
 declare -gA CI_CHECK_TOOL_BY_GATE=(
   [shellcheck]=shellcheck
   [shfmt]=shfmt
   [yaml]=yamllint
   [markdown]=markdownlint-cli2
   [secrets]=gitleaks
+  [neutrality]=python
+  [manifest]=python
   [unit]=bats
 )
 
@@ -25,7 +39,7 @@ Usage:
 
 Options:
   --dry-run               Print the planned checks without running them.
-  --gate NAME             Run one named check, or all (default).
+  --gate NAME             Run one named check, static, or all (default).
   --log-format text|json  Diagnostic format (default: text).
   --log-level debug|info|warning|error  Minimum diagnostic level.
   --log-file PATH         Append diagnostics to PATH when requested.
@@ -38,20 +52,30 @@ Markdown; scans Git history for secrets; and runs the Bats suite. Exit 0
 means every check passed. Exit 64 means invalid usage; 69 means blocked or
 failed validation. Dry-run performs no checks and is allowed off cluster.
 HELP
-  printf 'Gate names: %s\n' "${CI_CHECK_GATES[*]}"
+  printf 'Gate names: %s static\n' "${CI_CHECK_GATES[*]}"
 }
 
 # Summary: Check a requested name against the one supported gate registry.
 # Arguments: requested gate name.
 # Stdout: none. Stderr: none.
-# Returns: zero for a supported gate or all, one otherwise.
+# Returns: zero for a supported gate, static, or all; one otherwise.
 ci_check_gate_valid() {
   local gate=$1 known
-  [[ $gate == all ]] && return 0
+  [[ $gate == all || $gate == static ]] && return 0
   for known in "${CI_CHECK_GATES[@]}"; do
     [[ $gate == "$known" ]] && return 0
   done
   return 1
+}
+
+# Summary: Determine whether a requested selection includes a named gate.
+# Arguments: selection and gate name.
+# Stdout: none. Stderr: none.
+# Returns: zero when selected, one otherwise.
+ci_check_gate_selected() {
+  local selection=$1 gate=$2
+  [[ $selection == all || $selection == "$gate" ||
+    ( $selection == static && ${CI_CHECK_CLASS_BY_GATE[$gate]:-} == static ) ]]
 }
 
 # Summary: Check whether a required gate executable is available.
@@ -69,12 +93,13 @@ ci_check_tool_present() {
 ci_check_tools() {
   local gate=${1:-all} selected tool
   local -a tools=(bash git jq)
-  if [[ $gate == all ]]; then
+  if [[ $gate == all || $gate == static ]]; then
     for selected in "${CI_CHECK_GATES[@]}"; do
+      ci_check_gate_selected "$gate" "$selected" || continue
       tool=${CI_CHECK_TOOL_BY_GATE[$selected]:-}
       [[ -z $tool ]] || tools+=("$tool")
     done
-    tools+=(yq gh glab)
+    [[ $gate != all ]] || tools+=(yq gh glab)
   else
     tool=${CI_CHECK_TOOL_BY_GATE[$gate]:-}
     [[ -z $tool ]] || tools+=("$tool")
@@ -93,12 +118,12 @@ ci_check_tools() {
 # Stdout: JSON array. Stderr: jq diagnostics.
 # Returns: zero or jq's failure status.
 ci_check_gate_list_json() {
-  local gate=$1
-  if [[ $gate == all ]]; then
-    printf '%s\n' "${CI_CHECK_GATES[@]}" | jq -Rsc 'split("\n")[:-1]'
-  else
-    jq -cn --arg gate "$gate" '[$gate]'
-  fi
+  local selection=$1 gate
+  local -a selected=()
+  for gate in "${CI_CHECK_GATES[@]}"; do
+    ci_check_gate_selected "$selection" "$gate" && selected+=("$gate")
+  done
+  printf '%s\n' "${selected[@]}" | jq -Rsc 'split("\n")[:-1]'
 }
 
 # Summary: Run one named validation and preserve its failure as a gate failure.
@@ -155,8 +180,10 @@ ci_check_run() {
   local gate=${1:-all} file empty_tree verified_revision final_revision checks_json
   local -a shell_files=() yaml_files=() markdown_files=()
   cd "$CI_CHECK_ROOT" || return "$CI_EXIT_BLOCKED"
-  verified_revision=$(ci_verified_source_revision "$CI_CHECK_ROOT" \
-    'skills/ci-skills/SKILL.md') || return $?
+  if [[ $gate != static ]]; then
+    verified_revision=$(ci_verified_source_revision "$CI_CHECK_ROOT" \
+      'skills/ci-skills/SKILL.md') || return $?
+  fi
   while IFS= read -r -d '' file; do shell_files+=("$file"); done \
     < <(git ls-files -z -- '*.sh' '*.bash' 'bin/*')
   while IFS= read -r -d '' file; do yaml_files+=("$file"); done \
@@ -169,40 +196,56 @@ ci_check_run() {
     'Check the CI checkout and tracked file inventory.' || return $?
 
   empty_tree=$(git hash-object -t tree /dev/null) || return "$CI_EXIT_BLOCKED"
-  if [[ $gate == all || $gate == whitespace ]]; then
+  if ci_check_gate_selected "$gate" whitespace; then
     ci_check_step whitespace git diff --check "$empty_tree" HEAD || return $?
+    if [[ $gate == static ]]; then
+      ci_check_step whitespace-staged git diff --cached --check || return $?
+      ci_check_step whitespace-unstaged git diff --check || return $?
+    fi
   fi
-  if [[ $gate == all || $gate == bash-n ]]; then
+  if ci_check_gate_selected "$gate" bash-n; then
     for file in "${shell_files[@]}"; do
       ci_check_step "bash-n:$file" bash -n "$file" || return $?
     done
   fi
-  if [[ $gate == all || $gate == shellcheck ]]; then
+  if ci_check_gate_selected "$gate" shellcheck; then
     ci_check_step shellcheck shellcheck -x -S style "${shell_files[@]}" || return $?
   fi
-  if [[ $gate == all || $gate == shfmt ]]; then
+  if ci_check_gate_selected "$gate" shfmt; then
     ci_check_step shfmt shfmt -i 2 -d "${shell_files[@]}" || return $?
   fi
-  if [[ $gate == all || $gate == yaml ]]; then
+  if ci_check_gate_selected "$gate" yaml; then
     ci_check_step yaml yamllint \
       --config-data '{extends: default, rules: {document-start: disable, line-length: disable, truthy: disable}}' \
       "${yaml_files[@]}" || return $?
   fi
-  if [[ $gate == all || $gate == markdown ]]; then
+  if ci_check_gate_selected "$gate" markdown; then
     ci_check_step markdown markdownlint-cli2 "${markdown_files[@]}" || return $?
   fi
-  if [[ $gate == all || $gate == secrets ]]; then
+  if ci_check_gate_selected "$gate" secrets; then
     ci_check_step secrets gitleaks git --redact --no-banner . || return $?
   fi
-  if [[ $gate == all || $gate == unit ]]; then
+  if ci_check_gate_selected "$gate" neutrality; then
+    ci_check_step neutrality python tools/check_project_neutrality.py \
+      --root . --json || return $?
+  fi
+  if ci_check_gate_selected "$gate" manifest; then
+    ci_check_step manifest python tools/render_manifest.py --check || return $?
+  fi
+  if ci_check_gate_selected "$gate" unit; then
     ci_check_step unit bats --tap tests || return $?
+  fi
+  checks_json=$(ci_check_gate_list_json "$gate") || return "$CI_EXIT_BLOCKED"
+  if [[ $gate == static ]]; then
+    jq -cn --argjson checks "$checks_json" \
+      '{status:"passed",source:"working-tree",commit:null,checks:$checks}'
+    return
   fi
   final_revision=$(ci_verified_source_revision "$CI_CHECK_ROOT" \
     'skills/ci-skills/SKILL.md') || return $?
   [[ $final_revision == "$verified_revision" ]] || ci_fail "$CI_EXIT_BLOCKED" \
     'source revision changed during validation' \
     'Rerun this gate against one stable exact source commit.' || return $?
-  checks_json=$(ci_check_gate_list_json "$gate") || return "$CI_EXIT_BLOCKED"
   jq -cn --arg commit "$verified_revision" --argjson checks "$checks_json" \
     '{status:"passed",commit:$commit,checks:$checks}'
 }
@@ -266,9 +309,11 @@ ci_check_main() {
   fi
   ((BASH_VERSINFO[0] >= 5)) || ci_fail "$CI_EXIT_BLOCKED" \
     'Bash 5 is required' 'Use a CI pod image with Bash 5.' || return $?
-  [[ -n ${KUBERNETES_SERVICE_HOST:-} ]] || ci_fail "$CI_EXIT_BLOCKED" \
-    'Kubernetes execution is required' \
-    'Run this gate in the project-approved Kubernetes CI job.' || return $?
+  if [[ $gate != static ]]; then
+    [[ -n ${KUBERNETES_SERVICE_HOST:-} ]] || ci_fail "$CI_EXIT_BLOCKED" \
+      'Kubernetes execution is required' \
+      'Run this gate in the project-approved Kubernetes CI job.' || return $?
+  fi
   ci_check_tools "$gate" || return $?
   ci_check_run "$gate"
 }
