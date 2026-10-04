@@ -13,9 +13,9 @@ Sizes measured on 2026-10-02:
 
 | What an agent could load | Bytes |
 | --- | --- |
-| k8s `SKILL.md` | 5,534 |
-| k8s `references/access.md` | 8,691 |
-| k8s `tools.json` | 8,996 |
+| current diagnostics `SKILL.md` | 5,534 |
+| current diagnostics `references/access.md` | 8,691 |
+| current diagnostics `tools.json` | 8,996 |
 | vendored `glab` `SKILL.md` | 13,547 |
 | vendored `glab-stack` `SKILL.md` | 9,208 |
 | all of the above | 45,976 |
@@ -41,7 +41,7 @@ The last two rows use Python's default JSON separators.
   a report's `status` exactly (for example `BLOCKED`), or a phrase, which
   matches the task text as a case-insensitive substring.
 - **Example: a volume or claim is stuck.**
-  - L0 points at `k8s-admin-diagnostics`.
+  - L0 points at `ci-skills`.
   - L1 maps the symptom to `storage_report.py`.
   - L2 is that command's contract.
   - `references/access.md` opens only on `BLOCKED`, and the 13,547-byte
@@ -52,12 +52,12 @@ The last two rows use Python's default JSON separators.
 | Part | Value |
 | --- | --- |
 | Capability | route an agent to one file |
-| Owner | `scripts/core/catalog.py` in the k8s skill |
+| Owner | `scripts/core/catalog.py` in `skills/ci-skills/` |
 | Entrypoint | `tools/render_manifest.py` |
 | Result | `skill_manifest` (today's `tools.json` shape) |
 | Read-back | byte-equality test on `tools.json`; a fresh live receipt |
 
-## Changes to the k8s skill
+## Changes to `ci-skills`
 
 1. `scripts/core/catalog.py` gains a `REFERENCES` declaration. For each
    reference it records:
@@ -86,9 +86,12 @@ The last two rows use Python's default JSON separators.
 4. `references/conditional/gitlab-writes.md` is the one conditional
    reference. It says this skill is read-only, and that for a merge request,
    issue, comment or retry the agent loads the `glab` skill. That skill is
-   vendored at `skills/glab/`; in an installed set it is installed beside
-   this one with `bin/ci-skills install glab`. Because of `depends_on`,
-   installing this skill is refused until `glab` is installed beside it
+   vendored at `skills/glab/`; from a repository checkout, the maintenance
+   command installs it beside this skill with
+   `bin/ci-skills install glab --skills-dir DIR --confirm`. By this phase,
+   `install.sh`, `tools/install_ci_skills.py` and `bin/ci-skills install`
+   call the same `tools/skillkit/install.py` core. Its `depends_on` check
+   refuses either installation path until `glab` is beside this skill
    (GAL-CATALOG), so an installed copy never points at an absent skill.
 
 There are no platform-specific references (OpenShift, EKS and so on).
@@ -96,7 +99,7 @@ Nothing in the code reads them, so their content would be invented.
 
 ## Steps
 
-How the k8s skill comes to sit on top of `glab`:
+How `ci-skills` comes to sit on top of `glab`:
 
 1. Declare `REFERENCES` in `scripts/core/catalog.py`:
    - `references/access.md`
@@ -114,30 +117,24 @@ How the k8s skill comes to sit on top of `glab`:
    and how-to work to the `glab` skill.
 5. Declare the skill's tags, so that `bin/ci-skills list` shows them
    with the derived dependency on `glab`.
-6. Rename `skills/k8s-admin-diagnostics/` to `skills/k8s-diag/`. That
-   covers the `SKILL.md` frontmatter `name`, every path to the skill in
-   `tools/`, `tests/` and `README.md`, and the installer, which becomes
-   `bin/ci-skills install k8s-diag` (GAL-CATALOG).
-7. After the last skill edit, capture a new receipt on the executor that
+6. After the last skill edit, capture a new receipt on the executor that
    `acceptance/expected.toml` declares, with
-   `skills/k8s-diag/scripts/access_check.py --publication` and
+   `skills/ci-skills/scripts/access_check.py --publication` and
    `--receipt-out acceptance/receipts/<label>.json`. Commit it.
-8. Open one pull request. The `validate` workflow must pass, including live
+7. Open one pull request. The `validate` workflow must pass, including live
    acceptance with the new receipt.
 
 ## Live receipt
 
-`tools/check_live_acceptance.py` compares the committed receipt's skill
-digest with the digest of the checked-out `skills/k8s-admin-diagnostics/`,
-and the workflow step that runs it is unconditional. Every change above,
-the rename included, alters that digest. So this phase is one pull
-request that ends with a new receipt, captured after the pull request's
-last skill edit. Open pull
-requests #5, #7 and #8 also change this skill, so this phase lands after
-them. Its routing then also covers their commands (`cilium_node.py`,
-`ceph_kernel.py`, `ceph_cluster.py`) and the `project-binding.md`
-reference, and one receipt covers every change. Which host may
-serve as release evidence is open (GAL-GATES, G5).
+The package delivery in GAL-PHASES first changes the live acceptance checker
+to compare the receipt with `skills/ci-skills/` and captures a new receipt.
+The workflow step remains unconditional. This phase changes that package
+again, so its own pull request also needs a fresh receipt after its last
+skill edit. PRs #5, #7 and #8 have been integrated, so this phase routes their
+commands (`cilium_node.py`, `ceph_kernel.py`, `ceph_cluster.py`) and the
+`project-binding.md` reference. Its new receipt covers this pull request's
+final package bytes. Which host may serve as release evidence is open
+(GAL-GATES, G5).
 
 ## Gates
 

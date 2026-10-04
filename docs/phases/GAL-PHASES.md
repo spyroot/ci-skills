@@ -16,35 +16,39 @@ own design, steps and gates.
 
 | Phase | Delivers | Depends on |
 | --- | --- | --- |
-| GAL-GATES | the shared check entrypoint, aggregator, pins | PR #2 |
+| GAL-GATES | check entrypoint, aggregator, pins | merged `scripts/check.sh` |
 | GAL-SCHEMA | the record schemas under `schemas/` | nothing |
 | GAL-CLI | one command-line contract and its gate | SCHEMA, GATES |
 | GAL-VENDOR | `glab` agent skills vendored under `skills/` | GATES, SCHEMA |
 | GAL-CATALOG | discover, `list`, `get`, `install` | VENDOR, CLI |
 | GAL-TESTS | CI-only test command and coverage report | GATES, CATALOG |
-| GAL-ROUTING | three-hop routing; `k8s-diag` on top of `glab` | CATALOG |
+| GAL-ROUTING | three-hop routing; `ci-skills` on top of `glab` | CATALOG |
 | GAL-REFERENCE | declared tool operations and their check | CATALOG |
 | GAL-HOOKS | advisory local hooks | GATES, VENDOR |
 
 - **GAL-TESTS** has its own delivery pull request for the reusable test
   command. Every phase still carries its own focused tests in its own pull
   request; GAL-TESTS does not defer those tests.
-- **GAL-ROUTING** also waits for pull requests #5, #7 and #8, and for an
-  approved receipt host (GAL-GATES, G5).
+- **GAL-ROUTING** also waits for an approved receipt host (GAL-GATES, G5).
 
 ## Order
 
 1. These phase documents land first, in one pull request, so they can be
    read and reviewed before any implementation starts.
-2. GAL-GATES, once PR #2 has landed, because every other phase adds gates to
-   its entrypoint.
+2. GAL-GATES extends the merged `scripts/check.sh`, because every other phase
+   adds gates to it.
 3. GAL-SCHEMA, then GAL-CLI.
 4. GAL-VENDOR.
-5. GAL-CATALOG.
-6. GAL-TESTS, after GAL-CATALOG provides `bin/ci-skills`.
-7. GAL-REFERENCE and GAL-ROUTING. Both need GAL-CATALOG; GAL-ROUTING also
-   needs PRs #5, #7 and #8 and the receipt host.
-8. GAL-HOOKS, after GAL-GATES and GAL-VENDOR.
+5. A separate package delivery pull request consolidates the one `ci-skills`
+   skill from the source work merged through PR #16, before GAL-CATALOG.
+   Its tests, fresh live receipt and exact-head `validate` result land in
+   that pull request.
+6. GAL-CATALOG.
+7. GAL-TESTS, after GAL-CATALOG adds `list`, `get` and `install` to
+   `bin/ci-skills`.
+8. GAL-REFERENCE and GAL-ROUTING. Both need GAL-CATALOG; GAL-ROUTING also
+   needs the receipt host.
+9. GAL-HOOKS, after GAL-GATES and GAL-VENDOR.
 
 ## How a phase lands
 
@@ -66,37 +70,42 @@ own design, steps and gates.
 - **After merge**, the phase document's read-back step confirms the result
   on `main`.
 
-## Open pull requests
+## Pull request status
 
-Checked on 2026-10-02. These phases build on them, not around them.
+Checked on 2026-10-04. PR #16 merged the root tools, Kubernetes diagnostics,
+Event API benchmark, GitLab operations and live receipts from PRs #2, #7, #8,
+PR #9, PR #13 and PR #14. Those source PRs are closed. PR #15 merged the GAL-TESTS
+phase entry. The package delivery described below remains proposed.
 
-- **#2 (draft): `ci-api`, `ci-binary-build`, `scripts/check.sh`.** Our own
-  tools and the existing gate script. GAL-GATES extends its
-  `scripts/check.sh`, GAL-CATALOG lists its tools, and GAL-REFERENCE reads
-  their capabilities.
-- **#5, #7 and #8: more k8s diagnostics.** They add:
-  - the commands `cilium_node.py`, `ceph_kernel.py` and `ceph_cluster.py`;
-  - the `project-binding.md` reference;
-  - an Event API fallback.
+## One installable skill
 
-  GAL-ROUTING lands after them and routes their commands, so one live
-  receipt covers every skill change.
-- **#9 (draft): an Event API benchmark** under `benchmarks/`. No overlap.
-- **#10: field notes.** Merged on 2026-10-02.
+The canonical package is `skills/ci-skills/`, with
+`skills/ci-skills/SKILL.md` declaring `name: ci-skills`. Its user target file
+is `~/.ci-skills/target.toml`, and Codex installs it at
+`~/.codex/skills/ci-skills` (or `$CODEX_HOME/skills/ci-skills`).
 
-## Short names
+The merged root `SKILL.md` and `install.sh` still use the checkout layout.
+Package delivery moves the diagnostic skill,
+the merged `bin/ci-api`, `bin/ci-binary-build`, `lib/ci/api.bash`,
+`lib/automation/binary_build.bash`, and `lib/core/runtime.bash` into
+`skills/ci-skills/`, preserving their relative paths. Root `bin/ci-api` and
+`bin/ci-binary-build` become thin checkout adapters. The merged skill
+instructions live only in `skills/ci-skills/SKILL.md`; remove the root
+`SKILL.md`. `ci-api` owns caller-selected API reads; the diagnostics core
+owns target-bound access, collectors and receipts. Keep `scripts/check.sh`
+and `lib/ci/check.bash` at the repository root, pointed at the package runtime.
 
-Decided on 2026-10-02, in the style of the `bin/ci-*` tools:
-
-| Today | Decided |
-| --- | --- |
-| `skills/k8s-admin-diagnostics/` | `skills/k8s-diag/` |
-| `tools/install_k8s_admin_diagnostics.py` | `bin/ci-skills install` |
-| the catalog command | `bin/ci-skills` |
-
-Renaming the skill changes its digest, so the rename lands inside
-GAL-ROUTING, under the same new receipt. Installed copies under the old
-name keep working until they are reinstalled.
+Retarget the digest-verified copy installer as `tools/install_ci_skills.py`;
+root `install.sh` becomes its thin adapter and no longer links the checkout.
+Keep the existing revision-bound dry-run fingerprint, `--apply`,
+`--confirm-install FINGERPRINT`, and `--timeout DURATION` checks in that
+adapter; the copy installer enforces the same plan before writing.
+An existing link requires an explicit confirmed upgrade, backup and read-back
+before replacement. `bin/ci-skills` stays a repository maintenance command:
+GAL-VENDOR creates it, and GAL-CATALOG adds `list`, `get` and `install`.
+It is not a second installed skill command. Each package-byte change changes
+the digest and requires a new live receipt. The current tree has not yet made
+these moves.
 
 ## Open decisions
 
