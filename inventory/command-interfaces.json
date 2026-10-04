@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "kind": "command_interface_inventory",
   "evidence_class": "offline installed-command interface",
-  "base_revision": "d6bba3d7db21d9361ec3a3561beaaa455b64a7e7",
+  "base_revision": "af0814f1bc1479dc824cd17b898e10409cdd7678",
   "standards_binding": "standards-binding.yaml",
   "standards_revision": "dca62dec9bdb93af1c75aa58504f3ea2463e186c",
   "applicable_contracts": [
@@ -13,8 +13,8 @@
   ],
   "commands": {
     "access_check.py": {
-      "entrypoint": "skills/ci-skills/scripts/access_check.py",
-      "implementation": "skills/ci-skills/scripts/core/cli.py",
+      "entrypoint": "ci-skills/scripts/access_check.py",
+      "implementation": "ci-skills/scripts/core/cli.py",
       "report_kind": "access_check",
       "requires_authorities": [
         "github",
@@ -25,7 +25,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -39,8 +39,8 @@
       }
     },
     "bin/ci-api": {
-      "entrypoint": "skills/ci-skills/bin/ci-api",
-      "implementation": "skills/ci-skills/lib/ci/api.bash",
+      "entrypoint": "ci-skills/bin/ci-api",
+      "implementation": "ci-skills/lib/bash/ci/api.bash",
       "report_kind": "ci_api",
       "requires_authorities": [
         "one caller-selected GitHub or GitLab host"
@@ -49,7 +49,7 @@
       "help": "supported",
       "json_flag": "missing",
       "yaml_flag": "missing",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "boolean",
         "required_fields": [],
@@ -58,15 +58,15 @@
       }
     },
     "bin/ci-binary-build": {
-      "entrypoint": "skills/ci-skills/bin/ci-binary-build",
-      "implementation": "skills/ci-skills/lib/automation/binary_build.bash",
+      "entrypoint": "ci-skills/bin/ci-binary-build",
+      "implementation": "ci-skills/lib/bash/automation/binary_build.bash",
       "report_kind": "ci_binary_build",
       "requires_authorities": [],
       "read_only_declared": true,
       "help": "supported",
       "json_flag": "missing",
       "yaml_flag": "missing",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -79,8 +79,8 @@
       }
     },
     "ceph_cluster.py": {
-      "entrypoint": "skills/ci-skills/scripts/ceph_cluster.py",
-      "implementation": "skills/ci-skills/scripts/core/ceph_cluster.py",
+      "entrypoint": "ci-skills/scripts/ceph_cluster.py",
+      "implementation": "ci-skills/scripts/core/ceph_cluster.py",
       "report_kind": "ceph_cluster",
       "requires_authorities": [
         "kubernetes"
@@ -89,7 +89,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -103,8 +103,8 @@
       }
     },
     "ceph_kernel.py": {
-      "entrypoint": "skills/ci-skills/scripts/ceph_kernel.py",
-      "implementation": "skills/ci-skills/scripts/core/node_local.py",
+      "entrypoint": "ci-skills/scripts/ceph_kernel.py",
+      "implementation": "ci-skills/scripts/core/node_local.py",
       "report_kind": "ceph_kernel",
       "requires_authorities": [
         "kubernetes"
@@ -113,7 +113,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -127,8 +127,8 @@
       }
     },
     "cilium_node.py": {
-      "entrypoint": "skills/ci-skills/scripts/cilium_node.py",
-      "implementation": "skills/ci-skills/scripts/core/node_local.py",
+      "entrypoint": "ci-skills/scripts/cilium_node.py",
+      "implementation": "ci-skills/scripts/core/node_local.py",
       "report_kind": "cilium_node",
       "requires_authorities": [
         "kubernetes"
@@ -137,7 +137,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -151,8 +151,8 @@
       }
     },
     "cilium_status.py": {
-      "entrypoint": "skills/ci-skills/scripts/cilium_status.py",
-      "implementation": "skills/ci-skills/scripts/core/cilium.py",
+      "entrypoint": "ci-skills/scripts/cilium_status.py",
+      "implementation": "ci-skills/scripts/core/cilium.py",
       "report_kind": "cilium_status",
       "requires_authorities": [
         "kubernetes"
@@ -161,7 +161,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -175,8 +175,8 @@
       }
     },
     "event_trace.py": {
-      "entrypoint": "skills/ci-skills/scripts/event_trace.py",
-      "implementation": "skills/ci-skills/scripts/core/collect.py",
+      "entrypoint": "ci-skills/scripts/event_trace.py",
+      "implementation": "ci-skills/scripts/core/collect.py",
       "report_kind": "event_trace",
       "requires_authorities": [
         "kubernetes"
@@ -185,7 +185,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -199,8 +199,8 @@
       }
     },
     "gitlab_access.py": {
-      "entrypoint": "skills/ci-skills/scripts/gitlab_access.py",
-      "implementation": "skills/ci-skills/scripts/core/access.py",
+      "entrypoint": "ci-skills/scripts/gitlab_access.py",
+      "implementation": "ci-skills/scripts/core/access.py",
       "report_kind": "gitlab_access",
       "requires_authorities": [
         "gitlab"
@@ -209,7 +209,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -223,8 +223,8 @@
       }
     },
     "gitlab_issue.py": {
-      "entrypoint": "skills/ci-skills/scripts/gitlab_issue.py",
-      "implementation": "skills/ci-skills/scripts/core/gitlab_issues.py",
+      "entrypoint": "ci-skills/scripts/gitlab_issue.py",
+      "implementation": "ci-skills/scripts/core/gitlab_issues.py",
       "report_kind": "gitlab_issue",
       "requires_authorities": [
         "gitlab"
@@ -233,7 +233,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -247,8 +247,8 @@
       }
     },
     "gitlab_job.py": {
-      "entrypoint": "skills/ci-skills/scripts/gitlab_job.py",
-      "implementation": "skills/ci-skills/scripts/core/cli.py",
+      "entrypoint": "ci-skills/scripts/gitlab_job.py",
+      "implementation": "ci-skills/scripts/core/cli.py",
       "report_kind": "gitlab_job",
       "requires_authorities": [
         "gitlab"
@@ -257,7 +257,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -271,8 +271,8 @@
       }
     },
     "gitlab_milestone.py": {
-      "entrypoint": "skills/ci-skills/scripts/gitlab_milestone.py",
-      "implementation": "skills/ci-skills/scripts/core/gitlab_milestones.py",
+      "entrypoint": "ci-skills/scripts/gitlab_milestone.py",
+      "implementation": "ci-skills/scripts/core/gitlab_milestones.py",
       "report_kind": "gitlab_milestone",
       "requires_authorities": [
         "gitlab"
@@ -281,7 +281,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -295,8 +295,8 @@
       }
     },
     "gitlab_pipeline.py": {
-      "entrypoint": "skills/ci-skills/scripts/gitlab_pipeline.py",
-      "implementation": "skills/ci-skills/scripts/core/gitlab_pipelines.py",
+      "entrypoint": "ci-skills/scripts/gitlab_pipeline.py",
+      "implementation": "ci-skills/scripts/core/gitlab_pipelines.py",
       "report_kind": "gitlab_pipeline",
       "requires_authorities": [
         "gitlab"
@@ -305,7 +305,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -319,8 +319,8 @@
       }
     },
     "gitlab_runner.py": {
-      "entrypoint": "skills/ci-skills/scripts/gitlab_runner.py",
-      "implementation": "skills/ci-skills/scripts/core/gitlab_runners.py",
+      "entrypoint": "ci-skills/scripts/gitlab_runner.py",
+      "implementation": "ci-skills/scripts/core/gitlab_runners.py",
       "report_kind": "gitlab_runner",
       "requires_authorities": [
         "gitlab"
@@ -329,7 +329,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -343,8 +343,8 @@
       }
     },
     "gitlab_wiki.py": {
-      "entrypoint": "skills/ci-skills/scripts/gitlab_wiki.py",
-      "implementation": "skills/ci-skills/scripts/core/gitlab_wikis.py",
+      "entrypoint": "ci-skills/scripts/gitlab_wiki.py",
+      "implementation": "ci-skills/scripts/core/gitlab_wikis.py",
       "report_kind": "gitlab_wiki",
       "requires_authorities": [
         "gitlab"
@@ -353,7 +353,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -367,8 +367,8 @@
       }
     },
     "k8s_verify_mtu_consistency.py": {
-      "entrypoint": "skills/ci-skills/scripts/k8s_verify_mtu_consistency.py",
-      "implementation": "skills/ci-skills/scripts/core/mtu_consistency.py",
+      "entrypoint": "ci-skills/scripts/k8s_verify_mtu_consistency.py",
+      "implementation": "ci-skills/scripts/core/mtu_consistency.py",
       "report_kind": "k8s_verify_mtu_consistency",
       "requires_authorities": [
         "kubernetes"
@@ -377,7 +377,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [
@@ -391,8 +391,8 @@
       }
     },
     "storage_report.py": {
-      "entrypoint": "skills/ci-skills/scripts/storage_report.py",
-      "implementation": "skills/ci-skills/scripts/core/collect.py",
+      "entrypoint": "ci-skills/scripts/storage_report.py",
+      "implementation": "ci-skills/scripts/core/collect.py",
       "report_kind": "storage_report",
       "requires_authorities": [
         "kubernetes"
@@ -401,7 +401,7 @@
       "help": "supported",
       "json_flag": "supported",
       "yaml_flag": "supported",
-      "evidence": "tests/test_installed_package.py",
+      "evidence": "tests/python/test_installed_package.py",
       "observed_output": {
         "json_type": "object",
         "required_fields": [

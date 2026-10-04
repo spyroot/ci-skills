@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import REPO_ROOT, install_executable
+from tests.python.conftest import REPO_ROOT, install_executable
 from test_installed_package import (
     ENTRYPOINT_CASES,
     NODE_ENTRYPOINT_CASES,
@@ -21,7 +21,7 @@ INVENTORY = json.loads(
     (REPO_ROOT / "inventory" / "command-interfaces.json").read_text(encoding="utf-8")
 )
 MANIFEST = json.loads(
-    (REPO_ROOT / "skills" / "ci-skills" / "tools.json").read_text(encoding="utf-8")
+    (REPO_ROOT / "ci-skills" / "tools.json").read_text(encoding="utf-8")
 )
 
 
@@ -57,7 +57,7 @@ def test_inventory_covers_exactly_the_shipped_commands_and_binding() -> None:
             assert (REPO_ROOT / path).is_file(), (name, field)
         assert (
             row["entrypoint"]
-            == f"skills/ci-skills/{name if name.startswith('bin/') else f'scripts/{name}'}"
+            == f"ci-skills/{name if name.startswith('bin/') else f'scripts/{name}'}"
         )
         assert row["report_kind"] == declared["report_kind"]
         assert row["requires_authorities"] == declared["requires_authorities"]
@@ -86,7 +86,7 @@ def test_help_matches_the_recorded_json_and_yaml_flags(
     """Inspect the real shipped entrypoint without contacting an authority."""
     row = INVENTORY["commands"][name]
     entrypoint = installed_skill / Path(row["entrypoint"]).relative_to(
-        "skills/ci-skills"
+        "ci-skills"
     )
     argv = (
         [str(entrypoint)]
@@ -126,7 +126,7 @@ def test_existing_installed_mode_cases_cover_every_python_command() -> None:
         assert INVENTORY["commands"][name]["json_flag"] == "supported"
         assert INVENTORY["commands"][name]["yaml_flag"] == "supported"
         assert INVENTORY["commands"][name]["evidence"] == (
-            "tests/test_installed_package.py"
+            "tests/python/test_installed_package.py"
         )
 
 
@@ -151,7 +151,7 @@ def test_bash_mode_gap_is_observed_without_a_provider_call(
     env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
     env["INVENTORY_MARKER"] = str(marker)
     entrypoint = installed_skill / Path(row["entrypoint"]).relative_to(
-        "skills/ci-skills"
+        "ci-skills"
     )
     result = subprocess.run(
         [str(entrypoint), *args],

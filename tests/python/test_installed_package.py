@@ -13,7 +13,7 @@ import pytest
 import yaml
 from tests.python.conftest import REPO_ROOT, install_executable, load_module
 
-SKILL_ROOT = REPO_ROOT / "skills" / "ci-skills"
+SKILL_ROOT = REPO_ROOT / "ci-skills"
 COMMAND_INVENTORY = json.loads(
     (REPO_ROOT / "inventory" / "command-interfaces.json").read_text(encoding="utf-8")
 )["commands"]
