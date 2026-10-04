@@ -140,17 +140,11 @@ class MachineArgumentParser(argparse.ArgumentParser):
         modes = [
             flag.partition("=")[0]
             for flag in self._raw_argv
-            if flag.partition("=")[0] in {"--json", "--yaml", "--human"}
+            if flag.partition("=")[0] in {"--json", "--yaml"}
         ]
-        if modes:
-            mode = modes[0]
-        else:
-            try:
-                mode = "--human" if sys.stdout.isatty() else "--json"
-            except (AttributeError, ValueError):
-                mode = "--json"
-        if mode == "--human":
+        if not modes:
             super().error(message)
+        mode = modes[0]
         kind = self.report_kind or COMMANDS.get(Path(self.prog).name, {}).get(
             "kind", "arguments"
         )

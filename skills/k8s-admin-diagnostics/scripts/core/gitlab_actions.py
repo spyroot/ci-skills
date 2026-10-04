@@ -552,7 +552,6 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
     plan: ActionPlan | None = None
     session: Any = None
-    api: Any = None
     access: dict[str, Any] | None = None
     data: dict[str, Any] | None = None
     phase = "OFFLINE_PLAN"
@@ -680,12 +679,6 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         reason = sanitize(str(exc), 240)
     except Exception:  # noqa: BLE001 - keep malformed provider failures structured
         reason = "unexpected_runtime_failure"
-    if (
-        phase == "APPLY"
-        and mutated is None
-        and getattr(api, "write_attempted", None) is False
-    ):
-        mutated = False
     if plan is None:
         return _failure(args, kind, "gitlab_action", reason)
     return _planned_failure(

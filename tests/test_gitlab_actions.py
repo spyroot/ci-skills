@@ -49,12 +49,9 @@ class FakeAPI:
     def __init__(self, responses):
         self.responses = {key: list(value) for key, value in responses.items()}
         self.calls = []
-        self.write_attempted = False
 
     def _next(self, method, endpoint, body=None):
         self.calls.append((method, endpoint, body))
-        if method != "GET":
-            self.write_attempted = True
         values = self.responses[(method, endpoint)]
         if not values:
             raise AssertionError(f"unexpected repeated API call: {method} {endpoint}")
@@ -484,10 +481,9 @@ def test_transport_pins_host_and_sends_body_through_private_file():
     session = SimpleNamespace(
         host="gitlab.example.test", environment={"GITLAB_TOKEN": "selected"}
     )
-    client = API.GlabAPIClient(command=command)
-    assert client.write_attempted is False
-    result = client.post_json(session, "user/runners", {"description": "runner"})
-    assert client.write_attempted is True
+    result = API.GlabAPIClient(command=command).post_json(
+        session, "user/runners", {"description": "runner"}
+    )
     assert result == {"id": 23}
     assert (
         captured["argv"][captured["argv"].index("--hostname") + 1]
@@ -554,8 +550,6 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
     assert data["errors"] == [
         {"source": "gitlab_action", "reason": "list_response_invalid_shape"}
     ]
-    assert data["mutated"] is False
-    assert data["cleanup"]["reason"] == "no_write_attempted"
 
 
 @pytest.mark.parametrize(

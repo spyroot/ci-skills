@@ -279,7 +279,6 @@ class GlabAPIClient:
         self._command = command
         self._sleep = sleep
         self.timeout = timeout
-        self.write_attempted = False
 
     def get_json(self, session: Any, endpoint: str) -> Any:
         return self._request(session, "GET", endpoint)
@@ -338,8 +337,6 @@ class GlabAPIClient:
                     )
                 )
             for attempt in range(READ_ATTEMPTS if method == "GET" else 1):
-                if method != "GET":
-                    self.write_attempted = True
                 result = self._command(
                     argv,
                     timeout=self.timeout,

@@ -151,19 +151,6 @@ def test_argparse_failures_keep_machine_output_contract(
     assert "usage:" not in result.stdout
 
 
-def test_piped_argparse_failure_defaults_to_json():
-    result = run_script("gitlab_issue.py", "open-bug", "--title")
-    data = json.loads(result.stdout)
-
-    assert result.returncode == 2
-    assert data["status"] == "BLOCKED"
-    assert data["errors"][0] == {
-        "source": "arguments",
-        "reason": "invalid_arguments",
-    }
-    assert "usage:" not in result.stdout
-
-
 @pytest.mark.parametrize(
     ("flag", "loader"),
     (("--json", json.loads), ("--yaml", yaml.safe_load)),
