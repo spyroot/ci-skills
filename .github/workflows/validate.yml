@@ -78,11 +78,11 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y bats shfmt
           shell_files=(
-            install.sh scripts/check.sh
+            install.sh
             bin/ci-api bin/ci-binary-build
             skills/ci-skills/bin/ci-api skills/ci-skills/bin/ci-binary-build
             skills/ci-skills/lib/core/runtime.bash
-            skills/ci-skills/lib/ci/api.bash lib/ci/check.bash
+            skills/ci-skills/lib/ci/api.bash
             skills/ci-skills/lib/automation/binary_build.bash
             examples/emit-binary-buildconfig.sh
             examples/emit-vcpkg-prereq.sh
