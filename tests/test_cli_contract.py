@@ -188,6 +188,7 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
         lambda _target, publication=False: {
             "kind": "access_check",
             "status": status.PASS,
+            "live_checks": {"storage_report": {"status": status.PASS}},
         },
     )
 
@@ -205,3 +206,79 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
         {"source": "collect_storage", "reason": "malformed nested response"}
     ]
     assert "BLOCKED:" not in captured.err
+
+
+def test_collectors_attach_full_access_receipt_provenance(monkeypatch, capsys):
+    """Normal collectors carry the same-invocation full access receipt."""
+    cli = import_script_module("core.cli")
+    status = import_script_module("core.status")
+    target = object()
+    access_receipt = {
+        "kind": "access_check",
+        "status": status.PASS,
+        "execution_host": "unit-host.example.test",
+        "tested_revision": "a" * 40,
+        "credential_sources": {
+            "github": "env:GH_ENTERPRISE_TOKEN",
+            "gitlab": "env:GITLAB_TOKEN",
+            "kubernetes": "env:KUBECONFIG",
+        },
+        "targets": {
+            "github": "github.example.test/unit/repo",
+            "gitlab": "https://gitlab.example.test",
+            "kubernetes": {
+                "context": "unit-context",
+                "server": "https://api.cluster.example.test:6443",
+            },
+        },
+        "live_checks": {
+            "storage_report": {"status": status.PASS},
+            "event_trace": {"status": status.PASS},
+            "cilium_status": {"status": status.PASS},
+        },
+    }
+    args = argparse.Namespace(
+        target="target.toml",
+        json=True,
+        yaml=False,
+        dry_run=False,
+        output_dir=None,
+        publication=False,
+        revision="a" * 40,
+    )
+
+    monkeypatch.setattr(cli, "load_target", lambda _path: target)
+    monkeypatch.setattr(cli, "bind_sources", lambda value, revision=None: value)
+    monkeypatch.setattr(cli, "verify_kubeconfig_unchanged", lambda _value: None)
+    monkeypatch.setattr(cli, "verify_skill_unchanged", lambda _value: None)
+    monkeypatch.setattr(
+        cli,
+        "check_access",
+        lambda _target, publication=False: access_receipt,
+    )
+
+    def collect_storage(_target, _args):
+        return {
+            "schema_version": "1.0",
+            "kind": "storage_report",
+            "status": status.PASS,
+            "target": "unit-context",
+            "records": [],
+            "errors": [],
+            "summary": {"record_count": 0, "error_count": 0},
+        }
+
+    exit_status = cli.execute(args, collect_storage)
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+
+    assert exit_status == 0
+    assert data["status"] == status.PASS
+    assert data["access_receipt"]["execution_host"] == "unit-host.example.test"
+    assert data["access_receipt"]["tested_revision"] == "a" * 40
+    assert (
+        data["access_receipt"]["credential_sources"]
+        == access_receipt["credential_sources"]
+    )
+    assert data["access_receipt"]["targets"] == access_receipt["targets"]
+    assert data["access_receipt"]["live_checks"] == access_receipt["live_checks"]

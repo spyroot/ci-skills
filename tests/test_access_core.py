@@ -231,7 +231,12 @@ def _fake_access_runner(
                                     "metadata": {
                                         "namespace": "kube-system",
                                         "name": "cilium",
-                                    }
+                                    },
+                                    "spec": {
+                                        "selector": {
+                                            "matchLabels": {"k8s-app": "cilium"}
+                                        }
+                                    },
                                 }
                             ]
                         }
@@ -247,6 +252,7 @@ def _fake_access_runner(
                                     "metadata": {
                                         "namespace": "kube-system",
                                         "name": "cilium-ready",
+                                        "labels": {"k8s-app": "cilium"},
                                     },
                                     "status": {
                                         "conditions": [
@@ -263,7 +269,7 @@ def _fake_access_runner(
                     return completed(command, 1, stderr="connection refused")
                 return completed(
                     command,
-                    stdout=json.dumps({"local": {"status": "reachable"}}),
+                    stdout=json.dumps({"local": {"name": "worker-a"}, "nodes": []}),
                 )
             return completed(command, 99, stderr="unexpected kubectl call")
 
@@ -352,6 +358,53 @@ def test_check_access_receipt_records_metadata_and_resolved_sources(
     }
 
 
+def test_kubernetes_access_does_not_reuse_kubeconfig_changed_after_verification(
+    monkeypatch,
+    tmp_path,
+):
+    """Commands must not keep trusting a kubeconfig that changed after verify."""
+    access, runtime = _access_modules()
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig))
+    runner, _calls = _fake_access_runner(runtime, "success")
+    changed = False
+    reused_mutable_path: list[tuple[str, ...]] = []
+
+    def fake_run(argv, **kwargs):
+        nonlocal changed
+        command = tuple(str(part) for part in argv)
+        if command[0] == "kubectl":
+            context_index = command.index("--context")
+            args = list(command[context_index + 2 :])
+            if args == ["config", "view", "--raw", "-o", "json"]:
+                result = runner(argv, **kwargs)
+                kubeconfig.write_text(
+                    "apiVersion: v1\nclusters: []\n", encoding="utf-8"
+                )
+                changed = True
+                return result
+            if (
+                changed
+                and "--kubeconfig" in command
+                and command[command.index("--kubeconfig") + 1] == str(kubeconfig)
+            ):
+                reused_mutable_path.append(command)
+                return runtime.CommandResult(
+                    command, 1, "", "mutable kubeconfig reused"
+                )
+        return runner(argv, **kwargs)
+
+    monkeypatch.setattr(access, "run_command", fake_run)
+
+    surface = access.kubernetes_access(target)
+
+    if surface.status == "PASS":
+        assert reused_mutable_path == []
+    else:
+        assert surface.reason == "kubeconfig_changed"
+
+
 def test_check_access_resolves_ambient_token_environment_sources(
     monkeypatch,
     tmp_path,
@@ -426,6 +479,99 @@ def test_check_access_prefers_explicit_token_files_over_ambient_env(
     assert "ambient-gitlab-token" not in json.dumps(report)
     assert "github-file-token" not in json.dumps(report)
     assert "gitlab-file-token" not in json.dumps(report)
+
+
+def test_kubernetes_access_execs_cilium_agent_not_operator_pod(
+    monkeypatch,
+    tmp_path,
+):
+    """Cilium health preflight uses the agent selector instead of name prefix."""
+    access, runtime = _access_modules()
+    kubeconfig = tmp_path / "kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    target = _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig))
+    runner, _calls = _fake_access_runner(runtime, "success")
+    exec_pods: list[str] = []
+
+    def fake_run(argv, **kwargs):
+        command = tuple(str(part) for part in argv)
+        if command[0] == "kubectl":
+            context_index = command.index("--context")
+            args = list(command[context_index + 2 :])
+            if args == ["get", "daemonsets", "--all-namespaces", "-o", "json"]:
+                return runtime.CommandResult(
+                    command,
+                    0,
+                    json.dumps(
+                        {
+                            "items": [
+                                {
+                                    "metadata": {
+                                        "namespace": "kube-system",
+                                        "name": "cilium",
+                                    },
+                                    "spec": {
+                                        "selector": {
+                                            "matchLabels": {"k8s-app": "cilium"}
+                                        }
+                                    },
+                                }
+                            ]
+                        }
+                    ),
+                    "",
+                )
+            if args == ["-n", "kube-system", "get", "pods", "-o", "json"]:
+                return runtime.CommandResult(
+                    command,
+                    0,
+                    json.dumps(
+                        {
+                            "items": [
+                                {
+                                    "metadata": {
+                                        "name": "cilium-operator-0",
+                                        "labels": {"name": "cilium-operator"},
+                                    },
+                                    "status": {
+                                        "conditions": [
+                                            {"type": "Ready", "status": "True"}
+                                        ]
+                                    },
+                                },
+                                {
+                                    "metadata": {
+                                        "name": "cilium-agent-abc",
+                                        "labels": {"k8s-app": "cilium"},
+                                    },
+                                    "status": {
+                                        "conditions": [
+                                            {"type": "Ready", "status": "True"}
+                                        ]
+                                    },
+                                },
+                            ]
+                        }
+                    ),
+                    "",
+                )
+            if "exec" in args:
+                exec_pods.append(args[args.index("exec") + 1])
+                return runtime.CommandResult(
+                    command,
+                    0,
+                    json.dumps({"local": {"name": "worker-a"}, "nodes": []}),
+                    "",
+                )
+        return runner(argv, **kwargs)
+
+    monkeypatch.setattr(access, "run_command", fake_run)
+
+    surface = access.kubernetes_access(target)
+
+    assert surface.status == "PASS"
+    assert exec_pods == ["cilium-agent-abc"]
+    assert surface.details["cilium_health_pod"] == "cilium-agent-abc"
 
 
 @pytest.mark.parametrize(
@@ -525,6 +671,81 @@ def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
     serialized = json.dumps(report)
     for value in secret_values:
         assert value not in serialized
+
+
+def test_check_access_prefers_token_file_when_kubeconfig_user_also_has_token(
+    monkeypatch,
+    tmp_path,
+):
+    """When kubeconfig has tokenFile and token, the file is the effective source."""
+    access, runtime = _access_modules()
+    _clear_token_env(monkeypatch)
+    kubeconfig = tmp_path / "admin.kubeconfig"
+    kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
+    token_file = tmp_path / "admin.token"
+    token_file.write_text("token-file-secret\n", encoding="utf-8")
+    runner, _calls = _fake_access_runner(runtime, "success")
+
+    def fake_run(argv, **kwargs):
+        command = tuple(str(part) for part in argv)
+        if command[0] == "kubectl":
+            context_index = command.index("--context")
+            args = list(command[context_index + 2 :])
+            if args in (
+                ["config", "view", "-o", "json"],
+                ["config", "view", "--raw", "-o", "json"],
+            ):
+                return runtime.CommandResult(
+                    command,
+                    0,
+                    json.dumps(
+                        {
+                            "contexts": [
+                                {
+                                    "name": "unit-context",
+                                    "context": {
+                                        "cluster": "cluster-a",
+                                        "user": "admin-user",
+                                    },
+                                }
+                            ],
+                            "clusters": [
+                                {
+                                    "name": "cluster-a",
+                                    "cluster": {
+                                        "server": (
+                                            "https://api.cluster.example.test:6443"
+                                        )
+                                    },
+                                }
+                            ],
+                            "users": [
+                                {
+                                    "name": "admin-user",
+                                    "user": {
+                                        "token": "embedded-secret-token",
+                                        "tokenFile": str(token_file),
+                                    },
+                                }
+                            ],
+                        }
+                    ),
+                    "",
+                )
+        return runner(argv, **kwargs)
+
+    monkeypatch.setattr(access, "run_command", fake_run)
+
+    report = access.check_access(
+        _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig)),
+    )
+
+    assert report["status"] == "PASS"
+    auth = report["surfaces"]["kubernetes"]["details"]["auth_mechanism"]
+    assert auth == {"type": "tokenFile", "source": str(token_file.resolve())}
+    serialized = json.dumps(report)
+    assert "embedded-secret-token" not in serialized
+    assert "token-file-secret" not in serialized
 
 
 @pytest.mark.parametrize(

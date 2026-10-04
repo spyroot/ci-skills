@@ -11,7 +11,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .access import check_access, dry_run_access
-from .credentials import bind_sources
+from .credentials import (
+    bind_sources,
+    verify_kubeconfig_unchanged,
+    verify_skill_unchanged,
+)
 from .report import emit
 from .runtime import sanitize
 from .status import BLOCKED, PASS, exit_code
@@ -74,8 +78,6 @@ def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> i
 def execute(
     args: argparse.Namespace,
     collect: Callable[[Target, argparse.Namespace], dict[str, Any]] | None = None,
-    *,
-    live_checks: bool = False,
 ) -> int:
     kinds = {
         "collect_storage": "storage_report",
@@ -124,15 +126,19 @@ def execute(
                 for key, value in vars(args).items()
                 if key not in {"target", "json", "yaml", "dry_run", "output_dir"}
             }
-        if live_checks and not args.dry_run and gate["status"] == PASS:
+        if not args.dry_run and gate["status"] == PASS and "live_checks" not in gate:
             from .live import collect_live_checks
 
-            data = collect_live_checks(target, args, gate)
-        elif collect is None or args.dry_run or gate["status"] != PASS:
+            gate = collect_live_checks(target, args, gate)
+        if collect is None or args.dry_run or gate["status"] != PASS:
             data = gate
         else:
             source = collect.__name__
             data = collect(target, args)
+            data["access_receipt"] = gate
+        if not args.dry_run:
+            verify_kubeconfig_unchanged(target)
+            verify_skill_unchanged(target)
         mode = "json" if args.json else "yaml" if args.yaml else "human"
         sys.stdout.write(emit(data, mode, getattr(args, "output_dir", None)))
         return exit_code(data["status"])

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import socket
@@ -9,7 +10,7 @@ import subprocess
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from .target import Target, TargetError
+from .target import Target, TargetError, assert_external_path
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,71 @@ class Sources:
     gitlab: CredentialSource
     kubernetes: CredentialSource
     kubeconfig_files: tuple[Path, ...]
+    kubeconfig_hashes: tuple[str, ...]
     execution_host: str
+
+
+def github_token_names(host: str) -> tuple[str, str]:
+    """Match gh's documented environment precedence for the selected host."""
+    return (
+        ("GH_TOKEN", "GITHUB_TOKEN")
+        if host == "github.com" or host.endswith(".ghe.com")
+        else ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+    )
+
+
+def _file_digest(path: Path) -> str:
+    """Hash credential configuration without exposing its bytes."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def skill_digest(skill_root: Path | None = None) -> str:
+    """Fingerprint the executable skill bytes for independent CI read-back."""
+    root = skill_root or Path(__file__).resolve().parents[2]
+    paths = sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file()
+        and (
+            path.name == "SKILL.md"
+            or path.suffix == ".py"
+            or path.parent.name == "references"
+            and path.suffix == ".md"
+        )
+        and "__pycache__" not in path.parts
+    )
+    if not paths:
+        raise TargetError("skill_files_unavailable")
+    digest = hashlib.sha256()
+    for path in paths:
+        if path.is_symlink():
+            raise TargetError("skill_symlink_unexpected")
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+        digest.update(bytes.fromhex(_file_digest(path)))
+    return digest.hexdigest()
+
+
+def verify_kubeconfig_unchanged(target: Target) -> None:
+    """Block if a selected kubeconfig changed during this invocation."""
+    sources = target.sources if isinstance(target.sources, Sources) else None
+    if sources is None:
+        return
+    try:
+        current = tuple(_file_digest(path) for path in sources.kubeconfig_files)
+    except OSError as exc:
+        raise TargetError("kubeconfig_changed") from exc
+    if current != sources.kubeconfig_hashes:
+        raise TargetError("kubeconfig_changed")
+
+
+def verify_skill_unchanged(target: Target) -> None:
+    """Reject source replacement between binding and report publication."""
+    if target.skill_sha256 and skill_digest() != target.skill_sha256:
+        raise TargetError("skill_changed")
 
 
 def _file_token(path: Path) -> str:
@@ -82,6 +147,9 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
     if not paths:
         raise TargetError("kubeconfig_source_empty")
     for path in paths:
+        assert_external_path(
+            path.resolve(), Path(__file__).resolve().parents[2], "kubeconfig"
+        )
         try:
             if not path.is_file() or not path.stat().st_size:
                 raise TargetError(f"kubeconfig_unavailable:{path}")
@@ -96,16 +164,11 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
 
 
 def resolve_revision(explicit: str | None) -> str:
-    """Use an exact supplied/CI revision or the source repository HEAD."""
-    for value in (
-        explicit,
-        os.environ.get("CI_COMMIT_SHA"),
-        os.environ.get("GITHUB_SHA"),
-    ):
-        if value:
-            if not re.fullmatch(r"[0-9a-fA-F]{40}", value):
-                raise TargetError("tested_revision must be a full commit SHA")
-            return value.lower()
+    """Use the skill source HEAD or an explicit installed-skill revision."""
+    if explicit:
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", explicit):
+            raise TargetError("tested_revision must be a full commit SHA")
+        return explicit.lower()
     skill_root = Path(__file__).resolve().parents[2]
     repo_root = skill_root.parents[1]
     if (
@@ -129,11 +192,7 @@ def resolve_revision(explicit: str | None) -> str:
 
 def bind_sources(target: Target, *, revision: str | None = None) -> Target:
     """Freeze effective source selection for access checks and collectors."""
-    github_names = (
-        ("GH_TOKEN", "GITHUB_TOKEN")
-        if target.github.host == "github.com"
-        else ("GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
-    )
+    github_names = github_token_names(target.github.host)
     github = _token_source(
         target.github.token_file,
         github_names,
@@ -145,5 +204,21 @@ def bind_sources(target: Target, *, revision: str | None = None) -> Target:
         f"glab-credential-store:{target.gitlab.host}",
     )
     kube, files = _kubernetes_source(target)
-    sources = Sources(github, gitlab, kube, files, socket.getfqdn())
-    return replace(target, sources=sources, tested_revision=resolve_revision(revision))
+    sources = Sources(
+        github,
+        gitlab,
+        kube,
+        files,
+        tuple(_file_digest(path) for path in files),
+        socket.getfqdn(),
+    )
+    consumer = os.environ.get("CI_COMMIT_SHA") or os.environ.get("GITHUB_SHA")
+    if consumer and not re.fullmatch(r"[0-9a-fA-F]{40}", consumer):
+        consumer = None
+    return replace(
+        target,
+        sources=sources,
+        tested_revision=resolve_revision(revision),
+        skill_sha256=skill_digest(),
+        consumer_revision=consumer,
+    )

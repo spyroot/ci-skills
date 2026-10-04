@@ -102,6 +102,56 @@ def test_storage_report_records_malformed_list_envelopes_as_errors(
     assert reasons["attachments"] == "invalid_list_response"
 
 
+def test_storage_report_records_malformed_pv_and_pvc_fields_as_errors(
+    monkeypatch,
+    target_file,
+):
+    """Malformed PV/PVC item fields must not raise or become empty success."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    payloads = _empty_storage_payloads()
+    payloads["persistentvolumeclaims"] = {
+        "items": [
+            {
+                "metadata": {"namespace": "app", "name": "bad-pvc"},
+                "spec": "not-a-mapping",
+                "status": {"phase": "Bound"},
+            }
+        ]
+    }
+    payloads["persistentvolumes"] = {
+        "items": [
+            {
+                "metadata": {"name": "bad-pv"},
+                "spec": {"storageClassName": "fast"},
+                "status": "not-a-mapping",
+            }
+        ]
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, payloads[resource])
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        namespace="all",
+        node=None,
+        storage_class=None,
+        phase="all",
+        search=None,
+    )
+
+    result = collect.collect_storage(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"] == []
+    reasons = {error["source"]: error["reason"] for error in result["errors"]}
+    assert reasons["pvcs"] == "invalid_storage_response"
+    assert reasons["pvs"] == "invalid_storage_response"
+
+
 @pytest.mark.parametrize(
     ("phase", "expected_volume"),
     (("Released", "pv-released"), ("Failed", "pv-failed")),
@@ -267,6 +317,132 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
     ]
     assert row["pods"][0]["pod_uid"] == "pod-a"
     assert row["csi_driver"] == "csi.fast"
+
+
+def test_storage_report_matches_same_name_controllers_by_kind_and_daemonset_ready(
+    monkeypatch,
+    target_file,
+):
+    """Same-name controllers must not overwrite kind-specific ownership evidence."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    inventory = {
+        "nodes": [],
+        "pods": [
+            {
+                "metadata": {
+                    "namespace": "app",
+                    "name": "deploy-pod",
+                    "uid": "pod-deploy",
+                    "ownerReferences": [{"kind": "ReplicaSet", "name": "shared-rs"}],
+                },
+                "spec": {
+                    "nodeName": "worker-a",
+                    "volumes": [
+                        {"persistentVolumeClaim": {"claimName": "claim-deploy"}}
+                    ],
+                },
+                "status": {"phase": "Running"},
+            },
+            {
+                "metadata": {
+                    "namespace": "app",
+                    "name": "daemon-pod",
+                    "uid": "pod-daemon",
+                    "ownerReferences": [{"kind": "DaemonSet", "name": "shared"}],
+                },
+                "spec": {
+                    "nodeName": "worker-b",
+                    "volumes": [
+                        {"persistentVolumeClaim": {"claimName": "claim-daemon"}}
+                    ],
+                },
+                "status": {"phase": "Running"},
+            },
+        ],
+        "persistentvolumeclaims": [
+            {
+                "metadata": {"namespace": "app", "name": "claim-deploy"},
+                "spec": {"volumeName": "pv-deploy", "storageClassName": "fast"},
+                "status": {"phase": "Bound"},
+            },
+            {
+                "metadata": {"namespace": "app", "name": "claim-daemon"},
+                "spec": {"volumeName": "pv-daemon", "storageClassName": "fast"},
+                "status": {"phase": "Bound"},
+            },
+        ],
+        "persistentvolumes": [
+            {
+                "metadata": {"name": "pv-deploy"},
+                "spec": {"storageClassName": "fast"},
+                "status": {"phase": "Bound"},
+            },
+            {
+                "metadata": {"name": "pv-daemon"},
+                "spec": {"storageClassName": "fast"},
+                "status": {"phase": "Bound"},
+            },
+        ],
+        "storageclasses": [],
+        "csidrivers": [],
+        "csinodes": [],
+        "volumeattachments": [],
+        "deployments": [
+            {
+                "metadata": {"namespace": "app", "name": "shared"},
+                "spec": {"replicas": 4},
+                "status": {"readyReplicas": 3},
+            }
+        ],
+        "statefulsets": [
+            {
+                "metadata": {"namespace": "app", "name": "shared"},
+                "spec": {"replicas": 8},
+                "status": {"readyReplicas": 7},
+            }
+        ],
+        "daemonsets": [
+            {
+                "metadata": {"namespace": "app", "name": "shared"},
+                "status": {"desiredNumberScheduled": 5, "numberReady": 4},
+            }
+        ],
+        "replicasets": [
+            {
+                "metadata": {
+                    "namespace": "app",
+                    "name": "shared-rs",
+                    "ownerReferences": [{"kind": "Deployment", "name": "shared"}],
+                }
+            }
+        ],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": inventory[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        namespace="app",
+        node=None,
+        storage_class=None,
+        phase="Bound",
+        search=None,
+    )
+
+    result = collect.collect_storage(_target(target_file), args)
+
+    assert result["status"] == "PASS"
+    rows = {row["name"]: row for row in result["records"]}
+    assert rows["claim-deploy"]["controllers"] == [
+        {"kind": "Deployment", "name": "shared", "desired": 4, "ready": 3}
+    ]
+    assert rows["claim-daemon"]["controllers"] == [
+        {"kind": "DaemonSet", "name": "shared", "desired": 5, "ready": 4}
+    ]
 
 
 def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
@@ -465,6 +641,68 @@ def test_event_trace_uses_series_last_observed_time_inside_window(
     assert row["timestamp"] == "2026-10-01T10:05:00+00:00"
     assert row["first_timestamp"] == "2026-10-01T09:00:00+00:00"
     assert row["last_timestamp"] == "2026-10-01T10:05:00+00:00"
+    assert row["count"] == 7
+
+
+def test_event_trace_keeps_series_that_overlaps_window_and_preserves_count(
+    monkeypatch,
+    target_file,
+):
+    """A series event that starts in the window and ends after it is still evidence."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    events = {
+        "events": [],
+        "events.events.k8s.io": [
+            {
+                "metadata": {
+                    "namespace": "jobs",
+                    "name": "runner-pod.overlap",
+                    "creationTimestamp": "2026-10-01T10:05:00Z",
+                },
+                "regarding": {
+                    "kind": "Pod",
+                    "namespace": "jobs",
+                    "name": "runner-pod",
+                    "uid": "pod-overlap",
+                },
+                "eventTime": "2026-10-01T10:05:00Z",
+                "series": {
+                    "lastObservedTime": "2026-10-01T10:20:00Z",
+                    "count": 12,
+                },
+                "reason": "FailedScheduling",
+                "note": "selected overlap",
+                "type": "Warning",
+            }
+        ],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": events[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="jobs",
+        kind="Pod",
+        object="runner-pod",
+        reason="Failed",
+        search="overlap",
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PASS"
+    assert result["summary"]["record_count"] == 1
+    row = result["records"][0]
+    assert row["timestamp"] == "2026-10-01T10:20:00+00:00"
+    assert row["first_timestamp"] == "2026-10-01T10:05:00+00:00"
+    assert row["last_timestamp"] == "2026-10-01T10:20:00+00:00"
+    assert row["count"] == 12
 
 
 def test_event_trace_reports_malformed_event_items_as_partial(
@@ -514,6 +752,68 @@ def test_event_trace_reports_malformed_event_items_as_partial(
     reasons = {error["source"]: error["reason"] for error in result["errors"]}
     assert reasons["core_events"] == "invalid_list_response"
     assert reasons["events_v1"] == "invalid_list_response"
+
+
+def test_event_trace_reports_missing_named_event_timestamp_and_object_identity(
+    monkeypatch,
+    target_file,
+):
+    """Named event filters require timestamp and object identity evidence."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    events = {
+        "events": [
+            {
+                "metadata": {"namespace": "jobs", "name": "runner-pod.no-time"},
+                "involvedObject": {
+                    "kind": "Pod",
+                    "namespace": "jobs",
+                    "name": "runner-pod",
+                    "uid": "pod-1",
+                },
+                "reason": "FailedScheduling",
+                "message": "missing timestamp",
+            }
+        ],
+        "events.events.k8s.io": [
+            {
+                "metadata": {
+                    "namespace": "jobs",
+                    "name": "runner-pod.no-object",
+                    "creationTimestamp": "2026-10-01T10:05:00Z",
+                },
+                "eventTime": "2026-10-01T10:05:00Z",
+                "regarding": {"kind": "Pod", "namespace": "jobs"},
+                "reason": "FailedScheduling",
+                "note": "missing object name",
+            }
+        ],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": events[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(
+        from_time="2026-10-01T10:00:00Z",
+        to_time="2026-10-01T10:10:00Z",
+        namespace="jobs",
+        kind="Pod",
+        object="runner-pod",
+        reason=None,
+        search=None,
+    )
+
+    result = collect.collect_events(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"] == []
+    assert {"source": "core_events", "reason": "invalid_event_timestamp"} in result[
+        "errors"
+    ]
+    assert {"source": "events_v1", "reason": "invalid_event_object"} in result["errors"]
 
 
 def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
@@ -610,6 +910,62 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
     )
 
 
+@pytest.mark.parametrize("health_payload", (None, [], "reachable"))
+def test_cilium_status_rejects_invalid_health_json_shapes(
+    monkeypatch,
+    target_file,
+    health_payload,
+):
+    """Parseable JSON is not proof of a Cilium health response."""
+    collect = import_script_module("core.collect")
+    runtime = import_script_module("core.runtime")
+    resources = {
+        "daemonsets": [
+            {
+                "metadata": {"namespace": "kube-system", "name": "cilium"},
+                "spec": {"selector": {"matchLabels": {"k8s-app": "cilium"}}},
+                "status": {"desiredNumberScheduled": 1, "numberReady": 1},
+            }
+        ],
+        "pods": [
+            {
+                "metadata": {
+                    "namespace": "kube-system",
+                    "name": "cilium-ready",
+                    "uid": "pod-ready",
+                    "labels": {"k8s-app": "cilium"},
+                },
+                "spec": {"nodeName": "worker-a"},
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }
+        ],
+        "deployments": [],
+        "ciliumnodes.cilium.io": [],
+    }
+
+    def fake_run(argv, **_kwargs):
+        command = tuple(str(part) for part in argv)
+        if "exec" in command:
+            return runtime.CommandResult(command, 0, json.dumps(health_payload), "")
+        resource = command[command.index("get") + 1]
+        return _command_result(runtime, command, {"items": resources[resource]})
+
+    monkeypatch.setattr(collect, "run_command", fake_run)
+    args = SimpleNamespace(namespace="auto", node=None, search=None)
+
+    result = collect.collect_cilium(_target(target_file), args)
+
+    assert result["status"] == "PARTIAL"
+    assert result["records"][0]["status"] == "UNKNOWN"
+    assert result["records"][0]["reason"] == "invalid_health_response"
+    assert {"source": "cilium-ready", "reason": "invalid_health_response"} in result[
+        "errors"
+    ]
+
+
 def test_cilium_status_uses_daemonset_selector_for_agent_pods(
     monkeypatch,
     target_file,
@@ -654,7 +1010,7 @@ def test_cilium_status_uses_daemonset_selector_for_agent_pods(
             return runtime.CommandResult(
                 command,
                 0,
-                json.dumps({"local": {"host-primary-address": "10.0.0.10"}}),
+                json.dumps({"local": {"name": "worker-a"}, "nodes": []}),
                 "",
             )
         resource = command[command.index("get") + 1]

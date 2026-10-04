@@ -25,6 +25,7 @@ The suggested local location is `~/.config/ci-skills/target.toml`.
 [github]
 host = "github.com"
 repository = "owner/repository"
+# required_checks = ["validate", "gal19/live-receipt"]
 
 [gitlab]
 url = "https://gitlab.example.com"
@@ -51,8 +52,8 @@ skill. The commands never log in, grant roles, or change the active context.
 Every command accepts `--target PATH`, `--revision SHA`, `--json`, `--yaml`,
 `--dry-run`, and `--help`. Pass a full source commit SHA with `--revision`
 when the installed copy has no Git metadata. Reports also accept
-`--output-dir PATH` to write paired JSON and text files. Without that option,
-no report file is written.
+`--output-dir PATH` to publish a unique run directory containing paired
+`report.json` and `report.txt` files. Without that option, no file is written.
 
 - `access_check.py` checks the three selected authorities and runs the
   storage, event, and Cilium collector reads. `--publication` also requires
@@ -86,6 +87,11 @@ degraded cluster it exists to diagnose. Each live check reports
 The `validate` workflow checks workflow/YAML and Markdown syntax, diff
 hygiene, secrets, Ruff lint and format, package behavior, and mocked denial
 paths. Its package smoke runs every installed entrypoint from outside the
-source tree. Mocked CI is code evidence; the live access receipt must come
-from each intended execution host. Use the exact target and tested revision
-there, and retain the sanitized receipt only after all required checks pass.
+source tree. Its PR job also requires a fresh, exact-head
+`gal19/live-receipt` commit status from the trusted verifier account named by
+the repository variable `GAL19_TRUSTED_STATUS_ACTOR`. The private verifier
+uses `tools/verify_live_receipt.py` to compare the actual-host receipt with
+independently selected targets and the skill bytes at that revision, then
+posts that status. PR jobs never receive the private receipt. Until the
+trusted job, status actor, and required branch check are configured, live
+acceptance remains blocked.

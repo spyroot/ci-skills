@@ -32,6 +32,7 @@ Example nonsecret target:
 [github]
 host = "github.com"
 repository = "owner/repository"
+# required_checks = ["validate", "gal19/live-receipt"]
 # token_file = "/home/operator/.config/ci-skills/github.token"
 
 [gitlab]
@@ -49,8 +50,9 @@ server = "https://api.cluster.example.com:6443"
 Run `access_check.py --target PATH --json --publication` on each intended
 execution host. Supply `--revision SHA` for an installed copy without Git
 metadata, and `--job-url URL` when verifying a requested job. The receipt
-identifies the execution host, time, revision, sources, targets, identities,
-and individual results.
+identifies the execution host, time, skill revision and content hash, sources,
+targets, identities, and individual results. The consuming project's SHA is
+recorded separately when present.
 
 - GitHub: authenticate the selected host, read back the identity and exact
   repository. Publication mode also requires repository administration and
@@ -90,6 +92,8 @@ the gate then read the timeout as a denial.
 
 The `validate` workflow checks package layout, all installed entrypoints from
 an unrelated working directory, workflow/YAML and Markdown syntax, diff
-hygiene, secret scanning, Ruff lint and format, and mocked behavior. CI proves
-code behavior at its tested commit. The per-host live receipt proves actual
-access and resource reads on that host.
+hygiene, secret scanning, Ruff lint and format, and mocked behavior. The
+actual-host receipt is checked by `tools/verify_live_receipt.py` in a trusted
+job against an independent expected-target JSON and the exact skill checkout.
+That job publishes the `gal19/live-receipt` commit status; PR CI reads only
+the status, never the private receipt. A missing or stale status blocks.

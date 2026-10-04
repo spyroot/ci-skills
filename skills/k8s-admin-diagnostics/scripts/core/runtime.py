@@ -20,14 +20,25 @@ class CommandResult:
 
 
 _SECRET_PATTERNS = (
+    re.compile(
+        r'(?i)("(?:[A-Z0-9_]*TOKEN|API[_-]?KEY|PASSWORD|SECRET)"\s*:\s*")[^"]*(")'
+    ),
     re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer|basic)\s+)\S+"),
     re.compile(
-        r"(?i)\b((?:access[_-]?token|api[_-]?key|password|secret)\s*[:=]\s*)\S+"
+        r"(?i)\b((?:[A-Z0-9_]*TOKEN|API[_-]?KEY|PASSWORD|SECRET)\s*[:=]\s*)[^\s,}]+"
     ),
+    re.compile(r"(?i)(https?://)[^/@\s]+:[^/@\s]+@"),
+    re.compile(
+        r"(?i)\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,}|glpat-[A-Za-z0-9_-]{8,})\b"
+    ),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
     re.compile(
         r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
         re.DOTALL,
     ),
+)
+_CONTROL_SEQUENCE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"
 )
 
 
@@ -35,12 +46,22 @@ def sanitize(value: str, limit: int = 1000) -> str:
     """Remove common credential forms and bound untrusted report text."""
     result = value
     for pattern in _SECRET_PATTERNS:
-        result = pattern.sub(
-            lambda match: (
-                match.group(1) + "[REDACTED]" if match.lastindex else "[REDACTED]"
-            ),
-            result,
-        )
+        if pattern.groups == 2:
+            result = pattern.sub(
+                lambda match: match.group(1) + "[REDACTED]" + match.group(2), result
+            )
+        elif pattern.groups == 1:
+            result = pattern.sub(
+                lambda match: (
+                    match.group(1)
+                    + "[REDACTED]"
+                    + ("@" if match.group(1).lower().startswith("http") else "")
+                ),
+                result,
+            )
+        else:
+            result = pattern.sub("[REDACTED]", result)
+    result = _CONTROL_SEQUENCE.sub("", result)
     return result[:limit]
 
 
@@ -76,6 +97,7 @@ def _environment(overrides: dict[str, str | None] | None) -> dict[str, str]:
         {
             "GH_PROMPT_DISABLED": "1",
             "GLAB_NO_PROMPT": "1",
+            "GLAB_ENABLE_CI_AUTOLOGIN": "false",
             "KUBECTL_EXTERNAL_DIFF": "false",
         }
     )
@@ -134,7 +156,14 @@ def run_command_tail(
                 cap = max_bytes if tail is stdout_tail else 4096
                 if len(tail) > cap:
                     del tail[:-cap]
-    process.wait()
+    if not expired:
+        try:
+            process.wait(timeout=max(0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            expired = True
+            process.kill()
+    if expired:
+        process.wait(timeout=5)
     stdout = stdout_tail.decode("utf-8", errors="replace")
     stderr = stderr_tail.decode("utf-8", errors="replace")
     return CommandResult(

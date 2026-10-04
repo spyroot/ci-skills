@@ -7,12 +7,16 @@ name: validate
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      TESTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     permissions:
       contents: read
+      statuses: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Classify changed files
         id: changes
@@ -23,22 +27,34 @@ jobs:
         run: |
           base_sha="$COMPARISON_BASE"
           if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
-            base_sha="$(git rev-parse "$GITHUB_SHA^")"
+            base_sha="$(git rev-parse "$TESTED_SHA^")"
           fi
           git cat-file -e "${base_sha}^{commit}"
 
           changed_count=0
           non_markdown_count=0
-          while IFS= read -r -d '' path; do
-            changed_count=$((changed_count + 1))
-            case "${path,,}" in
+          classify_path() {
+            case "${1,,}" in
               *.md | *.markdown) ;;
               *) non_markdown_count=$((non_markdown_count + 1)) ;;
             esac
-          done < <(
-            git diff --name-only --diff-filter=ACMR -z \
-              "${base_sha}...${GITHUB_SHA}"
-          )
+          }
+
+          changed_paths="$(mktemp)"
+          trap 'rm -f "$changed_paths"' EXIT
+          git diff --name-status --find-renames -z \
+            "${base_sha}...${TESTED_SHA}" > "$changed_paths"
+          while IFS= read -r -d '' status; do
+            IFS= read -r -d '' path || exit 1
+            changed_count=$((changed_count + 1))
+            classify_path "$path"
+            case "${status:0:1}" in
+              R | C)
+                IFS= read -r -d '' path || exit 1
+                classify_path "$path"
+                ;;
+            esac
+          done < "$changed_paths"
 
           {
             printf 'base_sha=%s\n' "$base_sha"
@@ -49,7 +65,7 @@ jobs:
       - name: Diff hygiene
         env:
           COMPARISON_BASE: ${{ steps.changes.outputs.base_sha }}
-        run: git diff --check "${COMPARISON_BASE}...${GITHUB_SHA}"
+        run: git diff --check "${COMPARISON_BASE}...${TESTED_SHA}"
 
       - name: GitHub Actions validation (actionlint 1.7.12)
         uses: >-
@@ -100,3 +116,18 @@ jobs:
       - name: Tests
         if: steps.changes.outputs.non_markdown_count != '0'
         run: pytest -q --ignore=tests/test_installed_package.py
+
+      - name: Live receipt acceptance status
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GAL19_TRUSTED_STATUS_ACTOR: ${{ vars.GAL19_TRUSTED_STATUS_ACTOR }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${TESTED_SHA}/status" \
+            > "$RUNNER_TEMP/gal19-status.json"
+          python tools/check_live_status.py \
+            --status-file "$RUNNER_TEMP/gal19-status.json" \
+            --revision "$TESTED_SHA" \
+            --repository "$GITHUB_REPOSITORY" \
+            --actor "$GAL19_TRUSTED_STATUS_ACTOR" \
+            --json

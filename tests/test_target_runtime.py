@@ -4,9 +4,23 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 
 import pytest
-from conftest import import_script_module
+from conftest import SCRIPT_ROOT, import_script_module
+
+
+def _clear_credential_env(monkeypatch):
+    for name in (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+        "GITLAB_TOKEN",
+        "GITLAB_ACCESS_TOKEN",
+        "OAUTH_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 def test_load_target_accepts_exact_nonsecret_authorities(target_file):
@@ -49,6 +63,41 @@ def test_load_target_accepts_optional_gitlab_token_file_path(tmp_path):
 
     assert target.gitlab.token_file == token_file
     assert not hasattr(target.gitlab, "token")
+
+
+def test_bind_sources_rejects_env_kubeconfig_inside_skill(
+    monkeypatch,
+    target_file,
+):
+    """An ambient KUBECONFIG cannot point back into the installed skill tree."""
+    target_mod = import_script_module("core.target")
+    credentials = import_script_module("core.credentials")
+    _clear_credential_env(monkeypatch)
+    monkeypatch.setenv("KUBECONFIG", str(SCRIPT_ROOT / "inside.kubeconfig"))
+
+    with pytest.raises(
+        target_mod.TargetError,
+        match="kubeconfig must be stored outside",
+    ):
+        credentials.bind_sources(target_mod.load_target(target_file), revision="a" * 40)
+
+
+def test_bind_sources_rejects_default_kubeconfig_inside_skill(
+    monkeypatch,
+    target_file,
+):
+    """The kubectl default path must obey the same containment rule."""
+    target_mod = import_script_module("core.target")
+    credentials = import_script_module("core.credentials")
+    _clear_credential_env(monkeypatch)
+    monkeypatch.delenv("KUBECONFIG", raising=False)
+    monkeypatch.setenv("HOME", str(SCRIPT_ROOT))
+
+    with pytest.raises(
+        target_mod.TargetError,
+        match="kubeconfig must be stored outside",
+    ):
+        credentials.bind_sources(target_mod.load_target(target_file), revision="a" * 40)
 
 
 @pytest.mark.parametrize(
@@ -167,6 +216,34 @@ def test_runtime_sanitizes_secret_like_output_and_bounds_text():
     assert len(sanitized) == 120
 
 
+def test_runtime_sanitizes_env_json_url_jwt_and_control_sequences():
+    """Trace redaction covers token shapes emitted by CI tools and JSON logs."""
+    runtime = import_script_module("core.runtime")
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1bml0In0.signature"
+    text = (
+        "CI_JOB_TOKEN=unit-ci-token\n"
+        "GITLAB_TOKEN=unit-gl-token\n"
+        'json={"password":"unit-json-password","token":"unit-json-token"}\n'
+        f"callback=https://unit-user:unit-url-secret@gitlab.example.test/path\n"
+        f"raw={jwt}\n"
+        "\x1b[31mred\x1b[0m\n"
+    )
+
+    sanitized = runtime.sanitize(text, limit=1000)
+
+    for secret in (
+        "unit-ci-token",
+        "unit-gl-token",
+        "unit-json-password",
+        "unit-json-token",
+        "unit-url-secret",
+        jwt,
+        "\x1b",
+    ):
+        assert secret not in sanitized
+    assert sanitized.count("[REDACTED]") >= 5
+
+
 def test_run_command_uses_argument_vector_and_noninteractive_environment(monkeypatch):
     """Command execution disables prompts and avoids shell expansion."""
     runtime = import_script_module("core.runtime")
@@ -219,6 +296,27 @@ def test_run_command_tail_rejects_unbounded_limits():
 
     with pytest.raises(ValueError, match="tail limits"):
         runtime.run_command_tail(["tool"], max_lines=0)
+
+
+def test_run_command_tail_times_out_after_child_closes_pipes_then_lingers():
+    """A child that closes output pipes must still be reaped by the deadline."""
+    runtime = import_script_module("core.runtime")
+    start = time.monotonic()
+
+    result = runtime.run_command_tail(
+        [
+            sys.executable,
+            "-c",
+            ("import os, time\nos.close(1)\nos.close(2)\ntime.sleep(2)\n"),
+        ],
+        timeout=0.2,
+        max_lines=5,
+        max_bytes=1000,
+    )
+    elapsed = time.monotonic() - start
+
+    assert result.returncode == 124
+    assert elapsed < 1.0
 
 
 @pytest.mark.parametrize(

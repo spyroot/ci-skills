@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -121,14 +124,26 @@ def human(data: dict[str, Any]) -> str:
 
 def emit(data: dict[str, Any], mode: str, output_dir: str | None = None) -> str:
     """Render one in-memory collection and optionally persist paired reports."""
-    pretty_json = json.dumps(data, indent=2, sort_keys=True) + "\n"
-    human_text = human(data)
+    safe = _sanitize_data(data)
+    if output_dir:
+        safe["run_id"] = uuid.uuid4().hex
+    pretty_json = json.dumps(safe, indent=2, sort_keys=True) + "\n"
+    human_text = human(safe)
     if output_dir:
         destination = Path(output_dir).expanduser()
         destination.mkdir(parents=True, exist_ok=True)
-        stem = data.get("kind", "report")
-        (destination / f"{stem}.json").write_text(pretty_json, encoding="utf-8")
-        (destination / f"{stem}.txt").write_text(human_text, encoding="utf-8")
+        stem = safe.get("kind", "report")
+        final = destination / f"{stem}-{safe['run_id']}"
+        staging = Path(tempfile.mkdtemp(prefix=f".{stem}-", dir=destination))
+        try:
+            (staging / "report.json").write_text(pretty_json, encoding="utf-8")
+            (staging / "report.txt").write_text(human_text, encoding="utf-8")
+            os.replace(staging, final)
+        except BaseException:
+            for item in staging.iterdir():
+                item.unlink()
+            staging.rmdir()
+            raise
     if mode == "json":
         return pretty_json
     if mode == "yaml":
@@ -136,5 +151,23 @@ def emit(data: dict[str, Any], mode: str, output_dir: str | None = None) -> str:
             import yaml
         except ImportError as exc:
             raise RuntimeError("PyYAML is required for --yaml") from exc
-        return yaml.safe_dump(data, sort_keys=True, allow_unicode=True)
+        return yaml.safe_dump(safe, sort_keys=True, allow_unicode=True)
     return human_text
+
+
+def _sanitize_data(value: Any, key: str = "") -> Any:
+    """Redact provider values at the final JSON, YAML, and text boundary."""
+    if key.lower().endswith(
+        ("_token", "_password", "_secret", "_private_key")
+    ) or key.lower() in {"token", "password", "secret", "api_key"}:
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {
+            sanitize(str(name), 240): _sanitize_data(item, str(name))
+            for name, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_data(item, key) for item in value]
+    if isinstance(value, str):
+        return sanitize(value, max(64000, len(value)))
+    return value

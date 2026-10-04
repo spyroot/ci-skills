@@ -109,6 +109,7 @@ def collect_live_checks(
         ),
     }
     if getattr(args, "job_url", None):
+        receipt["requested_job_url"] = args.job_url
         tasks["gitlab_job"] = (
             collect_gitlab_job,
             SimpleNamespace(job_url=args.job_url, search=None),

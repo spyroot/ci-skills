@@ -18,6 +18,7 @@ class GitHubTarget:
     host: str
     repository: str
     token_file: Path | None = None
+    required_checks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,8 @@ class Target:
     kubernetes: KubernetesTarget
     sources: object | None = field(default=None, repr=False, compare=False)
     tested_revision: str | None = None
+    skill_sha256: str | None = None
+    consumer_revision: str | None = None
 
 
 def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:
@@ -94,17 +97,27 @@ def _optional_file(table: dict[str, object], key: str, skill_root: Path) -> Path
     if key == "token_file" and not selected.is_absolute():
         raise TargetError("token_file must be an absolute path")
     path = selected.resolve()
-    if path.is_relative_to(skill_root):
-        raise TargetError(f"{key} must be stored outside the installed skill")
+    assert_external_path(path, skill_root, key)
     return path
+
+
+def assert_external_path(path: Path, skill_root: Path, key: str) -> None:
+    """Keep target and credential files out of the source or installed skill."""
+    repo_root = skill_root.parents[1]
+    checkout = (
+        repo_root / ".git"
+    ).exists() and repo_root / "skills" / skill_root.name == skill_root
+    if path.is_relative_to(skill_root) or (checkout and path.is_relative_to(repo_root)):
+        raise TargetError(
+            f"{key} must be stored outside the repository and installed skill"
+        )
 
 
 def load_target(path: str | Path) -> Target:
     """Parse one operator-selected TOML file; never search for hidden profiles."""
     source = Path(path).expanduser()
     skill_root = Path(__file__).resolve().parents[2]
-    if source.resolve().is_relative_to(skill_root):
-        raise TargetError("target file must be stored outside the installed skill")
+    assert_external_path(source.resolve(), skill_root, "target file")
     try:
         with source.open("rb") as handle:
             data = tomllib.load(handle)
@@ -115,7 +128,11 @@ def load_target(path: str | Path) -> Target:
             "target must contain github, gitlab, and kubernetes tables only"
         )
 
-    github = _table(data["github"], "github", {"host", "repository", "token_file"})
+    github = _table(
+        data["github"],
+        "github",
+        {"host", "repository", "token_file", "required_checks"},
+    )
     github_host = _string(github, "host").lower()
     if "." not in github_host or "/" in github_host or ":" in github_host:
         raise TargetError("github.host must be a full hostname")
@@ -124,6 +141,14 @@ def load_target(path: str | Path) -> Target:
         not part for part in repository.split("/")
     ):
         raise TargetError("github.repository must be owner/repository")
+    checks = github.get("required_checks", [])
+    if not isinstance(checks, list) or any(
+        not isinstance(item, str) or not item.strip() for item in checks
+    ):
+        raise TargetError("github.required_checks must be a list of nonempty names")
+    required_checks = tuple(item.strip() for item in checks)
+    if len(required_checks) != len(set(required_checks)):
+        raise TargetError("github.required_checks contains duplicates")
 
     gitlab = _table(data["gitlab"], "gitlab", {"url", "token_file"})
     gitlab_url, gitlab_host = _https_url(_string(gitlab, "url"), "gitlab.url")
@@ -138,6 +163,7 @@ def load_target(path: str | Path) -> Target:
             host=github_host,
             repository=repository,
             token_file=_optional_file(github, "token_file", skill_root),
+            required_checks=required_checks,
         ),
         gitlab=GitLabTarget(
             url=gitlab_url,

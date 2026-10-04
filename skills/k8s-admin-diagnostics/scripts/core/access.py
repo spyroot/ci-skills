@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .credentials import Sources
+from .credentials import Sources, github_token_names, verify_kubeconfig_unchanged
 from .runtime import CommandResult, error_class, run_command
+from .selector import find_cilium_daemonset, matches_selector
 from .status import BLOCKED, DRY_RUN, PASS
 from .target import Target
 
@@ -34,6 +35,7 @@ class Surface:
 
 def kubectl_argv(target: Target, *args: str) -> list[str]:
     """Bind every Kubernetes command to the supplied context and optional file."""
+    verify_kubeconfig_unchanged(target)
     command = ["kubectl"]
     sources = target.sources if isinstance(target.sources, Sources) else None
     if sources and len(sources.kubeconfig_files) == 1:
@@ -74,9 +76,7 @@ def _token_file(path: Path | None, variable: str) -> dict[str, str] | None:
 def github_env(target: Target) -> dict[str, str | None] | None:
     if isinstance(target.sources, Sources):
         return target.sources.github.environment
-    variable = (
-        "GH_TOKEN" if target.github.host == "github.com" else "GH_ENTERPRISE_TOKEN"
-    )
+    variable = github_token_names(target.github.host)[0]
     return _token_file(target.github.token_file, variable)
 
 
@@ -100,6 +100,25 @@ def _json(result: CommandResult) -> Any:
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise ValueError("invalid_json") from exc
+
+
+def valid_cilium_health(value: Any) -> bool:
+    """Recognize Cilium's HealthStatusResponse, independent of health state."""
+    if not isinstance(value, dict) or not isinstance(value.get("local"), dict):
+        return False
+    name = value["local"].get("name")
+    nodes = value.get("nodes")
+    return (
+        isinstance(name, str)
+        and bool(name)
+        and isinstance(nodes, list)
+        and all(
+            isinstance(node, dict)
+            and isinstance(node.get("name"), str)
+            and bool(node["name"])
+            for node in nodes
+        )
+    )
 
 
 def _blocked(
@@ -188,6 +207,16 @@ def github_publication_access(target: Target) -> Surface:
     base = github_access(target)
     if base.status != PASS:
         return base
+    expected = set(target.github.required_checks)
+    if not expected:
+        return _blocked(
+            "github",
+            base.target,
+            base.observed_capability,
+            "required_checks_unconfigured",
+            "Set github.required_checks in the selected nonsecret target file.",
+            base.credential_source,
+        )
     result = run_command(
         [
             "gh",
@@ -254,6 +283,15 @@ def github_publication_access(target: Target) -> Surface:
             "Configure and read back at least one required main-branch status check.",
             base.credential_source,
         )
+    if not expected.issubset(names):
+        return _blocked(
+            "github",
+            base.target,
+            base.observed_capability,
+            "required_checks_mismatch",
+            "Make the selected expected checks required on the protected main branch.",
+            base.credential_source,
+        )
     return Surface(
         "github",
         PASS,
@@ -263,7 +301,10 @@ def github_publication_access(target: Target) -> Surface:
         + ["repository_admin", "protection_read", "required_checks_read"],
         None,
         credential_source=base.credential_source,
-        details={"required_checks": names},
+        details={
+            "required_checks": names,
+            "expected_required_checks": sorted(expected),
+        },
     )
 
 
@@ -334,7 +375,7 @@ def gitlab_access(target: Target) -> Surface:
     )
 
 
-def cilium_namespace(target: Target) -> str:
+def cilium_daemonset(target: Target) -> tuple[str, dict[str, Any]]:
     data = _json(
         run_command(
             kubectl_argv(target, "get", "daemonsets", "--all-namespaces", "-o", "json"),
@@ -343,19 +384,7 @@ def cilium_namespace(target: Target) -> str:
     )
     if not isinstance(data, dict) or not isinstance(data.get("items"), list):
         raise TypeError("invalid_daemonset_list")
-    items = data["items"]
-    matches = sorted(
-        {
-            item.get("metadata", {}).get("namespace")
-            for item in items
-            if isinstance(item, dict)
-            and item.get("metadata", {}).get("name") == "cilium"
-            and item.get("metadata", {}).get("namespace")
-        }
-    )
-    if len(matches) != 1:
-        raise ValueError("cilium_namespace_not_unique")
-    return matches[0]
+    return find_cilium_daemonset(data["items"])
 
 
 def _credential_path(value: str, target: Target) -> Path:
@@ -400,6 +429,11 @@ def _auth_mechanism(user: dict[str, Any], target: Target) -> dict[str, str]:
         options.append(
             {"type": "exec-provider", "source": str(user["exec"]["command"])}
         )
+    if len(options) == 2 and {item["type"] for item in options} == {
+        "tokenFile",
+        "embedded-token",
+    }:
+        return next(item for item in options if item["type"] == "tokenFile")
     if len(options) != 1:
         raise ValueError("kubeconfig_auth_mechanism_unresolved")
     return options[0]
@@ -543,7 +577,7 @@ def kubernetes_access(target: Target) -> Surface:
             if result.returncode:
                 raise ValueError(label + "_denied")
             observed.append(label)
-        namespace = cilium_namespace(target)
+        namespace, selector = cilium_daemonset(target)
         observed.append("cilium_namespace:" + namespace)
         result = run_command(
             kubectl_argv(
@@ -567,7 +601,7 @@ def kubernetes_access(target: Target) -> Surface:
             for pod in pods["items"]
             if isinstance(pod, dict)
             and isinstance(pod.get("metadata"), dict)
-            and pod["metadata"].get("name", "").startswith("cilium-")
+            and matches_selector(pod["metadata"].get("labels") or {}, selector)
             and any(
                 condition.get("type") == "Ready" and condition.get("status") == "True"
                 for condition in pod.get("status", {}).get("conditions", [])
@@ -596,10 +630,11 @@ def kubernetes_access(target: Target) -> Surface:
         if health_result.returncode:
             raise ValueError("cilium_health_exec_failed")
         health = _json(health_result)
-        if not isinstance(health, dict):
+        if not valid_cilium_health(health):
             raise TypeError("invalid_cilium_health_response")
         observed.append("cilium_health_exec")
         details["cilium_health_pod"] = pod_name
+        verify_kubeconfig_unchanged(target)
     except (
         ValueError,
         KeyError,
@@ -650,6 +685,8 @@ def check_access(target: Target, *, publication: bool = False) -> dict[str, Any]
                 "execution_host": target.sources.execution_host,
                 "captured_at": datetime.now(timezone.utc).isoformat(),
                 "tested_revision": target.tested_revision,
+                "skill_sha256": target.skill_sha256,
+                "consumer_revision": target.consumer_revision,
                 "credential_sources": {
                     "github": target.sources.github.reference,
                     "gitlab": target.sources.gitlab.reference,

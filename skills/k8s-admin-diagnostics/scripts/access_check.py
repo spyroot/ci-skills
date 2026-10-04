@@ -20,7 +20,7 @@ def main() -> int:
         help="also verify one exact GitLab job, pipeline, runner, and trace",
     )
     args = cli.parse_args()
-    return execute(args, live_checks=True)
+    return execute(args)
 
 
 if __name__ == "__main__":

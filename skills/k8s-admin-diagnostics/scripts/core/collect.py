@@ -8,9 +8,16 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from .access import gitlab_env, glab_argv, kubectl_argv, kubernetes_env
+from .access import (
+    gitlab_env,
+    glab_argv,
+    kubectl_argv,
+    kubernetes_env,
+    valid_cilium_health,
+)
 from .report import report
 from .runtime import error_class, run_command, run_command_tail, sanitize
+from .selector import find_cilium_daemonset, matches_selector
 from .status import PASS, UNKNOWN
 from .target import Target
 
@@ -53,6 +60,44 @@ def _items(value: Any) -> list[dict[str, Any]]:
     return items
 
 
+def _validate_resource_item(source: str, item: dict[str, Any]) -> None:
+    """Reject missing fields needed to interpret a collected resource."""
+    if source in {"pvcs", "pvs"}:
+        metadata = item["metadata"]
+        if source == "pvcs" and not metadata.get("namespace"):
+            raise ValueError("invalid_pvc_response")
+        if not isinstance(item.get("spec"), dict) or not isinstance(
+            item.get("status"), dict
+        ):
+            raise ValueError("invalid_storage_response")
+        if (
+            not isinstance(item["status"].get("phase"), str)
+            or not item["status"]["phase"]
+        ):
+            raise ValueError("invalid_storage_phase")
+    elif source in {"core_events", "events_v1"}:
+        obj = item.get("regarding") or item.get("involvedObject")
+        if (
+            not isinstance(obj, dict)
+            or not isinstance(obj.get("kind"), str)
+            or not obj.get("name")
+        ):
+            raise ValueError("invalid_event_object")
+        series = item.get("series") or {}
+        if not isinstance(series, dict):
+            raise ValueError("invalid_event_series")
+        timestamps = (
+            item.get("eventTime"),
+            item.get("firstTimestamp"),
+            item.get("lastTimestamp"),
+            item.get("deprecatedLastTimestamp"),
+            item["metadata"].get("creationTimestamp"),
+            series.get("lastObservedTime"),
+        )
+        if not any(isinstance(value, str) and value for value in timestamps):
+            raise ValueError("invalid_event_timestamp")
+
+
 def _meta(item: dict[str, Any]) -> dict[str, Any]:
     return item.get("metadata") or {}
 
@@ -62,34 +107,6 @@ def _search(value: dict[str, Any], needle: str | None) -> bool:
         not needle
         or needle.casefold() in json.dumps(value, ensure_ascii=False).casefold()
     )
-
-
-def _matches_selector(labels: dict[str, str], selector: dict[str, Any]) -> bool:
-    """Match a DaemonSet's declared Pod selector without guessing labels."""
-    if not selector:
-        return False
-    if any(
-        labels.get(key) != value
-        for key, value in selector.get("matchLabels", {}).items()
-    ):
-        return False
-    for expression in selector.get("matchExpressions", []):
-        key, operator, values = (
-            expression.get("key"),
-            expression.get("operator"),
-            expression.get("values", []),
-        )
-        if operator == "In" and labels.get(key) not in values:
-            return False
-        if operator == "NotIn" and labels.get(key) in values:
-            return False
-        if operator == "Exists" and key not in labels:
-            return False
-        if operator == "DoesNotExist" and key in labels:
-            return False
-        if operator not in {"In", "NotIn", "Exists", "DoesNotExist"}:
-            return False
-    return True
 
 
 def _batch(
@@ -118,6 +135,8 @@ def _batch(
             value, error = future.result()
             try:
                 data[key] = _items(value) if not error else []
+                for item in data[key]:
+                    _validate_resource_item(key, item)
             except (ValueError, TypeError) as exc:
                 data[key] = []
                 error = str(exc)
@@ -155,14 +174,23 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
                 }
             )
     controller_kinds = ("deployments", "statefulsets", "daemonsets")
+    singular_kinds = {
+        "deployments": "Deployment",
+        "statefulsets": "StatefulSet",
+        "daemonsets": "DaemonSet",
+    }
     controller_items = {
-        (_meta(item).get("namespace"), _meta(item).get("name")): item
+        (
+            singular_kinds[kind],
+            _meta(item).get("namespace"),
+            _meta(item).get("name"),
+        ): item
         for kind in controller_kinds
         for item in data.get(kind, [])
     }
     replica_owners = {
         (_meta(item).get("namespace"), _meta(item).get("name")): [
-            ref.get("name")
+            ("Deployment", ref.get("name"))
             for ref in (_meta(item).get("ownerReferences") or [])
             if ref.get("kind") == "Deployment"
         ]
@@ -173,7 +201,11 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
         meta = _meta(pod)
         namespace = meta.get("namespace")
         owners = meta.get("ownerReferences") or []
-        owner_names = [ref.get("name") for ref in owners if isinstance(ref, dict)]
+        owner_names = [
+            (ref.get("kind"), ref.get("name"))
+            for ref in owners
+            if isinstance(ref, dict)
+        ]
         for ref in owners:
             if ref.get("kind") == "ReplicaSet":
                 owner_names += replica_owners.get((namespace, ref.get("name")), [])
@@ -185,7 +217,8 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
                         "pod": meta.get("name"),
                         "pod_uid": meta.get("uid"),
                         "node": pod.get("spec", {}).get("nodeName"),
-                        "owners": owner_names,
+                        "owners": [name for _, name in owner_names if name],
+                        "owner_refs": owner_names,
                         "phase": pod.get("status", {}).get("phase"),
                     }
                 )
@@ -215,7 +248,12 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
         if args.phase != "all" and args.phase not in (phase, pv_phase):
             continue
         related_controllers = sorted(
-            {owner for pod in pods for owner in pod["owners"] if owner}
+            {
+                owner
+                for pod in pods
+                for owner in pod["owner_refs"]
+                if owner[0] and owner[1]
+            }
         )
         row = {
             "resource_kind": "PersistentVolumeClaim",
@@ -233,16 +271,21 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
             "csi_driver": pv.get("spec", {}).get("csi", {}).get("driver"),
             "controllers": [
                 {
+                    "kind": kind,
                     "name": owner,
-                    "desired": controller_items[(namespace, owner)]
+                    "desired": controller_items[(kind, namespace, owner)]
+                    .get("status", {})
+                    .get("desiredNumberScheduled")
+                    if kind == "DaemonSet"
+                    else controller_items[(kind, namespace, owner)]
                     .get("spec", {})
                     .get("replicas"),
-                    "ready": controller_items[(namespace, owner)]
+                    "ready": controller_items[(kind, namespace, owner)]
                     .get("status", {})
-                    .get("readyReplicas"),
+                    .get("numberReady" if kind == "DaemonSet" else "readyReplicas"),
                 }
-                for owner in related_controllers
-                if (namespace, owner) in controller_items
+                for kind, owner in related_controllers
+                if (kind, namespace, owner) in controller_items
             ],
         }
         if _search(row, args.search):
@@ -368,7 +411,7 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
             except ValueError:
                 errors.append({"source": source, "reason": "invalid_event_timestamp"})
                 continue
-            if event_time < start or event_time > end:
+            if first_time > end or event_time < start:
                 continue
             namespace = meta.get("namespace") or obj.get("namespace")
             if args.namespace != "all" and namespace != args.namespace:
@@ -393,7 +436,10 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
                 "message": sanitize(
                     event.get("note") or event.get("message") or "", 1000
                 ),
-                "count": event.get("deprecatedCount") or event.get("count") or 1,
+                "count": (event.get("series") or {}).get("count")
+                or event.get("deprecatedCount")
+                or event.get("count")
+                or 1,
                 "source": source,
             }
             key = (row["timestamp"], row["object_uid"], row["reason"], row["message"])
@@ -439,23 +485,16 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
         for item in data.get("daemonsets", [])
         if _meta(item).get("name", "").startswith("cilium")
     ]
-    namespaces = sorted(
-        {
-            _meta(item).get("namespace")
-            for item in daemonsets
-            if _meta(item).get("namespace")
-        }
-    )
-    if args.namespace == "auto":
-        if len(namespaces) != 1:
-            errors.append(
-                {"source": "daemonsets", "reason": "cilium_namespace_not_unique"}
-            )
-            namespace = None
-        else:
-            namespace = namespaces[0]
-    else:
-        namespace = args.namespace
+    try:
+        discovered_namespace, selector = find_cilium_daemonset(
+            data.get("daemonsets", [])
+        )
+    except ValueError as exc:
+        errors.append({"source": "daemonsets", "reason": str(exc)})
+        discovered_namespace, selector = None, {}
+    namespace = discovered_namespace if args.namespace == "auto" else args.namespace
+    if discovered_namespace and namespace != discovered_namespace:
+        errors.append({"source": "daemonsets", "reason": "cilium_daemonset_missing"})
     selected = [
         item
         for item in daemonsets
@@ -464,14 +503,11 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
     ]
     if len(selected) != 1:
         errors.append({"source": "daemonsets", "reason": "cilium_daemonset_missing"})
-    selector = selected[0].get("spec", {}).get("selector", {}) if selected else {}
-    if selected and not selector:
-        errors.append({"source": "daemonsets", "reason": "cilium_selector_missing"})
     agent_pods = [
         item
         for item in data.get("pods", [])
         if _meta(item).get("namespace") == namespace
-        and _matches_selector(_meta(item).get("labels") or {}, selector)
+        and matches_selector(_meta(item).get("labels") or {}, selector)
         and (not args.node or item.get("spec", {}).get("nodeName") == args.node)
     ]
     rows: list[dict[str, Any]] = []
@@ -524,8 +560,12 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
             row["reason"] = error_class(result)
             return row
         try:
-            row["health"] = json.loads(result.stdout)
-            row["status"] = PASS
+            health_response = json.loads(result.stdout)
+            if valid_cilium_health(health_response):
+                row["health"] = health_response
+                row["status"] = PASS
+            else:
+                row["reason"] = "invalid_health_response"
         except json.JSONDecodeError:
             row["reason"] = "invalid_health_json"
         return row
@@ -597,7 +637,15 @@ def collect_gitlab_job(target: Target, args: Any) -> dict[str, Any]:
     encoded = quote(project, safe="")
     base = f"projects/{encoded}"
     job, error = _read_json(glab_argv(target, f"{base}/jobs/{job_id}"), env=credential)
-    if error or not isinstance(job, dict) or str(job.get("id")) != job_id:
+    if (
+        error
+        or not isinstance(job, dict)
+        or str(job.get("id")) != job_id
+        or not isinstance(job.get("name"), str)
+        or not job["name"]
+        or not isinstance(job.get("status"), str)
+        or not job["status"]
+    ):
         return report(
             "gitlab_job",
             target.gitlab.url,
