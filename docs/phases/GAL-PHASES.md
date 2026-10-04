@@ -74,7 +74,7 @@ own design, steps and gates.
 
 Checked on 2026-10-04. PR #16 merged the root tools, Kubernetes diagnostics,
 Event API benchmark, GitLab operations and live receipts from PRs #2, #7, #8,
-#9, #13 and #14. Those source PRs are closed. PR #15 merged the GAL-TESTS
+PR #9, PR #13 and PR #14. Those source PRs are closed. PR #15 merged the GAL-TESTS
 phase entry. The package delivery described below remains proposed.
 
 ## One installable skill
