@@ -53,9 +53,7 @@ def test_load_target_accepts_optional_gitlab_token_file_path(tmp_path):
     assert not hasattr(target.gitlab, "token")
 
 
-def test_ambient_kubeconfig_cannot_point_into_installed_skill(
-    monkeypatch, target_file
-):
+def test_ambient_kubeconfig_cannot_point_into_installed_skill(monkeypatch, target_file):
     """An environment override cannot bypass the declared file boundary."""
     target_mod = import_script_module("core.target")
     credentials = import_script_module("core.credentials")
@@ -66,9 +64,7 @@ def test_ambient_kubeconfig_cannot_point_into_installed_skill(
         credentials._kubernetes_source(target_mod.load_target(target_file))
 
 
-def test_default_kubeconfig_cannot_point_into_installed_skill(
-    monkeypatch, target_file
-):
+def test_default_kubeconfig_cannot_point_into_installed_skill(monkeypatch, target_file):
     """The kubectl default obeys the same selected-file boundary."""
     target_mod = import_script_module("core.target")
     credentials = import_script_module("core.credentials")

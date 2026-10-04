@@ -83,9 +83,7 @@ def redact(value: str) -> str:
     captured output.
     """
     result = _ANSI_ESCAPE.sub("", value).replace("\x1b", "")
-    result = _URL_USERINFO.sub(
-        lambda match: match.group(1) + "[REDACTED]@", result
-    )
+    result = _URL_USERINFO.sub(lambda match: match.group(1) + "[REDACTED]@", result)
     for pattern in (*_QUOTED_PATTERNS, *_SECRET_PATTERNS):
         result = pattern.sub(
             lambda match: (

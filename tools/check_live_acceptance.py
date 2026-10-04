@@ -246,9 +246,11 @@ def _check_receipt(
         if observed_surface.get("status") != "PASS":
             problems.append(f"{name}:surface_not_pass:{surface}")
         source = sources.get(surface)
-        if not isinstance(source, str) or not source or observed_surface.get(
-            "credential_source"
-        ) != source:
+        if (
+            not isinstance(source, str)
+            or not source
+            or observed_surface.get("credential_source") != source
+        ):
             problems.append(f"{name}:credential_source_mismatch:{surface}")
         target = expected["targets"].get(surface)
         if surface == "kubernetes":
@@ -284,12 +286,16 @@ def _check_receipt(
         readback = job.get("job_readback")
         if job.get("job_url") != expected.get("job_url"):
             problems.append(f"{name}:job_target_mismatch")
-        if not isinstance(readback, dict) or any(
-            type(readback.get(field)) is not int or readback[field] <= 0
-            for field in ("job_id", "pipeline_id", "runner_id")
-        ) or (
-            type(_mapping(readback).get("trace_line_count")) is not int
-            or readback["trace_line_count"] < 0
+        if (
+            not isinstance(readback, dict)
+            or any(
+                type(readback.get(field)) is not int or readback[field] <= 0
+                for field in ("job_id", "pipeline_id", "runner_id")
+            )
+            or (
+                type(_mapping(readback).get("trace_line_count")) is not int
+                or readback["trace_line_count"] < 0
+            )
         ):
             problems.append(f"{name}:job_readback_missing")
     if "ceph_cluster" in expected.get("required_live_checks", ()):
@@ -302,9 +308,7 @@ def _check_receipt(
     # The required GitHub checks the publication gate read back.
     declared = set(expected.get("required_checks") or [])
     observed_checks = set(
-        _mapping(_mapping(surfaces.get("github")).get("details")).get(
-            "required_checks"
-        )
+        _mapping(_mapping(surfaces.get("github")).get("details")).get("required_checks")
         or []
     )
     for missing in sorted(declared - observed_checks):

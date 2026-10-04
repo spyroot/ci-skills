@@ -108,9 +108,7 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
     if not paths:
         raise TargetError("kubeconfig_source_empty")
     for path in paths:
-        assert_external_path(
-            path, Path(__file__).resolve().parents[2], "kubeconfig"
-        )
+        assert_external_path(path, Path(__file__).resolve().parents[2], "kubeconfig")
         try:
             if not path.is_file() or not path.stat().st_size:
                 raise TargetError(f"kubeconfig_unavailable:{path}")

@@ -164,13 +164,13 @@ def test_requested_gitlab_job_requires_exact_target_and_all_readbacks():
 
     assert _evaluate(receipt, expected)["status"] == "PASS"
     receipt["live_checks"]["gitlab_job"]["job_readback"].pop("runner_id")
-    assert "declared.json:job_readback_missing" in _evaluate(receipt, expected)[
-        "problems"
-    ]
+    assert (
+        "declared.json:job_readback_missing" in _evaluate(receipt, expected)["problems"]
+    )
     receipt["live_checks"]["gitlab_job"]["job_url"] = "https://elsewhere.test"
-    assert "declared.json:job_target_mismatch" in _evaluate(receipt, expected)[
-        "problems"
-    ]
+    assert (
+        "declared.json:job_target_mismatch" in _evaluate(receipt, expected)["problems"]
+    )
 
 
 @pytest.mark.parametrize(
