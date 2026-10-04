@@ -75,11 +75,16 @@ jobs:
           parsed = urlparse(source['repository'])
           repository = parsed.path.strip('/')
           revision = source['revision']
-          if parsed.scheme != 'https' or parsed.netloc != 'github.com' or repository != 'spyroot/standards':
-              raise SystemExit('Standards binding repository is not the approved private repository')
+          if (
+              parsed.scheme != 'https'
+              or parsed.netloc != 'github.com'
+              or repository != 'spyroot/standards'
+          ):
+              raise SystemExit('Standards source must be spyroot/standards')
           if not re.fullmatch(r'[0-9a-f]{40}', revision):
               raise SystemExit('Standards revision must be an exact commit')
-          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+          output_file = os.environ['GITHUB_OUTPUT']
+          with open(output_file, 'a', encoding='utf-8') as output:
               output.write(f'revision={revision}\n')
           PY
 
@@ -88,7 +93,7 @@ jobs:
           STANDARDS_READ_TOKEN: ${{ secrets.STANDARDS_READ_TOKEN }}
         run: |
           if [[ -z "$STANDARDS_READ_TOKEN" ]]; then
-            echo '::error::STANDARDS_READ_TOKEN must read the pinned Standards repository'
+            echo '::error::STANDARDS_READ_TOKEN is required'
             exit 1
           fi
 
