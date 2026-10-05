@@ -6,18 +6,18 @@ configured binding and returns evidence that an operator or agent can inspect.
 
 ## Current capabilities
 
-- [Check GitLab access](ci-skills/scripts/gitlab_access.py): identify
+- [Check GitLab access](ci-skills/bin/gitlab_access.py): identify
   the effective credential source and read back the selected project or group.
-- [Inspect pipelines](ci-skills/scripts/gitlab_pipeline.py) and
-  [jobs](ci-skills/scripts/gitlab_job.py): read status, stage progress,
+- [Inspect pipelines](ci-skills/bin/gitlab_pipeline.py) and
+  [jobs](ci-skills/bin/gitlab_job.py): read status, stage progress,
   runner details, and bounded traces; search within a job trace.
-- [Manage milestones](ci-skills/scripts/gitlab_milestone.py): create or
+- [Manage milestones](ci-skills/bin/gitlab_milestone.py): create or
   update a milestone's title, description, dates, and state.
-- [Open bug issues](ci-skills/scripts/gitlab_issue.py): create or reuse
+- [Open bug issues](ci-skills/bin/gitlab_issue.py): create or reuse
   an issue with caller-supplied labels and an optional milestone.
-- [Write wiki pages](ci-skills/scripts/gitlab_wiki.py): create or update
+- [Write wiki pages](ci-skills/bin/gitlab_wiki.py): create or update
   a page from supplied content, including documentation links.
-- [Manage runners](ci-skills/scripts/gitlab_runner.py): assign an
+- [Manage runners](ci-skills/bin/gitlab_runner.py): assign an
   existing runner or create a runner record with runner tags.
 - [Diagnose Kubernetes and OpenShift](ci-skills/scripts/): inspect
   storage, events, Cilium, Ceph, and node MTU consistency.
@@ -60,20 +60,20 @@ may also provide visibility.
 
 ### Current mapping
 
-- **Visibility:** [Access checks](ci-skills/scripts/access_check.py),
-  [Kubernetes events](ci-skills/scripts/event_trace.py), and
-  [node MTU consistency](ci-skills/scripts/k8s_verify_mtu_consistency.py).
-- **CI Combo:** [Pipeline inspection](ci-skills/scripts/gitlab_pipeline.py)
-  and [job and trace inspection](ci-skills/scripts/gitlab_job.py)
+- **Visibility:** [Access checks](ci-skills/bin/access_check.py),
+  [Kubernetes events](ci-skills/bin/event_trace.py), and
+  [node MTU consistency](ci-skills/bin/k8s_verify_mtu_consistency.py).
+- **CI Combo:** [Pipeline inspection](ci-skills/bin/gitlab_pipeline.py)
+  and [job and trace inspection](ci-skills/bin/gitlab_job.py)
   combine related CI records. [ci-api](ci-skills/bin/ci-api) supplies
   bounded API reads for such workflows.
-- **Generic Combo:** [Ceph cluster diagnostics](ci-skills/scripts/ceph_cluster.py)
+- **Generic Combo:** [Ceph cluster diagnostics](ci-skills/bin/ceph_cluster.py)
   combines cluster health, OSD hierarchy, placement groups, and Pods;
-  [Ceph kernel diagnostics](ci-skills/scripts/ceph_kernel.py) adds
+  [Ceph kernel diagnostics](ci-skills/bin/ceph_kernel.py) adds
   selected node events.
 - **Toolchain Combination:** [ci-binary-build](ci-skills/bin/ci-binary-build)
   plans an exact-commit OpenShift build, and
-  [gitlab_runner.py](ci-skills/scripts/gitlab_runner.py) plans and
+  [gitlab_runner.py](ci-skills/bin/gitlab_runner.py) plans and
   applies runner creation or assignment. The complete example workflows
   above remain proposed.
 
