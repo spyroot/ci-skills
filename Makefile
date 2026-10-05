@@ -30,7 +30,7 @@ ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
 MAKEFLAGS += --jobs=$(JOBS)
 endif
 TEST ?= bats --jobs $(JOBS) tests
-CONDA_ENV ?= galileo
+CONDA_ENV ?= ci-skills
 XARGS ?= xargs
 
 .NOTPARALLEL: bless install install-bless install-hooks toolchain \
@@ -96,7 +96,7 @@ pretty-python:
 	@set -Eeuo pipefail; \
 	source "$(REPO_ROOT)/automation/lib/core/exit_codes.bash"; \
 	source "$(REPO_ROOT)/lib/bash/toolchain/pretty.bash"; \
-	inventory="$$(mktemp -t galileo-pretty-python.XXXXXX)"; \
+	inventory="$$(mktemp -t ci-pretty-python.XXXXXX)"; \
 	trap 'rm -f -- "$$inventory"' EXIT; \
 	CI_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" '*.py'; \
 	if [[ ! -s "$$inventory" ]]; then \
@@ -128,7 +128,7 @@ pretty-shell:
 	@set -Eeuo pipefail; \
 	source "$(REPO_ROOT)/automation/lib/core/exit_codes.bash"; \
 	source "$(REPO_ROOT)/lib/bash/toolchain/pretty.bash"; \
-	inventory="$$(mktemp -t galileo-pretty-shell.XXXXXX)"; \
+	inventory="$$(mktemp -t ci-pretty-shell.XXXXXX)"; \
 	trap 'rm -f -- "$$inventory"' EXIT; \
 	CI_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" \
 		'*.sh' '*.bash'; \
