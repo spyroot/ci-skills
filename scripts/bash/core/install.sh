@@ -3,4 +3,4 @@ set -Eeuo pipefail
 
 # shellcheck source=lib/bash/toolchain/install.bash
 source "${BASH_SOURCE[0]%/*}/../../lib/bash/toolchain/install.bash"
-galileo_toolchain_main tools "$@"
+CI_toolchain_main tools "$@"

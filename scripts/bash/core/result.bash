@@ -24,11 +24,11 @@ _ci_result_valid_var_name() {
 # Exit classes: usage, failure, or success.
 # Side effects: appends to the named array; idempotency is caller-owned.
 ci_result_add() {
-	(($# == 4 || $# == 5)) || return "${GALILEO_EXIT_USAGE}"
+	(($# == 4 || $# == 5)) || return "${CI_EXIT_USAGE}"
 	local array_name="$1" check="$2" status="$3" detail="$4" count="${5:-}"
 	local item
-	_galileo_result_valid_var_name "${array_name}" ||
-		return "${GALILEO_EXIT_USAGE}"
+	_CI_result_valid_var_name "${array_name}" ||
+		return "${CI_EXIT_USAGE}"
 	if [[ -n "${count}" ]]; then
 		item="$(
 			jq -nc \
@@ -98,9 +98,9 @@ ci_result_text_is_secret_like() {
 # Arguments: captured stderr path.
 # Stdout: one stable, non-secret classification.
 ci_result_classify_provider_error() {
-	(($# == 1)) || return "${GALILEO_EXIT_USAGE}"
-	[[ -r "$1" ]] || return "${GALILEO_EXIT_MISSING_FILE}"
-	if _galileo_result_contains_secret_like_input <"$1"; then
+	(($# == 1)) || return "${CI_EXIT_USAGE}"
+	[[ -r "$1" ]] || return "${CI_EXIT_MISSING_FILE}"
+	if _CI_result_contains_secret_like_input <"$1"; then
 		printf 'redacted-sensitive-output\n'
 	elif grep -Eiq 'forbidden|unauthori[sz]ed|permission denied' "$1"; then
 		printf 'authorization\n'
@@ -122,16 +122,16 @@ ci_result_classify_provider_error() {
 	fi
 }
 
-galileo_result_add_evidence() {
-	(($# == 5)) || return "${GALILEO_EXIT_USAGE}"
+CI_result_add_evidence() {
+	(($# == 5)) || return "${CI_EXIT_USAGE}"
 	local array_name="$1" check="$2" status="$3" detail="$4" path="$5"
 	local item
-	_galileo_result_valid_var_name "${array_name}" ||
-		return "${GALILEO_EXIT_USAGE}"
-	[[ -r "${path}" ]] || return "${GALILEO_EXIT_MISSING_FILE}"
-	if printf '%s\n' "${detail}" | _galileo_result_contains_secret_like_input ||
-		_galileo_result_contains_secret_like_input <"${path}"; then
-		return "${GALILEO_EXIT_BLOCKED}"
+	_CI_result_valid_var_name "${array_name}" ||
+		return "${CI_EXIT_USAGE}"
+	[[ -r "${path}" ]] || return "${CI_EXIT_MISSING_FILE}"
+	if printf '%s\n' "${detail}" | _CI_result_contains_secret_like_input ||
+		_CI_result_contains_secret_like_input <"${path}"; then
+		return "${CI_EXIT_BLOCKED}"
 	fi
 	item="$(
 		jq -nc \
@@ -144,15 +144,15 @@ galileo_result_add_evidence() {
 			    gsub("\\x1B\\[[0-?]*[ -/]*[@-~]"; "") |
 			    gsub("[\\x00-\\x08\\x0B-\\x1F\\x7F]"; "") |
 			    split("\n") | map(select(test("\\S"))))}'
-	)" || return "${GALILEO_EXIT_FAILURE}"
+	)" || return "${CI_EXIT_FAILURE}"
 	eval "${array_name}+=(\"\${item}\")"
 }
 
-_galileo_result_stream() {
-	(($# == 1)) || return "${GALILEO_EXIT_USAGE}"
+_CI_result_stream() {
+	(($# == 1)) || return "${CI_EXIT_USAGE}"
 	local array_name="$1" count item index
-	_galileo_result_valid_var_name "${array_name}" ||
-		return "${GALILEO_EXIT_USAGE}"
+	_CI_result_valid_var_name "${array_name}" ||
+		return "${CI_EXIT_USAGE}"
 	eval "count=\${#${array_name}[@]}"
 	for ((index = 0; index < count; index++)); do
 		eval "item=\${${array_name}[${index}]}"
@@ -165,10 +165,10 @@ _galileo_result_stream() {
 # Environment inputs: jq on PATH.
 # Stdout: JSON result object.
 # Side effects/idempotency/cleanup: read-only and repeatable.
-galileo_result_render_json() {
-	(($# == 3)) || return "${GALILEO_EXIT_USAGE}"
+CI_result_render_json() {
+	(($# == 3)) || return "${CI_EXIT_USAGE}"
 	local array_name="$1" schema="$2" kind="$3"
-	_galileo_result_stream "${array_name}" |
+	_CI_result_stream "${array_name}" |
 		jq -s --arg schema "${schema}" --arg kind "${kind}" '{
 			"$schema": $schema,
 			apiVersion: "internal.spyroot.dev/v1alpha1",
@@ -181,12 +181,12 @@ galileo_result_render_json() {
 		}'
 }
 
-galileo_result_render_yaml() {
-	galileo_result_render_json "$@" | yq eval -P -
+CI_result_render_yaml() {
+	CI_result_render_json "$@" | yq eval -P -
 }
 
-galileo_result_render_text() {
-	galileo_result_render_json "$@" |
+CI_result_render_text() {
+	CI_result_render_json "$@" |
 		jq -r '.checks[] |
 			if has("count") then
 				"\(.status)\t\(.check)\tcount=\(.count)\t\(.detail)"
@@ -206,27 +206,27 @@ galileo_result_render_text() {
 # Every result-producing library reached for the same three-way case. One copy
 # means a fourth output mode, or a change to how an unknown one is refused,
 # lands once instead of in every caller.
-galileo_result_render() {
-	(($# == 4)) || return "${GALILEO_EXIT_USAGE}"
+CI_result_render() {
+	(($# == 4)) || return "${CI_EXIT_USAGE}"
 	local array_name="$1" schema="$2" kind="$3" output="$4"
 	case "${output}" in
-	json) galileo_result_render_json "${array_name}" "${schema}" "${kind}" ;;
-	yaml) galileo_result_render_yaml "${array_name}" "${schema}" "${kind}" ;;
-	text) galileo_result_render_text "${array_name}" "${schema}" "${kind}" ;;
+	json) CI_result_render_json "${array_name}" "${schema}" "${kind}" ;;
+	yaml) CI_result_render_yaml "${array_name}" "${schema}" "${kind}" ;;
+	text) CI_result_render_text "${array_name}" "${schema}" "${kind}" ;;
 	*)
 		printf 'BLOCKER: unknown output mode: %s\n' "${output}" >&2
-		return "${GALILEO_EXIT_USAGE}"
+		return "${CI_EXIT_USAGE}"
 		;;
 	esac
 }
 
-galileo_result_exit_status() {
-	if galileo_result_render_json "$@" |
+CI_result_exit_status() {
+	if CI_result_render_json "$@" |
 		jq -e '([.checks[] | select(.status != "READY")] | length) == 0' \
 			>/dev/null; then
-		return "${GALILEO_EXIT_OK}"
+		return "${CI_EXIT_OK}"
 	fi
-	return "${GALILEO_EXIT_BLOCKED}"
+	return "${CI_EXIT_BLOCKED}"
 }
 
 # Summary: Read one value from a YAML index without treating stale files as live proof.
@@ -234,8 +234,8 @@ galileo_result_exit_status() {
 # Environment inputs: yq on PATH.
 # Stdout: resolved string or empty string.
 # Exit classes: always success; callers decide whether the empty value blocks.
-galileo_index_value() {
-	(($# == 2)) || return "${GALILEO_EXIT_USAGE}"
+CI_index_value() {
+	(($# == 2)) || return "${CI_EXIT_USAGE}"
 	local index_file="$1" query="$2" value=''
 	if command -v yq >/dev/null 2>&1 && [[ -r "${index_file}" ]]; then
 		value="$(
@@ -252,23 +252,23 @@ galileo_index_value() {
 # Environment inputs: named env var and yq on PATH.
 # Exit classes: usage, missing value, assignment failure, or success.
 ci_config_value() {
-	(($# == 5)) || return "${GALILEO_EXIT_USAGE}"
+	(($# == 5)) || return "${CI_EXIT_USAGE}"
 	local array_name="$1" index_file="$2" env_name="$3" query="$4" output_var="$5"
-	local _galileo_config_resolved_value
-	_galileo_result_valid_var_name "${output_var}" ||
+	local _CI_config_resolved_value
+	_CI_result_valid_var_name "${output_var}" ||
 		return "${CI_EXIT_USAGE}"
-	_galileo_config_resolved_value="${!env_name:-}"
-	if [[ -z "${_galileo_config_resolved_value}" ]]; then
-		_galileo_config_resolved_value="$(
-			galileo_index_value "${index_file}" "${query}"
+	_CI_config_resolved_value="${!env_name:-}"
+	if [[ -z "${_CI_config_resolved_value}" ]]; then
+		_CI_config_resolved_value="$(
+			CI_index_value "${index_file}" "${query}"
 		)"
 	fi
-	if [[ -z "${_galileo_config_resolved_value}" ]]; then
-		galileo_result_add "${array_name}" "config.${env_name}" \
+	if [[ -z "${_CI_config_resolved_value}" ]]; then
+		CI_result_add "${array_name}" "config.${env_name}" \
 			"MISSING_VALUE" "${env_name} is missing from the environment and supplied configuration"
 		return "${CI_EXIT_MISSING_VALUE}"
 	fi
-	printf -v "${output_var}" '%s' "${_galileo_config_resolved_value}" ||
+	printf -v "${output_var}" '%s' "${_CI_config_resolved_value}" ||
 		return "${CI_EXIT_FAILURE}"
 }
 
@@ -282,7 +282,7 @@ ci_need_tools() {
 	shift
 	for tool in "$@"; do
 		if ! command -v "${tool}" >/dev/null 2>&1; then
-			galileo_result_add "${array_name}" "tool.${tool}" \
+			CI_result_add "${array_name}" "tool.${tool}" \
 				"MISSING_FILE" "${tool} is not on PATH"
 			missing=1
 		fi

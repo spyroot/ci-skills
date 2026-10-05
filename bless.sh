@@ -58,11 +58,11 @@ main() {
 		--dry-run) dry_run=true ;;
 		--help)
 			usage
-			return "${GALILEO_EXIT_OK}"
+			return "${CI_EXIT_OK}"
 			;;
 		*)
 			usage >&2
-			return "${GALILEO_EXIT_USAGE}"
+			return "${CI_EXIT_USAGE}"
 			;;
 		esac
 		shift
@@ -92,25 +92,25 @@ main() {
 	lint_staged_shell "${REPO_ROOT}" "${dry_run}" || return $?
 	# Whole tree, not the staged set: a cycle is a property of the graph, and
 	# the commit that closes one usually touches only one of its edges.
-	if galileo_source_graph_cycles "${REPO_ROOT}"; then
+	if CI_source_graph_cycles "${REPO_ROOT}"; then
 		printf 'Source graph: acyclic\n'
 	else
 		printf 'BLOCKER: the library source graph has a cycle\n' >&2
-		return "${GALILEO_EXIT_INVALID_DATA}"
+		return "${CI_EXIT_INVALID_DATA}"
 	fi
 	# Bash has one namespace, so the file is the only separation there is: two
 	# files defining one name is whichever was sourced last, silently.
-	if galileo_source_graph_duplicate_functions "${REPO_ROOT}"; then
+	if CI_source_graph_duplicate_functions "${REPO_ROOT}"; then
 		printf 'Source graph: every sourced function name is defined once\n'
 	else
 		printf 'BLOCKER: a function name is defined in more than one library file\n' >&2
-		return "${GALILEO_EXIT_INVALID_DATA}"
+		return "${CI_EXIT_INVALID_DATA}"
 	fi
-	if galileo_source_graph_tests_source_two_scripts "${REPO_ROOT}"; then
+	if CI_source_graph_tests_source_two_scripts "${REPO_ROOT}"; then
 		printf 'Source graph: no test sources two executables\n'
 	else
 		printf 'BLOCKER: a test sources two executables into one shell\n' >&2
-		return "${GALILEO_EXIT_INVALID_DATA}"
+		return "${CI_EXIT_INVALID_DATA}"
 	fi
 
 	lint_staged_script_interface "${REPO_ROOT}" "${dry_run}" || return $?

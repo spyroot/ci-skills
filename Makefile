@@ -23,7 +23,7 @@ K8S_TEST_SCRIPT := scripts/ci/k8s-test.sh
 # Preserve JOBS as a legacy way to supply the requested maximum.
 REQUESTED_JOBS := $(JOBS)
 MAX_JOBS ?= $(if $(REQUESTED_JOBS),$(REQUESTED_JOBS),4)
-override JOBS := $(shell bash -c 'source "$$1"; galileo_toolchain_job_count "$$2"' \
+override JOBS := $(shell bash -c 'source "$$1"; CI_toolchain_job_count "$$2"' \
 	_ "$(REPO_ROOT)/lib/bash/toolchain/jobs.bash" "$(MAX_JOBS)")
 export MAX_JOBS JOBS
 ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
@@ -76,7 +76,7 @@ pretty-markdown:
 	source "$(REPO_ROOT)/lib/bash/toolchain/pretty.bash"; \
 	inventory="$$(mktemp -t galileo-pretty-markdown.XXXXXX)"; \
 	trap 'rm -f -- "$$inventory"' EXIT; \
-	galileo_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" \
+	CI_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" \
 		'*.md' '*.markdown'; \
 	if [[ ! -s "$$inventory" ]]; then \
 		printf '%s\n' 'Markdown pretty: not_applicable'; \
@@ -86,7 +86,7 @@ pretty-markdown:
 		! command -v "$(XARGS)" >/dev/null; then \
 		printf '%s\n' 'BLOCKER: Markdown pretty tools are missing.' \
 			'SAFE_NEXT_STEP: run make install toolchain, then rerun make pretty.' >&2; \
-		exit "$$GALILEO_EXIT_BLOCKED"; \
+		exit "$$CI_EXIT_BLOCKED"; \
 	fi; \
 	cd "$(REPO_ROOT)"; \
 	$(XARGS) -0 markdownlint-cli2 --config .markdownlint-cli2.yaml --fix -- \
@@ -98,23 +98,23 @@ pretty-python:
 	source "$(REPO_ROOT)/lib/bash/toolchain/pretty.bash"; \
 	inventory="$$(mktemp -t galileo-pretty-python.XXXXXX)"; \
 	trap 'rm -f -- "$$inventory"' EXIT; \
-	galileo_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" '*.py'; \
+	CI_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" '*.py'; \
 	if [[ ! -s "$$inventory" ]]; then \
 		printf '%s\n' 'Python pretty: not_applicable'; \
 		exit 0; \
 	fi; \
-	conda_bin="$$(bash -c 'source "$$1"; galileo_find_conda' \
+	conda_bin="$$(bash -c 'source "$$1"; CI_find_conda' \
 		_ "$(REPO_ROOT)/automation/lib/core/conda.bash")"; \
 	if [[ -z "$$conda_bin" ]]; then \
 		printf '%s\n' 'BLOCKER: Python pretty requires Conda.' \
 			'SAFE_NEXT_STEP: run make install conda, then rerun make pretty.' >&2; \
-		exit "$$GALILEO_EXIT_BLOCKED"; \
+		exit "$$CI_EXIT_BLOCKED"; \
 	fi; \
 	if ! command -v "$(XARGS)" >/dev/null || \
 		! "$$conda_bin" run -n "$(CONDA_ENV)" ruff --version >/dev/null; then \
 		printf '%s\n' 'BLOCKER: Python pretty tools are missing.' \
 			'SAFE_NEXT_STEP: run make install conda, then rerun make pretty.' >&2; \
-		exit "$$GALILEO_EXIT_BLOCKED"; \
+		exit "$$CI_EXIT_BLOCKED"; \
 	fi; \
 	cd "$(REPO_ROOT)"; \
 	rc=0; \
@@ -130,7 +130,7 @@ pretty-shell:
 	source "$(REPO_ROOT)/lib/bash/toolchain/pretty.bash"; \
 	inventory="$$(mktemp -t galileo-pretty-shell.XXXXXX)"; \
 	trap 'rm -f -- "$$inventory"' EXIT; \
-	galileo_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" \
+	CI_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" \
 		'*.sh' '*.bash'; \
 	if [[ ! -s "$$inventory" ]]; then \
 		printf '%s\n' 'Shell pretty: not_applicable'; \
@@ -140,7 +140,7 @@ pretty-shell:
 		! command -v "$(XARGS)" >/dev/null; then \
 		printf '%s\n' 'BLOCKER: Shell pretty tools are missing.' \
 			'SAFE_NEXT_STEP: run make install toolchain, then rerun make pretty.' >&2; \
-		exit "$$GALILEO_EXIT_BLOCKED"; \
+		exit "$$CI_EXIT_BLOCKED"; \
 	fi; \
 	cd "$(REPO_ROOT)"; \
 	$(XARGS) -0 shfmt -w -- <"$$inventory"
@@ -174,10 +174,10 @@ help:
 		"  make k8s-test TEST='bats tests/toolbox_image.bats'"
 
 k8s-test:
-	GALILEO_K8S_TEST_COMMAND='$(TEST)' $(K8S_TEST_SCRIPT) --apply --json
+	CI_K8S_TEST_COMMAND='$(TEST)' $(K8S_TEST_SCRIPT) --apply --json
 
 k8s-test-dry-run:
-	GALILEO_K8S_TEST_COMMAND='$(TEST)' $(K8S_TEST_SCRIPT) --json
+	CI_K8S_TEST_COMMAND='$(TEST)' $(K8S_TEST_SCRIPT) --json
 
 toolbox: $(TOOLBOX_CONTEXT_FILES)
 	$(TOOLBOX_SCRIPT) --apply --json
