@@ -1,5 +1,5 @@
 ---
-name: galileo
+name: ci-skills
 channels:
   - conda-forge
 dependencies:
@@ -13,15 +13,10 @@ dependencies:
       - build
       - anthropic
       - mcp
-      - galileo
       - check-jsonschema
       - installer
-      - onepassword
-      - scikit-build-core>=1.0,<2
-      - splunk-ao
       - tomli-w
       - websocket-client
-      - galileo
   - kubernetes
   - python-kubernetes
   - pyyaml
