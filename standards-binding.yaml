@@ -18,6 +18,11 @@ spec:
     - automation
     - project-consumer
     - provider-escalation
+    - bash-shell-standards
+    - helm-ci-standards
+    - policy-authority-standards
+    - automation
+    - software-design
   providers: []
   projectAdditions:
     - TEAM_GUIDE.md
