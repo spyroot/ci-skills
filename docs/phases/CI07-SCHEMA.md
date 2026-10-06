@@ -21,8 +21,8 @@ shared standards' own schemas: `$schema`, `$id`, `title`, `type`, `required`,
 | `skill-frontmatter` | the YAML block in each `SKILL.md` | authors |
 | `skill-manifest` | a local skill's `tools.json` | `render_manifest.py` |
 | `skill-index` | `bin/ci-skills list --json` | discovery |
-| `vendor-lock` | `skills/vendor.lock.json` | `ci-skills update` |
-| `vendor-declarations` | `skills/vendor.toml` | maintainers |
+| `vendor-lock` | `vendor/vendor.lock.json` | `ci-skills update` |
+| `vendor-declarations` | `vendor/vendor.toml` | maintainers |
 | `tool-operations` | `bin/ci-skills tools --json` | CI-REFERENCE |
 | `command-contract` | each command's `--describe` | CI02-CLI |
 | `command-result` | each command's JSON result | CI02-CLI |
@@ -34,7 +34,7 @@ Upstream authors write the frontmatter of vendored skills.
 - **Identity.** Every record carries `kind`, a constant per schema, and
   `schema_version`.
 - **Names.** Names match `^[a-z0-9]+(-[a-z0-9]+)*$`. A skill's `name` equals
-  its directory name, which `../../tests/python/test_skill_package.py` already checks.
+  its directory name, which `tests/python/test_skill_package.py` already checks.
 - **Paths.** Relative POSIX paths inside the owning skill. No leading `/`,
   and no `..` segment.
 - **Digests.** 64 lowercase hexadecimal characters. A tree digest names its
@@ -72,8 +72,8 @@ them:
   in the toolchain contract today.
 - **Gate.** A `schemas` gate in `./scripts/check.sh` (CI03-GATES):
   - checks every schema against the 2020-12 metaschema;
-  - validates `tools.json` and `skills/vendor.lock.json`;
-  - validates `skills/vendor.toml`, parsed to JSON first;
+  - validates `tools.json` and `vendor/vendor.lock.json`;
+  - validates `vendor/vendor.toml`, parsed to JSON first;
   - validates the frontmatter of every `SKILL.md`, extracted first.
 - **At runtime.** Producers validate before they write, and
   `bin/ci-skills list` validates before it prints, with the `jsonschema`

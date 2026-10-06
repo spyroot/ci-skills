@@ -19,14 +19,14 @@ configured binding and returns evidence that an operator or agent can inspect.
   a page from supplied content, including documentation links.
 - [Manage runners](ci-skills/bin/gitlab_runner.py): assign an
   existing runner or create a runner record with runner tags.
-- [Diagnose Kubernetes and OpenShift](ci-skills/scripts/): inspect
+- [Diagnose Kubernetes and OpenShift](ci-skills/bin/): inspect
   storage, events, Cilium, Ceph, and node MTU consistency.
 - Use [ci-api](ci-skills/bin/ci-api) for bounded Git API reads and
   [ci-binary-build](ci-skills/bin/ci-binary-build) for exact-commit
   OpenShift build planning.
 
 The Python commands use small entry points over reusable code in
-[scripts/core](ci-skills/lib/core/). Their `--help` output serves
+[lib/core](ci-skills/lib/core/). Their `--help` output serves
 people, while `--json`, `--yaml`, and `--describe` expose versioned reports and
 command contracts. The generated [tools.json](ci-skills/tools.json)
 records options, access protocols, and target protocols. GitLab writes start
@@ -86,7 +86,7 @@ evidence. The commands below are proposed; they are not yet present in the
 
 Every new action needs a concrete script name, arguments, behavior, result,
 and independent read-back. Its Python entry point must stay small and call
-reusable code in [scripts/core](ci-skills/lib/core/). It must offer
+reusable code in [lib/core](ci-skills/lib/core/). It must offer
 `--help` for people, `--json` and `--yaml` for machines, and `--describe` for
 its command contract. [tools.json](ci-skills/tools.json) must declare
 its options and access and target protocols. Each versioned report kind must
@@ -211,14 +211,14 @@ read back its configured project and administrator identity:
 
 ```bash
 conda run -n ci-skills python \
-  skills/ci-skills/scripts/gitlab_access.py check --json
+  ci-skills/bin/gitlab_access.py check --json
 ```
 
 When all three authorities are configured, run the full publication check:
 
 ```bash
 conda run -n ci-skills python \
-  skills/ci-skills/scripts/access_check.py --publication
+  ci-skills/bin/access_check.py --publication
 ```
 
 Its `PASS` means every selected authority was reached and each required live
@@ -276,7 +276,7 @@ reported digest with `skill.digest` in later reports. It accepts `--json`,
 A Codex session can install the merged skill straight from GitHub instead:
 
 ```text
-Install the skill from https://github.com/spyroot/ci-skills/tree/main/skills/ci-skills
+Install the skill from https://github.com/spyroot/ci-skills/tree/main/ci-skills
 ```
 
 Either way, each execution host still needs its own credentials and its own
@@ -340,10 +340,10 @@ numeric target before a write:
 
 ```bash
 conda run -n ci-skills python \
-  skills/ci-skills/scripts/gitlab_access.py check \
+  ci-skills/bin/gitlab_access.py check \
   --json
 conda run -n ci-skills python \
-  skills/ci-skills/scripts/gitlab_milestone.py create \
+  ci-skills/bin/gitlab_milestone.py create \
   --title "Release checkpoint" --json
 ```
 

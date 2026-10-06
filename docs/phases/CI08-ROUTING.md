@@ -33,7 +33,7 @@ The last two rows use Python's default JSON separators.
 | L2 | the one thing to read or run | one reference, or `<command> --describe` |
 
 - **L1 sources.** The routing table lives in the skill's `tools.json`, which
-  `tools/render_manifest.py` renders from `scripts/core/catalog.py`.
+  `tools/render_manifest.py` renders from `ci-skills/lib/core/catalog.py`.
 - **Installed copies.** L0 needs a checkout, because `tools/` is not
   installed with a skill. An installed copy starts at L1: its `SKILL.md` and
   `tools.json` carry everything that L1 and L2 need.
@@ -52,14 +52,14 @@ The last two rows use Python's default JSON separators.
 | Part | Value |
 | --- | --- |
 | Capability | route an agent to one file |
-| Owner | `scripts/core/catalog.py` in `../../ci-skills` |
+| Owner | `ci-skills/lib/core/catalog.py` in `ci-skills` |
 | Entrypoint | `tools/render_manifest.py` |
 | Result | `skill_manifest` (today's `tools.json` shape) |
 | Read-back | byte-equality test on `tools.json`; a fresh live receipt |
 
 ## Changes to `ci-skills`
 
-1. `scripts/core/catalog.py` gains a `REFERENCES` declaration. For each
+1. `ci-skills/lib/core/catalog.py` gains a `REFERENCES` declaration. For each
    reference it records:
    - the path;
    - the tags;
@@ -77,7 +77,7 @@ The last two rows use Python's default JSON separators.
    - Sections 4 to 6 (statuses, correlation, persisting evidence) move
      unchanged to `references/reading-reports.md`.
    - The router keeps the literal `references/access.md` link, which
-     `../../tests/python/test_skill_package.py` requires.
+     `tests/python/test_skill_package.py` requires.
    - The router keeps the moved sections' safety rules as a short list:
      - `DRY_RUN` is never evidence.
      - `UNKNOWN` is never coerced.
@@ -86,7 +86,7 @@ The last two rows use Python's default JSON separators.
 4. `references/conditional/gitlab-writes.md` is the one conditional
    reference. It says this skill is read-only, and that for a merge request,
    issue, comment or retry the agent loads the `glab` skill. That skill is
-   vendored at `skills/glab/`; from a repository checkout, the maintenance
+   vendored at `vendor/skills/glab/`; from a repository checkout, the maintenance
    command installs it beside this skill with
    `bin/ci-skills install glab --skills-dir DIR --confirm`. By this phase,
    `install.sh`, `tools/install_ci_skills.py` and `bin/ci-skills install`
@@ -101,7 +101,7 @@ Nothing in the code reads them, so their content would be invented.
 
 How `ci-skills` comes to sit on top of `glab`:
 
-1. Declare `REFERENCES` in `scripts/core/catalog.py`:
+1. Declare `REFERENCES` in `ci-skills/lib/core/catalog.py`:
    - `references/access.md`
    - `references/reading-reports.md`
    - `references/conditional/gitlab-writes.md`, with `points_to: glab`
@@ -118,16 +118,16 @@ How `ci-skills` comes to sit on top of `glab`:
 5. Declare the skill's tags, so that `bin/ci-skills list` shows them
    with the derived dependency on `glab`.
 6. After the last skill edit, capture a new receipt on the executor that
-   `../../tests/acceptance` declares, with
-   `skills/ci-skills/scripts/access_check.py --publication` and
-   `--receipt-out acceptance/receipts/<label>.json`. Commit it.
+   `tests/acceptance` declares, with
+   `ci-skills/bin/access_check.py --publication` and
+   `--receipt-out tests/acceptance/receipts/<label>.json`. Commit it.
 7. Open one pull request. The `validate` workflow must pass, including live
    acceptance with the new receipt.
 
 ## Live receipt
 
 The package delivery in CI-PHASES first changes the live acceptance checker
-to compare the receipt with `../../ci-skills` and captures a new receipt.
+to compare the receipt with `ci-skills` and captures a new receipt.
 The workflow step remains unconditional. This phase changes that package
 again, so its own pull request also needs a fresh receipt after its last
 skill edit. PRs #5, #7 and #8 have been integrated, so this phase routes their
@@ -138,7 +138,7 @@ final package bytes. Which host may serve as release evidence is open
 
 ## Gates
 
-- **Kept CI gates.** `../../tests/python/test_catalog.py` keeps `tools.json` byte-equal to
+- **Kept CI gates.** `tests/python/test_catalog.py` keeps `tools.json` byte-equal to
   the catalog. Its routing test is changed in step 2 to read `.command`.
 - **Live acceptance.** The workflow accepts the new receipt.
 - **Closed world**, enforced by the `schemas` gate (CI-SCHEMA) before a

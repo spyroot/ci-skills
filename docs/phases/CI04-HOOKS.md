@@ -51,7 +51,7 @@ workflow would reject, using the entrypoint CI runs. Hooks are advisory:
   - It fails on any skill edit until a new receipt is committed
     (CI-ROUTING).
   - It fails on every push once the committed receipt is older than
-    `max_receipt_age_days` in `../../tests/acceptance`.
+    `max_receipt_age_days` in `tests/acceptance`.
   - Running it at push rather than at commit keeps intermediate commits
     possible.
 
@@ -86,12 +86,12 @@ agents that run hooks before and after an edit (such as Claude Code's
 
 - **Block edits to generated or copied files:**
   - `tools.json`
-  - `../../tests/acceptance`
+  - `tests/acceptance`
   - the vendored skill trees
-  - `skills/vendor.lock.json`
-- **Keep `skills/vendor.toml` editable;** it holds the hand declarations.
+  - `vendor/vendor.lock.json`
+- **Keep `vendor/vendor.toml` editable;** it holds the hand declarations.
 - **After a `*.py` edit:** run `ruff format` on that file.
-- **After an edit to `scripts/core/catalog.py`:** run
+- **After an edit to `ci-skills/lib/core/catalog.py`:** run
   `tools/render_manifest.py`.
 
 A hook's matcher selects the tool, such as `Edit|Write` or `Bash`; the hook

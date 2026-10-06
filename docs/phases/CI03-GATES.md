@@ -31,10 +31,10 @@ One does not replace the other.
 These stay. Each one moves behind `./scripts/check.sh` without losing its guarantee.
 
 - **Branch protection** enforces the `validate` workflow.
-- **`../../tests/python/test_validate_workflow_policy.py`** checks that the static steps exist and that live acceptance
+- **`tests/python/test_validate_workflow_policy.py`** checks that the static steps exist and that live acceptance
   is unconditional and runs first.
 - **`tools/check_live_acceptance.py`** checks that the receipt's digest equals the skill digest.
-- **The byte-equality test in `../../tests/python/test_catalog.py`** checks that `tools.json` equals the catalog.
+- **The byte-equality test in `tests/python/test_catalog.py`** checks that `tools.json` equals the catalog.
 
 ## Gaps
 
@@ -44,7 +44,8 @@ Each gap names the requirement, the failure it prevents, and the smallest change
 
 - **Requirement.** Local runs and CI invoke the same repository-owned entrypoint. The pinned standards' workspace index
   names `scripts/check.sh` as the gate entrypoint.
-- **Existing mechanism.** The merged `scripts/check.sh` and `lib/ci/check.bash` check tracked shell, YAML and Markdown,
+- - **Existing mechanism.** The merged `scripts/check.sh` and `ci-skills/lib/bash/ci/check.bash` check tracked shell,
+  YAML and Markdown,
   scan for secrets and run the Bats suite. The script takes `--dry-run`, `--log-format` and `--help`, and exits 0, 64
   or 69.
 - **Smallest change.** Extend that script instead of adding a second one:
@@ -52,7 +53,7 @@ Each gap names the requirement, the failure it prevents, and the smallest change
     CI-VENDOR, `verify`;
   - add a way to run one gate, or the static subset, for the hooks;
   - make each `validate.yml` step call it;
-  - extend `../../tests/python/test_validate_workflow_policy.py` so that every gate is called and live acceptance stays
+  - extend `tests/python/test_validate_workflow_policy.py` so that every gate is called and live acceptance stays
     unconditional and first.
 
 ### G2. Exact tool versions
@@ -81,11 +82,11 @@ Each gap names the requirement, the failure it prevents, and the smallest change
 ### G5. Release receipt host
 
 - **Requirement.** CI-ROUTING needs a new live receipt for the exact skill digest, captured on the executor that
-  `../../tests/acceptance` declares.
+  `tests/acceptance` declares.
 - **Conflict.** That executor is a laptop, and the project's guide says a laptop is not release evidence.
 - **Smallest change.**
   1. Name an approved executor and its capture route.
-  2. Update `../../tests/acceptance` to declare it.
+  2. Update `tests/acceptance` to declare it.
   3. Capture the receipt there, and read it back.
 
 ### G6. The pinned standards' CI evidence model
@@ -132,7 +133,8 @@ Each gap names the requirement, the failure it prevents, and the smallest change
 
 ## Steps
 
-1. Extend `scripts/check.sh` as in G1. The new checks live in `lib/ci/check.bash`, and `--help` lists every argument and
+1. Extend `scripts/check.sh` as in G1. The new checks live in `ci-skills/lib/bash/ci/check.bash`, and `--help` lists
+every argument and
    output mode.
 2. Switch the `validate.yml` steps to call it, add the final aggregator (G6) and the `schedule` trigger (G7), and extend
    the workflow-policy test.

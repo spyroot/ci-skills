@@ -28,7 +28,7 @@ Discovery only reads: it writes nothing and uses no network.
 
 ### Walk
 
-1. Start at `skills/`. The only local package is `../../ci-skills`;
+1. Start at `skills/`. The only local package is `ci-skills`;
    the root `SKILL.md` from PR #2 is consolidated and removed before this
    phase. Root `bin/ci-*` commands are tools, not another skill record.
 2. Take each directory directly under `skills/` that holds a
@@ -51,7 +51,7 @@ Discovery only reads: it writes nothing and uses no network.
    supplies the tags, references, routing and tool operations used
    (CI-ROUTING).
 3. **The lock and declarations**, for a vendored skill: its entry in
-   `skills/vendor.lock.json` and in `skills/vendor.toml`, each checked
+   `vendor/vendor.lock.json` and in `vendor/vendor.toml`, each checked
    against its schema.
 4. **The merged record**, checked against `skill-index` before anything is
    printed.
@@ -104,8 +104,8 @@ Exit codes, the result envelope and `safe_next_step` follow CI02-CLI.
   stays a thin wrapper over `skillkit/install.py` while its callers migrate.
   It keeps
   `SKILL_NAME`, `install`, `package_files`, `skills_directory` and
-  `tree_digest`, which `../../tests/python/test_installer.py` and
-  `../../tests/python/test_installed_package.py` load from the module by path. It puts its
+  `tree_digest`, which `tests/python/test_installer.py` and
+  `tests/python/test_installed_package.py` load from the module by path. It puts its
   own directory on `sys.path` so that `import skillkit` works when a test
   loads it that way.
 
@@ -121,7 +121,7 @@ stale. Its schema is `skill-index` (CI-SCHEMA).
   "skills": [
     {
       "name": "ci-skills",
-      "path": "skills/ci-skills",
+      "path": "ci-skills",
       "source": "local",
       "entry": "SKILL.md",
       "manifest": "tools.json",
@@ -151,9 +151,9 @@ Where each field comes from:
 | `source` | `local` | the lock (CI-VENDOR) |
 | `entry` | `SKILL.md` | `SKILL.md` |
 | `manifest` | `tools.json` | absent |
-| `tags` | `tools.json` (CI-ROUTING) | `skills/vendor.toml` |
+| `tags` | `tools.json` (CI-ROUTING) | `vendor/vendor.toml` |
 | `references`, `depends_on` | `tools.json` (CI-ROUTING) | absent |
-| `upstream` | absent | the lock and `skills/vendor.toml` |
+| `upstream` | absent | the lock and `vendor/vendor.toml` |
 
 `list` adds nothing a skill does not declare. Until CI-ROUTING, the local
 skill's `tags`, `references` and `depends_on` are empty. Historical package
@@ -182,7 +182,7 @@ setting an output budget.
 2. Add `tools/skillkit/discover.py` with the walk and read above.
 3. Extend CI-VENDOR's repository-level `bin/ci-skills` with `list`, `get`
    and `install`. Each verb has `--help` and `--describe` (CI02-CLI). This
-   maintenance command is outside the installed `../../ci-skills` package.
+   maintenance command is outside the installed `ci-skills` package.
 4. Add the tests CI-TESTS lists, and open one pull request; the
    `validate` workflow must pass.
 5. Read back: `bin/ci-skills list` shows exactly one `ci-skills` record,
@@ -193,6 +193,6 @@ setting an output budget.
 ## Gates
 
 - **Tests.** As listed in CI-TESTS, run in CI.
-- **Receipt.** This phase does not change `../../ci-skills`, so the
+- **Receipt.** This phase does not change `ci-skills`, so the
   package-delivery receipt remains valid until expiry. If this phase changes
   package bytes, capture a fresh receipt after the last edit (CI03-GATES).

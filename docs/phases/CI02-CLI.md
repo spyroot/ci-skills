@@ -46,12 +46,12 @@ Reading the parsers shows two defects:
   In `cilium_status.py` it names where Cilium is installed (`NAME|auto`,
   default: discover). The catalog covers both with one description.
 - **Help text declared twice.** Each option is described in
-  `scripts/core/catalog.py`, which `--describe` prints, and again in the
+  `ci-skills/lib/core/catalog.py`, which `--describe` prints, and again in the
   parser's `help=`. The two have already drifted: `--publication` reads
   "also require repository administration and the declared required
   checks" in the catalog and "also require GitHub repository
   administration before configuring checks" in the parser.
-  `../../tests/python/test_catalog.py` compares option names, not their text.
+  `tests/python/test_catalog.py` compares option names, not their text.
 
 ## The contract
 
@@ -110,7 +110,7 @@ The `cli` gate of `./scripts/check.sh` (CI03-GATES) runs in CI.
   - each option's help text comes from one declaration, the catalog, which
     the parser reads; the gate fails when the two differ;
   - for a mutating command, the default run writes nothing.
-- **Existing pattern.** `../../tests/python/test_catalog.py` already compares the k8s
+- **Existing pattern.** `tests/python/test_catalog.py` already compares the k8s
   skill's declared options with each script's real parser. The gate extends
   that check to every command.
 
