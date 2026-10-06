@@ -52,9 +52,13 @@ setup() {
 }
 
 @test 'secret-class paths are refused while a near match is allowed' {
-  run bash -c 'source "$1"; ci_bless_secret_path "$2"' _ \
-    "$root/scripts/bash/core/bless.bash" CODEX_HANDOFF.md
-  [ "$status" -eq 0 ]
+  for path in CODEX_HANDOFF.md CODEX_HANDOFF.diff CLAUDE_REVIEW.diff \
+    .AGENTS.md .AGENT_HANDOFF.patch docs/TEAM_GUIDE.md \
+    .ci-skills/target.toml .internal/queue/task.yaml; do
+    run bash -c 'source "$1"; ci_bless_secret_path "$2"' _ \
+      "$root/scripts/bash/core/bless.bash" "$path"
+    [ "$status" -eq 0 ]
+  done
   run bash -c 'source "$1"; ci_bless_secret_path "$2"' _ \
     "$root/scripts/bash/core/bless.bash" AGENCY.md
   [ "$status" -eq 1 ]

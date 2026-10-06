@@ -100,9 +100,17 @@ ci_bless_record() {
 # Returns: 0 for a secret-class path; 1 otherwise.
 ci_bless_secret_path() {
 	case "$1" in
-	.internal/* | .codex/* | .claude/* | .agent-review/* | \
-		AGENT*.md | CLAUDE*.md | CODEX*.md | TEAM_GUIDE.md | \
-		shared.md | brain-shared.md | *.key | *.pem | *.crt | *.p12)
+	.internal/* | */.internal/* | .ci-skills/* | */.ci-skills/* | \
+		.codex/* | */.codex/* | .claude/* | */.claude/* | \
+		.agent-review/* | */.agent-review/* | \
+		.AGENTS.md | */.AGENTS.md | AGENT*.md | */AGENT*.md | \
+		.AGENT_HANDOFF* | */.AGENT_HANDOFF* | AGENT_HANDOFF* | */AGENT_HANDOFF* | \
+		CLAUDE*.md | */CLAUDE*.md | CLAUDE_REVIEW* | */CLAUDE_REVIEW* | \
+		CLAUDE_PATCH.diff | */CLAUDE_PATCH.diff | \
+		CODEX*.md | */CODEX*.md | CODEX_HANDOFF* | */CODEX_HANDOFF* | \
+		TEAM_GUIDE.md | */TEAM_GUIDE.md | \
+		shared.md | */shared.md | brain-shared.md | */brain-shared.md | \
+		*.key | *.pem | *.crt | *.p12)
 		return 0
 		;;
 	esac
