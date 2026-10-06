@@ -298,8 +298,7 @@
         },
         "rel": {
           "enum": [
-            "infers",
-            "applies_to"
+            "infers"
           ]
         },
         "to": {

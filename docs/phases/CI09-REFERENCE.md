@@ -1082,7 +1082,15 @@ Subresources
   and `capability.command` are `bin/` plus the file name. From the catalog, `kind`, `requires`, `tools`, `mutates`,
   `side_effects` and `returns` are `kind`, `requires`, `required_tools`, `mutates`, `side_effects` and `returns`
   (`report_kind`, `requires_authorities`, `required_tools`, not `read_only`, `side_effects` and `returns` for a Bash
-  entry). A verb's own `purpose`, `kind`, `returns`, `read_back`, options and required options replace the command's.
+  entry). A verb's fields live in its command's existing `subcommands` entry; its `purpose`, `kind`, `returns`,
+  `read_back`, `mutates`, `side_effects`, `options` and `required_options` replace the command's.
+- **Order**: subresources and sections in the order the Declarations list them; capabilities in catalog order, then
+  planned verbs; inputs with required ones first, then catalog order. `run ID` lists the required inputs only;
+  `options` lists every input of the command and verb except `--apply` and `--confirm-plan`, which only a plan's own
+  result hands out.
+- **Lookup by name**: when the first segment is not a root group, it is matched against node names only, not
+  capability ids or reference names. One match answers that node with its full `path`; several answer "which one?"
+  with ids that join each match's path with `.`; none exits 2 with `path_unknown` and the root's choices.
 - **Read-back**: a declared `read_back`; else `read-only; the result is the read-back.` for a read-only command; else
   the command's `returns`.
 - **Section** (`reference_section`, from `get`): `kind`, `schema_version`, `reference`, `anchor`, `pinned` (the
@@ -1091,12 +1099,14 @@ Subresources
   `tier` when `--card` or `--part` selected one.
 - **Anchors**: section 2's anchor rule; a repeated heading takes the suffixes `-1`, `-2` and so on in document order,
   as Render 12 shows for the first two of the five "Naming and color convention" headings.
-- **Relations**: `to` is an anchor of the same reference, or `REF.ANCHOR` of another declared reference.
+- **Relations**: `infers` means automation sets the `to` label from the `from` label, as the `evidence` section
+  states. `to` is an anchor of the same reference, or `REF.ANCHOR` of another declared reference.
 - **Search**: a case-insensitive literal substring over each section's own text, heading included, across the whole
   pinned reference, in document order; its continuation keeps `--search`.
 - **Summaries**: a declared section uses its declared `summary` and `when`; a tagged section (`gitlab-ci-yaml`) uses
-  its index `description` and its placement's `when`; any other section uses its heading path, the headings
-  joined by a colon and a space, with a final period. The fixed texts are exactly these:
+  its index `description`, or its heading path when the description is longer than 100 characters, and its
+  placement's `when`; any other section uses its heading path, the headings joined by a colon and a space, with a
+  final period. The fixed texts are exactly these:
 
   | Where | Text |
   | --- | --- |
@@ -1109,11 +1119,13 @@ Subresources
   | search hit `when` | `Read for the passage that contains "TEXT".` |
   | subsection `when` | `Read when you need HEADING.` |
 
-- **Serialization**: `--json` is `json.dumps(answer, separators=(",", ":"), ensure_ascii=False)` with fields in the
-  schema's property order; byte limits are measured on that line. `core/report.py:emit` keeps its indented form for
-  reports.
-- **Limits**: one line at most 4096 bytes, 12 choices, 12 relations, 100-character summaries, 120-character `when`;
-  a `get` page at most 8192 bytes, cut at a line end. Past a limit, `continuation` carries the next page, for example
+- **Serialization**: every answer goes through the one emitter, `core/report.py:emit`, which keeps its redaction
+  and its `verbatim` allowlist (section 2, Lookup) and gains a compact mode for the navigator:
+  `json.dumps(answer, separators=(",", ":"), ensure_ascii=False)`, fields in the schema's property order, keys not
+  sorted. Byte limits are measured on that line; reports keep the indented, sorted form.
+- **Limits**: one line at most 4096 bytes, 12 choices, 12 relations, 8 path segments, 100-character summaries and
+  queries, 120-character `when` and input summaries, 240-character `returns` and `read_back`; a `get` page at most
+  8192 bytes of `text`, cut at a line end. Past a limit, `continuation` carries the next page, for example
   `{"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "--page", "2", "--json"]}` or
   `{"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-ci-yaml", "rules", "--page", "2",
   "--json"]}`. Nothing is dropped or truncated.
@@ -1434,8 +1446,7 @@ check-jsonschema --base-uri "file://$PWD/schemas/reference-section.schema.json" 
         },
         "rel": {
           "enum": [
-            "infers",
-            "applies_to"
+            "infers"
           ]
         },
         "to": {
@@ -1597,7 +1608,8 @@ Placement of every command:
 | `k8s network` | `k8s_verify_mtu_consistency.py` | `k8s_verify_mtu_consistency` |
 | `k8s storage` | `storage_report.py` | `storage_report` |
 
-One purpose per verb, distinct among siblings, read from what each verb's code does:
+One purpose per verb, distinct among siblings, read from what each verb's code does, stored in the command's
+`subcommands` entry:
 
 | Command | Verb | Purpose |
 | --- | --- | --- |
@@ -1617,9 +1629,13 @@ One purpose per verb, distinct among siblings, read from what each verb's code d
 
 `gitlab_access.py check` keeps its declared purpose. `bin/ci-api` declares its required options per verb: `check`
 takes `--provider`; `get` takes `--provider` and `--endpoint`. The GitLab commands declare
-`required_tools: ("glab",)`, the client their transport runs. `watch` also declares `kind: gitlab_pipeline_watch`,
-`returns` and `read_back` as Render 5 shows them, and its own options `--related-name`, `--interval` and
-`--timeout` with the help texts of Render 6.
+`required_tools: ("glab",)`, the client their transport runs. `subcommands["watch"]` also declares
+`kind: gitlab_pipeline_watch`, `returns` and `read_back` as Render 5 shows them, and its own `options`
+`--related-name`, `--interval` and `--timeout` with the help texts of Render 6; `options_for` and
+`tests/python/test_catalog.py` compare options per verb. `schemas/skill-manifest.schema.json` and
+`schemas/command-contract.schema.json` accept these optional `subcommands` fields. `reference.py` itself is an
+`OFFLINE_COMMANDS` entry (section 6, step 2) with verbs `next` and `get` and options `--page`, `--search`, `--card`,
+`--part`, `--json`, `--yaml`, `--human` and `--describe`.
 
 Planned verbs, each shown unavailable until it ships (the verbs CI11-TOOLS names for commands that exist today):
 
@@ -1632,13 +1648,16 @@ Planned verbs, each shown unavailable until it ships (the verbs CI11-TOOLS names
 
 References, each with its one summary:
 
-| Reference | Kind | Summary |
+| Reference | `source`, then `path` or `index` under `references/` | Summary |
 | --- | --- | --- |
-| `access` | local, `references/access.md` | Where targets and credentials come from, and the live receipt. |
-| `project-binding` | local, `references/project-binding.md` | How a project binds its target and kubeconfig sources. |
-| `gitlab-labels` | vendored | GitLab label families and how they relate. |
-| `gitlab-ci-yaml` | vendored, section 2 | The GitLab CI/CD YAML syntax, one keyword at a time. |
+| `access` | local, `access.md` | Where targets and credentials come from, and the live receipt. |
+| `project-binding` | local, `project-binding.md` | How a project binds its target and kubeconfig sources. |
+| `gitlab-labels` | vendored, `vendor/gitlab-labels/index.json` | GitLab label families and how they relate. |
+| `gitlab-ci-yaml` | vendored, `vendor/gitlab-ci-yaml/index.json` | The GitLab CI/CD YAML syntax, by keyword. |
 | `gitlab-mcp-server`, `claude-code-mcp`, `mcp-spec` | vendored | declared when each is vendored |
+
+These are the `REFERENCES` entries CI07-SCHEMA (Pointers) and CI08-ROUTING extend; `source` is new here and is not
+CI07's `kind` (`operations` or `knowledge`), which those phases add.
 
 Reference sections and where they appear; `when` renders as written:
 
@@ -1664,11 +1683,13 @@ NAV_NODES = {
     ("gitlab", "pipeline"): "Inspect, watch and diagnose pipelines.",
 }
 NAV_PLACEMENT = {"access_check.py": (), "gitlab_pipeline.py": ("gitlab", "pipeline")}
-VERBS = {
-    "gitlab_milestone.py": {"adjust-time": {"purpose": "Change only an exact milestone's start or due date, with read-back."}},
+COMMANDS["gitlab_milestone.py"]["subcommands"]["adjust-time"] = {
+    "required_options": ["--milestone-id"],
+    "purpose": "Change only an exact milestone's start or due date, with read-back.",
 }
 PLANNED_VERBS = {"gitlab_milestone.py": {"list": "CI11-TOOLS"}}
-REFERENCES = {"gitlab-labels": {"kind": "vendored", "summary": "GitLab label families and how they relate."}}
+REFERENCES = {"gitlab-labels": {"source": "vendored", "index": "references/vendor/gitlab-labels/index.json",
+                                 "summary": "GitLab label families and how they relate."}}
 REFERENCE_SECTIONS = (
     {"reference": "gitlab-labels", "anchor": "priority-labels", "nodes": (("gitlab", "issue"),),
      "summary": "priority::1 to priority::4; their meaning lives in the handbook triage page.",
@@ -1705,7 +1726,7 @@ Who adds what, in order:
      reference files, and draws the human view by the rules above; it types no other text than the fixed texts;
    - `ci-skills/bin/reference.py`: a thin main with the grammar above and `--describe`;
    - `ci-skills/tools.json` re-rendered, and one `SKILL.md` sentence: "Start at `bin/reference.py next` and follow
-     the pointers; never read `tools.json` or a whole reference."
+     the pointers; never read `tools.json`, an `index.json` or a whole reference."
 3. Acceptance: Renders 1 to 7 and 14 come out of the real tool exactly as shown and validate against the schemas
    above, and the five acceptance points below hold. Renders 8 to 13 follow when section 2 vendors their references.
 
@@ -1848,8 +1869,8 @@ its reason tokens, defined here once.
      reads back `kind: reference_section`, `anchor: triggerforward`, `pinned`
      equal to the declared sha, and `text` whose first line is
      ``#### `trigger:forward` ``;
-   - `ci-skills/bin/reference.py next gitlab pipeline --json` reads back
-     Render 3 (section 3) and validates against `schemas/reference-next.schema.json`;
+   - `ci-skills/bin/reference.py next gitlab pipeline run --json` reads back
+     Render 4 (section 3) and validates against `schemas/reference-next.schema.json`;
    - `ci-skills/bin/reference.py verify gitlab-ci-yaml --json` reads back
      `PASS` with `file_count: 177`;
    - `tools/update_reference.py gitlab-ci-yaml --sha 9892f2e6cf006fa1acc3f4d744f707757111db58 --dry-run --json`

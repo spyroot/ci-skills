@@ -67,7 +67,8 @@
       "enum": [
         "PASS",
         "PARTIAL",
-        "BLOCKED"
+        "BLOCKED",
+        "DRY_RUN"
       ]
     },
     "complete": {
@@ -232,6 +233,33 @@
           "type": "integer",
           "minimum": 0
         }
+      }
+    },
+    "access": {
+      "type": "object"
+    },
+    "execution_host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tested_revision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "skill": {
+      "type": "object"
+    },
+    "target_source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "collection_probes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
       }
     }
   }

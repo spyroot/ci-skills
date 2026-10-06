@@ -299,9 +299,8 @@ own formatting:
 ```diff
          "rel": {
            "enum": [
-             "infers",
--            "applies_to"
-+            "applies_to",
+-            "infers"
++            "infers",
 +            "meaning_in"
            ]
          },
@@ -317,7 +316,7 @@ The producer then answers with `"schema_version": "1.1"`. Once the handbook's tr
 The `^1\.[0-9]+$` pattern accepts both 1.0 and 1.1 answers; nothing else changes.
 
 `reference-next`, `reference-section` and `gitlab-pipeline-watch` start at 1.0 although their producers are not
-built yet: the operator fixed their shape by example, so they are locked contracts, not shapes in review, and step 1
+built yet: we fixed their shape by example, so they are locked contracts, not shapes in review, and step 1
 below does not apply to them.
 
 How a version is promoted:

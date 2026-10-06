@@ -75,7 +75,8 @@ navigator's data.
 
    Each command declares its `uses` too. Everything renders into
    `tools.json` with the rest of the catalog. `depends_on` is derived from
-   the `points_to` values, so the link to `glab` is declared once. How a tag is derived for a reference that has no index
+   the `points_to` values, so the link to `glab` is declared once.
+   How a tag is derived for a reference that has no index
    (`access.md`, `project-binding.md`, and `reading-reports.md`, planned,
    this phase) is not stated by any phase document; the gap is this phase's
    to close before step 1.

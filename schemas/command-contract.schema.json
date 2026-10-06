@@ -193,6 +193,35 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "kind": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "returns": {
+            "type": "string",
+            "minLength": 1
+          },
+          "read_back": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mutates": {
+            "type": "boolean"
+          },
+          "side_effects": {
+            "type": "string",
+            "minLength": 1
+          },
+          "options": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^--[a-z0-9][a-z0-9-]*$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }

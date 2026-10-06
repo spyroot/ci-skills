@@ -386,13 +386,22 @@ gitlab_pipeline.py watch --pipeline-id ID [--project PATH_OR_ID] [--related-name
 - Scope: the pipeline, every pipeline its bridges started (any project, depth at most 5), and with `--related-name`
   each newer pipeline in the root's project on the root's ref whose `name` matches REGEX. Settled: `success`,
   `failed`, `canceled`, `skipped`, `manual`.
-- Result: the report envelope plus `complete` (every pipeline in scope settled and read), `success` (every one
-  `success`), `polls`, `elapsed_seconds`, `changes` (pipeline status changes), `choices` (`retrieve` pointers in the
-  shape of CI09-REFERENCE section 3: failed jobs first, then unsuccessful pipelines) and `continuation` (`null`). One
-  record per pipeline: ids, `via`, `depth`, `status`, job counts by status; never the jobs themselves.
-- Limits: 50 pipelines in scope, 50 changes, 12 choices; past one, `errors` names it with its `count` and `complete`
-  is false. Each settled pipeline or job is one stderr log line while the watch runs.
-- Status: `PASS` when complete and successful; `PARTIAL` otherwise; `BLOCKED` when access or the root read fails.
+- Result: the report envelope, with the access evidence every GitLab command emits (`access`, `execution_host`,
+  `tested_revision`, `skill`, `target_source`; `collection_probes` under `--dry-run`), plus `complete` (every
+  pipeline in scope settled and read), `success` (every one `success`), `polls`, `elapsed_seconds`, `changes`
+  (pipeline status changes), `choices` (`retrieve` pointers in the shape of CI09-REFERENCE section 3: failed jobs
+  first, then unsuccessful pipelines) and `continuation` (`null`; a watch result has no next page). One record per
+  pipeline: ids, `via`, `depth`, `status`, job counts by status; never the jobs themselves.
+- Values: `via` is `root`, `related` or `bridge:<bridge job name>`; a choice id is `job:<job id>` or
+  `pipeline:<pipeline id>`; a job choice's summary is `failed: <failure reason>, <job name>`, a pipeline choice's
+  `every job of pipeline <id> by stage`.
+- Limits: 50 pipelines in scope, 50 changes, 12 choices. Past 50 pipelines, `errors` carries `scope_limit_exceeded`
+  with its `count` and `complete` is false. Past 50 changes or 12 choices, `errors` carries `changes_limit_exceeded`
+  or `choices_limit_exceeded` with its `count`, `complete` keeps its meaning, and the narrowing call for any record
+  without a choice is `gitlab_pipeline.py get --project <project_id> --pipeline-id <pipeline_id>`. Each settled
+  pipeline or job is one stderr log line while the watch runs.
+- Status: `PASS` when complete and successful; `PARTIAL` otherwise; `BLOCKED` when access or the root read fails;
+  `DRY_RUN` under `--dry-run`, with `collection_probes` and no records.
 - Human view: the status with `complete` and `success`; the target, project, pipeline, filters, polls, elapsed time
   and capture time; a "Pipelines" block, one line per record; a "Changes" block; a "Results" block drawn as
   CI09-REFERENCE section 3 draws choices; an "Errors" block when there are any.
@@ -527,7 +536,8 @@ Results
       "enum": [
         "PASS",
         "PARTIAL",
-        "BLOCKED"
+        "BLOCKED",
+        "DRY_RUN"
       ]
     },
     "complete": {
@@ -692,6 +702,33 @@ Results
           "type": "integer",
           "minimum": 0
         }
+      }
+    },
+    "access": {
+      "type": "object"
+    },
+    "execution_host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tested_revision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "skill": {
+      "type": "object"
+    },
+    "target_source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "collection_probes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
       }
     }
   }
