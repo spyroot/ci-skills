@@ -49,8 +49,8 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   scan for secrets and run the Bats suite. The script takes `--dry-run`, `--log-format` and `--help`, and exits 0, 64
   or 69.
 - **Smallest change.** Extend that script instead of adding a second one:
-  - add the checks `validate` runs today, plus the `schemas` gate (CI-SCHEMA), the `cli` gate (CI02-CLI) and, after
-    CI-VENDOR, `verify`;
+  - add the checks `validate` runs today, plus the `schemas` gate (CI07-SCHEMA), the `cli` gate (CI02-CLI) and, after
+    CI05-VENDOR, `verify`;
   - add a way to run one gate, or the static subset, for the hooks;
   - make each `validate.yml` step call it;
   - extend `tests/python/test_validate_workflow_policy.py` so that every gate is called and live acceptance stays
@@ -61,7 +61,7 @@ Each gap names the requirement, the failure it prevents, and the smallest change
 - **Requirement.** CI and local runs use the same tool versions.
 - **Failure today.** `requirements.txt` holds ranges (`ruff>=0.13,<1`), so CI and a contributor can format differently.
 - **Smallest change.** Pin exact versions, taken from what a `validate` run resolves. That includes `check-jsonschema`
-  (CI-SCHEMA) and coverage.py (CI-TESTS).
+  (CI07-SCHEMA) and coverage.py (CI06-TESTS).
 
 ### G3. A review that blocks a merge
 
@@ -73,7 +73,7 @@ Each gap names the requirement, the failure it prevents, and the smallest change
 
 ### G4. Vendored skills checked on every change
 
-- **Requirement.** A change to a vendored skill is always verified (CI-VENDOR).
+- **Requirement.** A change to a vendored skill is always verified (CI05-VENDOR).
 - **Failure today.** A change to Markdown files alone skips the gated workflow steps, and a vendored skill is almost all
   Markdown.
 - **Smallest change.** The `verify` gate runs unconditionally, under the same assertions the workflow-policy test

@@ -1,7 +1,7 @@
-# CI-SCHEMA: record schemas
+# CI07-SCHEMA: record schemas
 
-Status: proposed. Depends on: nothing. Used by CI-VENDOR, CI01-CATALOG,
-CI-ROUTING, CI-REFERENCE and CI02-CLI.
+Status: proposed. Depends on: nothing. Used by CI05-VENDOR, CI01-CATALOG,
+CI08-ROUTING, CI09-REFERENCE and CI02-CLI.
 
 ## Goal
 
@@ -23,7 +23,7 @@ shared standards' own schemas: `$schema`, `$id`, `title`, `type`, `required`,
 | `skill-index` | `bin/ci-skills list --json` | discovery |
 | `vendor-lock` | `vendor/vendor.lock.json` | `ci-skills update` |
 | `vendor-declarations` | `vendor/vendor.toml` | maintainers |
-| `tool-operations` | `bin/ci-skills tools --json` | CI-REFERENCE |
+| `tool-operations` | `bin/ci-skills tools --json` | CI09-REFERENCE |
 | `command-contract` | each command's `--describe` | CI02-CLI |
 | `command-result` | each command's JSON result | CI02-CLI |
 
@@ -49,7 +49,7 @@ Upstream authors write the frontmatter of vendored skills.
 ## Pointers between references and tools
 
 A skill's references are its documents under `references/`. The tools it
-calls are described by operations (CI-REFERENCE). One declaration links
+calls are described by operations (CI09-REFERENCE). One declaration links
 them:
 
 - **Operation ids.** Each tool operation has an id `<tool>:<operation>`, for
@@ -82,7 +82,7 @@ them:
   checks hashes only and stays on the standard library; full schema
   validation is the `schemas` gate's job.
 - **Tests.** Each schema has fixtures: one valid record, one per missing
-  required field, and one per broken conditional rule (CI-TESTS).
+  required field, and one per broken conditional rule (CI06-TESTS).
 
 ## Versions
 

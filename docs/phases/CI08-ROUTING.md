@@ -1,6 +1,6 @@
-# CI-ROUTING: routing, lazy loading and compact representation
+# CI08-ROUTING: routing, lazy loading and compact representation
 
-Status: proposed. Depends on: CI-VENDOR and CI01-CATALOG.
+Status: proposed. Depends on: CI05-VENDOR and CI01-CATALOG.
 
 ## Goal
 
@@ -65,7 +65,7 @@ The last two rows use Python's default JSON separators.
    - the tags;
    - the `load_when` entries;
    - an optional `points_to` skill;
-   - the tool operations it describes, in `uses` (CI-SCHEMA, CI-REFERENCE).
+   - the tool operations it describes, in `uses` (CI07-SCHEMA, CI09-REFERENCE).
 
    Each command declares its `uses` too. Everything renders into
    `tools.json` with the rest of the catalog. `depends_on` is derived from
@@ -126,7 +126,7 @@ How `ci-skills` comes to sit on top of `glab`:
 
 ## Live receipt
 
-The package delivery in CI-PHASES first changes the live acceptance checker
+The package delivery in CI10-PHASES first changes the live acceptance checker
 to compare the receipt with `ci-skills` and captures a new receipt.
 The workflow step remains unconditional. This phase changes that package
 again, so its own pull request also needs a fresh receipt after its last
@@ -141,11 +141,11 @@ final package bytes. Which host may serve as release evidence is open
 - **Kept CI gates.** `tests/python/test_catalog.py` keeps `tools.json` byte-equal to
   the catalog. Its routing test is changed in step 2 to read `.command`.
 - **Live acceptance.** The workflow accepts the new receipt.
-- **Closed world**, enforced by the `schemas` gate (CI-SCHEMA) before a
+- **Closed world**, enforced by the `schemas` gate (CI07-SCHEMA) before a
   pull request can pass. Every one of these must hold:
   - every `REFERENCES` path exists in the packaged skill;
   - every `points_to` names a skill that discovery finds;
   - every `uses` id resolves to a declared operation.
 
   A dangling entry fails the gate.
-- **Tests**, as listed in CI-TESTS, run in CI.
+- **Tests**, as listed in CI06-TESTS, run in CI.

@@ -1,4 +1,4 @@
-# CI-TESTS: testing strategy
+# CI06-TESTS: testing strategy
 
 Status: proposed. Covers every CIxx phase. Each phase's pull request carries
 its own tests; this page says which tests and why.
@@ -37,7 +37,7 @@ its own tests; this page says which tests and why.
   fixture drives `bin/ci-skills` and the hook scripts with the same fake
   `PATH`.
 - **Tests ride with their capability.** Each phase carries its focused tests;
-  CI-TESTS separately delivers only the reusable test command and coverage
+  CI06-TESTS separately delivers only the reusable test command and coverage
   report.
 
 ## Layers
@@ -162,7 +162,7 @@ Observed 2026-10-02:
 
 ## `ci-skills` package delivery
 
-The separate delivery pull request in CI-PHASES tests:
+The separate delivery pull request in CI10-PHASES tests:
 
 - the sole `ci-skills` entry and path assertions;
 - the thin checkout adapters and installed diagnostics and PR #2 commands
@@ -187,7 +187,7 @@ The separate delivery pull request in CI-PHASES tests:
   - The static subset runs only static gates.
   - A failing gate fails the run and names the gate.
 
-## CI-SCHEMA
+## CI07-SCHEMA
 
 - Every schema validates against the 2020-12 metaschema.
 - Per schema, fixtures for:
@@ -210,7 +210,7 @@ The contract test runs over every entrypoint discovery finds:
 - the default run of a mutating command writes nothing;
 - exit codes come only from the shared table.
 
-## CI-VENDOR
+## CI05-VENDOR
 
 - **Unit, with a fake `glab`.**
   - `verify` passes on a fixture tree and lock.
@@ -277,7 +277,7 @@ The contract test runs over every entrypoint discovery finds:
 - **Outside CI.** `get glab` is compared byte for byte with
   `glab skills get glab` where `glab` is installed.
 
-## CI-ROUTING
+## CI08-ROUTING
 
 - **Closed world.**
   - Every `REFERENCES` path exists.
@@ -298,7 +298,7 @@ The contract test runs over every entrypoint discovery finds:
 - **Live.** A new receipt captured on this laptop (D-SMOKE), accepted by the
   live acceptance gate.
 
-## CI-REFERENCE
+## CI09-REFERENCE
 
 - **Declarations.** Every call site's argument prefix maps to a declared
   operation, found by scanning the code. No unbounded `api` or `exec`

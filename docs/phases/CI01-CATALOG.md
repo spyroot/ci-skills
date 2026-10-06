@@ -1,14 +1,14 @@
 # CI01-CATALOG: discover, list, get and install every skill
 
-Status: proposed. Depends on: CI-VENDOR, CI-SCHEMA and CI02-CLI. Followed by: CI-ROUTING.
+Status: proposed. Depends on: CI05-VENDOR, CI07-SCHEMA and CI02-CLI. Followed by: CI08-ROUTING.
 
 ## Goal
 
 One interface over local and vendored skills, named after `glab skills`:
-`list`, `get` and `install`, beside CI-VENDOR's `update`. `list` returns
+`list`, `get` and `install`, beside CI05-VENDOR's `update`. `list` returns
 skill records, including the repository's `ci-skills` package; its commands
 are described by that package's `tools.json`. Package consolidation
-(CI-PHASES) lands before this phase.
+(CI10-PHASES) lands before this phase.
 
 ## Block
 
@@ -45,11 +45,11 @@ Discovery only reads: it writes nothing and uses no network.
 
 1. **`SKILL.md`.** The frontmatter is the block between a first line `---`
    and the next line `---`. It is parsed as YAML and checked against
-   `skill-frontmatter` (CI-SCHEMA). Its `name` must equal the directory
+   `skill-frontmatter` (CI07-SCHEMA). Its `name` must equal the directory
    name.
 2. **`tools.json`**, for a local skill, checked against `skill-manifest`. It
    supplies the tags, references, routing and tool operations used
-   (CI-ROUTING).
+   (CI08-ROUTING).
 3. **The lock and declarations**, for a vendored skill: its entry in
    `vendor/vendor.lock.json` and in `vendor/vendor.toml`, each checked
    against its schema.
@@ -112,7 +112,7 @@ Exit codes, the result envelope and `safe_next_step` follow CI02-CLI.
 ## Index record
 
 `list` builds the index on every call; nothing is committed, so it cannot go
-stale. Its schema is `skill-index` (CI-SCHEMA).
+stale. Its schema is `skill-index` (CI07-SCHEMA).
 
 ```json
 {
@@ -148,16 +148,16 @@ Where each field comes from:
 | Field | Local skill | Vendored skill |
 | --- | --- | --- |
 | `name`, `description` | `SKILL.md` frontmatter | `SKILL.md` frontmatter |
-| `source` | `local` | the lock (CI-VENDOR) |
+| `source` | `local` | the lock (CI05-VENDOR) |
 | `entry` | `SKILL.md` | `SKILL.md` |
 | `manifest` | `tools.json` | absent |
-| `tags` | `tools.json` (CI-ROUTING) | `vendor/vendor.toml` |
-| `references`, `depends_on` | `tools.json` (CI-ROUTING) | absent |
+| `tags` | `tools.json` (CI08-ROUTING) | `vendor/vendor.toml` |
+| `references`, `depends_on` | `tools.json` (CI08-ROUTING) | absent |
 | `upstream` | absent | the lock and `vendor/vendor.toml` |
 
-`list` adds nothing a skill does not declare. Until CI-ROUTING, the local
+`list` adds nothing a skill does not declare. Until CI08-ROUTING, the local
 skill's `tags`, `references` and `depends_on` are empty. Historical package
-size measurements are in CI-ROUTING; measure the consolidated record before
+size measurements are in CI08-ROUTING; measure the consolidated record before
 setting an output budget.
 
 ## Why this shape
@@ -180,10 +180,10 @@ setting an output budget.
    `tools/skillkit/install.py`, taking the skill name as a parameter. Keep
    that command as the wrapper described above until callers migrate.
 2. Add `tools/skillkit/discover.py` with the walk and read above.
-3. Extend CI-VENDOR's repository-level `bin/ci-skills` with `list`, `get`
+3. Extend CI05-VENDOR's repository-level `bin/ci-skills` with `list`, `get`
    and `install`. Each verb has `--help` and `--describe` (CI02-CLI). This
    maintenance command is outside the installed `ci-skills` package.
-4. Add the tests CI-TESTS lists, and open one pull request; the
+4. Add the tests CI06-TESTS lists, and open one pull request; the
    `validate` workflow must pass.
 5. Read back: `bin/ci-skills list` shows exactly one `ci-skills` record,
    plus `glab` and `glab-stack`. Comparing `bin/ci-skills get glab` with
@@ -192,7 +192,7 @@ setting an output budget.
 
 ## Gates
 
-- **Tests.** As listed in CI-TESTS, run in CI.
+- **Tests.** As listed in CI06-TESTS, run in CI.
 - **Receipt.** This phase does not change `ci-skills`, so the
   package-delivery receipt remains valid until expiry. If this phase changes
   package bytes, capture a fresh receipt after the last edit (CI03-GATES).

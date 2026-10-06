@@ -1,13 +1,13 @@
-# CI-VENDOR: vendored glab agent skills
+# CI05-VENDOR: vendored glab agent skills
 
-Status: proposed. Depends on: CI03-GATES, CI-SCHEMA and CI02-CLI. Followed
+Status: proposed. Depends on: CI03-GATES, CI07-SCHEMA and CI02-CLI. Followed
 by: CI01-CATALOG.
 
 ## Goal
 
 Copy the agent skills that the GitLab CLI (`glab`) ships into `skills/`, so
 this repository owns them, lists them (CI01-CATALOG) and routes to them
-(CI-ROUTING), and detect any later drift or hand edit.
+(CI08-ROUTING), and detect any later drift or hand edit.
 
 ## What glab ships
 
@@ -58,7 +58,7 @@ one skill at a time; a single shared notice would not travel with it.
 ## Declarations and lock
 
 **`vendor/vendor.toml`** is edited by hand and validated against
-`vendor-declarations` (CI-SCHEMA). It declares:
+`vendor-declarations` (CI07-SCHEMA). It declares:
 
 - **The skills to fetch.** Each skill's name and source (`glab-bundled` or
   `glab-remote`). `update` fetches only declared names, so nothing depends on
@@ -72,7 +72,7 @@ The notice text comes from the `LICENSE` of the upstream release that built
 the installed `glab`. It is added once, by hand, and `update` keeps it.
 
 **`vendor/vendor.lock.json`** is written only by `update`, never by hand,
-and validated against `vendor-lock` (CI-SCHEMA):
+and validated against `vendor-lock` (CI07-SCHEMA):
 
 ```json
 {
@@ -194,7 +194,7 @@ How we consume the skills that the installed `glab` ships:
    `-r requirements.txt`) and create the conda environment, before anything
    runs.
 2. Build `tools/skillkit/vendor.py` and the `verify` and `update` verbs of
-   `bin/ci-skills`, with the tests CI-TESTS lists.
+   `bin/ci-skills`, with the tests CI06-TESTS lists.
 3. Declare `glab` and `glab-stack` in `vendor/vendor.toml`, and add each
    notice from the upstream release's `LICENSE`.
 4. Run `bin/ci-skills update glab glab-stack` to see the plan, then run it
@@ -220,7 +220,7 @@ Steps 4 and 5 are also the refresh path: `update` shows upstream drift,
 - **Measured on the fetched copies.** No trailing whitespace, CRLF or tabs,
   so `git diff --check` passes; no gitleaks finding; no project-neutrality
   violation.
-- **Tests.** As listed in CI-TESTS, run in CI.
+- **Tests.** As listed in CI06-TESTS, run in CI.
 - **Receipt.** Vendoring does not change the local diagnostics skill, so its
   committed live receipt still applies until it expires on
   2026-11-01T22:35:26Z (`captured_at` plus `max_receipt_age_days`). After
