@@ -43,7 +43,8 @@ ci_toolchain_present() {
 	if [[ -n "$version_file" ]]; then
 		expected="$(head -1 "$root/$version_file")" || return 1
 		command="$(jq -r '.commands[0]' <<<"$dependency")" || return 1
-		observed="$("$command" --version 2>/dev/null | head -1)" || return 1
+		observed="$("$command" --version 2>/dev/null)" || return 1
+		observed="${observed%%$'\n'*}"
 		[[ "$observed" == *"v$expected"* || "$observed" == "$expected" ]] || return 1
 	fi
 }

@@ -17,6 +17,14 @@ setup() {
   [[ "$output" == *'"plan_fingerprint": '* ]]
 }
 
+@test 'unchanged toolchain produces the same reviewed plan fingerprint' {
+  first="$("$root/scripts/dev.sh" toolchain --dry-run --json)"
+  second="$("$root/scripts/dev.sh" toolchain --dry-run --json)"
+  [ "$(jq -r .plan_fingerprint <<<"$first")" = \
+    "$(jq -r .plan_fingerprint <<<"$second")" ]
+  [ "$(jq -r .detail <<<"$first")" = "$(jq -r .detail <<<"$second")" ]
+}
+
 @test 'development install refuses apply without confirmation' {
   run "$root/scripts/dev.sh" hooks --apply --json
   [ "$status" -eq 64 ]
