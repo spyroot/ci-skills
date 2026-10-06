@@ -11,7 +11,7 @@ versioned.
 ## Schemas
 
 All schemas live under `schemas/` at the repository root (planned, this
-phase; `command-contract` and `skill-index` are implemented so far), one file per record kind,
+phase; `command-contract`, `skill-index` and `skill-manifest` are implemented so far), one file per record kind,
 named `<kind>.schema.json`. They use JSON Schema draft 2020-12 and the style
 of the shared standards' own schemas: `$schema`, `$id`, `title`, `type`,
 `required`, `properties` and `$defs`. A kind without a schema cannot be
@@ -24,7 +24,7 @@ adds the record, or `today` where the record exists in the tree.
 | Schema | `kind` | Validates | Producer | Status |
 | --- | --- | --- | --- | --- |
 | `skill-frontmatter` | none, upstream shape | the YAML block in each `SKILL.md` | authors | missing |
-| `skill-manifest` | `skill_manifest` | `ci-skills/tools.json` | `tools/render_manifest.py` | missing |
+| `skill-manifest` | `skill_manifest` | `ci-skills/tools.json` | `tools/render_manifest.py` | implemented |
 | `skill-index` | `skill_index` | `bin/ci-skills list --json` | `tools/skillkit/discover.py` | implemented |
 | `vendor-lock` | `skill_vendor_lock` | `vendor/vendor.lock.json` | `bin/ci-skills update` | missing |
 | `vendor-declarations` | not named yet | `vendor/vendor.toml` | by hand | missing |
@@ -44,8 +44,56 @@ Implemented, each checked with `check-jsonschema --schemafile <schema> <record>`
   record; it accepts that section's example and the `ci-skills` record read from `ci-skills/SKILL.md` and
   `tools.json`, and refuses a local skill without its manifest, a vendored skill with one, an unknown field, an
   unknown error rule and an invalid name. Its producer, `bin/ci-skills list`, is not built yet (CI01-CATALOG).
+- [`schemas/skill-manifest.schema.json`](../../schemas/skill-manifest.schema.json), built from
+  `ci-skills/tools.json`; it accepts that file and refuses an unknown field, an entry without `purpose`, an option
+  name without dashes, `read_only` as text and an unknown authority.
 
 Every row marked missing is this phase's to implement; a record kind without its schema cannot be emitted.
+
+### Adding a schema
+
+A new schema is one file, `schemas/<schema>.schema.json`, named as its row in the table above. It must include:
+
+- `"$schema": "https://json-schema.org/draft/2020-12/schema"`, an `$id` under
+  `https://github.com/spyroot/ci-skills/schemas/`, `title` set to the record kind, and a `description` that names
+  the record and the producer that writes it;
+- `type: object` and `additionalProperties: false` at every object level, so a field the schema does not name is
+  refused;
+- `required` listing every field the record always carries, with `kind` and `schema_version` as `const`;
+- maps (option names, exit codes, status tokens, command names) as `propertyNames` plus `additionalProperties`,
+  never as a fixed key list;
+- shapes taken from real records: the producer's output when it exists (`command-contract`: all 15 `--describe`
+  outputs; `skill-manifest`: `ci-skills/tools.json`), otherwise the owning phase's record definition
+  (`skill-index`: CI01-CATALOG, Index record). A field the real records hold in two shapes accepts both:
+  `subcommands` is a map for the Python commands and a list for the Bash ones.
+
+Proof, before the row says implemented:
+
+1. `check-jsonschema --check-metaschema schemas/<schema>.schema.json` passes.
+2. `check-jsonschema --schemafile schemas/<schema>.schema.json <record>` accepts every real record.
+3. The same command refuses at least three broken copies: an unknown field, a missing required field, and one
+   value that breaks a declared rule.
+4. The table row says `implemented`, and the producer's phase document links the file.
+
+Example, the top of `schemas/skill-index.schema.json` (the file adds `description` and `$defs`):
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/skill-index.schema.json",
+  "title": "skill_index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "skills"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "skill_index"},
+    "skills": {"type": "array", "items": {"$ref": "#/$defs/skill"}},
+    "errors": {"type": "array", "items": {"$ref": "#/$defs/error"}}
+  }
+}
+```
+
 | one file per report kind | the kinds below | a command's result and its receipt | the command | see below |
 
 Notes on the rows:
