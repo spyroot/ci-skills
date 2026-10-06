@@ -187,15 +187,7 @@ Tests: CI03-GATES, Delivery, test and proof.
 
 ## CI07-SCHEMA
 
-- Every schema validates against the 2020-12 metaschema.
-- Per schema, fixtures for:
-  - one valid record;
-  - one record per missing required field;
-  - one record per broken conditional rule.
-- **The version gate.** A schema changed without a version bump fails, and
-  so does a MAJOR bump without the new file.
-- **Runtime.** An invalid record makes a producer exit 65, naming the file,
-  the JSON path and the rule.
+Tests: CI07-SCHEMA, Delivery, test and proof.
 
 ## CI02-CLI
 

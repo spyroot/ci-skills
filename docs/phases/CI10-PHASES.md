@@ -23,7 +23,7 @@ Python library in `ci-skills/lib/core/`, the Bash libraries in
 `ci-skills/lib/bash/{core,ci,automation}/`, references in
 `ci-skills/references/`, the generated `tools.json` beside `SKILL.md`.
 Decided, created by the phases named: maintenance-only Python in
-`tools/skillkit/` importing `core` from `ci-skills/lib` (CI05, CI09, CI01),
+`tools/skillkit/` importing `core` from `ci-skills/lib` (CI07 first, then CI05, CI09, CI01),
 thin maintenance mains in `tools/` plus the one root command `bin/ci-skills`
 (CI05 creates it, CI01 extends it), vendored skills in `vendor/skills/<name>/`
 with the declarations and the one lock in `vendor/` (CI05), vendored
@@ -113,8 +113,10 @@ is traceable to a request we recorded, a verified defect, or a source script.
 | plan, apply, read-back skeleton | `ci-skills/lib/core/action.py`, extracted from `gitlab_actions.py` | CI11-TOOLS |
 | parallel reads helper | `ci-skills/lib/core/collect.py` (the executor it already uses, made shared) | CI11-TOOLS |
 | references and navigator | `core/{reference,navigate,tool_operations}.py`, `bin/reference.py` | CI09-REFERENCE |
-| maintenance package | `tools/skillkit/{transaction,vendor,reference_update,install,discover}.py` | CI05, CI09, CI01 |
+| maintenance package | `tools/skillkit/{schema,transaction,vendor}.py` | CI07, CI05 |
+| maintenance package, continued | `tools/skillkit/{reference_update,install,discover}.py` | CI09, CI01 |
 | record schemas | `schemas/<kind>.schema.json`, one per record kind | CI07-SCHEMA |
+| schema validator | `tools/skillkit/schema.py`, thin main `tools/check_schemas.py` (`schema_check`) | CI07-SCHEMA |
 | GitHub GET owner | `core/github_api.py` (the `gh api` GET of `core/access.py:181-185`, extracted) | CI02-CLI |
 | Codex metadata and scopes | `ci-skills/agents/openai.yaml` (generated), `assets/`, `--scope` | CI01-CATALOG |
 | vendor declarations and lock | `vendor/vendor.toml`, `vendor/vendor.lock.json` | CI05-VENDOR |
