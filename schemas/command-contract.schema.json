@@ -146,7 +146,8 @@
       "minLength": 1
     },
     "schema_version": {
-      "const": "1.0"
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
     },
     "side_effects": {
       "type": "string",

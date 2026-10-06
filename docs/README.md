@@ -31,7 +31,7 @@ authorities a command reads; "writes" means it changes state only after a confir
 | `storage_report.py` | Correlate claims, volumes, attachments, pods and controllers | available | kubernetes |
 | installer | install the skill, digest-verified | available | `tools/install_ci_skills.py`, `install.sh` |
 | access references | how access is proved and how a project binds its target | available | `ci-skills/references/` |
-| record schemas | one closed schema per record kind | 3 of 11 available | [CI07-SCHEMA](phases/CI07-SCHEMA.md), `schemas/` |
+| record schemas | one closed schema per record kind | 6 of 14 available | [CI07-SCHEMA](phases/CI07-SCHEMA.md), `schemas/` |
 | GitLab tool belt | milestone, issue, wiki and runner actions above | available | [delivery plan](gitlab-toolbelt-plan.md) |
 | skill discovery and install | list, get and install every skill, local or vendored, into any Codex or Claude scope | planned | [CI01-CATALOG](phases/CI01-CATALOG.md) |
 | one command-line contract | every command answers `--help`, `--describe`, `--json` and `--yaml` with one exit table | planned | [CI02-CLI](phases/CI02-CLI.md) |
@@ -41,7 +41,7 @@ authorities a command reads; "writes" means it changes state only after a confir
 | tests and live smoke | CI-only test command, coverage, live smoke proven by read-back | planned | [CI06-TESTS](phases/CI06-TESTS.md) |
 | routing and selective loading | load only the reference a task needs | planned | [CI08-ROUTING](phases/CI08-ROUTING.md) |
 | references and navigator | ask what the skill can do about X; read one upstream keyword chunk | planned | [CI09-REFERENCE](phases/CI09-REFERENCE.md) |
-| GitLab jobs and pipelines | get, track, logs, list by status, interval, keyword, job-name glob; start, retry, cancel | planned | [CI11-TOOLS](phases/CI11-TOOLS.md) |
+| GitLab jobs and pipelines | get, watch, logs, list by status, interval, keyword, job-name glob; start, retry, cancel | planned | [CI11-TOOLS](phases/CI11-TOOLS.md) |
 | pipeline schedules | list, get, play, create, update | planned | [CI11-TOOLS](phases/CI11-TOOLS.md) |
 | merge-request checks | one MR's state, head pipeline and failing jobs with log snippets | planned | [CI11-TOOLS](phases/CI11-TOOLS.md) |
 | runners | tags, state, online, projects, executor; delete, reset token | planned | [CI11-TOOLS](phases/CI11-TOOLS.md) |

@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/reference-next.schema.json",
+  "title": "reference_next",
+  "description": "One answer of ci-skills/bin/reference.py next (CI09-REFERENCE section 3): one level of the resource graph, its summary and a bounded set of typed pointers. Its $defs choice and pointer are the one definition every pointer-carrying record reuses.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "path",
+    "summary",
+    "choices",
+    "continuation"
+  ],
+  "properties": {
+    "kind": {
+      "const": "reference_next"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "path": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+      }
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "capability": {
+      "$ref": "#/$defs/capability"
+    },
+    "choices": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/choice"
+      }
+    },
+    "relations": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/relation"
+      }
+    },
+    "continuation": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/pointer"
+        }
+      ]
+    },
+    "error": {
+      "$ref": "#/$defs/error"
+    }
+  },
+  "$defs": {
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "summary",
+        "next"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+        },
+        "kind": {
+          "enum": [
+            "expand",
+            "execute",
+            "read",
+            "retrieve"
+          ]
+        },
+        "summary": {
+          "$ref": "#/$defs/summary"
+        },
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "next": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/pointer"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "read"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "when"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "available": {
+                "const": false
+              }
+            },
+            "required": [
+              "available"
+            ]
+          },
+          "then": {
+            "properties": {
+              "next": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "next": {
+                "$ref": "#/$defs/pointer"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "pointer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "entrypoint",
+        "args"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "expand",
+            "describe",
+            "execute",
+            "read",
+            "retrieve"
+          ]
+        },
+        "entrypoint": {
+          "type": "string",
+          "pattern": "^bin/[A-Za-z0-9_.-]+$"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/input"
+          }
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "required"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "kind",
+        "requires",
+        "tools",
+        "mutates",
+        "side_effects",
+        "returns"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "pattern": "^bin/[A-Za-z0-9_.-]+$"
+        },
+        "verb": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        },
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "mutates": {
+          "type": "boolean"
+        },
+        "side_effects": {
+          "type": "string",
+          "minLength": 1
+        },
+        "returns": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "rel",
+        "to",
+        "evidence"
+      ],
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.:-]*$"
+        },
+        "rel": {
+          "enum": [
+            "infers",
+            "applies_to"
+          ]
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.:-]*$"
+        },
+        "evidence": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "input"
+      ],
+      "properties": {
+        "reason": {
+          "enum": [
+            "path_unknown",
+            "reference_unknown",
+            "anchor_unknown",
+            "card_unavailable",
+            "page_out_of_range"
+          ]
+        },
+        "input": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

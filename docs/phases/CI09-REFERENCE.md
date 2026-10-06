@@ -255,7 +255,6 @@ Schema `reference-index` (CI07-SCHEMA; version per its Versions section:
   "schema_version": "0.1",
   "kind": "reference_index",
   "reference": "gitlab-ci-yaml",
-  "domain": "gitlab",
   "max_chunk_bytes": 65536,
   "upstream": {
     "project": "gitlab-org/gitlab", "path": "doc/ci/yaml/_index.md",
@@ -296,7 +295,6 @@ this phase adds the `[references.<name>]` fields with a MINOR bump of the
 
 ```toml
 [references.gitlab-ci-yaml]
-domain = "gitlab"
 source = "gitlab-raw"                                  # a file at a commit from the GitLab raw endpoint
 project = "gitlab-org/gitlab"
 path = "doc/ci/yaml/_index.md"
@@ -310,6 +308,7 @@ max_chunk_bytes = 65536
 max_age_days = 90
 ```
 
+Where a reference's sections appear in the graph is declared in `core/catalog.py` (section 3), not here.
 `source`, `chunker` and `joiner` each have one implementation today; the
 `ReferenceSource`, `Chunker` and `Joiner` seams are introduced with the second
 source, not before (CI10-PHASES, Modularity: contract first only where two
@@ -366,7 +365,7 @@ them (section 4); `tests/python/test_reference.py` produces every one.
 | Step | The agent runs | Cost |
 | --- | --- | --- |
 | L0 | nothing; the skill `description` names the reference and the navigator | about 100 tokens |
-| L1 | `ci-skills/bin/reference.py next gitlab <tag>`, then the chosen `next`, two or three times | under 1 KB each |
+| L1 | `ci-skills/bin/reference.py next <path>` at any level, then one pointer (section 3) | under 4 KB each |
 | L2 | the leaf: `get` (one chunk), `--part values` or `--card` | one chunk, never the page |
 
 `index.json` and `tools.json` are inputs of the tool, never reading
@@ -375,106 +374,1211 @@ owns the rest of the router.
 
 ## 3. The navigator: one entrypoint for knowledge and tools
 
-An agent discovers what the skill can do through one entrypoint, `ci-skills/bin/reference.py`. Each call returns a
-compact description of one location in the resource graph and typed pointers to what is available there: groups
-and subresources to expand, capabilities to describe or execute, reference sections to read, and result details to
-retrieve. The agent never reads `tools.json`, a reference `index.json`, the documentation tree or a command's full
-`--help` to choose its next step; those files are the navigator's inputs.
+An agent discovers what the skill can do through one entrypoint, `ci-skills/bin/reference.py`. Each call returns
+one level of the resource graph: a short summary and typed pointers to the next level. The agent follows a pointer
+only when it needs what is behind it. It never reads `tools.json`, a reference `index.json`, the documentation tree
+or a command's full `--help`; those files are the navigator's inputs.
 
-### Reference example (locked)
+### Authority
 
-Human view, two levels:
+This section is the only specification of the navigator, of the pointer every response carries, and of how both
+render. CI08-ROUTING, CI11-TOOLS and `docs/README.md` point here and restate none of it. Each combo's operations and
+completion evidence are specified once in CI11-TOOLS, Combos. Versions, and how to add what we missed, follow
+CI07-SCHEMA, Versions. Acquiring a reference (source, pin, license, chunker) follows section 2, Declaration; where its
+sections appear in the graph is declared here. The navigator needs only CI10 block 0 (importable `bin/`, a working
+`tools/render_manifest.py`); the rest of this phase does not block it.
+
+### Grammar
+
+Every call has the same shape, so an agent repeats it one segment deeper:
 
 ```text
-reference.py next
+reference.py next                              the root
+reference.py next PATH                         one level: subresources, plus one run pointer and one read pointer
+reference.py next PATH run                     what you can run here
+reference.py next PATH run ID                  how to run it: command, required inputs, an options pointer
+reference.py next PATH run ID options          every input, only if needed
+reference.py next PATH read                    the references with sections here
+reference.py next PATH read REF                that reference's sections here, and how they relate
+reference.py next PATH read REF --search TEXT  the sections of the whole pinned reference that contain TEXT
+reference.py get REF ANCHOR                    one section's own text, plus pointers to its subsections
+                                               every call also takes --page N, and --json, --yaml or --human
+```
+
+- `run`, `read` and `options` are reserved segments; no node takes those names.
+- A path whose first segment is not a root group is looked up by name anywhere in the graph: one match answers that
+  level, several answer "which one?" with one `expand` pointer each (Render 12).
+- A pointer is listed only when its target is non-empty, so every pointer resolves.
+- A verb a plan names but the installed skill cannot run is listed with `available: false` and no pointer (Render 7).
+- `--json` prints one line, and the limits below apply to that line. The renders show it wrapped for reading.
+
+### The renders, in the order an agent meets them
+
+Each render shows the call, what a person sees (`--human`, the default on a terminal) and what an agent parses
+(`--json`, the default on a pipe). The human view is the JSON drawn by the rules that follow the renders; nothing
+appears in one that is not in the other. Renders 1 to 7 and 13 come from today's catalog once this task lands; the
+others appear when section 2 vendors the references they read.
+
+#### Render 1. The root
+
+Produced by: this task. One-line JSON: 851 bytes.
+
+```text
+$ reference.py next
+Discover what ci-skills can inspect, run or read.
 
 Available groups
-  harbor   Registry, images, charts and related operations.
-           Expand: reference.py next harbor
-
-  ci       Pipelines, jobs, runners and CI workflows.
-           Expand: reference.py next ci
+  gitlab   GitLab pipelines, jobs, runners, issues, milestones and wikis.
+           Expand: reference.py next gitlab
 
   k8s      Cluster, workload, storage and network operations.
            Expand: reference.py next k8s
 
-References
-  Relevant entry references, each with:
-  a short purpose, its anchor, when to read it, and how to retrieve it.
-```
-
-```text
-reference.py next ci
-
-Subresources
-  pipeline   Inspect pipelines and their related jobs.
-             Expand: reference.py next ci pipeline
-
-  job        Inspect job state, output and failure evidence.
-             Expand: reference.py next ci job
-
-  runner     Inspect or manage runners.
-             Expand: reference.py next ci runner
-
 Commands / combos
-  Relevant capabilities directly available at this level.
-  Each includes a short purpose and its exact next invocation.
+  run      1 capability to run.
+           Expand: reference.py next run
 
 References
-  Relevant CI references.
-  Each includes its anchor, when to read it, and its retrieval invocation.
+  read     1 reference with sections here.
+           Expand: reference.py next read
 ```
-
-The machine-readable answer one level down, which an agent parses:
 
 ```json
 {
   "kind": "reference_next",
   "schema_version": "1.0",
-  "path": ["ci", "pipeline"],
-  "summary": "Inspect, watch and diagnose pipelines.",
+  "path": [],
+  "summary": "Discover what ci-skills can inspect, run or read.",
   "choices": [
-    {
-      "id": "watch",
-      "kind": "execute",
-      "summary": "Watch a pipeline and its linked downstream runs.",
-      "next": {
-        "action": "describe",
-        "entrypoint": "bin/reference.py",
-        "args": ["next", "ci", "pipeline", "watch", "--json"]
-      }
-    },
-    {
-      "id": "trigger",
-      "kind": "read",
-      "summary": "Downstream pipeline trigger reference.",
-      "anchor": "trigger",
-      "when": "Read when interpreting how a downstream pipeline is triggered.",
-      "next": {
-        "action": "read",
-        "entrypoint": "bin/reference.py",
-        "args": ["get", "gitlab-ci-yaml", "trigger", "--card", "--json"]
-      }
-    }
+    {"id": "gitlab", "kind": "expand", "summary": "GitLab pipelines, jobs, runners, issues, milestones and wikis.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "--json"]}},
+    {"id": "k8s", "kind": "expand", "summary": "Cluster, workload, storage and network operations.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "k8s", "--json"]}},
+    {"id": "run", "kind": "expand", "summary": "1 capability to run.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "run", "--json"]}},
+    {"id": "read", "kind": "expand", "summary": "1 reference with sections here.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "read", "--json"]}}
   ],
   "continuation": null
 }
 ```
 
-The response shape:
+#### Render 2. Expand a group
+
+Produced by: this task; `mcp` once its references are vendored. One-line JSON: 1836 bytes.
 
 ```text
-compact response
-    → short summary
-    → typed pointers
-        → expand a subresource
-        → describe or execute a capability
-        → read a specific reference section
-        → retrieve selected result details
+$ reference.py next gitlab
+GitLab pipelines, jobs, runners, issues, milestones and wikis.
+
+Subresources
+  access     Prove GitLab access and read back the selected target.
+             Expand: reference.py next gitlab access
+
+  api        Read one caller-selected GitLab or GitHub API resource.
+             Expand: reference.py next gitlab api
+
+  issue      Create or reuse exact bug issues.
+             Expand: reference.py next gitlab issue
+
+  job        Inspect job state, output and failure evidence.
+             Expand: reference.py next gitlab job
+
+  mcp        Connect an MCP client to GitLab's MCP server.
+             Expand: reference.py next gitlab mcp
+
+  milestone  Create or update milestones.
+             Expand: reference.py next gitlab milestone
+
+  pipeline   Inspect, watch and diagnose pipelines.
+             Expand: reference.py next gitlab pipeline
+
+  runner     Inspect or manage runners.
+             Expand: reference.py next gitlab runner
+
+  wiki       Create or update wiki pages.
+             Expand: reference.py next gitlab wiki
 ```
 
-`harbor` is listed once its first command lands (CI11-TOOLS); a group or subresource with nothing under it is not
-listed.
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["gitlab"],
+  "summary": "GitLab pipelines, jobs, runners, issues, milestones and wikis.",
+  "choices": [
+    {"id": "access", "kind": "expand", "summary": "Prove GitLab access and read back the selected target.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "access", "--json"]}},
+    {"id": "api", "kind": "expand", "summary": "Read one caller-selected GitLab or GitHub API resource.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "api", "--json"]}},
+    {"id": "issue", "kind": "expand", "summary": "Create or reuse exact bug issues.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "issue", "--json"]}},
+    {"id": "job", "kind": "expand", "summary": "Inspect job state, output and failure evidence.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "job", "--json"]}},
+    {"id": "mcp", "kind": "expand", "summary": "Connect an MCP client to GitLab's MCP server.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "mcp", "--json"]}},
+    {"id": "milestone", "kind": "expand", "summary": "Create or update milestones.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "milestone", "--json"]}},
+    {"id": "pipeline", "kind": "expand", "summary": "Inspect, watch and diagnose pipelines.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "pipeline", "--json"]}},
+    {"id": "runner", "kind": "expand", "summary": "Inspect or manage runners.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "runner", "--json"]}},
+    {"id": "wiki", "kind": "expand", "summary": "Create or update wiki pages.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "wiki", "--json"]}}
+  ],
+  "continuation": null
+}
+```
+
+#### Render 3. Expand a subresource
+
+Produced by: this task; `read` once section 2 vendors `gitlab-ci-yaml`. One-line JSON: 519 bytes.
+
+```text
+$ reference.py next gitlab pipeline
+Inspect, watch and diagnose pipelines.
+
+Commands / combos
+  run      2 capabilities to run.
+           Expand: reference.py next gitlab pipeline run
+
+References
+  read     1 reference with sections here.
+           Expand: reference.py next gitlab pipeline read
+```
+
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["gitlab", "pipeline"],
+  "summary": "Inspect, watch and diagnose pipelines.",
+  "choices": [
+    {"id": "run", "kind": "expand", "summary": "2 capabilities to run.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "pipeline", "run", "--json"]}},
+    {"id": "read", "kind": "expand", "summary": "1 reference with sections here.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "pipeline", "read", "--json"]}}
+  ],
+  "continuation": null
+}
+```
+
+#### Render 4. What you can run
+
+Produced by: this task. One-line JSON: 573 bytes.
+
+```text
+$ reference.py next gitlab pipeline run
+2 capabilities to run.
+
+Commands / combos
+  get      Read one pipeline: status, stages and job counts.
+           Describe: reference.py next gitlab pipeline run get
+
+  watch    Watch a pipeline and its linked downstream runs.
+           Describe: reference.py next gitlab pipeline run watch
+```
+
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["gitlab", "pipeline", "run"],
+  "summary": "2 capabilities to run.",
+  "choices": [
+    {"id": "get", "kind": "execute", "summary": "Read one pipeline: status, stages and job counts.",
+     "next": {"action": "describe", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "pipeline", "run", "get", "--json"]}},
+    {"id": "watch", "kind": "execute", "summary": "Watch a pipeline and its linked downstream runs.",
+     "next": {"action": "describe", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "pipeline", "run", "watch", "--json"]}}
+  ],
+  "continuation": null
+}
+```
+
+#### Render 5. Describe one capability
+
+Produced by: this task. One-line JSON: 982 bytes.
+
+```text
+$ reference.py next gitlab pipeline run watch
+Watch a pipeline and its linked downstream runs.
+
+  command   bin/gitlab_pipeline.py watch
+  requires  gitlab
+  tools     glab
+  mutates   no
+  returns   gitlab_pipeline_watch
+
+Commands / combos
+  watch    Watch a pipeline and its linked downstream runs.
+           Run: gitlab_pipeline.py watch --pipeline-id <pipeline-id>
+           Needs: --pipeline-id  numeric ID of the pipeline to read
+
+  options  4 optional inputs.
+           Expand: reference.py next gitlab pipeline run watch options
+```
+
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["gitlab", "pipeline", "run", "watch"],
+  "summary": "Watch a pipeline and its linked downstream runs.",
+  "capability": {"command": "bin/gitlab_pipeline.py", "verb": "watch", "kind": "gitlab_pipeline_watch", "requires": ["gitlab"], "tools": ["glab"], "mutates": false, "side_effects": "none", "returns": "One record per pipeline in scope; complete and success reported separately; retrieve pointers to failures."},
+  "choices": [
+    {"id": "watch", "kind": "execute", "summary": "Watch a pipeline and its linked downstream runs.",
+     "next": {"action": "execute", "entrypoint": "bin/gitlab_pipeline.py", "args": ["watch", "--pipeline-id", "<pipeline-id>", "--json"], "inputs": [
+       {"name": "pipeline-id", "summary": "numeric ID of the pipeline to read", "required": true}
+     ]}},
+    {"id": "options", "kind": "expand", "summary": "4 optional inputs.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "pipeline", "run", "watch", "options", "--json"]}}
+  ],
+  "continuation": null
+}
+```
+
+#### Render 6. Its optional inputs, only if needed
+
+Produced by: this task. One-line JSON: 914 bytes.
+
+```text
+$ reference.py next gitlab pipeline run watch options
+4 optional inputs; append each as --name value.
+
+Commands / combos
+  watch    Watch a pipeline and its linked downstream runs.
+           Run: gitlab_pipeline.py watch --pipeline-id <pipeline-id>
+           Needs: --pipeline-id  numeric ID of the pipeline to read
+           Optional: --project  exact project path or numeric ID; otherwise use gitlab.project
+           Optional: --related-name  also watch newer pipelines in the root's project whose name matches
+           Optional: --interval  seconds between polls (default 10)
+           Optional: --timeout  seconds for the whole watch (default 3600)
+```
+
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["gitlab", "pipeline", "run", "watch", "options"],
+  "summary": "4 optional inputs; append each as --name value.",
+  "choices": [
+    {"id": "watch", "kind": "execute", "summary": "Watch a pipeline and its linked downstream runs.",
+     "next": {"action": "execute", "entrypoint": "bin/gitlab_pipeline.py", "args": ["watch", "--pipeline-id", "<pipeline-id>", "--json"], "inputs": [
+       {"name": "pipeline-id", "summary": "numeric ID of the pipeline to read", "required": true},
+       {"name": "project", "summary": "exact project path or numeric ID; otherwise use gitlab.project", "required": false},
+       {"name": "related-name", "summary": "also watch newer pipelines in the root's project whose name matches", "required": false},
+       {"name": "interval", "summary": "seconds between polls (default 10)", "required": false},
+       {"name": "timeout", "summary": "seconds for the whole watch (default 3600)", "required": false}
+     ]}}
+  ],
+  "continuation": null
+}
+```
+
+#### Render 7. A planned verb is shown, never callable
+
+Produced by: this task. One-line JSON: 995 bytes.
+
+```text
+$ reference.py next gitlab milestone run
+3 capabilities to run; 1 planned.
+
+Commands / combos
+  create       Create or update an exact GitLab milestone with independent read-back.
+               Describe: reference.py next gitlab milestone run create
+
+  update       Create or update an exact GitLab milestone with independent read-back.
+               Describe: reference.py next gitlab milestone run update
+
+  adjust-time  Create or update an exact GitLab milestone with independent read-back.
+               Describe: reference.py next gitlab milestone run adjust-time
+
+  list         Unavailable: planned in CI11-TOOLS.
+               Unavailable
+```
+
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["gitlab", "milestone", "run"],
+  "summary": "3 capabilities to run; 1 planned.",
+  "choices": [
+    {"id": "create", "kind": "execute", "summary": "Create or update an exact GitLab milestone with independent read-back.",
+     "next": {"action": "describe", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "milestone", "run", "create", "--json"]}},
+    {"id": "update", "kind": "execute", "summary": "Create or update an exact GitLab milestone with independent read-back.",
+     "next": {"action": "describe", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "milestone", "run", "update", "--json"]}},
+    {"id": "adjust-time", "kind": "execute", "summary": "Create or update an exact GitLab milestone with independent read-back.",
+     "next": {"action": "describe", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "milestone", "run", "adjust-time", "--json"]}},
+    {"id": "list", "kind": "execute", "summary": "Unavailable: planned in CI11-TOOLS.", "available": false, "next": null}
+  ],
+  "continuation": null
+}
+```
+
+#### Render 8. What you can read
+
+Produced by: once section 2 vendors `gitlab-labels`. One-line JSON: 387 bytes.
+
+```text
+$ reference.py next gitlab issue read
+1 reference with sections here.
+
+Subresources
+  gitlab-labels  GitLab label families: 8 sections and how they relate.
+                 Expand: reference.py next gitlab issue read gitlab-labels
+```
+
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["gitlab", "issue", "read"],
+  "summary": "1 reference with sections here.",
+  "choices": [
+    {"id": "gitlab-labels", "kind": "expand", "summary": "GitLab label families: 8 sections and how they relate.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "issue", "read", "gitlab-labels", "--json"]}}
+  ],
+  "continuation": null
+}
+```
+
+#### Render 9. One reference as a cluster
+
+Produced by: once section 2 vendors `gitlab-labels`. One-line JSON: 2932 bytes.
+
+```text
+$ reference.py next gitlab issue read gitlab-labels
+GitLab label families: 8 sections and how they relate.
+
+References
+  type-labels      Exactly one per issue; always lowercase; any color but blue.
+                   Read: reference.py get gitlab-labels type-labels
+                   Read when labeling any issue.
+
+  priority-labels  priority::1 to priority::4; their meaning lives in the handbook triage page.
+                   Read: reference.py get gitlab-labels priority-labels
+                   Read when setting priority; choosing a level needs the handbook page.
+
+  severity-labels  severity::1 to severity::4; their meaning lives in the handbook triage page.
+                   Read: reference.py get gitlab-labels severity-labels
+                   Read when setting severity; choosing a level needs the handbook page.
+
+  workflow-labels  18 workflow:: values for the issue's current status.
+                   Read: reference.py get gitlab-labels workflow-labels
+                   Read when moving an issue between states.
+
+  stage-labels     devops::<stage_key>; scoped, at most one per issue.
+                   Read: reference.py get gitlab-labels stage-labels
+                   Read when choosing the product stage.
+
+  group-labels     group::<group_key>; scoped; automation infers the stage from it.
+                   Read: reference.py get gitlab-labels group-labels
+                   Read when choosing the owning group.
+
+  category-labels  Category:<Category Name>; automation infers group and stage from it.
+                   Read: reference.py get gitlab-labels category-labels
+                   Read when the issue fits a product category.
+
+  feature-labels   Lowercase feature labels when no category applies; they infer group and stage.
+                   Read: reference.py get gitlab-labels feature-labels
+                   Read when no category label fits.
+
+Relations
+  group-labels infers stage-labels  (group-labels)
+  category-labels infers group-labels  (category-labels)
+  category-labels infers stage-labels  (category-labels)
+  feature-labels infers group-labels  (feature-labels)
+  feature-labels infers stage-labels  (feature-labels)
+```
+
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["gitlab", "issue", "read", "gitlab-labels"],
+  "summary": "GitLab label families: 8 sections and how they relate.",
+  "choices": [
+    {"id": "type-labels", "kind": "read", "summary": "Exactly one per issue; always lowercase; any color but blue.", "when": "Read when labeling any issue.",
+     "next": {"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-labels", "type-labels", "--json"]}},
+    {"id": "priority-labels", "kind": "read", "summary": "priority::1 to priority::4; their meaning lives in the handbook triage page.", "when": "Read when setting priority; choosing a level needs the handbook page.",
+     "next": {"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-labels", "priority-labels", "--json"]}},
+    {"id": "severity-labels", "kind": "read", "summary": "severity::1 to severity::4; their meaning lives in the handbook triage page.", "when": "Read when setting severity; choosing a level needs the handbook page.",
+     "next": {"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-labels", "severity-labels", "--json"]}},
+    {"id": "workflow-labels", "kind": "read", "summary": "18 workflow:: values for the issue's current status.", "when": "Read when moving an issue between states.",
+     "next": {"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-labels", "workflow-labels", "--json"]}},
+    {"id": "stage-labels", "kind": "read", "summary": "devops::<stage_key>; scoped, at most one per issue.", "when": "Read when choosing the product stage.",
+     "next": {"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-labels", "stage-labels", "--json"]}},
+    {"id": "group-labels", "kind": "read", "summary": "group::<group_key>; scoped; automation infers the stage from it.", "when": "Read when choosing the owning group.",
+     "next": {"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-labels", "group-labels", "--json"]}},
+    {"id": "category-labels", "kind": "read", "summary": "Category:<Category Name>; automation infers group and stage from it.", "when": "Read when the issue fits a product category.",
+     "next": {"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-labels", "category-labels", "--json"]}},
+    {"id": "feature-labels", "kind": "read", "summary": "Lowercase feature labels when no category applies; they infer group and stage.", "when": "Read when no category label fits.",
+     "next": {"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-labels", "feature-labels", "--json"]}}
+  ],
+  "relations": [
+    {"from": "group-labels", "rel": "infers", "to": "stage-labels", "evidence": "group-labels"},
+    {"from": "category-labels", "rel": "infers", "to": "group-labels", "evidence": "category-labels"},
+    {"from": "category-labels", "rel": "infers", "to": "stage-labels", "evidence": "category-labels"},
+    {"from": "feature-labels", "rel": "infers", "to": "group-labels", "evidence": "feature-labels"},
+    {"from": "feature-labels", "rel": "infers", "to": "stage-labels", "evidence": "feature-labels"}
+  ],
+  "continuation": null
+}
+```
+
+#### Render 10. Read one section
+
+Produced by: once section 2 vendors `gitlab-labels`. One-line JSON: 530 bytes.
+
+```text
+$ reference.py get gitlab-labels priority-labels
+gitlab-labels#priority-labels  pinned <commit recorded by the last refresh>
+
+Priority labels
+We have the following priority labels:
+
+* `~"priority::1"`
+* `~"priority::2"`
+* `~"priority::3"`
+* `~"priority::4"`
+
+Refer to the issue triage [priority label](https://handbook.gitlab.com/handbook/product-development/how-we-work/issue-triage/#priority) section in our handbook to see how it’s used.
+```
+
+```json
+{
+  "kind": "reference_section",
+  "schema_version": "1.0",
+  "reference": "gitlab-labels",
+  "anchor": "priority-labels",
+  "pinned": "<commit recorded by the last refresh>",
+  "text": "Priority labels\nWe have the following priority labels:\n\n* `~\"priority::1\"`\n* `~\"priority::2\"`\n* `~\"priority::3\"`\n* `~\"priority::4\"`\n\nRefer to the issue triage [priority label](https://handbook.gitlab.com/handbook/product-development/how-we-work/issue-triage/#priority) section in our handbook to see how it’s used.",
+  "choices": [],
+  "continuation": null
+}
+```
+
+#### Render 11. Search one pinned reference
+
+Produced by: once section 2 vendors `gitlab-labels`. One-line JSON: 771 bytes.
+
+```text
+$ reference.py next gitlab issue read gitlab-labels --search scoped
+2 sections contain "scoped".
+
+References
+  naming-and-color-convention    Stage labels: naming and color convention.
+                                 Read: reference.py get gitlab-labels naming-and-color-convention
+                                 Read for the passage that contains "scoped".
+
+  naming-and-color-convention-1  Group labels: naming and color convention.
+                                 Read: reference.py get gitlab-labels naming-and-color-convention-1
+                                 Read for the passage that contains "scoped".
+```
+
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["gitlab", "issue", "read", "gitlab-labels"],
+  "summary": "2 sections contain \"scoped\".",
+  "query": "scoped",
+  "choices": [
+    {"id": "naming-and-color-convention", "kind": "read", "summary": "Stage labels: naming and color convention.", "when": "Read for the passage that contains \"scoped\".",
+     "next": {"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-labels", "naming-and-color-convention", "--json"]}},
+    {"id": "naming-and-color-convention-1", "kind": "read", "summary": "Group labels: naming and color convention.", "when": "Read for the passage that contains \"scoped\".",
+     "next": {"action": "read", "entrypoint": "bin/reference.py", "args": ["get", "gitlab-labels", "naming-and-color-convention-1", "--json"]}}
+  ],
+  "continuation": null
+}
+```
+
+#### Render 12. Enter by name
+
+Produced by: once the MCP references are vendored. One-line JSON: 501 bytes.
+
+```text
+$ reference.py next mcp
+mcp: which one?
+
+Subresources
+  gitlab.mcp  Connect an MCP client to GitLab's MCP server.
+              Expand: reference.py next gitlab mcp
+
+  claude.mcp  Configure MCP servers in Claude Code.
+              Expand: reference.py next claude mcp
+```
+
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["mcp"],
+  "summary": "mcp: which one?",
+  "choices": [
+    {"id": "gitlab.mcp", "kind": "expand", "summary": "Connect an MCP client to GitLab's MCP server.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "mcp", "--json"]}},
+    {"id": "claude.mcp", "kind": "expand", "summary": "Configure MCP servers in Claude Code.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "claude", "mcp", "--json"]}}
+  ],
+  "continuation": null
+}
+```
+
+#### Render 13. A wrong segment
+
+Produced by: this task. One-line JSON: 1888 bytes.
+
+```text
+$ reference.py next gitlab pipelin
+path_unknown: pipelin
+GitLab pipelines, jobs, runners, issues, milestones and wikis.
+
+Subresources
+  access     Prove GitLab access and read back the selected target.
+             Expand: reference.py next gitlab access
+
+  api        Read one caller-selected GitLab or GitHub API resource.
+             Expand: reference.py next gitlab api
+
+  issue      Create or reuse exact bug issues.
+             Expand: reference.py next gitlab issue
+
+  job        Inspect job state, output and failure evidence.
+             Expand: reference.py next gitlab job
+
+  mcp        Connect an MCP client to GitLab's MCP server.
+             Expand: reference.py next gitlab mcp
+
+  milestone  Create or update milestones.
+             Expand: reference.py next gitlab milestone
+
+  pipeline   Inspect, watch and diagnose pipelines.
+             Expand: reference.py next gitlab pipeline
+
+  runner     Inspect or manage runners.
+             Expand: reference.py next gitlab runner
+
+  wiki       Create or update wiki pages.
+             Expand: reference.py next gitlab wiki
+```
+
+```json
+{
+  "kind": "reference_next",
+  "schema_version": "1.0",
+  "path": ["gitlab"],
+  "summary": "GitLab pipelines, jobs, runners, issues, milestones and wikis.",
+  "choices": [
+    {"id": "access", "kind": "expand", "summary": "Prove GitLab access and read back the selected target.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "access", "--json"]}},
+    {"id": "api", "kind": "expand", "summary": "Read one caller-selected GitLab or GitHub API resource.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "api", "--json"]}},
+    {"id": "issue", "kind": "expand", "summary": "Create or reuse exact bug issues.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "issue", "--json"]}},
+    {"id": "job", "kind": "expand", "summary": "Inspect job state, output and failure evidence.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "job", "--json"]}},
+    {"id": "mcp", "kind": "expand", "summary": "Connect an MCP client to GitLab's MCP server.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "mcp", "--json"]}},
+    {"id": "milestone", "kind": "expand", "summary": "Create or update milestones.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "milestone", "--json"]}},
+    {"id": "pipeline", "kind": "expand", "summary": "Inspect, watch and diagnose pipelines.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "pipeline", "--json"]}},
+    {"id": "runner", "kind": "expand", "summary": "Inspect or manage runners.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "runner", "--json"]}},
+    {"id": "wiki", "kind": "expand", "summary": "Create or update wiki pages.",
+     "next": {"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "wiki", "--json"]}}
+  ],
+  "continuation": null,
+  "error": {"reason": "path_unknown", "input": "pipelin"}
+}
+```
+
+The pipeline watch result that Render 6's command prints, with its `retrieve` pointers, is in CI11-TOOLS, Combos.
+
+### How a render is drawn
+
+1. The first line is the summary; an `error` comes before it as `reason: input`.
+2. A `capability` follows as aligned `command`, `requires`, `tools`, `mutates` and `returns` lines.
+3. Choices go into blocks in this order, each block omitted when empty: "Available groups" at the root and
+   "Subresources" below it (`expand` choices other than `run`, `read` and `options`); "Commands / combos"
+   (`execute` choices and the `run` and `options` pointers); "References" (`read` choices and the `read` pointer);
+   "Results" (`retrieve` choices).
+4. A choice is its id and summary, then its pointer as `Expand:`, `Describe:`, `Run:`, `Read:` or `Retrieve:`
+   followed by the entrypoint's file name and its arguments without `--json`. An `execute` pointer lists its inputs
+   as `Needs:` or `Optional:` lines, a `read` choice adds its `when` line, and an unavailable choice shows
+   `Unavailable`.
+5. `relations` render as `from rel to (evidence)`; a `continuation` renders as `More:` and its command.
+6. A section renders as `reference#anchor  pinned <pin>`, then its text verbatim, then its pointers.
+
+### Contract values
+
+- **Response** (`reference_next`): `kind`, `schema_version`, `path`, `summary`, `choices`, `continuation`; `query`
+  on a search; `capability` on a `run ID` level; `relations` on a `read REF` level; `error` with exit 2.
+- **Choice**: `id`, `kind` (`expand`, `execute`, `read` or `retrieve`), `summary`, `next`; `when` on every `read`
+  choice; `available: false` with `next: null` for a planned verb. A read choice's anchor is `args[2]` of its pointer.
+- **Pointer**: `action` (`expand`, `describe`, `execute`, `read` or `retrieve`), `entrypoint` (a path under the skill
+  root), `args`; an `execute` pointer adds `inputs`, one per input, each with `name`, `required` and, when the
+  catalog declares one, `summary`. Its `args` are the verb, each required option with a `<name>` placeholder, and
+  `--json` when the command accepts it. A mutating command's pointer prints its plan; the plan's own result carries
+  the apply pointer with the real digest, so an agent never builds `--apply` itself.
+- **Capability**: `command`, `verb`, `kind` (the report kind), `requires`, `tools`, `mutates`, `side_effects`,
+  `returns`, all read from the catalog entry.
+- **Section** (`reference_section`, from `get`): `kind`, `schema_version`, `reference`, `anchor`, `pinned` (the
+  upstream commit or version for a vendored reference, the skill revision for a local one), `text` (the lines from
+  the anchor's heading to the next heading of any level, verbatim), `choices` (its subsections), `continuation`.
+- **Anchors**: section 2's anchor rule; a repeated heading takes the suffixes `-1`, `-2` and so on in document order,
+  as Render 11 shows for the five "Naming and color convention" headings.
+- **Limits**: one-line JSON at most 4096 bytes, 12 choices, 12 relations, 100-character summaries, 120-character
+  `when`; a `get` page at most 8192 bytes, cut at a line end. Past a limit, `continuation` carries the next page, for
+  example `{"action": "expand", "entrypoint": "bin/reference.py", "args": ["next", "gitlab", "--page", "2",
+  "--json"]}`. Nothing is dropped or truncated.
+- **Exit codes**: 0 for an answer; 2 with `error.reason` `path_unknown`, `reference_unknown`, `anchor_unknown`,
+  `card_unavailable` or `page_out_of_range`.
+
+### Schemas
+
+`schemas/reference-next.schema.json` defines the answer, and in its `$defs` the choice and pointer every other
+pointer-carrying record reuses. `schemas/reference-section.schema.json` defines `get`. Every render above validates
+against them:
+
+```text
+check-jsonschema --base-uri "file://$PWD/schemas/reference-section.schema.json" \
+  --schemafile schemas/reference-section.schema.json <record>
+```
+
+`schemas/reference-next.schema.json`:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/reference-next.schema.json",
+  "title": "reference_next",
+  "description": "One answer of ci-skills/bin/reference.py next (CI09-REFERENCE section 3): one level of the resource graph, its summary and a bounded set of typed pointers. Its $defs choice and pointer are the one definition every pointer-carrying record reuses.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "path",
+    "summary",
+    "choices",
+    "continuation"
+  ],
+  "properties": {
+    "kind": {
+      "const": "reference_next"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "path": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+      }
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    },
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "capability": {
+      "$ref": "#/$defs/capability"
+    },
+    "choices": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/choice"
+      }
+    },
+    "relations": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/relation"
+      }
+    },
+    "continuation": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/pointer"
+        }
+      ]
+    },
+    "error": {
+      "$ref": "#/$defs/error"
+    }
+  },
+  "$defs": {
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "summary",
+        "next"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+        },
+        "kind": {
+          "enum": [
+            "expand",
+            "execute",
+            "read",
+            "retrieve"
+          ]
+        },
+        "summary": {
+          "$ref": "#/$defs/summary"
+        },
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "next": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/pointer"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "read"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "when"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "available": {
+                "const": false
+              }
+            },
+            "required": [
+              "available"
+            ]
+          },
+          "then": {
+            "properties": {
+              "next": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "next": {
+                "$ref": "#/$defs/pointer"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "pointer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "entrypoint",
+        "args"
+      ],
+      "properties": {
+        "action": {
+          "enum": [
+            "expand",
+            "describe",
+            "execute",
+            "read",
+            "retrieve"
+          ]
+        },
+        "entrypoint": {
+          "type": "string",
+          "pattern": "^bin/[A-Za-z0-9_.-]+$"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/input"
+          }
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "required"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "kind",
+        "requires",
+        "tools",
+        "mutates",
+        "side_effects",
+        "returns"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "pattern": "^bin/[A-Za-z0-9_.-]+$"
+        },
+        "verb": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        },
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "mutates": {
+          "type": "boolean"
+        },
+        "side_effects": {
+          "type": "string",
+          "minLength": 1
+        },
+        "returns": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        }
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "rel",
+        "to",
+        "evidence"
+      ],
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.:-]*$"
+        },
+        "rel": {
+          "enum": [
+            "infers",
+            "applies_to"
+          ]
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_.:-]*$"
+        },
+        "evidence": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "input"
+      ],
+      "properties": {
+        "reason": {
+          "enum": [
+            "path_unknown",
+            "reference_unknown",
+            "anchor_unknown",
+            "card_unavailable",
+            "page_out_of_range"
+          ]
+        },
+        "input": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
+```
+
+`schemas/reference-section.schema.json`:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/reference-section.schema.json",
+  "title": "reference_section",
+  "description": "One answer of ci-skills/bin/reference.py get (CI09-REFERENCE section 3): one section's own text, verbatim and bounded, the pin it was read at, and pointers to its subsections.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "reference",
+    "anchor",
+    "pinned",
+    "text",
+    "choices",
+    "continuation"
+  ],
+  "properties": {
+    "kind": {
+      "const": "reference_section"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "reference": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "anchor": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "pinned": {
+      "type": "string",
+      "minLength": 1
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 8192
+    },
+    "choices": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "reference-next.schema.json#/$defs/choice"
+      }
+    },
+    "continuation": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "reference-next.schema.json#/$defs/pointer"
+        }
+      ]
+    },
+    "error": {
+      "$ref": "reference-next.schema.json#/$defs/error"
+    }
+  }
+}
+```
+
+### Declarations: exactly what `core/catalog.py` gains
+
+Nodes, each with its one summary:
+
+| Node | Summary |
+| --- | --- |
+| root | Discover what ci-skills can inspect, run or read. |
+| `gitlab` | GitLab pipelines, jobs, runners, issues, milestones and wikis. |
+| `gitlab access` | Prove GitLab access and read back the selected target. |
+| `gitlab api` | Read one caller-selected GitLab or GitHub API resource. |
+| `gitlab issue` | Create or reuse exact bug issues. |
+| `gitlab job` | Inspect job state, output and failure evidence. |
+| `gitlab mcp` | Connect an MCP client to GitLab's MCP server. |
+| `gitlab milestone` | Create or update milestones. |
+| `gitlab pipeline` | Inspect, watch and diagnose pipelines. |
+| `gitlab runner` | Inspect or manage runners. |
+| `gitlab wiki` | Create or update wiki pages. |
+| `k8s` | Cluster, workload, storage and network operations. |
+| `k8s build` | Plan exact-commit OpenShift binary builds. |
+| `k8s ceph` | Ceph health, OSDs, placement groups and host kernel messages. |
+| `k8s cilium` | Cilium agents, operator and per-node health. |
+| `k8s events` | What the cluster reported during an interval. |
+| `k8s network` | Physical uplink MTU consistency across nodes. |
+| `k8s storage` | Claims, volumes, attachments and the pods using them. |
+| `claude` | Agent clients and their configuration. |
+| `claude mcp` | Configure MCP servers in Claude Code. |
+| `harbor` | Registry, images, charts and related operations. |
+
+`claude`, `claude mcp`, `gitlab mcp` and `harbor` stay hidden until something is placed in them.
+
+Placement of every command; a capability's id is its verb, or the command name without `.py` when it has no verbs,
+and its summary is the verb's `purpose`, else the command's `purpose`:
+
+| Node | Command | Capability ids |
+| --- | --- | --- |
+| root | `access_check.py` | `access_check` |
+| `gitlab access` | `gitlab_access.py` | `check` |
+| `gitlab api` | `bin/ci-api` | `check` (`--provider`), `get` (`--provider`, `--endpoint`) |
+| `gitlab issue` | `gitlab_issue.py` | `open-bug`, `create-bug` |
+| `gitlab job` | `gitlab_job.py` | `gitlab_job` |
+| `gitlab milestone` | `gitlab_milestone.py` | `create`, `update`, `adjust-time` |
+| `gitlab pipeline` | `gitlab_pipeline.py` | `get`, `watch` (CI11-TOOLS, Combos) |
+| `gitlab runner` | `gitlab_runner.py` | `assign`, `create` |
+| `gitlab wiki` | `gitlab_wiki.py` | `create`, `update` |
+| `k8s build` | `bin/ci-binary-build` | `ci-binary-build` |
+| `k8s ceph` | `ceph_cluster.py`, `ceph_kernel.py` | `ceph_cluster`, `ceph_kernel` |
+| `k8s cilium` | `cilium_status.py`, `cilium_node.py` | `cilium_status`, `cilium_node` |
+| `k8s events` | `event_trace.py` | `event_trace` |
+| `k8s network` | `k8s_verify_mtu_consistency.py` | `k8s_verify_mtu_consistency` |
+| `k8s storage` | `storage_report.py` | `storage_report` |
+
+Planned verbs, each shown unavailable until it ships (the verbs CI11-TOOLS names for commands that exist today):
+
+| Command | Planned verbs |
+| --- | --- |
+| `gitlab_job.py` | `get`, `list`, `watch`, `logs` |
+| `gitlab_pipeline.py` | `list`, `logs`, `children`, `start` |
+| `gitlab_runner.py` | `list`, `get`, `delete`, `reset-token` |
+| `gitlab_milestone.py` | `list` |
+
+New verb purposes: `get` "Read one pipeline: status, stages and job counts."; `watch` "Watch a pipeline and its
+linked downstream runs.". The GitLab commands declare `required_tools: ("glab",)`, the client their transport runs.
+
+Reference sections and where they appear; `when` renders as written:
+
+- `access` (local, `ci-skills/references/access.md`), node root: `where-the-target-file-comes-from` "Where a command
+  finds its target file." when "Read when a command reports no target file."; `effective-credential-sources`
+  "Which credential each authority uses." when "Read when a command is BLOCKED on a credential.";
+  `full-three-authority-live-receipt` "What the full live receipt proves." when "Read before capturing a receipt."
+- `project-binding` (local), node `k8s`: `project-specific-kubeconfig-resolver` "How a binding selects
+  kubeconfigs." when "Read when a project declares its own kubeconfig sources."
+- `gitlab-labels` (vendored): node `gitlab issue`, the eight sections and five relations of Render 9; node
+  `gitlab milestone`, `release-scoping-labels` "Deliverable, Stretch, Next Patch Release: what a milestone's issues
+  carry." when "Read when scheduling issues into a milestone." and `workflow-labels` as in Render 9.
+- `gitlab-ci-yaml` (vendored, section 2): node `gitlab pipeline`, the keywords section 2 tags with `pipeline`.
+- `gitlab-mcp-server`, `claude-code-mcp` and `mcp-spec` (vendored): nodes `gitlab mcp` and `claude mcp`; their
+  anchors come from the first fetch, and `mcp-spec` pins the latest version at each refresh.
+
+The same data in `core/catalog.py`, one entry per row above:
+
+```python
+NAV_NODES = {
+    (): "Discover what ci-skills can inspect, run or read.",
+    ("gitlab", "pipeline"): "Inspect, watch and diagnose pipelines.",
+}
+NAV_PLACEMENT = {"access_check.py": (), "gitlab_pipeline.py": ("gitlab", "pipeline")}
+PLANNED_VERBS = {"gitlab_milestone.py": {"list": "CI11-TOOLS"}}
+REFERENCE_SECTIONS = (
+    {"reference": "gitlab-labels", "anchor": "priority-labels", "nodes": (("gitlab", "issue"),),
+     "summary": "priority::1 to priority::4; their meaning lives in the handbook triage page.",
+     "when": "Read when setting priority; choosing a level needs the handbook page."},
+)
+RELATIONS = (
+    {"reference": "gitlab-labels", "from": "group-labels", "rel": "infers", "to": "stage-labels",
+     "evidence": "group-labels"},
+)
+```
+
+Acquisition stays in `vendor/vendor.toml` (section 2, Declaration). For a reference that follows the latest upstream,
+`pin = "latest"` replaces `sha`; each refresh resolves it to one version and records that version as `pinned`:
+
+```toml
+[references.mcp-spec]
+source = "<MCP specification>"
+pin = "latest"
+license = "<checked at declaration>"
+chunker = "markdown-headings"
+```
+
+A new command, verb, reference or section adds rows here in the same pull request; nothing else changes.
+
+### Steps
+
+The agent that claims the queue record `CI09-POINTER-OUTPUT` delivers, in one pull request after block 0:
+
+1. `ci-skills/lib/core/catalog.py`: the tables above as data, the two verb purposes, `required_tools` for the GitLab
+   commands.
+2. `ci-skills/lib/core/navigate.py`: builds every answer and section from that data, the commands' options and the
+   reference files, and draws the human view by the rules above; it types no other text.
+3. `ci-skills/bin/reference.py`: a thin main with the grammar above and `--describe`.
+4. `ci-skills/tools.json` re-rendered; `ci-skills/SKILL.md` gains one sentence: "Start at `bin/reference.py next` and
+   follow the pointers; never read `tools.json` or a whole reference."
+5. Acceptance: Renders 1 to 7 and 13 come out of the real tool exactly as shown, each validates against the schemas
+   above, and the five acceptance points below hold. The other renders follow when section 2 vendors their
+   references.
 
 ### Compact, versioned, pointer-based output
 
@@ -523,26 +1627,6 @@ Acceptance must demonstrate that:
 - combo results do not inline all component reports;
 - every advertised invocation and reference anchor resolves correctly.
 
-### Contract values
-
-- **Input**: `reference.py next [PATH ...] [--page N]` and `reference.py get REFERENCE ANCHOR [--card] [--page N]`,
-  with `--json`, `--yaml` or `--human`. Offline, no credentials, no target file. A known path or anchor is
-  addressed directly in one call.
-- **Response**: `kind`, `schema_version`, `path`, `summary`, `choices` and `continuation` (`null`, or the pointer
-  to the next page). An unknown path segment exits 2 with `error` (`reason: path_unknown`, `input`) and the choices
-  of the deepest known level.
-- **Choice**: `id`, `kind` (`expand`, `execute`, `read` or `retrieve`), `summary`, and `next`. A `read` choice adds
-  `anchor` and `when`.
-- **Pointer** (`next`): `action` (`expand`, `describe`, `execute`, `read` or `retrieve`), `entrypoint` (a path under
-  the skill root), `args` (argv, one string each). An `execute` pointer adds `inputs`, one entry per `<placeholder>`
-  in `args`, each with `name` and `summary`; a mutating command's execute pointer prints its plan, never `--apply`.
-- **Limits**: a serialized JSON response is at most 4096 bytes; at most 12 choices per response; a summary is at
-  most 100 characters; one `get` page is at most 8192 bytes. Past a limit, the response carries a `continuation`.
-- **Sources**: node summaries, the placement of each command and verb, and each reference section's anchor and
-  `when` are declared once in `core/catalog.py`; required inputs come from `required_options`; everything else is
-  derived. The answer's schema is `schemas/reference-next.schema.json` (CI07-SCHEMA); the pointer is defined
-  there once and reused by every response that carries pointers, combo results included (CI11-TOOLS, Combos).
-
 ## 4. Lifecycle of a reference
 
 One state machine per declared reference, the same shape as CI05-VENDOR's
@@ -588,13 +1672,6 @@ its reason tokens, defined here once.
   a deleted notice, a stray file, a symlink; `update`'s default run writes
   nothing; an interrupted transaction recovers. Fixtures under
   `tests/python/fixtures/reference/`.
-- `tests/python/test_navigate.py`: the five acceptance points of section 3, each one test: a synthetic catalogue of
-  200 commands keeps every answer within the limits and pages with `continuation`; following `expand` and
-  `continuation` pointers from the root reaches every declared node, capability and reference section; one
-  pointer returns only its target; a combo result carries `retrieve` pointers, not component reports; every
-  `execute` invocation parses with its command's real `build_parser()` and every `read` anchor resolves through
-  `get`. Plus: the answer for `ci pipeline` matches the locked example's shape; `path_unknown` returns the
-  deepest known level; equal inputs give equal bytes.
 - `tests/python/test_reference_contract.py`: every index entry's file exists
   and nothing else is in the tree (closed world, CI07-SCHEMA); the vendored
   tree is excluded from the executed-code digest (D-DIGEST) and digested on
@@ -642,8 +1719,8 @@ its reason tokens, defined here once.
      reads back `bytes: 2587`, `sha256` equal to the index entry, `url`
      ending in `#triggerforward`, and `content` whose first line is
      ``#### `trigger:forward` ``;
-   - `ci-skills/bin/reference.py next ci pipeline --json` reads back the
-     locked example's shape (section 3) and validates against `schemas/reference-next.schema.json`;
+   - `ci-skills/bin/reference.py next gitlab pipeline --json` reads back
+     Render 3 (section 3) and validates against `schemas/reference-next.schema.json`;
    - `ci-skills/bin/reference.py verify gitlab-ci-yaml --json` reads back
      `PASS` with `file_count: 177`;
    - `tools/update_reference.py gitlab-ci-yaml --sha 9892f2e6cf006fa1acc3f4d744f707757111db58 --dry-run --json`

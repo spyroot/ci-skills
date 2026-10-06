@@ -11,7 +11,8 @@ versioned.
 ## Schemas
 
 All schemas live under `schemas/` at the repository root (planned, this
-phase; `command-contract`, `skill-index` and `skill-manifest` are implemented so far), one file per record kind,
+phase; `command-contract`, `skill-index`, `skill-manifest`, `reference-next`, `reference-section` and
+`gitlab-pipeline-watch` are implemented so far), one file per record kind,
 named `<kind>.schema.json`. They use JSON Schema draft 2020-12 and the style
 of the shared standards' own schemas: `$schema`, `$id`, `title`, `type`,
 `required`, `properties` and `$defs`. A kind without a schema cannot be
@@ -26,7 +27,9 @@ adds the record, or `today` where the record exists in the tree.
 | `skill-frontmatter` | none, upstream shape | the YAML block in each `SKILL.md` | authors | missing |
 | `skill-manifest` | `skill_manifest` | `ci-skills/tools.json` | `tools/render_manifest.py` | implemented |
 | `skill-index` | `skill_index` | `bin/ci-skills list --json` | `tools/skillkit/discover.py` | implemented |
-| `reference-next` | `reference_next` | `reference.py next` answers; the shared pointer | `core/navigate.py` | missing |
+| `reference-next` | `reference_next` | `next` answers and the shared pointer | `core/navigate.py` | implemented |
+| `reference-section` | `reference_section` | `reference.py get` answers | `core/navigate.py` | implemented |
+| `gitlab-pipeline-watch` | `gitlab_pipeline_watch` | `watch` results | `core/gitlab_pipelines.py` | implemented |
 | `vendor-lock` | `skill_vendor_lock` | `vendor/vendor.lock.json` | `bin/ci-skills update` | missing |
 | `vendor-declarations` | not named yet | `vendor/vendor.toml` | by hand | missing |
 | `tool-operations` | `tool_operations` | `bin/ci-skills tools --json` | `core/tool_operations.py` | missing |
@@ -60,7 +63,8 @@ A new schema is one file, `schemas/<schema>.schema.json`, named as its row in th
   the record and the producer that writes it;
 - `type: object` and `additionalProperties: false` at every object level, so a field the schema does not name is
   refused;
-- `required` listing every field the record always carries, with `kind` and `schema_version` as `const`;
+- `required` listing every field the record always carries, with `kind` as `const` and `schema_version` as its
+  MAJOR pattern, for example `^1\.[0-9]+$` (Versions), so a MINOR addition never breaks a reader;
 - maps (option names, exit codes, status tokens, command names) as `propertyNames` plus `additionalProperties`,
   never as a fixed key list;
 - shapes taken from real records: the producer's output when it exists (`command-contract`: all 15 `--describe`
@@ -72,6 +76,8 @@ Proof, before the row says implemented:
 
 1. `check-jsonschema --check-metaschema schemas/<schema>.schema.json` passes.
 2. `check-jsonschema --schemafile schemas/<schema>.schema.json <record>` accepts every real record.
+   A schema that reuses another's `$defs` names it by file, and its commands add
+   `--base-uri "file://$PWD/schemas/<schema>.schema.json"` so the reference resolves locally.
 3. The same command refuses at least three broken copies: an unknown field, a missing required field, and one
    value that breaks a declared rule.
 4. The table row says `implemented`, and the producer's phase document links the file.
@@ -87,7 +93,7 @@ Example, the top of `schemas/skill-index.schema.json` (the file adds `descriptio
   "additionalProperties": false,
   "required": ["schema_version", "kind", "skills"],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
     "kind": {"const": "skill_index"},
     "skills": {"type": "array", "items": {"$ref": "#/$defs/skill"}},
     "errors": {"type": "array", "items": {"$ref": "#/$defs/error"}}
@@ -260,6 +266,37 @@ CI08-ROUTING consumes them.
   `target_source`; CI10-PHASES calls that delta the first `command-result`
   version, and whether it is MINOR or MAJOR follows from whether CI02-CLI
   binds those fields as optional or required.
+
+### Adding what we missed
+
+We will miss something. A miss is added as a MINOR change while existing readers keep working, in one pull request
+that changes the schema, the producer and the one owning document together:
+
+| We missed | Change | Version |
+| --- | --- | --- |
+| a field | add it as optional; producers emit it from the new MINOR on | MINOR |
+| an enum value (a choice kind, a pointer action, a relation) | add the value | MINOR |
+| a reserved segment or a node | add it; refuse a node named like a reserved segment | MINOR |
+| a field's name, type or meaning, or making it required | a new MAJOR file beside the old one (step 3 below) | MAJOR |
+
+A reader built for an older MINOR skips a choice, pointer or relation whose enum value it does not know, ignores
+fields it does not know, and never fails the whole answer for them.
+
+Exhibit, a miss we already know of: the priority and severity sections say their meaning lives in another reference,
+and no relation can say so. The fix is one enum value in `schemas/reference-next.schema.json`:
+
+```diff
+-        "rel": {"enum": ["infers", "applies_to"]},
++        "rel": {"enum": ["infers", "applies_to", "meaning_in"]},
+```
+
+The producer then answers with `"schema_version": "1.1"` and may carry this relation:
+
+```json
+{"from": "priority-labels", "rel": "meaning_in", "to": "gitlab-handbook-triage.priority", "evidence": "priority-labels"}
+```
+
+The `^1\.[0-9]+$` pattern accepts both 1.0 and 1.1 answers; nothing else changes.
 
 How a version is promoted:
 
