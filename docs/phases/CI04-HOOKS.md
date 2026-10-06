@@ -51,12 +51,9 @@ deleted in #27 (`1108cca`; CI10-PHASES, Pull request status).
   `--dry-run` it refuses to run off a Kubernetes pod (`tests/bash/check.bats`,
   "check refuses execution outside Kubernetes"). Until G1 lands, a hook
   has nothing it can run.
-- It also refuses staged agent instruction files, the patterns the
-  repository `.gitignore` lists as never committed: `.claude/`, `.codex/`,
-  `.agent-review/`, `AGENT*.md`, `CLAUDE*.md`, `CODEX*.md` and
-  `TEAM_GUIDE.md`. Our global ignore file (`core.excludesFile`,
-  `~/.gitignore_global`) adds `CODEX_HANDOFF.*`, `CLAUDE_REVIEW.*`,
-  `CLAUDE_PATCH.diff`, `.AGENTS.md` and `.AGENT_HANDOFF.*`.
+- It also refuses staged private agent files using the repository and global
+  ignore patterns. The staged-path check must use those patterns rather than
+  a second handwritten file list.
   `.coordination/` is not on that list: it is tracked by decision (three
   files, `git ls-files .coordination`), and the hook never refuses it. This
   refusal is the one check with no counterpart on the gate route.
@@ -161,8 +158,8 @@ run `ruff format` after a `*.py` edit and `tools/render_manifest.py` after a `ci
        run on the index snapshot;
      - pre-commit and pre-push both refuse on exits 1, 2, 64, 69 and 127
        from the entrypoint, and the commit or push does not proceed;
-     - a staged agent instruction file is refused: fixture `CLAUDE.md`,
-       staged with `git add -f`, and the refusal names it;
+     - a staged private-agent fixture is refused after `git add -f`, and
+       the refusal names the staged path;
      - a clean commit passes: the entrypoint exits 0 and the commit
        proceeds;
      - a refusal is advisory (D-GATE): it stops only that commit or push
@@ -189,9 +186,9 @@ run `ruff format` after a `*.py` edit and `tools/render_manifest.py` after a `ci
    - `ls -l "$(git rev-parse --git-common-dir)/hooks/"` lists an executable
      `pre-commit` and `pre-push`;
    - one refusal reproduced in a temporary repository with the hooks
-     installed: `git add -f CLAUDE.md` beside one clean staged file, then
-     `git commit -m fixture` exits non-zero and names `CLAUDE.md`; after
-     `git rm --cached CLAUDE.md` the same commit proceeds.
+     installed: force-add a private-agent fixture beside one clean staged
+     file, verify the commit refuses it by path, then unstage that fixture
+     and verify the same commit proceeds.
 4. *Evidence*: no receipt of its own; this phase adds no live check. An
    installer library under `ci-skills/lib/bash/` (part 1) is a byte change in
    the skill, which moves the skill digest, so the receipts are recaptured on
@@ -218,7 +215,6 @@ run `ruff format` after a `*.py` edit and `tools/render_manifest.py` after a `ci
 
 ## Open decisions
 
-- **Hook body.** `TEAM_GUIDE.md`'s repository structure, a binding project
-  addition (`standards-binding.yaml`), lists `bless.sh` as the pre-hook; this
+- **Hook body.** The binding's repository structure lists `bless.sh` as the pre-hook; this
   document names `scripts/check.sh` (CI03-GATES, G1 records the question).
   We decide which one the hooks call.
