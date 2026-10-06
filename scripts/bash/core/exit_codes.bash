@@ -15,7 +15,7 @@ readonly CI_EXIT_MISSING_FILE=66
 readonly CI_EXIT_MISSING_VALUE=67
 # What timeout(1) exits with, borrowed the way 64-67 borrow sysexits and 129-143
 # borrow 128+signal. It says "did not succeed in time", which is a different
-# answer from GALILEO_EXIT_BLOCKED "cannot succeed": a bounded wait that runs out
+# answer from CI_EXIT_BLOCKED "cannot succeed": a bounded wait that runs out
 # has proved nothing about the thing it was waiting for.
 readonly CI_EXIT_TIMEOUT=124
 readonly CI_EXIT_SIGNAL_HUP=129

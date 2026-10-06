@@ -6,27 +6,27 @@ configured binding and returns evidence that an operator or agent can inspect.
 
 ## Current capabilities
 
-- [Check GitLab access](ci-skills/scripts/gitlab_access.py): identify
+- [Check GitLab access](ci-skills/bin/gitlab_access.py): identify
   the effective credential source and read back the selected project or group.
-- [Inspect pipelines](ci-skills/scripts/gitlab_pipeline.py) and
-  [jobs](ci-skills/scripts/gitlab_job.py): read status, stage progress,
+- [Inspect pipelines](ci-skills/bin/gitlab_pipeline.py) and
+  [jobs](ci-skills/bin/gitlab_job.py): read status, stage progress,
   runner details, and bounded traces; search within a job trace.
-- [Manage milestones](ci-skills/scripts/gitlab_milestone.py): create or
+- [Manage milestones](ci-skills/bin/gitlab_milestone.py): create or
   update a milestone's title, description, dates, and state.
-- [Open bug issues](ci-skills/scripts/gitlab_issue.py): create or reuse
+- [Open bug issues](ci-skills/bin/gitlab_issue.py): create or reuse
   an issue with caller-supplied labels and an optional milestone.
-- [Write wiki pages](ci-skills/scripts/gitlab_wiki.py): create or update
+- [Write wiki pages](ci-skills/bin/gitlab_wiki.py): create or update
   a page from supplied content, including documentation links.
-- [Manage runners](ci-skills/scripts/gitlab_runner.py): assign an
+- [Manage runners](ci-skills/bin/gitlab_runner.py): assign an
   existing runner or create a runner record with runner tags.
-- [Diagnose Kubernetes and OpenShift](ci-skills/scripts/): inspect
+- [Diagnose Kubernetes and OpenShift](ci-skills/bin/): inspect
   storage, events, Cilium, Ceph, and node MTU consistency.
 - Use [ci-api](ci-skills/bin/ci-api) for bounded Git API reads and
   [ci-binary-build](ci-skills/bin/ci-binary-build) for exact-commit
   OpenShift build planning.
 
 The Python commands use small entry points over reusable code in
-[scripts/core](ci-skills/lib/core/). Their `--help` output serves
+[lib/core](ci-skills/lib/core/). Their `--help` output serves
 people, while `--json`, `--yaml`, and `--describe` expose versioned reports and
 command contracts. The generated [tools.json](ci-skills/tools.json)
 records options, access protocols, and target protocols. GitLab writes start
@@ -60,20 +60,20 @@ may also provide visibility.
 
 ### Current mapping
 
-- **Visibility:** [Access checks](ci-skills/scripts/access_check.py),
-  [Kubernetes events](ci-skills/scripts/event_trace.py), and
-  [node MTU consistency](ci-skills/scripts/k8s_verify_mtu_consistency.py).
-- **CI Combo:** [Pipeline inspection](ci-skills/scripts/gitlab_pipeline.py)
-  and [job and trace inspection](ci-skills/scripts/gitlab_job.py)
+- **Visibility:** [Access checks](ci-skills/bin/access_check.py),
+  [Kubernetes events](ci-skills/bin/event_trace.py), and
+  [node MTU consistency](ci-skills/bin/k8s_verify_mtu_consistency.py).
+- **CI Combo:** [Pipeline inspection](ci-skills/bin/gitlab_pipeline.py)
+  and [job and trace inspection](ci-skills/bin/gitlab_job.py)
   combine related CI records. [ci-api](ci-skills/bin/ci-api) supplies
   bounded API reads for such workflows.
-- **Generic Combo:** [Ceph cluster diagnostics](ci-skills/scripts/ceph_cluster.py)
+- **Generic Combo:** [Ceph cluster diagnostics](ci-skills/bin/ceph_cluster.py)
   combines cluster health, OSD hierarchy, placement groups, and Pods;
-  [Ceph kernel diagnostics](ci-skills/scripts/ceph_kernel.py) adds
+  [Ceph kernel diagnostics](ci-skills/bin/ceph_kernel.py) adds
   selected node events.
 - **Toolchain Combination:** [ci-binary-build](ci-skills/bin/ci-binary-build)
   plans an exact-commit OpenShift build, and
-  [gitlab_runner.py](ci-skills/scripts/gitlab_runner.py) plans and
+  [gitlab_runner.py](ci-skills/bin/gitlab_runner.py) plans and
   applies runner creation or assignment. The complete example workflows
   above remain proposed.
 
@@ -86,7 +86,7 @@ evidence. The commands below are proposed; they are not yet present in the
 
 Every new action needs a concrete script name, arguments, behavior, result,
 and independent read-back. Its Python entry point must stay small and call
-reusable code in [scripts/core](ci-skills/lib/core/). It must offer
+reusable code in [lib/core](ci-skills/lib/core/). It must offer
 `--help` for people, `--json` and `--yaml` for machines, and `--describe` for
 its command contract. [tools.json](ci-skills/tools.json) must declare
 its options and access and target protocols. Each versioned report kind must
@@ -206,19 +206,23 @@ For node diagnostics, declare the selected node and existing Pod routes under
 `[kubernetes.node_diagnostics]`. Provisioning access is the project's job;
 this skill resolves the selected source and reports it.
 
+Until block 0 of CI10-PHASES lands, prefix every command below with
+`PYTHONPATH=ci-skills/lib`: no main under `ci-skills/bin/` can import `core`
+without it (the shared locator is block 0's first item).
+
 **4. Prove access to the authorities you selected.** For a GitLab-only target,
 read back its configured project and administrator identity:
 
 ```bash
-conda run -n ci-skills python \
-  skills/ci-skills/scripts/gitlab_access.py check --json
+PYTHONPATH=ci-skills/lib conda run -n ci-skills python \
+  ci-skills/bin/gitlab_access.py check --json
 ```
 
 When all three authorities are configured, run the full publication check:
 
 ```bash
-conda run -n ci-skills python \
-  skills/ci-skills/scripts/access_check.py --publication
+PYTHONPATH=ci-skills/lib conda run -n ci-skills python \
+  ci-skills/bin/access_check.py --publication
 ```
 
 Its `PASS` means every selected authority was reached and each required live
@@ -276,7 +280,7 @@ reported digest with `skill.digest` in later reports. It accepts `--json`,
 A Codex session can install the merged skill straight from GitHub instead:
 
 ```text
-Install the skill from https://github.com/spyroot/ci-skills/tree/main/skills/ci-skills
+Install the skill from https://github.com/spyroot/ci-skills/tree/main/ci-skills
 ```
 
 Either way, each execution host still needs its own credentials and its own
@@ -339,11 +343,11 @@ The operation access check reads back the effective GitLab identity and exact
 numeric target before a write:
 
 ```bash
-conda run -n ci-skills python \
-  skills/ci-skills/scripts/gitlab_access.py check \
+PYTHONPATH=ci-skills/lib conda run -n ci-skills python \
+  ci-skills/bin/gitlab_access.py check \
   --json
-conda run -n ci-skills python \
-  skills/ci-skills/scripts/gitlab_milestone.py create \
+PYTHONPATH=ci-skills/lib conda run -n ci-skills python \
+  ci-skills/bin/gitlab_milestone.py create \
   --title "Release checkpoint" --json
 ```
 
@@ -478,9 +482,10 @@ proves was demonstrated at least once. Each live check reports
 
 ## Validation
 
-The `validate` workflow checks workflow/YAML and Markdown syntax, diff
-hygiene, secrets, Ruff lint and format, package behavior, and mocked denial
-paths. Its package smoke runs every installed entrypoint from outside the
-source tree. Mocked CI is code evidence; the live access receipt must come
+The `validate` workflow, deleted in #27 (`1108cca`), checked workflow/YAML
+and Markdown syntax, diff hygiene, secrets, Ruff lint and format, package
+behavior and mocked denial paths, and its package smoke ran every installed
+entrypoint from outside the source tree. No workflow exists today: we decided
+"no gate for now" (D-GATE, `docs/phases/CI03-GATES.md`, G0). Mocked CI is code evidence; the live access receipt must come
 from each intended execution host. Use the exact target and tested revision
 there, and retain the sanitized receipt only after all required checks pass.

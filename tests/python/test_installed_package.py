@@ -13,32 +13,7 @@ import pytest
 import yaml
 from tests.python.conftest import REPO_ROOT, install_executable, load_module
 
-SKILL_ROOT = REPO_ROOT / "ci-skills"
-COMMAND_INVENTORY = json.loads(
-    (REPO_ROOT / "inventory" / "command-interfaces.json").read_text(encoding="utf-8")
-)["commands"]
-
-
-def assert_inventory_output(command: str, value: Any) -> None:
-    """Tie the tracked current-output observation to installed execution."""
-    expected = COMMAND_INVENTORY[command]["observed_output"]
-    if expected["json_type"] == "object":
-        assert isinstance(value, dict), command
-        assert set(expected["required_fields"]) <= set(value), command
-    elif expected["json_type"] == "boolean":
-        assert isinstance(value, bool), command
-    else:
-        raise AssertionError(f"unknown inventory output type for {command}")
-    for field, key in (
-        ("expected_kind", "kind"),
-        ("expected_status", "status"),
-        ("expected_mode", "mode"),
-    ):
-        if field in expected:
-            assert value[key] == expected[field], command
-    if "sample_value" in expected:
-        assert value == expected["sample_value"], command
-
+SKILL_ROOT = REPO_ROOT / "skills" / "ci-skills"
 
 ENTRYPOINT_CASES = (
     ("access_check.py", (), "access_check", "PASS"),
@@ -572,8 +547,7 @@ def test_installed_bash_entrypoints_run_from_unrelated_directory(tmp_path: Path)
         check=False,
     )
     assert api.returncode == 0, api.stderr
-    api_result = json.loads(api.stdout)
-    assert_inventory_output("bin/ci-api", api_result)
+    assert json.loads(api.stdout) is False
 
     source = tmp_path / "source"
     source.mkdir()
@@ -632,7 +606,7 @@ def test_installed_bash_entrypoints_run_from_unrelated_directory(tmp_path: Path)
         check=False,
     )
     assert build.returncode == 0, build.stderr
-    assert_inventory_output("bin/ci-binary-build", json.loads(build.stdout))
+    assert json.loads(build.stdout)["mode"] == "dry-run"
 
 
 def _run_installed_node_script(
@@ -730,7 +704,6 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     data: dict[str, Any] = loader(result.stdout)
 
     assert result.returncode == 0
-    assert_inventory_output(script_name, data)
     assert data["kind"] == kind
     assert data["status"] == expected_status
     assert str(REPO_ROOT) not in result.stdout
@@ -799,7 +772,6 @@ def test_installed_mtu_entrypoint_plans_and_applies_from_unrelated_cwd(
     )
     planned = loader(plan.stdout)
     assert plan.returncode == 0
-    assert_inventory_output("k8s_verify_mtu_consistency.py", planned)
     assert planned["status"] == "DRY_RUN"
 
     applied = subprocess.run(
@@ -960,7 +932,6 @@ def test_installed_node_entrypoints_dry_run_from_unrelated_cwd(
     data: dict[str, Any] = loader(result.stdout)
 
     assert result.returncode == 0
-    assert_inventory_output(script_name, data)
     assert data["kind"] == kind
     assert data["status"] == "DRY_RUN"
     assert data["probes"]

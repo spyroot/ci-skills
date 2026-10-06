@@ -1,0 +1,22 @@
+---
+name: ci-skills
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pytest=9.1.1
+  - ruff=0.16.7
+  - yamllint
+  - python-dotenv
+  - pip:
+      - build
+      - anthropic
+      - mcp
+      - check-jsonschema
+      - installer
+      - tomli-w
+      - websocket-client
+  - kubernetes
+  - python-kubernetes
+  - pyyaml

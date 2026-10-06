@@ -1,0 +1,273 @@
+{
+  "dependencies": [
+    {
+      "name": "bash",
+      "commands": ["bash"],
+      "brew": ["bash"],
+      "apt": ["bash"],
+      "yum": ["bash"]
+    },
+    {
+      "name": "git",
+      "commands": ["git"],
+      "brew": ["git"],
+      "apt": ["git"],
+      "yum": ["git"]
+    },
+    {
+      "name": "make",
+      "commands": ["make"],
+      "brew": ["make"],
+      "apt": ["make"],
+      "yum": ["make"]
+    },
+    {
+      "name": "cmake",
+      "commands": ["cmake"],
+      "brew": ["cmake"],
+      "linux": {
+        "method": "archive",
+        "url": "https://github.com/Kitware/CMake/releases/download/v4.3.0/cmake-4.3.0-linux-{conda_arch}.tar.gz",
+        "stripComponents": 1
+      }
+    },
+    {
+      "name": "ninja",
+      "commands": ["ninja"],
+      "brew": ["ninja"],
+      "apt": ["ninja-build"],
+      "yum": ["ninja-build"]
+    },
+    {
+      "name": "cxx-compiler",
+      "platform": "linux",
+      "commands": ["c++"],
+      "apt": ["g++"],
+      "yum": ["gcc-c++"]
+    },
+    {
+      "name": "python-build",
+      "platform": "linux",
+      "commands": ["pyproject-build"],
+      "apt": ["python3-build"],
+      "yum": ["python3-build"]
+    },
+    {
+      "name": "python-wheel",
+      "platform": "linux",
+      "commands": ["wheel"],
+      "apt": ["python3-wheel"],
+      "yum": ["python3-wheel"]
+    },
+    {
+      "name": "coreutils",
+      "commands": [
+        "base64", "cat", "cp", "cut", "date", "dirname", "find", "grep",
+        "head", "install", "mkdir", "mktemp", "mv", "paste", "rm", "sed",
+        "sleep", "sort", "tr", "wc", "xargs"
+      ],
+      "brew": ["coreutils", "findutils", "grep", "gnu-sed"],
+      "apt": ["coreutils", "findutils", "grep", "sed"],
+      "yum": ["coreutils", "findutils", "grep", "sed"]
+    },
+    {
+      "name": "awk",
+      "commands": ["awk"],
+      "brew": ["gawk"],
+      "apt": ["gawk"],
+      "yum": ["gawk"]
+    },
+    {
+      "name": "tar",
+      "commands": ["tar"],
+      "brew": ["gnu-tar"],
+      "apt": ["tar"],
+      "yum": ["tar"]
+    },
+    {
+      "name": "xz",
+      "commands": ["xz"],
+      "brew": ["xz"],
+      "apt": ["xz-utils"],
+      "yum": ["xz"]
+    },
+    {
+      "name": "shasum",
+      "commands": ["shasum", "perl"],
+      "brew": ["perl"],
+      "apt": ["perl"],
+      "yum": ["perl-Digest-SHA"]
+    },
+    {
+      "name": "bzip2",
+      "platform": "linux",
+      "commands": ["bzip2"],
+      "apt": ["bzip2"],
+      "yum": ["bzip2"]
+    },
+    {
+      "name": "parallel",
+      "commands": ["parallel"],
+      "brew": ["parallel"],
+      "apt": ["parallel"],
+      "linux": {
+        "method": "archive",
+        "url": "https://ftp.gnu.org/gnu/parallel/parallel-latest.tar.bz2",
+        "stripComponents": 1,
+        "files": ["src/parallel"]
+      }
+    },
+    {
+      "name": "curl",
+      "commands": ["curl"],
+      "brew": ["curl"],
+      "apt": ["curl", "ca-certificates"],
+      "yum": ["curl", "ca-certificates"]
+    },
+    {
+      "name": "jq",
+      "commands": ["jq"],
+      "brew": ["jq"],
+      "apt": ["jq"],
+      "yum": ["jq"]
+    },
+    {
+      "name": "go",
+      "platform": "linux",
+      "commands": ["go"],
+      "apt": ["golang-go"],
+      "yum": ["golang"]
+    },
+    {
+      "name": "node",
+      "commands": ["node", "npm"],
+      "brew": ["node"],
+      "minimumMajor": 22,
+      "linux": {
+        "method": "archive",
+        "url": "https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-{node_arch}.tar.xz",
+        "stripComponents": 1
+      }
+    },
+    {
+      "name": "uv",
+      "platform": "linux",
+      "commands": ["uv"],
+      "linux": {
+        "method": "archive",
+        "url": "https://github.com/astral-sh/uv/releases/latest/download/uv-{shell_arch}-unknown-linux-gnu.tar.gz",
+        "stripComponents": 1,
+        "files": ["uv", "uvx"]
+      }
+    },
+    {
+      "name": "shellcheck",
+      "commands": ["shellcheck"],
+      "brew": ["shellcheck"],
+      "apt": ["shellcheck"],
+      "linux": {
+        "method": "archive",
+        "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.{shell_arch}.tar.xz",
+        "stripComponents": 1,
+        "files": ["shellcheck"]
+      }
+    },
+    {
+      "name": "shfmt",
+      "commands": ["shfmt"],
+      "brew": ["shfmt"],
+      "linux": {"method": "go", "module": "mvdan.cc/sh/v3/cmd/shfmt@latest"}
+    },
+    {
+      "name": "gitleaks",
+      "commands": ["gitleaks"],
+      "brew": ["gitleaks"],
+      "linux": {"method": "go", "module": "github.com/zricethezav/gitleaks/v8@v8.30.1"}
+    },
+    {
+      "name": "yq",
+      "commands": ["yq"],
+      "brew": ["yq"],
+      "linux": {"method": "go", "module": "github.com/mikefarah/yq/v4@v4.47.2"}
+    },
+    {
+      "name": "helm",
+      "commands": ["helm"],
+      "brew": ["helm"],
+      "linux": {
+        "method": "archive",
+        "url": "https://get.helm.sh/helm-v3.18.6-linux-{arch}.tar.gz",
+        "stripComponents": 1,
+        "files": ["helm"]
+      }
+    },
+    {
+      "name": "kubeconform",
+      "commands": ["kubeconform"],
+      "brew": ["kubeconform"],
+      "linux": {"method": "go", "module": "github.com/yannh/kubeconform/cmd/kubeconform@latest"}
+    },
+    {
+      "name": "kube-linter",
+      "commands": ["kube-linter"],
+      "brew": ["kube-linter"],
+      "linux": {"method": "go", "module": "golang.stackrox.io/kube-linter/cmd/kube-linter@latest"}
+    },
+    {
+      "name": "oc",
+      "commands": ["oc"],
+      "brew": ["openshift-cli"],
+      "linux": {
+        "method": "archive",
+        "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-{oc_arch}.tar.gz",
+        "stripComponents": 0,
+        "files": ["oc"]
+      }
+    },
+    {
+      "name": "markdownlint-cli2",
+      "commands": ["markdownlint-cli2"],
+      "brew": ["markdownlint-cli2"],
+      "versionFile": ".markdownlint-cli2-version",
+      "linux": {"method": "npm", "package": "markdownlint-cli2"}
+    },
+    {
+      "name": "ruff",
+      "commands": ["ruff"],
+      "brew": ["ruff"],
+      "linux": {"method": "uv", "package": "ruff"}
+    },
+    {
+      "name": "bats",
+      "commands": ["bats"],
+      "brew": ["bats-core"],
+      "apt": ["bats"],
+      "linux": {"method": "npm", "package": "bats"}
+    },
+    {
+      "name": "yamllint",
+      "commands": ["yamllint"],
+      "brew": ["yamllint"],
+      "linux": {"method": "uv", "package": "yamllint"}
+    },
+    {
+      "name": "check-jsonschema",
+      "commands": ["check-jsonschema"],
+      "brew": ["check-jsonschema"],
+      "linux": {"method": "uv", "package": "check-jsonschema"}
+    },
+    {
+      "name": "actionlint",
+      "commands": ["actionlint"],
+      "brew": ["actionlint"],
+      "linux": {"method": "go", "module": "github.com/rhysd/actionlint/cmd/actionlint@latest"}
+    }
+  ],
+  "conda": {
+    "brewCask": "miniforge",
+    "prefix": "~/miniforge3",
+    "url": "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-{conda_arch}.sh",
+    "environmentFile": "environment.yml",
+    "channels": ["conda-forge"]
+  }
+}

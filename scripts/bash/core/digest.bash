@@ -40,5 +40,5 @@ ci_stream_sha256() {
 # Exit classes: success, usage, or missing hashing tool.
 ci_text_sha256() {
 	(($# == 1)) || return "${CI_EXIT_USAGE:-64}"
-	printf '%s' "$1" | galileo_stream_sha256
+	printf '%s' "$1" | CI_stream_sha256
 }

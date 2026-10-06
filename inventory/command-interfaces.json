@@ -1,10 +1,11 @@
 {
   "schema_version": "1.0",
   "kind": "command_interface_inventory",
-  "evidence_class": "offline installed-command interface",
-  "base_revision": "af0814f1bc1479dc824cd17b898e10409cdd7678",
+  "evidence_class": "source-tree interface observation; no live system action",
+  "base_revision": "9c50b5913218487379bbed2dbe105a1926f92d27",
+  "command_surface_sha256": "110588f0a4eb5c7f000f8d3a7a6dd437c591b920ce59b8c46eaf85bd3dd91c78",
   "standards_binding": "standards-binding.yaml",
-  "standards_revision": "622d23408c530896ad860748b88c8711167e1199",
+  "standards_revision": "56a579c2d86addb7bae0591f8fc1750561b168d7",
   "applicable_contracts": [
     "ci",
     "unit-testing",
@@ -16,12 +17,16 @@
     "provider-escalation",
     "bash-shell-standards",
     "helm-ci-standards",
-    "policy-authority-standards"
+    "policy-authority-standards",
+    "documentation-contract",
+    "documentation-rules",
+    "software-design",
+    "python-standards"
   ],
   "commands": {
     "access_check.py": {
-      "entrypoint": "ci-skills/scripts/access_check.py",
-      "implementation": "ci-skills/scripts/core/cli.py",
+      "entrypoint": "ci-skills/bin/access_check.py",
+      "implementation": "ci-skills/lib/core/cli.py",
       "report_kind": "access_check",
       "requires_authorities": [
         "github",
@@ -29,20 +34,19 @@
         "kubernetes"
       ],
       "read_only_declared": true,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "access_check",
-        "expected_status": "PASS",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "bin/ci-api": {
@@ -53,15 +57,19 @@
         "one caller-selected GitHub or GitLab host"
       ],
       "read_only_declared": true,
-      "help": "supported",
-      "json_flag": "missing",
-      "yaml_flag": "missing",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "not_declared",
+      "yaml_flag": "not_declared",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "boolean",
-        "required_fields": [],
-        "sample_value": false,
-        "probe": "installed get --field enabled --output json"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
+        ],
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_bash_library"
       }
     },
     "bin/ci-binary-build": {
@@ -70,355 +78,341 @@
       "report_kind": "ci_binary_build",
       "requires_authorities": [],
       "read_only_declared": true,
-      "help": "supported",
-      "json_flag": "missing",
-      "yaml_flag": "missing",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "not_declared",
+      "yaml_flag": "not_declared",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "mode",
-          "fingerprint",
-          "plan"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_mode": "dry-run",
-        "probe": "installed dry-run build plan"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_bash_library"
       }
     },
     "ceph_cluster.py": {
-      "entrypoint": "ci-skills/scripts/ceph_cluster.py",
-      "implementation": "ci-skills/scripts/core/ceph_cluster.py",
+      "entrypoint": "ci-skills/bin/ceph_cluster.py",
+      "implementation": "ci-skills/lib/core/ceph_cluster.py",
       "report_kind": "ceph_cluster",
       "requires_authorities": [
         "kubernetes"
       ],
       "read_only_declared": true,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "ceph_cluster",
-        "expected_status": "PASS",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "ceph_kernel.py": {
-      "entrypoint": "ci-skills/scripts/ceph_kernel.py",
-      "implementation": "ci-skills/scripts/core/node_local.py",
+      "entrypoint": "ci-skills/bin/ceph_kernel.py",
+      "implementation": "ci-skills/lib/core/node_local.py",
       "report_kind": "ceph_kernel",
       "requires_authorities": [
         "kubernetes"
       ],
       "read_only_declared": null,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "ceph_kernel",
-        "expected_status": "DRY_RUN",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "cilium_node.py": {
-      "entrypoint": "ci-skills/scripts/cilium_node.py",
-      "implementation": "ci-skills/scripts/core/node_local.py",
+      "entrypoint": "ci-skills/bin/cilium_node.py",
+      "implementation": "ci-skills/lib/core/node_local.py",
       "report_kind": "cilium_node",
       "requires_authorities": [
         "kubernetes"
       ],
       "read_only_declared": null,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "cilium_node",
-        "expected_status": "DRY_RUN",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "cilium_status.py": {
-      "entrypoint": "ci-skills/scripts/cilium_status.py",
-      "implementation": "ci-skills/scripts/core/cilium.py",
+      "entrypoint": "ci-skills/bin/cilium_status.py",
+      "implementation": "ci-skills/lib/core/collect.py",
       "report_kind": "cilium_status",
       "requires_authorities": [
         "kubernetes"
       ],
       "read_only_declared": true,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "cilium_status",
-        "expected_status": "PASS",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "event_trace.py": {
-      "entrypoint": "ci-skills/scripts/event_trace.py",
-      "implementation": "ci-skills/scripts/core/collect.py",
+      "entrypoint": "ci-skills/bin/event_trace.py",
+      "implementation": "ci-skills/lib/core/collect.py",
       "report_kind": "event_trace",
       "requires_authorities": [
         "kubernetes"
       ],
       "read_only_declared": true,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "event_trace",
-        "expected_status": "PASS",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "gitlab_access.py": {
-      "entrypoint": "ci-skills/scripts/gitlab_access.py",
-      "implementation": "ci-skills/scripts/core/access.py",
+      "entrypoint": "ci-skills/bin/gitlab_access.py",
+      "implementation": "ci-skills/lib/core/access.py",
       "report_kind": "gitlab_access",
       "requires_authorities": [
         "gitlab"
       ],
       "read_only_declared": true,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "gitlab_access",
-        "expected_status": "PASS",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "gitlab_issue.py": {
-      "entrypoint": "ci-skills/scripts/gitlab_issue.py",
-      "implementation": "ci-skills/scripts/core/gitlab_issues.py",
+      "entrypoint": "ci-skills/bin/gitlab_issue.py",
+      "implementation": "ci-skills/lib/core/gitlab_issues.py",
       "report_kind": "gitlab_issue",
       "requires_authorities": [
         "gitlab"
       ],
       "read_only_declared": false,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "gitlab_issue",
-        "expected_status": "DRY_RUN",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "gitlab_job.py": {
-      "entrypoint": "ci-skills/scripts/gitlab_job.py",
-      "implementation": "ci-skills/scripts/core/cli.py",
+      "entrypoint": "ci-skills/bin/gitlab_job.py",
+      "implementation": "ci-skills/lib/core/cli.py",
       "report_kind": "gitlab_job",
       "requires_authorities": [
         "gitlab"
       ],
       "read_only_declared": true,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "gitlab_job",
-        "expected_status": "PASS",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "gitlab_milestone.py": {
-      "entrypoint": "ci-skills/scripts/gitlab_milestone.py",
-      "implementation": "ci-skills/scripts/core/gitlab_milestones.py",
+      "entrypoint": "ci-skills/bin/gitlab_milestone.py",
+      "implementation": "ci-skills/lib/core/gitlab_milestones.py",
       "report_kind": "gitlab_milestone",
       "requires_authorities": [
         "gitlab"
       ],
       "read_only_declared": false,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "gitlab_milestone",
-        "expected_status": "DRY_RUN",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "gitlab_pipeline.py": {
-      "entrypoint": "ci-skills/scripts/gitlab_pipeline.py",
-      "implementation": "ci-skills/scripts/core/gitlab_pipelines.py",
+      "entrypoint": "ci-skills/bin/gitlab_pipeline.py",
+      "implementation": "ci-skills/lib/core/gitlab_pipelines.py",
       "report_kind": "gitlab_pipeline",
       "requires_authorities": [
         "gitlab"
       ],
       "read_only_declared": true,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "gitlab_pipeline",
-        "expected_status": "PASS",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "gitlab_runner.py": {
-      "entrypoint": "ci-skills/scripts/gitlab_runner.py",
-      "implementation": "ci-skills/scripts/core/gitlab_runners.py",
+      "entrypoint": "ci-skills/bin/gitlab_runner.py",
+      "implementation": "ci-skills/lib/core/gitlab_runners.py",
       "report_kind": "gitlab_runner",
       "requires_authorities": [
         "gitlab"
       ],
       "read_only_declared": false,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "gitlab_runner",
-        "expected_status": "DRY_RUN",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "gitlab_wiki.py": {
-      "entrypoint": "ci-skills/scripts/gitlab_wiki.py",
-      "implementation": "ci-skills/scripts/core/gitlab_wikis.py",
+      "entrypoint": "ci-skills/bin/gitlab_wiki.py",
+      "implementation": "ci-skills/lib/core/gitlab_wikis.py",
       "report_kind": "gitlab_wiki",
       "requires_authorities": [
         "gitlab"
       ],
       "read_only_declared": false,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "gitlab_wiki",
-        "expected_status": "DRY_RUN",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "k8s_verify_mtu_consistency.py": {
-      "entrypoint": "ci-skills/scripts/k8s_verify_mtu_consistency.py",
-      "implementation": "ci-skills/scripts/core/mtu_consistency.py",
+      "entrypoint": "ci-skills/bin/k8s_verify_mtu_consistency.py",
+      "implementation": "ci-skills/lib/core/mtu_consistency.py",
       "report_kind": "k8s_verify_mtu_consistency",
       "requires_authorities": [
         "kubernetes"
       ],
       "read_only_declared": false,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "k8s_verify_mtu_consistency",
-        "expected_status": "DRY_RUN",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     },
     "storage_report.py": {
-      "entrypoint": "ci-skills/scripts/storage_report.py",
-      "implementation": "ci-skills/scripts/core/collect.py",
+      "entrypoint": "ci-skills/bin/storage_report.py",
+      "implementation": "ci-skills/lib/core/collect.py",
       "report_kind": "storage_report",
       "requires_authorities": [
         "kubernetes"
       ],
       "read_only_declared": true,
-      "help": "supported",
-      "json_flag": "supported",
-      "yaml_flag": "supported",
-      "evidence": "tests/python/test_installed_package.py",
+      "help": "blocked_before_parse",
+      "json_flag": "declared_but_unreachable",
+      "yaml_flag": "declared_but_unreachable",
+      "evidence": "tests/python/test_command_inventory.py",
       "observed_output": {
-        "json_type": "object",
-        "required_fields": [
-          "schema_version",
-          "kind",
-          "status"
+        "probes": [
+          "--help",
+          "--dry-run --json",
+          "--dry-run --yaml"
         ],
-        "expected_kind": "storage_report",
-        "expected_status": "PASS",
-        "probe": "installed fixture in JSON and YAML modes"
+        "exit_code": 1,
+        "stdout_nonempty": false,
+        "blocker": "missing_core_module"
       }
     }
   }
