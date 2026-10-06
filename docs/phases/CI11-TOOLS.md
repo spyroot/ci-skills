@@ -86,8 +86,8 @@ with config keys and concurrency:
   `finished_at` else `created_at`; `--search` over name, stage, ref, failure
   reason; fields: id, name, stage, status, failure reason, created, started,
   finished, duration, runner, pipeline id and ref, web URL.
-- `gitlab_pipeline.py get|watch|logs|children`: `--project`, `--pipeline-id`
-  (or `--ref` for the newest); `logs` fans out the failed jobs' traces in
+- `gitlab_pipeline.py get|logs|children`: `--project`, `--pipeline-id`
+  (or `--ref` for the newest; `watch` as Pipeline watch, exact); `logs` fans out the failed jobs' traces in
   parallel; `children` reads bridges and downstream pipelines; `[gitlab] url,
   project`.
 - `gitlab_pipeline.py list`: the `list` grammar; `--ref`; `--name-glob` over
@@ -209,8 +209,8 @@ The same ten steps for every row; the row repeats them with the real paths.
    `tools/render_manifest.py` turns it into the `tools.json` entry: it adds the universal options, renames
    `requires` to `requires_authorities` and `kind` to `report_kind`, and writes `mutates` as `read_only`,
    inverted. `schemas/skill-manifest.schema.json` must accept the new `tools.json` and
-   `schemas/command-contract.schema.json` the new `--describe` output. The navigator picks the tool up with no
-   further work.
+   `schemas/command-contract.schema.json` the new `--describe` output. Add the tool's `NAV_PLACEMENT` row, and a
+   `NAV_NODES` row if its node is new (CI09-REFERENCE section 3, Declarations); the navigator derives the rest.
 5. **Thin main.** `ci-skills/bin/<name>.py`: `build_parser()` plus one
    `execute` call, with the shared locator import.
 6. **Strip the project.** Every host, project, group, namespace, image name,
@@ -382,7 +382,7 @@ gitlab_pipeline.py watch --pipeline-id ID [--project PATH_OR_ID] [--related-name
 
 - `--pipeline-id`: required. `--project`: as `get`, default `gitlab.project` in the target. `--interval`: seconds
   between polls, default 10 (the source's cap, `gitlab_util.sh:62`). `--timeout`: seconds for the whole watch,
-  default 3600.
+  default 3600. `get` keeps today's bare invocation, `gitlab_pipeline.py --pipeline-id ID`, as its default verb.
 - Scope: the pipeline, every pipeline its bridges started (any project, depth at most 5), and with `--related-name`
   each newer pipeline in the root's project on the root's ref whose `name` matches REGEX. Settled: `success`,
   `failed`, `canceled`, `skipped`, `manual`.
@@ -393,6 +393,32 @@ gitlab_pipeline.py watch --pipeline-id ID [--project PATH_OR_ID] [--related-name
 - Limits: 50 pipelines in scope, 50 changes, 12 choices; past one, `errors` names it with its `count` and `complete`
   is false. Each settled pipeline or job is one stderr log line while the watch runs.
 - Status: `PASS` when complete and successful; `PARTIAL` otherwise; `BLOCKED` when access or the root read fails.
+- Human view: the status with `complete` and `success`; the target, project, pipeline, filters, polls, elapsed time
+  and capture time; a "Pipelines" block, one line per record; a "Changes" block; a "Results" block drawn as
+  CI09-REFERENCE section 3 draws choices; an "Errors" block when there are any.
+
+```text
+$ gitlab_pipeline.py watch --pipeline-id 4101 --related-name '^component '
+PARTIAL  complete: yes  success: no
+https://gitlab.example.test  project group/project  pipeline 4101  related '^component '  25 polls  742 s  captured 2026-10-07T09:40:00+00:00
+
+Pipelines
+  4101  failed   root           depth 0  project 12  9 jobs: failed 1, success 8
+  4102  success  bridge:static  depth 1  project 12  25 jobs: success 25
+  4110  success  related        depth 0  project 12  4 jobs: success 4
+
+Changes
+   300 s  4102  success
+   610 s  4110  success
+   742 s  4101  failed
+
+Results
+  job:88231      failed: script_failure, deploy:component
+                 Retrieve: gitlab_job.py --job-url https://gitlab.example.test/group/project/-/jobs/88231
+
+  pipeline:4101  every job of pipeline 4101 by stage
+                 Retrieve: gitlab_pipeline.py get --project 12 --pipeline-id 4101
+```
 
 ```json
 {
@@ -724,7 +750,8 @@ and every receipt is committed.
   plan, apply, read-back of the new pipeline id and `sha`; this pipeline runs
   one job that prints the marker line and one that fails on purpose.
 - `gitlab_pipeline.py watch --project <declared project> --pipeline-id <from start>`:
-  the observed statuses with timestamps, ending in a terminal status.
+  `complete: true`, `success: false` (the job that fails on purpose), the root
+  record's `status`, and `changes` ending with the root's settled status.
 - `gitlab_pipeline.py get`, `logs` and `children` on that pipeline: stage
   counts; the marker line in the job's trace; the bridge list (empty).
 - `gitlab_pipeline.py list --project <declared project> --limit 1 --name-glob <declared glob>`:
@@ -1231,8 +1258,8 @@ file stays nonsecret: file paths only, like `token_file` today.
 
 ## Read-back
 
-After each pull request: `ci-skills/bin/reference.py next <domain>` lists
-the new tool; `<tool> --describe` validates against `command-contract`;
+After each pull request: `ci-skills/bin/reference.py next <node> run` lists
+the new tool and `next <node> run <id>` describes it; `<tool> --describe` validates against `command-contract`;
 `tools/render_manifest.py --check` reports CURRENT; the neutrality checker
 reports PASS.
 

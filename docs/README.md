@@ -40,7 +40,7 @@ authorities a command reads; "writes" means it changes state only after a confir
 | vendored `glab` skills | vendor upstream `glab` skills and references under one digest lock | planned | [CI05-VENDOR](phases/CI05-VENDOR.md) |
 | tests and live smoke | CI-only test command, coverage, live smoke proven by read-back | planned | [CI06-TESTS](phases/CI06-TESTS.md) |
 | routing and selective loading | load only the reference a task needs | planned | [CI08-ROUTING](phases/CI08-ROUTING.md) |
-| references and navigator | ask what the skill can do about X; read one upstream keyword chunk | planned | [CI09-REFERENCE](phases/CI09-REFERENCE.md) |
+| references and navigator | walk what the skill can run or read, one level per call; read one reference section by anchor | planned | [CI09-REFERENCE](phases/CI09-REFERENCE.md) |
 | GitLab jobs and pipelines | get, watch, logs, list by status, interval, keyword, job-name glob; start, retry, cancel | planned | [CI11-TOOLS](phases/CI11-TOOLS.md) |
 | pipeline schedules | list, get, play, create, update | planned | [CI11-TOOLS](phases/CI11-TOOLS.md) |
 | merge-request checks | one MR's state, head pipeline and failing jobs with log snippets | planned | [CI11-TOOLS](phases/CI11-TOOLS.md) |

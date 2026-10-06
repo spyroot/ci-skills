@@ -233,7 +233,8 @@
         "tools",
         "mutates",
         "side_effects",
-        "returns"
+        "returns",
+        "read_back"
       ],
       "properties": {
         "command": {
@@ -270,6 +271,11 @@
           "minLength": 1
         },
         "returns": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "read_back": {
           "type": "string",
           "minLength": 1,
           "maxLength": 240
@@ -319,7 +325,7 @@
             "path_unknown",
             "reference_unknown",
             "anchor_unknown",
-            "card_unavailable",
+            "tier_unavailable",
             "page_out_of_range"
           ]
         },

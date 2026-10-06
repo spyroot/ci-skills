@@ -39,7 +39,8 @@ adds the record, or `today` where the record exists in the tree.
 | `command-contract` | `command_contract` | each command's `--describe` | `core/catalog.py` | implemented |
 | `command-result` | none, the envelope | the fields every report kind shares | `core/report.py` | missing |
 
-Implemented, each checked with `check-jsonschema --schemafile <schema> <record>`:
+Implemented, each checked with `check-jsonschema --schemafile <schema> <record>` (plus `--base-uri` where a schema
+reuses another's `$defs`):
 
 - [`schemas/command-contract.schema.json`](../../schemas/command-contract.schema.json), built from the
   `--describe` output of all 15 Python commands; it accepts all 15 and refuses an unknown field, a missing `kind`
@@ -51,6 +52,16 @@ Implemented, each checked with `check-jsonschema --schemafile <schema> <record>`
 - [`schemas/skill-manifest.schema.json`](../../schemas/skill-manifest.schema.json), built from
   `ci-skills/tools.json`; it accepts that file and refuses an unknown field, an entry without `purpose`, an option
   name without dashes, `read_only` as text and an unknown authority.
+- [`schemas/reference-next.schema.json`](../../schemas/reference-next.schema.json) and
+  [`schemas/reference-section.schema.json`](../../schemas/reference-section.schema.json), built from CI09-REFERENCE
+  section 3's renders; they accept all of them and a 1.1 answer, and refuse an unknown field, a capability without
+  `read_back`, a read choice without `when`, an unavailable verb with a pointer, 13 choices, a 101-character
+  summary, an unknown action or error reason, MAJOR 2 and an unknown tier. `reference-section` reuses the choice
+  and pointer of `reference-next`, so its commands add `--base-uri`. Their producer, `reference.py`, is not built
+  yet (CI09-REFERENCE).
+- [`schemas/gitlab-pipeline-watch.schema.json`](../../schemas/gitlab-pipeline-watch.schema.json), built from the
+  pipeline watch result in CI11-TOOLS, Combos; it accepts that result and refuses an unknown `via` and a depth
+  over 5. Its producer, `gitlab_pipeline.py watch`, is not built yet (CI11-TOOLS).
 
 Every row marked missing is this phase's to implement; a record kind without its schema cannot be emitted.
 
@@ -156,9 +167,8 @@ The report kinds, one `<kind>.schema.json` each:
 - `skill_install` (`bin/ci-skills install`, planned, CI01-CATALOG);
 - `skill_vendor_check` and `skill_vendor_update` (`bin/ci-skills verify` and
   `update`, planned, CI05-VENDOR);
-- `reference_next`, `reference_record`, `reference_list` and `reference_verify`
-  (`ci-skills/bin/reference.py next`, `get` and `verify`, planned,
-  CI09-REFERENCE).
+- `reference_verify` (`ci-skills/bin/reference.py verify`, planned,
+  CI09-REFERENCE); `reference_next` and `reference_section` are in the table above.
 
 ## Rules every schema follows
 
@@ -283,20 +293,32 @@ A reader built for an older MINOR skips a choice, pointer or relation whose enum
 fields it does not know, and never fails the whole answer for them.
 
 Exhibit, a miss we already know of: the priority and severity sections say their meaning lives in another reference,
-and no relation can say so. The fix is one enum value in `schemas/reference-next.schema.json`:
+and no relation can say so. The fix is one enum value in `schemas/reference-next.schema.json`, shown in that file's
+own formatting:
 
 ```diff
--        "rel": {"enum": ["infers", "applies_to"]},
-+        "rel": {"enum": ["infers", "applies_to", "meaning_in"]},
+         "rel": {
+           "enum": [
+             "infers",
+-            "applies_to"
++            "applies_to",
++            "meaning_in"
+           ]
+         },
 ```
 
-The producer then answers with `"schema_version": "1.1"` and may carry this relation:
+The producer then answers with `"schema_version": "1.1"`. Once the handbook's triage page is declared as reference
+`gitlab-handbook-triage` (CI09-REFERENCE section 3, Declarations), the priority cluster may carry this relation:
 
 ```json
 {"from": "priority-labels", "rel": "meaning_in", "to": "gitlab-handbook-triage.priority", "evidence": "priority-labels"}
 ```
 
 The `^1\.[0-9]+$` pattern accepts both 1.0 and 1.1 answers; nothing else changes.
+
+`reference-next`, `reference-section` and `gitlab-pipeline-watch` start at 1.0 although their producers are not
+built yet: the operator fixed their shape by example, so they are locked contracts, not shapes in review, and step 1
+below does not apply to them.
 
 How a version is promoted:
 
