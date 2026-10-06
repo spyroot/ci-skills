@@ -8,26 +8,26 @@ work still to do, not a capability that exists. Start with [CI10-PHASES](phases/
 
 Available rows are the 17 commands [`ci-skills/tools.json`](../ci-skills/tools.json) declares, generated from
 `ci-skills/lib/core/catalog.py`; run any of them with `--describe` for its contract. Details names the
-authorities a command reads; a command that writes says so.
+authorities a command reads; "writes" means it changes state only after a confirmed plan.
 
 | Capability | What the agent can accomplish | Available or planned | Details |
 | --- | --- | --- | --- |
-| `access_check.py` | Prove access to every selected authority and emit one receipt | available | github, gitlab, kubernetes |
-| `bin/ci-api` | Read one caller-selected GitHub or GitLab API endpoint with bounded output | available | one caller-selected GitHub or GitLab host |
+| `access_check.py` | Prove access to every selected authority; one receipt | available | github, gitlab, kubernetes |
+| `bin/ci-api` | Read one GitHub or GitLab API endpoint, bounded output | available | github or gitlab |
 | `bin/ci-binary-build` | Plan an exact-commit OpenShift Binary BuildConfig without applying it | available | local |
-| `ceph_cluster.py` | Read Ceph health, root/rack/host/OSD hierarchy, inactive PGs, and OSD/monitor Pods | available | kubernetes |
+| `ceph_cluster.py` | Read Ceph health, OSD hierarchy, inactive PGs and OSD/monitor Pods | available | kubernetes |
 | `ceph_kernel.py` | Classify host Ceph/RBD kernel journal lines through an existing Pod | available | kubernetes |
-| `cilium_node.py` | Read Cilium daemon status and health from an existing agent Pod on one node | available | kubernetes |
+| `cilium_node.py` | Read Cilium status and health from an agent Pod on one node | available | kubernetes |
 | `cilium_status.py` | Aggregate Cilium agent, operator and node health by real exec | available | kubernetes |
 | `event_trace.py` | Return a time-ordered event trace from both event APIs | available | kubernetes |
-| `gitlab_access.py` | Resolve the effective GitLab credential and read back identity and exact target | available | gitlab |
-| `gitlab_issue.py` | Create or reuse an exact GitLab bug issue with independent read-back | available | gitlab; writes after a confirmed plan |
+| `gitlab_access.py` | Resolve the GitLab credential; read back identity and exact target | available | gitlab |
+| `gitlab_issue.py` | Create or reuse an exact bug issue, read back independently | available | gitlab; writes |
 | `gitlab_job.py` | Read one CI job with its pipeline, runner and bounded trace | available | gitlab |
-| `gitlab_milestone.py` | Create or update an exact GitLab milestone with independent read-back | available | gitlab; writes after a confirmed plan |
+| `gitlab_milestone.py` | Create or update an exact milestone, read back independently | available | gitlab; writes |
 | `gitlab_pipeline.py` | Read one CI pipeline and bounded job progress by stage | available | gitlab |
-| `gitlab_runner.py` | Assign an existing runner or create a runner record and verify it | available | gitlab; writes after a confirmed plan |
-| `gitlab_wiki.py` | Create or update an exact GitLab wiki page with independent read-back | available | gitlab; writes after a confirmed plan |
-| `k8s_verify_mtu_consistency.py` | Compare PCI Ethernet uplink MTUs across selected Kubernetes nodes | available | kubernetes; writes after a confirmed plan |
+| `gitlab_runner.py` | Assign a runner or create one, then verify it | available | gitlab; writes |
+| `gitlab_wiki.py` | Create or update an exact wiki page, read back independently | available | gitlab; writes |
+| `k8s_verify_mtu_consistency.py` | Compare uplink MTUs across selected nodes | available | kubernetes; writes |
 | `storage_report.py` | Correlate claims, volumes, attachments, pods and controllers | available | kubernetes |
 | installer | install the skill, digest-verified | available | `tools/install_ci_skills.py`, `install.sh` |
 | access references | how access is proved and how a project binds its target | available | `ci-skills/references/` |
