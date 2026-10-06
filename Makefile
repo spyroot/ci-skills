@@ -1,5 +1,4 @@
-# This script copy from galileo repo.
-# current todo adopt and integrate , so I need move required scripts and adjust
+# Developer targets for ci-skills.
 #
 # Mustafa Bayramov mbayramo@cisco.com
 
@@ -74,7 +73,7 @@ pretty-markdown:
 	@set -Eeuo pipefail; \
 	source "$(REPO_ROOT)/automation/lib/core/exit_codes.bash"; \
 	source "$(REPO_ROOT)/lib/bash/toolchain/pretty.bash"; \
-	inventory="$$(mktemp -t galileo-pretty-markdown.XXXXXX)"; \
+	inventory="$$(mktemp -t ci-skills-pretty-markdown.XXXXXX)"; \
 	trap 'rm -f -- "$$inventory"' EXIT; \
 	CI_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" \
 		'*.md' '*.markdown'; \

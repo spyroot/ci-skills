@@ -160,7 +160,7 @@ _CI_result_stream() {
 	done
 }
 
-# Summary: Render check results with the standard Galileo result envelope.
+# Summary: Render check results with the standard result envelope.
 # Arguments: array variable, schema path, and kind.
 # Environment inputs: jq on PATH.
 # Stdout: JSON result object.
@@ -198,7 +198,7 @@ CI_result_render_text() {
 # Summary: Render check results in the output mode the caller asked for.
 # Arguments: array variable, schema path, kind, and text|json|yaml.
 # Environment inputs: jq on PATH; yq as well for yaml.
-# Stdout: the standard Galileo result envelope in that mode.
+# Stdout: the standard result envelope in that mode.
 # Stderr: one blocker line naming an unknown mode.
 # Exit classes: usage for an unknown mode, otherwise the renderer's status.
 # Side effects: none. Idempotency: read-only and repeatable. Cleanup: none.
