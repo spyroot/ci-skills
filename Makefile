@@ -1,189 +1,65 @@
-# This script copy from galileo repo.
-# current todo adopt and integrate , so I need move required scripts and adjust
-#
-# Mustafa Bayramov mbayramo@cisco.com
-
 SHELL := /bin/bash
 export PATH := /opt/homebrew/bin:/opt/homebrew/sbin:$(PATH)
-REPO_ROOT := $(CURDIR)
-.DEFAULT_GOAL := bless
-TOOLCHAIN_SCRIPT := scripts/toolchain/install.sh
-CONDA_INSTALL_SCRIPT := scripts/toolchain/conda.sh
-TOOLCHAIN_MANIFEST := $(REPO_ROOT)/toolchain-dependencies.json
-TOOLCHAIN_PREFIX ?=
-TOOLCHAIN_TIMEOUT ?= 1800
+.DEFAULT_GOAL := help
 
-TOOLBOX_SCRIPT := scripts/toolbox/toolbox-image.sh
-TOOLBOX_AUTH_SCRIPT := scripts/toolbox/toolbox-auth-smoke.sh
-TOOLBOX_CONTEXT_FILES := environment.yml \
-	platforms/component/toolbox/Containerfile \
-	platforms/component/toolbox/toolbox.yaml
-K8S_TEST_SCRIPT := scripts/ci/k8s-test.sh
-# MAX_JOBS is caller-selected; JOBS is the effective local CPU count.
-# Preserve JOBS as a legacy way to supply the requested maximum.
-REQUESTED_JOBS := $(JOBS)
-MAX_JOBS ?= $(if $(REQUESTED_JOBS),$(REQUESTED_JOBS),4)
-override JOBS := $(shell bash -c 'source "$$1"; CI_toolchain_job_count "$$2"' \
-	_ "$(REPO_ROOT)/lib/bash/toolchain/jobs.bash" "$(MAX_JOBS)")
-export MAX_JOBS JOBS
-ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
-MAKEFLAGS += --jobs=$(JOBS)
-endif
-TEST ?= bats --jobs $(JOBS) tests
+ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CONDA_ENV ?= ci-skills
-XARGS ?= xargs
+CONDA ?= $(shell command -v conda || printf '%s' "$$HOME/miniconda3/condabin/conda")
+DOCKER ?= docker
+DOCKER_IMAGE ?= ci-skills:dev
+DOCKER_PLATFORM ?= linux/amd64
 
-.NOTPARALLEL: bless install install-bless install-hooks toolchain \
-	toolchain-dry-run conda conda-dry-run
+.PHONY: help install toolchain conda install-hooks bless bless-all pretty \
+	pretty-markdown pretty-python pretty-shell build docker-build docker-smoke docker
 
-.PHONY: bless install install-bless install-hooks toolchain toolchain-dry-run \
-	conda conda-dry-run pretty pretty-markdown pretty-python pretty-shell help \
-	k8s-test k8s-test-dry-run toolbox toolbox-auth toolbox-dry-run
+help:
+	@printf '%s\n' \
+		'install           Install declared hook tools, the conda environment, and the pre-commit hook.' \
+		'toolchain         Install missing host tools in the bless profile.' \
+		'conda             Create or update the ci-skills environment from environment.yml.' \
+		'install-hooks     Install the repository hook without overriding global hooks.' \
+		'bless             Check exact staged index content; this is the commit hook command.' \
+		'bless-all         Check tracked working-tree files without rewriting them.' \
+		'pretty            Format tracked Markdown, Python, and Bash files; never stage them.' \
+		'build             Build the Ubuntu Linux development image.' \
+		'docker             Run the Linux hook smoke built into the image.'
 
-bless: install-bless
-	@cd "$(REPO_ROOT)" && ./bless.sh --staged
-
-install-bless: install-hooks
-
-install-hooks:
-	@git -C "$(REPO_ROOT)" config --local core.hooksPath .githooks
-
-install: install-bless $(if $(filter conda conda-dry-run,$(MAKECMDGOALS)),,toolchain)
+install:
+	@$(ROOT)/scripts/dev.sh install --apply --confirm-install
 
 toolchain:
-	$(TOOLCHAIN_SCRIPT) --manifest "$(TOOLCHAIN_MANIFEST)" \
-		$(if $(TOOLCHAIN_PREFIX),--prefix "$(TOOLCHAIN_PREFIX)") \
-		--timeout "$(TOOLCHAIN_TIMEOUT)" --apply --confirm-install --json
-
-toolchain-dry-run:
-	$(TOOLCHAIN_SCRIPT) --manifest "$(TOOLCHAIN_MANIFEST)" \
-		$(if $(TOOLCHAIN_PREFIX),--prefix "$(TOOLCHAIN_PREFIX)") \
-		--timeout "$(TOOLCHAIN_TIMEOUT)" --dry-run --json
+	@$(ROOT)/scripts/dev.sh toolchain --apply --confirm-install
 
 conda:
-	$(CONDA_INSTALL_SCRIPT) --manifest "$(TOOLCHAIN_MANIFEST)" \
-		--timeout "$(TOOLCHAIN_TIMEOUT)" --apply --confirm-install --json
+	@$(ROOT)/scripts/dev.sh conda --apply --confirm-install
 
-conda-dry-run:
-	$(CONDA_INSTALL_SCRIPT) --manifest "$(TOOLCHAIN_MANIFEST)" \
-		--timeout "$(TOOLCHAIN_TIMEOUT)" --dry-run --json
+install-hooks:
+	@$(ROOT)/scripts/dev.sh hooks --apply --confirm-install
+
+bless:
+	@$(ROOT)/bless.sh --staged
+
+bless-all:
+	@$(ROOT)/bless.sh --all
 
 pretty: pretty-markdown pretty-python pretty-shell
 
 pretty-markdown:
-	@set -Eeuo pipefail; \
-	source "$(REPO_ROOT)/automation/lib/core/exit_codes.bash"; \
-	source "$(REPO_ROOT)/lib/bash/toolchain/pretty.bash"; \
-	inventory="$$(mktemp -t galileo-pretty-markdown.XXXXXX)"; \
-	trap 'rm -f -- "$$inventory"' EXIT; \
-	CI_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" \
-		'*.md' '*.markdown'; \
-	if [[ ! -s "$$inventory" ]]; then \
-		printf '%s\n' 'Markdown pretty: not_applicable'; \
-		exit 0; \
-	fi; \
-	if ! command -v markdownlint-cli2 >/dev/null || \
-		! command -v "$(XARGS)" >/dev/null; then \
-		printf '%s\n' 'BLOCKER: Markdown pretty tools are missing.' \
-			'SAFE_NEXT_STEP: run make install toolchain, then rerun make pretty.' >&2; \
-		exit "$$CI_EXIT_BLOCKED"; \
-	fi; \
-	cd "$(REPO_ROOT)"; \
-	$(XARGS) -0 markdownlint-cli2 --config .markdownlint-cli2.yaml --fix -- \
-		<"$$inventory"
+	@markdownlint-cli2 --fix '**/*.md'
 
 pretty-python:
-	@set -Eeuo pipefail; \
-	source "$(REPO_ROOT)/automation/lib/core/exit_codes.bash"; \
-	source "$(REPO_ROOT)/lib/bash/toolchain/pretty.bash"; \
-	inventory="$$(mktemp -t ci-pretty-python.XXXXXX)"; \
-	trap 'rm -f -- "$$inventory"' EXIT; \
-	CI_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" '*.py'; \
-	if [[ ! -s "$$inventory" ]]; then \
-		printf '%s\n' 'Python pretty: not_applicable'; \
-		exit 0; \
-	fi; \
-	conda_bin="$$(bash -c 'source "$$1"; CI_find_conda' \
-		_ "$(REPO_ROOT)/automation/lib/core/conda.bash")"; \
-	if [[ -z "$$conda_bin" ]]; then \
-		printf '%s\n' 'BLOCKER: Python pretty requires Conda.' \
-			'SAFE_NEXT_STEP: run make install conda, then rerun make pretty.' >&2; \
-		exit "$$CI_EXIT_BLOCKED"; \
-	fi; \
-	if ! command -v "$(XARGS)" >/dev/null || \
-		! "$$conda_bin" run -n "$(CONDA_ENV)" ruff --version >/dev/null; then \
-		printf '%s\n' 'BLOCKER: Python pretty tools are missing.' \
-			'SAFE_NEXT_STEP: run make install conda, then rerun make pretty.' >&2; \
-		exit "$$CI_EXIT_BLOCKED"; \
-	fi; \
-	cd "$(REPO_ROOT)"; \
-	rc=0; \
-	$(XARGS) -0 "$$conda_bin" run -n "$(CONDA_ENV)" ruff check \
-		--fix --no-cache -- <"$$inventory" || rc=$$?; \
-	$(XARGS) -0 "$$conda_bin" run -n "$(CONDA_ENV)" ruff format \
-		--no-cache -- <"$$inventory" || rc=$$?; \
-	exit "$$rc"
+	@$(CONDA) run -n $(CONDA_ENV) ruff check --fix .
+	@$(CONDA) run -n $(CONDA_ENV) ruff format .
 
 pretty-shell:
-	@set -Eeuo pipefail; \
-	source "$(REPO_ROOT)/automation/lib/core/exit_codes.bash"; \
-	source "$(REPO_ROOT)/lib/bash/toolchain/pretty.bash"; \
-	inventory="$$(mktemp -t ci-pretty-shell.XXXXXX)"; \
-	trap 'rm -f -- "$$inventory"' EXIT; \
-	CI_toolchain_changed_files "$(REPO_ROOT)" "$$inventory" \
-		'*.sh' '*.bash'; \
-	if [[ ! -s "$$inventory" ]]; then \
-		printf '%s\n' 'Shell pretty: not_applicable'; \
-		exit 0; \
-	fi; \
-	if ! command -v shfmt >/dev/null || \
-		! command -v "$(XARGS)" >/dev/null; then \
-		printf '%s\n' 'BLOCKER: Shell pretty tools are missing.' \
-			'SAFE_NEXT_STEP: run make install toolchain, then rerun make pretty.' >&2; \
-		exit "$$CI_EXIT_BLOCKED"; \
-	fi; \
-	cd "$(REPO_ROOT)"; \
-	$(XARGS) -0 shfmt -w -- <"$$inventory"
+	@shfmt -w bless.sh scripts/*.sh scripts/bash/core/*.bash ci-skills/lib/bash
 
-help:
-	@printf '%s\n' \
-		'Targets:' \
-		'  bless            Install Git hooks and bless staged changes (default).' \
-		'  install-bless    Install the existing automatic blessing hooks.' \
-		'  install-hooks    Configure the existing repository Git hooks.' \
-		'  install          Install hooks and general tools; conda stays separate.' \
-		'  toolchain        Install general tools from the JSON manifest.' \
-		'  toolchain-dry-run Show the dependency installation plan as JSON.' \
-		'  conda            Install Conda and synchronize environment.yml.' \
-		'  conda-dry-run    Show the separate Conda installation plan.' \
-		'  pretty           Format changed Markdown, Python, and shell; do not stage.' \
-		'  k8s-test         Run TEST in Kubernetes using the Harbor toolbox.' \
-		'  k8s-test-dry-run Show the Kubernetes test Job plan as JSON.' \
-		'  toolbox          Build the Ubuntu toolbox in OpenShift, push to Harbor, read back.' \
-		'  toolbox-auth     Smoke Helm, GCR, and Harbor auth in toolbox.' \
-		'  toolbox-dry-run  Show the toolbox action plan as JSON.' \
-		'' \
-		"Examples:" \
-		"  make" \
-		"  make install" \
-		"  make install toolchain" \
-		"  make install conda" \
-		"  make pretty" \
-		"  make toolbox" \
-		"  make toolbox-auth" \
-		"  make k8s-test TEST='bats tests/toolbox_image.bats'"
+build: docker-build
 
-k8s-test:
-	CI_K8S_TEST_COMMAND='$(TEST)' $(K8S_TEST_SCRIPT) --apply --json
+docker-build:
+	@$(DOCKER) build --platform $(DOCKER_PLATFORM) --tag $(DOCKER_IMAGE) .
 
-k8s-test-dry-run:
-	CI_K8S_TEST_COMMAND='$(TEST)' $(K8S_TEST_SCRIPT) --json
+docker-smoke: docker-build
+	@$(DOCKER) run --rm --platform $(DOCKER_PLATFORM) $(DOCKER_IMAGE)
 
-toolbox: $(TOOLBOX_CONTEXT_FILES)
-	$(TOOLBOX_SCRIPT) --apply --json
-
-toolbox-auth:
-	$(TOOLBOX_AUTH_SCRIPT) --apply --json
-
-toolbox-dry-run: $(TOOLBOX_CONTEXT_FILES)
-	$(TOOLBOX_SCRIPT) --json
+docker: docker-smoke

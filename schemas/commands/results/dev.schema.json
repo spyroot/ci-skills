@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/commands/results/dev.schema.json",
+  "title": "scripts/dev.sh result",
+  "type": "object",
+  "required": ["kind", "schema_version", "operation", "mode", "status", "run_id", "detail"],
+  "properties": {
+    "kind": {"const": "dev_result"},
+    "schema_version": {"const": "1.0"},
+    "operation": {"enum": ["install", "toolchain", "conda", "hooks"]},
+    "mode": {"enum": ["plan", "apply"]},
+    "status": {"enum": ["PLANNED", "PASS", "FAIL"]},
+    "run_id": {"type": "string"},
+    "detail": {"type": "string"},
+    "safe_next_step": {"type": "string", "minLength": 1}
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"const": "FAIL"}}}, "then": {"required": ["safe_next_step"]}}
+  ],
+  "additionalProperties": false
+}

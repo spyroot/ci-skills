@@ -1,0 +1,29 @@
+{
+  "kind": "command_help",
+  "schema_version": "1.0",
+  "command": "bless.sh",
+  "audience": ["agent", "human"],
+  "summary": "Check staged source before commit.",
+  "description": "Reads Git index bytes by default and never rewrites source files.",
+  "examples": [
+    {"purpose": "Check staged content before committing", "command": "./bless.sh --staged"},
+    {"purpose": "List checks without running linters", "command": "./bless.sh --staged --dry-run --json"}
+  ],
+  "options": [
+    {"name": "--staged", "description": "Check exact Git index bytes; default"},
+    {"name": "--all", "description": "Check tracked working-tree files"},
+    {"name": "--dry-run", "description": "List planned checks"},
+    {"name": "--json", "description": "Render JSON result"},
+    {"name": "--yaml", "description": "Render YAML result"},
+    {"name": "--describe", "description": "Render machine help and schema paths"},
+    {"name": "--help", "description": "Render human help"}
+  ],
+  "output_modes": ["human", "json", "yaml"],
+  "usage": [
+    "./bless.sh [--staged|--all] [--dry-run] [--json|--yaml]",
+    "./bless.sh --describe",
+    "./bless.sh --help"
+  ],
+  "arguments_schema": "schemas/commands/arguments/bless.schema.json",
+  "result_schema": "schemas/commands/results/bless.schema.json"
+}

@@ -1,0 +1,30 @@
+{
+  "kind": "command_help",
+  "schema_version": "1.0",
+  "command": "scripts/dev.sh",
+  "audience": ["agent", "human"],
+  "summary": "Prepare the ci-skills development toolchain and Git hook.",
+  "description": "Defaults to a read-only plan; apply requires explicit confirmation.",
+  "examples": [
+    {"purpose": "Inspect the complete install plan", "command": "scripts/dev.sh install --dry-run"},
+    {"purpose": "Apply the reviewed plan", "command": "scripts/dev.sh install --apply --confirm-install"}
+  ],
+  "options": [
+    {"name": "--dry-run", "description": "Show the plan; default"},
+    {"name": "--apply", "description": "Execute the selected operation"},
+    {"name": "--confirm-install", "description": "Confirm explicit apply"},
+    {"name": "--timeout SECONDS", "description": "Bound each install step"},
+    {"name": "--log-format text|json", "description": "Select diagnostic format"},
+    {"name": "--log-level LEVEL", "description": "Select minimum diagnostic level"},
+    {"name": "--log-file PATH", "description": "Append diagnostics to a file"},
+    {"name": "--run-id ID", "description": "Attach a caller run ID"},
+    {"name": "--json", "description": "Render a JSON result"},
+    {"name": "--yaml", "description": "Render a YAML-compatible result"},
+    {"name": "--describe", "description": "Render machine help and schema paths"},
+    {"name": "--help", "description": "Render human help"}
+  ],
+  "output_modes": ["human", "json", "yaml"],
+  "usage": ["scripts/dev.sh OPERATION [--dry-run|--apply --confirm-install] [options]"],
+  "arguments_schema": "schemas/commands/arguments/dev.schema.json",
+  "result_schema": "schemas/commands/results/dev.schema.json"
+}

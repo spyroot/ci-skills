@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/commands/results/bless.schema.json",
+  "title": "bless.sh result",
+  "type": "object",
+  "required": ["kind", "schema_version", "status", "scope", "summary", "checks"],
+  "properties": {
+    "kind": {"const": "bless_result"},
+    "schema_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+    "status": {"enum": ["PASS", "FAIL", "PLANNED"]},
+    "scope": {"enum": ["staged", "all"]},
+    "safe_next_step": {"type": "string", "minLength": 1},
+    "summary": {
+      "type": "object",
+      "required": ["selected_files", "check_count", "failed_checks"],
+      "properties": {
+        "selected_files": {"type": "integer", "minimum": 0},
+        "check_count": {"type": "integer", "minimum": 0},
+        "failed_checks": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "check", "status"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "check": {"type": "string", "minLength": 1},
+          "status": {"enum": ["PASS", "FAIL", "PLANNED"]}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}},
+      "then": {
+        "properties": {
+          "summary": {"properties": {"failed_checks": {"const": 0}}},
+          "checks": {"not": {"contains": {"properties": {"status": {"const": "FAIL"}}}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "FAIL"}}},
+      "then": {
+        "properties": {
+          "summary": {"properties": {"failed_checks": {"minimum": 1}}},
+          "checks": {"contains": {"properties": {"status": {"const": "FAIL"}}}}
+        },
+        "required": ["safe_next_step"]
+      }
+    }
+  ],
+  "additionalProperties": false
+}

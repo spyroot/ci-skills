@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/configuration/toolchain-dependencies.schema.json",
+  "title": "ci-skills toolchain dependencies",
+  "type": "object",
+  "required": ["kind", "schema_version", "dependencies", "profiles", "conda"],
+  "properties": {
+    "kind": {"const": "toolchain_dependencies"},
+    "schema_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+    "dependencies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "commands"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "commands": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "platform": {"enum": ["linux"]},
+          "brew": {"$ref": "#/$defs/stringArray"},
+          "apt": {"$ref": "#/$defs/stringArray"},
+          "yum": {"$ref": "#/$defs/stringArray"},
+          "minimumMajor": {"type": "integer", "minimum": 1},
+          "versionFile": {"type": "string", "minLength": 1},
+          "linux": {
+            "type": "object",
+            "properties": {
+              "method": {"enum": ["archive", "go", "npm", "uv"]},
+              "url": {"type": "string", "minLength": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "stripComponents": {"type": "integer", "minimum": 0},
+              "files": {"$ref": "#/$defs/stringArray"},
+              "module": {"type": "string", "minLength": 1},
+              "package": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "required": ["bless"],
+      "properties": {
+        "bless": {
+          "type": "object",
+          "required": ["host", "conda"],
+          "properties": {
+            "host": {"$ref": "#/$defs/stringArray"},
+            "conda": {"$ref": "#/$defs/stringArray"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "conda": {
+      "type": "object",
+      "required": ["environmentFile", "channels"],
+      "properties": {
+        "brewCask": {"type": "string"},
+        "prefix": {"type": "string"},
+        "url": {"type": "string"},
+        "environmentFile": {"const": "environment.yml"},
+        "channels": {"$ref": "#/$defs/stringArray"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "additionalProperties": false
+}

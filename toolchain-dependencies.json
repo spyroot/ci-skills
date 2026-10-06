@@ -1,4 +1,6 @@
 {
+  "kind": "toolchain_dependencies",
+  "schema_version": "1.0",
   "dependencies": [
     {
       "name": "bash",
@@ -64,7 +66,7 @@
       "commands": [
         "base64", "cat", "cp", "cut", "date", "dirname", "find", "grep",
         "head", "install", "mkdir", "mktemp", "mv", "paste", "rm", "sed",
-        "sleep", "sort", "tr", "wc", "xargs"
+        "sleep", "sort", "timeout", "tr", "wc", "xargs"
       ],
       "brew": ["coreutils", "findutils", "grep", "gnu-sed"],
       "apt": ["coreutils", "findutils", "grep", "sed"],
@@ -261,8 +263,36 @@
       "commands": ["actionlint"],
       "brew": ["actionlint"],
       "linux": {"method": "go", "module": "github.com/rhysd/actionlint/cmd/actionlint@latest"}
+    },
+    {
+      "name": "taplo",
+      "commands": ["taplo"],
+      "brew": ["taplo"],
+      "linux": {
+        "method": "archive",
+        "url": "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86_64.gz",
+        "sha256": "8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156"
+      }
     }
   ],
+  "profiles": {
+    "bless": {
+      "host": [
+        "bash",
+        "awk",
+        "coreutils",
+        "git",
+        "jq",
+        "node",
+        "markdownlint-cli2",
+        "shellcheck",
+        "shfmt",
+        "gitleaks",
+        "taplo"
+      ],
+      "conda": ["ruff", "yamllint", "check-jsonschema"]
+    }
+  },
   "conda": {
     "brewCask": "miniforge",
     "prefix": "~/miniforge3",

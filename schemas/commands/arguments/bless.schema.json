@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/commands/arguments/bless.schema.json",
+  "title": "bless.sh arguments",
+  "type": "object",
+  "required": ["scope", "dry_run", "format"],
+  "properties": {
+    "scope": {"enum": ["staged", "all"]},
+    "dry_run": {"type": "boolean"},
+    "format": {"enum": ["human", "json", "yaml"]}
+  },
+  "additionalProperties": false
+}
