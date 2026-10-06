@@ -1,6 +1,6 @@
 # toolbox-harbor
 
-Saved 2026-10-06 from the session transcript `~/.claude/projects/-Users-spyroot-dev-ci-skills/279dd962-305b-4ab4-835e-7e6e872c8f60/subagents/agent-aa93621ba0c4d3fed.jsonl`. Inventory of the source repo's toolbox and Harbor scripts (folded into CI11 'Source rows: toolbox and Harbor'). Agent output, kept verbatim; a log, not present state.
+Source inventory recorded 2026-10-06; use current source for implementation decisions.
 
 ---
 

@@ -1,6 +1,6 @@
 # core-libs
 
-Saved 2026-10-06 from the session transcript `~/.claude/projects/-Users-spyroot-dev-ci-skills/279dd962-305b-4ab4-835e-7e6e872c8f60/subagents/agent-ab590ffcfa8d6035f.jsonl`. Inventory of the source repo's core libraries and gates for reuse. Agent output, kept verbatim; a log, not present state.
+Source inventory recorded 2026-10-06; use current source for implementation decisions.
 
 ---
 

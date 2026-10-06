@@ -10,8 +10,8 @@ more. No open-ended implementation, no invented behaviour: a tool exists only
 when a sentence we recorded or a source script stands behind it. The port
 recipe below owns the rules; the four source-row sections name each source
 script by path relative to the source repo root at the inventory commit,
-both recorded in the ignored `.internal/plans/` pointer. That project's name
-never enters a tracked file: the neutrality gate forbids it.
+both recorded in the private source inventory. That project's name never
+enters a tracked file: the neutrality gate forbids it.
 
 ## The catalogue
 
@@ -159,7 +159,7 @@ with config keys and concurrency:
 
 Source paths, functions and lines per tool are in the four source-row
 sections below (inventory of 2026-10-06 at the source commit recorded in the
-ignored `.internal/plans/` pointer); the tests per tool are the
+private source inventory); the tests per tool are the
 `tests/python/test_<module>.py` files of "Delivery, test and proof".
 
 ## The port recipe
@@ -441,7 +441,7 @@ A tool without a committed receipt for its case is not delivered.
 ## Source rows: OpenShift and Kubernetes (inventory of 2026-10-06)
 
 Inventory of 2026-10-06 at the source commit recorded with the source repo
-root in the ignored `.internal/plans/` pointer; paths are relative to that
+root in the private source inventory; paths are relative to that
 root and line numbers are from that commit; the full inventories are
 [ci11-inventories](../plans/2026-10-06/ci11-inventories/index.md). "new" marks a read we asked for
 that no source script performs; it is built to the sentence and nothing more.

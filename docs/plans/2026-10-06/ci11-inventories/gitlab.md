@@ -1,6 +1,6 @@
 # gitlab
 
-Saved 2026-10-06 from the session transcript `~/.claude/projects/-Users-spyroot-dev-ci-skills/279dd962-305b-4ab4-835e-7e6e872c8f60/subagents/agent-aeb86d6622d1ac80f.jsonl`. Inventory of the source repo's GitLab scripts for the CI11 port (folded into CI11 'Source rows: GitLab'). Agent output, kept verbatim; a log, not present state.
+Source inventory recorded 2026-10-06; use current source for implementation decisions.
 
 ---
 
