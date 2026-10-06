@@ -348,6 +348,31 @@ keeps its own plan, apply and read-back. The `Pattern` column of the
 catalogue names each tool's README grouping ("Tool grouping"); the
 concurrency rule is step 8 of the recipe.
 
+### Concrete combinations: proposed delivery entries
+
+These are proposed delivery entries, not claims that the commands already exist. Each result follows
+CI09-REFERENCE section 3: a compact summary, the essential fields of each step, and `retrieve` pointers to the
+component reports, never the reports inline.
+
+- **Pipeline watch** (`gitlab_pipeline.py watch`, the verb the rows below call `track`).
+  - Operations combined: resolve the selected pipeline (by ID, or the newest on a ref or sha); discover its jobs,
+    bridges and linked downstream pipelines, across projects; watch the declared scope, optionally widened to
+    newer pipelines in the same project whose name matches a declared pattern (pipelines a job started through
+    the API carry no bridge); report changes and final results. `manual` counts as settled; interval and
+    overall wait are bounded.
+  - Completion evidence: every pipeline in scope is accounted for; incomplete reads remain explicit; completion
+    and success are reported separately.
+- **Toolbox build, publish and watch.**
+  - Operations combined: start the declared GitLab build/publish workflow; reuse pipeline watch; obtain the
+    produced image identity; verify the published artifact in Harbor.
+  - Completion evidence: selected source revision, pipeline/job identities, produced image digest, and Harbor
+    read-back agree. A successful pipeline alone is insufficient.
+- **Milestone create, tag and MR check.**
+  - Operations combined: create or resolve the milestone; apply the specified associations and labels to the
+    selected work items; inspect the related MRs; verify their expected milestone/label associations.
+  - Completion evidence: exact milestone and work-item identities, changes made, and per-MR checks. Here, "tag"
+    is treated as a label; Git repository tags remain a separate, explicitly specified operation.
+
 ### Two combos we named, concretely
 
 - **`cluster_health.py`, "is the cluster ok" in one go.** One record per

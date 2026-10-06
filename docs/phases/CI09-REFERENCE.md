@@ -373,97 +373,175 @@ them (section 4); `tests/python/test_reference.py` produces every one.
 material; the one `SKILL.md` sentence of step 6 says so, and CI08-ROUTING
 owns the rest of the router.
 
-## 3. The navigator: one black box for knowledge and tools
+## 3. The navigator: one entrypoint for knowledge and tools
 
-An agent never reads `tools.json` or a whole reference. It walks: it names a domain, gets a short menu, picks one
-entry, and repeats until it reaches something to run or something to read. Every menu entry carries one action:
+An agent discovers what the skill can do through one entrypoint, `ci-skills/bin/reference.py`. Each call returns a
+compact description of one location in the resource graph and typed pointers to what is available there: groups
+and subresources to expand, capabilities to describe or execute, reference sections to read, and result details to
+retrieve. The agent never reads `tools.json`, a reference `index.json`, the documentation tree or a command's full
+`--help` to choose its next step; those files are the navigator's inputs.
 
-| Action | Meaning | The entry's `next` is |
-| --- | --- | --- |
-| `next` | a group; walk into it | the next `reference.py next` call |
-| `run` | a command the agent can execute | the exact command line |
-| `read` | something the agent can read | the exact call that prints it, one chunk or one contract |
+### Reference example (locked)
 
-### Worked example: gitlab, then pipeline, then watch
-
-Step 1 names the domain. The groups are the commands that require it, grouped by the noun in their name; the
-`ci-yaml` reference is walked like a group.
+Human view, two levels:
 
 ```text
-$ reference.py next gitlab
-gitlab
-  next  access     prove access; read back identity and target    reference.py next gitlab access
-  next  issue      create or reuse an exact bug issue             reference.py next gitlab issue
-  next  job        one job with its pipeline, runner and log tail reference.py next gitlab job
-  next  milestone  create or update a milestone                   reference.py next gitlab milestone
-  next  pipeline   one pipeline and its job progress by stage     reference.py next gitlab pipeline
-  next  runner     assign or create a runner                      reference.py next gitlab runner
-  next  wiki       create or update a wiki page                   reference.py next gitlab wiki
-  next  ci-yaml    the CI/CD YAML syntax, one keyword at a time   reference.py next gitlab ci-yaml
-```
+reference.py next
 
-Step 2 opens one group. Its verbs are things to run; the CI YAML keywords tagged with the same noun are things
-to read.
+Available groups
+  harbor   Registry, images, charts and related operations.
+           Expand: reference.py next harbor
+
+  ci       Pipelines, jobs, runners and CI workflows.
+           Expand: reference.py next ci
+
+  k8s      Cluster, workload, storage and network operations.
+           Expand: reference.py next k8s
+
+References
+  Relevant entry references, each with:
+  a short purpose, its anchor, when to read it, and how to retrieve it.
+```
 
 ```text
-$ reference.py next gitlab pipeline
-gitlab > pipeline
-  run   get                 one pipeline: stages and job counts           gitlab_pipeline.py get --pipeline-id <id> --json
-  run   track               watch one pipeline until it finishes          gitlab_pipeline.py track --pipeline-id <id> --json
-  run   logs                the failed jobs' log tails                    gitlab_pipeline.py logs --pipeline-id <id> --json
-  run   list                recent pipelines by status, time or job name  gitlab_pipeline.py list --json
-  read  needs:pipeline      CI YAML: mirror an upstream pipeline's status reference.py get gitlab-ci-yaml needs:pipeline
-  read  needs:pipeline:job  CI YAML: artifacts from another pipeline      reference.py get gitlab-ci-yaml needs:pipeline:job
+reference.py next ci
+
+Subresources
+  pipeline   Inspect pipelines and their related jobs.
+             Expand: reference.py next ci pipeline
+
+  job        Inspect job state, output and failure evidence.
+             Expand: reference.py next ci job
+
+  runner     Inspect or manage runners.
+             Expand: reference.py next ci runner
+
+Commands / combos
+  Relevant capabilities directly available at this level.
+  Each includes a short purpose and its exact next invocation.
+
+References
+  Relevant CI references.
+  Each includes its anchor, when to read it, and its retrieval invocation.
 ```
 
-Step 3 names the intent, not the verb. `watch` is no tag; it matches a word in the summary of `track`, so the
-answer is that leaf: one command to run and its contract to read.
-
-```text
-$ reference.py next gitlab pipeline watch
-gitlab > pipeline > track   ("watch" matched the summary of track)
-  run   track     watch one pipeline until it finishes             gitlab_pipeline.py track --pipeline-id <id> --json
-  read  contract  every option, the result fields, the exit codes  gitlab_pipeline.py track --describe
-```
-
-The same answer with `--json`, which an agent parses:
+The machine-readable answer one level down, which an agent parses:
 
 ```json
 {
-  "schema_version": "1.0",
   "kind": "reference_next",
-  "path": ["gitlab", "pipeline", "track"],
-  "matched": {"input": "watch", "by": "summary"},
+  "schema_version": "1.0",
+  "path": ["ci", "pipeline"],
+  "summary": "Inspect, watch and diagnose pipelines.",
   "choices": [
-    {"tag": "track", "action": "run", "summary": "watch one pipeline until it finishes",
-     "next": "gitlab_pipeline.py track --pipeline-id <id> --json"},
-    {"tag": "contract", "action": "read", "summary": "every option, the result fields, the exit codes",
-     "next": "gitlab_pipeline.py track --describe"}
-  ]
+    {
+      "id": "watch",
+      "kind": "execute",
+      "summary": "Watch a pipeline and its linked downstream runs.",
+      "next": {
+        "action": "describe",
+        "entrypoint": "bin/reference.py",
+        "args": ["next", "ci", "pipeline", "watch", "--json"]
+      }
+    },
+    {
+      "id": "trigger",
+      "kind": "read",
+      "summary": "Downstream pipeline trigger reference.",
+      "anchor": "trigger",
+      "when": "Read when interpreting how a downstream pipeline is triggered.",
+      "next": {
+        "action": "read",
+        "entrypoint": "bin/reference.py",
+        "args": ["get", "gitlab-ci-yaml", "trigger", "--card", "--json"]
+      }
+    }
+  ],
+  "continuation": null
 }
 ```
 
-The four pipeline verbs are the ones CI11-TOOLS adds; until they land, step 2 holds one `run` entry,
-`gitlab_pipeline.py --pipeline-id <id> --json`.
+The response shape:
 
-### Rules
+```text
+compact response
+    → short summary
+    → typed pointers
+        → expand a subresource
+        → describe or execute a capability
+        → read a specific reference section
+        → retrieve selected result details
+```
 
-- **Input**: `[DOMAIN [TAG ...]]`, `--json|--yaml|--human`, `--limit N` (default 12). Offline, no credentials, no
-  target file.
-- **Output**: `kind: reference_next`, `path`, `matched` when the input was not an exact tag, and `choices`, one line
-  each: `tag`, `action` (`next`, `run` or `read`), `summary`, `next`. Every answer stays under 1 KB; when the
-  limit drops choices, `cut` says how many and which tag narrows them. Never silent.
-- **Tree sources, all derived**: groups from the commands that require the domain (`requires_authorities`),
-  grouped by the noun in their name; verbs from each command's `subcommands`; reads from the reference indexes,
-  the keywords whose tags include the group's noun. Nothing is typed by hand.
-- **What the catalog must provide**: `subcommands` as a map for every command, each verb with a one-line
-  `purpose`. Today only `gitlab_access.py check` declares one, and the two Bash entries list their verbs as an
-  array; CI02-CLI makes both the rule.
-- **Matching**: an exact tag wins; otherwise a case-insensitive token match over the tags, then over the summary
-  words, as `watch` shows; ties are listed, never guessed; `tag_unknown` returns the nearest tags. The same input
-  always gives the same answer.
-- **Measured** on 2026-10-06 with a prototype over the pinned page: `next gitlab ci-yaml trigger` is 904 bytes and
-  lists the five children of `trigger` with their sizes plus the `get` leaf.
+`harbor` is listed once its first command lands (CI11-TOOLS); a group or subresource with nothing under it is not
+listed.
+
+### Compact, versioned, pointer-based output
+
+Discovery, capability descriptions, and combo results must use versioned,
+machine-readable output that is compact by default.
+
+A response contains only the current resource's summary, essential fields,
+and a bounded set of typed pointers. It must not recursively embed child
+resources, full command contracts, schemas, reference bodies, logs, or
+component reports.
+
+Every pointer identifies its target, explains its purpose briefly, and
+provides the exact machine-callable next invocation. Distinguish:
+expand, describe, execute, read, and retrieve-result.
+
+READ pointers include the specific reference anchor and when to read it.
+EXECUTE pointers expose the callable operation and required inputs, or
+provide a pointer to its compact description. Missing inputs are explicit.
+
+Expansion is optional. Support direct addressing of known resources.
+Do not force root-to-leaf navigation when the requested operation or
+reference is already known.
+
+New capabilities, references, and result sections extend the resource
+graph through declarations and pointers. They must not enlarge the
+default response by adding their full contents inline.
+
+Set concrete limits for serialized response bytes, entries per response,
+and summary length. When entries exceed a limit, return an explicit
+continuation or narrowing call. Never silently omit entries or truncate
+JSON. Explicit detail reads must also have defined bounds.
+
+Version the pointer and response contracts. Preserve the meaning of
+existing fields and actions. Do not use an unrestricted extensions object
+to bypass the compactness limits or introduce undefined behavior.
+
+Reuse the existing catalogue, navigator, commands, and schema owners.
+A pointer may invoke an existing command; it does not require another
+registry, workflow engine, or background service.
+
+Acceptance must demonstrate that:
+
+- a larger catalogue still produces bounded default responses;
+- advertised resources remain reachable through returned pointers;
+- following one pointer retrieves only the selected resource;
+- combo results do not inline all component reports;
+- every advertised invocation and reference anchor resolves correctly.
+
+### Contract values
+
+- **Input**: `reference.py next [PATH ...] [--page N]` and `reference.py get REFERENCE ANCHOR [--card] [--page N]`,
+  with `--json`, `--yaml` or `--human`. Offline, no credentials, no target file. A known path or anchor is
+  addressed directly in one call.
+- **Response**: `kind`, `schema_version`, `path`, `summary`, `choices` and `continuation` (`null`, or the pointer
+  to the next page). An unknown path segment exits 2 with `error` (`reason: path_unknown`, `input`) and the choices
+  of the deepest known level.
+- **Choice**: `id`, `kind` (`expand`, `execute`, `read` or `retrieve`), `summary`, and `next`. A `read` choice adds
+  `anchor` and `when`.
+- **Pointer** (`next`): `action` (`expand`, `describe`, `execute`, `read` or `retrieve`), `entrypoint` (a path under
+  the skill root), `args` (argv, one string each). An `execute` pointer adds `inputs`, one entry per `<placeholder>`
+  in `args`, each with `name` and `summary`; a mutating command's execute pointer prints its plan, never `--apply`.
+- **Limits**: a serialized JSON response is at most 4096 bytes; at most 12 choices per response; a summary is at
+  most 100 characters; one `get` page is at most 8192 bytes. Past a limit, the response carries a `continuation`.
+- **Sources**: node summaries, the placement of each command and verb, and each reference section's anchor and
+  `when` are declared once in `core/catalog.py`; required inputs come from `required_options`; everything else is
+  derived. The answer's schema is `schemas/reference-next.schema.json` (CI07-SCHEMA); the pointer is defined
+  there once and reused by every response that carries pointers, combo results included (CI11-TOOLS, Combos).
 
 ## 4. Lifecycle of a reference
 
@@ -510,13 +588,13 @@ its reason tokens, defined here once.
   a deleted notice, a stray file, a symlink; `update`'s default run writes
   nothing; an interrupted transaction recovers. Fixtures under
   `tests/python/fixtures/reference/`.
-- `tests/python/test_navigate.py`: `next` lists exactly the derived domains;
-  `next gitlab` lists `ci-yaml` and `commands`; `next gitlab ci-yaml trigger`
-  lists its five children and the leaf; `next gitlab pipeline` returns the
-  worked example's menu (section 3), byte for byte; an unknown tag returns
-  `tag_unknown` with nearest tags; every answer is under the declared byte
-  bound; a second reference in the fixture appears under its domain with no
-  code change; equal inputs give equal bytes.
+- `tests/python/test_navigate.py`: the five acceptance points of section 3, each one test: a synthetic catalogue of
+  200 commands keeps every answer within the limits and pages with `continuation`; following `expand` and
+  `continuation` pointers from the root reaches every declared node, capability and reference section; one
+  pointer returns only its target; a combo result carries `retrieve` pointers, not component reports; every
+  `execute` invocation parses with its command's real `build_parser()` and every `read` anchor resolves through
+  `get`. Plus: the answer for `ci pipeline` matches the locked example's shape; `path_unknown` returns the
+  deepest known level; equal inputs give equal bytes.
 - `tests/python/test_reference_contract.py`: every index entry's file exists
   and nothing else is in the tree (closed world, CI07-SCHEMA); the vendored
   tree is excluded from the executed-code digest (D-DIGEST) and digested on
@@ -564,8 +642,8 @@ its reason tokens, defined here once.
      reads back `bytes: 2587`, `sha256` equal to the index entry, `url`
      ending in `#triggerforward`, and `content` whose first line is
      ``#### `trigger:forward` ``;
-   - `ci-skills/bin/reference.py next gitlab pipeline --json` reads back the
-     worked example's menu (section 3);
+   - `ci-skills/bin/reference.py next ci pipeline --json` reads back the
+     locked example's shape (section 3) and validates against `schemas/reference-next.schema.json`;
    - `ci-skills/bin/reference.py verify gitlab-ci-yaml --json` reads back
      `PASS` with `file_count: 177`;
    - `tools/update_reference.py gitlab-ci-yaml --sha 9892f2e6cf006fa1acc3f4d744f707757111db58 --dry-run --json`
