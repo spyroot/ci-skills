@@ -197,7 +197,7 @@ The same ten steps for every row; the row repeats them with the real paths.
    same `kubectl` or `oc` command once per object is a defect, not a tool.
    Threads, never `async`: an `async` contract is added only when a tool must
    hold many open streams at once, as a separate contract (`software-design.md`
-   at standards revision `56a579c`, "Synchronous and Asynchronous
+   at the pinned standards revision `56a579c`, "Synchronous and Asynchronous
    Contracts"); no such tool exists in this catalogue.
 9. **Tests.** Mocked external commands through the `conftest.py` fixtures;
    the pinned mutating matrix for every `apply`; a receipt kind in

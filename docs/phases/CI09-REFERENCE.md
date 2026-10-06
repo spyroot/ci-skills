@@ -218,9 +218,9 @@ any project, under any domain. It follows the Agent Skills layout:
 The tree mirrors the keyword path, so the filesystem is a browsable index
 (`ls` shows the sub-keywords) and the worst case an agent can read is one
 5,000-byte chunk. The `vendor` segment matches the exclusion pattern of the
-documentation contract at standards revision `56a579c` (not in the pinned
-`dca62de`; the binding gap is reported in CI10-PHASES), so doc gates skip
-upstream text; the same segment is added to `.markdownlint-cli2.yaml`
+documentation contract at the pinned standards revision `56a579c`
+(`standards-binding.yaml`), so doc gates skip upstream text; the same segment
+is added to `.markdownlint-cli2.yaml`
 `ignores` and to `.gitattributes` as `-whitespace` (chunks end with `---` and
 a blank line).
 
