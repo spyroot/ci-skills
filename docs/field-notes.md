@@ -28,12 +28,10 @@ locked by `../tests/python/test_catalog.py` and visible in every receipt as
 `credential_sources.kubernetes`; the probe count is session recollection and is
 not citable from this repository.
 
-### 2. An instruction duplicating a declaration goes stale; the agent sees it first
+### 2. An instruction duplicating a declaration goes stale
 
-A subagent was briefed to `export KUBECONFIG=<overlay>:<real>` before any
-cluster command, because at the time the target declared no kubeconfig. After
-the target declared one, that subagent ran the briefing anyway and then reported
-back that the export was *not* what resolved the cluster —
+A run used `KUBECONFIG=<overlay>:<real>` after the target file declared a kubeconfig.
+The report showed the environment did *not* resolve the cluster —
 `credential_sources.kubernetes` read `target:kubernetes.kubeconfigs`, which
 precedes the environment in the chain (`core/credentials.py`, order locked by
 `../tests/python/test_catalog.py`).
@@ -113,7 +111,7 @@ single observation.
 
 ### 8. A correlator only in JSON cannot be cited from a human run
 
-Asked for the receipt correlator after running `--human`, a subagent found
+After running `--human`, a caller found
 `receipt_sha256` absent, read `core/access.py`, quoted the docstring explaining
 that the field digests the in-memory gate rather than the written receipt, and
 declined to invent a value. Correct behaviour, and a gap: the human summary

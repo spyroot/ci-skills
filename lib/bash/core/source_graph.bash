@@ -35,11 +35,13 @@ ci_source_graph_files() {
 # Returns: 0 when selected edges resolve; 1 on a missing dependency.
 ci_source_graph_edges() {
 	local scope="$1" file content target annotations sources strict=0 statement actual index
-	local -A changed=()
+	local -A changed=() deleted=()
 	local -a source_lines=() annotation_lines=()
 	if [[ "$scope" == staged ]]; then
 		while IFS= read -r -d '' file; do changed["$file"]=1; done \
 			< <(git diff --cached --name-only -z --diff-filter=ACMR)
+		while IFS= read -r -d '' file; do deleted["$file"]=1; done \
+			< <(git diff --cached --name-only -z --diff-filter=D)
 	fi
 	while IFS= read -r -d '' file; do
 		[[ "$scope" != all && -z "${changed[$file]:-}" ]] || strict=1
@@ -76,7 +78,7 @@ ci_source_graph_edges() {
 			[[ -n "$target" ]] || continue
 			if [[ "$scope" == staged ]]; then
 				if ! git cat-file -e ":$target" 2>/dev/null; then
-					if ((strict)); then
+					if ((strict)) || [[ -n "${deleted[$target]:-}" ]]; then
 						printf 'Missing staged Bash dependency %s from %s\n' "$target" "$file" >&2
 						return 1
 					fi

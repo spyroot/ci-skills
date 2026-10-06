@@ -49,7 +49,8 @@ WORKDIR /work
 COPY Makefile bless.sh environment.yml toolchain-dependencies.json .markdownlint-cli2.yaml .markdownlint-cli2-version .gitleaks.toml ./
 RUN conda env create --file environment.yml
 COPY scripts/dev.sh scripts/dev.sh
-COPY scripts/bash/core/bless.bash scripts/bash/core/dev.bash scripts/bash/core/hooks.bash scripts/bash/core/source_graph.bash scripts/bash/core/toolchain.bash scripts/bash/core/
+COPY lib/bash/core/ lib/bash/core/
+COPY lib/bash/automation/ lib/bash/automation/
 COPY ci-skills/lib/bash/core/runtime.bash ci-skills/lib/bash/core/runtime.bash
 COPY schemas/ schemas/
 RUN chmod 0755 bless.sh scripts/dev.sh && \

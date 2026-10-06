@@ -3,12 +3,13 @@
   "$id": "https://github.com/spyroot/ci-skills/schemas/commands/results/bless.schema.json",
   "title": "bless.sh result",
   "type": "object",
-  "required": ["kind", "schema_version", "status", "scope", "summary", "checks"],
+  "required": ["kind", "schema_version", "status", "scope", "exit_code", "summary", "checks"],
   "properties": {
     "kind": {"const": "bless_result"},
     "schema_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
     "status": {"enum": ["PASS", "FAIL", "PLANNED"]},
     "scope": {"enum": ["staged", "all"]},
+    "exit_code": {"enum": [0, 1, 69]},
     "run_id": {"type": "string"},
     "safe_next_step": {"type": "string", "minLength": 1},
     "summary": {

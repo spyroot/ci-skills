@@ -94,7 +94,7 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   reports `required_check_absent:validate` until a check of that name exists),
   `.coordination/pr-coordinator-policy.md:3-5` and `.coordination/pr-coordinator.toml:37,49`
   (`approved_pipeline_route` at the deleted workflow; `required = ["validate"]`). We change them only under the
-  approval lock on contracts (TEAM_GUIDE.md, "Evidence and merge"), once the route gives the check its name.
+  approval lock on contracts, once the route gives the check its name.
 
 ### G1. One entrypoint for local runs and CI
 
@@ -124,7 +124,7 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   does not exist, and its `toolchain`, `conda`, `pretty`, `k8s-test` and `toolbox` targets name scripts and libraries
   under `scripts/toolchain/`, `scripts/toolbox/`, `scripts/ci/`, `lib/bash/toolchain/` and `automation/lib/` that do
   not exist (lines 10-27, 75-130 and 176-189). Which of `bless.sh` and `scripts/check.sh` becomes the hook body is
-  CI04-HOOKS's to settle: TEAM_GUIDE.md's repository structure lists `bless.sh` as the pre-hook, and CI04-HOOKS names
+  CI04-HOOKS's to settle: the repository structure lists `bless.sh` as the pre-hook, and CI04-HOOKS names
   `scripts/check.sh`.
 - **Smallest change.** Extend that script instead of adding a second one:
   - recreate the workflow the gate route (G0) names; the step list to restore is at

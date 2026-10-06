@@ -17,6 +17,15 @@ setup() {
   [[ "$output" == *'"plan_fingerprint": '* ]]
 }
 
+@test 'hook dry-run leaves the Git hook directory unchanged' {
+  run bash -c 'source "$1"; ci_hooks_plan "$2"' _ \
+    "$root/lib/bash/automation/hooks.bash" "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'PLAN install hook:'* ]]
+  [ ! -e "$fixture/.git/hooks/pre-commit" ]
+  [ -z "$(find "$fixture/.git/hooks" -name 'ci-skills-pre-commit.*' -print)" ]
+}
+
 @test 'unchanged toolchain produces the same reviewed plan fingerprint' {
   first="$("$root/scripts/dev.sh" toolchain --dry-run --json)"
   second="$("$root/scripts/dev.sh" toolchain --dry-run --json)"
@@ -33,7 +42,7 @@ setup() {
 }
 
 @test 'hook apply consumes the reviewed plan and reads back an installed hook' {
-  cp -R "$root/scripts" "$root/ci-skills" "$fixture/"
+  cp -R "$root/scripts" "$root/lib" "$root/ci-skills" "$fixture/"
   cp "$root/Makefile" "$root/bless.sh" "$root/environment.yml" \
     "$root/toolchain-dependencies.json" "$fixture/"
   plan="$("$fixture/scripts/dev.sh" hooks --dry-run --json)"
@@ -46,7 +55,7 @@ setup() {
 }
 
 @test 'hook apply refuses a stale plan without installing a hook' {
-  cp -R "$root/scripts" "$root/ci-skills" "$fixture/"
+  cp -R "$root/scripts" "$root/lib" "$root/ci-skills" "$fixture/"
   cp "$root/Makefile" "$root/bless.sh" "$root/environment.yml" \
     "$root/toolchain-dependencies.json" "$fixture/"
   plan="$("$fixture/scripts/dev.sh" hooks --dry-run --json)"
@@ -64,11 +73,11 @@ setup() {
     .AGENTS.md .AGENT_HANDOFF.patch docs/TEAM_GUIDE.md \
     .ci-skills/target.toml .internal/queue/task.yaml; do
     run bash -c 'source "$1"; ci_bless_secret_path "$2"' _ \
-      "$root/scripts/bash/core/bless.bash" "$path"
+      "$root/lib/bash/automation/bless.bash" "$path"
     [ "$status" -eq 0 ]
   done
   run bash -c 'source "$1"; ci_bless_secret_path "$2"' _ \
-    "$root/scripts/bash/core/bless.bash" AGENCY.md
+    "$root/lib/bash/automation/bless.bash" AGENCY.md
   [ "$status" -eq 1 ]
 }
 
@@ -76,7 +85,7 @@ setup() {
   printf '%s\n' '#!/usr/bin/env bash' 'source "missing.bash"' >"$fixture/a.bash"
   git -C "$fixture" add a.bash
   run bash -c 'cd "$1"; source "$2"; ci_source_graph_acyclic staged' _ \
-    "$fixture" "$root/scripts/bash/core/source_graph.bash"
+    "$fixture" "$root/lib/bash/core/source_graph.bash"
   [ "$status" -eq 1 ]
   [[ "$output" == *'Missing or extra source annotation'* ]]
 }
@@ -86,9 +95,21 @@ setup() {
     'source "missing.bash"' >"$fixture/a.bash"
   git -C "$fixture" add a.bash
   run bash -c 'cd "$1"; source "$2"; ci_source_graph_acyclic staged' _ \
-    "$fixture" "$root/scripts/bash/core/source_graph.bash"
+    "$fixture" "$root/lib/bash/core/source_graph.bash"
   [ "$status" -eq 1 ]
   [[ "$output" == *'Missing staged Bash dependency'* ]]
+}
+
+@test 'staged deletion of a sourced Bash target is rejected for an unchanged caller' {
+  printf '%s\n' '# shellcheck source=b.bash' 'source "b.bash"' >"$fixture/a.bash"
+  printf '%s\n' '#!/usr/bin/env bash' >"$fixture/b.bash"
+  git -C "$fixture" add a.bash b.bash
+  git -C "$fixture" -c core.hooksPath=/dev/null commit -qm 'baseline'
+  git -C "$fixture" rm -q b.bash
+  run bash -c 'cd "$1"; source "$2"; ci_source_graph_acyclic staged' _ \
+    "$fixture" "$root/lib/bash/core/source_graph.bash"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'Missing staged Bash dependency b.bash from a.bash'* ]]
 }
 
 @test 'changed shell dependency cycle is rejected' {
@@ -96,7 +117,7 @@ setup() {
   printf '%s\n' '# shellcheck source=a.bash' 'source "a.bash"' >"$fixture/b.bash"
   git -C "$fixture" add a.bash b.bash
   run bash -c 'cd "$1"; source "$2"; ci_source_graph_acyclic staged' _ \
-    "$fixture" "$root/scripts/bash/core/source_graph.bash"
+    "$fixture" "$root/lib/bash/core/source_graph.bash"
   [ "$status" -eq 1 ]
   [[ "$output" == *'Bash source cycle includes'* ]]
 }
@@ -108,7 +129,7 @@ setup() {
   printf '%s\n' '#!/usr/bin/env bash' >"$fixture/b.bash"
   git -C "$fixture" add a.bash b.bash c.bash
   run bash -c 'cd "$1"; source "$2"; ci_source_graph_acyclic staged' _ \
-    "$fixture" "$root/scripts/bash/core/source_graph.bash"
+    "$fixture" "$root/lib/bash/core/source_graph.bash"
   [ "$status" -eq 1 ]
   [[ "$output" == *'Source annotation disagrees'* ]]
 }
@@ -117,14 +138,131 @@ setup() {
   printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$fixture/.git/hooks/pre-commit"
   chmod +x "$fixture/.git/hooks/pre-commit"
   run bash -c 'source "$1"; ci_hooks_install "$2"' _ \
-    "$root/scripts/bash/core/hooks.bash" "$fixture"
+    "$root/lib/bash/automation/hooks.bash" "$fixture"
   [ "$status" -eq 73 ]
   grep -Fq 'exit 0' "$fixture/.git/hooks/pre-commit"
 }
 
+@test 'hook installer second run is a verified no-op with no write call' {
+  bash -c 'source "$1"; ci_hooks_install "$2"' _ \
+    "$root/lib/bash/automation/hooks.bash" "$fixture"
+  mkdir -p "$fixture/fake-bin"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 99' >"$fixture/fake-bin/ln"
+  chmod +x "$fixture/fake-bin/ln"
+  run env PATH="$fixture/fake-bin:$PATH" bash -c \
+    'source "$1"; ci_hooks_install "$2"' _ \
+    "$root/lib/bash/automation/hooks.bash" "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'NO_OP hook already installed:'* ]]
+  [ -z "$(find "$fixture/.git/hooks" -name 'ci-skills-pre-commit.*' -print)" ]
+}
+
+@test 'hook installer removes its linked hook when read-back mismatches' {
+  mkdir -p "$fixture/fake-bin"
+  cat >"$fixture/fake-bin/ln" <<'FAKE'
+#!/usr/bin/env bash
+/bin/ln "$@" || exit
+printf 'corruption\n' >>"$2"
+FAKE
+  chmod +x "$fixture/fake-bin/ln"
+  run env PATH="$fixture/fake-bin:$PATH" bash -c \
+    'source "$1"; ci_hooks_install "$2"' _ \
+    "$root/lib/bash/automation/hooks.bash" "$fixture"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'read-back mismatches'* ]]
+  [ ! -e "$fixture/.git/hooks/pre-commit" ]
+  [ -z "$(find "$fixture/.git/hooks" -name 'ci-skills-pre-commit.*' -print)" ]
+}
+
+@test 'hook installer removes its linked hook after HUP INT and TERM' {
+  mkdir -p "$fixture/fake-bin"
+  cat >"$fixture/fake-bin/ln" <<'FAKE'
+#!/usr/bin/env bash
+/bin/ln "$@" || exit
+kill -s "$CI_TEST_SIGNAL" "$PPID"
+FAKE
+  chmod +x "$fixture/fake-bin/ln"
+  for signal_status in HUP:129 INT:130 TERM:143; do
+    signal="${signal_status%%:*}"
+    expected="${signal_status##*:}"
+    run env PATH="$fixture/fake-bin:$PATH" CI_TEST_SIGNAL="$signal" bash -c \
+      'source "$1"; ci_hooks_install "$2"' _ \
+      "$root/lib/bash/automation/hooks.bash" "$fixture"
+    [ "$status" -eq "$expected" ]
+    [ ! -e "$fixture/.git/hooks/pre-commit" ]
+    [ -z "$(find "$fixture/.git/hooks" -name 'ci-skills-pre-commit.*' -print)" ]
+  done
+}
+
+@test 'hook installer cleans its linked hook when the bounded step times out' {
+  mkdir -p "$fixture/fake-bin"
+  cat >"$fixture/fake-bin/ln" <<'FAKE'
+#!/usr/bin/env bash
+/bin/ln "$@" || exit
+sleep 5
+FAKE
+  chmod +x "$fixture/fake-bin/ln"
+  run env PATH="$fixture/fake-bin:$PATH" timeout 1 bash -c \
+    'source "$1"; ci_hooks_install "$2"' _ \
+    "$root/lib/bash/automation/hooks.bash" "$fixture"
+  [ "$status" -eq 124 ]
+  [ ! -e "$fixture/.git/hooks/pre-commit" ]
+  [ -z "$(find "$fixture/.git/hooks" -name 'ci-skills-pre-commit.*' -print)" ]
+}
+
+@test 'required cleanup failure overrides successful hook installation' {
+  mkdir -p "$fixture/fake-bin"
+  cat >"$fixture/fake-bin/rm" <<'FAKE'
+#!/usr/bin/env bash
+case "$*" in
+  *ci-skills-pre-commit.*) exit 1 ;;
+esac
+exec /bin/rm "$@"
+FAKE
+  chmod +x "$fixture/fake-bin/rm"
+  run env PATH="$fixture/fake-bin:$PATH" bash -c \
+    'source "$1"; ci_hooks_install "$2"' _ \
+    "$root/lib/bash/automation/hooks.bash" "$fixture"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'CLEANUP_FAIL: ci_runtime_cleanup_file'* ]]
+  [ -e "$fixture/.git/hooks/pre-commit" ]
+  [ -n "$(find "$fixture/.git/hooks" -name 'ci-skills-pre-commit.*' -print)" ]
+}
+
+@test 'shared cleanup stack is LIFO, continues after failure, and runs once' {
+  journal="$fixture/cleanup-journal"
+  run env CI_TEST_JOURNAL="$journal" bash -c '
+    source "$1"
+    ci_runtime_lifecycle_begin
+    cleanup_action() {
+      printf "%s\n" "$1" >>"$CI_TEST_JOURNAL"
+      [[ "$1" != fail ]]
+    }
+    ci_runtime_cleanup_push cleanup_action first
+    ci_runtime_cleanup_push cleanup_action fail
+    ci_runtime_cleanup_push cleanup_action last
+    ci_runtime_cleanup_run || :
+    ci_runtime_cleanup_run || :
+  ' _ "$root/lib/bash/core/runtime.bash"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$journal")" = $'last\nfail\nfirst' ]
+  [[ "$output" == *'CLEANUP_FAIL: cleanup_action'* ]]
+}
+
+@test 'blocked all-scope prerequisite reports retain all scope in JSON and YAML' {
+  for output_mode in --json --yaml; do
+    run bash -c 'source "$1"; ci_toolchain_conda() { return 1; }; ci_bless_main "$2" --all "$3"' _ \
+      "$root/lib/bash/automation/bless.bash" "$fixture" "$output_mode"
+    [ "$status" -eq 69 ]
+    [[ "$output" == *'"scope": "all"'* ]]
+    [[ "$output" == *'"exit_code": 69'* ]]
+    [[ "$output" != *'"scope": "staged"'* ]]
+  done
+}
+
 @test 'installed hook rejects a checkout without bless' {
   bash -c 'source "$1"; ci_hooks_install "$2"' _ \
-    "$root/scripts/bash/core/hooks.bash" "$fixture"
+    "$root/lib/bash/automation/hooks.bash" "$fixture"
   printf '%s\n' data >"$fixture/file.txt"
   git -C "$fixture" add file.txt
   run git -C "$fixture" commit -qm 'fixture commit'
@@ -135,9 +273,9 @@ setup() {
 @test 'installed hook commits staged JSON while rejecting staged invalid JSON' {
   cp "$root/bless.sh" "$root/.markdownlint-cli2.yaml" "$root/.gitleaks.toml" \
     "$root/environment.yml" "$root/toolchain-dependencies.json" "$fixture/"
-  cp -R "$root/scripts" "$root/schemas" "$root/ci-skills" "$fixture/"
+  cp -R "$root/scripts" "$root/lib" "$root/schemas" "$root/ci-skills" "$fixture/"
   bash -c 'source "$1"; ci_hooks_install "$2"' _ \
-    "$root/scripts/bash/core/hooks.bash" "$fixture"
+    "$root/lib/bash/automation/hooks.bash" "$fixture"
   printf '{"value":1}\n' >"$fixture/example.json"
   git -C "$fixture" add example.json
   printf '{"broken":' >"$fixture/example.json"
@@ -152,7 +290,7 @@ setup() {
 
 @test 'bless result schema rejects a passing result with a failing check' {
   printf '%s\n' \
-    '{"kind":"bless_result","schema_version":"1.0","status":"PASS","scope":"staged","summary":{"selected_files":1,"check_count":1,"failed_checks":1},"checks":[{"path":"a","check":"json","status":"FAIL"}]}' \
+    '{"kind":"bless_result","schema_version":"1.0","status":"PASS","scope":"staged","exit_code":0,"summary":{"selected_files":1,"check_count":1,"failed_checks":1},"checks":[{"path":"a","check":"json","status":"FAIL"}]}' \
     >"$fixture/false-pass.json"
   run check-jsonschema --schemafile "$root/schemas/commands/results/bless.schema.json" \
     "$fixture/false-pass.json"

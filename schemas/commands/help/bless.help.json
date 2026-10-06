@@ -23,6 +23,7 @@
     {"name": "--help", "description": "Render human help"}
   ],
   "output_modes": ["human", "json", "yaml"],
+  "exit_codes": {"passed_or_planned": 0, "check_failed": 1, "usage": 64, "blocked": 69},
   "usage": [
     "./bless.sh [--staged|--all] [--dry-run] [--json|--yaml]",
     "./bless.sh --describe",

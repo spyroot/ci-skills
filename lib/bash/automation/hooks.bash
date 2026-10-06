@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Author Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
+# shellcheck source=lib/bash/core/runtime.bash
+source "${BASH_SOURCE[0]%/*}/../core/runtime.bash"
 
 # Summary: Print the owned pre-commit hook for comparison and installation.
 # Stdout: hook source bytes.
@@ -14,8 +16,8 @@ if [[ -x "$root/bless.sh" ]] && grep -q 'ci-skills-bless-v1' "$root/bless.sh"; t
 	exec "$root/bless.sh" --staged
 fi
 printf 'ci-skills pre-commit: bless.sh is unavailable in this checkout.\n' >&2
-exit 69
 HOOK
+	printf 'exit %s\n' "$CI_EXIT_BLOCKED"
 }
 
 # Summary: Report the hook change required without modifying Git state.
@@ -37,18 +39,34 @@ ci_hooks_plan() {
 			! grep -Fq 'git_common_dir="$(git rev-parse --git-common-dir' "$dispatcher" ||
 			! grep -Fq 'exec "$local_hook" "$@"' "$dispatcher"; then
 			printf 'Configured hooksPath does not dispatch to Git common hooks: %s\n' "$configured" >&2
-			return 69
+			return "$CI_EXIT_BLOCKED"
 		fi
 	fi
 	if [[ -e "$target" || -L "$target" ]]; then
-		if ci_hooks_body | cmp -s - "$target"; then
+		if [[ -x "$target" ]] && ci_hooks_body | cmp -s - "$target"; then
 			printf 'NO_OP hook already installed: %s\n' "$target"
 			return 0
 		fi
 		printf 'Foreign pre-commit hook exists; preserve it: %s\n' "$target" >&2
-		return 73
+		return "$CI_EXIT_CONFLICT"
 	fi
 	printf 'PLAN install hook: %s\n' "$target"
+}
+
+# Summary: Roll back only this invocation's uncommitted hard-linked hook.
+# Arguments: target hook path; temporary link identity comes from this invocation.
+# Returns: cleanup failure when an owned target cannot be removed.
+ci_hooks_cleanup_target() {
+	local target="$1"
+	if [[ ${CI_HOOK_COMMITTED:-false} == true ]]; then return 0; fi
+	if [[ -e "$target" || -L "$target" ]]; then
+		# A competing foreign hook is never ours to remove.
+		if [[ -z ${CI_HOOK_TEMP:-} || ! "$target" -ef "$CI_HOOK_TEMP" ]]; then
+			return 0
+		fi
+		rm -f -- "$target" || return "$CI_EXIT_FAILED"
+		[[ ! -e "$target" && ! -L "$target" ]]
+	fi
 }
 
 # Summary: Install an owned pre-commit hook in the repository's common Git directory.
@@ -59,8 +77,10 @@ ci_hooks_plan() {
 # Side effects: creates one hook in the repository's common Git directory.
 # Idempotency: an identical hook returns without replacement.
 # Cleanup: removes its temporary file after success or handled failure.
-ci_hooks_install() {
-	local root="$1" common target temporary configured dispatcher plan
+ci_hooks_install() (
+	local root="$1" common target='' temporary='' configured dispatcher plan
+	CI_HOOK_TEMP='' CI_HOOK_COMMITTED=false
+	ci_runtime_lifecycle_begin || return
 	plan="$(ci_hooks_plan "$root")" || return
 	printf '%s\n' "$plan"
 	if [[ "$plan" == NO_OP* ]]; then return 0; fi
@@ -76,32 +96,32 @@ ci_hooks_install() {
 			! grep -Fq 'git_common_dir="$(git rev-parse --git-common-dir' "$dispatcher" ||
 			! grep -Fq 'exec "$local_hook" "$@"' "$dispatcher"; then
 			printf 'Configured hooksPath does not dispatch to Git common hooks: %s\n' "$configured" >&2
-			return 69
+			return "$CI_EXIT_BLOCKED"
 		fi
 	fi
 	mkdir -p -- "$common/hooks" || return
 	temporary="$(mktemp "$common/hooks/ci-skills-pre-commit.XXXXXX")" || return
-	ci_hooks_body >"$temporary"
-	chmod 0755 "$temporary" || {
-		rm -f "$temporary"
-		return 1
-	}
+	CI_HOOK_TEMP="$temporary"
+	ci_runtime_cleanup_push ci_runtime_cleanup_file "$temporary" || return
+	ci_hooks_body >"$temporary" || return
+	chmod 0755 "$temporary" || return
 	if [[ -e "$target" || -L "$target" ]]; then
-		if cmp -s "$temporary" "$target"; then
-			rm -f "$temporary"
+		if [[ -x "$target" ]] && cmp -s "$temporary" "$target"; then
 			printf 'Hook already installed: %s\n' "$target"
 			return 0
 		fi
-		rm -f "$temporary"
 		printf 'Foreign pre-commit hook exists; preserve it: %s\n' "$target" >&2
-		return 73
+		return "$CI_EXIT_CONFLICT"
 	fi
+	ci_runtime_cleanup_push ci_hooks_cleanup_target "$target" || return
 	ln "$temporary" "$target" 2>/dev/null || {
-		rm -f "$temporary"
 		printf 'Pre-commit hook appeared during installation; preserve it: %s\n' "$target" >&2
-		return 73
+		return "$CI_EXIT_CONFLICT"
 	}
-	rm -f "$temporary"
-	[[ -x "$target" ]] || return 1
-	printf 'Installed hook: %s\n' "$target"
-}
+	if [[ ! -x "$target" ]] || ! ci_hooks_body | cmp -s - "$target"; then
+		printf 'Installed hook read-back mismatches the expected executable.\n' >&2
+		return "$CI_EXIT_FAILED"
+	fi
+	printf 'Installed hook: %s\n' "$target" || return
+	CI_HOOK_COMMITTED=true
+)

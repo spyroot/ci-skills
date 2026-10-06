@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Author Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
+# shellcheck source=lib/bash/core/runtime.bash
+source "${BASH_SOURCE[0]%/*}/runtime.bash"
 
 # Summary: Find the project Conda executable without using a system Python.
 # Arguments: none.
@@ -66,7 +68,7 @@ ci_toolchain_profile() {
 			brew install jq || return
 		else
 			printf 'Missing jq; install jq before reading %s\n' "$manifest" >&2
-			return 69
+			return "$CI_EXIT_BLOCKED"
 		fi
 	fi
 	jq -e --arg profile "$profile" '
@@ -74,7 +76,7 @@ ci_toolchain_profile() {
 		($manifest.profiles[$profile].host | type) == "array" and
 		all($manifest.profiles[$profile].host[]; . as $name |
 			any($manifest.dependencies[]; .name == $name))
-	' "$manifest" >/dev/null || return 65
+	' "$manifest" >/dev/null || return "$CI_EXIT_DATA"
 	while IFS= read -r name; do
 		dependency="$(jq -c --arg name "$name" '.dependencies[] | select(.name == $name)' "$manifest")" || return
 		if ci_toolchain_present "$root" "$dependency"; then
@@ -90,7 +92,7 @@ ci_toolchain_profile() {
 			while IFS= read -r package; do packages+=("$package"); done < <(jq -r '.brew[]?' <<<"$dependency")
 			(("${#packages[@]}" > 0)) || {
 				printf 'No Homebrew source declared for %s\n' "$name" >&2
-				return 65
+				return "$CI_EXIT_DATA"
 			}
 			brew install "${packages[@]}" || return
 			if ci_toolchain_present "$root" "$dependency"; then
@@ -99,7 +101,7 @@ ci_toolchain_profile() {
 			fi
 		fi
 		printf 'Missing %s from profile %s\n' "$name" "$profile" >&2
-		return 69
+		return "$CI_EXIT_BLOCKED"
 	done < <(jq -r --arg profile "$profile" '.profiles[$profile].host[]' "$manifest")
 }
 
@@ -116,7 +118,7 @@ ci_toolchain_environment() {
 	declared="$(sed -n 's/^name:[[:space:]]*//p' "$root/environment.yml" | head -1)"
 	[[ "$declared" == "$expected" ]] || {
 		printf 'Conda environment name mismatch: expected %s, declared %s\n' "$expected" "$declared" >&2
-		return 65
+		return "$CI_EXIT_DATA"
 	}
 	if [[ "$mode" == plan ]]; then
 		printf 'PLAN create or update Conda environment %s from environment.yml\n' "$expected"
@@ -124,7 +126,7 @@ ci_toolchain_environment() {
 	fi
 	conda_bin="$(ci_toolchain_conda)" || {
 		printf 'Conda is missing; install Miniforge before make install.\n' >&2
-		return 69
+		return "$CI_EXIT_BLOCKED"
 	}
 	if "$conda_bin" env list --json | jq -e --arg name "$expected" '
 		any(.envs[]; (split("/") | last) == $name)

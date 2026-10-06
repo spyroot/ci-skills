@@ -24,6 +24,9 @@
     {"name": "--help", "description": "Render human help"}
   ],
   "output_modes": ["human", "json", "yaml"],
+  "exit_codes": {"passed_or_planned": 0, "operation_failed": 1, "usage": 64,
+    "invalid_data": 65, "missing_input": 66, "blocked": 69, "hook_conflict": 73,
+    "timeout": 124, "signal_hup": 129, "signal_int": 130, "signal_term": 143},
   "usage": ["scripts/dev.sh OPERATION [--dry-run|--apply --confirm-install PLAN_FINGERPRINT] [options]"],
   "arguments_schema": "schemas/commands/arguments/dev.schema.json",
   "result_schema": "schemas/commands/results/dev.schema.json"

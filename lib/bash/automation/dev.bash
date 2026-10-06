@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # Author Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
-# shellcheck source=ci-skills/lib/bash/core/runtime.bash
-source "${BASH_SOURCE[0]%/*}/../../../ci-skills/lib/bash/core/runtime.bash"
-# shellcheck source=scripts/bash/core/toolchain.bash
-source "${BASH_SOURCE[0]%/*}/toolchain.bash"
-# shellcheck source=scripts/bash/core/hooks.bash
+# shellcheck source=lib/bash/core/toolchain.bash
+source "${BASH_SOURCE[0]%/*}/../core/toolchain.bash"
+# shellcheck source=lib/bash/automation/hooks.bash
 source "${BASH_SOURCE[0]%/*}/hooks.bash"
 
 # Summary: Explain the repository development installer interface.
@@ -37,6 +35,10 @@ Output modes:
   --json  One structured result.
   --yaml  YAML 1.2-compatible structured result.
 
+Exit 0: planned or applied; 1: operation/read-back failed;
+64: bad arguments or stale plan; 65: invalid manifest; 69: missing prerequisite;
+73: foreign or competing pre-commit hook.
+
 Usage:
   scripts/dev.sh OPERATION [--dry-run|--apply --confirm-install SHA256] [options]
   scripts/dev.sh --describe
@@ -53,9 +55,10 @@ ci_dev_plan_fingerprint() {
 	local root="$1" operation="$2" plan="$3" path
 	local -a inputs=(
 		Makefile bless.sh environment.yml toolchain-dependencies.json
-		scripts/dev.sh scripts/bash/core/dev.bash
-		scripts/bash/core/toolchain.bash scripts/bash/core/hooks.bash
-		scripts/bash/core/bless.bash scripts/bash/core/source_graph.bash
+		scripts/dev.sh lib/bash/automation/dev.bash
+		lib/bash/core/runtime.bash lib/bash/core/toolchain.bash
+		lib/bash/automation/hooks.bash lib/bash/automation/bless.bash
+		lib/bash/core/source_graph.bash
 		ci-skills/lib/bash/core/runtime.bash
 	)
 	{
@@ -98,26 +101,32 @@ ci_dev_operation() {
 		toolchain)
 			timeout "$timeout_seconds" bash -c \
 				"source \"\$1\"; ci_toolchain_profile \"\$2\" bless install" _ \
-				"$root/scripts/bash/core/toolchain.bash" "$root" || return
+				"$root/lib/bash/core/toolchain.bash" "$root" || return
 			;;
 		conda)
 			timeout "$timeout_seconds" bash -c \
 				"source \"\$1\"; ci_toolchain_environment \"\$2\" ci-skills install" _ \
-				"$root/scripts/bash/core/toolchain.bash" "$root" || return
+				"$root/lib/bash/core/toolchain.bash" "$root" || return
 			;;
-		hooks) ci_hooks_install "$root" || return ;;
+		hooks)
+			timeout "$timeout_seconds" "$BASH" -c \
+				'source "$1"; ci_hooks_install "$2"' _ \
+				"$root/lib/bash/automation/hooks.bash" "$root" || return
+			;;
 		esac
 	done
 }
 
 # Summary: Render the final local setup result and a repair action on failure.
 # Arguments: $1: output mode; $2: operation; $3: plan or apply; $4: status;
-#   $5: detail text; $6: safe next step; $7: plan fingerprint.
+#   $5: detail text; $6: safe next step; $7: plan fingerprint;
+#   $8: exit code.
 # Stdout: human, JSON, or YAML-compatible result.
 # Stderr: none.
 # Returns: output renderer status.
 ci_dev_result() {
 	local format="$1" operation="$2" mode="$3" status="$4" detail="$5" next="$6" fingerprint="${7:-}" result
+	local exit_code="${8:-0}"
 	if [[ "$format" == human ]]; then
 		printf '%s\nci-skills %s %s: %s\n' "$detail" "$operation" "$mode" "$status"
 		[[ -z "$fingerprint" ]] || printf 'PLAN_FINGERPRINT: %s\n' "$fingerprint"
@@ -126,9 +135,9 @@ ci_dev_result() {
 	fi
 	result="$(jq -n --arg operation "$operation" --arg mode "$mode" --arg status "$status" \
 		--arg detail "$detail" --arg next "$next" --arg run "${CI_RUN_ID:-}" \
-		--arg fingerprint "$fingerprint" \
+		--arg fingerprint "$fingerprint" --argjson code "$exit_code" \
 		'{kind:"dev_result",schema_version:"1.0",operation:$operation,mode:$mode,
-		status:$status,run_id:$run,detail:$detail} +
+		status:$status,exit_code:$code,run_id:$run,detail:$detail} +
 		(if $next == "" then {} else {safe_next_step:$next} end) +
 		(if $fingerprint == "" then {} else {plan_fingerprint:$fingerprint} end)')" || return
 	printf '%s\n' "$result"
@@ -143,7 +152,7 @@ ci_dev_result() {
 ci_dev_refuse() {
 	local format="$1" operation="$2" mode="$3" code="$4" reason="$5" next="$6"
 	printf 'BLOCKER: %s\nSAFE_NEXT_STEP: %s\n' "$reason" "$next" >&2
-	ci_dev_result "$format" "$operation" "$mode" FAIL '' "$next" "${7:-}" || return
+	ci_dev_result "$format" "$operation" "$mode" FAIL '' "$next" "${7:-}" "$code" || return
 	return "$code"
 }
 
@@ -168,7 +177,7 @@ ci_dev_main() {
 	operation="${1:-}"
 	case "$operation" in install | toolchain | conda | hooks) shift ;; *)
 		ci_dev_help >&2
-		return 64
+		return "$CI_EXIT_USAGE"
 		;;
 	esac
 	while (($#)); do
@@ -185,7 +194,7 @@ ci_dev_main() {
 			shift
 			confirm="${1:-}"
 			[[ "$confirm" =~ ^[0-9a-f]{64}$ ]] || {
-				ci_dev_refuse "$format" "$operation" "$mode" 64 \
+				ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
 					'invalid plan fingerprint' 'Pass the SHA-256 PLAN_FINGERPRINT from the dry-run result.' || return $?
 			}
 			;;
@@ -194,28 +203,28 @@ ci_dev_main() {
 		--timeout)
 			shift
 			timeout_seconds="${1:-}"
-			[[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || return 64
-			((timeout_seconds <= 3600)) || return 64
+			[[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || return "$CI_EXIT_USAGE"
+			((timeout_seconds <= 3600)) || return "$CI_EXIT_USAGE"
 			;;
 		--log-format)
 			shift
 			CI_LOG_FORMAT="${1:-}"
-			[[ "$CI_LOG_FORMAT" == text || "$CI_LOG_FORMAT" == json ]] || return 64
+			[[ "$CI_LOG_FORMAT" == text || "$CI_LOG_FORMAT" == json ]] || return "$CI_EXIT_USAGE"
 			;;
 		--log-level)
 			shift
 			CI_LOG_LEVEL="${1:-}"
-			case "$CI_LOG_LEVEL" in debug | info | warning | error) ;; *) return 64 ;; esac
+			case "$CI_LOG_LEVEL" in debug | info | warning | error) ;; *) return "$CI_EXIT_USAGE" ;; esac
 			;;
 		--log-file)
 			shift
 			CI_LOG_FILE="${1:-}"
-			[[ -n "$CI_LOG_FILE" && "$CI_LOG_FILE" != --* ]] || return 64
+			[[ -n "$CI_LOG_FILE" && "$CI_LOG_FILE" != --* ]] || return "$CI_EXIT_USAGE"
 			;;
 		--run-id)
 			shift
 			CI_RUN_ID="${1:-}"
-			[[ -n "$CI_RUN_ID" && "$CI_RUN_ID" != --* ]] || return 64
+			[[ -n "$CI_RUN_ID" && "$CI_RUN_ID" != --* ]] || return "$CI_EXIT_USAGE"
 			;;
 		--help)
 			ci_dev_help
@@ -226,18 +235,18 @@ ci_dev_main() {
 			return
 			;;
 		*)
-			ci_dev_refuse "$format" "$operation" "$mode" 64 \
+			ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
 				'unknown development option' 'Run scripts/dev.sh --help.' || return $?
 			;;
 		esac
 		shift
 	done
 	if [[ "$dry_explicit" == true && "$apply_explicit" == true ]]; then
-		ci_dev_refuse "$format" "$operation" "$mode" 64 \
+		ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
 			'dry-run and apply conflict' 'Choose exactly one execution mode.' || return $?
 	fi
 	if [[ "$mode" == apply && -z "$confirm" ]]; then
-		ci_dev_refuse "$format" "$operation" "$mode" 64 \
+		ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
 			'apply lacks confirmation' 'Run the dry-run, then pass --apply --confirm-install PLAN_FINGERPRINT.' || return $?
 	fi
 	plan="$(ci_dev_operation "$root" "$operation" plan "$timeout_seconds")" || code=$?
@@ -245,14 +254,14 @@ ci_dev_main() {
 		ci_dev_refuse "$format" "$operation" "$mode" "$code" \
 			'plan failed' 'Repair the reported prerequisite and rerun the dry-run.' || return $?
 	fi
-	fingerprint="$(ci_dev_plan_fingerprint "$root" "$operation" "$plan")" || return 69
+	fingerprint="$(ci_dev_plan_fingerprint "$root" "$operation" "$plan")" || return "$CI_EXIT_BLOCKED"
 	if [[ "$mode" == apply && "$confirm" != "$fingerprint" ]]; then
-		ci_dev_refuse "$format" "$operation" "$mode" 64 \
+		ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
 			'plan inputs changed' 'Rerun the dry-run and review its new PLAN_FINGERPRINT.' \
 			"$fingerprint" || return $?
 	fi
 	if [[ "$mode" == apply ]] && ! command -v timeout >/dev/null 2>&1; then
-		ci_dev_refuse "$format" "$operation" "$mode" 69 \
+		ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_BLOCKED" \
 			'timeout command is unavailable' 'Run make toolchain to provide coreutils.' || return $?
 	fi
 	CI_LOG_FORMAT="${CI_LOG_FORMAT:-text}" CI_LOG_LEVEL="${CI_LOG_LEVEL:-info}"
@@ -271,6 +280,6 @@ ci_dev_main() {
 		if [[ "$mode" == plan ]]; then status=PLANNED; fi
 		ci_log info dev complete "$operation $mode" || return
 	fi
-	ci_dev_result "$format" "$operation" "$mode" "$status" "$detail" "$next" "$fingerprint" || return
+	ci_dev_result "$format" "$operation" "$mode" "$status" "$detail" "$next" "$fingerprint" "$code" || return
 	return "$code"
 }

@@ -27,7 +27,8 @@ it is not an agent-facing skill command.
 | `make build docker` | `Makefile`, `Dockerfile` | Build the Ubuntu image and run its hook smoke. |
 
 The reusable checker, installer, hook, and source graph functions live in
-`scripts/bash/core/`. Their executable wrappers remain thin. The argument,
+the root `lib/bash/{core,automation}/` directories. Their executable wrappers
+remain thin under `scripts/` and at `bless.sh`. The argument,
 help, result, and toolchain schemas live under the corresponding root
 `schemas/` subdirectories. `toolchain-dependencies.json` selects the host and
 Conda tools used by this hook; `environment.yml` declares the project Conda
@@ -50,8 +51,12 @@ first and passes that fingerprint. Changed inputs require a fresh plan.
 The installer reads the Git common directory, preserves any foreign hook,
 and refuses an incompatible configured hook dispatcher. It never sets the
 repository's `core.hooksPath` Git configuration key, which would override a
-contributor's global hook route. An identical second install is a no-op. The
-installed hook refuses when `bless.sh` is unavailable in a checkout.
+contributor's global hook route. It verifies the installed executable and
+registers its temporary file and uncommitted link with the shared Bash
+cleanup stack. That stack handles success, failure, timeout, and signals;
+incomplete cleanup makes installation fail.
+An identical second install is a no-op. The installed hook refuses when
+`bless.sh` is unavailable in a checkout.
 
 To recover from a failed check, repair and stage the named file, then run
 `make bless` again. A failed install leaves an existing foreign hook in place;
@@ -62,7 +67,9 @@ inspect the reported path before changing it.
 1. **Delivery:** `bless.sh`, `scripts/dev.sh`, their Bash libraries, `Makefile`,
    root schemas, and the Ubuntu `Dockerfile` in one pull request.
 2. **Tests:** `tests/bash/bless.bats` checks plan and refusal modes, secret
-   paths, missing/mismatched Bash sources, cycles, foreign-hook preservation,
+   paths, missing/mismatched Bash sources, staged dependency deletion, cycles,
+   hook rollback on signals and timeout, cleanup failure, read-back,
+   idempotency, foreign-hook preservation,
    missing checker refusal, a real Git commit from staged valid bytes, and a
    real commit refusal for staged invalid bytes.
 3. **Smoke:** `make build docker` runs those Bats cases inside the Ubuntu
