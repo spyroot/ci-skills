@@ -18,16 +18,18 @@ own design, steps and gates. Read back against the tree at `e85c7c8` on
 
 ## Layout, decided
 
-The operator fixed the layout in the tree on 2026-10-04: thin mains in
-`ci-skills/bin/`, the Python library in `ci-skills/lib/core/`, the Bash
-libraries in `ci-skills/lib/bash/{core,ci,automation}/`, references in
+In the tree today (fixed on 2026-10-04): thin mains in `ci-skills/bin/`, the
+Python library in `ci-skills/lib/core/`, the Bash libraries in
+`ci-skills/lib/bash/{core,ci,automation}/`, references in
 `ci-skills/references/`, the generated `tools.json` beside `SKILL.md`.
-Maintenance-only Python lives in `tools/skillkit/` and imports `core` from
-`ci-skills/lib`; thin maintenance mains live in `tools/`. Vendored skills
-live in `vendor/skills/<name>/`, vendored references in
-`ci-skills/references/vendor/<name>/`, the vendor declarations and the one
-lock in `vendor/`. Every tool is a small main that calls the library; a second
-implementation of a behaviour the library has is a defect.
+Decided, created by the phases named: maintenance-only Python in
+`tools/skillkit/` importing `core` from `ci-skills/lib` (CI05, CI09, CI01),
+thin maintenance mains in `tools/` plus the one root command `bin/ci-skills`
+(CI05 creates it, CI01 extends it), vendored skills in `vendor/skills/<name>/`
+with the declarations and the one lock in `vendor/` (CI05), vendored
+references in `ci-skills/references/vendor/<name>/` (CI09), schemas in
+`schemas/` (CI07). Every tool is a small main that calls the library; a
+second implementation of a behaviour the library has is a defect.
 
 ## Phases
 
@@ -39,8 +41,8 @@ implementation of a behaviour the library has is a defect.
 | CI05-VENDOR | vendored trees: `glab` skills and upstream references, one lock | CI03-GATES, CI07-SCHEMA, CI02-CLI |
 | CI01-CATALOG | discover, `list`, `get`, `install` | CI05-VENDOR, CI07-SCHEMA, CI02-CLI |
 | CI06-TESTS | the CI-only test command and coverage report | CI03-GATES, CI01-CATALOG |
-| CI09-REFERENCE | tool operations, knowledge references, the navigator | CI01-CATALOG, CI07-SCHEMA, CI05-VENDOR |
-| CI08-ROUTING | `REFERENCES` and tags in the catalog; the `SKILL.md` router | CI05-VENDOR, CI01-CATALOG, CI09 |
+| CI09-REFERENCE | tool operations, knowledge references, the navigator | CI01, CI07, CI05, CI02 |
+| CI08-ROUTING | tags in the catalog; the `SKILL.md` router (`REFERENCES` is CI09's) | CI05, CI01, CI09 |
 | CI11-TOOLS | the tool catalogue and the port of the source repo's scripts | CI02-CLI, CI07-SCHEMA, CI09-REFERENCE |
 | CI04-HOOKS | advisory local hooks | CI03-GATES, CI05-VENDOR |
 
@@ -51,14 +53,18 @@ implementation of a behaviour the library has is a defect.
    import per main; `tools/*.py` and `tests/python/conftest.py` pointed at
    `ci-skills/lib`), the Bash mains and libraries re-pointed to
    `lib/bash/...`, the root adapters re-pointed to `ci-skills/bin/`, the
-   test roots and the installer source fixed, the foreign content behind the
-   three neutrality violations removed. Exit criteria: `tools/render_manifest.py
-   --check` reports CURRENT, `ci-skills/bin/ci-api --help` exits 0, every
-   `ci-skills/bin/*.py --describe` prints its contract with no `PYTHONPATH`,
-   and the neutrality checker reports PASS.
-1. These phase documents, in one pull request.
-2. CI03-GATES, with G0: as of 2026-10-06 the operator decided "no gate for
-   now"; the gap is recorded, not closed.
+   test roots and the installer source fixed, `scripts/check.sh`'s library
+   restored at `ci-skills/lib/bash/ci/check.bash` from
+   `88bd9f6^:lib/ci/check.bash` with its paths updated, the foreign content
+   behind the three neutrality violations removed. Exit criteria:
+   `tools/render_manifest.py --check` reports CURRENT; `ci-skills/bin/ci-api
+   --help` exits 0; every `ci-skills/bin/*.py --describe` prints its contract
+   with no `PYTHONPATH`; the neutrality checker reports PASS;
+   `tools/check_live_acceptance.py --help` shows the current default paths;
+   the installed copy under `~/.codex/skills` is reinstalled (today it
+   carries both `bin/` and `scripts/`).
+1. These phase documents, in one pull request (#29).
+2. CI03-GATES (G0 records D-GATE).
 3. CI07-SCHEMA, then CI02-CLI.
 4. CI05-VENDOR.
 5. CI01-CATALOG.
@@ -69,7 +75,7 @@ implementation of a behaviour the library has is a defect.
 
 ## How a phase lands
 
-- **One pull request per block.** A tool is a block.
+- **A tool is a block** (Terms: one pull request per block).
 - **Every phase document carries a "Delivery, test and proof" section** with
   these five parts, each concrete:
   1. *Delivery*: the files created or changed and the command that runs.
@@ -82,18 +88,20 @@ implementation of a behaviour the library has is a defect.
   (`scripts/check.sh` and its library, `requirements.txt`, `schemas/`,
   `tests/python/test_validate_workflow_policy.py`, the workflow file the gate
   route names once one exists).
-- **Before merge**, for the exact head commit: a review with its findings
-  fixed in the same pull request (`qa` per `TEAM_GUIDE.md`), the static checks
+- **Before merge**, for the exact head commit: one read-only `qa` review
+  with its findings fixed in the same pull request, the static checks
   green (`ruff`, markdownlint, `git diff --check`, gitleaks, neutrality,
   manifest byte-equality), and the tests the phase lists written. Whether
   they ran depends on D-GATE.
 - **After merge**, the phase document's read-back step confirms the result
   on `main`.
+- **A release** is a tag on `main` plus the receipt the gate route produces
+  once one exists.
 
 ## Implementation map: what is added, changed, refactored and gated
 
 One line per item; the owning phase doc carries the design. Everything here
-is traceable to an operator sentence, a verified defect, or a source script.
+is traceable to a request we recorded, a verified defect, or a source script.
 
 ### Add
 
@@ -101,12 +109,13 @@ is traceable to an operator sentence, a verified defect, or a source script.
 | --- | --- | --- |
 | shared library locator | `ci-skills/bin/_bootstrap.py`, one import per main | block 0 |
 | skill-root leaf module | `ci-skills/lib/core/paths.py` | block 0 |
-| bounded HTTP helper (stdlib) | `ci-skills/lib/core/http.py`, used by Harbor and the reference fetch | CI11-TOOLS |
+| bounded HTTP helper (stdlib) | `core/http.py` (reference fetch first; Harbor reuses it) | CI09-REFERENCE |
 | plan, apply, read-back skeleton | `ci-skills/lib/core/action.py`, extracted from `gitlab_actions.py` | CI11-TOOLS |
 | parallel reads helper | `ci-skills/lib/core/collect.py` (the executor it already uses, made shared) | CI11-TOOLS |
-| references and navigator | `core/reference.py`, `core/navigate.py`, `bin/reference.py` | CI09-REFERENCE |
-| maintenance package | `tools/skillkit/{transaction,fetch,reference_update,vendor,discover}.py` | CI05, CI09 |
+| references and navigator | `core/{reference,navigate,tool_operations}.py`, `bin/reference.py` | CI09-REFERENCE |
+| maintenance package | `tools/skillkit/{transaction,vendor,reference_update,install,discover}.py` | CI05, CI09, CI01 |
 | record schemas | `schemas/<kind>.schema.json`, one per record kind | CI07-SCHEMA |
+| GitHub GET owner | `core/github_api.py` (the `gh api` GET of `core/access.py:181-185`, extracted) | CI02-CLI |
 | Codex metadata and scopes | `ci-skills/agents/openai.yaml` (generated), `assets/`, `--scope` | CI01-CATALOG |
 | vendor declarations and lock | `vendor/vendor.toml`, `vendor/vendor.lock.json` | CI05-VENDOR |
 | new tools | the CI11-TOOLS catalogue, one pull request each | CI11-TOOLS |
@@ -115,13 +124,14 @@ is traceable to an operator sentence, a verified defect, or a source script.
 
 | Item | Change |
 | --- | --- |
-| `core/catalog.py` | `OFFLINE_COMMANDS`, `REFERENCES`, `harbor` authority, `references` in `manifest()`, exit table |
+| `core/catalog.py` | `OFFLINE_COMMANDS`, `REFERENCES`, `harbor` authority, manifest `references`, per-verb `mutates` |
 | `core/cli.py` | `offline_parser`, `execute_offline`; one GitLab command flow used by every GitLab main |
 | `core/report.py` | `emit(..., verbatim=...)`; human fields for reference records |
 | `core/provenance.py` | `VENDOR_DIRECTORIES`, an `excluded` parameter, public `file_digest`, `included_files` |
 | `core/target.py`, `core/credentials.py`, `core/access.py` | `[harbor]` table, credential chain, access read-back |
 | `tools/install_ci_skills.py`, `install.sh` | `--scope`; the transaction from `tools/skillkit` |
 | `tools/render_manifest.py` | current paths; renders `agents/openai.yaml` beside `tools.json` |
+| `tools/check_live_acceptance.py` | current default paths; `[[smoke_cases]]` verification (CI03-GATES, G5) |
 | `tests/python/conftest.py` and the path-bound tests | `SKILL_ROOT = ci-skills`, `SCRIPT_ROOT = ci-skills/bin` |
 | `ci-skills/SKILL.md` | one navigator sentence; description terms for implicit invocation |
 | `Makefile`, `pyproject.toml`, `scripts/bash/core/result.bash` | neutrality-marker content removed |
@@ -137,90 +147,58 @@ is traceable to an operator sentence, a verified defect, or a source script.
 | result envelope | `core/report.py` | `scripts/bash/core/result.bash`, hand-built envelopes |
 | diagnostic logger | `core/cli.py` `log_event` | `mtu_consistency.EventLogger`, `runtime.bash` `ci_log` |
 | argument-error envelope | `core/cli.py` `MachineArgumentParser` | `StructuredParser`, `NodeParser` |
-| secret patterns, token-file rule, revision check, digest | the Python owners in `core/` | the Bash copies |
-| advisory file lock, plan fingerprint | `tools/skillkit/transaction.py`, `core/action.py` | the per-tool copies |
+| secret patterns | `core/runtime.py:32-94` | `scripts/bash/core/result.bash:68-77` |
+| single-token-file rule | `core/credentials.py:41-51` | `ci-skills/lib/bash/core/runtime.bash:55-75` |
+| clean-checkout revision check | `core/provenance.py:106-130` | `ci-skills/lib/bash/core/runtime.bash:97-118` |
+| SHA-256 of stdin | `core/provenance.py` | `lib/bash/core/runtime.bash:79-91`, `scripts/bash/core/digest.bash` |
+| advisory file lock | `tools/skillkit/transaction.py` | `tools/install_ci_skills.py:95`, `core/gitlab_api.py:211-259` |
+| plan fingerprint | `core/action.py` | `gitlab_actions.py:87`, `mtu_consistency.py:464`, `binary_build.bash:137-141` |
 
 ### Modularity
 
-`ci-skills/lib/core/` is flat today (30 modules) and CI11 adds about ten.
-Before the first CI11 tool lands, group by domain, imports updated in one
-pull request and nothing else changed: `core/` keeps the shared layer
-(`cli`, `catalog`, `status`, `report`, `runtime`, `http`, `paths`,
-`provenance`, `portable`, `credentials`, `target`, `access`, `action`,
-`collect`); `core/gitlab/`, `core/k8s/` (collectors, Cilium, Ceph, node
-reads, MTU), `core/ocp/`, `core/harbor/`, `core/reference/` hold the domain
-code. Abstractions, contract first and only where two implementations exist:
+`ci-skills/lib/core/` is flat (28 modules today) and CI11 adds about ten.
+Module paths in every phase document are flat (`core/<name>.py`) until the
+split into domain packages is decided (Open decisions, Modularity); the
+pull request that splits them changes imports and nothing else. Abstractions
+are introduced contract first and only where two implementations exist:
 `Action` (plan, apply, read-back), `Authority` (one access check per
-authority name, a registry instead of branches), `ReferenceSource`,
-`Chunker`, `Joiner`; none is added speculatively.
+authority name), `ReferenceSource`, `Chunker`, `Joiner`; none is added
+speculatively (CI09 keeps one implementation of each until a second source).
 
 ### Publish and install
 
-The skill is published by copying it (digest-verified) into a scope path:
-`$HOME/.agents/skills` (documented Codex user scope), `<repo>/.agents/skills`
-(repo scope, committed by a consuming repository), `/etc/codex/skills`
-(admin), `~/.claude/skills` or `.claude/skills` (Claude Code),
-`~/.codex/skills` (today's default, undocumented upstream). A release is a
-tag on `main` plus the receipt the gate route produces once one exists. Known
-install issues, verified 2026-10-06: the installed copy under
-`~/.codex/skills` carries both `bin/` and `scripts/` and must be reinstalled
-after block 0; no installed Python main can import `core` until the locator
-lands; the installer's source path is stale; `~/.claude/skills/k8s-admin-diagnostics`
-is an old-named copy; Python 3.11 or newer is required (the documented
-interpreter is the `ci-skills` conda environment).
+The skill is published by copying it, digest-verified, into a scope path;
+the scope table, `--scope` and the install-scope default are CI01-CATALOG
+("Codex metadata and install scopes" and its open decision D-SCOPE). Python
+3.11 or newer is required (the documented interpreter is the `ci-skills`
+conda environment). Block 0 repairs the install issues verified on
+2026-10-06 (its exit criteria).
 
 ### Lock every open-ended specification with a schema
 
-Every record a command reads or writes has one JSON Schema (2020-12) under
-`schemas/`, closed (`additionalProperties: false`), with `kind` and
-`schema_version`: `command-contract` (`--describe`), `command-result` (one
-file per report kind: the 17 catalog kinds today plus `reference_next`,
-`reference_record`, `reference_verify`, `install_plan`, `vendor_check`,
-`vendor_update`, `live_acceptance`, the receipts), `reference-index`,
-`skill-manifest`, `skill-index`, `vendor-lock`, `vendor-declarations`,
-`openai-agent-metadata`. A kind without a schema cannot be emitted; a schema
-change without a version bump fails the `schemas` gate (CI07-SCHEMA).
+Every record a command reads or writes has one closed JSON Schema (2020-12)
+under `schemas/` with `kind` and `schema_version`; the inventory is the
+schemas table of CI07-SCHEMA. A kind without a schema cannot be emitted; a
+schema change without a version bump fails the `schemas` gate.
 
 ### Machine-readable output, one shape
 
 Every command prints one JSON document on stdout (YAML with `--yaml`, a
-human summary on a terminal or with `--human`): `schema_version`, `kind`,
-`status` (`PASS`, `PARTIAL`, `BLOCKED`, `DRY_RUN`, `PLANNED`, `UNKNOWN`),
-`captured_at`, `execution_host`, `skill` (digest and revision claim),
-`target_source`, `records`, `errors` (`source`, `reason`, `safe_next_step`),
-`summary` (`record_count`, `error_count`); `access` on authority-bound
-commands; `plan_digest` on plans; `readback` and `cleanup` on applies.
-Diagnostics go to stderr, JSON Lines with `--log-format json`. Exit codes
-come from the one table in `core/status.py` (today 0 and 2; CI02-CLI's
-five-code table is the open decision D-EXIT).
+human summary on a terminal or with `--human`) whose fields are locked by
+`schemas/command-result.schema.json` (CI07-SCHEMA); diagnostics go to
+stderr (CI02-CLI). Today `core/report.py:52-61` emits `target` and `filters`
+and no `execution_host`, `skill` or `target_source`; that delta is the first
+`command-result` version. Exit codes come from the one table in
+`core/status.py` (today 0 and 2; D-EXIT).
 
 ### Gates that make every tool conform
 
-- **`cli` contract gate** (CI02-CLI), over every entrypoint the catalog
-  declares, never a glob: `--help` exits 0 with an empty environment and no
-  network; `--describe` validates against `command-contract`; the options
-  the parser accepts equal the options the catalog declares (introspection,
-  not help-text scraping); a shared option name keeps one help text; a
-  mutating command's default run writes nothing (temporary working
-  directory, fake `PATH`); `--json` and `--yaml` outputs validate against the
-  kind's `command-result` schema on a mocked run; exit codes are a subset of
-  the one table.
-- **`schemas` gate** (CI07-SCHEMA): every schema against the metaschema;
-  every committed record (`tools.json`, `index.json`, the lock, the
-  declarations, `agents/openai.yaml`) against its schema; closed world for
-  `uses`, `REFERENCES` and index files.
-- **`manifest` gate** (exists): `tools.json` and `agents/openai.yaml`
-  byte-equal to their render.
-- **`neutrality` gate** (exists, failing on `main` until block 0).
-- **`reference` gate** (CI09): `bin/reference.py verify` on every vendored
-  tree; the vendored tree excluded from the executed-code digest.
-- **static** (exist as tools): `ruff check`, `ruff format --check`,
-  markdownlint-cli2, shellcheck, shfmt, yamllint, gitleaks, `git diff --check`.
-- **tests**: pytest and bats, written with each block; the route that runs
-  them is D-GATE (none as of 2026-10-06).
-
-All of these are profiles of one entrypoint, `scripts/check.sh` (CI03-GATES,
-G1), so a contributor and any future CI route run the same list.
+One gate per owner: `cli` (CI02-CLI), `schemas` (CI07-SCHEMA), `verify`
+(CI05-VENDOR), `reference` (CI09-REFERENCE, section 5), `manifest`,
+`neutrality` and the static tools (CI03-GATES, Existing gates); all are
+profiles of one entrypoint, `scripts/check.sh` (CI03-GATES, G1), once block 0
+restores its library, so a contributor and any future CI route run the same
+list. Tests run on the gate route (D-GATE).
 
 ## Pull request status, read back 2026-10-06
 
@@ -228,8 +206,9 @@ G1), so a contributor and any future CI route run the same list.
   (package delivery, `d6bba3d`), #26 (deleted `lib/ci`), #27 (deleted
   `.github/workflows/validate.yml`, `1108cca`).
 - Closed unmerged: #2 (its tools shipped through #16).
-- Open, draft, conflicting: #23 (live proof for every command; touches the
-  deleted workflow and the old `skills/` tree), #28 (command inventory).
+- Open: #29 (draft, this document set, clean against `main`); #23 (live
+  proof for every command) and #28 (command inventory), drafts in conflict
+  with `main`.
 - No workflow exists on GitHub; branch protection on `main` is disabled; the
   committed receipts no longer match the skill digest (62 files now, 53 in
   the receipt) and expire 2026-11-03.
@@ -253,14 +232,14 @@ G1), so a contributor and any future CI route run the same list.
 
 ## Open decisions
 
-- **`orbit`.** Its source project carries the GitLab Enterprise Edition
-  license; vendor it or leave it out (CI05-VENDOR).
-- **Receipt host** and **live tool check executor** (CI03-GATES, G5;
-  CI09-REFERENCE).
-- **Review.** What makes a review block a merge (CI03-GATES, G3).
-- **CLI.** How `PARTIAL` exits, and whether the k8s commands move behind one
-  `bin/ci-k8s` command (CI02-CLI).
-- **Coverage floor** (CI06-TESTS).
-- **Repository license** (D-LICENSE, CI09-REFERENCE).
-- **Install scope default** for Codex (`$HOME/.agents/skills` is the
-  documented path; `~/.codex/skills` is today's default).
+Names and owners only; each owner document carries the question.
+
+- `orbit` license: vendor it or leave it out (CI05-VENDOR).
+- Review: what makes a review block a merge (CI03-GATES, G3).
+- D-EXIT: CI02's five-code exit table or today's 0 and 2, and how `PARTIAL`
+  exits; whether the k8s commands move behind one `bin/ci-k8s` (CI02-CLI).
+- Coverage floor (CI06-TESTS).
+- D-LICENSE: repository license or per-tree notices (CI09-REFERENCE).
+- D-SCOPE: the install scope default for Codex (CI01-CATALOG).
+- Modularity: split flat `core/` into `core/{gitlab,k8s,ocp,harbor,reference}/`
+  before the first CI11 tool, or keep it flat (this document, Modularity).

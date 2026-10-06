@@ -206,18 +206,22 @@ For node diagnostics, declare the selected node and existing Pod routes under
 `[kubernetes.node_diagnostics]`. Provisioning access is the project's job;
 this skill resolves the selected source and reports it.
 
+Until block 0 of CI10-PHASES lands, prefix every command below with
+`PYTHONPATH=ci-skills/lib`: no main under `ci-skills/bin/` can import `core`
+without it (the shared locator is block 0's first item).
+
 **4. Prove access to the authorities you selected.** For a GitLab-only target,
 read back its configured project and administrator identity:
 
 ```bash
-conda run -n ci-skills python \
+PYTHONPATH=ci-skills/lib conda run -n ci-skills python \
   ci-skills/bin/gitlab_access.py check --json
 ```
 
 When all three authorities are configured, run the full publication check:
 
 ```bash
-conda run -n ci-skills python \
+PYTHONPATH=ci-skills/lib conda run -n ci-skills python \
   ci-skills/bin/access_check.py --publication
 ```
 
@@ -339,10 +343,10 @@ The operation access check reads back the effective GitLab identity and exact
 numeric target before a write:
 
 ```bash
-conda run -n ci-skills python \
+PYTHONPATH=ci-skills/lib conda run -n ci-skills python \
   ci-skills/bin/gitlab_access.py check \
   --json
-conda run -n ci-skills python \
+PYTHONPATH=ci-skills/lib conda run -n ci-skills python \
   ci-skills/bin/gitlab_milestone.py create \
   --title "Release checkpoint" --json
 ```
