@@ -11,7 +11,7 @@ source "${BASH_SOURCE[0]%/*}/../core/source_graph.bash"
 # Stderr: none.
 # Returns: 0.
 ci_bless_usage() {
-	cat <<'EOF'
+  cat <<'EOF'
 Summary: Check staged source before commit (audience: agent and human).
 
 Examples:
@@ -53,24 +53,24 @@ EOF
 # Stderr: human blocker and repair action.
 # Returns: 0 after rendering; the caller returns its own failure status.
 ci_bless_blocked() {
-	local format="$1" scope="$2" check="$3" next="$4" result
-	if [[ "$format" == human ]]; then
-		printf 'BLOCKER: %s\nSAFE_NEXT_STEP: %s\n' "$check" "$next" >&2
-		return
-	fi
-	if command -v jq >/dev/null 2>&1; then
-		result="$(jq -n --arg check "$check" --arg next "$next" --arg run "${CI_RUN_ID:-}" \
-			--arg scope "$scope" --argjson code "$CI_EXIT_BLOCKED" \
-			'{kind:"bless_result",schema_version:"1.0",status:"FAIL",scope:$scope,exit_code:$code,
+  local format="$1" scope="$2" check="$3" next="$4" result
+  if [[ "$format" == human ]]; then
+    printf 'BLOCKER: %s\nSAFE_NEXT_STEP: %s\n' "$check" "$next" >&2
+    return
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    result="$(jq -n --arg check "$check" --arg next "$next" --arg run "${CI_RUN_ID:-}" \
+      --arg scope "$scope" --argjson code "$CI_EXIT_BLOCKED" \
+      '{kind:"bless_result",schema_version:"1.0",status:"FAIL",scope:$scope,exit_code:$code,
 			run_id:$run,
 			summary:{selected_files:0,check_count:1,failed_checks:1},
 			checks:[{path:"prerequisite",check:$check,status:"FAIL"}],safe_next_step:$next}')" || return
-	else
-		printf -v result '{"kind":"bless_result","schema_version":"1.0","status":"FAIL","scope":"%s","exit_code":%s,"summary":{"selected_files":0,"check_count":1,"failed_checks":1},"checks":[{"path":"prerequisite","check":"jq","status":"FAIL"}],"safe_next_step":"Run make install to provide jq."}' \
-			"$scope" "$CI_EXIT_BLOCKED"
-	fi
-	printf '%s\n' "$result"
-	printf 'BLOCKER: %s\nSAFE_NEXT_STEP: %s\n' "$check" "$next" >&2
+  else
+    printf -v result '{"kind":"bless_result","schema_version":"1.0","status":"FAIL","scope":"%s","exit_code":%s,"summary":{"selected_files":0,"check_count":1,"failed_checks":1},"checks":[{"path":"prerequisite","check":"jq","status":"FAIL"}],"safe_next_step":"Run make install to provide jq."}' \
+      "$scope" "$CI_EXIT_BLOCKED"
+  fi
+  printf '%s\n' "$result"
+  printf 'BLOCKER: %s\nSAFE_NEXT_STEP: %s\n' "$check" "$next" >&2
 }
 
 # Summary: Read the selected version of one repository file.
@@ -79,11 +79,11 @@ ci_bless_blocked() {
 # Stderr: Git or file diagnostics.
 # Returns: reader status.
 ci_bless_content() {
-	if [[ "$1" == staged ]]; then
-		git show ":$2"
-	else
-		cat -- "./$2"
-	fi
+  if [[ "$1" == staged ]]; then
+    git show ":$2"
+  else
+    cat -- "./$2"
+  fi
 }
 
 # Summary: Append one machine-readable check observation.
@@ -92,30 +92,30 @@ ci_bless_content() {
 # Stderr: jq diagnostics.
 # Returns: jq status.
 ci_bless_record() {
-	jq -cn --arg path "$2" --arg check "$3" --arg status "$4" \
-		'{path:$path,check:$check,status:$status}' >>"$1"
+  jq -cn --arg path "$2" --arg check "$3" --arg status "$4" \
+    '{path:$path,check:$check,status:$status}' >>"$1"
 }
 
 # Summary: Identify operator-local paths that must never enter this public repository.
 # Arguments: $1: repository-relative path to classify.
 # Returns: 0 for a secret-class path; 1 otherwise.
 ci_bless_secret_path() {
-	case "$1" in
-	.internal/* | */.internal/* | .ci-skills/* | */.ci-skills/* | \
-		.codex/* | */.codex/* | .claude/* | */.claude/* | \
-		.agent-review/* | */.agent-review/* | \
-		.AGENTS.md | */.AGENTS.md | AGENT*.md | */AGENT*.md | \
-		.AGENT_HANDOFF* | */.AGENT_HANDOFF* | AGENT_HANDOFF* | */AGENT_HANDOFF* | \
-		CLAUDE*.md | */CLAUDE*.md | CLAUDE_REVIEW* | */CLAUDE_REVIEW* | \
-		CLAUDE_PATCH.diff | */CLAUDE_PATCH.diff | \
-		CODEX*.md | */CODEX*.md | CODEX_HANDOFF* | */CODEX_HANDOFF* | \
-		TEAM_GUIDE.md | */TEAM_GUIDE.md | \
-		shared.md | */shared.md | brain-shared.md | */brain-shared.md | \
-		*.key | *.pem | *.crt | *.p12)
-		return 0
-		;;
-	esac
-	return 1
+  case "$1" in
+  .internal/* | */.internal/* | .ci-skills/* | */.ci-skills/* | \
+    .codex/* | */.codex/* | .claude/* | */.claude/* | \
+    .agent-review/* | */.agent-review/* | \
+    .AGENTS.md | */.AGENTS.md | AGENT*.md | */AGENT*.md | \
+    .AGENT_HANDOFF* | */.AGENT_HANDOFF* | AGENT_HANDOFF* | */AGENT_HANDOFF* | \
+    CLAUDE*.md | */CLAUDE*.md | CLAUDE_REVIEW* | */CLAUDE_REVIEW* | \
+    CLAUDE_PATCH.diff | */CLAUDE_PATCH.diff | \
+    CODEX*.md | */CODEX*.md | CODEX_HANDOFF* | */CODEX_HANDOFF* | \
+    TEAM_GUIDE.md | */TEAM_GUIDE.md | \
+    shared.md | */shared.md | brain-shared.md | */brain-shared.md | \
+    *.key | *.pem | *.crt | *.p12)
+    return 0
+    ;;
+  esac
+  return 1
 }
 
 # Summary: Check one file against a linter using the selected file bytes.
@@ -125,19 +125,19 @@ ci_bless_secret_path() {
 # Stderr: bounded failure diagnostics.
 # Returns: 0 on pass or plan, 1 on check failure.
 ci_bless_check() {
-	local records="$1" scope="$2" file="$3" label="$4" dry_run="$5" output
-	shift 5
-	if [[ "$dry_run" == true ]]; then
-		ci_bless_record "$records" "$file" "$label" PLANNED
-		return
-	fi
-	if output="$(ci_bless_content "$scope" "$file" | "$@" 2>&1)"; then
-		ci_bless_record "$records" "$file" "$label" PASS
-	else
-		ci_bless_record "$records" "$file" "$label" FAIL
-		printf 'FAIL %s %s\n%s\n' "$label" "$file" "${output:0:4096}" >&2
-		return 1
-	fi
+  local records="$1" scope="$2" file="$3" label="$4" dry_run="$5" output
+  shift 5
+  if [[ "$dry_run" == true ]]; then
+    ci_bless_record "$records" "$file" "$label" PLANNED
+    return
+  fi
+  if output="$(ci_bless_content "$scope" "$file" | "$@" 2>&1)"; then
+    ci_bless_record "$records" "$file" "$label" PASS
+  else
+    ci_bless_record "$records" "$file" "$label" FAIL
+    printf 'FAIL %s %s\n%s\n' "$label" "$file" "${output:0:4096}" >&2
+    return 1
+  fi
 }
 
 # Summary: Select the checks required for one staged or tracked file.
@@ -147,45 +147,45 @@ ci_bless_check() {
 # Stderr: check diagnostics.
 # Returns: 0 when all selected checks pass, 1 otherwise.
 ci_bless_file() {
-	local records="$1" scope="$2" file="$3" dry_run="$4" conda_bin="$5" env_name="$6"
-	local failed=0
-	local yaml_config='{extends: default, rules: {document-start: disable, line-length: {max: 120}, truthy: disable}}'
-	case "$file" in
-	*.py)
-		ci_bless_check "$records" "$scope" "$file" ruff-check "$dry_run" \
-			"$conda_bin" run --no-capture-output -n "$env_name" ruff check --no-cache --stdin-filename "$file" - || failed=1
-		ci_bless_check "$records" "$scope" "$file" ruff-format "$dry_run" \
-			"$conda_bin" run --no-capture-output -n "$env_name" ruff format --check --no-cache \
-			--stdin-filename "$file" - || failed=1
-		;;
-	*.json)
-		ci_bless_check "$records" "$scope" "$file" json "$dry_run" jq -e -s 'length == 1' || failed=1
-		if [[ "$file" == schemas/*.schema.json ]]; then
-			ci_bless_check "$records" "$scope" "$file" json-schema "$dry_run" \
-				"$conda_bin" run --no-capture-output -n "$env_name" \
-				check-jsonschema --check-metaschema --default-filetype json - || failed=1
-		fi
-		;;
-	*.yaml | *.yml)
-		ci_bless_check "$records" "$scope" "$file" yaml "$dry_run" \
-			"$conda_bin" run --no-capture-output -n "$env_name" \
-			yamllint --strict --config-data "$yaml_config" - || failed=1
-		;;
-	*.toml)
-		ci_bless_check "$records" "$scope" "$file" toml "$dry_run" \
-			taplo lint --no-schema - || failed=1
-		;;
-	*.md | *.markdown)
-		ci_bless_check "$records" "$scope" "$file" markdown "$dry_run" \
-			markdownlint-cli2 - --config "$CI_BLESS_ROOT/.markdownlint-cli2.yaml" --no-globs || failed=1
-		;;
-	*.sh | *.bash | .githooks/pre-commit)
-		ci_bless_check "$records" "$scope" "$file" shellcheck "$dry_run" \
-			shellcheck -s bash -e SC1091 - || failed=1
-		ci_bless_check "$records" "$scope" "$file" shfmt "$dry_run" shfmt -d - || failed=1
-		;;
-	esac
-	return "$failed"
+  local records="$1" scope="$2" file="$3" dry_run="$4" conda_bin="$5" env_name="$6"
+  local failed=0
+  local yaml_config='{extends: default, rules: {document-start: disable, line-length: {max: 120}, truthy: disable}}'
+  case "$file" in
+  *.py)
+    ci_bless_check "$records" "$scope" "$file" ruff-check "$dry_run" \
+      "$conda_bin" run --no-capture-output -n "$env_name" ruff check --no-cache --stdin-filename "$file" - || failed=1
+    ci_bless_check "$records" "$scope" "$file" ruff-format "$dry_run" \
+      "$conda_bin" run --no-capture-output -n "$env_name" ruff format --check --no-cache \
+      --stdin-filename "$file" - || failed=1
+    ;;
+  *.json)
+    ci_bless_check "$records" "$scope" "$file" json "$dry_run" jq -e -s 'length == 1' || failed=1
+    if [[ "$file" == schemas/*.schema.json ]]; then
+      ci_bless_check "$records" "$scope" "$file" json-schema "$dry_run" \
+        "$conda_bin" run --no-capture-output -n "$env_name" \
+        check-jsonschema --check-metaschema --default-filetype json - || failed=1
+    fi
+    ;;
+  *.yaml | *.yml)
+    ci_bless_check "$records" "$scope" "$file" yaml "$dry_run" \
+      "$conda_bin" run --no-capture-output -n "$env_name" \
+      yamllint --strict --config-data "$yaml_config" - || failed=1
+    ;;
+  *.toml)
+    ci_bless_check "$records" "$scope" "$file" toml "$dry_run" \
+      taplo lint --no-schema - || failed=1
+    ;;
+  *.md | *.markdown)
+    ci_bless_check "$records" "$scope" "$file" markdown "$dry_run" \
+      markdownlint-cli2 - --config "$CI_BLESS_ROOT/.markdownlint-cli2.yaml" --no-globs || failed=1
+    ;;
+  *.sh | *.bash | .githooks/pre-commit)
+    ci_bless_check "$records" "$scope" "$file" shellcheck "$dry_run" \
+      shellcheck -s bash -e SC1091 - || failed=1
+    ci_bless_check "$records" "$scope" "$file" shfmt "$dry_run" shfmt -d - || failed=1
+    ;;
+  esac
+  return "$failed"
 }
 
 # Summary: Check the named repository and render a human, JSON, or YAML result.
@@ -196,150 +196,150 @@ ci_bless_file() {
 # Side effects: creates and removes a temporary result directory; never rewrites source.
 # Cleanup: EXIT removes the temporary result directory.
 ci_bless_main() {
-	local CI_BLESS_ROOT="$1" scope=staged dry_run=false format=human conda_bin='' env_name=ci-skills
-	local file status=PASS failed=0 selected=0 records selection result
-	shift
-	while (($#)); do
-		case "$1" in
-		--staged) scope=staged ;;
-		--all) scope=all ;;
-		--dry-run) dry_run=true ;;
-		--json) format=json ;;
-		--yaml) format=yaml ;;
-		--log-format)
-			shift
-			CI_LOG_FORMAT="${1:-}"
-			[[ "$CI_LOG_FORMAT" == text || "$CI_LOG_FORMAT" == json ]] || return "$CI_EXIT_USAGE"
-			;;
-		--log-level)
-			shift
-			CI_LOG_LEVEL="${1:-}"
-			case "$CI_LOG_LEVEL" in debug | info | warning | error) ;; *) return "$CI_EXIT_USAGE" ;; esac
-			;;
-		--log-file)
-			shift
-			CI_LOG_FILE="${1:-}"
-			[[ -n "$CI_LOG_FILE" && "$CI_LOG_FILE" != --* ]] || return "$CI_EXIT_USAGE"
-			;;
-		--run-id)
-			shift
-			CI_RUN_ID="${1:-}"
-			[[ -n "$CI_RUN_ID" && "$CI_RUN_ID" != --* ]] || return "$CI_EXIT_USAGE"
-			;;
-		--describe)
-			cat "$CI_BLESS_ROOT/schemas/commands/help/bless.help.json"
-			return
-			;;
-		--help)
-			ci_bless_usage
-			return
-			;;
-		*)
-			ci_bless_usage >&2
-			return "$CI_EXIT_USAGE"
-			;;
-		esac
-		shift
-	done
-	cd "$CI_BLESS_ROOT" || return "$CI_EXIT_BLOCKED"
-	[[ "$(git rev-parse --show-toplevel 2>/dev/null)" == "$CI_BLESS_ROOT" ]] || {
-		printf 'bless.sh must run from its repository root\n' >&2
-		return "$CI_EXIT_BLOCKED"
-	}
-	command -v jq >/dev/null 2>&1 || {
-		ci_bless_blocked "$format" "$scope" jq 'Run make install to provide jq.'
-		return "$CI_EXIT_BLOCKED"
-	}
-	if [[ "$dry_run" == false || "$format" == yaml ]]; then
-		conda_bin="$(ci_toolchain_conda)" || {
-			ci_bless_blocked "$format" "$scope" conda 'Run make install to provide the project Conda environment.'
-			return "$CI_EXIT_BLOCKED"
-		}
-	fi
-	if [[ "$dry_run" == false ]]; then
-		local tool
-		for tool in taplo shellcheck shfmt markdownlint-cli2 gitleaks; do
-			command -v "$tool" >/dev/null 2>&1 || {
-				ci_bless_blocked "$format" "$scope" "$tool" 'Run make install to provide the bless toolchain.'
-				return "$CI_EXIT_BLOCKED"
-			}
-		done
-	fi
-	ci_log info bless start "$scope" || return
-	ci_runtime_lifecycle_begin || return "$CI_EXIT_BLOCKED"
-	CI_BLESS_TEMP="$(mktemp -d)" || return "$CI_EXIT_BLOCKED"
-	ci_runtime_cleanup_push ci_runtime_cleanup_dir "$CI_BLESS_TEMP" || return "$CI_EXIT_BLOCKED"
-	records="$CI_BLESS_TEMP/records"
-	selection="$CI_BLESS_TEMP/selection"
-	: >"$records"
-	if [[ "$scope" == staged ]]; then
-		git diff --cached --name-only -z --diff-filter=ACMR >"$selection" || return "$CI_EXIT_BLOCKED"
-	else
-		git ls-files -z >"$selection" || return "$CI_EXIT_BLOCKED"
-	fi
-	if [[ "$scope" == staged && "$dry_run" == false ]]; then
-		if ! git diff --cached --check >&2; then
-			ci_bless_record "$records" "staged-index" whitespace FAIL
-			failed=1
-		else
-			ci_bless_record "$records" "staged-index" whitespace PASS
-		fi
-	fi
-	while IFS= read -r -d '' file; do
-		[[ "$scope" != all || -f "$file" ]] || continue
-		selected=$((selected + 1))
-		if ci_bless_secret_path "$file"; then
-			ci_bless_record "$records" "$file" secret-path FAIL
-			printf 'Refusing secret-class agent file: %s\n' "$file" >&2
-			failed=1
-			continue
-		fi
-		ci_bless_file "$records" "$scope" "$file" "$dry_run" "$conda_bin" "$env_name" || failed=1
-	done <"$selection"
-	if [[ "$dry_run" == true ]]; then
-		ci_bless_record "$records" bash-source-graph source-cycle PLANNED
-	elif ci_source_graph_acyclic "$scope"; then
-		ci_bless_record "$records" bash-source-graph source-cycle PASS
-	else
-		ci_bless_record "$records" bash-source-graph source-cycle FAIL
-		failed=1
-	fi
-	if [[ "$scope" == staged && "$selected" -gt 0 && "$dry_run" == false ]]; then
-		if gitleaks git --staged --no-banner --redact=100 --log-level error >/dev/null; then
-			ci_bless_record "$records" staged-index gitleaks PASS
-		else
-			ci_bless_record "$records" staged-index gitleaks FAIL
-			printf 'Staged secret scan failed; inspect the staged diff.\n' >&2
-			failed=1
-		fi
-	fi
-	if [[ "$dry_run" == true && "$failed" == 0 ]]; then
-		status=PLANNED
-	elif [[ "$failed" != 0 ]]; then
-		status=FAIL
-	fi
-	local next=''
-	if [[ "$status" == FAIL ]]; then
-		next='Inspect the reported check diagnostics, repair the staged content, and rerun make bless.'
-	fi
-	local exit_code="$CI_EXIT_FAILED"
-	if [[ "$failed" == 0 ]]; then exit_code=0; fi
-	result="$(jq -s --arg status "$status" --arg scope "$scope" --argjson selected "$selected" \
-		--argjson code "$exit_code" \
-		--arg next "$next" --arg run "${CI_RUN_ID:-}" \
-		'{kind:"bless_result",schema_version:"1.0",status:$status,scope:$scope,exit_code:$code,run_id:$run,
+  local CI_BLESS_ROOT="$1" scope=staged dry_run=false format=human conda_bin='' env_name=ci-skills
+  local file status=PASS failed=0 selected=0 records selection result
+  shift
+  while (($#)); do
+    case "$1" in
+    --staged) scope=staged ;;
+    --all) scope=all ;;
+    --dry-run) dry_run=true ;;
+    --json) format=json ;;
+    --yaml) format=yaml ;;
+    --log-format)
+      shift
+      CI_LOG_FORMAT="${1:-}"
+      [[ "$CI_LOG_FORMAT" == text || "$CI_LOG_FORMAT" == json ]] || return "$CI_EXIT_USAGE"
+      ;;
+    --log-level)
+      shift
+      CI_LOG_LEVEL="${1:-}"
+      case "$CI_LOG_LEVEL" in debug | info | warning | error) ;; *) return "$CI_EXIT_USAGE" ;; esac
+      ;;
+    --log-file)
+      shift
+      CI_LOG_FILE="${1:-}"
+      [[ -n "$CI_LOG_FILE" && "$CI_LOG_FILE" != --* ]] || return "$CI_EXIT_USAGE"
+      ;;
+    --run-id)
+      shift
+      CI_RUN_ID="${1:-}"
+      [[ -n "$CI_RUN_ID" && "$CI_RUN_ID" != --* ]] || return "$CI_EXIT_USAGE"
+      ;;
+    --describe)
+      cat "$CI_BLESS_ROOT/schemas/commands/help/bless.help.json"
+      return
+      ;;
+    --help)
+      ci_bless_usage
+      return
+      ;;
+    *)
+      ci_bless_usage >&2
+      return "$CI_EXIT_USAGE"
+      ;;
+    esac
+    shift
+  done
+  cd "$CI_BLESS_ROOT" || return "$CI_EXIT_BLOCKED"
+  [[ "$(git rev-parse --show-toplevel 2>/dev/null)" == "$CI_BLESS_ROOT" ]] || {
+    printf 'bless.sh must run from its repository root\n' >&2
+    return "$CI_EXIT_BLOCKED"
+  }
+  command -v jq >/dev/null 2>&1 || {
+    ci_bless_blocked "$format" "$scope" jq 'Run make install to provide jq.'
+    return "$CI_EXIT_BLOCKED"
+  }
+  if [[ "$dry_run" == false || "$format" == yaml ]]; then
+    conda_bin="$(ci_toolchain_conda)" || {
+      ci_bless_blocked "$format" "$scope" conda 'Run make install to provide the project Conda environment.'
+      return "$CI_EXIT_BLOCKED"
+    }
+  fi
+  if [[ "$dry_run" == false ]]; then
+    local tool
+    for tool in taplo shellcheck shfmt markdownlint-cli2 gitleaks; do
+      command -v "$tool" >/dev/null 2>&1 || {
+        ci_bless_blocked "$format" "$scope" "$tool" 'Run make install to provide the bless toolchain.'
+        return "$CI_EXIT_BLOCKED"
+      }
+    done
+  fi
+  ci_log info bless start "$scope" || return
+  ci_runtime_lifecycle_begin || return "$CI_EXIT_BLOCKED"
+  CI_BLESS_TEMP="$(mktemp -d)" || return "$CI_EXIT_BLOCKED"
+  ci_runtime_cleanup_push ci_runtime_cleanup_dir "$CI_BLESS_TEMP" || return "$CI_EXIT_BLOCKED"
+  records="$CI_BLESS_TEMP/records"
+  selection="$CI_BLESS_TEMP/selection"
+  : >"$records"
+  if [[ "$scope" == staged ]]; then
+    git diff --cached --name-only -z --diff-filter=ACMR >"$selection" || return "$CI_EXIT_BLOCKED"
+  else
+    git ls-files -z >"$selection" || return "$CI_EXIT_BLOCKED"
+  fi
+  if [[ "$scope" == staged && "$dry_run" == false ]]; then
+    if ! git diff --cached --check >&2; then
+      ci_bless_record "$records" "staged-index" whitespace FAIL
+      failed=1
+    else
+      ci_bless_record "$records" "staged-index" whitespace PASS
+    fi
+  fi
+  while IFS= read -r -d '' file; do
+    [[ "$scope" != all || -f "$file" ]] || continue
+    selected=$((selected + 1))
+    if ci_bless_secret_path "$file"; then
+      ci_bless_record "$records" "$file" secret-path FAIL
+      printf 'Refusing secret-class agent file: %s\n' "$file" >&2
+      failed=1
+      continue
+    fi
+    ci_bless_file "$records" "$scope" "$file" "$dry_run" "$conda_bin" "$env_name" || failed=1
+  done <"$selection"
+  if [[ "$dry_run" == true ]]; then
+    ci_bless_record "$records" bash-source-graph source-cycle PLANNED
+  elif ci_source_graph_acyclic "$scope"; then
+    ci_bless_record "$records" bash-source-graph source-cycle PASS
+  else
+    ci_bless_record "$records" bash-source-graph source-cycle FAIL
+    failed=1
+  fi
+  if [[ "$scope" == staged && "$selected" -gt 0 && "$dry_run" == false ]]; then
+    if gitleaks git --staged --no-banner --redact=100 --log-level error >/dev/null; then
+      ci_bless_record "$records" staged-index gitleaks PASS
+    else
+      ci_bless_record "$records" staged-index gitleaks FAIL
+      printf 'Staged secret scan failed; inspect the staged diff.\n' >&2
+      failed=1
+    fi
+  fi
+  if [[ "$dry_run" == true && "$failed" == 0 ]]; then
+    status=PLANNED
+  elif [[ "$failed" != 0 ]]; then
+    status=FAIL
+  fi
+  local next=''
+  if [[ "$status" == FAIL ]]; then
+    next='Inspect the reported check diagnostics, repair the staged content, and rerun make bless.'
+  fi
+  local exit_code="$CI_EXIT_FAILED"
+  if [[ "$failed" == 0 ]]; then exit_code=0; fi
+  result="$(jq -s --arg status "$status" --arg scope "$scope" --argjson selected "$selected" \
+    --argjson code "$exit_code" \
+    --arg next "$next" --arg run "${CI_RUN_ID:-}" \
+    '{kind:"bless_result",schema_version:"1.0",status:$status,scope:$scope,exit_code:$code,run_id:$run,
 			summary:{selected_files:$selected,check_count:length,failed_checks:([.[] | select(.status=="FAIL")] | length)},
 			checks:.} + (if $next == "" then {} else {safe_next_step:$next} end)' "$records")" || return "$CI_EXIT_BLOCKED"
-	case "$format" in
-	json) printf '%s\n' "$result" ;;
-	yaml) printf '%s\n' "$result" | "$conda_bin" run --no-capture-output -n "$env_name" \
-		python -c 'import json,sys,yaml; yaml.safe_dump(json.load(sys.stdin),sys.stdout,sort_keys=False)' ;;
-	human)
-		printf 'Bless %s: %s (%s files, %s checks)\n' "$scope" "$status" \
-			"$selected" "$(jq -r '.summary.check_count' <<<"$result")"
-		[[ "$status" != FAIL ]] || printf 'SAFE_NEXT_STEP: %s\n' "$next" >&2
-		;;
-	esac
-	ci_log info bless complete "$status" || return
-	[[ "$failed" == 0 ]]
+  case "$format" in
+  json) printf '%s\n' "$result" ;;
+  yaml) printf '%s\n' "$result" | "$conda_bin" run --no-capture-output -n "$env_name" \
+    python -c 'import json,sys,yaml; yaml.safe_dump(json.load(sys.stdin),sys.stdout,sort_keys=False)' ;;
+  human)
+    printf 'Bless %s: %s (%s files, %s checks)\n' "$scope" "$status" \
+      "$selected" "$(jq -r '.summary.check_count' <<<"$result")"
+    [[ "$status" != FAIL ]] || printf 'SAFE_NEXT_STEP: %s\n' "$next" >&2
+    ;;
+  esac
+  ci_log info bless complete "$status" || return
+  [[ "$failed" == 0 ]]
 }

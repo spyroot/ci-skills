@@ -9,7 +9,7 @@ source "${BASH_SOURCE[0]%/*}/hooks.bash"
 # Stdout: human help with every accepted option.
 # Returns: 0.
 ci_dev_help() {
-	cat <<'HELP'
+  cat <<'HELP'
 Summary: Prepare the ci-skills development toolchain and Git hook (audience: agent and human).
 
 Examples:
@@ -52,23 +52,23 @@ HELP
 # Stderr: hash or file diagnostics.
 # Returns: hash or input-read status.
 ci_dev_plan_fingerprint() {
-	local root="$1" operation="$2" plan="$3" path
-	local -a inputs=(
-		Makefile bless.sh environment.yml toolchain-dependencies.json
-		scripts/dev.sh lib/bash/automation/dev.bash
-		lib/bash/core/runtime.bash lib/bash/core/toolchain.bash
-		lib/bash/automation/hooks.bash lib/bash/automation/bless.bash
-		lib/bash/core/source_graph.bash
-		ci-skills/lib/bash/core/runtime.bash
-	)
-	{
-		printf '%s\0%s\0' "$operation" "$plan"
-		for path in "${inputs[@]}"; do
-			printf '%s\0' "$path"
-			cat "$root/$path" || return
-			printf '\0'
-		done
-	} | ci_sha256_stdin
+  local root="$1" operation="$2" plan="$3" path
+  local -a inputs=(
+    Makefile bless.sh environment.yml toolchain-dependencies.json
+    scripts/dev.sh lib/bash/automation/dev.bash
+    lib/bash/core/runtime.bash lib/bash/core/toolchain.bash
+    lib/bash/automation/hooks.bash lib/bash/automation/bless.bash
+    lib/bash/core/source_graph.bash
+    ci-skills/lib/bash/core/runtime.bash
+  )
+  {
+    printf '%s\0%s\0' "$operation" "$plan"
+    for path in "${inputs[@]}"; do
+      printf '%s\0' "$path"
+      cat "$root/$path" || return
+      printf '\0'
+    done
+  } | ci_sha256_stdin
 }
 
 # Summary: Execute one selected local setup step with a bounded timeout.
@@ -80,41 +80,41 @@ ci_dev_plan_fingerprint() {
 # Idempotency: each core step reads its current state before applying.
 # Cleanup: each step owns its temporary resources.
 ci_dev_operation() {
-	local root="$1" operation="$2" mode="$3" timeout_seconds="$4" action
-	local -a actions=("$operation")
-	if [[ "$mode" == plan ]]; then
-		case "$operation" in
-		toolchain) ci_toolchain_profile "$root" bless plan ;;
-		conda) ci_toolchain_environment "$root" ci-skills plan ;;
-		hooks) ci_hooks_plan "$root" ;;
-		install)
-			ci_toolchain_profile "$root" bless plan || return
-			ci_toolchain_environment "$root" ci-skills plan || return
-			ci_hooks_plan "$root"
-			;;
-		esac
-		return
-	fi
-	if [[ "$operation" == install ]]; then actions=(toolchain conda hooks); fi
-	for action in "${actions[@]}"; do
-		case "$action" in
-		toolchain)
-			timeout "$timeout_seconds" bash -c \
-				"source \"\$1\"; ci_toolchain_profile \"\$2\" bless install" _ \
-				"$root/lib/bash/core/toolchain.bash" "$root" || return
-			;;
-		conda)
-			timeout "$timeout_seconds" bash -c \
-				"source \"\$1\"; ci_toolchain_environment \"\$2\" ci-skills install" _ \
-				"$root/lib/bash/core/toolchain.bash" "$root" || return
-			;;
-		hooks)
-			timeout "$timeout_seconds" "$BASH" -c \
-				'source "$1"; ci_hooks_install "$2"' _ \
-				"$root/lib/bash/automation/hooks.bash" "$root" || return
-			;;
-		esac
-	done
+  local root="$1" operation="$2" mode="$3" timeout_seconds="$4" action
+  local -a actions=("$operation")
+  if [[ "$mode" == plan ]]; then
+    case "$operation" in
+    toolchain) ci_toolchain_profile "$root" bless plan ;;
+    conda) ci_toolchain_environment "$root" ci-skills plan ;;
+    hooks) ci_hooks_plan "$root" ;;
+    install)
+      ci_toolchain_profile "$root" bless plan || return
+      ci_toolchain_environment "$root" ci-skills plan || return
+      ci_hooks_plan "$root"
+      ;;
+    esac
+    return
+  fi
+  if [[ "$operation" == install ]]; then actions=(toolchain conda hooks); fi
+  for action in "${actions[@]}"; do
+    case "$action" in
+    toolchain)
+      timeout "$timeout_seconds" bash -c \
+        "source \"\$1\"; ci_toolchain_profile \"\$2\" bless install" _ \
+        "$root/lib/bash/core/toolchain.bash" "$root" || return
+      ;;
+    conda)
+      timeout "$timeout_seconds" bash -c \
+        "source \"\$1\"; ci_toolchain_environment \"\$2\" ci-skills install" _ \
+        "$root/lib/bash/core/toolchain.bash" "$root" || return
+      ;;
+    hooks)
+      timeout "$timeout_seconds" "$BASH" -c \
+        "source \"\$1\"; ci_hooks_install \"\$2\"" _ \
+        "$root/lib/bash/automation/hooks.bash" "$root" || return
+      ;;
+    esac
+  done
 }
 
 # Summary: Render the final local setup result and a repair action on failure.
@@ -125,22 +125,22 @@ ci_dev_operation() {
 # Stderr: none.
 # Returns: output renderer status.
 ci_dev_result() {
-	local format="$1" operation="$2" mode="$3" status="$4" detail="$5" next="$6" fingerprint="${7:-}" result
-	local exit_code="${8:-0}"
-	if [[ "$format" == human ]]; then
-		printf '%s\nci-skills %s %s: %s\n' "$detail" "$operation" "$mode" "$status"
-		[[ -z "$fingerprint" ]] || printf 'PLAN_FINGERPRINT: %s\n' "$fingerprint"
-		[[ -z "$next" ]] || printf 'SAFE_NEXT_STEP: %s\n' "$next" >&2
-		return
-	fi
-	result="$(jq -n --arg operation "$operation" --arg mode "$mode" --arg status "$status" \
-		--arg detail "$detail" --arg next "$next" --arg run "${CI_RUN_ID:-}" \
-		--arg fingerprint "$fingerprint" --argjson code "$exit_code" \
-		'{kind:"dev_result",schema_version:"1.0",operation:$operation,mode:$mode,
+  local format="$1" operation="$2" mode="$3" status="$4" detail="$5" next="$6" fingerprint="${7:-}" result
+  local exit_code="${8:-0}"
+  if [[ "$format" == human ]]; then
+    printf '%s\nci-skills %s %s: %s\n' "$detail" "$operation" "$mode" "$status"
+    [[ -z "$fingerprint" ]] || printf 'PLAN_FINGERPRINT: %s\n' "$fingerprint"
+    [[ -z "$next" ]] || printf 'SAFE_NEXT_STEP: %s\n' "$next" >&2
+    return
+  fi
+  result="$(jq -n --arg operation "$operation" --arg mode "$mode" --arg status "$status" \
+    --arg detail "$detail" --arg next "$next" --arg run "${CI_RUN_ID:-}" \
+    --arg fingerprint "$fingerprint" --argjson code "$exit_code" \
+    '{kind:"dev_result",schema_version:"1.0",operation:$operation,mode:$mode,
 		status:$status,exit_code:$code,run_id:$run,detail:$detail} +
 		(if $next == "" then {} else {safe_next_step:$next} end) +
 		(if $fingerprint == "" then {} else {plan_fingerprint:$fingerprint} end)')" || return
-	printf '%s\n' "$result"
+  printf '%s\n' "$result"
 }
 
 # Summary: Refuse an invalid setup request with a safe next step.
@@ -150,10 +150,10 @@ ci_dev_result() {
 # Stderr: blocker and repair action.
 # Returns: the supplied failure code.
 ci_dev_refuse() {
-	local format="$1" operation="$2" mode="$3" code="$4" reason="$5" next="$6"
-	printf 'BLOCKER: %s\nSAFE_NEXT_STEP: %s\n' "$reason" "$next" >&2
-	ci_dev_result "$format" "$operation" "$mode" FAIL '' "$next" "${7:-}" "$code" || return
-	return "$code"
+  local format="$1" operation="$2" mode="$3" code="$4" reason="$5" next="$6"
+  printf 'BLOCKER: %s\nSAFE_NEXT_STEP: %s\n' "$reason" "$next" >&2
+  ci_dev_result "$format" "$operation" "$mode" FAIL '' "$next" "${7:-}" "$code" || return
+  return "$code"
 }
 
 # Summary: Parse setup options, select the requested step, and return its result.
@@ -162,124 +162,124 @@ ci_dev_refuse() {
 # Stderr: classified diagnostics.
 # Returns: 0 on planned or applied; 64 on usage; 69 on missing tools; otherwise step status.
 ci_dev_main() {
-	local root="$1" operation='' mode=plan format=human timeout_seconds=600
-	local confirm='' dry_explicit=false apply_explicit=false detail='' status=PASS next='' code=0
-	local plan='' fingerprint=''
-	shift
-	if [[ "${1:-}" == --help ]]; then
-		ci_dev_help
-		return
-	fi
-	if [[ "${1:-}" == --describe ]]; then
-		cat "$root/schemas/commands/help/dev.help.json"
-		return
-	fi
-	operation="${1:-}"
-	case "$operation" in install | toolchain | conda | hooks) shift ;; *)
-		ci_dev_help >&2
-		return "$CI_EXIT_USAGE"
-		;;
-	esac
-	while (($#)); do
-		case "$1" in
-		--dry-run)
-			mode=plan
-			dry_explicit=true
-			;;
-		--apply)
-			mode=apply
-			apply_explicit=true
-			;;
-		--confirm-install)
-			shift
-			confirm="${1:-}"
-			[[ "$confirm" =~ ^[0-9a-f]{64}$ ]] || {
-				ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
-					'invalid plan fingerprint' 'Pass the SHA-256 PLAN_FINGERPRINT from the dry-run result.' || return $?
-			}
-			;;
-		--json) format=json ;;
-		--yaml) format=yaml ;;
-		--timeout)
-			shift
-			timeout_seconds="${1:-}"
-			[[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || return "$CI_EXIT_USAGE"
-			((timeout_seconds <= 3600)) || return "$CI_EXIT_USAGE"
-			;;
-		--log-format)
-			shift
-			CI_LOG_FORMAT="${1:-}"
-			[[ "$CI_LOG_FORMAT" == text || "$CI_LOG_FORMAT" == json ]] || return "$CI_EXIT_USAGE"
-			;;
-		--log-level)
-			shift
-			CI_LOG_LEVEL="${1:-}"
-			case "$CI_LOG_LEVEL" in debug | info | warning | error) ;; *) return "$CI_EXIT_USAGE" ;; esac
-			;;
-		--log-file)
-			shift
-			CI_LOG_FILE="${1:-}"
-			[[ -n "$CI_LOG_FILE" && "$CI_LOG_FILE" != --* ]] || return "$CI_EXIT_USAGE"
-			;;
-		--run-id)
-			shift
-			CI_RUN_ID="${1:-}"
-			[[ -n "$CI_RUN_ID" && "$CI_RUN_ID" != --* ]] || return "$CI_EXIT_USAGE"
-			;;
-		--help)
-			ci_dev_help
-			return
-			;;
-		--describe)
-			cat "$root/schemas/commands/help/dev.help.json"
-			return
-			;;
-		*)
-			ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
-				'unknown development option' 'Run scripts/dev.sh --help.' || return $?
-			;;
-		esac
-		shift
-	done
-	if [[ "$dry_explicit" == true && "$apply_explicit" == true ]]; then
-		ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
-			'dry-run and apply conflict' 'Choose exactly one execution mode.' || return $?
-	fi
-	if [[ "$mode" == apply && -z "$confirm" ]]; then
-		ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
-			'apply lacks confirmation' 'Run the dry-run, then pass --apply --confirm-install PLAN_FINGERPRINT.' || return $?
-	fi
-	plan="$(ci_dev_operation "$root" "$operation" plan "$timeout_seconds")" || code=$?
-	if ((code)); then
-		ci_dev_refuse "$format" "$operation" "$mode" "$code" \
-			'plan failed' 'Repair the reported prerequisite and rerun the dry-run.' || return $?
-	fi
-	fingerprint="$(ci_dev_plan_fingerprint "$root" "$operation" "$plan")" || return "$CI_EXIT_BLOCKED"
-	if [[ "$mode" == apply && "$confirm" != "$fingerprint" ]]; then
-		ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
-			'plan inputs changed' 'Rerun the dry-run and review its new PLAN_FINGERPRINT.' \
-			"$fingerprint" || return $?
-	fi
-	if [[ "$mode" == apply ]] && ! command -v timeout >/dev/null 2>&1; then
-		ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_BLOCKED" \
-			'timeout command is unavailable' 'Run make toolchain to provide coreutils.' || return $?
-	fi
-	CI_LOG_FORMAT="${CI_LOG_FORMAT:-text}" CI_LOG_LEVEL="${CI_LOG_LEVEL:-info}"
-	CI_RUN_ID="${CI_RUN_ID:-}"
-	ci_log info dev start "$operation $mode" || return
-	if [[ "$mode" == plan ]]; then
-		detail="$plan"
-	else
-		detail="$(ci_dev_operation "$root" "$operation" "$mode" "$timeout_seconds")" || code=$?
-	fi
-	if ((code)); then
-		status=FAIL
-		next='Inspect the operation diagnosis, repair the named dependency, and rerun the dry-run plan.'
-		ci_log error dev failed "$operation exited $code" || return
-	else
-		if [[ "$mode" == plan ]]; then status=PLANNED; fi
-		ci_log info dev complete "$operation $mode" || return
-	fi
-	ci_dev_result "$format" "$operation" "$mode" "$status" "$detail" "$next" "$fingerprint" "$code" || return
-	return "$code"
+  local root="$1" operation='' mode=plan format=human timeout_seconds=600
+  local confirm='' dry_explicit=false apply_explicit=false detail='' status=PASS next='' code=0
+  local plan='' fingerprint=''
+  shift
+  if [[ "${1:-}" == --help ]]; then
+    ci_dev_help
+    return
+  fi
+  if [[ "${1:-}" == --describe ]]; then
+    cat "$root/schemas/commands/help/dev.help.json"
+    return
+  fi
+  operation="${1:-}"
+  case "$operation" in install | toolchain | conda | hooks) shift ;; *)
+    ci_dev_help >&2
+    return "$CI_EXIT_USAGE"
+    ;;
+  esac
+  while (($#)); do
+    case "$1" in
+    --dry-run)
+      mode=plan
+      dry_explicit=true
+      ;;
+    --apply)
+      mode=apply
+      apply_explicit=true
+      ;;
+    --confirm-install)
+      shift
+      confirm="${1:-}"
+      [[ "$confirm" =~ ^[0-9a-f]{64}$ ]] || {
+        ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
+          'invalid plan fingerprint' 'Pass the SHA-256 PLAN_FINGERPRINT from the dry-run result.' || return $?
+      }
+      ;;
+    --json) format=json ;;
+    --yaml) format=yaml ;;
+    --timeout)
+      shift
+      timeout_seconds="${1:-}"
+      [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || return "$CI_EXIT_USAGE"
+      ((timeout_seconds <= 3600)) || return "$CI_EXIT_USAGE"
+      ;;
+    --log-format)
+      shift
+      CI_LOG_FORMAT="${1:-}"
+      [[ "$CI_LOG_FORMAT" == text || "$CI_LOG_FORMAT" == json ]] || return "$CI_EXIT_USAGE"
+      ;;
+    --log-level)
+      shift
+      CI_LOG_LEVEL="${1:-}"
+      case "$CI_LOG_LEVEL" in debug | info | warning | error) ;; *) return "$CI_EXIT_USAGE" ;; esac
+      ;;
+    --log-file)
+      shift
+      CI_LOG_FILE="${1:-}"
+      [[ -n "$CI_LOG_FILE" && "$CI_LOG_FILE" != --* ]] || return "$CI_EXIT_USAGE"
+      ;;
+    --run-id)
+      shift
+      CI_RUN_ID="${1:-}"
+      [[ -n "$CI_RUN_ID" && "$CI_RUN_ID" != --* ]] || return "$CI_EXIT_USAGE"
+      ;;
+    --help)
+      ci_dev_help
+      return
+      ;;
+    --describe)
+      cat "$root/schemas/commands/help/dev.help.json"
+      return
+      ;;
+    *)
+      ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
+        'unknown development option' 'Run scripts/dev.sh --help.' || return $?
+      ;;
+    esac
+    shift
+  done
+  if [[ "$dry_explicit" == true && "$apply_explicit" == true ]]; then
+    ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
+      'dry-run and apply conflict' 'Choose exactly one execution mode.' || return $?
+  fi
+  if [[ "$mode" == apply && -z "$confirm" ]]; then
+    ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
+      'apply lacks confirmation' 'Run the dry-run, then pass --apply --confirm-install PLAN_FINGERPRINT.' || return $?
+  fi
+  plan="$(ci_dev_operation "$root" "$operation" plan "$timeout_seconds")" || code=$?
+  if ((code)); then
+    ci_dev_refuse "$format" "$operation" "$mode" "$code" \
+      'plan failed' 'Repair the reported prerequisite and rerun the dry-run.' || return $?
+  fi
+  fingerprint="$(ci_dev_plan_fingerprint "$root" "$operation" "$plan")" || return "$CI_EXIT_BLOCKED"
+  if [[ "$mode" == apply && "$confirm" != "$fingerprint" ]]; then
+    ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_USAGE" \
+      'plan inputs changed' 'Rerun the dry-run and review its new PLAN_FINGERPRINT.' \
+      "$fingerprint" || return $?
+  fi
+  if [[ "$mode" == apply ]] && ! command -v timeout >/dev/null 2>&1; then
+    ci_dev_refuse "$format" "$operation" "$mode" "$CI_EXIT_BLOCKED" \
+      'timeout command is unavailable' 'Run make toolchain to provide coreutils.' || return $?
+  fi
+  CI_LOG_FORMAT="${CI_LOG_FORMAT:-text}" CI_LOG_LEVEL="${CI_LOG_LEVEL:-info}"
+  CI_RUN_ID="${CI_RUN_ID:-}"
+  ci_log info dev start "$operation $mode" || return
+  if [[ "$mode" == plan ]]; then
+    detail="$plan"
+  else
+    detail="$(ci_dev_operation "$root" "$operation" "$mode" "$timeout_seconds")" || code=$?
+  fi
+  if ((code)); then
+    status=FAIL
+    next='Inspect the operation diagnosis, repair the named dependency, and rerun the dry-run plan.'
+    ci_log error dev failed "$operation exited $code" || return
+  else
+    if [[ "$mode" == plan ]]; then status=PLANNED; fi
+    ci_log info dev complete "$operation $mode" || return
+  fi
+  ci_dev_result "$format" "$operation" "$mode" "$status" "$detail" "$next" "$fingerprint" "$code" || return
+  return "$code"
 }
