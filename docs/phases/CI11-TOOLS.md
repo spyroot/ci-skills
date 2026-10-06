@@ -442,7 +442,8 @@ A tool without a committed receipt for its case is not delivered.
 
 Inventory of 2026-10-06 at the source commit recorded with the source repo
 root in the ignored `.internal/plans/` pointer; paths are relative to that
-root and line numbers are from that commit. "new" marks a read we asked for
+root and line numbers are from that commit; the full inventories are
+[ci11-inventories](../plans/2026-10-06/ci11-inventories/index.md). "new" marks a read we asked for
 that no source script performs; it is built to the sentence and nothing more.
 
 ### Cross-cutting adaptations for every port

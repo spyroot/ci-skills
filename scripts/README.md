@@ -18,5 +18,5 @@ scripts/                       # dev entrypoints: check.sh and scripts/bash/core
 tests/{python,bash,acceptance} # pytest, bats, the live receipt contract and sanitized receipts
 schemas/                       # record schemas, planned (CI07-SCHEMA); empty today
 vendor/                        # vendored skills and the one lock, planned (CI05-VENDOR)
-docs/phases/                   # CI01-CATALOG ... CI11-TOOLS
+docs/                          # index README.md; phases/ CI01..CI11; dated plans/, reviews/, brainstorm/
 ```
