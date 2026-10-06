@@ -1,0 +1,224 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/skill-index.schema.json",
+  "title": "skill_index",
+  "description": "The record `bin/ci-skills list --json` prints (CI01-CATALOG, Index record): one entry per discovered skill, local or vendored, plus the invalid ones under errors. Closed: unknown fields are refused.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "skills"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "skill_index"
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/skill"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/error"
+      }
+    }
+  },
+  "$defs": {
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path",
+        "source",
+        "entry",
+        "description",
+        "tags"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]{1,64}$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!(.*/)?\\.\\.(/|$)).+$"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry": {
+          "const": "SKILL.md"
+        },
+        "manifest": {
+          "const": "tools.json"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reference"
+          }
+        },
+        "depends_on": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,64}$"
+          }
+        },
+        "upstream": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "path": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "license": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "if": {
+        "properties": {
+          "source": {
+            "const": "local"
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "then": {
+        "required": [
+          "manifest",
+          "references",
+          "depends_on"
+        ],
+        "not": {
+          "required": [
+            "upstream"
+          ]
+        }
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "manifest"
+              ]
+            },
+            {
+              "required": [
+                "references"
+              ]
+            },
+            {
+              "required": [
+                "depends_on"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "kind"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!(.*/)?\\.\\.(/|$)).+$"
+        },
+        "kind": {
+          "enum": [
+            "operations",
+            "knowledge"
+          ]
+        },
+        "index": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!(.*/)?\\.\\.(/|$)).+$"
+        },
+        "domain": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "field",
+        "rule"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!(.*/)?\\.\\.(/|$)).+$"
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rule": {
+          "enum": [
+            "frontmatter_missing",
+            "frontmatter_invalid",
+            "name_mismatch",
+            "manifest_invalid",
+            "lock_entry_missing",
+            "symlink_unexpected"
+          ]
+        },
+        "safe_next_step": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

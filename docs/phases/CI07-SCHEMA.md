@@ -11,7 +11,7 @@ versioned.
 ## Schemas
 
 All schemas live under `schemas/` at the repository root (planned, this
-phase; only `command-contract.schema.json` is implemented so far), one file per record kind,
+phase; `command-contract` and `skill-index` are implemented so far), one file per record kind,
 named `<kind>.schema.json`. They use JSON Schema draft 2020-12 and the style
 of the shared standards' own schemas: `$schema`, `$id`, `title`, `type`,
 `required`, `properties` and `$defs`. A kind without a schema cannot be
@@ -25,7 +25,7 @@ adds the record, or `today` where the record exists in the tree.
 | --- | --- | --- | --- | --- |
 | `skill-frontmatter` | none, upstream shape | the YAML block in each `SKILL.md` | authors | missing |
 | `skill-manifest` | `skill_manifest` | `ci-skills/tools.json` | `tools/render_manifest.py` | missing |
-| `skill-index` | `skill_index` | `bin/ci-skills list --json` | `tools/skillkit/discover.py` | missing |
+| `skill-index` | `skill_index` | `bin/ci-skills list --json` | `tools/skillkit/discover.py` | implemented |
 | `vendor-lock` | `skill_vendor_lock` | `vendor/vendor.lock.json` | `bin/ci-skills update` | missing |
 | `vendor-declarations` | not named yet | `vendor/vendor.toml` | by hand | missing |
 | `tool-operations` | `tool_operations` | `bin/ci-skills tools --json` | `core/tool_operations.py` | missing |
@@ -35,11 +35,17 @@ adds the record, or `today` where the record exists in the tree.
 | `command-contract` | `command_contract` | each command's `--describe` | `core/catalog.py` | implemented |
 | `command-result` | none, the envelope | the fields every report kind shares | `core/report.py` | missing |
 
-`command-contract` is implemented as
-[`schemas/command-contract.schema.json`](../../schemas/command-contract.schema.json), built from the `--describe`
-output of all 15 Python commands. `check-jsonschema --schemafile schemas/command-contract.schema.json <record>`
-accepts all 15 and refuses an unknown field, a missing `kind` and a malformed option name. Every row marked
-missing is this phase's to implement; a record kind without its schema cannot be emitted.
+Implemented, each checked with `check-jsonschema --schemafile <schema> <record>`:
+
+- [`schemas/command-contract.schema.json`](../../schemas/command-contract.schema.json), built from the
+  `--describe` output of all 15 Python commands; it accepts all 15 and refuses an unknown field, a missing `kind`
+  and a malformed option name.
+- [`schemas/skill-index.schema.json`](../../schemas/skill-index.schema.json), built from CI01-CATALOG's index
+  record; it accepts that section's example and the `ci-skills` record read from `ci-skills/SKILL.md` and
+  `tools.json`, and refuses a local skill without its manifest, a vendored skill with one, an unknown field, an
+  unknown error rule and an invalid name. Its producer, `bin/ci-skills list`, is not built yet (CI01-CATALOG).
+
+Every row marked missing is this phase's to implement; a record kind without its schema cannot be emitted.
 | one file per report kind | the kinds below | a command's result and its receipt | the command | see below |
 
 Notes on the rows:
