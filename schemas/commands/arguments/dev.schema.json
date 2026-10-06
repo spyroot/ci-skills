@@ -13,12 +13,12 @@
     "log_format": {"enum": ["text", "json"]},
     "log_level": {"enum": ["debug", "info", "warning", "error"]},
     "log_file": {"type": "string", "minLength": 1},
-    "confirmed": {"type": "boolean"}
+    "confirm_install": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
   },
   "allOf": [
     {
       "if": {"properties": {"mode": {"const": "apply"}}},
-      "then": {"properties": {"confirmed": {"const": true}}, "required": ["confirmed"]}
+      "then": {"required": ["confirm_install"]}
     }
   ],
   "additionalProperties": false

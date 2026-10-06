@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Author Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
+# shellcheck source=ci-skills/lib/bash/core/runtime.bash
+source "${BASH_SOURCE[0]%/*}/../../../ci-skills/lib/bash/core/runtime.bash"
 # shellcheck source=scripts/bash/core/toolchain.bash
 source "${BASH_SOURCE[0]%/*}/toolchain.bash"
 # shellcheck source=scripts/bash/core/source_graph.bash
@@ -24,6 +26,10 @@ Options:
   --staged   Check exact Git index bytes (default).
   --all      Check tracked working-tree files.
   --dry-run  List selected checks without running linters.
+  --log-format text|json  Select diagnostic format; default text.
+  --log-level debug|info|warning|error  Minimum diagnostic level; default info.
+  --log-file PATH  Append diagnostics to a file.
+  --run-id ID  Attach a caller run ID to diagnostics and machine output.
   --describe  Show the paired argument and result schema paths.
   --help     Show help without requiring tools or credentials.
 
@@ -54,8 +60,9 @@ ci_bless_blocked() {
 		return
 	fi
 	if command -v jq >/dev/null 2>&1; then
-		result="$(jq -n --arg check "$check" --arg next "$next" \
+		result="$(jq -n --arg check "$check" --arg next "$next" --arg run "${CI_RUN_ID:-}" \
 			'{kind:"bless_result",schema_version:"1.0",status:"FAIL",scope:"staged",
+			run_id:$run,
 			summary:{selected_files:0,check_count:1,failed_checks:1},
 			checks:[{path:"prerequisite",check:$check,status:"FAIL"}],safe_next_step:$next}')" || return
 	else
@@ -190,6 +197,26 @@ ci_bless_main() {
 		--dry-run) dry_run=true ;;
 		--json) format=json ;;
 		--yaml) format=yaml ;;
+		--log-format)
+			shift
+			CI_LOG_FORMAT="${1:-}"
+			[[ "$CI_LOG_FORMAT" == text || "$CI_LOG_FORMAT" == json ]] || return 64
+			;;
+		--log-level)
+			shift
+			CI_LOG_LEVEL="${1:-}"
+			case "$CI_LOG_LEVEL" in debug | info | warning | error) ;; *) return 64 ;; esac
+			;;
+		--log-file)
+			shift
+			CI_LOG_FILE="${1:-}"
+			[[ -n "$CI_LOG_FILE" && "$CI_LOG_FILE" != --* ]] || return 64
+			;;
+		--run-id)
+			shift
+			CI_RUN_ID="${1:-}"
+			[[ -n "$CI_RUN_ID" && "$CI_RUN_ID" != --* ]] || return 64
+			;;
 		--describe)
 			cat "$CI_BLESS_ROOT/schemas/commands/help/bless.help.json"
 			return
@@ -229,6 +256,7 @@ ci_bless_main() {
 			}
 		done
 	fi
+	ci_log info bless start "$scope" || return
 	CI_BLESS_TEMP="$(mktemp -d)" || return 69
 	trap 'rm -rf -- "$CI_BLESS_TEMP"' EXIT
 	records="$CI_BLESS_TEMP/records"
@@ -284,16 +312,21 @@ ci_bless_main() {
 	if [[ "$status" == FAIL ]]; then
 		next='Inspect the reported check diagnostics, repair the staged content, and rerun make bless.'
 	fi
-	result="$(jq -s --arg status "$status" --arg scope "$scope" --argjson selected "$selected" --arg next "$next" \
-		'{kind:"bless_result",schema_version:"1.0",status:$status,scope:$scope,
+	result="$(jq -s --arg status "$status" --arg scope "$scope" --argjson selected "$selected" \
+		--arg next "$next" --arg run "${CI_RUN_ID:-}" \
+		'{kind:"bless_result",schema_version:"1.0",status:$status,scope:$scope,run_id:$run,
 			summary:{selected_files:$selected,check_count:length,failed_checks:([.[] | select(.status=="FAIL")] | length)},
 			checks:.} + (if $next == "" then {} else {safe_next_step:$next} end)' "$records")" || return 69
 	case "$format" in
 	json) printf '%s\n' "$result" ;;
 	yaml) printf '%s\n' "$result" | "$conda_bin" run --no-capture-output -n "$env_name" \
 		python -c 'import json,sys,yaml; yaml.safe_dump(json.load(sys.stdin),sys.stdout,sort_keys=False)' ;;
-	human) printf 'Bless %s: %s (%s files, %s checks)\n' "$scope" "$status" \
-		"$selected" "$(jq -r '.summary.check_count' <<<"$result")" ;;
+	human)
+		printf 'Bless %s: %s (%s files, %s checks)\n' "$scope" "$status" \
+			"$selected" "$(jq -r '.summary.check_count' <<<"$result")"
+		[[ "$status" != FAIL ]] || printf 'SAFE_NEXT_STEP: %s\n' "$next" >&2
+		;;
 	esac
+	ci_log info bless complete "$status" || return
 	[[ "$failed" == 0 ]]
 }

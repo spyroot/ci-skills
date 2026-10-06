@@ -3,6 +3,9 @@
 Status: proposed. This page orders the phases; each phase document owns its
 own design, steps and gates. Read back against the tree at `e85c7c8` on
 2026-10-06.
+The older block-0 and CI03 gate steps below still reference the rejected
+`scripts/check.sh` route; they require a separate gate decision before use.
+CI04-HOOKS is the independent local hook delivery.
 
 ## Terms
 
@@ -44,7 +47,7 @@ second implementation of a behaviour the library has is a defect.
 | CI09-REFERENCE | tool operations, knowledge references, the navigator | CI01, CI07, CI05, CI02 |
 | CI08-ROUTING | tags in the catalog; the `SKILL.md` router (`REFERENCES` is CI09's) | CI05, CI01, CI09 |
 | CI11-TOOLS | the tool catalogue and the port of the source repo's scripts | CI02-CLI, CI07-SCHEMA, CI09-REFERENCE |
-| CI04-HOOKS | advisory local hooks | CI03-GATES, CI05-VENDOR |
+| CI04-HOOKS | local `bless.sh` pre-commit hook and installer | nothing |
 
 ## Order
 
@@ -64,14 +67,14 @@ second implementation of a behaviour the library has is a defect.
    the installed copy under `~/.codex/skills` is reinstalled (today it
    carries both `bin/` and `scripts/`).
 1. These phase documents, in one pull request (#29).
-2. CI03-GATES (G0 records D-GATE).
-3. CI07-SCHEMA, then CI02-CLI.
-4. CI05-VENDOR.
-5. CI01-CATALOG.
-6. CI06-TESTS.
-7. CI09-REFERENCE, then CI08-ROUTING on top of it.
-8. CI11-TOOLS, one tool per pull request in the catalogue's order.
-9. CI04-HOOKS.
+2. CI04-HOOKS (local source blessing; no CI dependency).
+3. CI03-GATES (G0 records D-GATE).
+4. CI07-SCHEMA, then CI02-CLI.
+5. CI05-VENDOR.
+6. CI01-CATALOG.
+7. CI06-TESTS.
+8. CI09-REFERENCE, then CI08-ROUTING on top of it.
+9. CI11-TOOLS, one tool per pull request in the catalogue's order.
 
 ## How a phase lands
 

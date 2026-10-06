@@ -4,6 +4,8 @@ Status: proposed. Order and dependencies: CI10-PHASES, Phases. Covers every
 CIxx phase: each phase's pull request carries its own tests, listed in that
 phase's "Delivery, test and proof" section, and this page owns the rules, the
 layers, the smoke contract and the test command.
+Its historical `scripts/check.sh` references are unresolved gate plans;
+CI04-HOOKS now uses `bless.sh` for local static checks.
 
 ## Rules
 

@@ -25,16 +25,20 @@ help:
 		'docker             Run the Linux hook smoke built into the image.'
 
 install:
-	@$(ROOT)/scripts/dev.sh install --apply --confirm-install
+	@fingerprint=$$($(ROOT)/scripts/dev.sh install --dry-run --json | jq -er .plan_fingerprint) && \
+		$(ROOT)/scripts/dev.sh install --apply --confirm-install "$$fingerprint"
 
 toolchain:
-	@$(ROOT)/scripts/dev.sh toolchain --apply --confirm-install
+	@fingerprint=$$($(ROOT)/scripts/dev.sh toolchain --dry-run --json | jq -er .plan_fingerprint) && \
+		$(ROOT)/scripts/dev.sh toolchain --apply --confirm-install "$$fingerprint"
 
 conda:
-	@$(ROOT)/scripts/dev.sh conda --apply --confirm-install
+	@fingerprint=$$($(ROOT)/scripts/dev.sh conda --dry-run --json | jq -er .plan_fingerprint) && \
+		$(ROOT)/scripts/dev.sh conda --apply --confirm-install "$$fingerprint"
 
 install-hooks:
-	@$(ROOT)/scripts/dev.sh hooks --apply --confirm-install
+	@fingerprint=$$($(ROOT)/scripts/dev.sh hooks --dry-run --json | jq -er .plan_fingerprint) && \
+		$(ROOT)/scripts/dev.sh hooks --apply --confirm-install "$$fingerprint"
 
 bless:
 	@$(ROOT)/bless.sh --staged

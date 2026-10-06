@@ -12,10 +12,12 @@
     "status": {"enum": ["PLANNED", "PASS", "FAIL"]},
     "run_id": {"type": "string"},
     "detail": {"type": "string"},
+    "plan_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "safe_next_step": {"type": "string", "minLength": 1}
   },
   "allOf": [
-    {"if": {"properties": {"status": {"const": "FAIL"}}}, "then": {"required": ["safe_next_step"]}}
+    {"if": {"properties": {"status": {"const": "FAIL"}}}, "then": {"required": ["safe_next_step"]}},
+    {"if": {"properties": {"status": {"enum": ["PLANNED", "PASS"]}}}, "then": {"required": ["plan_fingerprint"]}}
   ],
   "additionalProperties": false
 }

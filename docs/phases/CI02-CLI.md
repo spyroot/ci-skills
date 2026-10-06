@@ -157,12 +157,13 @@ Every command follows the pinned agent-grade checklist, as:
    - The installer binds the same way today: `--apply` with
      `--confirm-install FINGERPRINT` or `--confirm-upgrade FINGERPRINT`
      (`tools/install_ci_skills.py:486-492`).
+   - The CI04-HOOKS development installer takes the same binding today:
+     `--apply --confirm-install SHA256` consumes its dry-run plan fingerprint.
    - The maintenance verbs of `bin/ci-skills` (planned, CI05-VENDOR),
-     `install` (CI01-CATALOG) and `update` (CI05-VENDOR), the hook
-     installer (CI04-HOOKS) and `tools/update_reference.py`
-     (CI09-REFERENCE) take the same binding. The phase documents write it
-     `--apply --confirm-plan DIGEST`, the form the mutating commands in the
-     tree already use; its spelling is open decision D-CONFIRM (below).
+     `install` (CI01-CATALOG), `update` (CI05-VENDOR), and
+     `tools/update_reference.py` (CI09-REFERENCE) must take the same
+     binding. Their confirmation spelling remains open decision D-CONFIRM
+     (below); the phase documents write it `--apply --confirm-plan DIGEST`.
 
    The `cli` gate checks every mutating command for the plan-bound form.
 7. **Names.** Python mains are `ci-skills/bin/<domain>_<noun>.py`

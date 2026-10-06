@@ -7,7 +7,11 @@
   "properties": {
     "scope": {"enum": ["staged", "all"]},
     "dry_run": {"type": "boolean"},
-    "format": {"enum": ["human", "json", "yaml"]}
+    "format": {"enum": ["human", "json", "yaml"]},
+    "log_format": {"enum": ["text", "json"]},
+    "log_level": {"enum": ["debug", "info", "warning", "error"]},
+    "log_file": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "minLength": 1}
   },
   "additionalProperties": false
 }

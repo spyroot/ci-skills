@@ -4,15 +4,15 @@
   "command": "scripts/dev.sh",
   "audience": ["agent", "human"],
   "summary": "Prepare the ci-skills development toolchain and Git hook.",
-  "description": "Defaults to a read-only plan; apply requires explicit confirmation.",
+  "description": "Defaults to a read-only plan; apply requires the exact dry-run fingerprint.",
   "examples": [
     {"purpose": "Inspect the complete install plan", "command": "scripts/dev.sh install --dry-run"},
-    {"purpose": "Apply the reviewed plan", "command": "scripts/dev.sh install --apply --confirm-install"}
+    {"purpose": "Apply the reviewed plan", "command": "scripts/dev.sh install --apply --confirm-install PLAN_FINGERPRINT"}
   ],
   "options": [
     {"name": "--dry-run", "description": "Show the plan; default"},
     {"name": "--apply", "description": "Execute the selected operation"},
-    {"name": "--confirm-install", "description": "Confirm explicit apply"},
+    {"name": "--confirm-install SHA256", "description": "Require the exact dry-run plan fingerprint"},
     {"name": "--timeout SECONDS", "description": "Bound each install step"},
     {"name": "--log-format text|json", "description": "Select diagnostic format"},
     {"name": "--log-level LEVEL", "description": "Select minimum diagnostic level"},
@@ -24,7 +24,7 @@
     {"name": "--help", "description": "Render human help"}
   ],
   "output_modes": ["human", "json", "yaml"],
-  "usage": ["scripts/dev.sh OPERATION [--dry-run|--apply --confirm-install] [options]"],
+  "usage": ["scripts/dev.sh OPERATION [--dry-run|--apply --confirm-install PLAN_FINGERPRINT] [options]"],
   "arguments_schema": "schemas/commands/arguments/dev.schema.json",
   "result_schema": "schemas/commands/results/dev.schema.json"
 }

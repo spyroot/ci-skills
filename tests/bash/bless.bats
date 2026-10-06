@@ -14,6 +14,7 @@ setup() {
   run "$root/scripts/dev.sh" hooks --dry-run --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "PLANNED"'* ]]
+  [[ "$output" == *'"plan_fingerprint": '* ]]
 }
 
 @test 'development install refuses apply without confirmation' {
@@ -21,6 +22,33 @@ setup() {
   [ "$status" -eq 64 ]
   [[ "$output" == *'"status": "FAIL"'* ]]
   [[ "$output" == *'SAFE_NEXT_STEP:'* ]]
+}
+
+@test 'hook apply consumes the reviewed plan and reads back an installed hook' {
+  cp -R "$root/scripts" "$root/ci-skills" "$fixture/"
+  cp "$root/Makefile" "$root/bless.sh" "$root/environment.yml" \
+    "$root/toolchain-dependencies.json" "$fixture/"
+  plan="$("$fixture/scripts/dev.sh" hooks --dry-run --json)"
+  fingerprint="$(jq -er .plan_fingerprint <<<"$plan")"
+  run "$fixture/scripts/dev.sh" hooks --apply --confirm-install "$fingerprint" --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"status": "PASS"'* ]]
+  [ -x "$fixture/.git/hooks/pre-commit" ]
+  grep -Fq 'ci-skills-bless-v1' "$fixture/.git/hooks/pre-commit"
+}
+
+@test 'hook apply refuses a stale plan without installing a hook' {
+  cp -R "$root/scripts" "$root/ci-skills" "$fixture/"
+  cp "$root/Makefile" "$root/bless.sh" "$root/environment.yml" \
+    "$root/toolchain-dependencies.json" "$fixture/"
+  plan="$("$fixture/scripts/dev.sh" hooks --dry-run --json)"
+  fingerprint="$(jq -er .plan_fingerprint <<<"$plan")"
+  printf '\n' >>"$fixture/toolchain-dependencies.json"
+  run "$fixture/scripts/dev.sh" hooks --apply --confirm-install "$fingerprint" --json
+  [ "$status" -eq 64 ]
+  [[ "$output" == *'"status": "FAIL"'* ]]
+  [[ "$output" == *'"safe_next_step": '* ]]
+  [ ! -e "$fixture/.git/hooks/pre-commit" ]
 }
 
 @test 'secret-class paths are refused while a near match is allowed' {

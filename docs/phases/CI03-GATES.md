@@ -1,6 +1,9 @@
 # CI03-GATES: verification gates
 
 Status: proposed. Order and dependencies: CI10-PHASES, Phases.
+The `scripts/check.sh` design below predates the operator's rejection of that
+entrypoint. It is unresolved gate history, not an implementation instruction.
+CI04-HOOKS separately owns the local `bless.sh` pre-commit hook.
 
 ## Goal
 
