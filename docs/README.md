@@ -26,11 +26,8 @@ decisions taken and the open decisions.
 
 ## Records
 
-`GAL-*` is the former name of the `CIxx` phases, renamed in `e6254bd`.
-
 | Date | Kind | Record | What it holds |
 | --- | --- | --- | --- |
-| 2026-10-02 | brainstorm | [brainstorms](brainstorm/2026-10-02/) | one brainstorm per GAL phase document |
 | 2026-10-06 | plan | [plan](plans/2026-10-06/reference-and-docs-readjust.md) | the approved plan behind PR #29 |
 | 2026-10-06 | inventory | [inventories](plans/2026-10-06/ci11-inventories/index.md) | source inventories for CI11 |
 

@@ -1,6 +1,6 @@
 # Event trace A/B benchmark
 
-This harness measures the first GAL-19 optimization candidate: replacing two
+This harness measures the first optimization candidate: replacing two
 whole-cluster EventList reads with one preferred API read and a compatibility
 fallback. It does not implement that optimization.
 
