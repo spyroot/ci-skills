@@ -51,6 +51,7 @@ and nothing more.
 | GitLab pipeline fetch | `gitlab_pipeline.py fetch` | `core/gitlab_pipelines.py` | gitlab | no | exists |
 | GitLab pipeline track | `gitlab_pipeline.py track` | `core/gitlab_pipelines.py` | gitlab | no | port |
 | GitLab pipeline logs | `gitlab_pipeline.py logs` | `core/gitlab_jobs.py` | gitlab | no | port |
+| GitLab pipeline start, retry, cancel | `gitlab_pipeline.py start` | `core/gitlab_pipelines.py` | gitlab | yes | README |
 | GitLab pipeline schedules | `gitlab_schedule.py` | `core/gitlab_schedules.py` | gitlab | play, create, update | port |
 | Merge-request checks | `gitlab_mr.py check` | `core/gitlab_merge_requests.py` | gitlab | no | port |
 | OpenShift routes, full view | `ocp_route.py` | `core/ocp_routes.py` | kubernetes | no | port |
@@ -162,6 +163,82 @@ node_spec = "ocp/reference-node-spec.yaml"
 source = "rhcos"
 serve_port = 8080
 ```
+
+## Concurrency and combo patterns
+
+- **Parallel where the task is a collection.** A tool that reads many
+  objects of one kind (pods, nodes, routes, jobs, repositories, machines)
+  fans the reads out through the executor `core/collect.py` already uses, with
+  a declared worker bound and a per-call timeout, and records each read's
+  duration beside the wall time. A loop that runs the same `kubectl` or `oc`
+  command once per object is a defect, not a tool; review rejects it.
+  `k8s_state.py`, `ocp_ha.py`, `ocp_route.py --probe`, `ocp_machine.py`,
+  `gitlab_pipeline.py logs` and `harbor_sanity.py` are collections.
+- **Async only where truly needed.** Threads over subprocess and HTTP calls
+  are enough for every tool in the catalogue; an `async` interface is added
+  only when a tool must hold many open connections or streams at once, and
+  then as a separate contract, never by detecting an event loop
+  (`software-design.md`, "Synchronous and Asynchronous Contracts"). No such
+  tool exists in this catalogue today.
+- **Combo patterns, from the README.** Every row carries one of the four
+  groupings the README defines: *Visibility* (one report answers a status
+  question: `ocp_route.py`, `ocp_ha.py`, `ocp_machine.py`, `k8s_state.py`,
+  `harbor_sanity.py`), *CI Combo* (one action wires the GitLab steps an
+  agent would run separately: `gitlab_job.py`, `gitlab_pipeline.py`,
+  `gitlab_schedule.py`, `gitlab_mr.py`), *Generic Combo* (a view of one
+  complex object from its parts: `k8s_state.py`, `ocp_ha.py`), *Toolchain
+  Combination* (a prescribed sequence that creates or configures something:
+  `toolbox_build.py`, `harbor_push.py`, `harbor_robot.py`, `ocp_iso.py`).
+  A combo is a set of existing tools wired as a workflow, in sequence or in
+  parallel; it never re-implements a step another tool owns, and each step
+  keeps its own plan, apply and read-back.
+
+## Smoke cases: fixed arguments and the read-back that proves each tool
+
+Executed from this laptop against the declared targets (CI06-TESTS, "Live
+smoke"); one `[[smoke_cases]]` entry per tool in `tests/acceptance/expected.toml`;
+every receipt is committed under `tests/acceptance/receipts/`. Values marked
+"declared" are written into `expected.toml` by the operator before the smoke,
+never chosen by a tool.
+
+- `gitlab_job.py fetch --job-url <the declared job>`: read-back `records[0].id`
+  equals the declared id, plus `pipeline.id`, `runner.id`, the trace tail.
+- `gitlab_job.py logs --job-url <the declared job> --lines 200`: the trace
+  contains the declared marker line; `lines <= 200`.
+- `gitlab_pipeline.py start --project hott/test --ref <declared>`: plan, apply,
+  read-back of the new pipeline id and `sha`; this pipeline runs one job that
+  prints the marker line.
+- `gitlab_pipeline.py track --project hott/test --pipeline-id <from start>`:
+  the observed statuses with timestamps, ending in `success`.
+- `gitlab_pipeline.py fetch` and `logs` on that pipeline: stage counts; the
+  marker line in the job's trace.
+- `gitlab_schedule.py create --project hott/test --description <declared>
+  --ref <declared> --cron <declared>`: plan, apply, GET read-back equal to the
+  request, second apply `NO_OP`; `update` and `play` the same way.
+- `gitlab_mr.py check --mr-url <the declared merge request>`: read-back of
+  `detailed_merge_status`, the head pipeline id and each failing job's name.
+- `ocp_route.py --namespace <declared>`: the declared route host appears with
+  its TLS and backend fields; probes recorded per route with durations.
+- `ocp_ha.py`: control-plane node names and readiness, etcd member health,
+  the list of degraded cluster operators (empty or named), machine config
+  pool status; one duration per concurrent read.
+- `ocp_machine.py --node-spec <declared path>`: each machine's match or
+  mismatch against the spec, by field.
+- `ocp_iso.py build --node <declared>` then `serve`: the ISO file's sha256
+  recorded; `HEAD` on the served URL returns 200; the server stopped on exit
+  (read back); second build with the same inputs `NO_OP`.
+- `k8s_state.py`: node and pod counts per declared namespace; per-read
+  durations and wall time.
+- `toolbox_build.py apply --tag <declared>`: the image digest reported by the
+  build equals the digest read back from Harbor; second apply `NO_OP`.
+- `harbor_push.py apply --image <declared> --tag <declared>`: artifact digest
+  read back equals the pushed digest.
+- `harbor_robot.py create --name <declared> --token-out <declared path>`:
+  GET robot by name equals the request, `sink_persisted` true, the token is
+  not in the report, second apply `NO_OP`.
+- `harbor_sanity.py`: the declared project and repository are listed.
+
+A tool without a committed receipt for its case is not delivered.
 
 ## Gates
 

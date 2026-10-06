@@ -5,8 +5,10 @@ its own tests; this page says which tests and why.
 
 ## Rules
 
-- **Tests run in CI.** A local run is limited to static checks and never
-  replaces CI.
+- **Unit and contract tests run on the gate route** (CI03-GATES, G0; none
+  as of 2026-10-06). A local run of them is limited to static checks.
+- **Live smoke runs on this laptop**, the executor `tests/acceptance/expected.toml`
+  declares, against the test project and the live cluster (D-SMOKE, below).
 - **Unit tests are offline, deterministic and isolated.** No live cluster,
   network, credentials or package installation (pinned standards,
   `unit-testing` contract).
@@ -46,7 +48,7 @@ its own tests; this page says which tests and why.
 | Contract | pytest | CI | declarations agree with each other |
 | Shell | bats | CI | `./scripts/check.sh` and the hooks |
 | Offline smoke | pytest | CI | real entrypoint on the real tree |
-| Live | receipt | approved executor | the k8s skill, live |
+| Live smoke | receipt | this laptop, test project, live cluster | each tool executed, output locked, read back |
 
 Contract tests compare declarations that must agree:
 
@@ -54,6 +56,85 @@ Contract tests compare declarations that must agree:
 - the catalog and `tools.json`;
 - records and their schemas;
 - `uses` pointers and declared operations.
+
+## Live smoke: the proof that a tool did what it says
+
+Decided by the operator on 2026-10-06 (D-SMOKE): live smoke is executed
+directly from this laptop (`mac.lan`, `tests/acceptance/expected.toml:36-38`)
+against the declared live targets, and the proof is not an exit code but the
+tool's own output with what it read back. We are not testing the CI system;
+we are proving that the action executed and that the output is consistent.
+
+### Targets, declared once in `tests/acceptance/expected.toml`
+
+- GitLab: `https://gitlab.dcloud.run`, project `hott/test` (id 123) for
+  writes, `hott/ci-skills-runner-proof` (id 124) for runner assignment, the
+  job `https://gitlab.dcloud.run/hott/isovalent/-/jobs/38883` for reads
+  (`expected.toml:19,30,51-52,203-204`).
+- Kubernetes and OpenShift: context `ww-cai-verified`, server
+  `https://api.ww-cai-cisco-live.dcloud.local:6443`, Ceph namespace
+  `openshift-storage` (`expected.toml:23,33-34`).
+- Harbor: the registry paired with that GitLab in the operator's authority
+  spec (`harbor.dcloud.run`); the smoke project is declared in
+  `expected.toml` before the first Harbor smoke, never chosen by a tool.
+- GitHub: `github.com/spyroot/ci-skills` for the publication receipt.
+
+### A smoke case
+
+One per tool, declared in `expected.toml` as `[[smoke_cases]]` with `tool`,
+`operation`, the fixed `args` (no random values; the receipt records their
+digest and the checker rejects a receipt whose arguments differ), the
+expected `status`, and the `readback` fields that prove the action. The case
+is run with `--receipt-out tests/acceptance/receipts/<tool>-<case>.json`,
+which writes the sanitized form (host paths digested, no credential values).
+
+What the read-back is, per class of tool:
+
+- **Read tool** (`fetch`, views, state): the records it collected, identified
+  by their ids and names, with counts. Example: `gitlab_job.py fetch` on the
+  declared job returns `records[0].id == 38883`, its `pipeline.id`,
+  `runner.id` and the last trace lines.
+- **Logs** (`logs`): the bounded trace with the line the declared job is
+  known to print; `gitlab_job.py logs --lines 200` must contain the declared
+  marker (a "hello world" line is enough; the job exists to be read).
+- **Tracking** (`track`): the sequence of statuses observed with timestamps,
+  ending in the terminal status, for a pipeline started by
+  `gitlab_pipeline.py start` on the declared ref of `hott/test`.
+- **Mutating tool** (`create`, `apply`, `assign`): the plan with its
+  `plan_digest`, the apply result `APPLIED`, the independent GET read-back of
+  the resource compared field by field with the request (`readback.verified`
+  is `true`), and a second run with the same plan that reads `NO_OP` and
+  sends no write. Example: `gitlab_milestone.py create --title <declared>`
+  then `GET /projects/123/milestones/<id>` equals the request
+  (`tests/acceptance/receipts/milestone-create-applied.json`,
+  `milestone-create-no_op.json`).
+- **Build and push**: the artifact digest read back from the registry after
+  the push equals the digest the build reported; a second apply is `NO_OP`.
+- **ISO and served files**: the file's sha256 recorded, a `HEAD` on the
+  served URL returning 200, and the server stopped on exit (read back).
+- **Node and cluster reads run concurrently**: the receipt records each
+  read's own duration and the wall time, so the parallelism is visible.
+
+### What a receipt carries (the fields the checker compares)
+
+`kind`, `schema_version`, `status`, `captured_at`, `execution_host`,
+`skill.digest`, `target_source`, `verified_target`, `operation`, `plan`,
+`plan_digest`, `records`, `readback` (`action`, `id`, the compared fields,
+`verified`), `result_action` (`APPLIED` or `NO_OP`), `mutated`, `cleanup`,
+`errors`, `summary`. These are the fields today's operation receipts already
+hold; the `command-result` schema of each kind (CI07-SCHEMA) locks them, so
+the evidence has one shape per tool and the smoke shows it.
+
+### Verification
+
+`tools/check_live_acceptance.py --root . --expected tests/acceptance/expected.toml
+--receipts tests/acceptance/receipts --skill ci-skills --json` compares every
+receipt with its declared case: executor host, identities, targets, the
+arguments digest, the expected status, the read-back fields, `NO_OP` on the
+second run, the skill digest (code only, D-DIGEST), and the age
+(`max_receipt_age_days`). A tool with no smoke case, or a case with no
+receipt, fails the check. Unit tests mock; a receipt is the only evidence
+that a tool ran live.
 
 ## Coverage targets
 
@@ -214,8 +295,8 @@ The contract test runs over every entrypoint discovery finds:
   - A status token matches only that exact status.
   - A phrase matches the task text as a case-insensitive substring.
   - Text that matches nothing loads nothing.
-- **Live.** A new receipt from the approved executor, accepted by the live
-  acceptance gate.
+- **Live.** A new receipt captured on this laptop (D-SMOKE), accepted by the
+  live acceptance gate.
 
 ## CI-REFERENCE
 

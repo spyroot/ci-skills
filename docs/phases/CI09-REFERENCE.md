@@ -562,6 +562,34 @@ name checks inside the library.
    `bin/reference.py next gitlab pipeline --json` returns the measured menu;
    `verify` reports PASS; `tools/render_manifest.py --check` reports CURRENT.
 
+## 7. Delivery, test and proof
+
+1. *Delivery*: `ci-skills/lib/core/{reference,navigate,paths}.py`,
+   `ci-skills/bin/reference.py`, `tools/skillkit/{transaction,fetch,reference_update}.py`,
+   `tools/update_reference.py`, `schemas/reference-index.schema.json`,
+   `ci-skills/references/vendor/gitlab-ci-yaml/` (176 files), `vendor/vendor.toml`,
+   `vendor/vendor.lock.json`, one `SKILL.md` sentence, the regenerated
+   `tools.json`.
+2. *Tests*: section 5, by file and case.
+3. *Smoke*, fixed arguments, on this laptop:
+   - `bin/reference.py get gitlab-ci-yaml trigger:forward --json` reads back
+     `bytes: 2587`, `sha256` equal to the index entry, `url` ending in
+     `#triggerforward`, and `content` whose first line is
+     ``#### `trigger:forward` ``;
+   - `bin/reference.py next gitlab pipeline --json` reads back the measured
+     menu (section 3);
+   - `bin/reference.py verify gitlab-ci-yaml --json` reads back `PASS` with
+     the file count 176;
+   - `tools/update_reference.py gitlab-ci-yaml --sha 9892f2e6cf006fa1acc3f4d744f707757111db58 --dry-run --json`
+     reads back, live from gitlab.com, HTTP 200, `content-length: 254048` and
+     a raw `sha256` equal to `upstream.sha256` in the index, and writes nothing.
+4. *Evidence*: `tests/acceptance/receipts/reference-get-trigger-forward.json`,
+   `reference-next-gitlab-pipeline.json`, `reference-verify.json`,
+   `reference-update-dry-run.json`; fields: `kind`, `status`, `records`,
+   `readback`, `skill.digest`, `execution_host`, `captured_at`.
+5. *Verification*: `tools/check_live_acceptance.py` with the four
+   `[[smoke_cases]]` declared for this phase reports `PASS`.
+
 ## Open decisions for knowledge references
 
 - D-LICENSE: a per-tree notice only (recommended), or a repository license.

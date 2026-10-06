@@ -81,13 +81,13 @@ Each gap names the requirement, the failure it prevents, and the smallest change
 
 ### G5. Release receipt host
 
-- **Requirement.** CI-ROUTING needs a new live receipt for the exact skill digest, captured on the executor that
-  `tests/acceptance` declares.
-- **Conflict.** That executor is a laptop, and the project's guide says a laptop is not release evidence.
-- **Smallest change.**
-  1. Name an approved executor and its capture route.
-  2. Update `tests/acceptance` to declare it.
-  3. Capture the receipt there, and read it back.
+- **Requirement.** CI08-ROUTING and every CI11-TOOLS tool need a live receipt for the exact skill digest, captured on
+  the executor that `tests/acceptance/expected.toml` declares.
+- **Decided 2026-10-06 (D-SMOKE).** The executor is this laptop, `mac.lan` (`expected.toml:36-38`). Live smoke runs
+  from it directly against the test project and the live cluster, and the receipt's read-back is the evidence
+  (CI06-TESTS, "Live smoke"). The sentence "a laptop is not release evidence" in the local guide applies to unit and
+  contract tests, which run on the gate route (G0, G8), not to live smoke.
+- **Read-back.** `tools/check_live_acceptance.py` accepts receipts only from the declared executor and identities.
 
 ### G6. The pinned standards' CI evidence model
 
