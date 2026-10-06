@@ -178,12 +178,39 @@ The same ten steps for every row; the row repeats them with the real paths.
    `podman` and `skopeo`, and one bounded standard-library HTTP helper
    `core/http.py` shared by the Harbor API and the reference fetch. Never a
    second transport, envelope, logger, exit table or redaction.
-4. **Declare.** Add the command to `core/catalog.py` (`requires`, options,
-   subcommands, `mutates`, `returns`, `required_tools`); add the `harbor`
-   authority once (target `[harbor]` with the keys of the config block below;
-   credential chain: target file, then the declared variables, then none,
-   reported in `credential_sources` like the others); regenerate
-   `tools.json`. The navigator picks the tool up with no further work.
+4. **Declare.** Add the command to `COMMANDS` in `ci-skills/lib/core/catalog.py`. Every entry declares `kind`,
+   `purpose`, `use_when`, `requires`, `capabilities`, `options` (the command's own options with their help text),
+   `required_options` and `returns`. It adds `subcommands`, `mutates`, `required_tools`, `execution_surface` and
+   `side_effects` only when they differ from the defaults: none, false, none, "selected authority API" and
+   "none". Add the `harbor` authority once (target `[harbor]` with the keys of the config block below;
+   credential chain: target file, then the declared variables, then none, reported in `credential_sources` like
+   the others). The entry this phase adds for `cluster_health.py`:
+
+   ```python
+   "cluster_health.py": {
+       "kind": "cluster_health",
+       "purpose": "Report CNI, MTU, controller, Ceph, storage and event health in one view.",
+       "use_when": "You need one answer to whether the selected cluster is healthy.",
+       "requires": ("kubernetes",),
+       "capabilities": ("time_ranged",),
+       "options": {
+           "--ceph-namespace": "namespace of the Ceph cluster to read",
+           "--cilium-namespace": "namespace of the Cilium agents",
+           "--skip": "component to leave out; repeatable",
+       },
+       "required_options": (),
+       "returns": (
+           "One record per component (cni, mtu, controllers, ceph, storage, events), each ok, degraded "
+           "or unknown with its evidence and read duration; PASS when all are ok."
+       ),
+   },
+   ```
+
+   `tools/render_manifest.py` turns it into the `tools.json` entry: it adds the universal options, renames
+   `requires` to `requires_authorities` and `kind` to `report_kind`, and writes `mutates` as `read_only`,
+   inverted. `schemas/skill-manifest.schema.json` must accept the new `tools.json` and
+   `schemas/command-contract.schema.json` the new `--describe` output. The navigator picks the tool up with no
+   further work.
 5. **Thin main.** `ci-skills/bin/<name>.py`: `build_parser()` plus one
    `execute` call, with the shared locator import.
 6. **Strip the project.** Every host, project, group, namespace, image name,
