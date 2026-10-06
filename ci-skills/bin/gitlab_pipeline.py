@@ -8,6 +8,7 @@ import json
 import sys
 import time
 
+import _bootstrap  # noqa: F401
 from core.access import check_gitlab_operation_access
 from core.catalog import describe, missing_required_options
 from core.cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
@@ -21,8 +22,7 @@ KIND = "gitlab_pipeline"
 SCRIPT = "gitlab_pipeline.py"
 
 
-def build_parser(
-) -> argparse.ArgumentParser:
+def build_parser() -> argparse.ArgumentParser:
     """Expose the common output tier with an exact pipeline selection.
     :return:
     """

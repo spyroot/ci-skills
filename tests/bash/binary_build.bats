@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  tool="${BATS_TEST_DIRNAME}/../bin/ci-binary-build"
+  tool="${BATS_TEST_DIRNAME}/../../bin/ci-binary-build"
   repo="${BATS_TEST_TMPDIR}/source"
   mkdir -p "$repo" "${BATS_TEST_TMPDIR}/mock"
   git -C "$repo" init -q

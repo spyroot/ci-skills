@@ -1,4 +1,9 @@
-"""Shared pytest helpers for the public diagnostics skill."""
+"""Shared pytest helpers for the installed ci-skills package.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -14,9 +19,11 @@ from typing import Any
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_ROOT = REPO_ROOT / "skills" / "ci-skills" / "scripts"
-CORE_ROOT = SCRIPT_ROOT / "core"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SKILL_ROOT = REPO_ROOT / "ci-skills"
+SCRIPT_ROOT = SKILL_ROOT / "bin"
+LIB_ROOT = SKILL_ROOT / "lib"
+CORE_ROOT = LIB_ROOT / "core"
 
 
 def load_module(module_name: str, path: Path) -> ModuleType:
@@ -32,10 +39,18 @@ def load_module(module_name: str, path: Path) -> ModuleType:
 
 
 def import_script_module(module_name: str) -> ModuleType:
-    """Import a module from the diagnostics script tree."""
+    """Import a command adapter or reusable library module from the skill.
+
+    :param module_name: Dotted module name below ``bin`` or ``lib``.
+    :returns: The imported module used by the caller's test.
+    :raises ImportError: If the requested library module is unavailable.
+    """
     script_root = str(SCRIPT_ROOT)
     if script_root not in sys.path:
         sys.path.insert(0, script_root)
+    lib_root = str(LIB_ROOT)
+    if lib_root not in sys.path:
+        sys.path.insert(0, lib_root)
     return import_module(module_name)
 
 
@@ -89,12 +104,19 @@ def run_script(
     fake_bin: Path | None = None,
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one planned script through Python with optional fake command path."""
+    """Execute an installed Python entrypoint with isolated external commands.
+
+    :param script_name: Filename below the skill's ``bin`` directory.
+    :param args: Command arguments passed to the entrypoint.
+    :param fake_bin: Optional directory of fake external commands.
+    :param env: Optional environment overrides for the child process.
+    :returns: Captured stdout, stderr, and exit status from the child process.
+    """
     script = SCRIPT_ROOT / script_name
     if not script.exists():
         pytest.fail(f"missing script under test: {script.relative_to(REPO_ROOT)}")
     environment = os.environ.copy()
-    python_path = str(SCRIPT_ROOT)
+    python_path = str(LIB_ROOT)
     if environment.get("PYTHONPATH"):
         python_path = python_path + os.pathsep + environment["PYTHONPATH"]
     environment.update(

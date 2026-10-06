@@ -8,9 +8,10 @@ import json
 import socket
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
+import _bootstrap  # noqa: F401
 from core.access import check_gitlab_operation_access
 from core.catalog import describe
 from core.cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
@@ -51,7 +52,7 @@ def _dry_run(
         "schema_version": "1.0",
         "kind": "gitlab_access",
         "status": DRY_RUN,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": datetime.now(UTC).isoformat(),
         "execution_host": socket.getfqdn(),
         "target_file": target_file,
         "target_source": target_source,

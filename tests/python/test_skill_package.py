@@ -1,4 +1,9 @@
-"""Skill package structure and frontmatter validation tests."""
+"""Skill package structure and frontmatter validation tests.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -6,9 +11,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from tests.python.conftest import REPO_ROOT
 
-SKILL_ROOT = REPO_ROOT / "skills" / "ci-skills"
+SKILL_ROOT = REPO_ROOT / "ci-skills"
 REQUIRED_PACKAGE_PATHS = (
     "SKILL.md",
     # Declared by SKILL.md's own frontmatter as the manifest, and step 2 of the
@@ -16,16 +22,16 @@ REQUIRED_PACKAGE_PATHS = (
     # points at a contract that is not there.
     "tools.json",
     "references/access.md",
-    "scripts/access_check.py",
-    "scripts/gitlab_job.py",
-    "scripts/gitlab_access.py",
-    "scripts/gitlab_milestone.py",
-    "scripts/gitlab_issue.py",
-    "scripts/gitlab_wiki.py",
-    "scripts/gitlab_runner.py",
-    "scripts/storage_report.py",
-    "scripts/event_trace.py",
-    "scripts/cilium_status.py",
+    "bin/access_check.py",
+    "bin/gitlab_job.py",
+    "bin/gitlab_access.py",
+    "bin/gitlab_milestone.py",
+    "bin/gitlab_issue.py",
+    "bin/gitlab_wiki.py",
+    "bin/gitlab_runner.py",
+    "bin/storage_report.py",
+    "bin/event_trace.py",
+    "bin/cilium_status.py",
 )
 
 

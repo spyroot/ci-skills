@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Install the repository's CI skill into a local Codex skills directory."""
+"""Install the repository's CI skill into a local Codex skills directory.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -26,13 +31,13 @@ SKILL_NAME = "ci-skills"
 JOURNAL_NAME = f".{SKILL_NAME}.install-transaction.json"
 LOCK_NAME = f".{SKILL_NAME}.install.lock"
 LOCK_WAIT_SECONDS = 30
-SOURCE = Path(__file__).resolve().parents[1] / "skills" / SKILL_NAME
-sys.path.insert(0, str(SOURCE / "scripts"))
+SOURCE = Path(__file__).resolve().parents[1] / SKILL_NAME
+sys.path.insert(0, str(SOURCE / "lib"))
 
 from core.provenance import _included, skill_identity, tree_digest
 
 RECOVERY = {
-    "skill_manifest_missing": "Use a checkout containing skills/ci-skills/SKILL.md.",
+    "skill_manifest_missing": "Use a checkout containing ci-skills/SKILL.md.",
     "skill_symlink_unexpected": "Remove the symlink from the source skill tree and retry.",
     "source_revision_unverified": "Install from a clean checkout of the merged skill revision.",
     "destination_exists": "Inspect the installed skill, then use --upgrade --apply --confirm-upgrade.",

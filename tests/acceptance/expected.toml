@@ -1,7 +1,7 @@
 # What a live-access receipt must prove before this revision is accepted.
 #
 # Owned by the operator. Every value here was read back from a real receipt, not
-# chosen: run `access_check.py --publication --receipt-out acceptance/receipts/<label>.json`
+# chosen: run `access_check.py --publication --receipt-out tests/acceptance/receipts/<label>.json`
 # on an intended host and the committed receipt is compared against this file by
 # `tools/check_live_acceptance.py`, which the validate workflow runs.
 #

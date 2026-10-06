@@ -3,6 +3,7 @@
 
 import argparse
 
+import _bootstrap  # noqa: F401
 from core.cli import execute, parser
 from core.collect import collect_storage
 

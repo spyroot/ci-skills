@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Render the skill's `tools.json` from its single declaration.
 
-`skills/ci-skills/tools.json` is the machine-readable contract an
+`ci-skills/tools.json` is the machine-readable contract an
 agent reads instead of five help texts, and it is generated from
-`scripts/core/catalog.py`. `tests/test_catalog.py` fails when the committed copy
+`ci-skills/lib/core/catalog.py`. The catalog tests fail when the committed copy
 drifts from that module, so this is the other half: the command that makes the
 committed copy current again.
 
@@ -13,6 +13,10 @@ committed copy current again.
 Without this, regenerating the manifest means hand-reproducing the serialization
 the test compares against, and the next person edits the generated file instead
 of the declaration.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -24,15 +28,20 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
-SKILL_RELATIVE = Path("skills") / "ci-skills"
+SKILL_RELATIVE = Path("ci-skills")
 
 
 def load_catalog(root: Path) -> Any:
-    """Import the catalog module from the skill tree, uninstalled."""
-    script_root = root / SKILL_RELATIVE / "scripts"
-    if not (script_root / "core" / "catalog.py").is_file():
-        raise FileNotFoundError(f"no catalog module under {script_root}")
-    sys.path.insert(0, str(script_root))
+    """Load the catalog that owns the installed skill's command manifest.
+
+    :param root: Repository root containing the ``ci-skills`` package.
+    :returns: The importable catalog module.
+    :raises FileNotFoundError: If the selected package has no catalog module.
+    """
+    lib_root = root / SKILL_RELATIVE / "lib"
+    if not (lib_root / "core" / "catalog.py").is_file():
+        raise FileNotFoundError(f"no catalog module under {lib_root}")
+    sys.path.insert(0, str(lib_root))
     # Imported after sys.path is set up, which is the point of this function.
     from core import catalog
 

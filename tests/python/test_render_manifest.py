@@ -1,10 +1,14 @@
 """Tests for the manifest generator.
 
-`tools/render_manifest.py` is the only file-mutating tool in `tools/`, and it is
+`tools/render_manifest.py` renders the checked-in command catalog, and it is
 the one that keeps the committed `tools.json` equal to its declaration. Two
 things need proving: `--check` reports staleness without writing anything, and a
-write makes `--check` pass. `tests/test_catalog.py` covers the repository's own
+write makes `--check` pass. The catalog tests cover the repository's own
 manifest being current; these cover the tool that makes it so.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from pathlib import Path
 from tests.python.conftest import REPO_ROOT
 
 TOOL = REPO_ROOT / "tools" / "render_manifest.py"
-MANIFEST = Path("skills") / "ci-skills" / "tools.json"
+MANIFEST = Path("ci-skills") / "tools.json"
 
 
 def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -32,12 +36,17 @@ def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _copy_repo(tmp_path: Path) -> Path:
-    """Copy the skill tree and the manifest into a scratch root."""
+    """Copy the installed skill's catalog and manifest into an isolated root.
+
+    :param tmp_path: Test-owned directory for the copied package.
+    :returns: The temporary repository root used by the renderer.
+    :raises OSError: If the package cannot be copied into the test directory.
+    """
     root = tmp_path / "repo"
     (root / MANIFEST.parent).mkdir(parents=True)
     shutil.copytree(
-        REPO_ROOT / "skills" / "ci-skills" / "scripts",
-        root / "skills" / "ci-skills" / "scripts",
+        REPO_ROOT / "ci-skills" / "lib",
+        root / "ci-skills" / "lib",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
     shutil.copy2(REPO_ROOT / MANIFEST, root / MANIFEST)

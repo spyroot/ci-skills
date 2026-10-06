@@ -16,7 +16,9 @@ code under review -- which is what "wrong revision" has to mean.
 This is plain data: an operator-owned expectations file, receipts as files, and
 one comparison function.
 
-Mustafa Byarmov mbayramo@ciso.com / spyroot@gmail.com
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -25,13 +27,14 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-
 import tomllib
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Final
 
 SCHEMA_VERSION = "1.0"
+SKILL_RELATIVE: Final[Path] = Path("ci-skills")
+ACCEPTANCE_RELATIVE: Final[Path] = Path("tests") / "acceptance"
 RECEIPT_KIND = "access_check"
 GITLAB_RECEIPT_KINDS = {
     "gitlab_access",
@@ -160,10 +163,10 @@ def _parse_time(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _check_common(
@@ -446,15 +449,19 @@ def _runner_smoke_cleanup_verified(
 
 
 def _redactor():
-    """Return the skill's own redactor, so one rule covers capture and review."""
+    """Load the installed skill's redaction rule for receipt review.
+
+    :returns: The skill's redaction function.
+    :raises AcceptanceError: If the selected skill library cannot be imported.
+    """
     root = Path(__file__).resolve().parents[1]
-    scripts = root / "skills" / "ci-skills" / "scripts"
-    if str(scripts) not in sys.path:
-        sys.path.insert(0, str(scripts))
+    library = root / SKILL_RELATIVE / "lib"
+    if str(library) not in sys.path:
+        sys.path.insert(0, str(library))
     try:
         from core.runtime import redact_tree
-    except ImportError:
-        return None
+    except ImportError as exc:
+        raise AcceptanceError("skill_runtime_unavailable") from exc
     return redact_tree
 
 
@@ -478,7 +485,7 @@ def evaluate(
     """Compare committed receipts against the operator's expectations."""
     from core.provenance import tree_digest
 
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     digest = tree_digest(skill_root)["digest"]
     by_host: dict[str, list[tuple[str, dict[str, Any]]]] = {}
     for name, receipt in receipts.items():
@@ -622,6 +629,10 @@ def evaluate(
 
 
 def main() -> int:
+    """Evaluate committed receipts and report the observed acceptance result.
+
+    :returns: Zero for accepted receipts, otherwise the blocked exit status.
+    """
     cli = argparse.ArgumentParser(
         description="Verify committed live-access receipts against this revision.",
         epilog="Example: check_live_acceptance.py --root . --json",
@@ -630,17 +641,17 @@ def main() -> int:
     cli.add_argument(
         "--expected",
         metavar="PATH",
-        help="expectations file (default: <root>/acceptance/expected.toml)",
+        help="expectations file (default: <root>/tests/acceptance/expected.toml)",
     )
     cli.add_argument(
         "--receipts",
         metavar="PATH",
-        help="receipt directory (default: <root>/acceptance/receipts)",
+        help="receipt directory (default: <root>/tests/acceptance/receipts)",
     )
     cli.add_argument(
         "--skill",
         metavar="PATH",
-        help="skill root (default: <root>/skills/ci-skills)",
+        help="skill root (default: <root>/ci-skills)",
     )
     modes = cli.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print JSON")
@@ -649,14 +660,18 @@ def main() -> int:
 
     root = Path(args.root).resolve()
     expected_path = (
-        Path(args.expected) if args.expected else root / "acceptance" / "expected.toml"
+        Path(args.expected)
+        if args.expected
+        else root / ACCEPTANCE_RELATIVE / "expected.toml"
     )
     receipts_path = (
-        Path(args.receipts) if args.receipts else root / "acceptance" / "receipts"
+        Path(args.receipts)
+        if args.receipts
+        else root / ACCEPTANCE_RELATIVE / "receipts"
     )
-    skill_path = Path(args.skill) if args.skill else root / "skills" / "ci-skills"
-    _redactor()
+    skill_path = Path(args.skill) if args.skill else root / SKILL_RELATIVE
     try:
+        _redactor()
         data = evaluate(
             _load_expected(expected_path), _load_receipts(receipts_path), skill_path
         )

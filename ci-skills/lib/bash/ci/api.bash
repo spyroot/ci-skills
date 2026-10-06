@@ -2,9 +2,9 @@
 
 [[ ${CI_SKILLS_API_LOADED:-0} == 1 ]] && return 0
 CI_SKILLS_API_LOADED=1
-CI_API_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
-# shellcheck source=skills/ci-skills/lib/core/runtime.bash
-source "$CI_API_ROOT/lib/core/runtime.bash"
+CI_API_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd -P)
+# shellcheck source=ci-skills/lib/bash/core/runtime.bash
+source "$CI_API_ROOT/lib/bash/core/runtime.bash"
 
 ci_api_help() {
   cat <<'HELP'

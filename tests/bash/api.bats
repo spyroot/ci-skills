@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  tool="${BATS_TEST_DIRNAME}/../bin/ci-api"
+  tool="${BATS_TEST_DIRNAME}/../../bin/ci-api"
   mkdir -p "${BATS_TEST_TMPDIR}/mock"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash

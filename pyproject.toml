@@ -26,7 +26,7 @@ wheel.reproducible = true
 [tool.scikit-build.wheel.packages]
 "demos/hiddengems" = "demos/hiddengems"
 
-# Settings for the Python tools in the galileo conda environment
+# Settings for the Python tools in the ci-skills conda environment
 # (environment.yml). CI runs both through scripts/ci/static-gate.sh, as the
 # static:pytest and static:ruff gates declared in gates/manifest.yaml.
 
@@ -70,6 +70,8 @@ exclude = [
 # environment.yml recorded that default rather than choosing it. Every path
 # outside demos/ keeps the full set.
 [tool.ruff.lint.per-file-ignores]
+"ci-skills/**/__init__.py" = ["N999"]
+"ci-skills/__init__.py" = ["N999"]
 "demos/**/*.py" = [
   "UP006",
   "UP035",

@@ -11,17 +11,23 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from tests.python.conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
+
+from tests.python.conftest import (
+    REPO_ROOT,
+    SCRIPT_ROOT,
+    import_script_module,
+    load_module,
+)
 
 ACCEPTANCE = load_module(
     "check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
 )
 SKILL_ROOT = SCRIPT_ROOT.parent
 HOST = "declared-host.example.test"
-NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 1, tzinfo=UTC)
 
 
 def _digest() -> str:
@@ -325,7 +331,7 @@ def test_real_operation_envelope_round_trips_through_portable_receipt(tmp_path):
             required,
             {"max_receipt_age_days": 30},
             _digest(),
-            datetime.now(timezone.utc),
+            datetime.now(UTC),
         )
 
     assert problems() == ["runner.json:runner_smoke_cleanup_unproven"]
@@ -586,7 +592,7 @@ def test_missing_expectations_emits_structured_json_failure(
 
 def test_no_committed_receipt_carries_a_host_path():
     """The committable form is what makes a real receipt publishable at all."""
-    for path in (REPO_ROOT / "acceptance" / "receipts").glob("*.json"):
+    for path in (REPO_ROOT / "tests" / "acceptance" / "receipts").glob("*.json"):
         body = json.dumps(json.loads(path.read_text(encoding="utf-8")))
         assert "/Users/" not in body, path.name
         assert "/home/" not in body, path.name
