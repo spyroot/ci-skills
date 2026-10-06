@@ -86,11 +86,9 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   2. **The home GitLab CI aggregator**, posting one required context to GitHub for the exact SHA (the pinned `ci.md`,
      "GitHub Reflection"; the aggregator requirement is G6). Nothing exists, and its inventory is unverified.
   3. **Local scripts**, as the advisory pre-commit body only (CI04-HOOKS), never the merge gate.
-- **Gap.** Three tracked files still name `validate` as the required check: `tests/acceptance/expected.toml:26`
+- **Gap.** `tests/acceptance/expected.toml:26` still names `validate` as the required check
   (`required_checks = ["validate"]`, which the checker enforces at lines 311-317, so a fresh publication receipt
-  reports `required_check_absent:validate` until a check of that name exists),
-  `.coordination/pr-coordinator-policy.md:3-5` and `.coordination/pr-coordinator.toml:37,49`
-  (`approved_pipeline_route` at the deleted workflow; `required = ["validate"]`). We change them only under the
+  reports `required_check_absent:validate` until a check of that name exists). Change this expectation only under the
   approval lock on contracts (TEAM_GUIDE.md, "Evidence and merge"), once the route gives the check its name.
 
 ### G1. One entrypoint for local runs and CI
