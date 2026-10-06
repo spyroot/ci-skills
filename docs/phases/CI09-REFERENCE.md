@@ -375,40 +375,95 @@ owns the rest of the router.
 
 ## 3. The navigator: one black box for knowledge and tools
 
-An agent passes a domain and tags; the answer is a bounded menu of tags,
-each with the exact next command (another `next`, a `get`, or a command to
-run); another agent can pass the tag instead. The same tool advertises every
-catalog command, so `next` with no arguments is "this is what I can do" and
-`next harbor` is "this is what I can do about Harbor".
+An agent never reads `tools.json` or a whole reference. It walks: it names a domain, gets a short menu, picks one
+entry, and repeats until it reaches something to run or something to read. Every menu entry carries one action:
+
+| Action | Meaning | The entry's `next` is |
+| --- | --- | --- |
+| `next` | a group; walk into it | the next `reference.py next` call |
+| `run` | a command the agent can execute | the exact command line |
+| `read` | something the agent can read | the exact call that prints it, one chunk or one contract |
+
+### Worked example: gitlab, then pipeline, then watch
+
+Step 1 names the domain. The groups are the commands that require it, grouped by the noun in their name; the
+`ci-yaml` reference is walked like a group.
 
 ```text
-reference.py next                        -> domains (derived: references' domain, commands' requires_authorities)
-reference.py next gitlab                 -> areas: ci-yaml (reference), commands
-reference.py next gitlab ci-yaml trigger -> children forward, include, inputs, project, strategy; leaf: get
-reference.py next gitlab pipeline        -> ranked matches over derived tags: keywords and commands
+$ reference.py next gitlab
+gitlab
+  next  access     prove access; read back identity and target    reference.py next gitlab access
+  next  issue      create or reuse an exact bug issue             reference.py next gitlab issue
+  next  job        one job with its pipeline, runner and log tail reference.py next gitlab job
+  next  milestone  create or update a milestone                   reference.py next gitlab milestone
+  next  pipeline   one pipeline and its job progress by stage     reference.py next gitlab pipeline
+  next  runner     assign or create a runner                      reference.py next gitlab runner
+  next  wiki       create or update a wiki page                   reference.py next gitlab wiki
+  next  ci-yaml    the CI/CD YAML syntax, one keyword at a time   reference.py next gitlab ci-yaml
 ```
 
-- **Input**: `[DOMAIN [TAG ...]]`, `--json|--yaml|--human`, `--limit N`
-  (default 12). Offline, no credentials, no target file.
-- **Output**, bounded: `kind: reference_next`, `domain`, `path`, `node`
-  (`id`, `kind` domain|area|section|keyword|command, `summary`), `choices`
-  (one line each: `tag`, `kind`, `summary`, `bytes`, `next` as the exact
-  command to run), `leaf` (`get`, `command`, `url`), and `cut` (how many
-  choices the limit removed, and which tag narrows them). Never silent.
-- **Tree sources, all derived**: reference indexes (`children`, `section`,
-  `tags`) and `tools.json` (`routing` phrases, `commands[*].requires_authorities`
-  for the domain, `use_when`, `subcommands`). A declared reference carries one
-  `domain`; its area id is the reference name without the `<domain>-` prefix
-  (`gitlab-ci-yaml` is area `ci-yaml`); nothing else is typed by hand.
-- **Matching**: an exact child tag wins; otherwise case-insensitive token
-  match over the derived tags under the current path, ranked (exact tag, path
-  token, section, related-topic slug, `use_when` word); ties are listed,
-  never guessed; `tag_unknown` returns the nearest tags. Deterministic.
-- **Measured** on 2026-10-06 with a prototype over the pinned page and the
-  committed `tools.json`: `next gitlab ci-yaml trigger` is 904 bytes and
-  lists five children with their sizes plus the `get` leaf; `next gitlab
-  pipeline` is 622 bytes and lists `needs:pipeline`, `needs:pipeline:job`,
-  `gitlab_job.py --describe` and `gitlab_pipeline.py --describe`.
+Step 2 opens one group. Its verbs are things to run; the CI YAML keywords tagged with the same noun are things
+to read.
+
+```text
+$ reference.py next gitlab pipeline
+gitlab > pipeline
+  run   get                 one pipeline: stages and job counts           gitlab_pipeline.py get --pipeline-id <id> --json
+  run   track               watch one pipeline until it finishes          gitlab_pipeline.py track --pipeline-id <id> --json
+  run   logs                the failed jobs' log tails                    gitlab_pipeline.py logs --pipeline-id <id> --json
+  run   list                recent pipelines by status, time or job name  gitlab_pipeline.py list --json
+  read  needs:pipeline      CI YAML: mirror an upstream pipeline's status reference.py get gitlab-ci-yaml needs:pipeline
+  read  needs:pipeline:job  CI YAML: artifacts from another pipeline      reference.py get gitlab-ci-yaml needs:pipeline:job
+```
+
+Step 3 names the intent, not the verb. `watch` is no tag; it matches a word in the summary of `track`, so the
+answer is that leaf: one command to run and its contract to read.
+
+```text
+$ reference.py next gitlab pipeline watch
+gitlab > pipeline > track   ("watch" matched the summary of track)
+  run   track     watch one pipeline until it finishes             gitlab_pipeline.py track --pipeline-id <id> --json
+  read  contract  every option, the result fields, the exit codes  gitlab_pipeline.py track --describe
+```
+
+The same answer with `--json`, which an agent parses:
+
+```json
+{
+  "schema_version": "1.0",
+  "kind": "reference_next",
+  "path": ["gitlab", "pipeline", "track"],
+  "matched": {"input": "watch", "by": "summary"},
+  "choices": [
+    {"tag": "track", "action": "run", "summary": "watch one pipeline until it finishes",
+     "next": "gitlab_pipeline.py track --pipeline-id <id> --json"},
+    {"tag": "contract", "action": "read", "summary": "every option, the result fields, the exit codes",
+     "next": "gitlab_pipeline.py track --describe"}
+  ]
+}
+```
+
+The four pipeline verbs are the ones CI11-TOOLS adds; until they land, step 2 holds one `run` entry,
+`gitlab_pipeline.py --pipeline-id <id> --json`.
+
+### Rules
+
+- **Input**: `[DOMAIN [TAG ...]]`, `--json|--yaml|--human`, `--limit N` (default 12). Offline, no credentials, no
+  target file.
+- **Output**: `kind: reference_next`, `path`, `matched` when the input was not an exact tag, and `choices`, one line
+  each: `tag`, `action` (`next`, `run` or `read`), `summary`, `next`. Every answer stays under 1 KB; when the
+  limit drops choices, `cut` says how many and which tag narrows them. Never silent.
+- **Tree sources, all derived**: groups from the commands that require the domain (`requires_authorities`),
+  grouped by the noun in their name; verbs from each command's `subcommands`; reads from the reference indexes,
+  the keywords whose tags include the group's noun. Nothing is typed by hand.
+- **What the catalog must provide**: `subcommands` as a map for every command, each verb with a one-line
+  `purpose`. Today only `gitlab_access.py check` declares one, and the two Bash entries list their verbs as an
+  array; CI02-CLI makes both the rule.
+- **Matching**: an exact tag wins; otherwise a case-insensitive token match over the tags, then over the summary
+  words, as `watch` shows; ties are listed, never guessed; `tag_unknown` returns the nearest tags. The same input
+  always gives the same answer.
+- **Measured** on 2026-10-06 with a prototype over the pinned page: `next gitlab ci-yaml trigger` is 904 bytes and
+  lists the five children of `trigger` with their sizes plus the `get` leaf.
 
 ## 4. Lifecycle of a reference
 
@@ -458,7 +513,7 @@ its reason tokens, defined here once.
 - `tests/python/test_navigate.py`: `next` lists exactly the derived domains;
   `next gitlab` lists `ci-yaml` and `commands`; `next gitlab ci-yaml trigger`
   lists its five children and the leaf; `next gitlab pipeline` returns the
-  menu measured in section 3, byte for byte; an unknown tag returns
+  worked example's menu (section 3), byte for byte; an unknown tag returns
   `tag_unknown` with nearest tags; every answer is under the declared byte
   bound; a second reference in the fixture appears under its domain with no
   code change; equal inputs give equal bytes.
@@ -510,7 +565,7 @@ its reason tokens, defined here once.
      ending in `#triggerforward`, and `content` whose first line is
      ``#### `trigger:forward` ``;
    - `ci-skills/bin/reference.py next gitlab pipeline --json` reads back the
-     menu measured in section 3;
+     worked example's menu (section 3);
    - `ci-skills/bin/reference.py verify gitlab-ci-yaml --json` reads back
      `PASS` with `file_count: 177`;
    - `tools/update_reference.py gitlab-ci-yaml --sha 9892f2e6cf006fa1acc3f4d744f707757111db58 --dry-run --json`
