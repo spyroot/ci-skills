@@ -11,7 +11,7 @@ versioned.
 ## Schemas
 
 All schemas live under `schemas/` at the repository root (planned, this
-phase; the directory exists today and is empty), one file per record kind,
+phase; only `command-contract.schema.json` is implemented so far), one file per record kind,
 named `<kind>.schema.json`. They use JSON Schema draft 2020-12 and the style
 of the shared standards' own schemas: `$schema`, `$id`, `title`, `type`,
 `required`, `properties` and `$defs`. A kind without a schema cannot be
@@ -21,19 +21,25 @@ emitted, and a schema change without a version bump fails the `schemas` gate
 record's `kind` and its producer, and the last column names the phase that
 adds the record, or `today` where the record exists in the tree.
 
-| Schema | `kind` | Validates | Producer | Lands in |
+| Schema | `kind` | Validates | Producer | Status |
 | --- | --- | --- | --- | --- |
-| `skill-frontmatter` | none, upstream shape | the YAML block in each `SKILL.md` | authors | today |
-| `skill-manifest` | `skill_manifest` | `ci-skills/tools.json` | `tools/render_manifest.py` | today |
-| `skill-index` | `skill_index` | `bin/ci-skills list --json` | `tools/skillkit/discover.py` | CI01-CATALOG |
-| `vendor-lock` | `skill_vendor_lock` | `vendor/vendor.lock.json` | `bin/ci-skills update` | CI05-VENDOR |
-| `vendor-declarations` | not named yet | `vendor/vendor.toml` | by hand | CI05-VENDOR |
-| `tool-operations` | `tool_operations` | `bin/ci-skills tools --json` | `core/tool_operations.py` | CI09-REFERENCE |
-| `reference-index` | `reference_index` | a reference's `index.json` | `tools/update_reference.py` | CI09-REFERENCE |
-| `openai-agent-metadata` | none, upstream shape | `agents/openai.yaml` | `tools/render_manifest.py` | CI01-CATALOG |
-| `smoke-case` | not named yet | each `[[smoke_cases]]` entry of `expected.toml` | by hand | CI03-GATES, G5 |
-| `command-contract` | `command_contract` | each command's `--describe` | `core/catalog.py` | today |
-| `command-result` | none, the envelope | the fields every report kind shares | `core/report.py` | today |
+| `skill-frontmatter` | none, upstream shape | the YAML block in each `SKILL.md` | authors | missing |
+| `skill-manifest` | `skill_manifest` | `ci-skills/tools.json` | `tools/render_manifest.py` | missing |
+| `skill-index` | `skill_index` | `bin/ci-skills list --json` | `tools/skillkit/discover.py` | missing |
+| `vendor-lock` | `skill_vendor_lock` | `vendor/vendor.lock.json` | `bin/ci-skills update` | missing |
+| `vendor-declarations` | not named yet | `vendor/vendor.toml` | by hand | missing |
+| `tool-operations` | `tool_operations` | `bin/ci-skills tools --json` | `core/tool_operations.py` | missing |
+| `reference-index` | `reference_index` | a reference's `index.json` | `tools/update_reference.py` | missing |
+| `openai-agent-metadata` | none, upstream shape | `agents/openai.yaml` | `tools/render_manifest.py` | missing |
+| `smoke-case` | not named yet | each `[[smoke_cases]]` entry of `expected.toml` | by hand | missing |
+| `command-contract` | `command_contract` | each command's `--describe` | `core/catalog.py` | implemented |
+| `command-result` | none, the envelope | the fields every report kind shares | `core/report.py` | missing |
+
+`command-contract` is implemented as
+[`schemas/command-contract.schema.json`](../../schemas/command-contract.schema.json), built from the `--describe`
+output of all 15 Python commands. `check-jsonschema --schemafile schemas/command-contract.schema.json <record>`
+accepts all 15 and refuses an unknown field, a missing `kind` and a malformed option name. Every row marked
+missing is this phase's to implement; a record kind without its schema cannot be emitted.
 | one file per report kind | the kinds below | a command's result and its receipt | the command | see below |
 
 Notes on the rows:
