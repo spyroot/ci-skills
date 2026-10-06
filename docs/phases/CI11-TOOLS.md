@@ -15,6 +15,9 @@ enters a tracked file: the neutrality gate forbids it.
 
 ## The catalogue
 
+Commands that ship today are in [docs/README.md](../README.md), Capabilities; this table lists only
+what this phase adds or changes.
+
 Tasks we named on 2026-10-06. "exists" means the capability is in `ci-skills`
 today as the bare command (`gitlab_job.py --job-url URL` keeps working for the
 committed receipt; the verbs arrive with `track` and `logs`); "port" means it
