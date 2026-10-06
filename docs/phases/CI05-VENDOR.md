@@ -45,10 +45,6 @@ has no JSON output.
 | Result | `skill_vendor_check`, `skill_vendor_update`, one `<kind>.schema.json` each (CI07-SCHEMA, Schemas) |
 | Read-back | `update` runs `verify` after it writes |
 
-CI10-PHASES, "Lock every open-ended specification with a schema", lists these
-two kinds as `vendor_check` and `vendor_update`; the names here stand (decided
-2026-10-06), and CI10-PHASES owns that correction.
-
 ## Layout
 
 ```text
@@ -121,9 +117,8 @@ Where each lock field comes from:
 - **`upstream.project` and `upstream.path`:** the skill's frontmatter
   `metadata`, or `null` where it names none. `glab-stack` names neither.
 - **`files`:** the SHA-256 of each file in the set that `tree_digest` covers
-  (`_included` in `ci-skills/lib/core/provenance.py`; CI10-PHASES,
-  Implementation map, makes it public as `included_files` beside
-  `file_digest`), computed by `tools/skillkit/vendor.py` through that module.
+  (`_included` in `ci-skills/lib/core/provenance.py`, which this phase makes
+  public as `included_files` beside `file_digest`, step 2), computed by `tools/skillkit/vendor.py` through that module.
   `origin` is `upstream` for fetched files and `local` for the notice.
 - **`tree`:** `tree_digest` from that same `provenance.py`, the digest the
   installer and the live acceptance check already use.
@@ -132,12 +127,13 @@ Where each lock field comes from:
 
 ```text
 bin/ci-skills verify [--receipt-out PATH] [--json | --yaml | --human]
-bin/ci-skills update [NAME ...] [--confirm] [--json | --yaml | --human]
+bin/ci-skills update [NAME ...] [--apply --confirm-plan DIGEST] [--json | --yaml | --human]
 ```
 
 Exit codes, the result envelope and `safe_next_step` follow CI02-CLI.
-`--confirm` is the apply switch of the maintenance verbs; skill actions use
-`--apply --confirm-plan DIGEST` (decided 2026-10-06). `--receipt-out` is the
+The maintenance verbs apply only with `--apply --confirm-plan DIGEST`, the
+digest of the plan the default run printed, as the skill actions do
+(CI02-CLI, item 6; D-CONFIRM). `--receipt-out` is the
 receipt option every smoke case runs with (CI06-TESTS, Live smoke), which
 `access_check.py` already has; this phase adds it to `verify`. Each reason
 token below is defined once, in `tools/skillkit/vendor.py`, with its safe
@@ -164,7 +160,8 @@ next step:
   CI09-REFERENCE's `bin/reference.py verify` lives so that it is not a second
   implementation, is CI09-REFERENCE's to define.
 - **`update` plans by default** (CI02-CLI). It lists, per skill, the files
-  that would be added, changed or removed, and writes only with `--confirm`.
+  that would be added, changed or removed, and writes only with
+  `--apply --confirm-plan DIGEST` (CI02-CLI, item 6).
 - **A fetch heals before it blocks.** `update` retries `attempts` times,
   waiting `backoff_seconds` between tries, then reports `fetch_failed` with
   each attempt's error.
@@ -173,7 +170,7 @@ next step:
 
 ## Update transaction
 
-`update --confirm` changes several files at once, one tree per skill plus
+`update --apply` changes several files at once, one tree per skill plus
 the lock. The steps are the ones `tools/skillkit/transaction.py` provides,
 journal, lock, stage, swap, read-back and recover, extracted from
 `tools/install_ci_skills.py`: `plan_fingerprint`, `_journal_path`,
@@ -215,9 +212,6 @@ reports that it recovered.
   `core.provenance`, as the installer does, and computes the per-file hashes
   through it. Never the reverse: an installed skill ships without `tools/`,
   and editing `provenance.py` would change the skill digest.
-- CI10-PHASES, Layout, decided, puts thin maintenance mains in `tools/`;
-  this command lives at `bin/ci-skills` (decided 2026-10-06), and the two
-  sentences are CI10-PHASES's to reconcile.
 
 ## Steps
 
@@ -230,20 +224,23 @@ How we consume the skills that the installed `glab` ships:
    `tools/install_ci_skills.py`, which then calls it),
    `tools/skillkit/vendor.py` and `bin/ci-skills` with its `verify` and
    `update` verbs, `--help` and `--describe`; write the tests of "Delivery,
-   test and proof" with the block.
+   test and proof" with the block. In `ci-skills/lib/core/provenance.py`,
+   make `included_files` and `file_digest` public and add the `excluded`
+   parameter and `VENDOR_DIRECTORIES` (D-DIGEST).
 3. Declare `glab` and `glab-stack` in `vendor/vendor.toml`, add each notice
    from the upstream release's `LICENSE`, and add the `vendor-declarations`,
    `vendor-lock`, `skill_vendor_check` and `skill_vendor_update` schemas at
    `0.<minor>` (CI07-SCHEMA, Steps and Versions).
 4. Run `bin/ci-skills update glab glab-stack` to see the plan, then run it
-   again with `--confirm`, which performs the update transaction.
+   again with `--apply --confirm-plan DIGEST`, which performs the update
+   transaction.
 5. Run `bin/ci-skills verify`; it must report `PASS`.
 6. Add the `.markdownlint-cli2.yaml` ignores and the unconditional `verify`
    gate (CI03-GATES, G4).
 7. Open one pull request; merge per CI10-PHASES, How a phase lands.
 
 Steps 4 and 5 are also the refresh path: `update` shows upstream drift,
-`update --confirm` applies it, and the diff goes through a pull request.
+`update --apply --confirm-plan DIGEST` applies it, and the diff goes through a pull request.
 
 ## Gates
 
@@ -258,16 +255,16 @@ Steps 4 and 5 are also the refresh path: `update` shows upstream drift,
   violation.
 - **Tests.** Written with the block; run status UNVERIFIED (CI03-GATES, G0).
   The pytest and bats suites are never run on this laptop.
-- **Receipt.** Vendoring changes no executed code: `vendor/` is outside the
-  skill, and `ci-skills/references/vendor/**` is excluded from the
-  executed-code digest by decision (D-DIGEST, 2026-10-06; CI10-PHASES,
-  Implementation map, adds `VENDOR_DIRECTORIES` to `core/provenance.py` for
-  it), so it does not move the skill digest a receipt is bound to. A receipt
-  applies until it expires
-  (`captured_at` plus `max_receipt_age_days`; CI03-GATES, G7). As read back
-  on 2026-10-06, the committed receipts already mismatch the skill digest
-  (CI10-PHASES, Pull request status); whether that blocks a merge is D-GATE
-  (CI03-GATES, G0).
+- **Receipt.** The vendored trees do not move the executed-code digest:
+  `vendor/` is outside the skill, and `ci-skills/references/vendor/**` is
+  excluded by D-DIGEST. This phase's code does move it: the
+  `core/provenance.py` change (step 2) and the `verify` gate in
+  `ci-skills/lib/bash/ci/check.bash` (step 6) are bytes inside `ci-skills/`,
+  so the receipts are recaptured on the D-SMOKE executor after the last edit
+  (CI03-GATES, G5). A receipt applies until it expires (`captured_at` plus
+  `max_receipt_age_days`; CI03-GATES, G7). As read back on 2026-10-06, the
+  committed receipts already mismatch the skill digest (CI10-PHASES, Pull
+  request status); whether that blocks a merge is D-GATE (CI03-GATES, G0).
 
 ## Delivery, test and proof
 
@@ -280,12 +277,13 @@ Steps 4 and 5 are also the refresh path: `update` shows upstream drift,
    at `0.<minor>`, `tests/python/test_vendor.py` and
    `tests/python/test_transaction.py`. Files it changes:
    `tools/install_ci_skills.py` (calls the extracted transaction; CI10-PHASES,
-   Implementation map, Modify), `environment.yml` (step 1),
+   Implementation map, Modify), `ci-skills/lib/core/provenance.py` (step 2),
+   `environment.yml` (step 1),
    `.markdownlint-cli2.yaml` (step 6), `scripts/check.sh` and its library (the
    `verify` gate; CI03-GATES, G1) and `tests/python/conftest.py` (the
    `run_tool` fixture that drives `bin/ci-skills`; CI06-TESTS, Rules). The
    commands that run: `bin/ci-skills update glab glab-stack --json`, then
-   `bin/ci-skills update glab glab-stack --confirm --json`, then
+   `bin/ci-skills update glab glab-stack --apply --confirm-plan DIGEST --json`, then
    `bin/ci-skills verify --json`.
 2. *Tests*, written with the block; run status UNVERIFIED (CI03-GATES, G0);
    the pytest and bats suites are never run on this laptop. CI06-TESTS,
@@ -308,7 +306,7 @@ Steps 4 and 5 are also the refresh path: `update` shows upstream drift,
        `update` gives `glab_unavailable` and `verify` still passes; a fake
        `glab` that fails fewer times than `attempts` ends in `PASS`, and one
        that always fails gives `fetch_failed` with every attempt's error;
-     - declared `tags`, `license` and `notice` survive an `update --confirm`;
+     - declared `tags`, `license` and `notice` survive an `update --apply`;
      - `verify` runs with the PyYAML import blocked, which proves it is
        standard-library only;
      - contract: `.markdownlint-cli2.yaml` ignores every vendored skill that
@@ -326,10 +324,8 @@ Steps 4 and 5 are also the refresh path: `update` shows upstream drift,
        `test_recovery_finishes_verified_activation_without_rolling_it_back`
        and `test_interrupted_upgrade_restores_last_good_install`; the rest of
        that file stays on the installer (CI01-CATALOG, Interface).
-   - Gap: how a bare `--confirm` binds `update` to the plan it printed, which
-     CI02-CLI's contract (item 6: a changed input fingerprint is refused) and
-     the matrix's "apply only with a valid plan" case need, is not defined
-     here; owner: CI02-CLI.
+   - `update` is bound to the plan it printed through the plan's digest
+     (CI02-CLI, item 6; D-CONFIRM): a changed plan is refused.
 3. *Smoke* (D-SMOKE, decided 2026-10-06), on the executor that
    `tests/acceptance/expected.toml` declares (`[[executors]]`, host
    `mac.lan`), with fixed arguments:
@@ -360,7 +356,8 @@ Steps 4 and 5 are also the refresh path: `update` shows upstream drift,
    `access_check` and the `gitlab_*` kinds (`RECEIPT_KIND` and
    `GITLAB_RECEIPT_KINDS` in `tools/check_live_acceptance.py`), and
    `expected.toml` has no `[[smoke_cases]]` table, so a `skill_vendor_check`
-   receipt is not compared until CI06-TESTS adds both; owner: CI06-TESTS.
+   receipt is not compared until CI03-GATES G5 adds both; owner: CI03-GATES,
+   G5.
 
 ## Open decision
 

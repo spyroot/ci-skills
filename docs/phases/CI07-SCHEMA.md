@@ -16,7 +16,7 @@ named `<kind>.schema.json`. They use JSON Schema draft 2020-12 and the style
 of the shared standards' own schemas: `$schema`, `$id`, `title`, `type`,
 `required`, `properties` and `$defs`. A kind without a schema cannot be
 emitted, and a schema change without a version bump fails the `schemas` gate
-(decided 2026-10-06). This table is the inventory CI10-PHASES points at
+(CI10-PHASES, Implementation map). This table is the inventory CI10-PHASES points at
 ("Lock every open-ended specification with a schema"); every row names the
 record's `kind` and its producer, and the last column names the phase that
 adds the record, or `today` where the record exists in the tree.
@@ -89,7 +89,7 @@ The report kinds, one `<kind>.schema.json` each:
 - `skill_install` (`bin/ci-skills install`, planned, CI01-CATALOG);
 - `skill_vendor_check` and `skill_vendor_update` (`bin/ci-skills verify` and
   `update`, planned, CI05-VENDOR);
-- `reference_next`, `reference_record` and `reference_verify`
+- `reference_next`, `reference_record`, `reference_list` and `reference_verify`
   (`ci-skills/bin/reference.py next`, `get` and `verify`, planned,
   CI09-REFERENCE).
 
@@ -116,7 +116,7 @@ The report kinds, one `<kind>.schema.json` each:
 
 A skill's references are its documents under `references/`. The tools it
 calls are described by operations (CI09-REFERENCE). One declaration links
-them. Ownership, decided 2026-10-06: this document owns the `uses` pointer
+them. Ownership (CI10-PHASES, Terms): this document owns the `uses` pointer
 schema, CI09-REFERENCE owns the operations inventory the pointers name, and
 CI08-ROUTING consumes them.
 
@@ -307,8 +307,10 @@ changing its version, or bumps MAJOR without adding the new file.
    `tools/check_schemas.py --root . --json` over `ci-skills/tools.json` and
    every receipt under `tests/acceptance/receipts/`: each is listed with its
    schema and `schema_version` `1.0`, and the result is `PASS`.
-4. *Evidence*: no receipt; the static evidence is
-   `tools/check_schemas.py --root . --json` output.
+4. *Evidence*: no receipt for the schema check itself; the static evidence
+   is `tools/check_schemas.py --root . --json` output. The `schemas` gate in
+   `ci-skills/lib/bash/ci/check.bash` is a byte change inside `ci-skills/`,
+   so the receipts are recaptured on the D-SMOKE executor (CI03-GATES, G5).
 5. *Verification*: `tools/check_schemas.py --root . --json` prints
    `"status": "PASS"` with one entry per validated record (file, schema,
    `schema_version`), and the static checks CI10-PHASES names before merge

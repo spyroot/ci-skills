@@ -174,7 +174,7 @@ any project, under any domain. It follows the Agent Skills layout:
 | Capability | vendor N upstream pages as verbatim chunks with a derived index; serve one chunk, part or card |
 | Owner | `ci-skills/lib/core/reference.py` (chunk, anchor, index, verify, lookup) |
 | Entrypoints | installed: `ci-skills/bin/reference.py next\|get\|list\|verify`; checkout: `tools/update_reference.py` |
-| Result | `reference_next`, `reference_record`, `reference_verify`, `reference_index` (`index.json`), lock entries |
+| Result | `reference_next`, `reference_record`, `reference_list`, `reference_verify`, `reference_index`, lock entries |
 | Read-back | `verify` recomputes every digest and the index from the committed files; `update` runs it last |
 
 ### Upstream, measured 2026-10-06
@@ -325,7 +325,8 @@ implementations exist).
    defined once: the default run prints the plan (URLs, commit, expected
    bytes) offline and writes nothing; `--dry-run` performs the network reads
    and reports HTTP status, length and raw `sha256`, writing nothing;
-   `--confirm` fetches into staging and publishes.
+   `--apply --confirm-plan DIGEST` (the digest the default run printed;
+   CI02-CLI, item 6) fetches into staging and publishes.
 2. **Chunk.** Scan lines, treating fenced code as opaque; a heading is
    `^(#{2,6}) (.+)$`; a keyword heading is one whose text is a backticked
    keyword path; anything else is a section heading. A chunk runs from its
@@ -439,7 +440,8 @@ its reason tokens, defined here once.
 8. **refresh**: stages 2 to 5 at the new commit; the pull request diff shows
    exactly which keywords changed.
 9. **retire**: remove the declaration; `update` plans the removals and
-   `--confirm` applies them; the closed-world gate fails on any dangling
+   `--apply --confirm-plan DIGEST` applies them; the closed-world gate fails
+   on any dangling
    `SKILL.md` or index pointer (`dangling_reference`).
 
 ## 5. Gates and tests
@@ -465,6 +467,9 @@ its reason tokens, defined here once.
   tree is excluded from the executed-code digest (D-DIGEST) and digested on
   its own in the lock.
 - `tests/python/test_tool_operations.py`: section 1's read-back.
+- Gate `reference`, a profile of `scripts/check.sh` (CI03-GATES, G1): it
+  runs `ci-skills/bin/reference.py verify --json` over every vendored tree
+  and fails on anything but `PASS`.
 - Run on the gate route (D-GATE; CI03-GATES, G0).
 
 ## 6. Steps
@@ -478,7 +483,8 @@ its reason tokens, defined here once.
 3. Add `tools/skillkit/reference_update.py` over `tools/skillkit/transaction.py`
    (CI05-VENDOR) and the thin main `tools/update_reference.py`.
 4. Declare `gitlab-ci-yaml` in `vendor/vendor.toml`; run `update --sha
-   9892f2e6cf006fa1acc3f4d744f707757111db58 --confirm`; commit the tree, the
+   9892f2e6cf006fa1acc3f4d744f707757111db58`, then the same command with
+   `--apply --confirm-plan DIGEST`; commit the tree, the
    lock, `schemas/reference-index.schema.json`, `schemas/tool-operations.schema.json`
    and the tests of section 5.
 5. Add the `tools` verb to `bin/ci-skills` with the recorded fixtures for
@@ -491,11 +497,14 @@ its reason tokens, defined here once.
 ## 7. Delivery, test and proof
 
 1. *Delivery*: the files of steps 2 to 6, plus `ci-skills/references/vendor/gitlab-ci-yaml/`
-   (177 files), `vendor/vendor.toml`, `vendor/vendor.lock.json` and the
-   regenerated `tools.json`.
+   (177 files), `vendor/vendor.toml`, `vendor/vendor.lock.json`, the
+   regenerated `tools.json`, the `ignores` entry in `.markdownlint-cli2.yaml`
+   and the `-whitespace` line in `.gitattributes` (Layout), and the five
+   `[[smoke_cases]]` entries in `tests/acceptance/expected.toml` (part 3).
 2. *Tests*: section 5, by file; written with the block, run status
    UNVERIFIED (CI03-GATES, G0).
-3. *Smoke*, fixed arguments, on the D-SMOKE executor:
+3. *Smoke*, fixed arguments, on the D-SMOKE executor, each run with
+   `--receipt-out` and its receipt path of part 4 (CI02-CLI, item 7):
    - `ci-skills/bin/reference.py get gitlab-ci-yaml trigger:forward --json`
      reads back `bytes: 2587`, `sha256` equal to the index entry, `url`
      ending in `#triggerforward`, and `content` whose first line is
@@ -514,9 +523,15 @@ its reason tokens, defined here once.
    `reference-update-dry-run.json`, `tool-operations-glab.json`; fields:
    `kind`, `status`, `records`, `readback`, `skill.digest`, `execution_host`,
    `captured_at`.
-5. *Verification*: `tools/check_live_acceptance.py` with the five
-   `[[smoke_cases]]` declared for this phase reports `PASS`.
+5. *Verification*: `tools/check_live_acceptance.py --root . --expected
+   tests/acceptance/expected.toml --receipts tests/acceptance/receipts
+   --skill ci-skills --json`, with the five `[[smoke_cases]]` of this phase
+   declared, prints `"status": "PASS"` and exits 0.
 
 ## Open decisions
 
 - D-LICENSE: a per-tree notice only (recommended), or a repository license.
+- The one home of the hash walk that `bin/ci-skills verify` (CI05-VENDOR)
+  and `ci-skills/bin/reference.py verify` share, and whether
+  `bin/ci-skills verify` also walks the lock's `references` entries
+  (CI05-VENDOR, Interface).

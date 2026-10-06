@@ -89,7 +89,8 @@ deleted in #27 (`1108cca`; CI10-PHASES, Pull request status).
   `<git-common-dir>/hooks/<name>`.
 - **Contract (CI02-CLI).** The installer:
   - has `--help`;
-  - plans by default and installs only with `--confirm`;
+  - plans by default and installs only with `--apply --confirm-plan DIGEST`
+    (CI02-CLI, item 6; D-CONFIRM);
   - refuses to replace a hook it did not install, with `hook_exists` and a
     safe next step;
   - does nothing on a second run;
@@ -150,7 +151,7 @@ run `ruff format` after a `*.py` edit and `tools/render_manifest.py` after a `ci
      ```
 
    - the installer: a plan run with no arguments, then the same run with
-     `--confirm`.
+     `--apply --confirm-plan DIGEST` (the digest the plan run printed).
 2. *Tests*, written with the block; run status UNVERIFIED (CI03-GATES, G0):
    the pytest and bats suites are never run on the laptop (D-GATE).
    - `tests/bash/hooks.bats` (planned, CI04-HOOKS; named like `check.bats`
@@ -182,7 +183,7 @@ run `ruff format` after a `*.py` edit and `tools/render_manifest.py` after a `ci
    - Agent-harness hooks are outside the deliverable, so they have no tests
      here (CI06-TESTS).
 3. *Smoke*: this phase changes no live behaviour. The static read-back, on
-   this laptop, after the installer ran with `--confirm`:
+   this laptop, after the installer ran with `--apply --confirm-plan DIGEST`:
    - `git config --local core.hooksPath` prints nothing and exits 1 (unset,
      as read back on 2026-10-06);
    - `ls -l "$(git rev-parse --git-common-dir)/hooks/"` lists an executable
@@ -191,9 +192,11 @@ run `ruff format` after a `*.py` edit and `tools/render_manifest.py` after a `ci
      installed: `git add -f CLAUDE.md` beside one clean staged file, then
      `git commit -m fixture` exits non-zero and names `CLAUDE.md`; after
      `git rm --cached CLAUDE.md` the same commit proceeds.
-4. *Evidence*: no receipt. This phase adds no live check and changes no byte
-   under `ci-skills/`, so the skill digest and the committed receipts are
-   untouched. The static evidence is the output of these commands:
+4. *Evidence*: no receipt of its own; this phase adds no live check. An
+   installer library under `ci-skills/lib/bash/` (part 1) is a byte change in
+   the skill, which moves the skill digest, so the receipts are recaptured on
+   the D-SMOKE executor (CI03-GATES, G5); a library outside `ci-skills/`
+   leaves them untouched. The static evidence is the output of these commands:
    - `git config --local core.hooksPath` (no output, exit 1);
    - `ls -l "$(git rev-parse --git-common-dir)/hooks/"`;
    - the refusal transcript from part 3;
@@ -212,3 +215,10 @@ run `ruff format` after a `*.py` edit and `tools/render_manifest.py` after a `ci
    expected `Live acceptance: PASS` with exit 0. Today it is not `PASS`: the
    committed receipts no longer match the skill digest (CI10-PHASES, Pull
    request status), and only a fresh receipt changes that, not this phase.
+
+## Open decisions
+
+- **Hook body.** `TEAM_GUIDE.md`'s repository structure, a binding project
+  addition (`standards-binding.yaml`), lists `bless.sh` as the pre-hook; this
+  document names `scripts/check.sh` (CI03-GATES, G1 records the question).
+  We decide which one the hooks call.

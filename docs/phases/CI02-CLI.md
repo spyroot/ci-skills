@@ -116,7 +116,7 @@ Every command follows the pinned agent-grade checklist, as:
    dependency, and names the audience: agent, human or both.
 2. **Contract.** `--describe` prints the command's contract (CI07-SCHEMA,
    `command-contract`, planned; today's record carries
-   `kind: command_contract`, `core/catalog.py:591`): its purpose, options,
+   `kind: command_contract`, `core/catalog.py:592`): its purpose, options,
    output modes and exit codes, whether it mutates, and the tool operations
    it uses (`uses`, planned, CI07-SCHEMA).
 3. **Results.** One JSON result on stdout; fields per
@@ -142,30 +142,42 @@ Every command follows the pinned agent-grade checklist, as:
    | 66 | missing input |
    | 69 | blocked or failed |
 
-6. **Mutating commands.** Two forms, decided 2026-10-06, and the `cli` gate
-   checks each command against the form its kind declares.
-   - Skill actions plan by default and write only with
-     `--apply --confirm-plan DIGEST`, the digest being the plan's
-     fingerprint (`core/gitlab_actions.py:403-406`;
-     `core/mtu_consistency.py:569`). Five commands declare `mutates: True`
-     today (`core/catalog.py:262`, `:290`, `:314`, `:337`, `:424`):
-     `gitlab_milestone.py`, `gitlab_issue.py`, `gitlab_wiki.py`,
-     `gitlab_runner.py` and `k8s_verify_mtu_consistency.py`.
+6. **Mutating commands.** Every mutating command plans by default and
+   writes only with a confirmation that carries the digest of the plan its
+   default run printed, so a plan whose input fingerprint changed is refused
+   and a second run with the same inputs is a no-op (pinned `unit-testing`
+   contract: "apply requires valid plan", "same-commit or same-input
+   fingerprint"). A bare `--confirm` without that digest does not meet it.
+   - Skill actions write only with `--apply --confirm-plan DIGEST`
+     (`core/gitlab_actions.py:403-406`; `core/mtu_consistency.py:569`).
+     Five commands declare `mutates: True` today (`core/catalog.py:262`,
+     `:290`, `:314`, `:337`, `:424`): `gitlab_milestone.py`,
+     `gitlab_issue.py`, `gitlab_wiki.py`, `gitlab_runner.py` and
+     `k8s_verify_mtu_consistency.py`.
+   - The installer binds the same way today: `--apply` with
+     `--confirm-install FINGERPRINT` or `--confirm-upgrade FINGERPRINT`
+     (`tools/install_ci_skills.py:486-492`).
    - The maintenance verbs of `bin/ci-skills` (planned, CI05-VENDOR),
-     `install` (CI01-CATALOG) and `update` (CI05-VENDOR), and the hook
-     installer (CI04-HOOKS) plan by default and write only with `--confirm`.
+     `install` (CI01-CATALOG) and `update` (CI05-VENDOR), the hook
+     installer (CI04-HOOKS) and `tools/update_reference.py`
+     (CI09-REFERENCE) take the same binding. The phase documents write it
+     `--apply --confirm-plan DIGEST`, the form the mutating commands in the
+     tree already use; its spelling is open decision D-CONFIRM (below).
 
-   Both forms refuse to apply a plan whose input fingerprint changed, and a
-   second run with the same inputs is a no-op (pinned standards,
-   `unit-testing` contract).
+   The `cli` gate checks every mutating command for the plan-bound form.
 7. **Names.** Python mains are `ci-skills/bin/<domain>_<noun>.py`
    (`gitlab_job.py`, `ceph_cluster.py`); the Bash tools keep `ci-<noun>`
    until ported (CI10-PHASES, Refactor). Verbs are short words (`list`,
    `get`, `install`, `update`, `verify`), and options are lowercase
    `--kebab-case`. One option name means one thing everywhere:
    - `--target`, `--dry-run`;
-   - `--apply` with `--confirm-plan DIGEST` on skill actions, `--confirm` on
-     the maintenance verbs;
+   - `--apply` with `--confirm-plan DIGEST` on every mutating command
+     (item 6, D-CONFIRM);
+   - `--receipt-out PATH` on every command that has a `[[smoke_cases]]`
+     entry (CI06-TESTS, Live smoke); it writes the sanitized receipt
+     (`core/portable.py`). `access_check.py`, `gitlab_access.py` and the
+     four mutating GitLab mains have it today (`core/catalog.py:210`,
+     `:249`, `:275`, `:300`, `:323`, `:350`);
    - `--json`, `--yaml`, `--human`;
    - `--search`, `--namespace`, `--node`, `--last`, `--from`, `--to`.
 
@@ -268,11 +280,11 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
      (`:69-75`), extended from `COMMANDS` to the node-local mains and, after
      the port, the former Bash tools;
      `test_mutating_commands_are_identified_in_the_manifest` (`:221-236`)
-     gains the `--confirm` form when `bin/ci-skills` lands.
-   - `tests/python/test_schemas.py` (new; the name is proposed here,
-     CI07-SCHEMA names none): for each of the two schemas, one valid record,
-     one record per missing required field and one per broken conditional
-     rule (CI06-TESTS, "CI07-SCHEMA").
+     covers the maintenance verbs' plan-bound form (item 6) when
+     `bin/ci-skills` lands.
+   - `tests/python/test_schema.py` (CI07-SCHEMA, Delivery, test and proof):
+     for each of the two schemas, one valid record, one record per missing
+     required field and one per broken conditional rule.
    - `tests/bash/check.bats` (exists): `--dry-run` lists the `cli` gate, and
      a failing command fails the run and names the gate (CI06-TESTS,
      "CI03-GATES").
@@ -314,7 +326,8 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
    `required_checks = ["validate"]`, the workflow deleted in #27
    (`1108cca`), which `tools/check_live_acceptance.py:311-313` compares with
    the receipt. Whether the expectation changes or the receipt is captured
-   without `--publication` is CI03-GATES G5's decision.
+   without `--publication` is CI03-GATES G0's decision (D-GATE); until it
+   is made, a fresh publication receipt is not `PASS`.
 5. *Verification.*
    - `tools/render_manifest.py --check` prints `CURRENT` and exits 0
      (`render_manifest.py:69-72`). Observed 2026-10-06: `FileNotFoundError:
@@ -336,11 +349,17 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
 
 - **D-EXIT.** The five-code table in the contract against today's two codes
   (CI10-PHASES, "Machine-readable output, one shape").
-- **The `PARTIAL` exit** (CI10-PHASES, Open decisions, "CLI"). `PARTIAL`
+- **D-CONFIRM.** The spelling of the plan-bound confirmation on the
+  maintenance verbs (item 6). Recommended: `--apply --confirm-plan DIGEST`,
+  the form the skill actions use and the installer uses as
+  `--confirm-install`, so one option name means one thing (item 7).
+  Alternative: `--confirm DIGEST`. Either way the digest is that of the
+  printed plan.
+- **The `PARTIAL` exit** (CI10-PHASES, Open decisions, D-EXIT). `PARTIAL`
   (the read worked, a component is unhealthy) exits 2 today, like `BLOCKED`
   (`core/status.py:13`). It needs either its own code, or exit 0 with
   `status: PARTIAL`.
-- **`bin/ci-k8s`** (CI10-PHASES, Open decisions, "CLI"). Proposed: one
+- **`bin/ci-k8s`** (CI10-PHASES, Open decisions, D-EXIT). Proposed: one
   `bin/ci-k8s` command with short verbs, after the `ci-skills` package
   delivery (#21, merged, `d6bba3d`). Options keep their names and meanings.
   `k8s_verify_mtu_consistency.py` has no proposed verb yet.

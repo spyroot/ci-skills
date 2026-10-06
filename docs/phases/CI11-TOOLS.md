@@ -53,7 +53,7 @@ Combination). Authorities are the catalog's (`gitlab`, `kubernetes`, `harbor`);
 | OpenShift ISO report | `ocp_iso.py rhcos-report` | `core/ocp_iso.py` | kubernetes | no | port | visibility |
 | OpenShift ISO actions | `ocp_iso.py` action verbs (bullet) | `core/ocp_iso.py` | kubernetes | yes | port | toolchain |
 | CSR approval | `ocp_csr.py` | `core/ocp_csr.py` | kubernetes | yes | port | generic |
-| NIC MTU config | `mtu_consistency.py` (extended) | `core/nic_mtu_config.py` | kubernetes | yes | port | generic |
+| NIC MTU config | `k8s_verify_mtu_consistency.py` | `core/nic_mtu_config.py` | kubernetes | yes | port | generic |
 | k8s state snapshot | `k8s_state.py` | `core/k8s_state.py` | kubernetes | no | port | visibility |
 | cluster health, one view | `cluster_health.py` | `core/cluster_health.py` | kubernetes | no | new | generic |
 | Ceph benchmark | `ceph_bench.py` | `core/ceph_bench.py` | kubernetes | yes | port | generic |
@@ -128,7 +128,7 @@ with config keys and concurrency:
   inside the Pod serial.
 - `ocp_csr.py`: `--search` over names and signers; the apply flags (approve
   only the planned names and signers); `[kubernetes]`; one CSR list.
-- `mtu_consistency.py` (extended): the MachineConfig rendering in the plan
+- `k8s_verify_mtu_consistency.py` (extended): the MachineConfig rendering in the plan
   and the fingerprinted apply behind the apply flags; `[openshift.nic_mtu]`;
   `butane` is a required tool.
 - `k8s_state.py`: `--namespace`, `--node`, `--search`, the `time_ranged`
@@ -354,8 +354,9 @@ concurrency rule is step 8 of the recipe.
 
 One `[[smoke_cases]]` entry per tool in `tests/acceptance/expected.toml`
 (CI06-TESTS, "Live smoke"); `<declared ...>` values are written there before
-the smoke, never chosen by a tool; every receipt is committed under
-`tests/acceptance/receipts/`.
+the smoke, never chosen by a tool; each case runs with
+`--receipt-out tests/acceptance/receipts/<tool>-<case>.json` (CI02-CLI, item 7)
+and every receipt is committed.
 
 - `gitlab_job.py get --job-url <declared job>`: read-back `records[0].id`
   equals the declared id, plus `pipeline.id`, `runner.id`, the trace tail.
@@ -410,16 +411,19 @@ the smoke, never chosen by a tool; every receipt is committed under
   a second build with the same inputs `NO_OP`.
 - `ocp_csr.py`: the pending CSR list as `PLANNED`; apply on a CSR created for
   the smoke reads back `Approved`.
-- `mtu_consistency.py` extended: the rendered MachineConfig's digest in the
-  plan; no apply in the smoke.
+- `k8s_verify_mtu_consistency.py` extended: the rendered MachineConfig's
+  digest in the plan. Its apply needs a node pool declared for it in
+  `tests/acceptance/expected.toml`; until one is declared, this row is not
+  delivered (rule below).
 - `k8s_state.py`: node and pod counts per declared namespace; per-read
   durations and wall time.
 - `cluster_health.py --ceph-namespace <declared namespace>`: one line per
   component with its evidence (agent count, MTU value, degraded operator
   list, Ceph health string, pending claim count, warning event count) and a
   duration per component; `status` matches the live cluster on the day.
-- `ceph_nfs.py`: the export list read back; `ceph_bench.py`: plan only in the
-  smoke (its apply writes).
+- `ceph_nfs.py`: the export list read back. `ceph_bench.py`: the plan; its
+  apply writes and needs a pool declared for it in `expected.toml`, and until
+  one is declared, this row is not delivered (rule below).
 - `toolbox_build.py apply --tag <declared>`: the image digest reported by the
   build equals the digest read back from Harbor; second apply `NO_OP`.
 - `harbor_push.py apply --image <declared> --tag <declared>`: artifact digest
@@ -889,11 +893,13 @@ reports PASS.
    and per-call timeout asserted on a fake executor); written with the block;
    run status UNVERIFIED (CI03-GATES, G0).
 3. *Smoke*: the row's line under "Smoke cases", on the D-SMOKE executor.
-4. *Evidence*: `tests/acceptance/receipts/<tool>-<verb>.json` with `kind`,
+4. *Evidence*: `tests/acceptance/receipts/<tool>-<case>.json` with `kind`,
    `status`, `records`, `plan_digest` and `readback` (mutations),
    `result_action` (`APPLIED` then `NO_OP`), `execution_host`, `captured_at`.
-5. *Verification*: `tools/check_live_acceptance.py` with the row's
-   `[[smoke_cases]]` entry reports `PASS`.
+5. *Verification*: `tools/check_live_acceptance.py --root . --expected
+   tests/acceptance/expected.toml --receipts tests/acceptance/receipts
+   --skill ci-skills --json`, with the row's `[[smoke_cases]]` entry
+   declared, prints `"status": "PASS"` and exits 0.
 
 ## Open decisions
 

@@ -13,7 +13,7 @@ ci-skills/                     # the one installable skill (Agent Skills layout)
 ├── lib/bash/{core,ci,automation}/   # the Bash libraries
 ├── references/                # access.md, project-binding.md; vendor/<name>/ planned (CI09)
 └── benchmarks/
-tools/                         # repository maintenance mains; tools/skillkit/ planned (CI05, CI09, CI01)
+tools/                         # repository maintenance mains; tools/skillkit/ planned (CI07, CI05, CI09, CI01)
 scripts/                       # dev entrypoints: check.sh and scripts/bash/core/
 tests/{python,bash,acceptance} # pytest, bats, the live receipt contract and sanitized receipts
 schemas/                       # record schemas, planned (CI07-SCHEMA); empty today

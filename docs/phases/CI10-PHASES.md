@@ -196,7 +196,8 @@ and no `execution_host`, `skill` or `target_source`; that delta is the first
 ### Gates that make every tool conform
 
 One gate per owner: `cli` (CI02-CLI), `schemas` (CI07-SCHEMA), `verify`
-(CI05-VENDOR), `reference` (CI09-REFERENCE, section 5), `manifest`,
+(CI05-VENDOR), `tests` (CI06-TESTS), `reference` (CI09-REFERENCE, section 5),
+`manifest`,
 `neutrality` and the static tools (CI03-GATES, Existing gates); all are
 profiles of one entrypoint, `scripts/check.sh` (CI03-GATES, G1), once block 0
 restores its library, so a contributor and any future CI route run the same
@@ -240,6 +241,12 @@ Names and owners only; each owner document carries the question.
 - Review: what makes a review block a merge (CI03-GATES, G3).
 - D-EXIT: CI02's five-code exit table or today's 0 and 2, and how `PARTIAL`
   exits; whether the k8s commands move behind one `bin/ci-k8s` (CI02-CLI).
+- D-CONFIRM: the spelling of the plan-bound confirmation on the maintenance
+  verbs (CI02-CLI).
+- Gate library home: `ci-skills/lib/bash/ci/check.bash` as block 0 writes it
+  (every gate edit then moves the skill digest and forces a receipt
+  recapture), or a path outside `ci-skills/` (gate edits leave the digest
+  alone) (CI03-GATES, G1).
 - Coverage floor (CI06-TESTS).
 - D-LICENSE: repository license or per-tree notices (CI09-REFERENCE).
 - D-SCOPE: the install scope default for Codex (CI01-CATALOG).

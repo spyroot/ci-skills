@@ -80,7 +80,8 @@ it can be named. Discovery only reads: it writes nothing and uses no network.
   - `lock_entry_missing`
   - `symlink_unexpected`
 - `list` prints every valid record and lists each invalid one under
-  `errors`. If any record failed, it exits 65.
+  `errors`. If any record failed, it exits non-zero: 65 in CI02-CLI's
+  proposed table, 2 today (D-EXIT).
 - Output is sorted and bounded. Nothing is read from a skill's body except
   its frontmatter.
 
@@ -89,7 +90,7 @@ it can be named. Discovery only reads: it writes nothing and uses no network.
 ```text
 bin/ci-skills list [--skills-dir DIR] [--json | --yaml | --human]
 bin/ci-skills get NAME [PATH]
-bin/ci-skills install NAME [--skills-dir DIR] [--confirm]
+bin/ci-skills install NAME [--skills-dir DIR] [--apply --confirm-plan DIGEST]
                            [--json | --yaml | --human]
 ```
 
@@ -102,8 +103,9 @@ Exit codes, the result envelope and `safe_next_step` follow CI02-CLI.
   skill. `PATH` must resolve inside the skill directory: an absolute path, a
   `..` segment, or a symbolic link that leads outside is refused with
   `path_outside_skill`.
-- **`install` plans by default** and copies only with `--confirm`
-  (CI02-CLI). It also:
+- **`install` plans by default** and copies only with
+  `--apply --confirm-plan DIGEST`, the digest of the plan it printed
+  (CI02-CLI, item 6; D-CONFIRM). It also:
   - runs `verify` first for a vendored skill, refusing with
     `vendor_unverified` on any mismatch;
   - checks every skill named in `depends_on` is already installed in the
@@ -276,7 +278,9 @@ below goes beyond them.
    icon files under `ci-skills/assets/`, then render once (Codex metadata
    and install scopes).
 5. After the last skill edit, capture a fresh publication receipt on the
-   declared executor (Delivery, test and proof, part 4).
+   declared executor (Delivery, test and proof, part 4); it stays
+   non-`PASS` until CI03-GATES G0 settles the `required_checks` read-back
+   (D-GATE).
 6. Add the tests (Delivery, test and proof, part 2), and open one pull
    request; merge per CI10-PHASES, How a phase lands.
 7. Read back: `bin/ci-skills list` shows exactly one `ci-skills` record,
@@ -312,7 +316,7 @@ below goes beyond them.
    `tests/bash/install.bats` and `tests/acceptance/receipts/operator-laptop.json`
    (recaptured). The commands that run: `bin/ci-skills list --json`;
    `bin/ci-skills get glab`;
-   `bin/ci-skills install glab --skills-dir DIR --confirm --json`;
+   `bin/ci-skills install glab --skills-dir DIR --apply --confirm-plan DIGEST --json`;
    `tools/render_manifest.py`;
    `tools/install_ci_skills.py --scope user --dry-run --json`.
 2. *Tests*, written with the block; run status UNVERIFIED (CI03-GATES, G0).
@@ -329,8 +333,8 @@ below goes beyond them.
      - each error token: `frontmatter_missing`, `frontmatter_invalid`,
        `name_mismatch`, `manifest_invalid`, `lock_entry_missing` and
        `symlink_unexpected`;
-     - `list` exits 65 when any record fails, and still prints the valid
-       ones;
+     - `list` exits non-zero when any record fails (65 in CI02-CLI's
+       proposed table, 2 today; D-EXIT), and still prints the valid ones;
      - each local record carries its references with their `kind`.
    - `tests/python/test_ci_skills_cli.py` (new; the `run_tool` fixture,
      CI06-TESTS):
@@ -353,7 +357,7 @@ below goes beyond them.
      - a different digest gives `destination_differs`;
      - a failed copy removes the staging directory;
      - a read-back mismatch gives `installed_digest_mismatch`;
-     - the default run plans and writes nothing, `--confirm` applies, and a
+     - the default run plans and writes nothing, `--apply --confirm-plan DIGEST` applies, and a
        plan whose input fingerprint changed is refused;
      - a missing input (`SKILL.md` absent); `install` uses no tool, network
        or credential, so the authentication and retry rows do not apply;
@@ -397,13 +401,13 @@ below goes beyond them.
      `--upgrade --apply --confirm-upgrade FINGERPRINT --timeout 10s --json`,
      brings today's default destination, `~/.codex/skills/ci-skills`, which
      holds an old-layout copy (CI10-PHASES, Publish and install), to the
-     current digest; `bin/ci-skills install ci-skills --confirm --json` then
+     current digest; `bin/ci-skills install ci-skills --apply --confirm-plan DIGEST --json` then
      reads back `PASS` with that digest and writes nothing, the no-op;
    - `conda run -n ci-skills python ~/.codex/skills/ci-skills/bin/access_check.py --describe`
      prints `kind: command_contract`, byte-equal to the checkout's
      `ci-skills/bin/access_check.py --describe` because `install` read back
      the same digest and the contract holds only catalog content;
-   - `bin/ci-skills install glab --confirm --json` reads back `PASS` and a
+   - `bin/ci-skills install glab --apply --confirm-plan DIGEST --json` reads back `PASS` and a
      `digest` equal to the `glab` tree digest in `vendor/vendor.lock.json`
      (or `destination_differs`, where `~/.codex/skills/glab` already holds
      other bytes); `bin/ci-skills list --skills-dir ~/.codex/skills --json`
@@ -426,12 +430,13 @@ below goes beyond them.
    named in `required_live_checks` with `job_url` and `ceph_namespace`, and
    the `required_checks` read-back. `required_checks`
    still names `validate`, deleted in #27 (1108cca); what the receipt reads
-   back instead is not declared here; decided in CI03-GATES, G0 (D-GATE).
+   back instead is not declared here; decided in CI03-GATES, G0 (D-GATE),
+   and until then a fresh receipt is not `PASS`.
    The offline verbs have no receipt: the static evidence is the
    `bin/ci-skills list --json` and `--describe` output of part 3. A
    `[[smoke_cases]]` entry for them needs `--receipt-out` on
-   `bin/ci-skills`, which this document does not declare; decided with
-   CI03-GATES, G5.
+   `bin/ci-skills`, which CI02-CLI declares for every smoke-cased command
+   (item 7).
 5. *Verification*. The checker:
 
    ```text

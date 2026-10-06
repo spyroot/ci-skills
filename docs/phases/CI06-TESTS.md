@@ -27,7 +27,8 @@ layers, the smoke contract and the test command.
   `install` (CI01-CATALOG), the hook installer (CI04-HOOKS) and the
   CI11-TOOLS actions. The matrix covers:
   - **planning:** default dry-run, explicit dry-run, zero mutation in a
-    dry-run, apply only with `--confirm`, apply only with a valid plan, and
+    dry-run, apply only with the plan-bound confirmation (CI02-CLI, item 6),
+    apply only with a valid plan, and
     refusing a plan whose input fingerprint changed;
   - **environment:** a missing tool, a missing input, a terminal
     authentication failure, and bounded retry;
@@ -229,15 +230,14 @@ Tests: CI04-HOOKS, Delivery, test and proof.
    coverage report
    ```
 
-   Three gaps, none of them closed here by invention: `scripts/check.sh:6`
+   Two gaps, none of them closed here by invention: `scripts/check.sh:6`
    sources `lib/ci/check.bash`, deleted in #26, so the entrypoint cannot run
    until block 0 re-points it (CI10-PHASES, Order); G1 names no argument
-   that runs one gate, so the argv that runs only `tests` is G1's to name;
-   G1 puts the gate library at `ci-skills/lib/bash/ci/check.bash` (planned,
-   CI03-GATES), inside the digested tree (`core/provenance.py`,
-   `_included`), and whether it sits inside or outside `ci-skills/` decides
-   whether this phase changes the skill digest (part 5), which is G1's to
-   settle.
+   that runs one gate, so the argv that runs only `tests` is G1's to name.
+   The gate library sits at `ci-skills/lib/bash/ci/check.bash` (planned,
+   CI10-PHASES, Order, block 0), inside the digested tree
+   (`core/provenance.py`, `_included`), so adding the `tests` gate moves the
+   skill digest (part 5).
 2. *Tests*, written with the block; run status UNVERIFIED (CI03-GATES, G0).
    In `tests/bash/check.bats`, on the fixture and stub pattern it already
    uses (`make_check_run_fixture`, `make_success_stubs`):
@@ -252,6 +252,9 @@ Tests: CI04-HOOKS, Delivery, test and proof.
      `tests` gate;
    - no `coverage` on `PATH` exits 69, like the suite's other blocked cases.
 
+   The literal 69 is the restored library's blocked code; once D-EXIT is
+   decided (CI02-CLI), the cases assert the one table's blocked code.
+
    The exact-pin contract test CI03-GATES lists covers the new
    `requirements.txt` line; no second test.
 3. *Smoke.* This phase changes no live behaviour and declares no smoke case.
@@ -263,11 +266,11 @@ Tests: CI04-HOOKS, Delivery, test and proof.
 4. *Evidence.* No receipt: the static evidence is the output of
    `./scripts/check.sh` running the `tests` gate (the three lines above),
    kept by the gate route once one exists (D-GATE).
-5. *Verification.* With no byte changed under `ci-skills/` (part 1), the
-   skill digest and the committed receipts are untouched, so
-   `tools/check_live_acceptance.py --root . --expected tests/acceptance/expected.toml
-   --receipts tests/acceptance/receipts --skill ci-skills` prints the same
-   `Live acceptance: PASS` line (exit 0) before and after this phase.
+5. *Verification.* The `tests` gate is a byte change under `ci-skills/`
+   (part 1), so the receipts are recaptured on the D-SMOKE executor
+   (CI03-GATES, G5); then `tools/check_live_acceptance.py --root . --expected
+   tests/acceptance/expected.toml --receipts tests/acceptance/receipts
+   --skill ci-skills` prints `Live acceptance: PASS` (exit 0).
    Observed 2026-10-06, that command exits with
    `ModuleNotFoundError: No module named 'core'`
    (`tools/check_live_acceptance.py:450-453` inserts `skills/ci-skills/scripts`,
@@ -277,6 +280,10 @@ Tests: CI04-HOOKS, Delivery, test and proof.
 
 ## Open decisions
 
+- **Live steps read from a third-party binary.** CI05-VENDOR's smoke reads
+  `glab skills get` and `glab skills list`, which are not tools of ours, and
+  a receipt comes only from a tool run (Live smoke); which record carries
+  their result is open here.
 - **Coverage.** Whether to set a line-coverage floor, once coverage is
   measured.
 - **`bats` on the gate route.** `tests/bash/` holds 4 Bats files (39 cases)

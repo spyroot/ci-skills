@@ -43,7 +43,7 @@ and the `SKILL.md` sentence that points at it.
   installed copy will answer `next` without a checkout. `bin/ci-skills list`
   (planned, CI01-CATALOG) needs a checkout, because `tools/` is not installed
   with a skill.
-- **Matching `load_when`** (decided 2026-10-06; stated once, here). A
+- **Matching `load_when`** (stated once, here). A
   `load_when` entry matches in this order: an exact status token against a
   report's `status` (for example `BLOCKED`); else a case-insensitive
   substring over the task text; then a case-insensitive substring over the
@@ -119,7 +119,7 @@ and the `SKILL.md` sentence that points at it.
    `gitlab_pipeline.py start` with `retry` and `gitlab_mr.py check`), and
    points at the `glab` skill with `points_to: glab`. That skill is vendored
    at `vendor/skills/glab/` (planned, CI05-VENDOR); from a repository
-   checkout, `bin/ci-skills install glab --skills-dir DIR --confirm`
+   checkout, `bin/ci-skills install glab --skills-dir DIR --apply --confirm-plan DIGEST`
    (planned, CI01-CATALOG) installs it beside this skill. By this phase,
    `install.sh`, `tools/install_ci_skills.py` and `bin/ci-skills install`
    call the same `tools/skillkit/install.py` core (planned, CI01-CATALOG).
@@ -157,7 +157,8 @@ How `ci-skills` comes to sit on top of `glab`:
    (`mac.lan`, `tests/acceptance/expected.toml`) with
    `ci-skills/bin/access_check.py --publication --receipt-out
    tests/acceptance/receipts/operator-laptop.json`, replacing the committed
-   receipt. Commit it.
+   receipt. Commit it. It stays non-`PASS` until CI03-GATES G0 settles the
+   `required_checks` read-back (D-GATE).
 7. Open one pull request; merge per CI10-PHASES, How a phase lands.
 
 ## Live receipt

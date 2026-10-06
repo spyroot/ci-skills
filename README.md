@@ -482,9 +482,10 @@ proves was demonstrated at least once. Each live check reports
 
 ## Validation
 
-The `validate` workflow checks workflow/YAML and Markdown syntax, diff
-hygiene, secrets, Ruff lint and format, package behavior, and mocked denial
-paths. Its package smoke runs every installed entrypoint from outside the
-source tree. Mocked CI is code evidence; the live access receipt must come
+The `validate` workflow, deleted in #27 (`1108cca`), checked workflow/YAML
+and Markdown syntax, diff hygiene, secrets, Ruff lint and format, package
+behavior and mocked denial paths, and its package smoke ran every installed
+entrypoint from outside the source tree. No workflow exists today: we decided
+"no gate for now" (D-GATE, `docs/phases/CI03-GATES.md`, G0). Mocked CI is code evidence; the live access receipt must come
 from each intended execution host. Use the exact target and tested revision
 there, and retain the sanitized receipt only after all required checks pass.

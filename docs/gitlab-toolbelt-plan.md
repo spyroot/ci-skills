@@ -193,7 +193,9 @@ nonzero exit status.
 
 ## Gates and proof per block
 
-The existing GitHub `validate` workflow is the configured CI route. Each
+The GitHub `validate` workflow was the CI route until #27 (`1108cca`)
+deleted it; we decided "no gate for now" (D-GATE,
+`docs/phases/CI03-GATES.md`, G0). Each
 changed block needs exact-head static checks, catalog/manifest/schema
 validation, focused unit tests, and installed-package smoke. The installed
 smoke runs all entrypoints from an unrelated directory and checks normal
@@ -212,9 +214,7 @@ sanitized receipt binds the exact skill digest, origin and
 numeric target IDs, effective source and user ID, plan digest, apply result,
 independent GET, repeated no-op, and cleanup. The existing acceptance checker
 requires operation receipt profiles alongside the diagnostic receipt; an
-empty or incomplete profile inventory blocks. The current expectations file
-has no disposable GitLab target or operation receipts, so `validate` remains
-blocked until they are supplied. Mocked unit tests alone cannot accept stages
+empty or incomplete profile inventory blocks. Mocked unit tests alone cannot accept stages
 2–6. No production resource is changed merely to satisfy smoke.
 
 ## Remaining live acceptance inputs

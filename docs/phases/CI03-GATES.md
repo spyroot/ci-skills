@@ -72,8 +72,8 @@ Each gap names the requirement, the failure it prevents, and the smallest change
      `1108cca^:.github/workflows/validate.yml`. A verbatim restore is red; the edits:
      - its shell list (lines 80-89) names `skills/ci-skills/...` paths (lines 83-86) that now live under `ci-skills/`,
        and `lib/ci/check.bash` (line 85), which block 0 restores at `ci-skills/lib/bash/ci/check.bash` (planned,
-       CI10-PHASES block 0; the restore from `88bd9f6^` is decided 2026-10-06, and CI10-PHASES's block 0 text does not
-       name it yet); the restored library lists tracked shell files itself (`git ls-files`,
+       CI10-PHASES, Order, block 0, restored from `88bd9f6^`);
+       the restored library lists tracked shell files itself (`git ls-files`,
        `88bd9f6^:lib/ci/check.bash:104-105`), so the step calls the entrypoint instead of carrying a list;
      - `bats --tap tests/*.bats` (line 95) becomes `tests/bash/*.bats`;
      - `pytest -q tests/test_installed_package.py` (line 107) and `--ignore=tests/test_installed_package.py` (line
@@ -86,19 +86,20 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   2. **The home GitLab CI aggregator**, posting one required context to GitHub for the exact SHA (the pinned `ci.md`,
      "GitHub Reflection"; the aggregator requirement is G6). Nothing exists, and its inventory is unverified.
   3. **Local scripts**, as the advisory pre-commit body only (CI04-HOOKS), never the merge gate.
-- **Gap.** Two tracked files still name `validate` as the required check: `tests/acceptance/expected.toml:26`
+- **Gap.** Three tracked files still name `validate` as the required check: `tests/acceptance/expected.toml:26`
   (`required_checks = ["validate"]`, which the checker enforces at lines 311-317, so a fresh publication receipt
-  reports `required_check_absent:validate` until a check of that name exists) and
-  `.coordination/pr-coordinator-policy.md:3-5`. We change them only under the approval lock on contracts
-  (TEAM_GUIDE.md, "Evidence and merge"), once the route gives the check its name.
+  reports `required_check_absent:validate` until a check of that name exists),
+  `.coordination/pr-coordinator-policy.md:3-5` and `.coordination/pr-coordinator.toml:37,49`
+  (`approved_pipeline_route` at the deleted workflow; `required = ["validate"]`). We change them only under the
+  approval lock on contracts (TEAM_GUIDE.md, "Evidence and merge"), once the route gives the check its name.
 
 ### G1. One entrypoint for local runs and CI
 
 - **Requirement.** Local runs and any gate route invoke the same repository-owned entrypoint. The pinned standards'
   workspace index names `scripts/check.sh` as the gate entrypoint (`templates/internal/INDEX.yaml`, `gates.entrypoint`).
 - **Existing mechanism.** `scripts/check.sh:5-6` sources `lib/ci/check.bash`, deleted in #26 (commit `88bd9f6`); no
-  `check.bash` exists at any path, so the script cannot run today. Block 0 (CI10-PHASES, Order; the restore is decided
-  2026-10-06, G0) restores it at `ci-skills/lib/bash/ci/check.bash` from `88bd9f6^:lib/ci/check.bash` with paths
+  `check.bash` exists at any path, so the script cannot run today. Block 0 (CI10-PHASES, Order)
+  restores it at `ci-skills/lib/bash/ci/check.bash` from `88bd9f6^:lib/ci/check.bash` with paths
   updated: the library sources
   `skills/ci-skills/lib/core/runtime.bash` (line 7), now `ci-skills/lib/bash/core/runtime.bash`, and verifies
   `skills/ci-skills/SKILL.md` (lines 102-103 and 128-129), now `ci-skills/SKILL.md`. It checks tracked shell files with
@@ -127,7 +128,9 @@ Each gap names the requirement, the failure it prevents, and the smallest change
     `1108cca^:.github/workflows/validate.yml`, and each restored step calls the entrypoint instead of carrying its own
     command list;
   - add the `schemas` gate (CI07-SCHEMA), the `cli` gate (CI02-CLI), the `manifest` and `neutrality` gates (Existing
-    gates) and, after CI05-VENDOR, `verify`;
+    gates) and, after their phases, `verify` (CI05-VENDOR), `tests` (CI06-TESTS) and `reference` (CI09-REFERENCE);
+  - give `scripts/check.sh` `--describe` and a `command-contract` record like every catalog entrypoint (CI02-CLI,
+    "Which commands");
   - add profiles: one gate alone, the static subset for the hooks (CI04-HOOKS), and the merge profile that runs every
     required gate. The pinned `smoke-testing` contract's example is `--profile merge --category unit` (its line 85),
     and the pinned reference `scripts/check.sh` accepts no `--profile` (G6), so G1 fixes the syntax; this document
