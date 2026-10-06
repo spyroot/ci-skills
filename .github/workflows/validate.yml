@@ -58,13 +58,12 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y bats shellcheck shfmt
-          mapfile -d '' shell_files < <(git ls-files -z '*.sh' '*.bash')
-          shell_files+=(bin/ci-api bin/ci-binary-build ci-skills/bin/ci-api ci-skills/bin/ci-binary-build)
-          for file in "${shell_files[@]}"; do
-            bash -n "$file"
-          done
-          shellcheck -x -S style "${shell_files[@]}"
-          shfmt -i 2 -d "${shell_files[@]}"
+          git ls-files -z -- '*.sh' '*.bash' bin/ci-api bin/ci-binary-build \
+            ci-skills/bin/ci-api ci-skills/bin/ci-binary-build | xargs -0 -r -n 1 bash -n
+          git ls-files -z -- '*.sh' '*.bash' bin/ci-api bin/ci-binary-build \
+            ci-skills/bin/ci-api ci-skills/bin/ci-binary-build | xargs -0 -r shellcheck -x -S style
+          git ls-files -z -- '*.sh' '*.bash' bin/ci-api bin/ci-binary-build \
+            ci-skills/bin/ci-api ci-skills/bin/ci-binary-build | xargs -0 -r shfmt -i 2 -d
           bats --tap tests/bash/*.bats
 
       - name: Ruff lint
