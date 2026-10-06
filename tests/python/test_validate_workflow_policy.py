@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import yaml
-from tests.python.conftest import REPO_ROOT
+from pathlib import Path
 
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
+import yaml
+
+WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "validate.yml"
 
 
 def _workflow_text() -> str:
@@ -29,19 +30,19 @@ def test_validate_workflow_runs_installed_package_smoke():
     """The validation workflow runs the isolated installed-package smoke."""
     text = _workflow_text()
 
-    assert "tests/test_installed_package.py" in text
+    assert "tests/python/test_installed_package.py" in text
 
 
 def test_the_live_acceptance_step_is_unconditional_and_may_not_fail():
-    """The central gate must not be skippable or advisory.
+    """The acceptance check must run for every pull request.
 
     Gated on `non_markdown_count`, a Markdown-only change could edit the very
     claims it backs and skip it. Marked `continue-on-error`, or moved to its own
-    workflow, it would be advisory -- `validate` is the required check. Its
-    position does not change whether it is required for a successful job.
+    workflow, it would be advisory. The `validate` job depends on `checks`.
     """
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    steps = workflow["jobs"]["validate"]["steps"]
+    steps = workflow["jobs"]["checks"]["steps"]
+    assert workflow["jobs"]["validate"]["needs"] == ["checks"]
 
     matching = [
         step for step in steps if "check_live_acceptance.py" in str(step.get("run", ""))
@@ -52,6 +53,6 @@ def test_the_live_acceptance_step_is_unconditional_and_may_not_fail():
     assert step.get("continue-on-error") in (None, False)
     assert "|| true" not in str(step.get("run"))
 
-    assert any("non_markdown_count" in str(item.get("if", "")) for item in steps), (
-        "the gated Python steps should still exist"
+    assert all("non_markdown_count" not in str(item.get("if", "")) for item in steps), (
+        "required checks must not depend on the changed-file type"
     )

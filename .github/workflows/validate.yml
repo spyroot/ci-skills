@@ -1,0 +1,98 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Diff hygiene
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: git diff --check "${BASE_SHA}...${GITHUB_SHA}"
+
+      - name: GitHub Actions syntax
+        uses: >-
+          docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: .github/workflows/validate.yml
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python and YAML dependencies
+        run: python -m pip install -r requirements.txt yamllint==1.38.0
+
+      - name: YAML syntax
+        run: yamllint .github/workflows/validate.yml standards-binding.yaml
+
+      - name: Markdown
+        run: >-
+          npx --yes markdownlint-cli2@0.23.2
+          '*.md' '**/*.md' '#.git/**'
+
+      - name: Repository secret scan
+        uses: >-
+          docker://zricethezav/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+        with:
+          args: git --redact --no-banner .
+
+      - name: Project neutrality
+        run: python tools/check_project_neutrality.py --root . --json
+
+      - name: Rendered manifest
+        run: python tools/render_manifest.py --check
+
+      - name: Shell syntax, format, lint and tests
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bats shellcheck shfmt
+          mapfile -d '' shell_files < <(git ls-files -z '*.sh' '*.bash')
+          shell_files+=(bin/ci-api bin/ci-binary-build ci-skills/bin/ci-api ci-skills/bin/ci-binary-build)
+          for file in "${shell_files[@]}"; do
+            bash -n "$file"
+          done
+          shellcheck -x -S style "${shell_files[@]}"
+          shfmt -i 2 -d "${shell_files[@]}"
+          bats --tap tests/bash/*.bats
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format
+        run: ruff format --check .
+
+      - name: Installed package smoke
+        run: pytest -q tests/python/test_installed_package.py
+
+      - name: Python tests
+        run: pytest -q tests/python --ignore=tests/python/test_installed_package.py
+
+      - name: Live acceptance receipts
+        run: >-
+          python tools/check_live_acceptance.py
+          --root . --expected tests/acceptance/expected.toml
+          --receipts tests/acceptance/receipts --skill ci-skills --json
+
+  validate:
+    if: always()
+    needs: [checks]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require all checks to pass
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+        run: test "$CHECKS_RESULT" = success
