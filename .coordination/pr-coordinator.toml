@@ -11,7 +11,7 @@ root_env = "STANDARDS_ROOT"
 default_local_path = "/Users/spyroot/dev/standards"
 binding_local_path = "/Users/spyroot/dev/standards"
 repository = "https://github.com/spyroot/standards"
-revision = "dca62dec9bdb93af1c75aa58504f3ea2463e186c"
+revision = "56a579c2d86addb7bae0591f8fc1750561b168d7"
 binding_file = "standards-binding.yaml"
 internal_templates = "templates/internal"
 required_contracts = [
@@ -23,8 +23,15 @@ required_contracts = [
   "automation",
   "project-consumer",
   "provider-escalation",
+  "bash-shell-standards",
+  "helm-ci-standards",
+  "policy-authority-standards",
+  "documentation-contract",
+  "documentation-rules",
+  "software-design",
+  "python-standards",
 ]
-project_additions = ["TEAM_GUIDE.md"]
+project_additions = [".coordination/pr-coordinator-policy.md", "TEAM_GUIDE.md"]
 
 [workspace]
 approved_pipeline_route = "https://github.com/spyroot/ci-skills/actions/workflows/validate.yml"

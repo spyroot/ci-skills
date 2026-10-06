@@ -1,24 +1,34 @@
-# CI-TESTS: testing strategy
+# CI06-TESTS: testing strategy
 
-Status: proposed. Covers every GAL phase. Each phase's pull request carries
-its own tests; this page says which tests and why.
+Status: proposed. Order and dependencies: CI10-PHASES, Phases. Covers every
+CIxx phase: each phase's pull request carries its own tests, listed in that
+phase's "Delivery, test and proof" section, and this page owns the rules, the
+layers, the smoke contract and the test command.
 
 ## Rules
 
-- **Tests run in CI.** A local run is limited to static checks and never
-  replaces CI.
+- **Unit and contract tests run on the gate route** (D-GATE; CI03-GATES, G0).
+  Locally only the static checks run: the pinned `agent-workspace` contract
+  says never to run tests on the laptop.
+- **Live smoke runs on this laptop**, the executor `tests/acceptance/expected.toml`
+  declares, against the test project and the live cluster (D-SMOKE, below).
 - **Unit tests are offline, deterministic and isolated.** No live cluster,
-  network, credentials or package installation (pinned standards,
-  `unit-testing` contract).
-- **No skipped required tests.** The suite has no `skip` markers today.
-  But the workflow skips pytest entirely on a Markdown-only change, and that
-  also counts as skipping required tests (CI03-GATES, G6).
+  network, credentials or package installation (pinned `unit-testing`
+  contract, "Default Boundary").
+- **No skipped required tests.** The suite has no `skip`, `skipif` or `xfail`
+  marker today. The deleted `validate` workflow (#27) skipped pytest entirely
+  on a Markdown-only change, which also counts as skipping required tests;
+  the gate route must not (CI03-GATES, G6).
 - **Mutating commands get the full matrix.** The pinned `unit-testing`
-  contract lists the tests every mutating command needs. The mutating
-  commands here are `update`, `install` and the hook installer. The matrix
-  covers:
+  contract ("Required Tests for a Mutating Entrypoint") lists the tests every
+  mutating command needs; this bullet defines the matrix the rest of this
+  document calls "the full matrix". The mutating commands today are the five
+  `core/catalog.py` marks `mutates: True`; planned are `update` (CI05-VENDOR),
+  `install` (CI01-CATALOG), the hook installer (CI04-HOOKS) and the
+  CI11-TOOLS actions. The matrix covers:
   - **planning:** default dry-run, explicit dry-run, zero mutation in a
-    dry-run, apply only with `--confirm`, apply only with a valid plan, and
+    dry-run, apply only with the plan-bound confirmation (CI02-CLI, item 6),
+    apply only with a valid plan, and
     refusing a plan whose input fingerprint changed;
   - **environment:** a missing tool, a missing input, a terminal
     authentication failure, and bounded retry;
@@ -29,229 +39,255 @@ its own tests; this page says which tests and why.
 - **Idempotency.** The same input run twice is a no-op that reports `PASS`
   and writes nothing. A different input against an existing target is
   refused, never overwritten.
-- **External commands are faked, never called.** `../../tests/python/conftest.py`
+- **External commands are faked, never called.** `tests/python/conftest.py`
   provides `fake_bin`, `install_executable` and `call_journal`. Its
-  `run_script` drives only the k8s skill's scripts, so a sibling `run_tool`
-  fixture drives `bin/ci-skills` and the hook scripts with the same fake
-  `PATH`.
+  `run_script` drives only the Python mains under its `SCRIPT_ROOT`, a path
+  that does not exist today (`conftest.py:17-19`; block 0 points it at
+  `ci-skills/bin/`, CI10-PHASES, Order). A sibling `run_tool` fixture
+  (planned, with `bin/ci-skills`: CI05-VENDOR) drives `bin/ci-skills` and
+  the hook scripts (planned, CI04-HOOKS) with the same fake `PATH`.
 - **Tests ride with their capability.** Each phase carries its focused tests;
-  CI-TESTS separately delivers only the reusable test command and coverage
-  report.
+  CI06-TESTS separately delivers only the reusable test command and coverage
+  report (Delivery, test and proof).
 
 ## Layers
 
 | Layer | Tool | Runs | Proves |
 | --- | --- | --- | --- |
-| Unit | pytest | CI | one module, every reason token |
-| Contract | pytest | CI | declarations agree with each other |
-| Shell | bats | CI | `./scripts/check.sh` and the hooks |
-| Offline smoke | pytest | CI | real entrypoint on the real tree |
-| Live | receipt | approved executor | the k8s skill, live |
+| Unit | pytest | gate route (D-GATE) | one module, every reason token |
+| Contract | pytest | gate route (D-GATE) | declarations agree with each other |
+| Shell | bats | gate route (D-GATE) | `./scripts/check.sh` and the hooks |
+| Offline smoke | pytest | gate route (D-GATE) | real entrypoint on the real tree |
+| Live smoke | receipt | this laptop, test project, live cluster | each tool executed, output locked, read back |
 
 Contract tests compare declarations that must agree:
 
-- the workflow and the gate registry;
+- the gate list `./scripts/check.sh --dry-run` prints (CI03-GATES, Steps) and
+  the workflow the gate route names, once one exists (D-GATE);
 - the catalog and `tools.json`;
-- records and their schemas;
-- `uses` pointers and declared operations.
+- records and their schemas (planned, CI07-SCHEMA);
+- `uses` pointers and declared operations (planned, CI07-SCHEMA and
+  CI09-REFERENCE).
+
+## Live smoke: the proof that a tool did what it says
+
+D-SMOKE (CI10-PHASES, Decisions taken): live smoke runs from this laptop, the
+executor `tests/acceptance/expected.toml` declares, against the targets
+declared there, and the proof is not an exit code but the tool's own output
+with what it read back (the pinned `smoke-testing` contract, "Required
+Invariants", asks for independent read-back). We are not testing the CI
+system; we are proving that the action executed and that the output is
+consistent. The local guide's sentence that a laptop is not release evidence
+applies to unit and contract tests, which run on the gate route (D-GATE;
+CI03-GATES, G0 and G8), not to live smoke: a smoke receipt is accepted only
+from the declared executor, and only by the checker (Verification, below).
+
+### Targets, declared once in `tests/acceptance/expected.toml`
+
+`[targets]` declares `gitlab`, the host every GitLab case reads and writes,
+and `github`, the repository of the publication receipt; `job_url` the one
+completed job the read cases use; `[targets.kubernetes]` the `context` and
+`server`; `ceph_namespace` the namespace of the Ceph check; `[[executors]]`
+the host and identities a receipt must come from; and each
+`[[gitlab_receipts]]` entry, in `target_path`, the project a write case acts
+on. Harbor is declared there before the first Harbor smoke case (CI11-TOOLS),
+never chosen by a tool.
+
+### A smoke case
+
+One per tool, declared in `expected.toml` as `[[smoke_cases]]` (planned:
+today the file has `[[gitlab_receipts]]` only; the checker's `[[smoke_cases]]`
+verification is CI03-GATES G5's, and the smoke-case schema row is
+CI07-SCHEMA's) with `tool`, `operation`, the fixed `args` (no random values;
+the receipt records their digest and the checker rejects a receipt whose
+arguments differ), the expected `status`, and the `readback` fields that
+prove the action. The case is run with `--receipt-out
+tests/acceptance/receipts/<tool>-<case>.json`, which writes the sanitized
+form (host paths digested, no credential values; `core/portable.py`).
+
+Today `gitlab_job.py` takes `--job-url URL` and `--search` and declares no
+subcommand (`ci-skills/bin/gitlab_job.py`, `core/catalog.py`); CI11-TOOLS
+adds the verbs (`get`, per its one query grammar) and owns the compatibility
+rule for the committed receipt.
+
+What the read-back is, per class of tool (CI11-TOOLS owns the per-tool smoke
+cases):
+
+- **Read:** the records by id and count.
+- **Logs:** the bounded trace with the declared marker.
+- **Track:** the status sequence to a terminal state.
+- **Mutating:** plan digest, `APPLIED`, field-by-field `GET` read-back,
+  second run `NO_OP`.
+- **Build and push:** registry digest equals the reported digest.
+- **ISO:** sha256, `HEAD` 200, server stopped.
+- **Concurrent reads:** per-read durations beside wall time.
+
+### What a receipt carries (the fields the checker compares)
+
+The fields `command-result` locks (CI07-SCHEMA, planned); the checker
+compares them. Smoke-specific on top: `plan`, `plan_digest`, `readback`
+(`action`, `id`, the compared fields, `verified`) and `result_action`
+(`APPLIED` or `NO_OP`). Today's operation receipts under
+`tests/acceptance/receipts/` already hold all four.
+
+### Verification
+
+`tools/check_live_acceptance.py --root . --expected tests/acceptance/expected.toml
+--receipts tests/acceptance/receipts --skill ci-skills --json` compares every
+receipt with what `expected.toml` declares. Today, for `[[gitlab_receipts]]`:
+the executor host and identities, the targets, the kind and operation,
+`result_action` with `readback.verified`, the `APPLIED` and `NO_OP` pair
+sharing one `plan_digest` and one resource identity, the skill digest and the
+age (`max_receipt_age_days`); a declared host or operation with no receipt,
+and a receipt nobody declared, fail it. `[[smoke_cases]]` adds the
+fixed-argument digest and the read-back fields each case names (planned,
+CI03-GATES G5), so that a tool with no smoke case, or a case with no receipt,
+fails the check; D-DIGEST narrows the digest to code (`references/vendor/**`
+excluded, planned: today `core/provenance.py` excludes only caches). Unit
+tests mock; a receipt is the only evidence that a tool ran live.
 
 ## Coverage targets
 
 - **Reason tokens.** Every reason token and status a command can emit has
   at least one test that produces it.
-- **Mutating commands.** Each covers the full matrix above.
-- **Lines.** coverage.py, pinned in `requirements.txt` (CI03-GATES, G2),
-  runs as `coverage run -m pytest` inside the tests gate and prints a
-  report. No threshold exists today; whether to set one is an open decision.
+- **Mutating commands.** Each covers the full matrix (Rules).
+- **Lines.** This phase adds coverage.py to `requirements.txt` as an exact
+  pin (CI03-GATES, G2 names it as this phase's; today the file holds three
+  ranges and no coverage line) and runs `coverage run -m pytest` inside the
+  `tests` gate (Delivery, test and proof), which prints a report. No
+  threshold exists today; whether to set one is an open decision.
 
 ## Existing coverage
 
-Observed 2026-10-02:
+Observed 2026-10-06:
 
-- 174 test functions in 22 files, no skips, and no coverage measurement.
-- The existing diagnostics installer has tests for dry-run, refusal, a
-  negative path and a successful read-back. It has none for:
-  - staging cleanup after a failed copy;
+- 398 `def test_` functions in 40 files under `tests/python/` and 39 `@test`
+  cases in 4 files under `tests/bash/`; no `skip`, `skipif` or `xfail`
+  marker; no coverage measurement.
+- The suite cannot import today: `tests/python/conftest.py:17-19` resolves
+  `REPO_ROOT` to `tests/` and `SCRIPT_ROOT` to `tests/skills/ci-skills/scripts`,
+  which does not exist, so `import_script_module` (`conftest.py:34-39`)
+  finds no `core`. Block 0 (CI10-PHASES, Order) fixes it. The Bats suite's
+  `tests/bash/check.bats` sources `../lib/ci/check.bash`, a path that does
+  not exist either: the library was deleted in #26.
+- No execution surface exists (D-GATE; CI03-GATES, G0).
+- The installer (`tools/install_ci_skills.py`) has tests for dry-run,
+  refusal, a negative path and a successful read-back
+  (`tests/python/test_installer.py`). No test names or asserts:
+  - the staging directory's removal after a failed copy;
   - the `installed_digest_mismatch` read-back failure;
   - `pyyaml_unavailable`.
-- **Second runs.** Today the installer refuses any existing destination,
-  so a second run is a refusal, not a no-op. Package delivery preserves
-  its tests while changing the package path. CI01-CATALOG's `install` makes
-  the same digest a no-op and refuses a different one.
-
-## `ci-skills` package delivery
-
-The separate delivery pull request in CI-PHASES tests:
-
-- the sole `ci-skills` entry and path assertions;
-- the thin checkout adapters and installed diagnostics and PR #2 commands
-  from outside the checkout;
-- confirmed upgrade from an existing link, refusal without confirmation,
-  revision-bound fingerprint, timeout, and installed digest read-back;
-- manifest equality in CI and a fresh live receipt for the final package.
+- **Second runs.** Today the installer refuses any existing destination
+  (`destination_exists`), so a second run is a refusal, not a no-op. #21
+  (merged) kept those tests and moved the package path. CI01-CATALOG's
+  `install` makes the same digest a no-op and refuses a different one.
 
 ## CI03-GATES
 
-- **Contract.**
-  - Registry gates have unique ids, and every gate is called by exactly one
-    `validate.yml` step.
-  - Live acceptance and `verify` stay unconditional and first.
-  - The `schedule` trigger is present.
-  - The final aggregator fails when an evidence record is missing, skipped,
-    warning-bearing or for the wrong commit.
-  - Every `requirements.txt` line pins an exact version.
-- **Shell (bats).**
-  - `--help` lists every argument and output mode; an unknown option exits
-    64.
-  - The static subset runs only static gates.
-  - A failing gate fails the run and names the gate.
+Tests: CI03-GATES, Delivery, test and proof.
 
-## CI-SCHEMA
+## CI07-SCHEMA
 
-- Every schema validates against the 2020-12 metaschema.
-- Per schema, fixtures for:
-  - one valid record;
-  - one record per missing required field;
-  - one record per broken conditional rule.
-- **The version gate.** A schema changed without a version bump fails, and
-  so does a MAJOR bump without the new file.
-- **Runtime.** An invalid record makes a producer exit 65, naming the file,
-  the JSON path and the rule.
+Tests: CI07-SCHEMA, Delivery, test and proof.
 
 ## CI02-CLI
 
-The contract test runs over every entrypoint discovery finds:
+Tests: CI02-CLI, Delivery, test and proof.
 
-- `--help` and `--describe` exit 0 with an empty environment and no network;
-- `--describe` validates against `command-contract`;
-- options accepted equal options described;
-- a shared option name keeps one meaning;
-- the default run of a mutating command writes nothing;
-- exit codes come only from the shared table.
+## CI05-VENDOR
 
-## CI-VENDOR
-
-- **Unit, with a fake `glab`.**
-  - `verify` passes on a fixture tree and lock.
-  - Each reason token:
-    - one flipped byte gives `digest_mismatch`;
-    - a deleted `LICENSE` gives `file_missing`;
-    - a stray file gives `unexpected_file`;
-    - a corrupt lock gives `lock_unreadable`;
-    - a symbolic link in a staged or a committed tree gives
-      `symlink_unexpected`;
-    - an undeclared name gives `skill_unknown`.
-  - The lock's `tree` equals `tree_digest`, and each `files` hash equals
-    that file's SHA-256.
-  - The full matrix for `update`, including:
-    - with no `glab`, `update` gives `glab_unavailable` and `verify` still
-      passes;
-    - a fake `glab` that fails fewer times than `attempts` ends in `PASS`,
-      and one that always fails gives `fetch_failed` with every attempt's
-      error.
-  - **Interrupted transaction:** a process killed between the tree renames
-    and the lock rename leaves a marker. The next run restores the previous
-    trees and lock, and reports that it recovered.
-  - Declared tags, license and notice survive an `update --confirm`.
-  - `verify` runs with the PyYAML import blocked, which proves it is
-    standard-library only.
-- **Contract.** `.markdownlint-cli2.yaml` ignores every vendored skill that
-  the lock lists.
-- **Offline smoke.** `bin/ci-skills verify --json` on the committed vendored
-  tree reports `PASS`.
+Tests: CI05-VENDOR, Delivery, test and proof.
 
 ## CI01-CATALOG
 
-- **Discovery.**
-  - The walk order is the direct children of `skills/` in name order;
-    the repository root is not a second skill.
-  - Exactly one `ci-skills` record resolves to `../../ci-skills`.
-  - `list --skills-dir DIR` reads a copied installed package; an unconverted
-    symbolic link reports `symlink_unexpected` with the upgrade command.
-  - Nested and hidden directories are skipped.
-  - Each error token: `frontmatter_missing`, `frontmatter_invalid`,
-    `name_mismatch`, `manifest_invalid`, `lock_entry_missing` and
-    `symlink_unexpected`.
-  - `list` exits 65 when any record fails, and still prints the valid ones.
-- **Containment.**
-  - As `NAME`, `get` and `install` refuse `../x`, `a/b`, `.` and a
-    symlinked skill root, all with `skill_unknown`.
-  - As `PATH`, `get` refuses `../x`, an absolute path and an escaping
-    symbolic link, with `path_outside_skill`.
-- **The full matrix for `install`, including:**
-  - a vendored skill with bytes that do not match its lock gives
-    `vendor_unverified`;
-  - a missing dependency gives `dependency_missing`;
-  - the same digest twice is a no-op;
-  - a different digest gives `destination_differs`;
-  - a failed copy removes the staging directory;
-  - a read-back mismatch gives `installed_digest_mismatch`.
-- **Regression.** `../../tests/python/test_installer.py` and
-  `../../tests/python/test_installed_package.py` pass against the compatibility wrapper;
-  package delivery updates path assertions for `../../ci-skills` first.
-- **Offline smoke.** The installed-package smoke also installs a vendored
-  skill and compares digests. `bin/ci-skills` runs from the repository as
-  a maintenance command; installed-package smoke exercises the diagnostics
-  and PR #2 tools from outside the checkout.
-- **Outside CI.** `get glab` is compared byte for byte with
-  `glab skills get glab` where `glab` is installed.
+Tests: CI01-CATALOG, Delivery, test and proof.
 
-## CI-ROUTING
+## CI08-ROUTING
 
-- **Closed world.**
-  - Every `REFERENCES` path exists.
-  - Every `points_to` names a discovered skill.
-  - Every `uses` id resolves.
-  - `depends_on` equals the set of `points_to` values.
-  - A dangling entry fails.
-- **The router.** `SKILL.md` keeps the `references/access.md` link and the
-  four safety rules, and `references/reading-reports.md` holds the moved
-  sections.
-- **Install dependency.** Both `install.sh` and `bin/ci-skills install`
-  refuse an absent or mismatched `glab` dependency without partial writes;
-  each succeeds once the matching dependency is installed.
-- **Matching.**
-  - A status token matches only that exact status.
-  - A phrase matches the task text as a case-insensitive substring.
-  - Text that matches nothing loads nothing.
-- **Live.** A new receipt from the approved executor, accepted by the live
-  acceptance gate.
+Tests: CI08-ROUTING, Delivery, test and proof.
 
-## CI-REFERENCE
+## CI09-REFERENCE
 
-- **Declarations.** Every call site's argument prefix maps to a declared
-  operation, found by scanning the code. No unbounded `api` or `exec`
-  operation is labelled read-only.
-- **The parser.**
-  - Recorded `__complete` output from `glab` 1.120.0, `gh` 2.98.0 and
-    `kubectl` v1.36.4 parses as expected.
-  - Hostile fixtures are bounded or dropped: directive lines, active-help
-    lines, huge output and a hanging command.
-- **Results.** `tool_missing` carries a safe next step. `used_by` is
-  computed, and matches the `uses` pointers.
+Tests: CI09-REFERENCE, Delivery, test and proof.
 
 ## CI04-HOOKS
 
-- **Shell (bats), in temporary git repositories.**
-  - A staged defect with an unstaged fix is refused, because the checks
-    run on the index snapshot.
-  - pre-commit and pre-push both refuse on exits 1, 2, 64, 69 and 127, and
-    the commit or push does not proceed.
-  - Staged agent instruction files are refused.
-- **The full matrix for the installer, including:**
-  - an existing hook it did not install gives `hook_exists`;
-  - a failed link cleans up and fails;
-  - in a linked worktree it installs into the common directory;
-  - with a global dispatcher present, delegation reads back;
-  - `core.hooksPath` stays unset.
+Tests: CI04-HOOKS, Delivery, test and proof.
 
-Agent-harness hooks are outside the deliverable, so they have no tests here.
+## Delivery, test and proof
+
+1. *Delivery.* This phase adds the `tests` gate to the one entrypoint,
+   `./scripts/check.sh` (CI03-GATES, G1), and an exact coverage.py pin to
+   `requirements.txt` (CI03-GATES, G2). The gate runs, from the repository
+   root, the two pytest runs the deleted workflow had
+   (`1108cca^:.github/workflows/validate.yml`, steps "Isolated
+   installed-package smoke" and "Tests"), under coverage and on today's
+   paths:
+
+   ```text
+   coverage run -m pytest -q tests/python/test_installed_package.py
+   coverage run -a -m pytest -q --ignore=tests/python/test_installed_package.py tests/python
+   coverage report
+   ```
+
+   Two gaps, none of them closed here by invention: `scripts/check.sh:6`
+   sources `lib/ci/check.bash`, deleted in #26, so the entrypoint cannot run
+   until block 0 re-points it (CI10-PHASES, Order); G1 names no argument
+   that runs one gate, so the argv that runs only `tests` is G1's to name.
+   The gate library sits at `ci-skills/lib/bash/ci/check.bash` (planned,
+   CI10-PHASES, Order, block 0), inside the digested tree
+   (`core/provenance.py`, `_included`), so adding the `tests` gate moves the
+   skill digest (part 5).
+2. *Tests*, written with the block; run status UNVERIFIED (CI03-GATES, G0).
+   In `tests/bash/check.bats`, on the fixture and stub pattern it already
+   uses (`make_check_run_fixture`, `make_success_stubs`):
+   - `--dry-run` lists the `tests` gate and calls no `coverage` or `pytest`
+     (the deleted library listed it as `unit`: `check.bats`, first case);
+   - outside Kubernetes (`KUBERNETES_SERVICE_HOST` unset) the gate exits 69
+     with `Kubernetes execution is required`, the guard the suite already
+     asserts;
+   - with a stub `coverage` on `PATH`, the gate calls the three lines above
+     in that order and nothing else (call journal);
+   - a stub `coverage` that exits non-zero fails the run and names the
+     `tests` gate;
+   - no `coverage` on `PATH` exits 69, like the suite's other blocked cases.
+
+   The literal 69 is the restored library's blocked code; once D-EXIT is
+   decided (CI02-CLI), the cases assert the one table's blocked code.
+
+   The exact-pin contract test CI03-GATES lists covers the new
+   `requirements.txt` line; no second test.
+3. *Smoke.* This phase changes no live behaviour and declares no smoke case.
+   Its static read-back is the gate's own summary: pytest's final `N passed`
+   line for each run and the `TOTAL` line of `coverage report`, in the check
+   output. Where the report is written as a file is not declared anywhere;
+   this phase names it when CI03-GATES G6 fixes the evidence layout
+   (`reports/ci/<job>.json`).
+4. *Evidence.* No receipt: the static evidence is the output of
+   `./scripts/check.sh` running the `tests` gate (the three lines above),
+   kept by the gate route once one exists (D-GATE).
+5. *Verification.* The `tests` gate is a byte change under `ci-skills/`
+   (part 1), so the receipts are recaptured on the D-SMOKE executor
+   (CI03-GATES, G5); then `tools/check_live_acceptance.py --root . --expected
+   tests/acceptance/expected.toml --receipts tests/acceptance/receipts
+   --skill ci-skills` prints `Live acceptance: PASS` (exit 0).
+   Observed 2026-10-06, that command exits with
+   `ModuleNotFoundError: No module named 'core'`
+   (`tools/check_live_acceptance.py:450-453` inserts `skills/ci-skills/scripts`,
+   which does not exist; block 0 re-points `tools/*.py`), and the committed
+   receipts no longer match the tree's digest (CI10-PHASES, Pull request
+   status), so the line reads `PASS` only once both are repaired.
 
 ## Open decisions
 
+- **Live steps read from a third-party binary.** CI05-VENDOR's smoke reads
+  `glab skills get` and `glab skills list`, which are not tools of ours, and
+  a receipt comes only from a tool run (Live smoke); which record carries
+  their result is open here.
 - **Coverage.** Whether to set a line-coverage floor, once coverage is
   measured.
-- **`bats` in CI.** PR #2 runs its Bats suite in an approved CI image that
-  holds every declared tool. Whether `validate` uses that image depends on
-  the test route (CI03-GATES, G8); the pinned standards forbid ad hoc tool
-  installs inside a required job.
+- **`bats` on the gate route.** `tests/bash/` holds 4 Bats files (39 cases)
+  and CI03-GATES G1 names `scripts/check.sh` as their runner. Which image
+  runs them, holding every declared tool, is the gate route's choice (D-GATE;
+  CI03-GATES, G0 and G8): the pinned `blockers` contract forbids installing
+  tools ad hoc inside a required CI job.
