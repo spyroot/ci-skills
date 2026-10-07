@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from argparse import Namespace
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from .gitlab_actions import (
     ActionError,
@@ -17,27 +17,49 @@ from .gitlab_actions import (
     _positive,
     _required_text,
 )
-from .gitlab_api import GitLabAPIError, create_guard, uncertain_write
+from .gitlab_api import (
+    GitLabAPIError,
+    create_guard,
+    runner_update_guard,
+    uncertain_write,
+    unverified_write,
+)
 from .target import GitLabOperationTarget
+
+MAX_TAG_UPDATE_ATTEMPTS: Final[int] = 2
 
 
 def prepare(
     args: Namespace, target: GitLabOperationTarget, target_kind: str
 ) -> tuple[dict[str, Any], int | None, str | None]:
+    """Validate one runner action before the shared plan is fingerprinted.
+
+    :param args: Parsed command arguments.
+    :param target: Selected nonsecret GitLab target.
+    :param target_kind: Access scope, ``project`` or ``group``.
+    :returns: Request body, existing runner ID, and one-time token sink.
+    :raises ActionError: If the action or its arguments are invalid.
+    """
     if args.action == "assign":
         identifier = _positive(args.runner_id or target.gitlab.runner_id, "runner_id")
         if args.token_out or args.description or args.tag or args.runner_type:
             raise ActionError("assign_accepts_runner_id_only")
         return {}, identifier, None
+    if args.action == "tag":
+        identifier = _positive(args.runner_id, "runner_id")
+        if args.token_out or args.description or args.runner_type:
+            raise ActionError("tag_accepts_runner_id_and_tags_only")
+        tags = _requested_tags(args.tag)
+        if not tags:
+            raise ActionError("tag_requires_tag")
+        return {"tag_list": tags}, identifier, None
     if args.action != "create":
         raise ActionError("unsupported_runner_action")
     body: dict[str, Any] = {
         "runner_type": f"{target_kind}_type",
         "description": _required_text(args.description, "description"),
     }
-    tags = [_required_text(tag, "tag") for tag in args.tag]
-    if len(set(tags)) != len(tags):
-        raise ActionError("duplicate_tag")
+    tags = _requested_tags(args.tag)
     if tags:
         body["tag_list"] = ",".join(tags)
     if args.runner_id is not None:
@@ -48,6 +70,37 @@ def prepare(
         str(Path(args.token_out).expanduser().absolute()) if args.token_out else None
     )
     return body, None, token_out
+
+
+def _requested_tags(values: list[str]) -> list[str]:
+    """Validate caller tags for both record creation and later additions.
+
+    :param values: Repeated ``--tag`` values from the command parser.
+    :returns: Distinct, nonempty tag names in caller order.
+    :raises ActionError: If a tag is empty, contains a comma, or is repeated.
+    """
+    tags = [_required_text(value, "tag") for value in values]
+    if any("," in tag for tag in tags):
+        raise ActionError("tag_must_not_contain_comma")
+    if len(set(tags)) != len(tags):
+        raise ActionError("duplicate_tag")
+    return tags
+
+
+def _observed_tags(value: Any) -> list[str]:
+    """Accept only a concrete GitLab tag list for a runner read-back.
+
+    :param value: Provider ``tag_list`` value.
+    :returns: Nonempty tag names in provider order.
+    :raises ActionError: If GitLab returns an invalid or duplicated tag.
+    """
+    if not isinstance(value, list) or any(
+        not isinstance(tag, str) or not tag or "," in tag for tag in value
+    ):
+        raise ActionError("runner_tag_list_invalid_shape")
+    if len(set(value)) != len(value):
+        raise ActionError("runner_tag_list_duplicate")
+    return value
 
 
 def project_ids(api: Any, session: Any, group_id: int) -> tuple[int, ...]:
@@ -235,15 +288,34 @@ def _runner_matches(
 
 
 def _runner_readback(
-    api: Any, session: Any, scope: str, runner_id: int, description: str
-) -> None:
+    api: Any,
+    session: Any,
+    scope: str,
+    runner_id: int,
+    description: str | None = None,
+    expected_tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Read one runner and its selected-scope membership from GitLab.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated GitLab session.
+    :param scope: Exact project or group runner-list endpoint.
+    :param runner_id: Runner ID to verify.
+    :param description: Optional expected creation key.
+    :param expected_tags: Optional exact tag set for creation.
+    :returns: Provider runner record with a validated ``tag_list``.
+    :raises ActionError: If identity, scope, or tags do not match.
+    :raises GitLabAPIError: If either live read fails.
+    """
     observed = _object(
         api.get_json(session, f"runners/{runner_id}"),
         "runner_readback",
         "id",
         "description",
     )
-    if observed["id"] != runner_id or observed["description"] != description:
+    if observed["id"] != runner_id or (
+        description is not None and observed["description"] != description
+    ):
         raise ActionError("runner_readback_mismatch")
     scoped = [
         item
@@ -252,6 +324,85 @@ def _runner_readback(
     ]
     if len(scoped) != 1:
         raise ActionError("runner_scope_readback_mismatch")
+    observed_tags = _observed_tags(observed.get("tag_list"))
+    if expected_tags is not None and set(observed_tags) != set(expected_tags):
+        raise ActionError("runner_tag_readback_mismatch")
+    return observed
+
+
+def _tag(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
+    """Add requested tags to one scoped runner and verify a fresh GET.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated session for the selected target.
+    :param plan: Confirmed tag-addition plan.
+    :param target_id: Access-verified project or group ID.
+    :returns: Before/after tags and verified action status.
+    :raises ActionError: If the runner is outside the selected target or malformed.
+    :raises GitLabAPIError: If a pre-write provider read or terminal write fails.
+    """
+    runner_id = _positive(plan.resource_id, "runner_id")
+    scope = f"{plan.target_kind}s/{target_id}/runners"
+    requested = _observed_tags(plan.body["tag_list"])
+    with runner_update_guard(plan.origin, runner_id):
+        current = _runner_readback(api, session, scope, runner_id)
+        if current.get("runner_type") != f"{plan.target_kind}_type":
+            raise ActionError("runner_scope_type_mismatch")
+        before = _observed_tags(current.get("tag_list"))
+        observed_tags = before
+        reconciled = False
+        for attempt in range(MAX_TAG_UPDATE_ATTEMPTS):
+            desired = observed_tags + [
+                tag for tag in before + requested if tag not in observed_tags
+            ]
+            if desired == observed_tags:
+                return {
+                    "action": "NO_OP",
+                    "id": runner_id,
+                    "verified": True,
+                    "mutated": False,
+                    "before_tags": before,
+                    "after_tags": before,
+                    "added_tags": [],
+                }
+            try:
+                api.put_json(session, f"runners/{runner_id}", {"tag_list": desired})
+            except GitLabAPIError as exc:
+                if not uncertain_write(exc):
+                    raise
+                reconciled = True
+            try:
+                observed = _runner_readback(api, session, scope, runner_id)
+                observed_tags = _observed_tags(observed.get("tag_list"))
+            except (ActionError, GitLabAPIError):
+                return unverified_write(
+                    target_id,
+                    {"id": runner_id, "before_tags": before, "expected_tags": desired},
+                    "runner_tag_readback_unavailable",
+                )
+            if set(before + requested).issubset(observed_tags):
+                result = {
+                    "action": "APPLIED",
+                    "id": runner_id,
+                    "verified": True,
+                    "mutated": True,
+                    "before_tags": before,
+                    "after_tags": observed_tags,
+                    "added_tags": [tag for tag in requested if tag not in before],
+                }
+                if reconciled or attempt:
+                    result["reconciled"] = True
+                return result
+        return unverified_write(
+            target_id,
+            {
+                "id": runner_id,
+                "before_tags": before,
+                "after_tags": observed_tags,
+                "expected_tags": desired,
+            },
+            "runner_tag_readback_mismatch",
+        )
 
 
 def _rollback_created_runner(
@@ -281,6 +432,16 @@ def _rollback_created_runner(
 
 
 def _create(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
+    """Create one scoped runner record and save its one-time token.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated GitLab session.
+    :param plan: Confirmed creation plan.
+    :param target_id: Access-verified project or group ID.
+    :returns: Verified runner ID, observed tags, and token-sink status.
+    :raises ActionError: If the token sink or recovery state is invalid.
+    :raises GitLabAPIError: If a terminal provider operation fails.
+    """
     if not plan.token_out:
         raise ActionError("token_out_required_for_runner_create_plan")
     scope = f"{plan.target_kind}s/{target_id}/runners"
@@ -397,7 +558,14 @@ def _create(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[st
                     "mutated": None if cleanup["status"] != "PASS" else False,
                 }
             try:
-                _runner_readback(api, session, scope, runner_id, description)
+                expected_tags = (
+                    plan.body["tag_list"].split(",")
+                    if "tag_list" in plan.body
+                    else None
+                )
+                observed = _runner_readback(
+                    api, session, scope, runner_id, description, expected_tags
+                )
             except (ActionError, GitLabAPIError) as exc:
                 cleanup = _rollback_created_runner(
                     api, session, scope, runner_id, description
@@ -419,6 +587,7 @@ def _create(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[st
                 "action": "APPLIED",
                 "id": runner_id,
                 "verified": True,
+                "after_tags": observed["tag_list"],
                 "sink_persisted": True,
                 "mutated": True,
                 "cleanup": {
@@ -434,6 +603,18 @@ def _create(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[st
 
 
 def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
+    """Dispatch one confirmed runner action to the existing shared adapter.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated GitLab session.
+    :param plan: Confirmed runner action plan.
+    :param target_id: Access-verified project or group ID.
+    :returns: Action record with independent read-back evidence.
+    :raises ActionError: If a selected resource or response is invalid.
+    :raises GitLabAPIError: If a terminal provider operation fails.
+    """
     if plan.operation == "assign":
         return _assign(api, session, plan, target_id)
+    if plan.operation == "tag":
+        return _tag(api, session, plan, target_id)
     return _create(api, session, plan, target_id)

@@ -646,7 +646,7 @@
         "--token-out",
         "--yaml"
       ],
-      "purpose": "Assign an existing runner or create a runner record and verify it.",
+      "purpose": "Assign, create, or tag a selected GitLab runner record and verify it.",
       "read_only": false,
       "report_kind": "gitlab_runner",
       "required_options": [],
@@ -654,7 +654,7 @@
       "requires_authorities": [
         "gitlab"
       ],
-      "returns": "A sanitized plan or verified runner record and assignment evidence.",
+      "returns": "A sanitized plan or verified runner record, assignment, and before/after tag evidence.",
       "side_effects": "none",
       "subcommands": {
         "assign": {
@@ -668,9 +668,16 @@
             "--description",
             "--token-out"
           ]
+        },
+        "tag": {
+          "required_options": [
+            "--runner-id",
+            "--tag"
+          ],
+          "result_schema": "schemas/results/gitlab-runner-tag.schema.json"
         }
       },
-      "use_when": "A selected project or group needs runner assignment or creation."
+      "use_when": "A selected project or group needs runner assignment, creation, or tags."
     },
     "gitlab_wiki.py": {
       "capabilities": [],

@@ -12,7 +12,7 @@ import stat
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -209,15 +209,12 @@ class CreateGuard:
 
 
 @contextmanager
-def create_guard(
-    origin: str, target_kind: str, target_id: int, kind: str, title: str
-) -> Iterator[CreateGuard]:
-    """Serialize one title's search/create/read-back across local processes.
+def _locked_descriptor(identity: Sequence[str | int]) -> Iterator[int]:
+    """Lock one resource identity in a private local file.
 
-    Locks are scoped by exact host and numeric target. No title is written to
-    the lock file. A create started but not independently verified leaves a
-    pending marker, so a later invocation may read back but cannot send a new
-    POST when the first POST's outcome remains unknown.
+    :param identity: Exact provider and resource identifiers; never a credential.
+    :returns: Open, exclusively locked descriptor for the caller's operation.
+    :raises GitLabAPIError: If the lock path is unsafe or acquisition times out.
     """
     root = _lock_root()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -228,10 +225,8 @@ def create_guard(
         or metadata.st_mode & 0o077
     ):
         raise GitLabAPIError("create_lock_directory_unsafe")
-    identity = json.dumps(
-        [origin, target_kind, target_id, kind, title], separators=(",", ":")
-    )
-    name = hashlib.sha256(identity.encode("utf-8")).hexdigest() + ".lock"
+    encoded = json.dumps(identity, separators=(",", ":"))
+    name = hashlib.sha256(encoded.encode("utf-8")).hexdigest() + ".lock"
     flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(root / name, flags, 0o600)
     try:
@@ -253,10 +248,41 @@ def create_guard(
                 if time.monotonic() >= deadline:
                     raise GitLabAPIError("create_lock_timeout") from exc
                 time.sleep(0.05)
-        yield CreateGuard(descriptor)
+        yield descriptor
     finally:
         fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
+
+
+@contextmanager
+def create_guard(
+    origin: str, target_kind: str, target_id: int, kind: str, title: str
+) -> Iterator[CreateGuard]:
+    """Serialize one creation and retain its crash-recovery marker.
+
+    :param origin: Bound GitLab origin.
+    :param target_kind: Project or group scope.
+    :param target_id: Access-verified scope ID.
+    :param kind: Resource class being created.
+    :param title: Server-visible uniqueness key.
+    :returns: Guard that records an uncertain POST until reconciliation.
+    :raises GitLabAPIError: If the lock or recovery marker is unsafe.
+    """
+    with _locked_descriptor([origin, target_kind, target_id, kind, title]) as fd:
+        yield CreateGuard(fd)
+
+
+@contextmanager
+def runner_update_guard(origin: str, runner_id: int) -> Iterator[None]:
+    """Serialize local updates to one runner across selected projects.
+
+    :param origin: Bound GitLab origin.
+    :param runner_id: Runner ID shared by every project selection.
+    :returns: Control after the resource lock is acquired.
+    :raises GitLabAPIError: If the local lock cannot be acquired safely.
+    """
+    with _locked_descriptor([origin, "runner", runner_id]):
+        yield
 
 
 class GlabAPIClient:

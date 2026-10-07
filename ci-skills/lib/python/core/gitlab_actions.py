@@ -10,7 +10,7 @@ import socket
 import sys
 import time
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,8 +65,11 @@ class ActionPlan:
         return hashlib.sha256(encoded).hexdigest()
 
     def public(self) -> dict[str, Any]:
-        """Describe the plan without publishing issue/wiki text or a token."""
-        return {
+        """Describe the plan without publishing issue/wiki text or a token.
+
+        :returns: Safe plan metadata, including nonsecret runner tags.
+        """
+        result = {
             "operation": self.operation,
             "target_kind": self.target_kind,
             "target_reference": self.target_reference,
@@ -88,6 +91,12 @@ class ActionPlan:
             "one_time_sink_required": self.operation == "create"
             and self.kind == "gitlab_runner",
         }
+        if self.kind == "gitlab_runner" and "tag_list" in self.body:
+            tags = self.body["tag_list"]
+            result["requested_tags"] = (
+                tags.split(",") if isinstance(tags, str) else list(tags)
+            )
+        return result
 
 
 def _positive(value: Any, name: str) -> int:
@@ -334,7 +343,12 @@ def apply_plan(
 
 
 def action_parser(kind: str) -> argparse.ArgumentParser:
-    """Keep wrappers thin while exposing the existing universal CLI tier."""
+    """Expose the shared plan/apply interface for one GitLab action kind.
+
+    :param kind: Registered GitLab action kind.
+    :returns: Parser with universal and kind-specific options.
+    :raises KeyError: If the action kind is not registered.
+    """
     result = parser(
         f"Plan, apply, and verify {kind.replace('_', ' ')} changes.", kind=kind
     )
@@ -342,7 +356,7 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
         "gitlab_milestone": ("create", "update", "adjust-time"),
         "gitlab_issue": ("open-bug", "create-bug"),
         "gitlab_wiki": ("create", "update"),
-        "gitlab_runner": ("assign", "create"),
+        "gitlab_runner": ("assign", "create", "tag"),
     }
     result.add_argument(
         "action", nargs="?", choices=choices[kind], help="operation to plan or apply"
@@ -382,7 +396,7 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
             help="read exact group project IDs and print an apply-ready plan without writes",
         )
         result.add_argument(
-            "--runner-id", type=int, help="numeric runner ID for assignment"
+            "--runner-id", type=int, help="numeric runner ID for assignment or tagging"
         )
         result.add_argument(
             "--runner-type",
@@ -394,7 +408,7 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
             "--tag",
             action="append",
             default=[],
-            help="runner tag; repeat to add several",
+            help="runner tag for create or tag; repeat to add several",
         )
         result.add_argument(
             "--token-out", metavar="PATH", help="create-only one-time token destination"
@@ -421,7 +435,7 @@ def _result(plan: ActionPlan, status: str, **fields: Any) -> dict[str, Any]:
         "schema_version": "1.0",
         "kind": plan.kind,
         "status": status,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": datetime.now(UTC).isoformat(),
         "execution_host": socket.getfqdn(),
         "tested_revision": plan.revision,
         "origin": plan.origin,

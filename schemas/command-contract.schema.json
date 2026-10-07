@@ -206,6 +206,10 @@
             "type": "string",
             "minLength": 1
           },
+          "result_schema": {
+            "type": "string",
+            "pattern": "^schemas/results/[a-z0-9-]+\\.schema\\.json$"
+          },
           "mutates": {
             "type": "boolean"
           },

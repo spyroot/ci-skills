@@ -358,18 +358,18 @@ COMMANDS: dict[str, dict[str, Any]] = {
     },
     "gitlab_runner.py": {
         "kind": "gitlab_runner",
-        "purpose": "Assign an existing runner or create a runner record and verify it.",
-        "use_when": "A selected project or group needs runner assignment or creation.",
+        "purpose": "Assign, create, or tag a selected GitLab runner record and verify it.",
+        "use_when": "A selected project or group needs runner assignment, creation, or tags.",
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
         "options": {
             "--project": "exact project path or numeric ID",
             "--group": "exact group path or numeric ID",
-            "--runner-id": "numeric existing runner ID for assignment",
+            "--runner-id": "numeric existing runner ID for assignment or tagging",
             "--runner-type": "project or group scope for creation",
             "--description": "runner description and server-visible recovery key",
-            "--tag": "runner tag; repeat for multiple tags",
+            "--tag": "runner tag for create or tag; repeat for multiple tags",
             "--token-out": "caller-selected 0600 file for the one-time runner token",
             "--live-plan": "read exact group project IDs and print an apply-ready plan without writes",
             "--apply": "perform the validated change",
@@ -382,8 +382,12 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "create": {
                 "required_options": ["--runner-type", "--description", "--token-out"]
             },
+            "tag": {
+                "required_options": ["--runner-id", "--tag"],
+                "result_schema": "schemas/results/gitlab-runner-tag.schema.json",
+            },
         },
-        "returns": "A sanitized plan or verified runner record and assignment evidence.",
+        "returns": "A sanitized plan or verified runner record, assignment, and before/after tag evidence.",
     },
     "storage_report.py": {
         "kind": "storage_report",

@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/gitlab-runner-tag.schema.json",
+  "title": "GitLab runner tag action result",
+  "description": "JSON or YAML from gitlab_runner.py tag. PASS proves a scoped runner GET after mutation; DRY_RUN is an offline plan; BLOCKED and PARTIAL are not success.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "status", "captured_at", "errors", "summary"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "gitlab_runner"},
+    "status": {"enum": ["DRY_RUN", "PASS", "PARTIAL", "BLOCKED"]},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "execution_host": {"type": "string", "minLength": 1},
+    "tested_revision": {"type": ["string", "null"]},
+    "operation": {"const": "tag"},
+    "origin": {"type": "string", "pattern": "^https://"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reference"],
+      "properties": {
+        "kind": {"enum": ["project", "group"]},
+        "reference": {"type": "string", "minLength": 1}
+      }
+    },
+    "target_file": {"type": "string", "minLength": 1},
+    "target_source": {"type": "string", "minLength": 1},
+    "phase": {"enum": ["OFFLINE_PLAN", "ACCESS", "APPLY"]},
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "target_kind", "target_reference", "resource_id", "project_ids", "confirmation_ready", "fields", "body_sha256", "plan_digest", "one_time_sink_required", "requested_tags"],
+      "properties": {
+        "operation": {"const": "tag"},
+        "target_kind": {"enum": ["project", "group"]},
+        "target_reference": {"type": "string", "minLength": 1},
+        "resource_id": {"type": "integer", "minimum": 1},
+        "project_ids": {"type": "null"},
+        "confirmation_ready": {"const": true},
+        "fields": {"const": ["tag_list"]},
+        "body_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "one_time_sink_required": {"const": false},
+        "requested_tags": {"$ref": "#/$defs/tags"}
+      }
+    },
+    "mutated": {"type": ["boolean", "null"]},
+    "records": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/record"}},
+    "readback": {"type": "object"},
+    "result_action": {"enum": ["APPLIED", "NO_OP"]},
+    "identity": {"type": "object"},
+    "verified_target": {"type": "object"},
+    "credential_source": {"type": "string", "minLength": 1},
+    "credential_digest": {"type": "string", "minLength": 1},
+    "skill": {"type": "object"},
+    "cleanup": {"type": "object"},
+    "report_files": {"type": "object"},
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "reason"],
+        "properties": {
+          "source": {"type": "string", "minLength": 1},
+          "reason": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_count", "error_count"],
+      "properties": {
+        "record_count": {"type": "integer", "minimum": 0, "maximum": 1},
+        "error_count": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}, "required": ["status"]},
+      "then": {
+        "required": ["operation", "phase", "plan", "plan_digest", "records", "readback", "result_action", "identity", "verified_target", "credential_source", "credential_digest", "skill"],
+        "properties": {
+          "phase": {"const": "APPLY"},
+          "records": {"minItems": 1},
+          "readback": {"allOf": [{"$ref": "#/$defs/record"}, {"properties": {"verified": {"const": true}}}]},
+          "errors": {"maxItems": 0},
+          "summary": {"properties": {"record_count": {"const": 1}, "error_count": {"const": 0}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "DRY_RUN"}}, "required": ["status"]},
+      "then": {
+        "required": ["operation", "phase", "plan", "plan_digest", "records"],
+        "properties": {
+          "phase": {"const": "OFFLINE_PLAN"},
+          "mutated": {"const": false},
+          "records": {"maxItems": 0},
+          "errors": {"maxItems": 0},
+          "summary": {"properties": {"record_count": {"const": 0}, "error_count": {"const": 0}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "PARTIAL"}}, "required": ["status"]},
+      "then": {
+        "required": ["operation", "phase", "plan", "plan_digest", "records", "readback", "result_action", "mutated", "cleanup", "identity", "verified_target", "credential_source", "credential_digest", "skill"],
+        "properties": {
+          "phase": {"const": "APPLY"},
+          "result_action": {"const": "APPLIED"},
+          "mutated": {"type": ["boolean", "null"]},
+          "records": {"minItems": 1},
+          "readback": {
+            "allOf": [
+              {"$ref": "#/$defs/record"},
+              {"required": ["before_tags", "expected_tags", "errors", "cleanup"], "properties": {"verified": {"const": false}}}
+            ]
+          },
+          "cleanup": {"required": ["status", "reason"], "properties": {"status": {"const": "NOT_PERFORMED"}}},
+          "errors": {"minItems": 1},
+          "summary": {"properties": {"record_count": {"const": 1}, "error_count": {"minimum": 1}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "BLOCKED"}}, "required": ["status"]},
+      "then": {"properties": {"errors": {"minItems": 1}}}
+    },
+    {
+      "if": {"required": ["operation"], "properties": {"status": {"const": "BLOCKED"}}},
+      "then": {"required": ["plan", "plan_digest", "phase", "target", "readback", "cleanup", "mutated"]}
+    }
+  ],
+  "$defs": {
+    "tags": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "id", "verified"],
+      "properties": {
+        "action": {"enum": ["APPLIED", "NO_OP"]},
+        "id": {"type": "integer", "minimum": 1},
+        "verified": {"type": "boolean"},
+        "mutated": {"type": ["boolean", "null"]},
+        "before_tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "after_tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "added_tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "expected_tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "uncertain": {"type": "boolean"},
+        "reconciled": {"type": "boolean"},
+        "errors": {"type": "array"},
+        "cleanup": {"type": "object"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"verified": {"const": true}}, "required": ["verified"]},
+          "then": {"required": ["before_tags", "after_tags", "added_tags"]}
+        }
+      ]
+    }
+  }
+}

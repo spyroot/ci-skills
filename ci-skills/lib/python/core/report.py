@@ -8,7 +8,7 @@ import re
 import shutil
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +51,7 @@ def report(
     return {
         "schema_version": "1.0",
         "kind": kind,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": datetime.now(UTC).isoformat(),
         "target": target,
         "filters": filters,
         "records": records,
@@ -62,6 +62,11 @@ def report(
 
 
 def human(data: dict[str, Any]) -> str:
+    """Render bounded operator output from one structured result.
+
+    :param data: Versioned command result or operation plan.
+    :returns: Human-readable status and selected evidence fields.
+    """
     if data.get("kind") == "k8s_verify_mtu_consistency":
         records = data.get("records", [])
         lines = [
@@ -100,6 +105,12 @@ def human(data: dict[str, Any]) -> str:
         f"Target: {data.get('target', 'unknown')}",
         f"Records: {len(data.get('records', []))}",
     ]
+    if data.get("kind") == "gitlab_runner":
+        lines.append(f"Operation: {data.get('operation', 'unknown')}")
+        lines.append(f"Plan: {data.get('plan_digest', 'unavailable')}")
+        requested = (data.get("plan") or {}).get("requested_tags")
+        if requested is not None:
+            lines.append("Requested tags: " + ",".join(requested))
     for item in data.get("records", []):
         fields = (
             "timestamp",
@@ -140,6 +151,16 @@ def human(data: dict[str, Any]) -> str:
                 )
             if item.get("stuck"):
                 lines.append("    stuck=true")
+        elif kind == "gitlab_runner":
+            lines[-1] = (
+                f"  runner_id={item.get('id', 'unknown')}"
+                f"  action={item.get('action', 'unknown')}"
+                f"  verified={str(item.get('verified', False)).lower()}"
+            )
+            if "before_tags" in item:
+                lines.append("    before_tags=" + ",".join(item["before_tags"]))
+            if "after_tags" in item:
+                lines.append("    after_tags=" + ",".join(item["after_tags"]))
         elif kind == "gitlab_job":
             lines.append(f"    failure_reason={item.get('failure_reason')}")
             for label in ("pipeline", "runner"):
