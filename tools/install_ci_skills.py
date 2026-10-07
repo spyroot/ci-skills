@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Install the repository's CI skill into a local Codex skills directory."""
+"""Install the repository's CI skill into a local Codex skills directory.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -28,8 +33,10 @@ LOCK_NAME = f".{SKILL_NAME}.install.lock"
 LOCK_WAIT_SECONDS = 30
 SOURCE = Path(__file__).resolve().parents[1] / SKILL_NAME
 sys.path.insert(0, str(SOURCE / "lib" / "python"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from core.provenance import _included, skill_identity, tree_digest
+from agent_profile import AgentProfile, AgentProfileError, AgentProfileReason
+from core.provenance import _git, _included, skill_identity, tree_digest
 
 RECOVERY = {
     "skill_manifest_missing": "Use a checkout containing ci-skills/SKILL.md.",
@@ -42,11 +49,22 @@ RECOVERY = {
     "install_recovery_unsafe": "Inspect the installed skill and transaction journal before changing either.",
     "install_io_failure": "Run --recover --apply --confirm-recover, then retry installation.",
     "install_lock_timeout": "Wait for the other installer process to finish, then retry.",
-    "install_deadline_expired": "Make a new plan and choose a longer --timeout.",
-    "installation_fingerprint_changed": "Make a new plan from the current committed source and confirm it.",
+    AgentProfileReason.DEADLINE_EXPIRED: "Make a new plan and choose a longer --timeout.",
+    AgentProfileReason.FINGERPRINT_CHANGED: "Make a new plan from the current committed source and confirm it.",
     "installed_digest_mismatch": "Inspect source changes and retry from a clean checkout.",
     "pyyaml_unavailable": "Install PyYAML in the project environment or select --json.",
     "log_file_unwritable": "Inspect the requested log path and installed destination before retrying.",
+    AgentProfileReason.PROFILE_INVALID: "Repair the agent profile in toolchain-dependencies.json.",
+    AgentProfileReason.DESTINATION_UNSAFE: "Choose a real repository-local agent skills directory.",
+    AgentProfileReason.REPOSITORY_UNAVAILABLE: "Run the installer from the repository that will receive the agent skill.",
+    AgentProfileReason.SKILL_CONFLICT: "Inspect the existing agent skill; its bytes differ from the glab bundle.",
+    AgentProfileReason.SKILL_INVALID: "Inspect the glab bundle and retry without replacing the existing skill.",
+    AgentProfileReason.COMMAND_FAILED: "Run the reported command on this host to inspect its error, then retry.",
+    AgentProfileReason.GLAB_UNAVAILABLE: "Install glab using the host package manager, then retry.",
+    AgentProfileReason.GLAB_INCOMPATIBLE: "Upgrade glab to a release with the declared bundled skill, then rerun the plan.",
+    AgentProfileReason.GLAB_REPLAN_REQUIRED: "glab is installed. Rerun --dry-run and confirm the new fingerprint to install its skill.",
+    AgentProfileReason.BREW_UNAVAILABLE: "Install Homebrew from https://brew.sh/, then rerun the installer.",
+    AgentProfileReason.PACKAGE_MANAGER_UNAVAILABLE: "Install glab with this Linux distribution's package manager, then retry.",
 }
 
 
@@ -63,6 +81,27 @@ def plan_fingerprint(plan: dict[str, Any]) -> str:
     revision = plan["revision"].get("value") or ""
     values = (plan["source"], plan["destination"], revision, plan["digest"])
     return hashlib.sha256("\0".join(values).encode()).hexdigest()
+
+
+def confirmed_fingerprint(core_fingerprint: str, agent_plan: dict[str, Any]) -> str:
+    """Bind confirmation to agent state and both installer implementations.
+
+    :param core_fingerprint: Digest of the skill source and destination plan.
+    :param agent_plan: Complete agent host and bundled-skill plan.
+    :returns: SHA-256 fingerprint of the combined installation decision.
+    """
+    implementation = {
+        name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+        for name in ("install_ci_skills.py", "agent_profile.py")
+    }
+    decision = {
+        "core": core_fingerprint,
+        "agent": agent_plan,
+        "implementation": implementation,
+    }
+    return hashlib.sha256(
+        json.dumps(decision, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _present(path: Path) -> bool:
@@ -451,6 +490,10 @@ def install(
 
 
 def main() -> int:
+    """Plan or apply a confirmed skill and agent-profile installation.
+
+    :returns: Zero for a valid plan or complete install, otherwise two.
+    """
     started = time.monotonic()
     parser = argparse.ArgumentParser(
         description="Install ci-skills from this checkout. Audience: human and agent.",
@@ -576,7 +619,34 @@ def main() -> int:
     else:
         plan = install(SOURCE, skills_dir, dry_run=True, upgrade=args.upgrade)
         if plan["status"] == "DRY_RUN":
-            plan["fingerprint"] = plan_fingerprint(plan)
+            try:
+                repository = _git(Path.cwd(), "rev-parse", "--show-toplevel")
+                if repository is None:
+                    raise AgentProfileError(AgentProfileReason.REPOSITORY_UNAVAILABLE)
+                agent_profile = AgentProfile(SOURCE.parent, Path(repository))
+                plan["agent"] = agent_profile.plan()
+            except (
+                OSError,
+                KeyError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
+                reason = (
+                    exc.reason.value
+                    if isinstance(exc, AgentProfileError)
+                    else AgentProfileReason.PROFILE_INVALID.value
+                )
+                plan.update(
+                    status="BLOCKED",
+                    reason=reason,
+                    safe_next_step=RECOVERY[reason],
+                )
+            core_fingerprint = plan_fingerprint(plan)
+            if plan["status"] == "DRY_RUN":
+                plan["fingerprint"] = confirmed_fingerprint(
+                    core_fingerprint, plan["agent"]
+                )
             plan["source_revision"] = plan["revision"]["value"]
             plan["mode"] = "dry-run"
             plan["mutable_link"] = False
@@ -600,14 +670,40 @@ def main() -> int:
             }
         else:
             seconds = int(args.timeout[:-1])
-            result = install(
-                SOURCE,
-                skills_dir,
-                dry_run=False,
-                upgrade=args.upgrade,
-                deadline=started + seconds,
-                expected_fingerprint=plan["fingerprint"],
-            )
+            try:
+                with _mutation_lock(
+                    skills_dir.expanduser().resolve(), deadline=started + seconds
+                ):
+                    if (
+                        confirmed_fingerprint(core_fingerprint, plan["agent"])
+                        != plan["fingerprint"]
+                    ):
+                        raise AgentProfileError(AgentProfileReason.FINGERPRINT_CHANGED)
+                    agent_result = agent_profile.apply(plan["agent"], started + seconds)
+                    result = _install_unlocked(
+                        SOURCE,
+                        skills_dir,
+                        dry_run=False,
+                        upgrade=args.upgrade,
+                        deadline=started + seconds,
+                        expected_fingerprint=core_fingerprint,
+                    )
+                    result["agent"] = agent_result
+            except (OSError, ValueError) as exc:
+                reason = (
+                    exc.reason.value
+                    if isinstance(exc, AgentProfileError)
+                    else AgentProfileReason.COMMAND_FAILED.value
+                )
+                result = {
+                    **plan,
+                    "status": "BLOCKED",
+                    "reason": reason,
+                    "safe_next_step": RECOVERY[reason],
+                }
+                if isinstance(exc, AgentProfileError) and exc.command:
+                    result["failed_command"] = exc.command
+                    result["failed_exit_code"] = exc.exit_code
             result["fingerprint"] = plan["fingerprint"]
             result["source_revision"] = result.get("revision", {}).get("value")
             result["mutable_link"] = False

@@ -1,4 +1,7 @@
 {
+  "$schema": "./schemas/configuration/toolchain-dependencies.schema.json",
+  "kind": "toolchain_dependencies",
+  "schema_version": "1.0",
   "dependencies": [
     {
       "name": "bash",
@@ -13,6 +16,14 @@
       "brew": ["git"],
       "apt": ["git"],
       "yum": ["git"]
+    },
+    {
+      "name": "glab",
+      "commands": ["glab"],
+      "probe": ["glab", "skills", "get", "glab-stack"],
+      "brew": ["glab"],
+      "apt": ["glab"],
+      "yum": ["glab"]
     },
     {
       "name": "make",
@@ -263,6 +274,13 @@
       "linux": {"method": "go", "module": "github.com/rhysd/actionlint/cmd/actionlint@latest"}
     }
   ],
+  "profiles": {
+    "agent": {
+      "host": ["glab"],
+      "skills": ["glab-stack"],
+      "skillsDirectory": ".agents/skills"
+    }
+  },
   "conda": {
     "brewCask": "miniforge",
     "prefix": "~/miniforge3",

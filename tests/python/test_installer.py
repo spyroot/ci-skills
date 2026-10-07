@@ -1,4 +1,9 @@
-"""Deterministic contract checks for the local skill installer."""
+"""Check contracts for the local skill installer.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from tests.python.conftest import REPO_ROOT, load_module
+from conftest import REPO_ROOT, load_module
 
 
 def _installer():
@@ -411,3 +416,12 @@ def test_default_destination_uses_codex_home(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
     assert installer.skills_directory() == tmp_path / "home" / ".codex" / "skills"
+
+
+def test_every_agent_failure_reason_has_one_recovery_step():
+    """Keep every agent failure mapped to one actionable recovery message."""
+    installer = _installer()
+
+    for reason in installer.AgentProfileReason:
+        assert reason in installer.RECOVERY
+        assert isinstance(installer.RECOVERY[reason], str)
