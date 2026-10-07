@@ -393,16 +393,23 @@ def _tag(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, 
                 if reconciled or attempt:
                     result["reconciled"] = True
                 return result
-        return unverified_write(
-            target_id,
-            {
-                "id": runner_id,
-                "before_tags": before,
-                "after_tags": observed_tags,
-                "expected_tags": desired,
+        return {
+            "action": "UNVERIFIED",
+            "id": runner_id,
+            "verified": False,
+            "mutated": None,
+            "uncertain": True,
+            "before_tags": before,
+            "after_tags": observed_tags,
+            "expected_tags": desired,
+            "errors": [
+                {"project_id": target_id, "reason": "runner_tag_readback_mismatch"}
+            ],
+            "cleanup": {
+                "status": "NOT_PERFORMED",
+                "reason": "post_write_readback_mismatch",
             },
-            "runner_tag_readback_mismatch",
-        )
+        }
 
 
 def _rollback_created_runner(

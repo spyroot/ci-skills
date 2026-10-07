@@ -140,7 +140,7 @@ def _tag_output(plan, record):
         verified_target={"id": 42, "kind": "project"},
         credential_source="unit",
         credential_digest="sha256:unit",
-        skill={},
+        skill={"revision": {"verified": True, "value": plan.revision}},
     )
     return json.loads(REPORT.emit(data, "json"))
 
@@ -527,7 +527,24 @@ def test_runner_tag_adds_to_selected_runner_and_reads_back():
         "added_tags": ["new"],
     }
     assert ("PUT", "runners/23", {"tag_list": ["existing", "new"]}) in api.calls
-    TAG_VALIDATOR.validate(_tag_output(plan, result))
+    output = _tag_output(plan, result)
+    TAG_VALIDATOR.validate(output)
+    for broken in (
+        {"tested_revision": None},
+        {"skill": {"revision": {"verified": False, "value": plan.revision}}},
+    ):
+        assert not TAG_VALIDATOR.is_valid({**output, **broken})
+
+
+def test_runner_tag_uses_only_verified_bound_revision():
+    verified = SimpleNamespace(
+        skill={"revision": {"verified": True, "value": "a" * 40}}
+    )
+    unverified = SimpleNamespace(
+        skill={"revision": {"verified": False, "value": "a" * 40}}
+    )
+    assert ACTION._verified_skill_revision(verified) == "a" * 40
+    assert ACTION._verified_skill_revision(unverified) is None
 
 
 def test_runner_tag_is_no_op_when_tag_already_exists():
@@ -593,6 +610,9 @@ def test_runner_tag_partial_output_requires_readback_and_cleanup():
     )
     result = RUNNERS.apply(api, object(), plan, 42)
     assert result["verified"] is False
+    assert result["action"] == "UNVERIFIED"
+    assert result["mutated"] is None
+    assert result["after_tags"] == ["existing"]
     assert result["errors"][0]["reason"] == "runner_tag_readback_mismatch"
     output = _tag_output(plan, result)
     TAG_VALIDATOR.validate(output)

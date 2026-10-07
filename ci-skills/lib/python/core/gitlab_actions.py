@@ -452,6 +452,24 @@ def _result(plan: ActionPlan, status: str, **fields: Any) -> dict[str, Any]:
     }
 
 
+def _verified_skill_revision(session: Any) -> str | None:
+    """Read the source revision verified by the bound skill identity.
+
+    :param session: Bound GitLab session, if live binding completed.
+    :returns: Verified full source SHA, or ``None`` when unavailable.
+    """
+    skill = getattr(session, "skill", None)
+    revision = skill.get("revision") if isinstance(skill, dict) else None
+    if not isinstance(revision, dict) or revision.get("verified") is not True:
+        return None
+    value = revision.get("value")
+    return (
+        value
+        if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value)
+        else None
+    )
+
+
 def _access_failure(access: dict[str, Any]) -> tuple[str, str]:
     """Keep the failed GitLab identity or target check in an action result."""
     errors = access.get("errors")
@@ -500,6 +518,7 @@ def _planned_failure(
     data.setdefault("errors", []).append(error)
     data["summary"]["error_count"] = len(data["errors"])
     if session is not None:
+        data["tested_revision"] = _verified_skill_revision(session)
         for field in ("credential_source", "credential_digest", "skill"):
             value = getattr(session, field, None)
             if value is not None:
@@ -599,6 +618,12 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
                 target_source=plan.target_source,
                 revision=args.revision,
             )
+            if (
+                plan.kind == "gitlab_runner"
+                and plan.operation == "tag"
+                and _verified_skill_revision(session) is None
+            ):
+                raise ActionError("skill_revision_unverified")
             api = GlabAPIClient(timeout=args.timeout)
             access = check_gitlab_operation_access(session, api_client=api)
             if access.get("status") != PASS:
@@ -681,6 +706,8 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
                     cleanup=cleanup,
                 )
                 mutated = data["mutated"]
+        if session is not None:
+            data["tested_revision"] = _verified_skill_revision(session)
         if args.receipt_out:
             write_portable_receipt(data, args.receipt_out)
         rendered = emit(data, output_mode(args), args.output_dir)

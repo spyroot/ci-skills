@@ -224,7 +224,7 @@ def _locked_descriptor(identity: Sequence[str | int]) -> Iterator[int]:
         or metadata.st_uid != os.getuid()
         or metadata.st_mode & 0o077
     ):
-        raise GitLabAPIError("create_lock_directory_unsafe")
+        raise GitLabAPIError("resource_lock_directory_unsafe")
     encoded = json.dumps(identity, separators=(",", ":"))
     name = hashlib.sha256(encoded.encode("utf-8")).hexdigest() + ".lock"
     flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
@@ -236,7 +236,7 @@ def _locked_descriptor(identity: Sequence[str | int]) -> Iterator[int]:
             or metadata.st_uid != os.getuid()
             or metadata.st_mode & 0o077
         ):
-            raise GitLabAPIError("create_lock_file_unsafe")
+            raise GitLabAPIError("resource_lock_file_unsafe")
         deadline = time.monotonic() + CREATE_LOCK_WAIT_SECONDS
         while True:
             try:
@@ -246,7 +246,7 @@ def _locked_descriptor(identity: Sequence[str | int]) -> Iterator[int]:
                 if exc.errno not in (errno.EAGAIN, errno.EACCES):
                     raise
                 if time.monotonic() >= deadline:
-                    raise GitLabAPIError("create_lock_timeout") from exc
+                    raise GitLabAPIError("resource_lock_timeout") from exc
                 time.sleep(0.05)
         yield descriptor
     finally:
