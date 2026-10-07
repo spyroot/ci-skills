@@ -16,6 +16,7 @@ sys.path.insert(0, str(BENCHMARK_ROOT))
 
 import event_trace_ab as harness
 import event_trace_evidence as evidence
+import event_trace_worker as worker
 import source_identity as provenance
 
 SHA = "a" * 40
@@ -260,6 +261,60 @@ def test_clean_exact_harness_provenance_and_dirty_rejection(tmp_path: Path):
     (subtree / "tool.py").write_text("VALUE = 2\n", encoding="utf-8")
     with pytest.raises(provenance.SourceIdentityError, match="source_subtree_dirty"):
         provenance.source_identity(root, revision, subtree)
+
+
+def test_run_fingerprints_each_checkout_at_its_skill_subtree(monkeypatch):
+    """Both checkouts are fingerprinted at <root>/ci-skills, the tree the worker imports from."""
+    arguments = _run_arguments()
+    subtrees: list[Path] = []
+
+    monkeypatch.setattr(harness.platform, "system", lambda: "Linux")
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+
+    def recording_identity(root, revision, subtree):
+        subtrees.append(Path(subtree))
+        if len(subtrees) == 3:
+            raise provenance.SourceIdentityError("stop_after_fingerprints")
+        return HARNESS
+
+    monkeypatch.setattr(harness, "source_identity", recording_identity)
+
+    result = harness.run(arguments)
+
+    assert result["reason"] == "stop_after_fingerprints"
+    assert subtrees[1:] == [
+        Path(arguments.baseline_root).resolve() / "ci-skills",
+        Path(arguments.candidate_root).resolve() / "ci-skills",
+    ]
+
+
+def test_worker_refuses_a_checkout_without_the_skill_library(tmp_path):
+    with pytest.raises(RuntimeError, match="skill_library_missing"):
+        worker._source(tmp_path, SHA)
+
+
+def test_worker_refuses_the_pre_move_library_layout(tmp_path):
+    (tmp_path / "ci-skills" / "lib" / "core").mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="skill_library_missing"):
+        worker._source(tmp_path, SHA)
+
+
+def test_worker_fingerprints_the_skill_tree_and_imports_its_library(
+    tmp_path, monkeypatch
+):
+    """The worker fingerprints <root>/ci-skills, the tree the harness fingerprints, and imports lib/python."""
+    (tmp_path / "ci-skills" / "lib" / "python").mkdir(parents=True)
+    calls: list[tuple] = []
+    monkeypatch.setattr(worker, "source_identity", lambda *args: calls.append(args))
+    monkeypatch.setattr(worker.sys, "path", list(sys.path))
+
+    library = worker._source(tmp_path, SHA)
+
+    root = tmp_path.resolve()
+    assert calls == [(root, SHA, root / "ci-skills")]
+    assert library == root / "ci-skills" / "lib" / "python"
+    assert worker.sys.path[0] == str(library)
 
 
 def test_run_alternates_pairs_and_passes_only_with_grounded_evidence(monkeypatch):

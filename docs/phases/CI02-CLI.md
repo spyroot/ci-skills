@@ -24,11 +24,11 @@ Both have `--help`. The `--log-*` flags are `--log-format`, `--log-level`,
 (`core/catalog.py:40-43`) and `core/cli.py:218-239` adds them to the 13
 mains in `COMMANDS`, while the two node-local mains lack them
 (`core/catalog.py:444-454`). `ci-binary-build` has no `--output` and returns
-its JSON plan (`core/catalog.py:521-534`). Three exit-code tables disagree:
+its JSON plan (`core/catalog.py:521-534`). Two exit-code tables disagree:
 `catalog.EXIT_CODES` (`core/catalog.py:550-553`, 0 and 2, restating
-`core/status.py:11-13`), `ci-skills/lib/bash/core/runtime.bash:6-9`
-(`CI_EXIT_BLOCKED=69`) and `scripts/bash/core/exit_codes.bash:9-23`
-(`CI_EXIT_BLOCKED=2`). Only the Python mains can describe themselves, and
+`core/status.py:11-13`) and `ci-skills/lib/bash/core/runtime.bash:6-9`
+(`CI_EXIT_BLOCKED=69`); block 0 removed a third, `scripts/bash/core/exit_codes.bash`.
+Only the Python mains can describe themselves, and
 none of the 17 entrypoints answers `--help` on its own today: a main with an
 empty environment fails on `import core` (observed 2026-10-06 for
 `gitlab_job.py:6`, exit 1; all 15 mains import `core` at the top level) until
@@ -131,8 +131,8 @@ Every command follows the pinned agent-grade checklist, as:
    0 for `PASS`, `DRY_RUN` and `PLANNED`, 2 otherwise); `catalog.EXIT_CODES`
    (`core/catalog.py:550-553`) restates it for `--describe` and
    `tools.json`. CI10-PHASES, Refactor, renders the one table to
-   `lib/bash/core/exit_codes.bash` (planned) and removes the two Bash
-   tables.
+   `lib/bash/core/exit_codes.bash` (planned) and removes the Bash
+   table in `runtime.bash`.
 
    | Code | Meaning |
    | --- | --- |

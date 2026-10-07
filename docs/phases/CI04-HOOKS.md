@@ -17,7 +17,7 @@ deleted in #27 (`1108cca`; CI10-PHASES, Pull request status).
 | --- | --- |
 | Capability | run the static gates before a commit or push |
 | Owner | the hook scripts under `scripts/hooks/` (planned, CI04-HOOKS) |
-| Entrypoint | `./scripts/check.sh`; its library returns in block 0 (CI10-PHASES, Order) and grows in CI03-GATES, G1 |
+| Entrypoint | `./scripts/check.sh`; its library returns and grows in CI03-GATES, G1 |
 | Result | the script's result: `PASS`, or the failing gate |
 | Read-back | a failing staged file is refused, naming its gate |
 
@@ -45,8 +45,8 @@ deleted in #27 (`1108cca`; CI10-PHASES, Pull request status).
 - The static subset of `./scripts/check.sh`, run on the index snapshot, so
   neutrality sees exactly what the commit will contain. The selector for
   that subset is the one CI03-GATES, G1 adds. Today the script's library,
-  as last committed before #26 and restored by block 0 at
-  `ci-skills/lib/bash/ci/check.bash` (planned, CI10-PHASES, Order), takes
+  as last committed before #26 and to be restored by CI03-GATES, G1 (home:
+  CI10-PHASES, Gate library home), takes
   only `--dry-run`, the `--log-*` flags and `--help`, and outside
   `--dry-run` it refuses to run off a Kubernetes pod (`tests/bash/check.bats`,
   "check refuses execution outside Kubernetes"). Until G1 lands, a hook

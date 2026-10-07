@@ -233,7 +233,7 @@ CI08-ROUTING consumes them.
   and a summary on a terminal; its result kind is `schema_check`.
 - **Gate.** The `schemas` gate of `scripts/check.sh` (CI03-GATES, G1, which
   also owns how one gate is selected; the script's library,
-  `ci-skills/lib/bash/ci/check.bash` (planned, CI10-PHASES, block 0), is
+  the gate library (CI03-GATES, G1; home: CI10-PHASES, Gate library home), is
   restored first) runs `tools/check_schemas.py --root . --json`, which:
   - checks every schema against the 2020-12 metaschema;
   - validates every committed record against its schema: `ci-skills/tools.json`,
