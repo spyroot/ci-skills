@@ -1,8 +1,7 @@
 # Documentation
 
-Every document of this repository lives here, in git. Local workspaces hold only queue and coordination state.
-Current specifications are the authority. Records are kept as they were written; where a record and a current
-specification disagree, the specification wins.
+Public specifications and source inventories live here in git. Current specifications are the authority; older
+records may describe superseded behavior.
 
 ## Current specifications
 
@@ -24,20 +23,16 @@ decisions taken and the open decisions.
 | [CI11-TOOLS](phases/CI11-TOOLS.md) | the tool catalogue and the port of the source repo's scripts |
 | [GitLab tool belt](gitlab-toolbelt-plan.md) | delivery plan of the GitLab operations tool belt |
 | [Field notes](field-notes.md) | observations from the first deliveries |
+| [Use cases](use-cases.md) | the behaviour we want, use case by use case, in our own words |
 
 ## Records
 
-`GAL-*` is the former name of the `CIxx` phases, renamed in `e6254bd`.
+`CI-*` is the former name of the `CIxx` phases, renamed in `e6254bd`.
 
 | Date | Kind | Record | What it holds |
 | --- | --- | --- | --- |
 | 2026-10-02 | brainstorm | [brainstorms](brainstorm/2026-10-02/) | one brainstorm per GAL phase document |
-| 2026-10-04 | plan | [GAL phases](plans/2026-10-04/GAL-phases.md) | the GAL phase plan and the questions answered |
-| 2026-10-04 | review | [GAL review](reviews/2026-10-04/GAL-phase-docs.review.md) | review of the GAL phase documents |
 | 2026-10-06 | plan | [plan](plans/2026-10-06/reference-and-docs-readjust.md) | the approved plan behind PR #29 |
 | 2026-10-06 | inventory | [inventories](plans/2026-10-06/ci11-inventories/index.md) | source inventories for CI11 |
-| 2026-10-06 | review | [reviews](reviews/2026-10-06/index.md) | reviews of PR #29 and the per-phase editor reports |
 
-Records were copied unchanged except for two mechanical substitutions: the source project's name is written
-`source` and its checkout `$SOURCE_REPO`, because the project-neutrality gate forbids the name, and host paths are
-written relative to the home directory (`~/`).
+Inventories use `source` and `$SOURCE_REPO` for the source project and checkout.

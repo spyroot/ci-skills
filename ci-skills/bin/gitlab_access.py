@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+import _bootstrap  # noqa: F401
 from core.access import check_gitlab_operation_access
 from core.catalog import describe
 from core.cli import _failure, log_event, output_mode, parser, resolve_gitlab_target

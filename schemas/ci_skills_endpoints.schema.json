@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/ci_skills_endpoints.schema.json",
+  "title": "ci_skills_endpoints",
+  "description": "The result of gates/gate-ci-skills-endpoints: whether the tracked target-format documents name only the endpoint and access keys declared in ci-skills/lib/python/core/endpoints.py (TARGET_CONTRACT).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "status",
+    "base",
+    "documents",
+    "value_keys",
+    "findings"
+  ],
+  "properties": {
+    "kind": {
+      "const": "ci_skills_endpoints"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    },
+    "base": {
+      "description": "The revision whose template counts as existing; null when no comparison ran.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      ]
+    },
+    "documents": {
+      "description": "Each checked document as path:first-line.",
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "string",
+        "pattern": "^[^\\s:]+:[1-9][0-9]*$",
+        "maxLength": 512
+      }
+    },
+    "value_keys": {
+      "description": "Declared keys that are values, not pointers: accepted because a current command still reads them.",
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/path"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    }
+  },
+  "$defs": {
+    "path": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*$",
+      "maxLength": 256
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule",
+        "path",
+        "source",
+        "line",
+        "detail"
+      ],
+      "properties": {
+        "rule": {
+          "enum": [
+            "undeclared",
+            "unpaired",
+            "undocumented",
+            "value_introduced",
+            "base_unreadable",
+            "parse_error"
+          ]
+        },
+        "path": {
+          "description": "The table, key or file the finding names, as written; a quoted TOML key may hold any character.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "line": {
+          "description": "1-based line in source; 0 when the parsed document names the key but no line does (an inline table or a dotted key).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 512
+        }
+      }
+    }
+  }
+}

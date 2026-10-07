@@ -586,7 +586,7 @@ def test_missing_expectations_emits_structured_json_failure(
 
 def test_no_committed_receipt_carries_a_host_path():
     """The committable form is what makes a real receipt publishable at all."""
-    for path in (REPO_ROOT / "acceptance" / "receipts").glob("*.json"):
+    for path in (REPO_ROOT / "tests" / "acceptance" / "receipts").glob("*.json"):
         body = json.dumps(json.loads(path.read_text(encoding="utf-8")))
         assert "/Users/" not in body, path.name
         assert "/home/" not in body, path.name

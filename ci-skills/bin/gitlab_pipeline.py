@@ -8,6 +8,7 @@ import json
 import sys
 import time
 
+import _bootstrap  # noqa: F401
 from core.access import check_gitlab_operation_access
 from core.catalog import describe, missing_required_options
 from core.cli import _failure, log_event, output_mode, parser, resolve_gitlab_target

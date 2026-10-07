@@ -117,7 +117,7 @@ Where each lock field comes from:
 - **`upstream.project` and `upstream.path`:** the skill's frontmatter
   `metadata`, or `null` where it names none. `glab-stack` names neither.
 - **`files`:** the SHA-256 of each file in the set that `tree_digest` covers
-  (`_included` in `ci-skills/lib/core/provenance.py`, which this phase makes
+  (`_included` in `ci-skills/lib/python/core/provenance.py`, which this phase makes
   public as `included_files` beside `file_digest`, step 2), computed by `tools/skillkit/vendor.py` through that module.
   `origin` is `upstream` for fetched files and `local` for the notice.
 - **`tree`:** `tree_digest` from that same `provenance.py`, the digest the
@@ -207,7 +207,7 @@ reports that it recovered.
   CI05-VENDOR): `vendor.py` and `transaction.py` here. CI01-CATALOG extends
   the command with `list`, `get` and `install`; CI09-REFERENCE reuses the
   transaction and the lock.
-- **`tools/skillkit/` imports `core` from `ci-skills/lib`** (CI10-PHASES,
+- **`tools/skillkit/` imports `core` from `ci-skills/lib/python`** (CI10-PHASES,
   Layout, decided), one import direction: `skillkit` imports
   `core.provenance`, as the installer does, and computes the per-file hashes
   through it. Never the reverse: an installed skill ships without `tools/`,
@@ -224,7 +224,7 @@ How we consume the skills that the installed `glab` ships:
    `tools/install_ci_skills.py`, which then calls it),
    `tools/skillkit/vendor.py` and `bin/ci-skills` with its `verify` and
    `update` verbs, `--help` and `--describe`; write the tests of "Delivery,
-   test and proof" with the block. In `ci-skills/lib/core/provenance.py`,
+   test and proof" with the block. In `ci-skills/lib/python/core/provenance.py`,
    make `included_files` and `file_digest` public and add the `excluded`
    parameter and `VENDOR_DIRECTORIES` (D-DIGEST).
 3. Declare `glab` and `glab-stack` in `vendor/vendor.toml`, add each notice
@@ -277,7 +277,7 @@ Steps 4 and 5 are also the refresh path: `update` shows upstream drift,
    at `0.<minor>`, `tests/python/test_vendor.py` and
    `tests/python/test_transaction.py`. Files it changes:
    `tools/install_ci_skills.py` (calls the extracted transaction; CI10-PHASES,
-   Implementation map, Modify), `ci-skills/lib/core/provenance.py` (step 2),
+   Implementation map, Modify), `ci-skills/lib/python/core/provenance.py` (step 2),
    `environment.yml` (step 1),
    `.markdownlint-cli2.yaml` (step 6), `scripts/check.sh` and its library (the
    `verify` gate; CI03-GATES, G1) and `tests/python/conftest.py` (the

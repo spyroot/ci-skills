@@ -23,7 +23,8 @@ Superseded 2026-10-06: no workflow, protection disabled (CI10-PHASES, Pull reque
 
 ## Two routes
 
-- **Execution:** `./scripts/check.sh <profile>` runs the gates. Block 0 restores its library and G1 adds the profiles.
+- **Execution:** `./scripts/check.sh <profile>` runs the gates. G1 restores its library (deleted on purpose; block 0
+  does not) and adds the profiles.
 - **Read-back:** `gh pr checks <pr> --json name,state` reads the result for the exact head, once a gate route exists
   (G0).
 
@@ -40,21 +41,109 @@ on 2026-10-06 (CI10-PHASES, Pull request status) or observed in the tree that da
   unconditional (lines 15-57). It reads `.github/workflows/validate.yml` (line 8), deleted in #27, so it cannot pass
   until that workflow is recreated.
 - **`tools/check_live_acceptance.py`** checks that each receipt's `skill.digest` equals the skill's `tree_digest`, with
-  the other fields listed in "Delivery, test and proof", part 4. Today it reports `skill_digest_mismatch` on every
-  committed receipt (observed with `PYTHONPATH=ci-skills/lib`; without it the import of `core` at line 479 fails until
-  block 0 re-points `tools/*.py`).
+  the other fields listed in "Delivery, test and proof", part 4. It reports `skill_digest_mismatch` on every
+  committed receipt (observed on 2026-10-06, before block 0 re-pointed `tools/*.py` at `ci-skills/lib/python`).
 - **The byte-equality test in `tests/python/test_catalog.py`** (`test_the_rendered_manifest_matches_the_module`, line
   121) checks that `tools.json` equals the catalog's render.
-- **`manifest`**: `tools/render_manifest.py --check` prints `CURRENT` or `STALE` (lines 69-71). Today it fails on the
-  stale `skills/ci-skills/scripts` path; block 0 re-points it (CI10-PHASES, Order). Tool exists; gate id pending G1.
-- **`neutrality`**: `tools/check_project_neutrality.py --root . --json` reports `PASS` or `FAIL` (line 54). Today it
-  reports `FAIL` on three files, `Makefile`, `pyproject.toml` and `scripts/bash/core/result.bash`; block 0 removes the
-  content (CI10-PHASES, Modify). Tool exists; gate id pending G1.
+- **`manifest`**: `tools/render_manifest.py --check` prints `CURRENT` or `STALE` (lines 69-71). Since block 0 it prints
+  `CURRENT`. Tool exists; gate id pending G1.
+- **`neutrality`**: `tools/check_project_neutrality.py --root . --json` reports `PASS` or `FAIL` (line 54). Since
+  block 0 it reports `PASS`; before, it reported `FAIL` on `Makefile`, `pyproject.toml` and
+  `scripts/bash/core/result.bash`. Tool exists; gate id pending G1.
 - **Static tools** (CI10-PHASES, "Gates that make every tool conform"): `ruff check`, `ruff format --check`,
   markdownlint-cli2, shellcheck, shfmt, yamllint, gitleaks and `git diff --check`. Each: tool exists; gate id pending
   G1. The restored library names its checks `whitespace`, `bash-n`, `shellcheck`, `shfmt`, `yaml`, `markdown`,
   `secrets` and `unit` (`88bd9f6^:lib/ci/check.bash:134`) and does not run Ruff.
 - **Tests** (pytest and bats): the route that runs them is D-GATE (G0).
+- **`gate-ci-skills-endpoints`**: refuses a target-file key that is not an endpoint or its access (next section). It
+  runs on every pull request and every push to `main`.
+
+## gate-ci-skills-endpoints
+
+Decided 2026-10-07: a target file names, per authority, the endpoint we point at (a host, a project, a cluster) and
+where its access lives (a token file, a kubeconfig), and nothing else. `~/.ci-skills/target.toml` is the default; a
+project's `.ci-skills/target.toml` overrides the same keys (`catalog.TARGET_PROTOCOL` picks the file). Pods, nodes,
+namespaces, pipelines, milestones and merge requests are read from the live system, never declared in the file. Adding
+an authority is one `Table` in the contract, with its endpoint and its access.
+
+| Part | Value |
+| --- | --- |
+| Capability | refuse a target-file key that is not a declared endpoint or access key |
+| Owner | contract `ci-skills/lib/python/core/endpoints.py`; gate `tools/skillkit/endpoint_gate.py` |
+| Entrypoint | `gates/gate-ci-skills-endpoints.py --base REF [--staged]`; job `gate-ci-skills-endpoints` |
+| Result | `ci_skills_endpoints` (`schemas/ci_skills_endpoints.schema.json`) |
+| Read-back | the job validates its own record against the schema; `gh pr checks <pr>` for the exact head |
+
+- `TARGET_CONTRACT` is the one declaration: `core/target.py` accepts exactly its keys, and `catalog.AUTHORITIES` is
+  derived from it. The gate's document reading and base comparison are maintenance-only, so they live in
+  `tools/skillkit/` (CI10-PHASES, placement), outside the installed skill and its digest; this gate creates that
+  package.
+- The job is defined in `.github/workflows/gate-ci-skills-endpoints.yml`, a workflow of its own: `validate.yml` is
+  G1's, and its policy test (`tests/python/test_validate_workflow_policy.py`) expects G1's full step list there.
+- Output: a summary by default, `--json` or `--yaml` for agents. Exit 0 `PASS`, 1 `FAIL`, 2 the gate could not run
+  (an unreadable document, a crash).
+- Blocking: on GitHub the job is visible on every pull request, but it blocks a merge only once `main`'s branch
+  protection requires the `gate-ci-skills-endpoints` check; protection is disabled today (G0), and requiring the
+  check is our protection setting, not this repository's content.
+
+Documents checked: `target.toml.template`, and each fenced TOML block (```` ``` ```` or `~~~`, any case, indented or
+not) in `README.md` and `ci-skills/**/*.md`. A block that names its target file at top level is a project binding
+(`core/project_binding.py`), another format, and is skipped. Paths with a `vendor`, `third-party` or `external`
+segment hold upstream text and are skipped. Phase plans under `docs/` propose future keys and are not checked.
+Commented-out keys count, under any number of `#`, quoted or not: they show a reader what to write.
+
+Rules, each a finding's `rule`:
+
+- `undeclared`: a document names a table or key the contract does not declare;
+- `unpaired`: an authority declares no endpoint key or no access key;
+- `undocumented`: a declared table or key is missing from `target.toml.template`;
+- `value_introduced`: a key whose role is `value` is in the template now and was not at `--base`;
+- `base_unreadable`: `--base` names no commit, or the template cannot be read there, so the check fails closed;
+- `parse_error`: the active TOML of a document does not parse.
+
+The job's base is `github.event.pull_request.base.sha || github.event.before`, the expression the deleted workflow used
+(`1108cca^:.github/workflows/validate.yml:22`). To block a commit, a repository-local `pre-commit` hook runs
+`gates/gate-ci-skills-endpoints.py --staged`, which reads the staged index (what the commit records), not the working
+tree. Installing hooks is CI04-HOOKS's; until then the check runs on GitHub only. When G1's `scripts/check.sh`
+exists, this gate becomes one of its gates.
+
+Exhibit, a key added to the template on top of `main`:
+
+```text
+$ gates/gate-ci-skills-endpoints.py --base HEAD
+FAIL: 3 documents checked against base HEAD
+accepted values that are not pointers (read them at run time): github.required_checks, gitlab.runner_id, kubernetes.node_diagnostics.node, ...
+undeclared: gitlab.namespace (target.toml.template:51) not an endpoint or access key of the target contract
+```
+
+```json
+{
+  "kind": "ci_skills_endpoints",
+  "schema_version": "1.0",
+  "status": "FAIL",
+  "base": "HEAD",
+  "documents": ["target.toml.template:1", "ci-skills/references/access.md:65", "ci-skills/references/project-binding.md:26"],
+  "value_keys": ["github.required_checks", "gitlab.runner_id", "kubernetes.node_diagnostics.node"],
+  "findings": [
+    {
+      "rule": "undeclared",
+      "path": "gitlab.namespace",
+      "source": "target.toml.template",
+      "line": 51,
+      "detail": "not an endpoint or access key of the target contract"
+    }
+  ]
+}
+```
+
+`value_keys` (shortened above; the full list is eleven) are the keys accepted today that are values, not pointers. A
+current command still reads each, so the gate lists them instead of failing; each goes when its command reads the value
+at run time:
+
+- `github.required_checks`: `tests/acceptance/expected.toml:26` already declares the same list;
+- `gitlab.runner_id`: readable from the runners API;
+- `kubernetes.node_diagnostics.*`: the node, Pod and mount are discoverable on the node; on OpenShift
+  `oc adm node-logs` reads the journal with no Pod route (`oc adm node-logs --help`, client 4.22.9).
 
 ## Gaps
 
@@ -63,6 +152,8 @@ Each gap names the requirement, the failure it prevents, and the smallest change
 ### G0. Gate route (D-GATE)
 
 - **Decided 2026-10-06, D-GATE (CI10-PHASES, Decisions taken):** none for now; the gap is recorded, not closed.
+- **2026-10-07:** `gate-ci-skills-endpoints` runs as its own workflow (section gate-ci-skills-endpoints), the first
+  check since D-GATE. It does not restore `validate.yml`, which stays G1's.
 - **Facts, read back from GitHub on 2026-10-06.** `.github/workflows/validate.yml` was deleted in PR #27 (commit
   `1108cca`); `.github/workflows` answers 404; branch protection on `main` is disabled (`gh api` 404); no `validate`
   workflow exists; the committed receipts no longer match the skill digest (`tools/check_live_acceptance.py` reports
@@ -71,8 +162,8 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   1. **The GitHub preflight, owned by G1.** Recreate `.github/workflows/validate.yml` (planned, CI03-GATES G1) from
      `1108cca^:.github/workflows/validate.yml`. A verbatim restore is red; the edits:
      - its shell list (lines 80-89) names `skills/ci-skills/...` paths (lines 83-86) that now live under `ci-skills/`,
-       and `lib/ci/check.bash` (line 85), which block 0 restores at `ci-skills/lib/bash/ci/check.bash` (planned,
-       CI10-PHASES, Order, block 0, restored from `88bd9f6^`);
+       and `lib/ci/check.bash` (line 85), which G1 restores from `88bd9f6^` (home: CI10-PHASES, Open decisions,
+       Gate library home);
        the restored library lists tracked shell files itself (`git ls-files`,
        `88bd9f6^:lib/ci/check.bash:104-105`), so the step calls the entrypoint instead of carrying a list;
      - `bats --tap tests/*.bats` (line 95) becomes `tests/bash/*.bats`;
@@ -88,19 +179,19 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   3. **Local scripts**, as the advisory pre-commit body only (CI04-HOOKS), never the merge gate.
 - **Gap.** `tests/acceptance/expected.toml:26` still names `validate` as the required check
   (`required_checks = ["validate"]`, which the checker enforces at lines 311-317, so a fresh publication receipt
-  reports `required_check_absent:validate` until a check of that name exists). Change this expectation only under the
-  approval lock on contracts (TEAM_GUIDE.md, "Evidence and merge"), once the route gives the check its name.
+  reports `required_check_absent:validate` until a check of that name exists),
+  `.coordination/pr-coordinator-policy.md:3-5`  
 
 ### G1. One entrypoint for local runs and CI
 
 - **Requirement.** Local runs and any gate route invoke the same repository-owned entrypoint. The pinned standards'
   workspace index names `scripts/check.sh` as the gate entrypoint (`templates/internal/INDEX.yaml`, `gates.entrypoint`).
 - **Existing mechanism.** `scripts/check.sh:5-6` sources `lib/ci/check.bash`, deleted in #26 (commit `88bd9f6`); no
-  `check.bash` exists at any path, so the script cannot run today. Block 0 (CI10-PHASES, Order)
-  restores it at `ci-skills/lib/bash/ci/check.bash` from `88bd9f6^:lib/ci/check.bash` with paths
-  updated: the library sources
-  `skills/ci-skills/lib/core/runtime.bash` (line 7), now `ci-skills/lib/bash/core/runtime.bash`, and verifies
-  `skills/ci-skills/SKILL.md` (lines 102-103 and 128-129), now `ci-skills/SKILL.md`. It checks tracked shell files with
+  `check.bash` exists at any path, so the script cannot run today; it was deleted on purpose, and block 0
+  (CI10-PHASES, Order) does not restore it. The deleted library (`88bd9f6^:lib/ci/check.bash`) sourced
+  `skills/ci-skills/lib/core/runtime.bash` (line 7), today `ci-skills/lib/bash/core/runtime.bash`, and verified
+  `skills/ci-skills/SKILL.md` (lines 102-103 and 128-129), today `ci-skills/SKILL.md`. It checks tracked shell
+  files with
   `bash -n`, ShellCheck and shfmt, checks tracked whitespace, YAML and Markdown, scans Git history for secrets and runs
   the Bats suite (lines 116-127). It takes `--dry-run`, `--log-format`, `--log-level`, `--log-file`, `--run-id` and
   `--help` (lines 17-22); its help text says it exits 0, 64 or 69 (lines 26-28), and it also returns 66 for an
@@ -109,7 +200,7 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   - the Bats glob: `bats --tap tests` (line 127) becomes `tests/bash/*.bats`;
   - the exit codes: from the one table in `core/status.py` (0 and 2, `status.py:13`), rendered to
     `ci-skills/lib/bash/core/exit_codes.bash` (planned, CI10-PHASES Refactor), in place of `runtime.bash`'s 64, 65, 66
-    and 69 and the second Bash table in `scripts/bash/core/exit_codes.bash`; the code for a failed gate is D-EXIT
+    and 69; the code for a failed gate is D-EXIT
     (CI02-CLI);
   - its Kubernetes-pod guard (`KUBERNETES_SERVICE_HOST`, lines 185-187) becomes a per-profile rule that G1 decides.
 
@@ -119,7 +210,7 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   does not exist, and its `toolchain`, `conda`, `pretty`, `k8s-test` and `toolbox` targets name scripts and libraries
   under `scripts/toolchain/`, `scripts/toolbox/`, `scripts/ci/`, `lib/bash/toolchain/` and `automation/lib/` that do
   not exist (lines 10-27, 75-130 and 176-189). Which of `bless.sh` and `scripts/check.sh` becomes the hook body is
-  CI04-HOOKS's to settle: TEAM_GUIDE.md's repository structure lists `bless.sh` as the pre-hook, and CI04-HOOKS names
+  CI04-HOOKS's to settle: the repository structure lists `bless.sh` as the pre-hook, and CI04-HOOKS names
   `scripts/check.sh`.
 - **Smallest change.** Extend that script instead of adding a second one:
   - recreate the workflow the gate route (G0) names; the step list to restore is at
@@ -238,8 +329,8 @@ A local static result never replaces the gate route's result.
 
 ## Steps
 
-1. Restore the library in block 0 (CI10-PHASES, Order), then extend `scripts/check.sh` as in G1. The new checks live
-   in `ci-skills/lib/bash/ci/check.bash`, and `--help` lists every argument and output mode.
+1. Restore the library from `88bd9f6^:lib/ci/check.bash`, then extend `scripts/check.sh` as in G1. The new checks live
+   in the restored library (home: CI10-PHASES, Gate library home), and `--help` lists every argument and output mode.
 2. Recreate the workflow the gate route (G0) names from `1108cca^:.github/workflows/validate.yml` with G0's edit list;
    make each step call the entrypoint, add the final aggregator (G6) and the `schedule` trigger (G7), and extend the
    workflow-policy test.
@@ -254,8 +345,8 @@ A local static result never replaces the gate route's result.
 ## Delivery, test and proof
 
 1. **Delivery.**
-   - Changed: `scripts/check.sh` (sources `ci-skills/lib/bash/ci/check.bash`); `ci-skills/lib/bash/ci/check.bash`
-     (restored in block 0; this phase adds the profiles, the gates and the guard rule, G1); `requirements.txt` (G2);
+   - Changed: `scripts/check.sh` (sources the gate library); the gate library (home: CI10-PHASES, Gate library home;
+     restored by this phase, which also adds the profiles, the gates and the guard rule, G1); `requirements.txt` (G2);
      `tools/check_live_acceptance.py` (the smoke-case verification, G5; the days left, G7);
      `tests/python/test_validate_workflow_policy.py`, `tests/bash/check.bats` and `tests/python/test_live_acceptance.py`
      (part 2).
@@ -304,7 +395,7 @@ A local static result never replaces the gate route's result.
    workflow exists, the `gh pr checks` output for the head commit. The phase does change the skill digest:
    `ci-skills/lib/bash/ci/check.bash` lies inside the digested tree (`tree_digest` walks the skill root and excludes
    only `__pycache__`, `.pyc`, `.pyo` and `.DS_Store`: `_included` and `tree_digest`,
-   `ci-skills/lib/core/provenance.py:43-75`; D-DIGEST excludes `references/vendor/**`), so the receipts under
+   `ci-skills/lib/python/core/provenance.py:43-75`; D-DIGEST excludes `references/vendor/**`), so the receipts under
    `tests/acceptance/receipts/`, already `skill_digest_mismatch` (CI10-PHASES, Pull request status), are recaptured
    on the declared executor (D-SMOKE) after the last skill edit.
    The fields the checker compares on the publication receipt (`tests/acceptance/receipts/operator-laptop.json`),

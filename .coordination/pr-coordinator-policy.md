@@ -1,3 +1,5 @@
+# PR coordination policy
+
 Before PR coordination, rebase, or merge decisions, resolve `standards-binding.yaml` and read its pinned shared
 standards in manifest order; then apply this policy.
 

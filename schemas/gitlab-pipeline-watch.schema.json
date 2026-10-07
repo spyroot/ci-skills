@@ -1,0 +1,266 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/gitlab-pipeline-watch.schema.json",
+  "title": "gitlab_pipeline_watch",
+  "description": "Result of ci-skills/bin/gitlab_pipeline.py watch (CI11-TOOLS, Combos, Pipeline watch): one record per pipeline in scope, completion and success reported separately, retrieve pointers to details.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "captured_at",
+    "target",
+    "filters",
+    "status",
+    "complete",
+    "success",
+    "polls",
+    "elapsed_seconds",
+    "records",
+    "changes",
+    "choices",
+    "continuation",
+    "errors",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "kind": {
+      "const": "gitlab_pipeline_watch"
+    },
+    "captured_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "filters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project",
+        "pipeline_id"
+      ],
+      "properties": {
+        "project": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "pipeline_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "related_name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "PARTIAL",
+        "BLOCKED",
+        "DRY_RUN"
+      ]
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "success": {
+      "type": "boolean"
+    },
+    "polls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "elapsed_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "records": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "pipeline_id",
+          "via",
+          "depth",
+          "status",
+          "jobs"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pipeline_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "via": {
+            "type": "string",
+            "pattern": "^(root|related|bridge:.+)$"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          },
+          "jobs": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "total",
+              "by_status"
+            ],
+            "properties": {
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "by_status": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[a-z_]+$"
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "at_seconds",
+          "pipeline_id",
+          "status"
+        ],
+        "properties": {
+          "at_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "pipeline_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "choices": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "reference-next.schema.json#/$defs/choice"
+      }
+    },
+    "continuation": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "reference-next.schema.json#/$defs/pointer"
+        }
+      ]
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_count",
+        "error_count"
+      ],
+      "properties": {
+        "record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "access": {
+      "type": "object"
+    },
+    "execution_host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tested_revision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "skill": {
+      "type": "object"
+    },
+    "target_source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "collection_probes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

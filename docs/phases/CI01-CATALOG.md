@@ -150,7 +150,8 @@ Exit codes, the result envelope and `safe_next_step` follow CI02-CLI.
 ## Index record
 
 `list` builds the index on every call; nothing is committed, so it cannot go
-stale. Its schema is `skill-index` (CI07-SCHEMA).
+stale. Its schema is
+[`schemas/skill-index.schema.json`](../../schemas/skill-index.schema.json) (CI07-SCHEMA).
 
 ```json
 {

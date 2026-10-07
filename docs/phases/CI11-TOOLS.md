@@ -10,14 +10,17 @@ more. No open-ended implementation, no invented behaviour: a tool exists only
 when a sentence we recorded or a source script stands behind it. The port
 recipe below owns the rules; the four source-row sections name each source
 script by path relative to the source repo root at the inventory commit,
-both recorded in the ignored `.internal/plans/` pointer. That project's name
-never enters a tracked file: the neutrality gate forbids it.
+both recorded in the private source inventory. That project's name never
+enters a tracked file: the neutrality gate forbids it.
 
 ## The catalogue
 
+Commands that ship today are in [docs/README.md](../README.md), Capabilities; this table lists only
+what this phase adds or changes.
+
 Tasks we named on 2026-10-06. "exists" means the capability is in `ci-skills`
 today as the bare command (`gitlab_job.py --job-url URL` keeps working for the
-committed receipt; the verbs arrive with `track` and `logs`); "port" means it
+committed receipt; the verbs arrive with `watch` and `logs`); "port" means it
 comes from a source script; "new" means we named it, or README "Proposed
 GitLab actions" lists it, and no script exists, so it is built to the
 sentence and nothing more. `Pattern` is the README grouping ("Tool grouping"):
@@ -28,11 +31,11 @@ Combination). Authorities are the catalog's (`gitlab`, `kubernetes`, `harbor`);
 | Task | Tool | Library module | Authority | Mutates | Status | Pattern |
 | --- | --- | --- | --- | --- | --- | --- |
 | GitLab job get | `gitlab_job.py get` | `core/collect.py` | gitlab | no | exists | visibility |
-| GitLab job track | `gitlab_job.py track` | `core/gitlab_jobs.py` | gitlab | no | port | ci |
+| GitLab job watch | `gitlab_job.py watch` | `core/gitlab_jobs.py` | gitlab | no | port | ci |
 | GitLab job logs | `gitlab_job.py logs` | `core/gitlab_jobs.py` | gitlab | no | port | ci |
 | job dump | `gitlab_job.py list` | `core/gitlab_jobs.py` | gitlab | no | new | ci |
 | GitLab pipeline get | `gitlab_pipeline.py get` | `core/gitlab_pipelines.py` | gitlab | no | exists | visibility |
-| GitLab pipeline track | `gitlab_pipeline.py track` | `core/gitlab_pipelines.py` | gitlab | no | port | ci |
+| GitLab pipeline watch | `gitlab_pipeline.py watch` | `core/gitlab_pipelines.py` | gitlab | no | port | ci |
 | GitLab pipeline logs | `gitlab_pipeline.py logs` | `core/gitlab_jobs.py` | gitlab | no | port | ci |
 | pipeline dump, job glob | `gitlab_pipeline.py list` | `core/gitlab_pipelines.py` | gitlab | no | new | ci |
 | child pipelines | `gitlab_pipeline.py children` | `core/gitlab_pipelines.py` | gitlab | no | port | ci |
@@ -74,8 +77,8 @@ catalog (CI10-PHASES, Modify), so read and write verbs share one main.
 Per-tool interface beyond the universal tier and the query grammar (below),
 with config keys and concurrency:
 
-- `gitlab_job.py get|track|logs`: `--job-url` (`get` also `--project --job-id`);
-  `track` the grammar's `--interval`, `--timeout`, `--until terminal`; `logs`
+- `gitlab_job.py get|watch|logs`: `--job-url` (`get` also `--project --job-id`);
+  `watch` the grammar's `--interval`, `--timeout`; `logs`
   `--lines N`, `--search`, `--failure-window N`; `[gitlab] url`.
 - `gitlab_job.py list`: the `list` grammar; `--status` values
   `failed|success|running|pending|canceled|stuck` (`stuck`: pending or created
@@ -83,8 +86,8 @@ with config keys and concurrency:
   `finished_at` else `created_at`; `--search` over name, stage, ref, failure
   reason; fields: id, name, stage, status, failure reason, created, started,
   finished, duration, runner, pipeline id and ref, web URL.
-- `gitlab_pipeline.py get|track|logs|children`: `--project`, `--pipeline-id`
-  (or `--ref` for the newest); `logs` fans out the failed jobs' traces in
+- `gitlab_pipeline.py get|logs|children`: `--project`, `--pipeline-id`
+  (or `--ref` for the newest; `watch` as Pipeline watch, exact); `logs` fans out the failed jobs' traces in
   parallel; `children` reads bridges and downstream pipelines; `[gitlab] url,
   project`.
 - `gitlab_pipeline.py list`: the `list` grammar; `--ref`; `--name-glob` over
@@ -159,7 +162,7 @@ with config keys and concurrency:
 
 Source paths, functions and lines per tool are in the four source-row
 sections below (inventory of 2026-10-06 at the source commit recorded in the
-ignored `.internal/plans/` pointer); the tests per tool are the
+private source inventory); the tests per tool are the
 `tests/python/test_<module>.py` files of "Delivery, test and proof".
 
 ## The port recipe
@@ -169,18 +172,45 @@ The same ten steps for every row; the row repeats them with the real paths.
 1. **Point.** Name the source script by path under the source repo root, the
    functions and lines that implement the task, and its tests.
 2. **Bound the task.** One tool does one task we named.
-3. **Library first.** Put the logic in `ci-skills/lib/core/<module>.py` as
+3. **Library first.** Put the logic in `ci-skills/lib/python/core/<module>.py` as
    functions over the existing transports: `core.gitlab_api.GlabAPIClient`
    for GitLab, `core.runtime.run_command_bounded` for `oc`, `kubectl`,
    `podman` and `skopeo`, and one bounded standard-library HTTP helper
    `core/http.py` shared by the Harbor API and the reference fetch. Never a
    second transport, envelope, logger, exit table or redaction.
-4. **Declare.** Add the command to `core/catalog.py` (`requires`, options,
-   subcommands, `mutates`, `returns`, `required_tools`); add the `harbor`
-   authority once (target `[harbor]` with the keys of the config block below;
-   credential chain: target file, then the declared variables, then none,
-   reported in `credential_sources` like the others); regenerate
-   `tools.json`. The navigator picks the tool up with no further work.
+4. **Declare.** Add the command to `COMMANDS` in `ci-skills/lib/python/core/catalog.py`. Every entry declares `kind`,
+   `purpose`, `use_when`, `requires`, `capabilities`, `options` (the command's own options with their help text),
+   `required_options` and `returns`. It adds `subcommands`, `mutates`, `required_tools`, `execution_surface` and
+   `side_effects` only when they differ from the defaults: none, false, none, "selected authority API" and
+   "none". Add the `harbor` authority once (target `[harbor]` with the keys of the config block below;
+   credential chain: target file, then the declared variables, then none, reported in `credential_sources` like
+   the others). The entry this phase adds for `cluster_health.py`:
+
+   ```python
+   "cluster_health.py": {
+       "kind": "cluster_health",
+       "purpose": "Report CNI, MTU, controller, Ceph, storage and event health in one view.",
+       "use_when": "You need one answer to whether the selected cluster is healthy.",
+       "requires": ("kubernetes",),
+       "capabilities": ("time_ranged",),
+       "options": {
+           "--ceph-namespace": "namespace of the Ceph cluster to read",
+           "--cilium-namespace": "namespace of the Cilium agents",
+           "--skip": "component to leave out; repeatable",
+       },
+       "required_options": (),
+       "returns": (
+           "One record per component (cni, mtu, controllers, ceph, storage, events), each ok, degraded "
+           "or unknown with its evidence and read duration; PASS when all are ok."
+       ),
+   },
+   ```
+
+   `tools/render_manifest.py` turns it into the `tools.json` entry: it adds the universal options, renames
+   `requires` to `requires_authorities` and `kind` to `report_kind`, and writes `mutates` as `read_only`,
+   inverted. `schemas/skill-manifest.schema.json` must accept the new `tools.json` and
+   `schemas/command-contract.schema.json` the new `--describe` output. Add the tool's `NAV_PLACEMENT` row, and a
+   `NAV_NODES` row if its node is new (CI09-REFERENCE section 3, Declarations); the navigator derives the rest.
 5. **Thin main.** `ci-skills/bin/<name>.py`: `build_parser()` plus one
    `execute` call, with the shared locator import.
 6. **Strip the project.** Every host, project, group, namespace, image name,
@@ -296,9 +326,9 @@ schedule, route, node, machine, Pod, claim):
 - `get`: one object by id or URL, with its related objects (a job with its
   pipeline and runner; a pipeline with its jobs and bridges; a runner with its
   projects and managers).
-- `track`: poll `get` until a terminal status, with `--interval`, `--timeout`
-  and `--until terminal`; the record is the sequence of observed statuses
-  with timestamps.
+- `watch`: poll until every object in scope settles, with `--interval` and
+  `--timeout`; for pipelines the Pipeline watch combo (Combos) is the single
+  specification.
 - `logs`: the bounded text of the object (job trace) with `--lines`,
   `--search` and `--failure-window`.
 - actions (`start`, `play`, `retry`, `cancel`, `create`, `update`, `assign`,
@@ -317,6 +347,393 @@ parallel; it never re-implements a step another tool owns, and each step
 keeps its own plan, apply and read-back. The `Pattern` column of the
 catalogue names each tool's README grouping ("Tool grouping"); the
 concurrency rule is step 8 of the recipe.
+
+### Concrete combinations: proposed delivery entries
+
+These are proposed delivery entries, not claims that the commands already exist. Each result follows
+CI09-REFERENCE section 3: a compact summary, the essential fields of each step, and `retrieve` pointers to the
+component reports, never the reports inline.
+
+- **Pipeline watch** (`gitlab_pipeline.py watch`; the exact interface, result and schema follow this list).
+  - Operations combined: resolve the selected pipeline by ID; discover its jobs,
+    bridges and linked downstream pipelines, across projects; watch the declared scope, optionally widened to
+    newer pipelines in the same project whose name matches a declared pattern (pipelines a job started through
+    the API carry no bridge); report changes and final results. `manual` counts as settled; interval and
+    overall wait are bounded.
+  - Completion evidence: every pipeline in scope is accounted for; incomplete reads remain explicit; completion
+    and success are reported separately.
+- **Toolbox build, publish and watch.**
+  - Operations combined: start the declared GitLab build/publish workflow; reuse pipeline watch; obtain the
+    produced image identity; verify the published artifact in Harbor.
+  - Completion evidence: selected source revision, pipeline/job identities, produced image digest, and Harbor
+    read-back agree. A successful pipeline alone is insufficient.
+- **Milestone create, tag and MR check.**
+  - Operations combined: create or resolve the milestone; apply the specified associations and labels to the
+    selected work items; inspect the related MRs; verify their expected milestone/label associations.
+  - Completion evidence: exact milestone and work-item identities, changes made, and per-MR checks. Here, "tag"
+    is treated as a label; Git repository tags remain a separate, explicitly specified operation.
+
+#### Pipeline watch, exact
+
+```text
+gitlab_pipeline.py watch --pipeline-id ID [--project PATH_OR_ID] [--related-name REGEX]
+                         [--interval SECONDS] [--timeout SECONDS]   plus the universal tier
+```
+
+- `--pipeline-id`: required. `--project`: as `get`, default `gitlab.project` in the target. `--interval`: seconds
+  between polls, default 10 (the source's cap, `gitlab_util.sh:62`). `--timeout`: seconds for the whole watch,
+  default 3600. `get` keeps today's bare invocation, `gitlab_pipeline.py --pipeline-id ID`, as its default verb.
+- Scope: the pipeline, every pipeline its bridges started (any project, depth at most 5), and with `--related-name`
+  each newer pipeline in the root's project on the root's ref whose `name` matches REGEX. Settled: `success`,
+  `failed`, `canceled`, `skipped`, `manual`.
+- Result: the report envelope, with the access evidence every GitLab command emits (`access`, `execution_host`,
+  `tested_revision`, `skill`, `target_source`; `collection_probes` under `--dry-run`), plus `complete` (every
+  pipeline in scope settled and read), `success` (every one `success`), `polls`, `elapsed_seconds`, `changes`
+  (pipeline status changes), `choices` (`retrieve` pointers in the shape of CI09-REFERENCE section 3: failed jobs
+  first, then unsuccessful pipelines) and `continuation` (`null`; a watch result has no next page). One record per
+  pipeline: ids, `via`, `depth`, `status`, job counts by status; never the jobs themselves.
+- Values: `via` is `root`, `related` or `bridge:<bridge job name>`; a choice id is `job:<job id>` or
+  `pipeline:<pipeline id>`; a job choice's summary is `failed: <failure reason>, <job name>`, a pipeline choice's
+  `every job of pipeline <id> by stage`.
+- Limits: 50 pipelines in scope, 50 changes, 12 choices. Past 50 pipelines, `errors` carries `scope_limit_exceeded`
+  with its `count` and `complete` is false. Past 50 changes or 12 choices, `errors` carries `changes_limit_exceeded`
+  or `choices_limit_exceeded` with its `count`, `complete` keeps its meaning, and the narrowing call for any record
+  without a choice is `gitlab_pipeline.py get --project <project_id> --pipeline-id <pipeline_id>`. Each settled
+  pipeline or job is one stderr log line while the watch runs.
+- Status: `PASS` when complete and successful; `PARTIAL` otherwise; `BLOCKED` when access or the root read fails;
+  `DRY_RUN` under `--dry-run`, with `collection_probes` and no records.
+- Human view: the status with `complete` and `success`; the target, project, pipeline, filters, polls, elapsed time
+  and capture time; a "Pipelines" block, one line per record; a "Changes" block; a "Results" block drawn as
+  CI09-REFERENCE section 3 draws choices; an "Errors" block when there are any.
+
+```text
+$ gitlab_pipeline.py watch --pipeline-id 4101 --related-name '^component '
+PARTIAL  complete: yes  success: no
+https://gitlab.example.test  project group/project  pipeline 4101  related '^component '  25 polls  742 s  captured 2026-10-07T09:40:00+00:00
+
+Pipelines
+  4101  failed   root           depth 0  project 12  9 jobs: failed 1, success 8
+  4102  success  bridge:static  depth 1  project 12  25 jobs: success 25
+  4110  success  related        depth 0  project 12  4 jobs: success 4
+
+Changes
+   300 s  4102  success
+   610 s  4110  success
+   742 s  4101  failed
+
+Results
+  job:88231      failed: script_failure, deploy:component
+                 Retrieve: gitlab_job.py --job-url https://gitlab.example.test/group/project/-/jobs/88231
+
+  pipeline:4101  every job of pipeline 4101 by stage
+                 Retrieve: gitlab_pipeline.py get --project 12 --pipeline-id 4101
+```
+
+```json
+{
+  "schema_version": "1.0",
+  "kind": "gitlab_pipeline_watch",
+  "captured_at": "2026-10-07T09:40:00+00:00",
+  "target": "https://gitlab.example.test",
+  "filters": {"project": "group/project", "pipeline_id": 4101, "related_name": "^component "},
+  "status": "PARTIAL",
+  "complete": true,
+  "success": false,
+  "polls": 25,
+  "elapsed_seconds": 742,
+  "records": [
+    {"project_id": 12, "pipeline_id": 4101, "via": "root", "depth": 0, "status": "failed", "jobs": {"total": 9, "by_status": {"failed": 1, "success": 8}}},
+    {"project_id": 12, "pipeline_id": 4102, "via": "bridge:static", "depth": 1, "status": "success", "jobs": {"total": 25, "by_status": {"success": 25}}},
+    {"project_id": 12, "pipeline_id": 4110, "via": "related", "depth": 0, "status": "success", "jobs": {"total": 4, "by_status": {"success": 4}}}
+  ],
+  "changes": [
+    {"at_seconds": 300, "pipeline_id": 4102, "status": "success"},
+    {"at_seconds": 610, "pipeline_id": 4110, "status": "success"},
+    {"at_seconds": 742, "pipeline_id": 4101, "status": "failed"}
+  ],
+  "choices": [
+    {"id": "job:88231", "kind": "retrieve", "summary": "failed: script_failure, deploy:component",
+     "next": {"action": "retrieve", "entrypoint": "bin/gitlab_job.py", "args": ["--job-url", "https://gitlab.example.test/group/project/-/jobs/88231", "--json"]}},
+    {"id": "pipeline:4101", "kind": "retrieve", "summary": "every job of pipeline 4101 by stage",
+     "next": {"action": "retrieve", "entrypoint": "bin/gitlab_pipeline.py", "args": ["get", "--project", "12", "--pipeline-id", "4101", "--json"]}}
+  ],
+  "continuation": null,
+  "errors": [],
+  "summary": {"record_count": 3, "error_count": 0}
+}
+```
+
+`schemas/gitlab-pipeline-watch.schema.json`, which reuses the choice and pointer of
+`schemas/reference-next.schema.json`:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/gitlab-pipeline-watch.schema.json",
+  "title": "gitlab_pipeline_watch",
+  "description": "Result of ci-skills/bin/gitlab_pipeline.py watch (CI11-TOOLS, Combos, Pipeline watch): one record per pipeline in scope, completion and success reported separately, retrieve pointers to details.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "captured_at",
+    "target",
+    "filters",
+    "status",
+    "complete",
+    "success",
+    "polls",
+    "elapsed_seconds",
+    "records",
+    "changes",
+    "choices",
+    "continuation",
+    "errors",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "kind": {
+      "const": "gitlab_pipeline_watch"
+    },
+    "captured_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "filters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project",
+        "pipeline_id"
+      ],
+      "properties": {
+        "project": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "pipeline_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "related_name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "PARTIAL",
+        "BLOCKED",
+        "DRY_RUN"
+      ]
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "success": {
+      "type": "boolean"
+    },
+    "polls": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "elapsed_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "records": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project_id",
+          "pipeline_id",
+          "via",
+          "depth",
+          "status",
+          "jobs"
+        ],
+        "properties": {
+          "project_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pipeline_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "via": {
+            "type": "string",
+            "pattern": "^(root|related|bridge:.+)$"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          },
+          "jobs": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "total",
+              "by_status"
+            ],
+            "properties": {
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "by_status": {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[a-z_]+$"
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "changes": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "at_seconds",
+          "pipeline_id",
+          "status"
+        ],
+        "properties": {
+          "at_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "pipeline_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "choices": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "reference-next.schema.json#/$defs/choice"
+      }
+    },
+    "continuation": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "reference-next.schema.json#/$defs/pointer"
+        }
+      ]
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_count",
+        "error_count"
+      ],
+      "properties": {
+        "record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "access": {
+      "type": "object"
+    },
+    "execution_host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tested_revision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "skill": {
+      "type": "object"
+    },
+    "target_source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "collection_probes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}
+```
 
 ### Two combos we named, concretely
 
@@ -369,8 +786,9 @@ and every receipt is committed.
 - `gitlab_pipeline.py start --project <declared project> --ref <declared ref>`:
   plan, apply, read-back of the new pipeline id and `sha`; this pipeline runs
   one job that prints the marker line and one that fails on purpose.
-- `gitlab_pipeline.py track --project <declared project> --pipeline-id <from start>`:
-  the observed statuses with timestamps, ending in a terminal status.
+- `gitlab_pipeline.py watch --project <declared project> --pipeline-id <from start>`:
+  `complete: true`, `success: false` (the job that fails on purpose), the root
+  record's `status`, and `changes` ending with the root's settled status.
 - `gitlab_pipeline.py get`, `logs` and `children` on that pipeline: stage
   counts; the marker line in the job's trace; the bridge list (empty).
 - `gitlab_pipeline.py list --project <declared project> --limit 1 --name-glob <declared glob>`:
@@ -441,7 +859,7 @@ A tool without a committed receipt for its case is not delivered.
 ## Source rows: OpenShift and Kubernetes (inventory of 2026-10-06)
 
 Inventory of 2026-10-06 at the source commit recorded with the source repo
-root in the ignored `.internal/plans/` pointer; paths are relative to that
+root in the private source inventory; paths are relative to that
 root and line numbers are from that commit; the full inventories are
 [ci11-inventories](../plans/2026-10-06/ci11-inventories/index.md). "new" marks a read we asked for
 that no source script performs; it is built to the sentence and nothing more.
@@ -618,7 +1036,7 @@ The source has three GitLab transports (the shared `glab api` wrapper at
 `core.gitlab_api.GlabAPIClient` (JSON bodies in a 0600 file, never argv). The
 status mapping is in the cross-cutting adaptations above.
 
-### `gitlab_job.py get`, `list`, `track`, `logs`
+### `gitlab_job.py get`, `list`, `watch`, `logs`
 
 - Source: job by name and id `automation/lib/ci/pipeline.bash:113-117`, job list
   (20 pages of 100, silently capped) `:94-108`, `GET jobs/<id>` `:140`; poll
@@ -630,14 +1048,14 @@ status mapping is in the cross-cutting adaptations above.
   last 200 trace lines sanitized, `:853-860`), `TERMINAL_JOB_STATUSES` at
   `core/gitlab_pipelines.py:13`.
 - Adapt: `list` and `get` by project and id or by pipeline and name glob;
-  `track` with one terminal set and `manual` ending the track explicitly;
+  `watch` with one terminal set and `manual` ending the watch explicitly;
   `logs` reads the trace through a new bounded `GlabAPIClient.get_text`
   (today only `*_json`, `core/gitlab_api.py:283-294`), and `collect.py:853`'s
   trace read moves onto it; paginate everything (`pipeline.bash:98` caps silently).
 - Concurrency: the trace read in `collect_gitlab_job` (`collect.py:853`) joins
   the existing pool (`:820`); list pages in parallel.
 
-### `gitlab_pipeline.py get`, `list`, `track`, `logs`, `children`, `start`
+### `gitlab_pipeline.py get`, `list`, `watch`, `logs`, `children`, `start`
 
 - Source: pipeline GET with id, ref and sha checks
   `scripts/utility/gitlab_util.sh:1674-1680`; bridges to the child pipeline
@@ -877,15 +1295,15 @@ file stays nonsecret: file paths only, like `token_file` today.
 
 ## Read-back
 
-After each pull request: `ci-skills/bin/reference.py next <domain>` lists
-the new tool; `<tool> --describe` validates against `command-contract`;
+After each pull request: `ci-skills/bin/reference.py next <node> run` lists
+the new tool and `next <node> run <id>` describes it; `<tool> --describe` validates against `command-contract`;
 `tools/render_manifest.py --check` reports CURRENT; the neutrality checker
 reports PASS.
 
 ## Delivery, test and proof
 
 1. *Delivery*, per tool: `ci-skills/bin/<tool>.py`, the Library module cell
-   under `ci-skills/lib/core/`, the catalog entry and the regenerated
+   under `ci-skills/lib/python/core/`, the catalog entry and the regenerated
    `tools.json`, the `target.toml.template` keys of its row, its
    `[[smoke_cases]]` entry; the command that runs is the tool's smoke line.
 2. *Tests*: `tests/python/test_<module>.py` per Library module (mocked `gh`,

@@ -16,8 +16,7 @@ The operator asked for three things:
    (`ci-skills/bin` thin mains, `ci-skills/lib/core` Python library, `ci-skills/lib/bash/*` Bash
    libraries) and "no dual implementation; every tool is a small main that calls the library".
 
-"Memory" and "lazy loading" have a recorded operator definition, used throughout:
-`.internal/plans/GAL-phases.md:24` (Q2): "index which pointers, machine readable schema where is what tags".
+"Memory" and "lazy loading" mean indexing pointers, tags and schema locations so a caller loads only what it needs.
 
 ## Verified findings that shape the plan
 
@@ -28,13 +27,8 @@ The operator asked for three things:
 - [fact: `gh api repos/spyroot/ci-skills/contents/.github/workflows`] 404.
   [fact: `gh api .../branches/main/protection`] "Branch protection has been disabled on this repository".
   [fact: `gh run list --workflow validate`] "could not find any workflows named validate".
-- Still naming `validate` as the gate: `.internal/MAP.md:11`,
-  `.internal/INDEX.yaml:24,28`, `TEAM_GUIDE.md:14-15`,
-  `.coordination/pr-coordinator-policy.md:4-5`,
-  `docs/phases/CI03-GATES.md:11-13`, `CLAUDE.md` (Commands),
-  `tests/acceptance/expected.toml:26`, and the memory file
-  `~/.claude/projects/-Users-spyroot-dev-ci-skills/memory/ci-skills-queue-and-gates.md`
-  ("GitHub `validate` is the merge gate, never re-ask"). That memory was true when written; the fact changed.
+- Still naming `validate` as the gate: `.coordination/pr-coordinator-policy.md:4-5`,
+  `docs/phases/CI03-GATES.md:11-13`, and `tests/acceptance/expected.toml:26`.
 - No local gate functions either: [fact: `ls`] `bless.sh:15-45` sources `automation/lib/*` (missing),
   `scripts/check.sh:6` sources `lib/ci/check.bash` (deleted on `main` in `88bd9f6`, merged via PR #26),
   `Makefile:26-27,10` reference `lib/bash/toolchain/jobs.bash` and `scripts/toolchain/install.sh` (missing),
@@ -592,7 +586,7 @@ implicit files, which rules out a `$TMPDIR` cache. Two layout choices follow, ea
 ## Proposal B: finish the CIxx re-adjustment and add grounded detail (one PR, docs only)
 
 Naming rule, applied everywhere: the phase id is the filename stem, `CI01-CATALOG` ... `CI10-PHASES`; bodies,
-titles, dependency lines and cross-references use that id; `GAL-*` and un-numbered `CI-*` disappear. Observed today
+titles, dependency lines and cross-references use that id; `CI-*` and un-numbered `CI-*` disappear. Observed today
 [fact: `git grep`]: 24 stale names in `CI01-CATALOG.md`, 9 in `CI02-CLI.md`, 5 in `CI03-GATES.md`, 3 in `CI04-HOOKS.md`,
 22 in `CI05-VENDOR.md`, 11 in `CI06-TESTS.md`, 9 in `CI07-SCHEMA.md`, 15 in `CI08-ROUTING.md`, 12 in `CI09-REFERENCE.md`,
 25 in `CI10-PHASES.md`; titles of CI05-CI09 still read `CI-VENDOR` etc.
@@ -670,9 +664,7 @@ CI05 25 edits, 2 drops (title becomes "vendored trees, glab agent skills and ups
 3 drops, plus a "Knowledge kind" test section; CI07 13 edits, 1 drop; CI08 19 edits, 1 drop; CI09 15 edits, 1 drop,
 plus the full "Knowledge references: upstream text read on demand" section (11,885 characters, drafted); CI10 13
 edits, 1 drop (order gains a block 0 and the 2026-10-06 PR read-back); README 9 edits; `scripts/README.md` 1
-(the whole tree picture). The lists are in the design journal
-`~/.claude/projects/-Users-spyroot-dev-ci-skills/279dd962-305b-4ab4-835e-7e6e872c8f60/subagents/workflows/wf_dbf846f4-75a/journal.jsonl`
-under the result labelled `plan:docs-edits`; the first implementation step copies them into `.internal/drafts/`.
+(the whole tree picture). The implementation used these edit lists to update the phase documents.
 Two corrections apply before use: the drafted CI09 section and the CI06 test section still carry this plan's first
 numbers (151 chunks, 60 anchors, 12,507-byte `trigger`, "next heading of the same or higher level") and must take the
 corrected ones above (167 keyword chunks, 174 with sections, 176 files, 78 anchors with 1 dangling, 5,000-byte
@@ -705,32 +697,6 @@ Per-doc grounded detail to add:
 - `CI06-TESTS.md`: section per phase keeps its name; add the CI09 knowledge tests above; "Existing coverage" gets the
   2026-10-06 observation that the suite cannot import (F3) and that no execution surface exists (F1).
 - `README.md`: fix the eight stale paths/commands in F3; `scripts/README.md`: replace the tree with the real one.
-
-## Proposal C: queue re-adjustment (Claude lane only)
-
-[fact: queue audit, 36 records read in full] 57 of the 78 scope paths named by queue records no longer exist and
-35 of 36 records carry old names; no record uses a `CIxx` name. Lanes `shared/`, `ci/`, `provider-escalation/` are
-empty.
-
-- Move each of the eight `.internal/queue/claude/active/GAL-*.yaml` records (one canonical record, moved not copied,
-  per `.internal/queue/README.md`) to `CIxx-NAME.yaml` and update in place: `metadata.id` (line 4), `spec.title`
-  (line 8), `spec.scope.paths` (line 15: `docs/phases/GAL-X.md` -> `docs/phases/CIxx-X.md`), drop the dead worktree
-  path `.internal/worktrees/gal-phase-docs/...` (line 22 in CATALOG, HOOKS, ROUTING, VENDOR), fix the evidence
-  pointers that name `.internal/queue/codex/ready/gal-{reference,tests}-brainstorm.yaml` (the records sit in
-  `claude/done`), set `latestVerifiedObservation` to the 2026-10-06 read-back (PR #11 merged; `validate` deleted in
-  `1108cca`; branch protection disabled; docs renamed in `b7e0a24`), and `nextAction` to the docs PR of Proposal B.
-  Mapping: GAL-CATALOG->CI01-CATALOG, GAL-CLI->CI02-CLI, GAL-HOOKS->CI04-HOOKS, GAL-VENDOR->CI05-VENDOR,
-  GAL-TESTS->CI06-TESTS, GAL-SCHEMA->CI07-SCHEMA, GAL-ROUTING->CI08-ROUTING, GAL-REFERENCE->CI09-REFERENCE.
-- The eight `claude/done/gal-*-brainstorm.yaml` records keep their historical names (done is history).
-- `.internal/queue/p0.yaml:10` says "15 commands"; `ci-skills/bin` holds 17 entrypoints (15 Python mains plus
-  `ci-api`, `ci-binary-build`); `:17` depends on an "exact-head GitHub gate" that cannot run. Codex owns it; report only.
-- Codex records are not edited. Reported for the operator: `codex/active/gal-ci-skills-name-spec.yaml` (6 stale
-  paths), `gal-gates-entrypoint.yaml`, `gal-tests-umbrella-pr15.yaml`, `pr2-command-output-contracts.yaml`,
-  `codex/ready/gal-cli-brainstorm.yaml`, `gal-schema-brainstorm.yaml`, `pr13-...`, `pr7-...`, `pr8-...` name old paths;
-  `.internal/queue/p0.yaml` item `p0-live-15-evidence` is owned by Codex and tied to PR #23, which is CONFLICTING and
-  touches `.github/workflows/validate.yml` and the old `skills/` tree.
-- `.internal/memory.md` pointer and `.internal/memories/GAL-checkpoint-2026-10-02.md` are a past observation; add a
-  2026-10-06 checkpoint (F1-F3) rather than editing history.
 
 ## Proposal D: make `ci-skills` an Agent-Skills package that works in every Codex scope (operator requirement)
 
@@ -915,14 +881,12 @@ Where does the maintenance code (vendor update, reference update, discovery, ins
   `tools/skillkit/` (`transaction.py`, `fetch.py`, `reference_update.py`, later `vendor.py` and `discover.py`),
   imported by the thin mains `tools/update_reference.py` and `tools/install_ci_skills.py`. `skillkit` imports `core`
   from `ci-skills/lib`; there is one `core` package, so the collision that `CI05-VENDOR.md:175-187` worried about
-  does not arise, and no inert maintenance code ships in the skill or churns its digest. `TEAM_GUIDE.md:160-184`
-  must then draw `ci-skills/lib/core/` (not `lib/python/core/`) and `tools/skillkit/`.
+  does not arise, and no inert maintenance code ships in the skill or churns its digest. The repository layout guide must then draw `ci-skills/lib/core/` (not `lib/python/core/`) and `tools/skillkit/`.
 - Alternative, pure Option 1: all Python under `ci-skills/lib/core/`, `tools/*.py` thin. Cost: the installed skill
   carries the transaction, fetch and update code it never runs, and every edit to them changes the skill digest.
-- Alternative, Option 2: a second library at the repository root (`lib/python/...`, the shape `TEAM_GUIDE.md:166`
-  draws, which the tree does not have). Cost: two Python libraries and an import direction to police.
+- Alternative, Option 2: a second library at the repository root (`lib/python/...`, which the tree does not have). Cost: two Python libraries and an import direction to police.
 
-`TEAM_GUIDE.md:160-184` draws `lib/bash/core/` and `lib/python/core/` while the tree has `ci-skills/lib/core/`
+The repository layout guide draws `lib/bash/core/` and `lib/python/core/` while the tree has `ci-skills/lib/core/`
 (Python) and `ci-skills/lib/bash/{core,ci,automation}/`; whichever the operator confirms, the docs and the guide
 must draw the same tree.
 
@@ -945,19 +909,16 @@ must draw the same tree.
    `lib/ci/check.bash` (D-GATE, G1 restores it at `ci-skills/lib/bash/ci/check.bash`).
 1. **Docs PR** (Proposal B + the CI09 text of Proposal A): `docs/phases/*.md`, `README.md`, `scripts/README.md`;
    no skill bytes change, so no receipt.
-2. **Queue moves** (local, ignored files, Claude lane): after 1 is opened.
-3. **CI09 implementation PR**: `core/reference.py`, `bin/reference.py`, `tools/update_reference.py`, schema, tests,
+2. **CI09 implementation PR**: `core/reference.py`, `bin/reference.py`, `tools/update_reference.py`, schema, tests,
    `ci-skills/references/vendor/gitlab-ci-yaml/` (152 chunks or one file plus outline per D-LAYOUT, `LICENSE.md`,
    `index.json`), catalog `REFERENCES` entry rendered into `tools.json`, one `SKILL.md` line. Depends on
    CI05-VENDOR's transaction and CI07-SCHEMA's gate existing, or lands them minimally within this PR per CI10's
    shared-file allowance.
-4. **Scopes and `agents/openai.yaml` PR** (Proposal D): installer `--scope`, the rendered `agents/openai.yaml`,
+3. **Scopes and `agents/openai.yaml` PR** (Proposal D): installer `--scope`, the rendered `agents/openai.yaml`,
    `assets/` with operator-supplied icons, the description terms, README install section per scope; one fresh
    receipt (skill bytes change).
-5. **MR checker PR** (Proposal E), only if authorized: `core/gitlab_merge_requests.py`, `bin/gitlab_mr.py`, catalog
+4. **MR checker PR** (Proposal E), only if authorized: `core/gitlab_merge_requests.py`, `bin/gitlab_mr.py`, catalog
    and routing entries, tests, `expected.toml` receipt kind, one fresh receipt.
-
-Each PR goes through the pr-coordinator skill and one `qa` review (`~/.codex/agents/qa.toml`), per TEAM_GUIDE.
 
 ## Verification
 
@@ -988,7 +949,6 @@ Each PR goes through the pr-coordinator skill and one `qa` review (`~/.codex/age
 | Reference for `trigger:forward` loadable on demand, grounded in Claude + OpenAI skill docs | Proposal A in `docs/phases/CI09-REFERENCE.md`; later `core/reference.py` | anchor oracle, chunker, verify, closed-world | proposed; grounding fetched 2026-10-06 |
 | Finish CIxx renaming in doc bodies and cross-references | Proposal B | link scan, markdownlint, `git grep` for old names returns nothing | 135 stale names counted; not yet edited |
 | Grounded detail per phase (algorithms, load/knowledge/memory) | Proposal B per-doc list | review | pending audit fold-in |
-| Queue re-adjusted to new names | Proposal C | record moves, no copies | not yet moved |
 | Layout and no-dual-implementation reflected | path rule + Placement decision | `tools/render_manifest.py --check`; QA reuse review | consumers still stale (F3) |
 | Merge gate | none exists | — | BLOCKED: D-GATE |
 | Skill works the same way in every Codex scope; official layout with `agents/openai.yaml` | Proposal D | installed-package smoke per scope path; manifest byte-equality covers `openai.yaml` | proposed; scope table fetched 2026-10-06 |
@@ -997,9 +957,8 @@ Each PR goes through the pr-coordinator skill and one `qa` review (`~/.codex/age
 ## D-GATE: the three gate routes are roles, not alternatives (gates design pass, evidence cited)
 
 - **G1, restore `.github/workflows/validate.yml` from `1108cca^`** as the fast, blocking, non-mutating GitHub
-  preflight. The operator's global rules make this mandatory for every GitHub-mirrored repository and say it must not
-  replace the authoritative GitLab gates (`~/.claude/CLAUDE.md`, "Every GitHub-mirrored repository MUST
-  have a fast, blocking, non-mutating GitHub Actions preflight"). Needed edits to the old file: the shell list
+  preflight. The proposal described a fast GitHub preflight; its authority must be resolved before implementation.
+  Needed edits to the old file: the shell list
   (`:80-89`, old `skills/ci-skills/...` paths), the bats glob (`:95`, now `tests/bash/*.bats`), the pytest paths
   (`:107`, `:111`, now `tests/python/...`), the acceptance call (`:118`, add `--expected tests/acceptance/expected.toml
   --receipts tests/acceptance/receipts --skill ci-skills`), and the `non_markdown_count` conditions, which the pinned

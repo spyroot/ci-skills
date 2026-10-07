@@ -24,11 +24,11 @@ Both have `--help`. The `--log-*` flags are `--log-format`, `--log-level`,
 (`core/catalog.py:40-43`) and `core/cli.py:218-239` adds them to the 13
 mains in `COMMANDS`, while the two node-local mains lack them
 (`core/catalog.py:444-454`). `ci-binary-build` has no `--output` and returns
-its JSON plan (`core/catalog.py:521-534`). Three exit-code tables disagree:
+its JSON plan (`core/catalog.py:521-534`). Two exit-code tables disagree:
 `catalog.EXIT_CODES` (`core/catalog.py:550-553`, 0 and 2, restating
-`core/status.py:11-13`), `ci-skills/lib/bash/core/runtime.bash:6-9`
-(`CI_EXIT_BLOCKED=69`) and `scripts/bash/core/exit_codes.bash:9-23`
-(`CI_EXIT_BLOCKED=2`). Only the Python mains can describe themselves, and
+`core/status.py:11-13`) and `ci-skills/lib/bash/core/runtime.bash:6-9`
+(`CI_EXIT_BLOCKED=69`); block 0 removed a third, `scripts/bash/core/exit_codes.bash`.
+Only the Python mains can describe themselves, and
 none of the 17 entrypoints answers `--help` on its own today: a main with an
 empty environment fails on `import core` (observed 2026-10-06 for
 `gitlab_job.py:6`, exit 1; all 15 mains import `core` at the top level) until
@@ -131,8 +131,8 @@ Every command follows the pinned agent-grade checklist, as:
    0 for `PASS`, `DRY_RUN` and `PLANNED`, 2 otherwise); `catalog.EXIT_CODES`
    (`core/catalog.py:550-553`) restates it for `--describe` and
    `tools.json`. CI10-PHASES, Refactor, renders the one table to
-   `lib/bash/core/exit_codes.bash` (planned) and removes the two Bash
-   tables.
+   `lib/bash/core/exit_codes.bash` (planned) and removes the Bash
+   table in `runtime.bash`.
 
    | Code | Meaning |
    | --- | --- |
@@ -237,12 +237,12 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
 
 1. *Delivery.* Created: `schemas/command-contract.schema.json` and
    `schemas/command-result.schema.json` (planned, CI07-SCHEMA; `schemas/`
-   exists and is empty). Changed: `ci-skills/lib/core/catalog.py` (one help
+   exists and is empty). Changed: `ci-skills/lib/python/core/catalog.py` (one help
    text per option; `cilium_status.py` leaves `namespaced` and gains
-   `--cilium-namespace`), `ci-skills/lib/core/cli.py` and
-   `ci-skills/lib/core/node_local_cli.py` (the parsers read the catalog's
+   `--cilium-namespace`), `ci-skills/lib/python/core/cli.py` and
+   `ci-skills/lib/python/core/node_local_cli.py` (the parsers read the catalog's
    text), `ci-skills/bin/cilium_status.py` and
-   `ci-skills/lib/core/collect.py:623` (the rename), `ci-skills/tools.json`
+   `ci-skills/lib/python/core/collect.py:623` (the rename), `ci-skills/tools.json`
    (regenerated), `tests/python/test_cli_contract.py`,
    `tests/python/test_catalog.py`, `tests/bash/check.bats`, and
    `scripts/check.sh` with its library for the `cli` gate. The command that
