@@ -3,23 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from math import isfinite
 from typing import Any, Final, TypedDict
 from urllib.parse import urlencode, urlsplit
 
 from .collect import _timestamp, parse_window
-from .gitlab_api import GlabAPIClient, GitLabAPIError, next_keyset_endpoint
+from .gitlab_api import GitLabAPIError, GlabAPIClient, next_keyset_endpoint
+from .gitlab_job_fields import FILTERABLE_JOB_STATUSES, GitLabJobFields
 from .gitlab_session import BoundGitLabSession
 
 PAGE_SIZE: Final = 100
 SCAN_PAGES: Final = 20
 MAX_RESULTS: Final = 500
 MAX_RECORD_ERRORS: Final = 32
-JOB_STATUSES: Final = frozenset(
-    {"failed", "success", "running", "pending", "canceled", "stuck"}
-)
 
 
 class RunnerSummary(TypedDict):
@@ -55,6 +53,7 @@ class JobListResult:
     records: list[JobSummary]
     errors: list[dict[str, str]]
     truncated: bool
+    first_page_failed: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,7 +90,7 @@ class JobQuery:
         :raises ValueError: If a limit, status, time range, or ID is invalid.
         """
         statuses = tuple(dict.fromkeys(args.status or ()))
-        if any(status not in JOB_STATUSES for status in statuses):
+        if any(status not in FILTERABLE_JOB_STATUSES for status in statuses):
             raise ValueError("job_status_invalid")
         if not 1 <= args.limit <= MAX_RESULTS:
             raise ValueError("job_limit_out_of_range")
@@ -117,7 +116,7 @@ class JobQuery:
         end = _timestamp(args.to_time) if args.to_time else None
         start = _timestamp(args.from_time) if args.from_time else None
         if args.last is not None:
-            end = datetime.now(timezone.utc)
+            end = datetime.now(UTC)
             start = end - parse_window(args.last)
         if start is not None and end is not None and start > end:
             raise ValueError("from_after_to")
@@ -173,12 +172,10 @@ class JobQuery:
             return False
         if self.name_glob is not None and not fnmatchcase(job.name, self.name_glob):
             return False
-        if self.search is not None and not any(
+        return self.search is None or any(
             self.search in value.casefold()
             for value in (job.name, job.stage, job.ref, job.failure_reason or "")
-        ):
-            return False
-        return True
+        )
 
 
 @dataclass(frozen=True)
@@ -208,29 +205,24 @@ class JobRecord:
         :returns: Validated public job record.
         :raises ValueError: If required data is absent, malformed, or off host.
         """
-        if not isinstance(item, dict):
-            raise ValueError("job_response_invalid")
-        identifier = item.get("id")
+        if not isinstance(item, dict) or not isinstance(item.get("pipeline"), dict):
+            # Preserve the provider error code consumed by list reports.
+            raise ValueError("job_response_invalid")  # noqa: TRY004
         pipeline = item.get("pipeline")
         runner = item.get("runner")
         url = item.get("web_url")
         if (
-            type(identifier) is not int
-            or identifier <= 0
-            or not isinstance(pipeline, dict)
-            or type(pipeline.get("id")) is not int
+            type(pipeline.get("id")) is not int
             or pipeline["id"] <= 0
             or not isinstance(url, str)
             or urlsplit(url).scheme != "https"
             or urlsplit(url).netloc.lower() != host
         ):
             raise ValueError("job_response_invalid")
-        for field in ("name", "stage", "status", "ref", "created_at"):
+        fields = GitLabJobFields.from_api(item)
+        for field in ("ref", "created_at"):
             if not isinstance(item.get(field), str) or not item[field].strip():
                 raise ValueError(f"job_{field}_invalid")
-        failure_reason = item.get("failure_reason")
-        if failure_reason is not None and not isinstance(failure_reason, str):
-            raise ValueError("job_failure_reason_invalid")
         duration = item.get("duration")
         if duration is not None and (
             isinstance(duration, bool)
@@ -260,11 +252,11 @@ class JobRecord:
         except (TypeError, ValueError) as exc:
             raise ValueError("job_timestamp_invalid") from exc
         return cls(
-            id=identifier,
-            name=item["name"],
-            stage=item["stage"],
-            status=item["status"],
-            failure_reason=failure_reason,
+            id=fields.id,
+            name=fields.name,
+            stage=fields.stage,
+            status=fields.status,
+            failure_reason=fields.failure_reason,
             created_at=created,
             started_at=started,
             finished_at=finished,
@@ -343,11 +335,11 @@ def list_jobs(
     endpoint = f"projects/{project_id}/jobs?{urlencode(parameters)}"
     records: list[JobSummary] = []
     errors: list[dict[str, str]] = []
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     seen_ids: set[int] = set()
     seen_endpoints: set[str] = set()
     previous_id: int | None = None
-    for _page in range(SCAN_PAGES):
+    for page in range(SCAN_PAGES):
         if endpoint in seen_endpoints:
             errors.append({"source": "jobs", "reason": "pagination_cursor_repeated"})
             return JobListResult(records, errors, True)
@@ -356,10 +348,10 @@ def list_jobs(
             items, headers = client.get_json_with_headers(session, endpoint)
         except GitLabAPIError as exc:
             errors.append({"source": "jobs", "reason": exc.reason})
-            return JobListResult(records, errors, True)
+            return JobListResult(records, errors, True, first_page_failed=page == 0)
         if not isinstance(items, list) or len(items) > PAGE_SIZE:
             errors.append({"source": "jobs", "reason": "job_page_invalid"})
-            return JobListResult(records, errors, True)
+            return JobListResult(records, errors, True, first_page_failed=page == 0)
         for item in items:
             try:
                 job = JobRecord.from_api(item, session.host)

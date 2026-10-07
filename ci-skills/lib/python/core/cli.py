@@ -9,7 +9,7 @@ import socket
 import sys
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -260,7 +260,7 @@ def log_event(
     if thresholds[level] < thresholds[getattr(args, "log_level", "info")]:
         return
     record = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "level": level,
         "run_id": sanitize(getattr(args, "run_id", None) or "", 80)
         .replace("\r", " ")
@@ -304,7 +304,7 @@ def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> i
         "schema_version": "1.0",
         "kind": kind,
         "status": BLOCKED,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": datetime.now(UTC).isoformat(),
         "execution_host": socket.getfqdn(),
         "tested_revision": getattr(args, "revision", None),
         "errors": [{"source": source, "reason": sanitize(reason, 240)}],
@@ -628,8 +628,6 @@ def execute_gitlab_job_list(args: argparse.Namespace) -> int:
                 ),
                 revision=args.revision,
             )
-            if not session.skill["revision"]["value"]:
-                raise TargetError("skill_revision_required_for_live_job_list")
             source = "access"
             gate = check_gitlab_operation_access(session)
             if gate["status"] == PASS:
@@ -638,6 +636,8 @@ def execute_gitlab_job_list(args: argparse.Namespace) -> int:
                 data = report(
                     kind, target.gitlab.url, filters, result.records, result.errors
                 )
+                if result.first_page_failed:
+                    data["status"] = BLOCKED
                 truncated = result.truncated
             else:
                 data = report(kind, target.gitlab.url, filters, [], gate["errors"])
@@ -650,7 +650,10 @@ def execute_gitlab_job_list(args: argparse.Namespace) -> int:
                 "observed_capability": gate["observed_capability"],
             }
             data["execution_host"] = session.execution_host
-            data["tested_revision"] = session.skill["revision"]["value"]
+            revision = session.skill["revision"]
+            data["tested_revision"] = (
+                revision["value"] if revision["verified"] else None
+            )
             data["skill"] = session.skill
             data["target_source"] = session.target_source
         data["operation"] = "list"

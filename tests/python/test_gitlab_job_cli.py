@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -39,6 +40,25 @@ def _target(tmp_path: Path) -> Path:
 def _args(path: Path, *extra: str):
     return SCRIPT.build_parser().parse_args(
         ["--target", str(path), "--job-url", JOB_URL, "--json", *extra]
+    )
+
+
+def _list_session() -> SimpleNamespace:
+    """Build valid skill evidence for a project job-list read.
+
+    :returns: Bound-session fixture with verified skill metadata.
+    """
+    return SimpleNamespace(
+        environment={"GITLAB_TOKEN": "selected-token"},
+        execution_host="worker.example.test",
+        target_source="argv:--target;argv:--project",
+        skill={
+            "algorithm": "sha256-tree-v1",
+            "digest": "a" * 64,
+            "file_count": 1,
+            "revision": {"value": "b" * 40, "source": "test", "verified": True},
+            "consuming_project": {"commit": None, "source": None},
+        },
     )
 
 
@@ -244,16 +264,7 @@ def test_list_uses_bound_project_and_emits_schema_valid_output(
     :param mode: Requested machine output mode.
     """
     path = _target(tmp_path)
-    session = SimpleNamespace(
-        environment={"GITLAB_TOKEN": "selected-token"},
-        execution_host="worker.example.test",
-        target_source="argv:--target;argv:--project",
-        skill={
-            "digest": "a" * 64,
-            "file_count": 1,
-            "revision": {"value": "b" * 40, "source": "test", "verified": True},
-        },
-    )
+    session = _list_session()
     observed: dict[str, Any] = {}
 
     def bind(_target: object, **kwargs: object) -> SimpleNamespace:
@@ -318,6 +329,34 @@ def test_list_uses_bound_project_and_emits_schema_valid_output(
     assert observed["read"] == (session, 42, 7)
     assert "selected-token" not in output
 
+    validator = Draft202012Validator(schema)
+    for path, value in (
+        (("access", "identity", "unexpected"), "undeclared"),
+        (("skill", "unexpected"), "undeclared"),
+        (("access", "target", "id"), "42"),
+        (("skill", "revision", "verified"), False),
+    ):
+        invalid = deepcopy(data)
+        field = invalid
+        for key in path[:-1]:
+            field = field[key]
+        field[path[-1]] = value
+        assert not validator.is_valid(invalid)
+    missing = deepcopy(data)
+    del missing["access"]["identity"]["username"]
+    assert not validator.is_valid(missing)
+
+    session.skill["revision"]["verified"] = False
+    assert CLI.execute_gitlab_job(args) == 0
+    unverified_output = capsys.readouterr().out
+    unverified = (
+        json.loads(unverified_output)
+        if mode == "--json"
+        else yaml.safe_load(unverified_output)
+    )
+    validator.validate(unverified)
+    assert unverified["tested_revision"] is None
+
 
 def test_list_access_refusal_skips_job_read(
     tmp_path: Path,
@@ -331,12 +370,7 @@ def test_list_access_refusal_skips_job_read(
     :param capsys: Captured blocked result.
     """
     path = _target(tmp_path)
-    session = SimpleNamespace(
-        environment={"GITLAB_TOKEN": "selected-token"},
-        execution_host="worker.example.test",
-        target_source="argv:--target;argv:--project",
-        skill={"revision": {"value": "b" * 40}},
-    )
+    session = _list_session()
     monkeypatch.setattr(CLI, "bind_gitlab_session", lambda *_args, **_kwargs: session)
     monkeypatch.setattr(
         CLI,
@@ -363,3 +397,56 @@ def test_list_access_refusal_skips_job_read(
     assert data["status"] == "BLOCKED"
     assert data["records"] == []
     assert data["errors"] == [{"source": "target", "reason": "target_path_mismatch"}]
+
+
+@pytest.mark.parametrize(
+    ("first_page_failed", "expected_status"),
+    [(True, "BLOCKED"), (False, "PARTIAL")],
+)
+def test_list_reports_first_page_failure_as_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    first_page_failed: bool,
+    expected_status: str,
+) -> None:
+    """Render a total jobs read failure differently from a later page failure.
+
+    :param tmp_path: Isolated target file directory.
+    :param monkeypatch: Replacement for live GitLab access.
+    :param capsys: Captured command output.
+    :param first_page_failed: Whether no jobs page could be read.
+    :param expected_status: Status required for this read state.
+    """
+    path = _target(tmp_path)
+    session = _list_session()
+    monkeypatch.setattr(CLI, "bind_gitlab_session", lambda *_args, **_kwargs: session)
+    monkeypatch.setattr(
+        CLI,
+        "check_gitlab_operation_access",
+        lambda _bound: {
+            "status": "PASS",
+            "errors": [],
+            "identity": {"id": 17},
+            "target": {"kind": "project", "id": 42, "full_path": "unit/repo"},
+            "observed_capability": ["identity_read", "target_read"],
+        },
+    )
+    monkeypatch.setattr(
+        JOBS,
+        "list_jobs",
+        lambda *_args: JOBS.JobListResult(
+            [],
+            [{"source": "jobs", "reason": "transport"}],
+            True,
+            first_page_failed=first_page_failed,
+        ),
+    )
+    args = SCRIPT.build_parser().parse_args(
+        ["list", "--target", str(path), "--project", "unit/repo", "--json"]
+    )
+
+    assert CLI.execute_gitlab_job(args) == 2
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == expected_status
+    assert data["errors"] == [{"source": "jobs", "reason": "transport"}]

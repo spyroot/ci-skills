@@ -16,7 +16,7 @@
     "target_source": {"type": "string", "minLength": 1},
     "execution_host": {"type": "string", "minLength": 1},
     "tested_revision": {"type": ["string", "null"]},
-    "skill": {"type": "object"},
+    "skill": {"$ref": "#/$defs/skill"},
     "report_files": {
       "type": "object",
       "additionalProperties": false,
@@ -59,8 +59,8 @@
       "required": ["status", "target", "observed_capability"],
       "properties": {
         "status": {"enum": ["PASS", "BLOCKED", "DRY_RUN"]},
-        "identity": {"type": ["object", "null"]},
-        "target": {"type": ["object", "null"]},
+        "identity": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/identity"}]},
+        "target": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/project"}, {"$ref": "#/$defs/project_reference"}]},
         "observed_capability": {"type": "array", "items": {"type": "string", "minLength": 1}}
       }
     },
@@ -92,22 +92,9 @@
       "then": {
         "required": ["execution_host", "tested_revision", "skill", "target_source", "access"],
         "properties": {
-          "tested_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+          "tested_revision": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
           "skill": {
-            "required": ["digest", "file_count", "revision"],
-            "properties": {
-              "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-              "file_count": {"type": "integer", "minimum": 1},
-              "revision": {
-                "type": "object",
-                "required": ["value", "source", "verified"],
-                "properties": {
-                  "value": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-                  "source": {"type": "string", "minLength": 1},
-                  "verified": {"type": "boolean"}
-                }
-              }
-            }
+            "$ref": "#/$defs/skill"
           },
           "access": {
             "required": ["status", "identity", "target", "observed_capability"],
@@ -131,6 +118,35 @@
       "then": {"properties": {"errors": {"maxItems": 0}}}
     },
     {
+      "if": {
+        "properties": {
+          "status": {"enum": ["PASS", "PARTIAL"]},
+          "skill": {
+            "properties": {
+              "revision": {"properties": {"verified": {"const": true}}, "required": ["verified"]}
+            },
+            "required": ["revision"]
+          }
+        },
+        "required": ["status", "skill"]
+      },
+      "then": {"properties": {"tested_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "skill": {
+            "properties": {
+              "revision": {"properties": {"verified": {"const": false}}, "required": ["verified"]}
+            },
+            "required": ["revision"]
+          }
+        },
+        "required": ["skill"]
+      },
+      "then": {"properties": {"tested_revision": {"type": "null"}}}
+    },
+    {
       "if": {"properties": {"status": {"const": "PARTIAL"}}, "required": ["status"]},
       "then": {"properties": {"errors": {"minItems": 1}}}
     },
@@ -150,8 +166,48 @@
     }
   ],
   "$defs": {
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "digest", "file_count", "revision", "consuming_project"],
+      "properties": {
+        "algorithm": {"const": "sha256-tree-v1"},
+        "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "file_count": {"type": "integer", "minimum": 1},
+        "revision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "source", "verified"],
+          "properties": {
+            "value": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+            "source": {"type": ["string", "null"], "minLength": 1},
+            "verified": {"type": "boolean"},
+            "detail": {"type": "string", "minLength": 1}
+          }
+        },
+        "consuming_project": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commit", "source"],
+          "properties": {
+            "commit": {"type": ["string", "null"], "minLength": 1},
+            "source": {"type": ["string", "null"], "minLength": 1}
+          }
+        }
+      }
+    },
+    "project_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reference"],
+      "properties": {
+        "kind": {"const": "project"},
+        "reference": {"type": "string", "minLength": 1}
+      }
+    },
     "identity": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["id", "username", "web_url"],
       "properties": {
         "id": {"type": "integer", "minimum": 1},
@@ -161,6 +217,7 @@
     },
     "project": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["kind", "id", "full_path", "web_url"],
       "properties": {
         "kind": {"const": "project"},

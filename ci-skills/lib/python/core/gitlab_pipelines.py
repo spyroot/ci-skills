@@ -1,14 +1,16 @@
 """Read and summarize one exact GitLab pipeline through a bound session."""
 
 from __future__ import annotations
+
 from collections import Counter
 from typing import Any
+
 from .gitlab_api import GlabAPIClient
+from .gitlab_job_fields import TERMINAL_JOB_STATUSES, GitLabJobFields
 from .gitlab_session import BoundGitLabSession
 
 PAGE_SIZE = 100
 MAX_JOB_PAGES = 5
-TERMINAL_JOB_STATUSES = frozenset({"success", "failed", "canceled", "skipped"})
 
 
 def _positive_id(value: Any) -> bool:
@@ -20,20 +22,17 @@ def _nonempty(value: Any) -> bool:
 
 
 def _job(item: Any, pipeline_id: int) -> dict[str, Any]:
-    """Keep bounded fields only, after rejecting a malformed job response."""
-    if not isinstance(item, dict) or not all(
-        (
-            _positive_id(item.get("id")),
-            _nonempty(item.get("name")),
-            _nonempty(item.get("stage")),
-            _nonempty(item.get("status")),
-        )
-    ):
-        raise ValueError("pipeline_job_response_invalid")
+    """Keep shared job fields and verify this pipeline's relationship.
 
-    failure_reason = item.get("failure_reason")
-    if failure_reason is not None and not isinstance(failure_reason, str):
-        raise ValueError("pipeline_job_response_invalid")
+    :param item: One untrusted GitLab pipeline-job response.
+    :param pipeline_id: Exact pipeline selected by the caller.
+    :returns: Bounded job fields for the pipeline report.
+    :raises ValueError: If fields are malformed or the pipeline differs.
+    """
+    try:
+        fields = GitLabJobFields.from_api(item)
+    except ValueError as exc:
+        raise ValueError("pipeline_job_response_invalid") from exc
     pipeline = item.get("pipeline")
     if pipeline is not None and (
         not isinstance(pipeline, dict)
@@ -42,15 +41,20 @@ def _job(item: Any, pipeline_id: int) -> dict[str, Any]:
     ):
         raise ValueError("pipeline_job_reference_mismatch")
     return {
-        "id": item["id"],
-        "name": item["name"],
-        "stage": item["stage"],
-        "status": item["status"],
-        "failure_reason": failure_reason,
+        "id": fields.id,
+        "name": fields.name,
+        "stage": fields.stage,
+        "status": fields.status,
+        "failure_reason": fields.failure_reason,
     }
 
 
 def _counts(jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Count jobs and their terminal progress for one pipeline scope.
+
+    :param jobs: Validated pipeline job summaries.
+    :returns: Total, terminal count, percentage, and statuses.
+    """
     by_status = Counter(job["status"] for job in jobs)
     completed = sum(by_status[status] for status in TERMINAL_JOB_STATUSES)
     total = len(jobs)
@@ -73,11 +77,12 @@ def read_pipeline(
 
     The additional page after the cap distinguishes exactly 500 jobs from an
     incomplete result. No pipeline variables or traces are fetched.
-    :param session:
-    :param project_id:
-    :param pipeline_id:
-    :param api_client:
-    :return:
+    :param session: Exact-host GitLab session.
+    :param project_id: Positive selected project ID.
+    :param pipeline_id: Positive selected pipeline ID.
+    :param api_client: GitLab transport supplied by the caller.
+    :returns: Pipeline summary and bounded collection errors.
+    :raises ValueError: If IDs or provider responses are invalid.
     """
     if not _positive_id(project_id) or not _positive_id(pipeline_id):
         raise ValueError("project_and_pipeline_ids_must_be_positive")
@@ -100,7 +105,6 @@ def read_pipeline(
 
     jobs: list[dict[str, Any]] = []
     for page in range(1, MAX_JOB_PAGES + 2):
-
         items = client.get_json(
             session, f"{base}/jobs?per_page={PAGE_SIZE}&page={page}"
         )
@@ -128,7 +132,6 @@ def read_pipeline(
 
     for job in jobs:
         stages.setdefault(job["stage"], []).append(job)
-
 
     record = {
         "id": pipeline_id,

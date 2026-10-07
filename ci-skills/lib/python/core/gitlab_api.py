@@ -11,9 +11,10 @@ import re
 import stat
 import tempfile
 import time
+from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
@@ -153,9 +154,7 @@ def _delay(stderr: str, endpoint: str, attempt: int) -> float:
                 date = parsedate_to_datetime(raw)
                 seconds = max(
                     0.0,
-                    (
-                        date.astimezone(timezone.utc) - datetime.now(timezone.utc)
-                    ).total_seconds(),
+                    (date.astimezone(UTC) - datetime.now(UTC)).total_seconds(),
                 )
             except (TypeError, ValueError, OverflowError):
                 seconds = -1.0
@@ -433,8 +432,10 @@ def next_keyset_endpoint(session: Any, current: str, headers: str) -> str | None
     current_pairs = parse_qsl(base.query, keep_blank_values=True)
     next_pairs = parse_qsl(parsed.query, keep_blank_values=True)
     cursor_keys = {"id_before", "id_after", "cursor", "page_token"}
-    if any(
-        pair not in next_pairs for pair in current_pairs if pair[0] not in cursor_keys
-    ):
+    current_filters = Counter(
+        pair for pair in current_pairs if pair[0] not in cursor_keys
+    )
+    next_filters = Counter(pair for pair in next_pairs if pair[0] not in cursor_keys)
+    if current_filters != next_filters:
         raise GitLabAPIError("pagination_link_invalid")
     return _endpoint(f"{relative}?{parsed.query}")

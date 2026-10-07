@@ -16,6 +16,7 @@ import pytest
 from tests.python.conftest import import_script_module
 
 JOBS = import_script_module("core.gitlab_jobs")
+API = import_script_module("core.gitlab_api")
 SCRIPT = import_script_module("gitlab_job")
 
 
@@ -194,6 +195,33 @@ def test_job_list_reports_duplicate_cursor_data_as_incomplete() -> None:
     assert result.errors == [{"source": "jobs", "reason": "pagination_order_invalid"}]
 
 
+def test_job_list_rejects_off_host_cursor() -> None:
+    """Keep the first page but refuse a cursor on another GitLab host."""
+
+    class Page:
+        """Return one page with a cross-host next link."""
+
+        def get_json_with_headers(
+            self, _session: object, _endpoint: str
+        ) -> tuple[list[dict[str, object]], str]:
+            """Supply a GitLab page with an invalid next host.
+
+            :param _session: Unused bound session.
+            :param _endpoint: Unused job endpoint.
+            :returns: One provider record and cross-host response headers.
+            """
+            return [_job(5)], (
+                'Link: <https://other.example.test/api/v4/projects/42/jobs?id_before=5>; rel="next"'
+            )
+
+    result = JOBS.list_jobs(
+        SimpleNamespace(host="gitlab.example.test"), 42, _query(), api_client=Page()
+    )
+    assert [record["id"] for record in result.records] == [5]
+    assert result.errors == [{"source": "jobs", "reason": "pagination_link_invalid"}]
+    assert result.truncated
+
+
 def test_job_list_classifies_malformed_record_and_limit_truncation() -> None:
     """Keep valid jobs but report malformed data and a result limit."""
 
@@ -220,3 +248,100 @@ def test_job_list_classifies_malformed_record_and_limit_truncation() -> None:
     assert [record["id"] for record in result.records] == [5, 4]
     assert result.truncated
     assert result.errors == [{"source": "jobs", "reason": "job_response_invalid"}]
+
+
+def test_job_list_rejects_off_host_next_cursor() -> None:
+    """Keep the selected host fixed across keyset pages."""
+
+    class Page:
+        """Return one page with a next link to another host."""
+
+        def get_json_with_headers(
+            self, _session: object, endpoint: str
+        ) -> tuple[list[dict[str, object]], str]:
+            """Return the hostile cursor after a valid record.
+
+            :param _session: Unused bound session.
+            :param endpoint: Requested project jobs endpoint.
+            :returns: Job records and an off-host Link header.
+            """
+            next_link = f"https://other.example.test/api/v4/{endpoint}&id_before=5"
+            return [_job(5)], f'Link: <{next_link}>; rel="next"'
+
+    result = JOBS.list_jobs(
+        SimpleNamespace(host="gitlab.example.test"), 42, _query(), api_client=Page()
+    )
+    assert [record["id"] for record in result.records] == [5]
+    assert result.errors == [{"source": "jobs", "reason": "pagination_link_invalid"}]
+    assert result.truncated
+
+
+@pytest.mark.parametrize(
+    ("current_query", "next_query"),
+    [
+        ("per_page=100", "per_page=100&id_before=5&scope%5B%5D=failed"),
+        (
+            "per_page=100&scope%5B%5D=pending",
+            "per_page=100&scope%5B%5D=failed&id_before=5",
+        ),
+        (
+            "per_page=100&scope%5B%5D=pending",
+            "per_page=100&scope%5B%5D=pending&scope%5B%5D=pending&id_before=5",
+        ),
+        ("per_page=100&scope%5B%5D=pending", "per_page=100&id_before=5"),
+    ],
+)
+def test_keyset_cursor_preserves_exact_collection_filters(
+    current_query: str, next_query: str
+) -> None:
+    """Reject added, changed, duplicated, or removed collection filters.
+
+    :param current_query: Query sent for the current page.
+    :param next_query: Query supplied by the provider's next link.
+    """
+    session = SimpleNamespace(host="gitlab.example.test")
+    current = f"projects/42/jobs?{current_query}"
+    next_url = f"https://gitlab.example.test/api/v4/projects/42/jobs?{next_query}"
+    with pytest.raises(API.GitLabAPIError, match="pagination_link_invalid"):
+        API.next_keyset_endpoint(session, current, f'Link: <{next_url}>; rel="next"')
+
+
+@pytest.mark.parametrize("fail_first", [True, False])
+def test_job_list_distinguishes_first_and_later_page_failure(
+    fail_first: bool,
+) -> None:
+    """Classify a total read failure separately from an incomplete scan.
+
+    :param fail_first: Fail before any valid provider page when true.
+    """
+
+    class Pages:
+        """Fail on the requested page after zero or one successful reads."""
+
+        def __init__(self) -> None:
+            """Track how many API pages were requested."""
+            self.calls = 0
+
+        def get_json_with_headers(
+            self, _session: object, endpoint: str
+        ) -> tuple[list[dict[str, object]], str]:
+            """Return one page or a classified provider failure.
+
+            :param _session: Unused bound session.
+            :param endpoint: Requested project jobs endpoint.
+            :returns: One job and its next cursor when permitted.
+            :raises GitLabAPIError: When the selected page fails.
+            """
+            self.calls += 1
+            if fail_first or self.calls > 1:
+                raise API.GitLabAPIError("transport")
+            next_link = f"https://gitlab.example.test/api/v4/{endpoint}&id_before=5"
+            return [_job(5)], f'Link: <{next_link}>; rel="next"'
+
+    result = JOBS.list_jobs(
+        SimpleNamespace(host="gitlab.example.test"), 42, _query(), api_client=Pages()
+    )
+    assert [record["id"] for record in result.records] == ([] if fail_first else [5])
+    assert result.first_page_failed is fail_first
+    assert result.errors == [{"source": "jobs", "reason": "transport"}]
+    assert result.truncated
