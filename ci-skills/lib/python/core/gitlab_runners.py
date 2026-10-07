@@ -365,8 +365,10 @@ def _tag(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, 
                     "after_tags": before,
                     "added_tags": [],
                 }
+            put_confirmed = False
             try:
                 api.put_json(session, f"runners/{runner_id}", {"tag_list": desired})
+                put_confirmed = True
             except GitLabAPIError as exc:
                 if not uncertain_write(exc):
                     raise
@@ -375,11 +377,35 @@ def _tag(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, 
                 observed = _runner_readback(api, session, scope, runner_id)
                 observed_tags = _observed_tags(observed.get("tag_list"))
             except (ActionError, GitLabAPIError):
-                return unverified_write(
-                    target_id,
-                    {"id": runner_id, "before_tags": before, "expected_tags": desired},
-                    "runner_tag_readback_unavailable",
-                )
+                if put_confirmed:
+                    return unverified_write(
+                        target_id,
+                        {
+                            "id": runner_id,
+                            "before_tags": before,
+                            "expected_tags": desired,
+                        },
+                        "runner_tag_readback_unavailable",
+                    )
+                return {
+                    "action": "UNVERIFIED",
+                    "id": runner_id,
+                    "verified": False,
+                    "mutated": None,
+                    "uncertain": True,
+                    "before_tags": before,
+                    "expected_tags": desired,
+                    "errors": [
+                        {
+                            "project_id": target_id,
+                            "reason": "runner_tag_readback_unavailable",
+                        }
+                    ],
+                    "cleanup": {
+                        "status": "NOT_PERFORMED",
+                        "reason": "post_write_readback_unverified",
+                    },
+                }
             if set(before + requested).issubset(observed_tags):
                 result = {
                     "action": "APPLIED",

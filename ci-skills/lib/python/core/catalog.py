@@ -363,6 +363,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "Apply may create a runner record, assign it, or update its tags.",
         "options": {
             "--project": "exact project path or numeric ID",
             "--group": "exact group path or numeric ID",
@@ -378,13 +379,27 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "--receipt-out": "write a sanitized, shareable operation receipt",
         },
         "subcommands": {
-            "assign": {"required_options": ["--runner-id"]},
+            "assign": {
+                "required_options": ["--runner-id"],
+                "purpose": "Assign an existing runner to the selected project or group.",
+                "mutates": True,
+                "side_effects": "Apply may attach a runner to selected projects.",
+                "read_back": "Read scoped runner membership after assignment.",
+            },
             "create": {
-                "required_options": ["--runner-type", "--description", "--token-out"]
+                "required_options": ["--runner-type", "--description", "--token-out"],
+                "purpose": "Create a runner record and save its one-time token.",
+                "mutates": True,
+                "side_effects": "Apply may create a runner record and write the token file.",
+                "read_back": "Read the new runner record and scoped listing.",
             },
             "tag": {
                 "required_options": ["--runner-id", "--tag"],
                 "result_schema": "schemas/results/gitlab-runner-tag.schema.json",
+                "purpose": "Add tags to an existing runner record.",
+                "mutates": True,
+                "side_effects": "Apply may update the runner tag list.",
+                "read_back": "Read tags from a fresh runner GET and scoped listing.",
             },
         },
         "returns": "A sanitized plan or verified runner record, assignment, and before/after tag evidence.",

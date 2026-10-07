@@ -655,26 +655,38 @@
         "gitlab"
       ],
       "returns": "A sanitized plan or verified runner record, assignment, and before/after tag evidence.",
-      "side_effects": "none",
+      "side_effects": "Apply may create a runner record, assign it, or update its tags.",
       "subcommands": {
         "assign": {
+          "mutates": true,
+          "purpose": "Assign an existing runner to the selected project or group.",
+          "read_back": "Read scoped runner membership after assignment.",
           "required_options": [
             "--runner-id"
-          ]
+          ],
+          "side_effects": "Apply may attach a runner to selected projects."
         },
         "create": {
+          "mutates": true,
+          "purpose": "Create a runner record and save its one-time token.",
+          "read_back": "Read the new runner record and scoped listing.",
           "required_options": [
             "--runner-type",
             "--description",
             "--token-out"
-          ]
+          ],
+          "side_effects": "Apply may create a runner record and write the token file."
         },
         "tag": {
+          "mutates": true,
+          "purpose": "Add tags to an existing runner record.",
+          "read_back": "Read tags from a fresh runner GET and scoped listing.",
           "required_options": [
             "--runner-id",
             "--tag"
           ],
-          "result_schema": "schemas/results/gitlab-runner-tag.schema.json"
+          "result_schema": "schemas/results/gitlab-runner-tag.schema.json",
+          "side_effects": "Apply may update the runner tag list."
         }
       },
       "use_when": "A selected project or group needs runner assignment, creation, or tags."

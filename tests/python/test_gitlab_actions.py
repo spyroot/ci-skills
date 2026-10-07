@@ -121,7 +121,12 @@ def _list(endpoint):
 
 
 def _tag_output(plan, record):
-    """Render one real runner-action record through the shared result adapter."""
+    """Render one runner-action record through the shared result adapter.
+
+    :param plan: Confirmed runner action plan.
+    :param record: Result returned by the runner action.
+    :returns: JSON-compatible result for schema validation.
+    """
     errors = [
         {"source": f"project:{item['project_id']}", "reason": item["reason"]}
         for item in record.get("errors", [])
@@ -136,11 +141,30 @@ def _tag_output(plan, record):
         errors=errors,
         readback=record,
         cleanup=record.get("cleanup", {"status": "NOT_APPLICABLE"}),
-        identity={"id": 1, "username": "test"},
-        verified_target={"id": 42, "kind": "project"},
+        identity={
+            "id": 1,
+            "username": "test",
+            "web_url": "https://gitlab.example.test/test",
+        },
+        verified_target={
+            "id": 42,
+            "kind": "project",
+            "full_path": "team/repo",
+            "web_url": "https://gitlab.example.test/team/repo",
+        },
         credential_source="unit",
         credential_digest="sha256:unit",
-        skill={"revision": {"verified": True, "value": plan.revision}},
+        skill={
+            "algorithm": "sha256-tree-v1",
+            "digest": "b" * 64,
+            "file_count": 1,
+            "revision": {
+                "verified": True,
+                "value": plan.revision,
+                "source": "git_head",
+            },
+            "consuming_project": {"commit": None, "source": None},
+        },
     )
     return json.loads(REPORT.emit(data, "json"))
 
@@ -531,9 +555,27 @@ def test_runner_tag_adds_to_selected_runner_and_reads_back():
     TAG_VALIDATOR.validate(output)
     for broken in (
         {"tested_revision": None},
+        {"identity": {}},
+        {"verified_target": {}},
         {"skill": {"revision": {"verified": False, "value": plan.revision}}},
     ):
         assert not TAG_VALIDATOR.is_valid({**output, **broken})
+    for field in ("digest", "algorithm", "file_count", "consuming_project"):
+        invalid = deepcopy(output)
+        del invalid["skill"][field]
+        assert not TAG_VALIDATOR.is_valid(invalid)
+    for field in ("web_url", "username"):
+        invalid = deepcopy(output)
+        del invalid["identity"][field]
+        assert not TAG_VALIDATOR.is_valid(invalid)
+    for field in ("web_url", "full_path"):
+        invalid = deepcopy(output)
+        del invalid["verified_target"][field]
+        assert not TAG_VALIDATOR.is_valid(invalid)
+    for field in ("identity", "verified_target", "skill"):
+        invalid = deepcopy(output)
+        invalid[field]["unexpected"] = True
+        assert not TAG_VALIDATOR.is_valid(invalid)
 
 
 def test_runner_tag_uses_only_verified_bound_revision():
@@ -620,6 +662,31 @@ def test_runner_tag_partial_output_requires_readback_and_cleanup():
         invalid = deepcopy(output)
         del invalid[field]
         assert not TAG_VALIDATOR.is_valid(invalid)
+
+
+def test_runner_tag_uncertain_put_and_failed_readback_has_unknown_mutation():
+    """Keep mutation unknown when neither PUT nor GET confirms the outcome."""
+    plan = _plan("gitlab_runner", "tag", {"tag_list": ["new"]}, resource_id=23)
+    current = {
+        "id": 23,
+        "description": "owned-runner",
+        "runner_type": "project_type",
+        "tag_list": ["existing"],
+    }
+    api = FakeAPI(
+        {
+            ("GET", "runners/23"): [current, API.GitLabAPIError("timeout")],
+            ("GET", _list("projects/42/runners")): [[{"id": 23}]],
+            ("PUT", "runners/23"): [API.GitLabAPIError("timeout")],
+        }
+    )
+    result = RUNNERS.apply(api, object(), plan, 42)
+    assert result["action"] == "UNVERIFIED"
+    assert result["mutated"] is None
+    assert result["verified"] is False
+    assert result["uncertain"] is True
+    assert result["errors"][0]["reason"] == "runner_tag_readback_unavailable"
+    TAG_VALIDATOR.validate(_tag_output(plan, result))
 
 
 def test_concurrent_runner_tag_additions_preserve_both_tags(tmp_path, monkeypatch):
