@@ -23,8 +23,12 @@ K8S_TEST_SCRIPT := scripts/ci/k8s-test.sh
 # Preserve JOBS as a legacy way to supply the requested maximum.
 REQUESTED_JOBS := $(JOBS)
 MAX_JOBS ?= $(if $(REQUESTED_JOBS),$(REQUESTED_JOBS),4)
-override JOBS := $(shell bash -c 'source "$$1"; CI_toolchain_job_count "$$2"' \
-	_ "$(REPO_ROOT)/lib/bash/toolchain/jobs.bash" "$(MAX_JOBS)")
+# The job-count library belongs to the toolchain targets, which this repository
+# does not have yet; without it the requested maximum is used as is.
+JOBS_LIBRARY := $(REPO_ROOT)/lib/bash/toolchain/jobs.bash
+override JOBS := $(if $(wildcard $(JOBS_LIBRARY)),$(shell bash -c \
+	'source "$$1"; CI_toolchain_job_count "$$2"' _ "$(JOBS_LIBRARY)" \
+	"$(MAX_JOBS)"),$(MAX_JOBS))
 export MAX_JOBS JOBS
 ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
 MAKEFLAGS += --jobs=$(JOBS)
@@ -45,7 +49,9 @@ bless: install-bless
 
 install-bless: install-hooks
 
+# .githooks/pre-commit (tracked) calls ./bless.sh --staged before every commit.
 install-hooks:
+	@test -x "$(REPO_ROOT)/.githooks/pre-commit"
 	@git -C "$(REPO_ROOT)" config --local core.hooksPath .githooks
 
 install: install-bless $(if $(filter conda conda-dry-run,$(MAKECMDGOALS)),,toolchain)
@@ -148,9 +154,9 @@ pretty-shell:
 help:
 	@printf '%s\n' \
 		'Targets:' \
-		'  bless            Install Git hooks and bless staged changes (default).' \
-		'  install-bless    Install the existing automatic blessing hooks.' \
-		'  install-hooks    Configure the existing repository Git hooks.' \
+		'  bless            Install the pre-commit hook and bless staged changes (default).' \
+		'  install-bless    Install the pre-commit hook that runs bless.sh.' \
+		'  install-hooks    Activate .githooks/pre-commit (core.hooksPath .githooks).' \
 		'  install          Install hooks and general tools; conda stays separate.' \
 		'  toolchain        Install general tools from the JSON manifest.' \
 		'  toolchain-dry-run Show the dependency installation plan as JSON.' \
