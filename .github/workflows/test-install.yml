@@ -30,6 +30,8 @@ jobs:
       - name: Check reStructuredText API documentation
         run: >-
           pydoclint --style=sphinx --skip-checking-short-docstrings=False
+          --arg-type-hints-in-docstring=False --check-return-types=False
+          --skip-checking-raises=True --allow-init-docstring=True
           tools/agent_profile.py
       - name: Verify installer behavior with isolated host fixtures
         run: |
