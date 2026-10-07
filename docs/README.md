@@ -59,6 +59,14 @@ Also: [field notes](field-notes.md).
 
 | Date | Kind | Record | What it holds |
 | --- | --- | --- | --- |
+| 2026-10-02 | brainstorm | [CI01-CATALOG](brainstorm/2026-10-02/CI01-CATALOG.md) | the first brainstorm on catalog, before it became [CI01-CATALOG](phases/CI01-CATALOG.md) |
+| 2026-10-02 | brainstorm | [CI03-GATES](brainstorm/2026-10-02/CI03-GATES.md) | the first brainstorm on gates, before it became [CI03-GATES](phases/CI03-GATES.md) |
+| 2026-10-02 | brainstorm | [CI04-HOOKS](brainstorm/2026-10-02/CI04-HOOKS.md) | the first brainstorm on hooks, before it became [CI04-HOOKS](phases/CI04-HOOKS.md) |
+| 2026-10-02 | brainstorm | [CI05-VENDOR](brainstorm/2026-10-02/CI05-VENDOR.md) | the first brainstorm on vendoring, before it became [CI05-VENDOR](phases/CI05-VENDOR.md) |
+| 2026-10-02 | brainstorm | [CI06-TESTS](brainstorm/2026-10-02/CI06-TESTS.md) | the first brainstorm on tests, before it became [CI06-TESTS](phases/CI06-TESTS.md) |
+| 2026-10-02 | brainstorm | [CI08-ROUTING](brainstorm/2026-10-02/CI08-ROUTING.md) | the first brainstorm on routing, before it became [CI08-ROUTING](phases/CI08-ROUTING.md) |
+| 2026-10-02 | brainstorm | [CI09-REFERENCE](brainstorm/2026-10-02/CI09-REFERENCE.md) | the first brainstorm on references, before it became [CI09-REFERENCE](phases/CI09-REFERENCE.md) |
+| 2026-10-02 | brainstorm | [CI10-PHASES](brainstorm/2026-10-02/CI10-PHASES.md) | the first brainstorm on phase order, before it became [CI10-PHASES](phases/CI10-PHASES.md) |
 | 2026-10-06 | plan | [plan](plans/2026-10-06/reference-and-docs-readjust.md) | the approved plan behind PR #29 |
 | 2026-10-06 | inventory | [inventories](plans/2026-10-06/ci11-inventories/index.md) | source inventories for CI11 |
 
