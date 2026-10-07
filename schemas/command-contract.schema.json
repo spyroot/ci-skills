@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/command-contract.schema.json",
+  "title": "command_contract",
+  "description": "The record every ci-skills command prints with --describe. Derived from the --describe output of all 15 Python commands on 2026-10-06; closed: unknown fields are refused.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "access_protocol",
+    "capabilities",
+    "command",
+    "default_output",
+    "execution_surface",
+    "exit_codes",
+    "kind",
+    "options",
+    "purpose",
+    "report_kind",
+    "required_options",
+    "required_tools",
+    "requires_authorities",
+    "returns",
+    "schema_version",
+    "skill",
+    "status_values",
+    "target_protocol",
+    "use_when"
+  ],
+  "properties": {
+    "access_protocol": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "github",
+          "gitlab",
+          "kubernetes"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "when"
+          ],
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "when": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "filters_records",
+          "namespaced",
+          "node_scoped",
+          "time_ranged"
+        ]
+      }
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1
+    },
+    "default_output": {
+      "type": "string",
+      "minLength": 1
+    },
+    "execution_surface": {
+      "type": "string",
+      "minLength": 1
+    },
+    "exit_codes": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[0-9]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "kind": {
+      "const": "command_contract"
+    },
+    "mutates": {
+      "type": "boolean"
+    },
+    "options": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^--[a-z0-9][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "report_kind": {
+      "type": "string",
+      "minLength": 1
+    },
+    "required_options": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required_tools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "requires_authorities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "github",
+          "gitlab",
+          "kubernetes"
+        ]
+      }
+    },
+    "returns": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "side_effects": {
+      "type": "string",
+      "minLength": 1
+    },
+    "skill": {
+      "const": "ci-skills"
+    },
+    "status_values": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "BLOCKED",
+          "DRY_RUN",
+          "PARTIAL",
+          "PASS",
+          "PLANNED",
+          "UNKNOWN"
+        ]
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "subcommands": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required_options": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "kind": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "returns": {
+            "type": "string",
+            "minLength": 1
+          },
+          "read_back": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mutates": {
+            "type": "boolean"
+          },
+          "side_effects": {
+            "type": "string",
+            "minLength": 1
+          },
+          "options": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^--[a-z0-9][a-z0-9-]*$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "target_protocol": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "location",
+          "scope",
+          "source",
+          "when"
+        ],
+        "properties": {
+          "location": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scope": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "when": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "use_when": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

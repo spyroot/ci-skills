@@ -1,4 +1,4 @@
-# CI-GATES adversarial review
+# GAL-GATES adversarial review
 
 Target: PR #11, head `7b0f9099202aa768bbabf69c569400ed8cfe5d8a`.
 Live `main` protection currently requires `validate`, strict freshness and
@@ -6,7 +6,7 @@ administrator enforcement; required approving reviews are unset.
 
 ## Findings
 
-- **P1 — G6 is not optional.** `CI-GATES.md:89-109` offers partial adoption
+- **P1 — G6 is not optional.** `GAL-GATES.md:89-109` offers partial adoption
   or an exception for the pinned CI and smoke evidence model. The project
   binding requires both contracts with `exceptions: []`; its pinned schema
   permits only `stricter-or-temporary-block-only` exceptions. A weakening
@@ -14,7 +14,7 @@ administrator enforcement; required approving reviews are unset.
   status read-back pass. Implement the required model or leave the gate unmet.
 - **P1 — Test execution route is undefined.** `validate.yml:9,81-95` runs
   Python tests on `ubuntu-latest`, while the current instruction requires
-  authoritative tests in Kubernetes. `CI-GATES.md:111-125` also prescribes
+  authoritative tests in Kubernetes. `GAL-GATES.md:111-125` also prescribes
   local lint gates despite the no-laptop-gates rule. Name the approved GitHub
   to Kubernetes execution route before treating either result as authority.
 - **P1 — “Exact head check” needs two SHAs.** `:15-16` assumes the required

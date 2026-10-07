@@ -19,11 +19,11 @@ own design, steps and gates. Read back against the tree at `e85c7c8` on
 ## Layout, decided
 
 In the tree today (fixed on 2026-10-04): thin mains in `ci-skills/bin/`, the
-Python library in `ci-skills/lib/core/`, the Bash libraries in
-`ci-skills/lib/bash/{core,ci,automation}/`, references in
+Python library in `ci-skills/lib/python/core/`, the Bash libraries in
+`ci-skills/lib/bash/{core,api,automation}/`, references in
 `ci-skills/references/`, the generated `tools.json` beside `SKILL.md`.
 Decided, created by the phases named: maintenance-only Python in
-`tools/skillkit/` importing `core` from `ci-skills/lib` (CI07 first, then CI05, CI09, CI01),
+`tools/skillkit/` importing `core` from `ci-skills/lib/python` (CI07 first, then CI05, CI09, CI01),
 thin maintenance mains in `tools/` plus the one root command `bin/ci-skills`
 (CI05 creates it, CI01 extends it), vendored skills in `vendor/skills/<name>/`
 with the declarations and the one lock in `vendor/` (CI05), vendored
@@ -41,22 +41,26 @@ second implementation of a behaviour the library has is a defect.
 | CI05-VENDOR | vendored trees: `glab` skills and upstream references, one lock | CI03-GATES, CI07-SCHEMA, CI02-CLI |
 | CI01-CATALOG | discover, `list`, `get`, `install` | CI05-VENDOR, CI07-SCHEMA, CI02-CLI |
 | CI06-TESTS | the CI-only test command and coverage report | CI03-GATES, CI01-CATALOG |
-| CI09-REFERENCE | tool operations, knowledge references, the navigator | CI01, CI07, CI05, CI02 |
+| CI09-REFERENCE | tool operations, knowledge references, the navigator | CI01, CI07, CI05, CI02 (navigator: block 0) |
 | CI08-ROUTING | tags in the catalog; the `SKILL.md` router (`REFERENCES` is CI09's) | CI05, CI01, CI09 |
 | CI11-TOOLS | the tool catalogue and the port of the source repo's scripts | CI02-CLI, CI07-SCHEMA, CI09-REFERENCE |
 | CI04-HOOKS | advisory local hooks | CI03-GATES, CI05-VENDOR |
 
 ## Order
 
-0. **Block 0, prerequisite repairs**, before anything else: one shared
-   locator for the Python library (`ci-skills/bin/_bootstrap.py` and one
-   import per main; `tools/*.py` and `tests/python/conftest.py` pointed at
-   `ci-skills/lib`), the Bash mains and libraries re-pointed to
-   `lib/bash/...`, the root adapters re-pointed to `ci-skills/bin/`, the
-   test roots and the installer source fixed, `scripts/check.sh`'s library
-   restored at `ci-skills/lib/bash/ci/check.bash` from
-   `88bd9f6^:lib/ci/check.bash` with its paths updated, the foreign content
-   behind the three neutrality violations removed. Exit criteria:
+0. **Block 0, the layout**, before anything else, as `TEAM_GUIDE.md` draws
+   it: skill commands in `ci-skills/bin/`; the Python library in
+   `ci-skills/lib/python/core/`, put on the path by one locator
+   (`ci-skills/bin/_bootstrap.py`, one import per main; `tools/*.py` and
+   `tests/python/conftest.py` point at `ci-skills/lib/python`); the Bash
+   libraries in `ci-skills/lib/bash/<purpose>/` (`core` generic, `api` and
+   `automation` behind the two Bash commands, `ci` only for CI-only code);
+   development and build executables in `scripts/`. Dependencies flow from
+   executables into libraries, never back, and a local build script does not
+   import CI-specific behavior. Also: the root adapters re-pointed to
+   `ci-skills/bin/`, the test roots and the installer source fixed, the unused
+   Bash copies in `scripts/bash/core/` removed, the neutrality-marker strings
+   removed. `scripts/check.sh`'s library stays deleted. Exit criteria:
    `tools/render_manifest.py --check` reports CURRENT; `ci-skills/bin/ci-api
    --help` exits 0; every `ci-skills/bin/*.py --describe` prints its contract
    with no `PYTHONPATH`; the neutrality checker reports PASS;
@@ -108,10 +112,10 @@ is traceable to a request we recorded, a verified defect, or a source script.
 | Item | Where | Owner |
 | --- | --- | --- |
 | shared library locator | `ci-skills/bin/_bootstrap.py`, one import per main | block 0 |
-| skill-root leaf module | `ci-skills/lib/core/paths.py` | block 0 |
+| skill-root leaf module | `ci-skills/lib/python/core/paths.py` | block 0 |
 | bounded HTTP helper (stdlib) | `core/http.py` (reference fetch first; Harbor reuses it) | CI09-REFERENCE |
-| plan, apply, read-back skeleton | `ci-skills/lib/core/action.py`, extracted from `gitlab_actions.py` | CI11-TOOLS |
-| parallel reads helper | `ci-skills/lib/core/collect.py` (the executor it already uses, made shared) | CI11-TOOLS |
+| plan, apply, read-back skeleton | `lib/python/core/action.py`, extracted from `gitlab_actions.py` | CI11-TOOLS |
+| parallel reads helper | `lib/python/core/collect.py` (the executor it already uses, made shared) | CI11-TOOLS |
 | references and navigator | `core/{reference,navigate,tool_operations}.py`, `bin/reference.py` | CI09-REFERENCE |
 | maintenance package | `tools/skillkit/{schema,transaction,vendor}.py` | CI07, CI05 |
 | maintenance package, continued | `tools/skillkit/{reference_update,install,discover}.py` | CI09, CI01 |
@@ -134,31 +138,31 @@ is traceable to a request we recorded, a verified defect, or a source script.
 | `tools/install_ci_skills.py`, `install.sh` | `--scope`; the transaction from `tools/skillkit` |
 | `tools/render_manifest.py` | current paths; renders `agents/openai.yaml` beside `tools.json` |
 | `tools/check_live_acceptance.py` | current default paths; `[[smoke_cases]]` verification (CI03-GATES, G5) |
-| `tests/python/conftest.py` and the path-bound tests | `SKILL_ROOT = ci-skills`, `SCRIPT_ROOT = ci-skills/bin` |
+| `tests/python/conftest.py`, path-bound tests | `SCRIPT_ROOT = ci-skills/bin`, `LIB_ROOT = ci-skills/lib/python` |
 | `ci-skills/SKILL.md` | one navigator sentence; description terms for implicit invocation |
-| `Makefile`, `pyproject.toml`, `scripts/bash/core/result.bash` | neutrality-marker content removed |
+| `Makefile`, `pyproject.toml`; `scripts/bash/core/*.bash` | neutrality strings removed; unused copies removed |
 
 ### Refactor (second implementations removed; one owner each)
 
 | Behaviour | Keep | Remove or fold |
 | --- | --- | --- |
 | GitLab command flow | `core/cli.py` | the copies in `bin/gitlab_access.py`, `bin/gitlab_pipeline.py` |
-| exit codes | `core/status.py`, rendered to `lib/bash/core/exit_codes.bash` | the two Bash tables |
-| GitLab GET transport | `core/gitlab_api.py` | `lib/bash/ci/api.bash` (`ci-api` becomes a Python main) |
+| exit codes | `core/status.py`, rendered to `lib/bash/core/exit_codes.bash` | `runtime.bash`'s table |
+| GitLab GET transport | `core/gitlab_api.py` | `lib/bash/api/api.bash` (`ci-api` becomes a Python main) |
 | binary build plan | `core/binary_build.py` (ported) | `lib/bash/automation/binary_build.bash` |
-| result envelope | `core/report.py` | `scripts/bash/core/result.bash`, hand-built envelopes |
+| result envelope | `core/report.py` | hand-built envelopes |
 | diagnostic logger | `core/cli.py` `log_event` | `mtu_consistency.EventLogger`, `runtime.bash` `ci_log` |
 | argument-error envelope | `core/cli.py` `MachineArgumentParser` | `StructuredParser`, `NodeParser` |
-| secret patterns | `core/runtime.py:32-94` | `scripts/bash/core/result.bash:68-77` |
+| secret patterns | `core/runtime.py:32-94` | none left; the Bash copy went with `scripts/bash/core/result.bash` |
 | single-token-file rule | `core/credentials.py:41-51` | `ci-skills/lib/bash/core/runtime.bash:55-75` |
 | clean-checkout revision check | `core/provenance.py:106-130` | `ci-skills/lib/bash/core/runtime.bash:97-118` |
-| SHA-256 of stdin | `core/provenance.py` | `lib/bash/core/runtime.bash:79-91`, `scripts/bash/core/digest.bash` |
+| SHA-256 of stdin | `core/provenance.py` | `lib/bash/core/runtime.bash:79-91` |
 | advisory file lock | `tools/skillkit/transaction.py` | `tools/install_ci_skills.py:95`, `core/gitlab_api.py:211-259` |
 | plan fingerprint | `core/action.py` | `gitlab_actions.py:87`, `mtu_consistency.py:464`, `binary_build.bash:137-141` |
 
 ### Modularity
 
-`ci-skills/lib/core/` is flat (28 modules today) and CI11 adds about ten.
+`ci-skills/lib/python/core/` is flat (28 modules today) and CI11 adds about ten.
 Module paths in every phase document are flat (`core/<name>.py`) until the
 split into domain packages is decided (Open decisions, Modularity); the
 pull request that splits them changes imports and nothing else. Abstractions
@@ -227,7 +231,7 @@ list. Tests run on the gate route (D-GATE).
 - 2026-10-06, D-HOME: knowledge references live in CI09-REFERENCE.
 - 2026-10-06, D-LAYOUT: the vendored tree mirrors the keyword path, with
   card, part and chunk tiers (CI09-REFERENCE, section 2).
-- 2026-10-06, placement: runtime code in `ci-skills/lib/core/`,
+- 2026-10-06, placement: runtime code in `ci-skills/lib/python/core/`,
   maintenance-only code in `tools/skillkit/`.
 - 2026-10-06, D-SMOKE: live smoke runs from this laptop against the test
   project and the live cluster; the receipt's read-back is the proof
@@ -243,7 +247,8 @@ Names and owners only; each owner document carries the question.
   exits; whether the k8s commands move behind one `bin/ci-k8s` (CI02-CLI).
 - D-CONFIRM: the spelling of the plan-bound confirmation on the maintenance
   verbs (CI02-CLI).
-- Gate library home: `ci-skills/lib/bash/ci/check.bash` as block 0 writes it
+- Gate library home: `ci-skills/lib/bash/ci/check.bash`, a CI-only module (deleted on
+  purpose; block 0 does not restore it)
   (every gate edit then moves the skill digest and forces a receipt
   recapture), or a path outside `ci-skills/` (gate edits leave the digest
   alone) (CI03-GATES, G1).

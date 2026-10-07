@@ -13,6 +13,7 @@ from typing import Any
 
 from .catalog import GITHUB_TOKEN_VARIABLES, GITLAB_VARIABLES, github_variables
 from .gitlab_session import BoundGitLabSession
+from .paths import SKILL_ROOT
 from .provenance import ProvenanceError, skill_identity
 from .target import GitLabOperationTarget, Target, TargetError, assert_external_path
 
@@ -108,7 +109,7 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
     if not paths:
         raise TargetError("kubeconfig_source_empty")
     for path in paths:
-        assert_external_path(path, Path(__file__).resolve().parents[2], "kubeconfig")
+        assert_external_path(path, SKILL_ROOT, "kubeconfig")
         try:
             if not path.is_file() or not path.stat().st_size:
                 raise TargetError(f"kubeconfig_unavailable:{path}")
@@ -129,9 +130,8 @@ def resolve_skill_identity(explicit: str | None) -> dict[str, Any]:
     about the code that ran, and `CI_COMMIT_SHA` belongs to whatever project
     invoked the skill, not to the skill. See `core.provenance`.
     """
-    skill_root = Path(__file__).resolve().parents[2]
     try:
-        return skill_identity(skill_root, explicit)
+        return skill_identity(SKILL_ROOT, explicit)
     except ProvenanceError as exc:
         raise TargetError(str(exc)) from exc
 

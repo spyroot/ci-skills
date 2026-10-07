@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Render the skill's `tools.json` from its single declaration.
 
-`skills/ci-skills/tools.json` is the machine-readable contract an
+`ci-skills/tools.json` is the machine-readable contract an
 agent reads instead of five help texts, and it is generated from
-`scripts/core/catalog.py`. `tests/test_catalog.py` fails when the committed copy
+`ci-skills/lib/python/core/catalog.py`. `tests/python/test_catalog.py` fails when the committed copy
 drifts from that module, so this is the other half: the command that makes the
 committed copy current again.
 
@@ -24,15 +24,16 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
-SKILL_RELATIVE = Path("skills") / "ci-skills"
+SKILL_RELATIVE = Path("ci-skills")
+LIBRARY_RELATIVE = SKILL_RELATIVE / "lib" / "python"
 
 
 def load_catalog(root: Path) -> Any:
     """Import the catalog module from the skill tree, uninstalled."""
-    script_root = root / SKILL_RELATIVE / "scripts"
-    if not (script_root / "core" / "catalog.py").is_file():
-        raise FileNotFoundError(f"no catalog module under {script_root}")
-    sys.path.insert(0, str(script_root))
+    library = root / LIBRARY_RELATIVE
+    if not (library / "core" / "catalog.py").is_file():
+        raise FileNotFoundError(f"no catalog module under {library}")
+    sys.path.insert(0, str(library))
     # Imported after sys.path is set up, which is the point of this function.
     from core import catalog
 

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from tests.python.conftest import REPO_ROOT
 
-BENCHMARK_ROOT = REPO_ROOT / "benchmarks"
+BENCHMARK_ROOT = REPO_ROOT / "ci-skills" / "benchmarks"
 sys.path.insert(0, str(BENCHMARK_ROOT))
 
 import event_trace_ab as harness
