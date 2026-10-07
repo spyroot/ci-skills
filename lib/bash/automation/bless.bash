@@ -74,19 +74,6 @@ ci_bless_blocked() {
   printf 'BLOCKER: %s\nSAFE_NEXT_STEP: %s\n' "$check" "$next" >&2
 }
 
-# Summary: Read the selected version of one repository file.
-# Arguments: $1: staged or all; $2: repository-relative path.
-# Stdout: file bytes.
-# Stderr: Git or file diagnostics.
-# Returns: reader status.
-ci_bless_content() {
-  if [[ "$1" == staged ]]; then
-    git show ":$2"
-  else
-    cat -- "./$2"
-  fi
-}
-
 # Summary: Append one machine-readable check observation.
 # Arguments: $1: records path; $2: file path; $3: check name; $4: status.
 # Stdout: none.
@@ -132,7 +119,7 @@ ci_bless_check() {
     ci_bless_record "$records" "$file" "$label" PLANNED
     return
   fi
-  if output="$(ci_bless_content "$scope" "$file" | "$@" 2>&1)"; then
+  if output="$(ci_source_graph_content "$scope" "$file" | "$@" 2>&1)"; then
     ci_bless_record "$records" "$file" "$label" PASS
   else
     ci_bless_record "$records" "$file" "$label" FAIL

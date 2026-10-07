@@ -4,6 +4,8 @@
 setup() {
   root="${BATS_TEST_DIRNAME}/../.."
   fixture="${BATS_TEST_TMPDIR}/source"
+  export GIT_CONFIG_GLOBAL="${BATS_TEST_TMPDIR}/global.gitconfig"
+  : >"$GIT_CONFIG_GLOBAL"
   mkdir -p "$fixture"
   git -C "$fixture" init -q
   git -C "$fixture" config user.name ci-skills-tests
@@ -53,7 +55,7 @@ setup() {
   [[ "$output" == *'"cleanup_status": "PASS"'* ]]
   [ -x "$fixture/.git/hooks/pre-commit" ]
   grep -Fq 'ci-skills-bless-v1' "$fixture/.git/hooks/pre-commit"
-  grep -Fq 'exec "$root/bless.sh" --staged' "$fixture/.git/hooks/pre-commit"
+  grep -Fq 'exec make -C "$root" bless' "$fixture/.git/hooks/pre-commit"
 }
 
 @test 'hook apply refuses a stale plan without installing a hook' {
@@ -300,7 +302,7 @@ FAKE
   git -C "$fixture" add file.txt
   run git -C "$fixture" commit -qm 'fixture commit'
   [ "$status" -ne 0 ]
-  [[ "$output" == *'bless.sh is unavailable'* ]]
+  [[ "$output" == *'make bless is unavailable'* ]]
 }
 
 @test 'installed hook commits staged JSON while rejecting staged invalid JSON' {
@@ -312,7 +314,7 @@ FAKE
   run make -C "$fixture" bless
   [ "$status" -eq 0 ]
   [ -x "$fixture/.git/hooks/pre-commit" ]
-  grep -Fq 'exec "$root/bless.sh" --staged' "$fixture/.git/hooks/pre-commit"
+  grep -Fq 'exec make -C "$root" bless' "$fixture/.git/hooks/pre-commit"
   printf '{"broken":' >"$fixture/example.json"
   run git -C "$fixture" commit -qm 'valid staged content'
   [ "$status" -eq 0 ]

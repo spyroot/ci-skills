@@ -12,10 +12,11 @@ ci_hooks_body() {
 # ci-skills-managed-pre-commit-v1
 set -Eeuo pipefail
 root="$(git rev-parse --show-toplevel)"
-if [[ -x "$root/bless.sh" ]] && grep -q 'ci-skills-bless-v1' "$root/bless.sh"; then
-	exec "$root/bless.sh" --staged
+if [[ -f "$root/Makefile" && -x "$root/bless.sh" ]] &&
+  grep -q 'ci-skills-bless-v1' "$root/bless.sh"; then
+  exec make -C "$root" bless
 fi
-printf 'ci-skills pre-commit: bless.sh is unavailable in this checkout.\n' >&2
+printf 'ci-skills pre-commit: make bless is unavailable in this checkout.\n' >&2
 HOOK
   printf 'exit %s\n' "$CI_EXIT_BLOCKED"
 }
