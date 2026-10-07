@@ -11,13 +11,14 @@ import re
 import stat
 import tempfile
 import time
+from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from .runtime import CommandResult, error_class, run_command_bounded
 
@@ -40,6 +41,7 @@ _UNCERTAIN_WRITE = frozenset(
     }
 )
 _RETRY_AFTER = re.compile(r"(?im)^retry-after\s*:\s*([^\r\n]+)")
+_NEXT_LINK = re.compile(r'<([^<>]+)>\s*;\s*rel\s*=\s*"?next"?', re.IGNORECASE)
 
 
 class GitLabAPIError(RuntimeError):
@@ -152,9 +154,7 @@ def _delay(stderr: str, endpoint: str, attempt: int) -> float:
                 date = parsedate_to_datetime(raw)
                 seconds = max(
                     0.0,
-                    (
-                        date.astimezone(timezone.utc) - datetime.now(timezone.utc)
-                    ).total_seconds(),
+                    (date.astimezone(UTC) - datetime.now(UTC)).total_seconds(),
                 )
             except (TypeError, ValueError, OverflowError):
                 seconds = -1.0
@@ -289,6 +289,19 @@ class GlabAPIClient:
     def get_json(self, session: Any, endpoint: str) -> Any:
         return self._request(session, "GET", endpoint)
 
+    def get_json_with_headers(self, session: Any, endpoint: str) -> tuple[Any, str]:
+        """Read one JSON page and retain its HTTP pagination headers.
+
+        :param session: Exact-host bound GitLab session.
+        :param endpoint: Relative GitLab API endpoint.
+        :returns: Parsed JSON and response headers from the same read.
+        :raises GitLabAPIError: If the response fails shared transport checks.
+        """
+        payload, headers = self._request(session, "GET", endpoint, include_headers=True)
+        if not headers.startswith("HTTP/"):
+            raise GitLabAPIError("pagination_headers_missing")
+        return payload, headers
+
     def post_json(self, session: Any, endpoint: str, body: dict[str, Any]) -> Any:
         return self._request(session, "POST", endpoint, body)
 
@@ -305,6 +318,8 @@ class GlabAPIClient:
         method: str,
         endpoint: str,
         body: dict[str, Any] | None = None,
+        *,
+        include_headers: bool = False,
     ) -> Any:
         selected = _endpoint(endpoint)
         argv = [
@@ -363,7 +378,6 @@ class GlabAPIClient:
                     raise GitLabAPIError(reason, attempts=READ_ATTEMPTS)
                 self._sleep(_delay(headers or result.stderr, selected, attempt))
         finally:
-
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
 
@@ -380,4 +394,48 @@ class GlabAPIClient:
             raise GitLabAPIError("invalid_json") from exc
         if not isinstance(payload, (dict, list)):
             raise GitLabAPIError("invalid_shape")
-        return payload
+        return (payload, headers) if include_headers else payload
+
+
+def next_keyset_endpoint(session: Any, current: str, headers: str) -> str | None:
+    """Resolve GitLab's next cursor without changing host or collection.
+
+    :param session: Exact-host bound GitLab session.
+    :param current: Relative endpoint used for the page just read.
+    :param headers: Headers returned with that same page.
+    :returns: Safe relative next endpoint, or None at the collection end.
+    :raises GitLabAPIError: If the next link changes host, path, or filters.
+    """
+    links = [
+        line[5:].strip()
+        for line in headers.splitlines()
+        if line.lower().startswith("link:")
+    ]
+    matches = [match.group(1) for link in links for match in _NEXT_LINK.finditer(link)]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise GitLabAPIError("pagination_link_invalid")
+    parsed = urlsplit(matches[0])
+    prefix = "/api/v4/"
+    base = urlsplit(_endpoint(current))
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc.lower() != session.host
+        or not parsed.path.startswith(prefix)
+        or parsed.fragment
+    ):
+        raise GitLabAPIError("pagination_link_invalid")
+    relative = parsed.path[len(prefix) :]
+    if relative != base.path:
+        raise GitLabAPIError("pagination_link_invalid")
+    current_pairs = parse_qsl(base.query, keep_blank_values=True)
+    next_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    cursor_keys = {"id_before", "id_after", "cursor", "page_token"}
+    current_filters = Counter(
+        pair for pair in current_pairs if pair[0] not in cursor_keys
+    )
+    next_filters = Counter(pair for pair in next_pairs if pair[0] not in cursor_keys)
+    if current_filters != next_filters:
+        raise GitLabAPIError("pagination_link_invalid")
+    return _endpoint(f"{relative}?{parsed.query}")

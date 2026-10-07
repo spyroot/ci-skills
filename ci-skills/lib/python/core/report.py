@@ -126,7 +126,21 @@ def human(data: dict[str, Any]) -> str:
         lines.append("  " + "  ".join(parts)[:240])
         kind = data.get("kind")
         search = (data.get("filters") or {}).get("search")
-        if kind == "gitlab_job":
+        if kind == "gitlab_job" and data.get("operation") == "list":
+            lines[-1] = (
+                "  "
+                + f"id={item['id']}  name={sanitize(item['name'], 80)}"
+                + f"  stage={sanitize(item['stage'], 40)}"
+                + f"  status={sanitize(item['status'], 24)}"
+                + f"  ref={sanitize(item['ref'], 48)}"
+            )
+            if item.get("failure_reason"):
+                lines.append(
+                    f"    failure_reason={sanitize(item['failure_reason'], 120)}"
+                )
+            if item.get("stuck"):
+                lines.append("    stuck=true")
+        elif kind == "gitlab_job":
             lines.append(f"    failure_reason={item.get('failure_reason')}")
             for label in ("pipeline", "runner"):
                 if item.get(label) is not None:
@@ -205,6 +219,8 @@ def human(data: dict[str, Any]) -> str:
             if surface.get("next_step"):
                 lines.append(f"    next: {surface['next_step']}")
     lines.extend(_report_file_lines(data))
+    if data.get("kind") == "gitlab_job" and data.get("operation") == "list":
+        lines.append(f"Truncated: {str(data.get('truncated', False)).lower()}")
     return "\n".join(lines) + "\n"
 
 
