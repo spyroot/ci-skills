@@ -29,7 +29,7 @@ jobs:
             toolchain-dependencies.json
       - name: Verify installer behavior with isolated host fixtures
         run: |
-          pytest -q tests/python/test_agent_profile.py tests/python/test_installer.py
+          python -m pytest -q tests/python/test_agent_profile.py tests/python/test_installer.py
           bats tests/bash/install.bats
       - name: Check reStructuredText API documentation
         run: >-
