@@ -42,11 +42,7 @@ class AgentProfileError(ValueError):
 
 
 class AgentProfile:
-    """Resolve and install the manifest's agent profile for one checkout.
-
-    :param root: Repository checkout containing ``toolchain-dependencies.json``.
-    :raises AgentProfileError: If the manifest or destination is unsafe.
-    """
+    """Resolve and install the manifest's agent profile for one checkout."""
 
     def __init__(self, root: Path):
         """Load and validate the checkout's agent toolchain contract.

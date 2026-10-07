@@ -27,13 +27,13 @@ jobs:
           check-jsonschema \
             --schemafile schemas/configuration/toolchain-dependencies.schema.json \
             toolchain-dependencies.json
+      - name: Verify installer behavior with isolated host fixtures
+        run: |
+          pytest -q tests/python/test_agent_profile.py tests/python/test_installer.py
+          bats tests/bash/install.bats
       - name: Check reStructuredText API documentation
         run: >-
           pydoclint --style=sphinx --skip-checking-short-docstrings=False
           --arg-type-hints-in-docstring=False --check-return-types=False
           --skip-checking-raises=True --allow-init-docstring=True
           tools/agent_profile.py
-      - name: Verify installer behavior with isolated host fixtures
-        run: |
-          pytest -q tests/python/test_agent_profile.py tests/python/test_installer.py
-          bats tests/bash/install.bats
