@@ -164,10 +164,10 @@ Observed 2026-10-06:
 - 398 `def test_` functions in 40 files under `tests/python/` and 39 `@test`
   cases in 4 files under `tests/bash/`; no `skip`, `skipif` or `xfail`
   marker; no coverage measurement.
-- The suite cannot import today: `tests/python/conftest.py:17-19` resolves
-  `REPO_ROOT` to `tests/` and `SCRIPT_ROOT` to `tests/skills/ci-skills/scripts`,
-  which does not exist, so `import_script_module` (`conftest.py:34-39`)
-  finds no `core`. Block 0 (CI10-PHASES, Order) fixes it. The Bats suite's
+- Before block 0 the suite could not import: `tests/python/conftest.py`
+  resolved `REPO_ROOT` to `tests/` and `SCRIPT_ROOT` to `tests/skills/ci-skills/scripts`,
+  so `import_script_module` found no `core`. Block 0 fixed it (`LIB_ROOT` is
+  `ci-skills/lib/python`). The Bats suite's
   `tests/bash/check.bats` sources `../lib/ci/check.bash`, a path that does
   not exist either: the library was deleted in #26.
 - No execution surface exists (D-GATE; CI03-GATES, G0).
@@ -234,9 +234,9 @@ Tests: CI04-HOOKS, Delivery, test and proof.
    sources `lib/ci/check.bash`, deleted in #26, so the entrypoint cannot run
    until CI03-GATES, G1, restores it; G1 names no argument
    that runs one gate, so the argv that runs only `tests` is G1's to name.
-   The gate library sits at `ci-skills/lib/bash/ci/check.bash` (planned,
-   CI03-GATES, G1), inside the digested tree
-   (`core/provenance.py`, `_included`), so adding the `tests` gate moves the
+   If the gate library's home is `ci-skills/lib/bash/ci/check.bash`
+   (CI10-PHASES, Gate library home), it sits inside the digested tree
+   (`core/provenance.py`, `_included`), and adding the `tests` gate moves the
    skill digest (part 5).
 2. *Tests*, written with the block; run status UNVERIFIED (CI03-GATES, G0).
    In `tests/bash/check.bats`, on the fixture and stub pattern it already

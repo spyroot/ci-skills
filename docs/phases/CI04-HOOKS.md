@@ -45,8 +45,8 @@ deleted in #27 (`1108cca`; CI10-PHASES, Pull request status).
 - The static subset of `./scripts/check.sh`, run on the index snapshot, so
   neutrality sees exactly what the commit will contain. The selector for
   that subset is the one CI03-GATES, G1 adds. Today the script's library,
-  as last committed before #26 and to be restored by CI03-GATES, G1, at
-  `ci-skills/lib/bash/ci/check.bash` (planned), takes
+  as last committed before #26 and to be restored by CI03-GATES, G1 (home:
+  CI10-PHASES, Gate library home), takes
   only `--dry-run`, the `--log-*` flags and `--help`, and outside
   `--dry-run` it refuses to run off a Kubernetes pod (`tests/bash/check.bats`,
   "check refuses execution outside Kubernetes"). Until G1 lands, a hook

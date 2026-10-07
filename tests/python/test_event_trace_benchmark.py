@@ -293,6 +293,30 @@ def test_worker_refuses_a_checkout_without_the_skill_library(tmp_path):
         worker._source(tmp_path, SHA)
 
 
+def test_worker_refuses_the_pre_move_library_layout(tmp_path):
+    (tmp_path / "ci-skills" / "lib" / "core").mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="skill_library_missing"):
+        worker._source(tmp_path, SHA)
+
+
+def test_worker_fingerprints_the_skill_tree_and_imports_its_library(
+    tmp_path, monkeypatch
+):
+    """The worker fingerprints <root>/ci-skills, the tree the harness fingerprints, and imports lib/python."""
+    (tmp_path / "ci-skills" / "lib" / "python").mkdir(parents=True)
+    calls: list[tuple] = []
+    monkeypatch.setattr(worker, "source_identity", lambda *args: calls.append(args))
+    monkeypatch.setattr(worker.sys, "path", list(sys.path))
+
+    library = worker._source(tmp_path, SHA)
+
+    root = tmp_path.resolve()
+    assert calls == [(root, SHA, root / "ci-skills")]
+    assert library == root / "ci-skills" / "lib" / "python"
+    assert worker.sys.path[0] == str(library)
+
+
 def test_run_alternates_pairs_and_passes_only_with_grounded_evidence(monkeypatch):
     arguments = _run_arguments()
     calls: list[tuple[str, str]] = []

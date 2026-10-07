@@ -41,16 +41,15 @@ on 2026-10-06 (CI10-PHASES, Pull request status) or observed in the tree that da
   unconditional (lines 15-57). It reads `.github/workflows/validate.yml` (line 8), deleted in #27, so it cannot pass
   until that workflow is recreated.
 - **`tools/check_live_acceptance.py`** checks that each receipt's `skill.digest` equals the skill's `tree_digest`, with
-  the other fields listed in "Delivery, test and proof", part 4. Today it reports `skill_digest_mismatch` on every
-  committed receipt (observed with `PYTHONPATH=ci-skills/lib`; without it the import of `core` at line 479 fails until
-  block 0 re-points `tools/*.py`).
+  the other fields listed in "Delivery, test and proof", part 4. It reports `skill_digest_mismatch` on every
+  committed receipt (observed on 2026-10-06, before block 0 re-pointed `tools/*.py` at `ci-skills/lib/python`).
 - **The byte-equality test in `tests/python/test_catalog.py`** (`test_the_rendered_manifest_matches_the_module`, line
   121) checks that `tools.json` equals the catalog's render.
-- **`manifest`**: `tools/render_manifest.py --check` prints `CURRENT` or `STALE` (lines 69-71). Today it fails on the
-  stale `skills/ci-skills/scripts` path; block 0 re-points it (CI10-PHASES, Order). Tool exists; gate id pending G1.
-- **`neutrality`**: `tools/check_project_neutrality.py --root . --json` reports `PASS` or `FAIL` (line 54). Today it
-  reports `FAIL` on three files, `Makefile`, `pyproject.toml` and `scripts/bash/core/result.bash`; block 0 removes the
-  content (CI10-PHASES, Modify). Tool exists; gate id pending G1.
+- **`manifest`**: `tools/render_manifest.py --check` prints `CURRENT` or `STALE` (lines 69-71). Since block 0 it prints
+  `CURRENT`. Tool exists; gate id pending G1.
+- **`neutrality`**: `tools/check_project_neutrality.py --root . --json` reports `PASS` or `FAIL` (line 54). Since
+  block 0 it reports `PASS`; before, it reported `FAIL` on `Makefile`, `pyproject.toml` and
+  `scripts/bash/core/result.bash`. Tool exists; gate id pending G1.
 - **Static tools** (CI10-PHASES, "Gates that make every tool conform"): `ruff check`, `ruff format --check`,
   markdownlint-cli2, shellcheck, shfmt, yamllint, gitleaks and `git diff --check`. Each: tool exists; gate id pending
   G1. The restored library names its checks `whitespace`, `bash-n`, `shellcheck`, `shfmt`, `yaml`, `markdown`,
@@ -242,7 +241,7 @@ A local static result never replaces the gate route's result.
 ## Steps
 
 1. Restore the library from `88bd9f6^:lib/ci/check.bash`, then extend `scripts/check.sh` as in G1. The new checks live
-   in `ci-skills/lib/bash/ci/check.bash`, and `--help` lists every argument and output mode.
+   in the restored library (home: CI10-PHASES, Gate library home), and `--help` lists every argument and output mode.
 2. Recreate the workflow the gate route (G0) names from `1108cca^:.github/workflows/validate.yml` with G0's edit list;
    make each step call the entrypoint, add the final aggregator (G6) and the `schedule` trigger (G7), and extend the
    workflow-policy test.
@@ -257,8 +256,8 @@ A local static result never replaces the gate route's result.
 ## Delivery, test and proof
 
 1. **Delivery.**
-   - Changed: `scripts/check.sh` (sources `ci-skills/lib/bash/ci/check.bash`); `ci-skills/lib/bash/ci/check.bash`
-     (restored by this phase, which also adds the profiles, the gates and the guard rule, G1); `requirements.txt` (G2);
+   - Changed: `scripts/check.sh` (sources the gate library); the gate library (home: CI10-PHASES, Gate library home;
+     restored by this phase, which also adds the profiles, the gates and the guard rule, G1); `requirements.txt` (G2);
      `tools/check_live_acceptance.py` (the smoke-case verification, G5; the days left, G7);
      `tests/python/test_validate_workflow_policy.py`, `tests/bash/check.bats` and `tests/python/test_live_acceptance.py`
      (part 2).
