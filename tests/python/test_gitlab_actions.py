@@ -23,6 +23,7 @@ ISSUES = import_script_module("core.gitlab_issues")
 WIKIS = import_script_module("core.gitlab_wikis")
 RUNNERS = import_script_module("core.gitlab_runners")
 REPORT = import_script_module("core.report")
+PROVENANCE = import_script_module("core.provenance")
 
 TAG_SCHEMA = json.loads(
     (
@@ -30,6 +31,35 @@ TAG_SCHEMA = json.loads(
     ).read_text(encoding="utf-8")
 )
 TAG_VALIDATOR = Draft202012Validator(TAG_SCHEMA)
+
+
+def test_committed_runner_tag_receipts_match_live_contract():
+    root = Path(__file__).parents[2]
+    receipts = root / "tests/acceptance/runner-tag"
+    applied = json.loads((receipts / "runner-tag-applied.json").read_text())
+    repeated = json.loads((receipts / "runner-tag-no_op.json").read_text())
+    digest = PROVENANCE.tree_digest(root / "ci-skills")["digest"]
+
+    for result in (applied, repeated):
+        TAG_VALIDATOR.validate(result)
+        assert result["skill"]["digest"] == digest
+        assert result["skill"]["revision"]["verified"] is True
+        assert result["tested_revision"] == result["skill"]["revision"]["value"]
+        assert result["verified_target"]["full_path"] == "hott/test"
+        assert result["readback"]["verified"] is True
+
+    added = applied["plan"]["requested_tags"]
+    assert applied["result_action"] == "APPLIED"
+    assert applied["readback"]["added_tags"] == added
+    assert set(applied["readback"]["before_tags"]).isdisjoint(added)
+    assert set(applied["readback"]["before_tags"] + added) <= set(
+        applied["readback"]["after_tags"]
+    )
+    assert repeated["result_action"] == "NO_OP"
+    assert repeated["readback"]["mutated"] is False
+    assert applied["plan_digest"] == repeated["plan_digest"]
+    assert applied["readback"]["id"] == repeated["readback"]["id"]
+    assert applied["readback"]["after_tags"] == repeated["readback"]["after_tags"]
 
 
 def _plan(
