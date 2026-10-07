@@ -5,14 +5,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
+import yaml
+from jsonschema import Draft202012Validator
+
 from tests.python.conftest import import_script_module
 
 CLI = import_script_module("core.cli")
 COLLECT = import_script_module("core.collect")
 REPORT = import_script_module("core.report")
 RUNTIME = import_script_module("core.runtime")
+JOBS = import_script_module("core.gitlab_jobs")
 SCRIPT = import_script_module("gitlab_job")
 TARGET = import_script_module("core.target")
 
@@ -222,3 +227,139 @@ def test_bound_job_collector_checks_runner_on_exact_host(tmp_path, monkeypatch):
         for argv, env in calls
     )
     assert "selected-token" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("mode", ("--json", "--yaml"))
+def test_list_uses_bound_project_and_emits_schema_valid_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+) -> None:
+    """Read the selected project once and emit the declared agent result.
+
+    :param tmp_path: Isolated target file directory.
+    :param monkeypatch: Replacement for live GitLab access.
+    :param capsys: Captured command output.
+    :param mode: Requested machine output mode.
+    """
+    path = _target(tmp_path)
+    session = SimpleNamespace(
+        environment={"GITLAB_TOKEN": "selected-token"},
+        execution_host="worker.example.test",
+        target_source="argv:--target;argv:--project",
+        skill={
+            "digest": "a" * 64,
+            "file_count": 1,
+            "revision": {"value": "b" * 40, "source": "test", "verified": True},
+        },
+    )
+    observed: dict[str, Any] = {}
+
+    def bind(_target: object, **kwargs: object) -> SimpleNamespace:
+        """Return the same bound session the command must use.
+
+        :param _target: Parsed target configuration.
+        :param kwargs: Selected project binding values.
+        :returns: Test session for this invocation.
+        """
+        observed["binding"] = kwargs
+        return session
+
+    def list_selected(bound: object, project_id: int, query: Any) -> Any:
+        """Capture the exact selected project job read.
+
+        :param bound: Bound GitLab session.
+        :param project_id: Verified project ID.
+        :param query: Validated job-list query.
+        :returns: Empty valid job-list result.
+        """
+        observed["read"] = (bound, project_id, query.limit)
+        return JOBS.JobListResult([], [], False)
+
+    monkeypatch.setattr(CLI, "bind_gitlab_session", bind)
+    monkeypatch.setattr(
+        CLI,
+        "check_gitlab_operation_access",
+        lambda _bound: {
+            "status": "PASS",
+            "errors": [],
+            "identity": {
+                "id": 17,
+                "username": "operator",
+                "web_url": "https://gitlab.example.test/operator",
+            },
+            "target": {
+                "kind": "project",
+                "id": 42,
+                "full_path": "unit/repo",
+                "web_url": "https://gitlab.example.test/unit/repo",
+            },
+            "observed_capability": ["identity_read", "target_read"],
+        },
+    )
+    monkeypatch.setattr(JOBS, "list_jobs", list_selected)
+    args = SCRIPT.build_parser().parse_args(
+        ["list", "--target", str(path), "--project", "unit/repo", "--limit", "7", mode]
+    )
+
+    assert CLI.execute_gitlab_job(args) == 0
+    output = capsys.readouterr().out
+    data = json.loads(output) if mode == "--json" else yaml.safe_load(output)
+    schema = json.loads(
+        (
+            Path(__file__).parents[2] / "schemas/results/gitlab-job-list.schema.json"
+        ).read_text(encoding="utf-8")
+    )
+    Draft202012Validator(schema).validate(data)
+    assert data["status"] == "PASS"
+    assert data["operation"] == "list"
+    assert observed["binding"]["target_reference"] == "unit/repo"
+    assert observed["read"] == (session, 42, 7)
+    assert "selected-token" not in output
+
+
+def test_list_access_refusal_skips_job_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Preserve a GitLab access refusal without reading project jobs.
+
+    :param tmp_path: Isolated target file directory.
+    :param monkeypatch: Replacement for live GitLab access.
+    :param capsys: Captured blocked result.
+    """
+    path = _target(tmp_path)
+    session = SimpleNamespace(
+        environment={"GITLAB_TOKEN": "selected-token"},
+        execution_host="worker.example.test",
+        target_source="argv:--target;argv:--project",
+        skill={"revision": {"value": "b" * 40}},
+    )
+    monkeypatch.setattr(CLI, "bind_gitlab_session", lambda *_args, **_kwargs: session)
+    monkeypatch.setattr(
+        CLI,
+        "check_gitlab_operation_access",
+        lambda _bound: {
+            "status": "BLOCKED",
+            "errors": [{"source": "target", "reason": "target_path_mismatch"}],
+            "identity": None,
+            "target": None,
+            "observed_capability": [],
+        },
+    )
+    monkeypatch.setattr(
+        JOBS,
+        "list_jobs",
+        lambda *_args: pytest.fail("job read ran after access refusal"),
+    )
+    args = SCRIPT.build_parser().parse_args(
+        ["list", "--target", str(path), "--project", "unit/repo", "--json"]
+    )
+
+    assert CLI.execute_gitlab_job(args) == 2
+    data = json.loads(capsys.readouterr().out)
+    assert data["status"] == "BLOCKED"
+    assert data["records"] == []
+    assert data["errors"] == [{"source": "target", "reason": "target_path_mismatch"}]
