@@ -3,6 +3,25 @@
 setup() {
   repo_root="$(cd -- "${BATS_TEST_DIRNAME}/../.." && pwd -P)"
   destination="${BATS_TEST_TMPDIR}/skills/ci-skills"
+  fake_bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/glab" <<'GLAB'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $1 == skills && $3 == glab-stack ]] || exit 64
+case $2 in
+  get) printf '# glab-stack fixture\n' ;;
+  install)
+    [[ $4 == --path ]] || exit 64
+    mkdir -p "$5/glab-stack"
+    printf '# glab-stack fixture\n' >"$5/glab-stack/SKILL.md"
+    ;;
+  *) exit 64 ;;
+esac
+GLAB
+  chmod +x "$fake_bin/glab"
+  PATH="$fake_bin:$PATH"
+  export PATH
 }
 
 make_install_fixture() {
@@ -22,6 +41,10 @@ make_install_fixture() {
   git -C "$source_root" commit --quiet -m "fixture source"
   source_revision="$(git -C "$source_root" rev-parse HEAD)"
   tool="${source_root}/install.sh"
+  caller_root="${BATS_TEST_TMPDIR}/consumer"
+  mkdir -p "$caller_root"
+  git -C "$caller_root" init --quiet
+  cd "$caller_root" || return 1
 }
 
 @test 'dry-run binds a clean package and destination without writing' {
@@ -32,6 +55,7 @@ make_install_fixture() {
   [ "$(jq -r .source <<<"$output")" = "$source_root/ci-skills" ]
   [ "$(jq -r .destination <<<"$output")" = "$destination" ]
   [ "$(jq -r .source_revision <<<"$output")" = "$source_revision" ]
+  [ "$(jq -r .agent.destination <<<"$output")" = "$caller_root/.agents/skills" ]
   jq -e '.mutable_link == false and (.fingerprint | length == 64)' <<<"$output" >/dev/null
   [ ! -e "$destination" ]
 }
@@ -58,6 +82,8 @@ make_install_fixture() {
   [ -d "$destination" ]
   [ ! -L "$destination" ]
   [ "$(jq -r .status <<<"$output")" = "PASS" ]
+  [ -f "$caller_root/.agents/skills/glab-stack/SKILL.md" ]
+  [ ! -e "$source_root/.agents/skills/glab-stack" ]
   cmp "$source_root/ci-skills/SKILL.md" "$destination/SKILL.md"
   run "$tool" --destination "$destination" --upgrade --dry-run
   [ "$status" -eq 0 ]
