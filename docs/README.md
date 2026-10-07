@@ -23,6 +23,7 @@ decisions taken and the open decisions.
 | [CI11-TOOLS](phases/CI11-TOOLS.md) | the tool catalogue and the port of the source repo's scripts |
 | [GitLab tool belt](gitlab-toolbelt-plan.md) | delivery plan of the GitLab operations tool belt |
 | [Field notes](field-notes.md) | observations from the first deliveries |
+| [Use cases](use-cases.md) | the behaviour we want, use case by use case, in our own words |
 
 ## Records
 
