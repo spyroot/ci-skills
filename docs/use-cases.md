@@ -23,7 +23,7 @@ How an agent uses ci-skills, at a high level. Commands are in `ci-skills/bin/`; 
 | "What happened in this job?" (URL) | `gitlab_job.py --job-url URL` | shipped |
 | "How is this pipeline doing?" | `gitlab_pipeline.py` | shipped |
 | "I just started a pipeline, watch it" | `gitlab_pipeline.py watch` (root and every pipeline it starts) | planned |
-| "Create a milestone / open a bug / update the wiki" | `gitlab_milestone.py`, `gitlab_issue.py`, `gitlab_wiki.py` | shipped |
+| "Create a milestone, a bug or a wiki page" | `gitlab_milestone.py`, `gitlab_issue.py`, `gitlab_wiki.py` | shipped |
 | "Assign or create a runner" | `gitlab_runner.py` | shipped |
 | "Is my cluster healthy?" | one health command: finds CNI, storage, operators and checks each | planned |
 | "Why is this volume stuck?" | `storage_report.py` | shipped |
