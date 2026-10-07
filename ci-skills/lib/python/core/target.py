@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-import tomllib
-
 from .catalog import AUTHORITIES
+from .endpoints import TARGET_CONTRACT
 from .paths import SKILL_ROOT
 
 
@@ -104,7 +104,7 @@ class Target:
     target_reference: str | None = None
 
 
-def _table(value: object, name: str, keys: set[str]) -> dict[str, object]:
+def _table(value: object, name: str, keys: frozenset[str]) -> dict[str, object]:
     """Return one table after rejecting undeclared fields, including credentials."""
     if not isinstance(value, dict):
         raise TargetError(f"{name} must be a TOML table")
@@ -239,11 +239,7 @@ def _optional_reference(table: dict[str, object], key: str) -> str | None:
 
 
 def _parse_gitlab(value: object, skill_root: Path) -> GitLabTarget:
-    gitlab = _table(
-        value,
-        "gitlab",
-        {"url", "token_file", "project", "group", "runner_id"},
-    )
+    gitlab = _table(value, "gitlab", TARGET_CONTRACT.names("gitlab"))
     url, host = _https_url(_string(gitlab, "url"), "gitlab.url")
     runner_id = gitlab.get("runner_id")
     if runner_id is not None and (
@@ -276,7 +272,7 @@ def load_gitlab_target(path: str | Path) -> GitLabOperationTarget:
     source = Path(path).expanduser()
     skill_root = SKILL_ROOT
     data = _read_target_data(source, skill_root)
-    if "gitlab" not in data or set(data) - {"github", "gitlab", "kubernetes"}:
+    if "gitlab" not in data or set(data) - set(AUTHORITIES):
         raise TargetError("GitLab operations need a gitlab table without extra tables")
     selected = _parse_gitlab(data["gitlab"], skill_root)
     return GitLabOperationTarget(selected, source.resolve())
@@ -311,7 +307,8 @@ def select_gitlab_reference(
 def _node_diagnostics(value: object | None) -> NodeDiagnosticsTarget | None:
     if value is None:
         return None
-    table = _table(value, "kubernetes.node_diagnostics", {"node", "cilium", "journal"})
+    name = "kubernetes.node_diagnostics"
+    table = _table(value, name, TARGET_CONTRACT.names(name))
     node = _string(table, "node")
     if any(character.isspace() for character in node):
         raise TargetError(
@@ -322,24 +319,20 @@ def _node_diagnostics(value: object | None) -> NodeDiagnosticsTarget | None:
     if "journal" in table:
         journal_table = _table(
             table["journal"],
-            "kubernetes.node_diagnostics.journal",
-            {"namespace", "selector", "container", "directory", "host_path"},
+            f"{name}.journal",
+            TARGET_CONTRACT.names(f"{name}.journal"),
         )
         journal = JournalPodRoute(
-            pod=_node_pod_route(journal_table, "journal", allow_journal_fields=True),
+            pod=_node_pod_route(journal_table, "journal"),
             directory=_absolute_path(_string(journal_table, "directory"), "directory"),
             host_path=_absolute_path(_string(journal_table, "host_path"), "host_path"),
         )
     return NodeDiagnosticsTarget(node=node, cilium=cilium, journal=journal)
 
 
-def _node_pod_route(
-    value: object, kind: str, *, allow_journal_fields: bool = False
-) -> NodePodRoute:
-    keys = {"namespace", "selector", "container"}
-    if allow_journal_fields:
-        keys.update({"directory", "host_path"})
-    table = _table(value, f"kubernetes.node_diagnostics.{kind}", keys)
+def _node_pod_route(value: object, kind: str) -> NodePodRoute:
+    name = f"kubernetes.node_diagnostics.{kind}"
+    table = _table(value, name, TARGET_CONTRACT.names(name))
     namespace = _string(table, "namespace")
     selector = _string(table, "selector")
     container = _string(table, "container")
@@ -378,11 +371,7 @@ def load_target(
 
     github_target = None
     if "github" in required_surfaces:
-        github = _table(
-            data["github"],
-            "github",
-            {"host", "repository", "token_file", "required_checks"},
-        )
+        github = _table(data["github"], "github", TARGET_CONTRACT.names("github"))
         github_host = _string(github, "host").lower()
         if "." not in github_host or "/" in github_host or ":" in github_host:
             raise TargetError("github.host must be a full hostname")
@@ -405,9 +394,7 @@ def load_target(
     kubernetes_target = None
     if "kubernetes" in required_surfaces:
         kubernetes = _table(
-            data["kubernetes"],
-            "kubernetes",
-            {"context", "server", "kubeconfig", "kubeconfigs", "node_diagnostics"},
+            data["kubernetes"], "kubernetes", TARGET_CONTRACT.names("kubernetes")
         )
         server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
         kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)

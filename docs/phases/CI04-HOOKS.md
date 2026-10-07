@@ -51,6 +51,10 @@ deleted in #27 (`1108cca`; CI10-PHASES, Pull request status).
   `--dry-run` it refuses to run off a Kubernetes pod (`tests/bash/check.bats`,
   "check refuses execution outside Kubernetes"). Until G1 lands, a hook
   has nothing it can run.
+- `gates/gate-ci-skills-endpoints.py --staged` (CI03-GATES,
+  gate-ci-skills-endpoints), which reads the staged index itself and needs no
+  snapshot: it refuses a commit that adds a target-file key the contract does
+  not declare. It runs today; G1's selector picks it up once it exists.
 - It also refuses staged private agent files using the repository and global
   ignore patterns. The staged-path check must use those patterns rather than
   a second handwritten file list.

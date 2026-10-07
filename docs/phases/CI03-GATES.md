@@ -55,6 +55,95 @@ on 2026-10-06 (CI10-PHASES, Pull request status) or observed in the tree that da
   G1. The restored library names its checks `whitespace`, `bash-n`, `shellcheck`, `shfmt`, `yaml`, `markdown`,
   `secrets` and `unit` (`88bd9f6^:lib/ci/check.bash:134`) and does not run Ruff.
 - **Tests** (pytest and bats): the route that runs them is D-GATE (G0).
+- **`gate-ci-skills-endpoints`**: refuses a target-file key that is not an endpoint or its access (next section). It
+  runs on every pull request and every push to `main`.
+
+## gate-ci-skills-endpoints
+
+Decided 2026-10-07: a target file names, per authority, the endpoint we point at (a host, a project, a cluster) and
+where its access lives (a token file, a kubeconfig), and nothing else. `~/.ci-skills/target.toml` is the default; a
+project's `.ci-skills/target.toml` overrides the same keys (`catalog.TARGET_PROTOCOL` picks the file). Pods, nodes,
+namespaces, pipelines, milestones and merge requests are read from the live system, never declared in the file. Adding
+an authority is one `Table` in the contract, with its endpoint and its access.
+
+| Part | Value |
+| --- | --- |
+| Capability | refuse a target-file key that is not a declared endpoint or access key |
+| Owner | contract `ci-skills/lib/python/core/endpoints.py`; gate `tools/skillkit/endpoint_gate.py` |
+| Entrypoint | `gates/gate-ci-skills-endpoints.py --base REF [--staged]`; job `gate-ci-skills-endpoints` |
+| Result | `ci_skills_endpoints` (`schemas/ci_skills_endpoints.schema.json`) |
+| Read-back | the job validates its own record against the schema; `gh pr checks <pr>` for the exact head |
+
+- `TARGET_CONTRACT` is the one declaration: `core/target.py` accepts exactly its keys, and `catalog.AUTHORITIES` is
+  derived from it. The gate's document reading and base comparison are maintenance-only, so they live in
+  `tools/skillkit/` (CI10-PHASES, placement), outside the installed skill and its digest; this gate creates that
+  package.
+- The job is defined in `.github/workflows/gate-ci-skills-endpoints.yml`, a workflow of its own: `validate.yml` is
+  G1's, and its policy test (`tests/python/test_validate_workflow_policy.py`) expects G1's full step list there.
+- Output: a summary by default, `--json` or `--yaml` for agents. Exit 0 `PASS`, 1 `FAIL`, 2 the gate could not run
+  (an unreadable document, a crash).
+- Blocking: on GitHub the job is visible on every pull request, but it blocks a merge only once `main`'s branch
+  protection requires the `gate-ci-skills-endpoints` check; protection is disabled today (G0), and requiring the
+  check is our protection setting, not this repository's content.
+
+Documents checked: `target.toml.template`, and each fenced TOML block (```` ``` ```` or `~~~`, any case, indented or
+not) in `README.md` and `ci-skills/**/*.md`. A block that names its target file at top level is a project binding
+(`core/project_binding.py`), another format, and is skipped. Paths with a `vendor`, `third-party` or `external`
+segment hold upstream text and are skipped. Phase plans under `docs/` propose future keys and are not checked.
+Commented-out keys count, under any number of `#`, quoted or not: they show a reader what to write.
+
+Rules, each a finding's `rule`:
+
+- `undeclared`: a document names a table or key the contract does not declare;
+- `unpaired`: an authority declares no endpoint key or no access key;
+- `undocumented`: a declared table or key is missing from `target.toml.template`;
+- `value_introduced`: a key whose role is `value` is in the template now and was not at `--base`;
+- `base_unreadable`: `--base` names no commit, or the template cannot be read there, so the check fails closed;
+- `parse_error`: the active TOML of a document does not parse.
+
+The job's base is `github.event.pull_request.base.sha || github.event.before`, the expression the deleted workflow used
+(`1108cca^:.github/workflows/validate.yml:22`). To block a commit, a repository-local `pre-commit` hook runs
+`gates/gate-ci-skills-endpoints.py --staged`, which reads the staged index (what the commit records), not the working
+tree. Installing hooks is CI04-HOOKS's; until then the check runs on GitHub only. When G1's `scripts/check.sh`
+exists, this gate becomes one of its gates.
+
+Exhibit, a key added to the template on top of `main`:
+
+```text
+$ gates/gate-ci-skills-endpoints.py --base HEAD
+FAIL: 3 documents checked against base HEAD
+accepted values that are not pointers (read them at run time): github.required_checks, gitlab.runner_id, kubernetes.node_diagnostics.node, ...
+undeclared: gitlab.namespace (target.toml.template:51) not an endpoint or access key of the target contract
+```
+
+```json
+{
+  "kind": "ci_skills_endpoints",
+  "schema_version": "1.0",
+  "status": "FAIL",
+  "base": "HEAD",
+  "documents": ["target.toml.template:1", "ci-skills/references/access.md:65", "ci-skills/references/project-binding.md:26"],
+  "value_keys": ["github.required_checks", "gitlab.runner_id", "kubernetes.node_diagnostics.node"],
+  "findings": [
+    {
+      "rule": "undeclared",
+      "path": "gitlab.namespace",
+      "source": "target.toml.template",
+      "line": 51,
+      "detail": "not an endpoint or access key of the target contract"
+    }
+  ]
+}
+```
+
+`value_keys` (shortened above; the full list is eleven) are the keys accepted today that are values, not pointers. A
+current command still reads each, so the gate lists them instead of failing; each goes when its command reads the value
+at run time:
+
+- `github.required_checks`: `tests/acceptance/expected.toml:26` already declares the same list;
+- `gitlab.runner_id`: readable from the runners API;
+- `kubernetes.node_diagnostics.*`: the node, Pod and mount are discoverable on the node; on OpenShift
+  `oc adm node-logs` reads the journal with no Pod route (`oc adm node-logs --help`, client 4.22.9).
 
 ## Gaps
 
@@ -63,6 +152,8 @@ Each gap names the requirement, the failure it prevents, and the smallest change
 ### G0. Gate route (D-GATE)
 
 - **Decided 2026-10-06, D-GATE (CI10-PHASES, Decisions taken):** none for now; the gap is recorded, not closed.
+- **2026-10-07:** `gate-ci-skills-endpoints` runs as its own workflow (section gate-ci-skills-endpoints), the first
+  check since D-GATE. It does not restore `validate.yml`, which stays G1's.
 - **Facts, read back from GitHub on 2026-10-06.** `.github/workflows/validate.yml` was deleted in PR #27 (commit
   `1108cca`); `.github/workflows` answers 404; branch protection on `main` is disabled (`gh api` 404); no `validate`
   workflow exists; the committed receipts no longer match the skill digest (`tools/check_live_acceptance.py` reports
