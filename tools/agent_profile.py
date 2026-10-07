@@ -1,6 +1,8 @@
 """Install the agent host and bundled skills declared by the toolchain manifest.
 
 Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -21,12 +24,30 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 
 
+class AgentProfileReason(StrEnum):
+    """Stable installer failure reasons shared by the profile and CLI."""
+
+    PROFILE_INVALID = "agent_profile_invalid"
+    DESTINATION_UNSAFE = "agent_destination_unsafe"
+    REPOSITORY_UNAVAILABLE = "agent_repository_unavailable"
+    SKILL_CONFLICT = "agent_skill_conflict"
+    SKILL_INVALID = "agent_skill_invalid"
+    COMMAND_FAILED = "agent_command_failed"
+    GLAB_UNAVAILABLE = "glab_unavailable"
+    GLAB_INCOMPATIBLE = "glab_incompatible"
+    GLAB_REPLAN_REQUIRED = "glab_replan_required"
+    BREW_UNAVAILABLE = "brew_unavailable"
+    PACKAGE_MANAGER_UNAVAILABLE = "package_manager_unavailable"
+    DEADLINE_EXPIRED = "install_deadline_expired"
+    FINGERPRINT_CHANGED = "installation_fingerprint_changed"
+
+
 class AgentProfileError(ValueError):
     """Report a safe, classified agent-profile installation failure."""
 
     def __init__(
         self,
-        reason: str,
+        reason: AgentProfileReason,
         command: list[str] | None = None,
         exit_code: int | None = None,
     ):
@@ -37,21 +58,24 @@ class AgentProfileError(ValueError):
         :param exit_code: Exit code when the process ran.
         """
         super().__init__(reason)
+        self.reason = reason
         self.command = command
         self.exit_code = exit_code
 
 
 class AgentProfile:
-    """Resolve and install the manifest's agent profile for one checkout."""
+    """Install the source agent profile into the caller's repository."""
 
-    def __init__(self, root: Path):
-        """Load and validate the checkout's agent toolchain contract.
+    def __init__(self, root: Path, repository_root: Path):
+        """Load the source contract and resolve a repository skill destination.
 
-        :param root: Checkout containing the manifest and its schema.
+        :param root: Source checkout containing the manifest and schema.
+        :param repository_root: Root of the repository invoking the installer.
         :raises AgentProfileError: If the contract or destination is invalid.
         :raises OSError: If the manifest or schema cannot be read.
         """
         self.root = root.resolve()
+        self.repository_root = repository_root.resolve()
         self.manifest = self.root / "toolchain-dependencies.json"
         raw = self.manifest.read_bytes()
         self.digest = hashlib.sha256(raw).hexdigest()
@@ -65,37 +89,37 @@ class AgentProfile:
             Draft202012Validator.check_schema(schema)
             Draft202012Validator(schema).validate(data)
         except (SchemaError, ValidationError) as exc:
-            raise AgentProfileError("agent_profile_invalid") from exc
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID) from exc
         profile = data["profiles"]["agent"]
         hosts = profile["host"]
         skills = profile["skills"]
         relative = Path(profile["skillsDirectory"])
         if hosts != ["glab"] or not isinstance(skills, list) or not skills:
-            raise AgentProfileError("agent_profile_invalid")
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
         if any(
             not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", name)
             for name in skills
         ):
-            raise AgentProfileError("agent_profile_invalid")
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
         if relative.is_absolute() or any(
             part in {"", ".", ".."} for part in relative.parts
         ):
-            raise AgentProfileError("agent_profile_invalid")
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
         dependencies = [
             entry for entry in data["dependencies"] if entry.get("name") == "glab"
         ]
         if len(dependencies) != 1 or dependencies[0].get("commands") != ["glab"]:
-            raise AgentProfileError("agent_profile_invalid")
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
         self.packages = {
             manager: dependencies[0].get(manager, [])
             for manager in ("brew", "apt", "yum")
         }
         if any(packages != ["glab"] for packages in self.packages.values()):
-            raise AgentProfileError("agent_profile_invalid")
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
         if dependencies[0].get("probe") != ["glab", "skills", "get", skills[0]]:
-            raise AgentProfileError("agent_profile_invalid")
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
         self.skills = skills
-        self.destination = self.root / relative
+        self.destination = self.repository_root / relative
         self._check_destination()
 
     @staticmethod
@@ -117,7 +141,7 @@ class AgentProfile:
             result: dict[str, Any] = {}
             for key, value in pairs:
                 if key in result:
-                    raise AgentProfileError("agent_profile_invalid")
+                    raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
                 result[key] = value
             return result
 
@@ -127,26 +151,26 @@ class AgentProfile:
             :param _value: Nonfinite token supplied by the decoder.
             :raises AgentProfileError: Every invocation rejects the token.
             """
-            raise AgentProfileError("agent_profile_invalid")
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
 
         try:
             parsed = json.loads(raw, object_pairs_hook=unique, parse_constant=nonfinite)
         except (UnicodeError, ValueError) as exc:
-            raise AgentProfileError("agent_profile_invalid") from exc
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID) from exc
         if not isinstance(parsed, dict):
-            raise AgentProfileError("agent_profile_invalid")
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
         return parsed
 
     def _check_destination(self) -> None:
-        """Reject symlinks in the checkout-local destination chain.
+        """Reject symlinks in the caller repository's destination chain.
 
         :raises AgentProfileError: If a component redirects or is not a directory.
         """
-        current = self.root
-        for part in self.destination.relative_to(self.root).parts:
+        current = self.repository_root
+        for part in self.destination.relative_to(self.repository_root).parts:
             current = current / part
             if current.is_symlink() or (current.exists() and not current.is_dir()):
-                raise AgentProfileError("agent_destination_unsafe")
+                raise AgentProfileError(AgentProfileReason.DESTINATION_UNSAFE)
 
     @staticmethod
     def _run(command: list[str], deadline: float) -> bytes:
@@ -159,7 +183,7 @@ class AgentProfile:
         """
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise AgentProfileError("install_deadline_expired")
+            raise AgentProfileError(AgentProfileReason.DEADLINE_EXPIRED)
         try:
             completed = subprocess.run(
                 command,
@@ -168,10 +192,10 @@ class AgentProfile:
                 timeout=remaining,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise AgentProfileError("agent_command_failed", command) from exc
+            raise AgentProfileError(AgentProfileReason.COMMAND_FAILED, command) from exc
         if completed.returncode:
             raise AgentProfileError(
-                "agent_command_failed", command, completed.returncode
+                AgentProfileReason.COMMAND_FAILED, command, completed.returncode
             )
         return completed.stdout
 
@@ -193,10 +217,10 @@ class AgentProfile:
         """
         if platform.system() == "Darwin":
             if not shutil.which("brew"):
-                raise AgentProfileError("brew_unavailable")
+                raise AgentProfileError(AgentProfileReason.BREW_UNAVAILABLE)
             return ["brew", "install", *self.packages["brew"]]
         if platform.system() != "Linux":
-            raise AgentProfileError("package_manager_unavailable")
+            raise AgentProfileError(AgentProfileReason.PACKAGE_MANAGER_UNAVAILABLE)
         if shutil.which("apt-get"):
             command = ["apt-get", "install", "-y", *self.packages["apt"]]
         elif shutil.which("dnf"):
@@ -204,10 +228,10 @@ class AgentProfile:
         elif shutil.which("yum"):
             command = ["yum", "install", "-y", *self.packages["yum"]]
         else:
-            raise AgentProfileError("package_manager_unavailable")
+            raise AgentProfileError(AgentProfileReason.PACKAGE_MANAGER_UNAVAILABLE)
         if os.geteuid() != 0:
             if not shutil.which("sudo"):
-                raise AgentProfileError("package_manager_unavailable")
+                raise AgentProfileError(AgentProfileReason.PACKAGE_MANAGER_UNAVAILABLE)
             command = ["sudo", "-n", *command]
         return command
 
@@ -230,21 +254,23 @@ class AgentProfile:
                     )
                 except AgentProfileError as exc:
                     raise AgentProfileError(
-                        "glab_incompatible", exc.command, exc.exit_code
+                        AgentProfileReason.GLAB_INCOMPATIBLE,
+                        exc.command,
+                        exc.exit_code,
                     ) from exc
                 bundled[name] = hashlib.sha256(content).hexdigest()
             target = self.destination / name
             skill_file = target / "SKILL.md"
             if target.is_symlink() or skill_file.is_symlink():
-                raise AgentProfileError("agent_destination_unsafe")
+                raise AgentProfileError(AgentProfileReason.DESTINATION_UNSAFE)
             if target.exists():
                 if not target.is_dir() or not skill_file.is_file():
-                    raise AgentProfileError("agent_skill_conflict")
+                    raise AgentProfileError(AgentProfileReason.SKILL_CONFLICT)
                 if glab and skill_file.read_bytes() != content:
-                    raise AgentProfileError("agent_skill_conflict")
-                actions[name] = "verify" if not glab else "ready"
+                    raise AgentProfileError(AgentProfileReason.SKILL_CONFLICT)
+                actions[name] = "pending" if not glab else "ready"
             else:
-                actions[name] = "install"
+                actions[name] = "pending" if not glab else "install"
         host_action = (
             "ready" if glab else "install: " + " ".join(self._host_install_command())
         )
@@ -257,7 +283,7 @@ class AgentProfile:
         }
 
     def apply(self, expected_plan: dict[str, Any], deadline: float) -> dict[str, Any]:
-        """Install glab and its bundled skills, preserving existing content.
+        """Bootstrap glab or install previously planned bundled skills.
 
         :param expected_plan: Agent state from the confirmed plan.
         :param deadline: Monotonic deadline for all host commands.
@@ -265,22 +291,23 @@ class AgentProfile:
         :raises AgentProfileError: If the plan changed or an install fails.
         """
         if self.plan(deadline) != expected_plan:
-            raise AgentProfileError("installation_fingerprint_changed")
+            raise AgentProfileError(AgentProfileReason.FINGERPRINT_CHANGED)
         self._check_destination()
         if not shutil.which("glab"):
             self._run(self._host_install_command(), deadline)
             if not shutil.which("glab"):
-                raise AgentProfileError("glab_unavailable")
+                raise AgentProfileError(AgentProfileReason.GLAB_UNAVAILABLE)
+            raise AgentProfileError(AgentProfileReason.GLAB_REPLAN_REQUIRED)
         installed: dict[str, str] = {}
         for name in self.skills:
             expected = self._bundled_skill(name, deadline)
             target = self.destination / name
             skill_file = target / "SKILL.md"
             if target.is_symlink() or skill_file.is_symlink():
-                raise AgentProfileError("agent_destination_unsafe")
+                raise AgentProfileError(AgentProfileReason.DESTINATION_UNSAFE)
             if target.exists():
                 if not skill_file.is_file() or skill_file.read_bytes() != expected:
-                    raise AgentProfileError("agent_skill_conflict")
+                    raise AgentProfileError(AgentProfileReason.SKILL_CONFLICT)
                 installed[name] = "ready"
                 continue
             self.destination.mkdir(parents=True, exist_ok=True)
@@ -299,14 +326,14 @@ class AgentProfile:
                     or staged_file.is_symlink()
                     or not staged_file.is_file()
                 ):
-                    raise AgentProfileError("agent_skill_invalid")
+                    raise AgentProfileError(AgentProfileReason.SKILL_INVALID)
                 if staged_file.read_bytes() != expected:
-                    raise AgentProfileError("agent_skill_invalid")
+                    raise AgentProfileError(AgentProfileReason.SKILL_INVALID)
                 if target.exists() or target.is_symlink():
-                    raise AgentProfileError("agent_skill_conflict")
+                    raise AgentProfileError(AgentProfileReason.SKILL_CONFLICT)
                 os.rename(staged, target)
             if skill_file.read_bytes() != expected:
-                raise AgentProfileError("agent_skill_invalid")
+                raise AgentProfileError(AgentProfileReason.SKILL_INVALID)
             installed[name] = "installed"
         return {
             "host": "ready",

@@ -123,22 +123,26 @@ conda create -n ci-skills python=3.11
 conda run -n ci-skills python -m pip install -r requirements.txt
 ```
 
-**2. Install the `ci-skills` skill.** Activate the `ci-skills` conda environment. From a clean committed checkout,
-inspect the installer plan, set `FINGERPRINT` to its printed value, then install the package:
+**2. Install the `ci-skills` skill.** Activate the `ci-skills` conda environment. From the repository where
+Codex should find `glab-stack`, point to a clean committed ci-skills checkout, inspect the plan, then install:
 
 ```bash
 conda activate ci-skills
-./install.sh --dry-run
-FINGERPRINT="$(./install.sh --dry-run | jq -r '.fingerprint')"
-./install.sh --apply --confirm-install "$FINGERPRINT" --timeout 600s
+CI_SKILLS_INSTALLER="$PWD/install.sh"
+cd /path/to/consumer-repository
+"$CI_SKILLS_INSTALLER" --dry-run
+FINGERPRINT="$("$CI_SKILLS_INSTALLER" --dry-run | jq -r '.fingerprint')"
+"$CI_SKILLS_INSTALLER" --apply --confirm-install "$FINGERPRINT" --timeout 600s
 ```
 
 `install.sh` forwards to [the copy installer](tools/install_ci_skills.py). It installs at
 `$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The installed copy is
-independent of the checkout. It also installs the bundled `glab-stack` skill under `.agents/skills` in this checkout.
+independent of the checkout. It also installs the bundled `glab-stack` skill under `$REPO_ROOT/.agents/skills` in the
+repository where you run the installer.
 When `glab` is missing, it installs the declared package with Homebrew on macOS or `apt-get`, `dnf`, or `yum` on Linux.
 If Homebrew is missing, the installer points to its installation instructions. The package's
 [SKILL.md](ci-skills/SKILL.md) routes agent requests to its tools.
+If `glab` was missing, the first apply installs it and requests a new dry-run fingerprint before installing its skill.
 
 **3. Authenticate, as yourself.** The skill ships no credentials and grants no access. Provide the identity needed by
 the commands you run: a Kubernetes administrator for cluster diagnostics, a GitLab instance administrator for GitLab

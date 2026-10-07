@@ -1,15 +1,20 @@
-"""Focused checks for the agent profile used by ``install.sh``."""
+"""Check the agent profile used by ``install.sh``.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import time
 from pathlib import Path
 
 import pytest
-
-from tests.python.conftest import REPO_ROOT, load_module
+from conftest import REPO_ROOT, load_module
 
 
 def _profile(tmp_path: Path):
@@ -49,17 +54,20 @@ def _profile(tmp_path: Path):
         schema / "toolchain-dependencies.schema.json",
     )
     module = load_module("agent_profile", REPO_ROOT / "tools" / "agent_profile.py")
-    return module, module.AgentProfile(tmp_path)
+    repository_root = tmp_path / "consumer"
+    repository_root.mkdir()
+    return module, module.AgentProfile(tmp_path, repository_root)
 
 
 def test_missing_glab_uses_brew_then_verifies_installed_skill(tmp_path, monkeypatch):
-    """A missing host CLI follows the manifest and reads back skill bytes.
+    """Install glab, then require a plan that binds its bundled skill bytes.
 
     :param tmp_path: Isolated checkout root.
     :param monkeypatch: Host command fixture controller.
     """
     module, profile = _profile(tmp_path)
-    state = {"glab": False}
+    assert profile.destination == tmp_path / "consumer" / ".agents" / "skills"
+    state = {"glab": False, "bundle": b"bundled skill\n"}
     commands = []
     monkeypatch.setattr(module.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(
@@ -79,15 +87,32 @@ def test_missing_glab_uses_brew_then_verifies_installed_skill(tmp_path, monkeypa
         elif command[:3] == ["glab", "skills", "install"]:
             skill = Path(command[5]) / "glab-stack"
             skill.mkdir()
-            (skill / "SKILL.md").write_bytes(b"bundled skill\n")
+            (skill / "SKILL.md").write_bytes(state["bundle"])
         elif command[:3] == ["glab", "skills", "get"]:
-            return b"bundled skill\n"
+            return state["bundle"]
         return b""
 
     monkeypatch.setattr(profile, "_run", run)
-    result = profile.apply(profile.plan(), time.monotonic() + 30)
-
+    first_plan = profile.plan()
+    with pytest.raises(module.AgentProfileError, match="glab_replan_required"):
+        profile.apply(first_plan, time.monotonic() + 30)
     assert commands[0] == ["brew", "install", "glab"]
+    assert not (profile.destination / "glab-stack").exists()
+
+    second_plan = profile.plan()
+    assert (
+        second_plan["bundled"]["glab-stack"]
+        == hashlib.sha256(state["bundle"]).hexdigest()
+    )
+    state["bundle"] = b"changed skill\n"
+    with pytest.raises(
+        module.AgentProfileError, match="installation_fingerprint_changed"
+    ):
+        profile.apply(second_plan, time.monotonic() + 30)
+    assert not (profile.destination / "glab-stack").exists()
+    state["bundle"] = b"bundled skill\n"
+    result = profile.apply(second_plan, time.monotonic() + 30)
+
     assert result["skills"] == {"glab-stack": "installed"}
     assert (
         profile.destination / "glab-stack" / "SKILL.md"
@@ -143,7 +168,7 @@ def test_existing_glab_without_bundled_skill_blocks_plan(tmp_path, monkeypatch):
     monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/glab")
 
     def incompatible(_command, _deadline):
-        raise module.AgentProfileError("agent_command_failed")
+        raise module.AgentProfileError(module.AgentProfileReason.COMMAND_FAILED)
 
     monkeypatch.setattr(profile, "_run", incompatible)
     with pytest.raises(module.AgentProfileError, match="glab_incompatible"):
@@ -174,7 +199,7 @@ def test_manifest_schema_rejects_invalid_contracts(tmp_path, invalid):
     path.write_text(json.dumps(data))
 
     with pytest.raises(module.AgentProfileError, match="agent_profile_invalid"):
-        module.AgentProfile(tmp_path)
+        module.AgentProfile(tmp_path, tmp_path / "consumer")
 
 
 @pytest.mark.parametrize("raw", (b'{"a":1,"a":2}', b'{"a":NaN}'))

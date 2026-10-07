@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Install the repository's CI skill into a local Codex skills directory."""
+"""Install the repository's CI skill into a local Codex skills directory.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -30,8 +35,8 @@ SOURCE = Path(__file__).resolve().parents[1] / SKILL_NAME
 sys.path.insert(0, str(SOURCE / "lib" / "python"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from agent_profile import AgentProfile, AgentProfileError
-from core.provenance import _included, skill_identity, tree_digest
+from agent_profile import AgentProfile, AgentProfileError, AgentProfileReason
+from core.provenance import _git, _included, skill_identity, tree_digest
 
 RECOVERY = {
     "skill_manifest_missing": "Use a checkout containing ci-skills/SKILL.md.",
@@ -44,20 +49,22 @@ RECOVERY = {
     "install_recovery_unsafe": "Inspect the installed skill and transaction journal before changing either.",
     "install_io_failure": "Run --recover --apply --confirm-recover, then retry installation.",
     "install_lock_timeout": "Wait for the other installer process to finish, then retry.",
-    "install_deadline_expired": "Make a new plan and choose a longer --timeout.",
-    "installation_fingerprint_changed": "Make a new plan from the current committed source and confirm it.",
+    AgentProfileReason.DEADLINE_EXPIRED: "Make a new plan and choose a longer --timeout.",
+    AgentProfileReason.FINGERPRINT_CHANGED: "Make a new plan from the current committed source and confirm it.",
     "installed_digest_mismatch": "Inspect source changes and retry from a clean checkout.",
     "pyyaml_unavailable": "Install PyYAML in the project environment or select --json.",
     "log_file_unwritable": "Inspect the requested log path and installed destination before retrying.",
-    "agent_profile_invalid": "Repair the agent profile in toolchain-dependencies.json.",
-    "agent_destination_unsafe": "Choose a real checkout-local agent skills directory.",
-    "agent_skill_conflict": "Inspect the existing agent skill; its bytes differ from the glab bundle.",
-    "agent_skill_invalid": "Inspect the glab bundle and retry without replacing the existing skill.",
-    "agent_command_failed": "Run the reported command on this host to inspect its error, then retry.",
-    "glab_unavailable": "Install glab using the host package manager, then retry.",
-    "glab_incompatible": "Upgrade glab to a release with the declared bundled skill, then rerun the plan.",
-    "brew_unavailable": "Install Homebrew from https://brew.sh/, then rerun the installer.",
-    "package_manager_unavailable": "Install glab with this Linux distribution's package manager, then retry.",
+    AgentProfileReason.PROFILE_INVALID: "Repair the agent profile in toolchain-dependencies.json.",
+    AgentProfileReason.DESTINATION_UNSAFE: "Choose a real repository-local agent skills directory.",
+    AgentProfileReason.REPOSITORY_UNAVAILABLE: "Run the installer from the repository that will receive the agent skill.",
+    AgentProfileReason.SKILL_CONFLICT: "Inspect the existing agent skill; its bytes differ from the glab bundle.",
+    AgentProfileReason.SKILL_INVALID: "Inspect the glab bundle and retry without replacing the existing skill.",
+    AgentProfileReason.COMMAND_FAILED: "Run the reported command on this host to inspect its error, then retry.",
+    AgentProfileReason.GLAB_UNAVAILABLE: "Install glab using the host package manager, then retry.",
+    AgentProfileReason.GLAB_INCOMPATIBLE: "Upgrade glab to a release with the declared bundled skill, then rerun the plan.",
+    AgentProfileReason.GLAB_REPLAN_REQUIRED: "glab is installed. Rerun --dry-run and confirm the new fingerprint to install its skill.",
+    AgentProfileReason.BREW_UNAVAILABLE: "Install Homebrew from https://brew.sh/, then rerun the installer.",
+    AgentProfileReason.PACKAGE_MANAGER_UNAVAILABLE: "Install glab with this Linux distribution's package manager, then retry.",
 }
 
 
@@ -613,7 +620,10 @@ def main() -> int:
         plan = install(SOURCE, skills_dir, dry_run=True, upgrade=args.upgrade)
         if plan["status"] == "DRY_RUN":
             try:
-                agent_profile = AgentProfile(SOURCE.parent)
+                repository = _git(Path.cwd(), "rev-parse", "--show-toplevel")
+                if repository is None:
+                    raise AgentProfileError(AgentProfileReason.REPOSITORY_UNAVAILABLE)
+                agent_profile = AgentProfile(SOURCE.parent, Path(repository))
                 plan["agent"] = agent_profile.plan()
             except (
                 OSError,
@@ -623,9 +633,9 @@ def main() -> int:
                 json.JSONDecodeError,
             ) as exc:
                 reason = (
-                    str(exc)
+                    exc.reason.value
                     if isinstance(exc, AgentProfileError)
-                    else "agent_profile_invalid"
+                    else AgentProfileReason.PROFILE_INVALID.value
                 )
                 plan.update(
                     status="BLOCKED",
@@ -668,7 +678,7 @@ def main() -> int:
                         confirmed_fingerprint(core_fingerprint, plan["agent"])
                         != plan["fingerprint"]
                     ):
-                        raise AgentProfileError("installation_fingerprint_changed")
+                        raise AgentProfileError(AgentProfileReason.FINGERPRINT_CHANGED)
                     agent_result = agent_profile.apply(plan["agent"], started + seconds)
                     result = _install_unlocked(
                         SOURCE,
@@ -681,9 +691,9 @@ def main() -> int:
                     result["agent"] = agent_result
             except (OSError, ValueError) as exc:
                 reason = (
-                    str(exc)
+                    exc.reason.value
                     if isinstance(exc, AgentProfileError)
-                    else "agent_command_failed"
+                    else AgentProfileReason.COMMAND_FAILED.value
                 )
                 result = {
                     **plan,
