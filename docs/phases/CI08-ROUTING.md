@@ -4,7 +4,7 @@ Status: proposed. Order and dependencies: CI10-PHASES, Phases.
 
 ## Goal
 
-An agent reaches the one file it needs in three hops and opens a file only
+An agent reaches the one file it needs one level per call (CI09-REFERENCE section 3) and opens a file only
 when its tags match, instead of loading every skill up front.
 
 ## Why
@@ -26,18 +26,15 @@ The last two rows use Python's default JSON separators. The vendored `glab`
 skills are not in the tree (planned, CI05-VENDOR), so the table no longer
 carries their sizes.
 
-## Three hops
+## Navigator and routing
 
-The hops are implemented by `ci-skills/bin/reference.py next` (planned,
-CI09-REFERENCE, section 3, measured); this phase supplies the tags it reads
-and the `SKILL.md` sentence that points at it.
+The navigator is `ci-skills/bin/reference.py next` (planned, CI09-REFERENCE,
+section 3); this phase supplies the `SKILL.md` routing around it, not the
+navigator's data.
 
-- **Sources.** The navigator's tree is derived (CI09-REFERENCE, section 3)
-  from the reference indexes and from `tools.json`, which
-  `tools/render_manifest.py` renders from `ci-skills/lib/core/catalog.py`:
-  its `routing` phrases, `use_when`, `subcommands` and each command's
-  `requires_authorities`. This phase derives the tags in the catalog, once,
-  so `tools.json` carries them and the navigator reads them.
+- **Sources.** CI09-REFERENCE, section 3 (Authority, Declarations) is the
+  single specification of the navigator's declarations, output and
+  rendering; this phase adds none.
 - **Installed copies.** CI09-REFERENCE lists `ci-skills/bin/reference.py`
   among the installed entrypoints (section 2, Block, knowledge kind), so an
   installed copy will answer `next` without a checkout. `bin/ci-skills list`
@@ -46,16 +43,9 @@ and the `SKILL.md` sentence that points at it.
 - **Matching `load_when`** (stated once, here). A
   `load_when` entry matches in this order: an exact status token against a
   report's `status` (for example `BLOCKED`); else a case-insensitive
-  substring over the task text; then a case-insensitive substring over the
-  `load_when` entries of a reference's `index.json` (planned,
-  CI09-REFERENCE), which are full keyword paths. The ranking of `next` choices is the navigator's own
-  (CI09-REFERENCE, section 3, Matching).
-- **Example.** CI09-REFERENCE's measured menus (section 3):
-  - `next gitlab ci-yaml trigger`, 904 bytes: five children and the `get`
-    leaf;
-  - `next gitlab pipeline`, 622 bytes: `needs:pipeline`,
-    `needs:pipeline:job`, `gitlab_job.py --describe` and
-    `gitlab_pipeline.py --describe`.
+  substring over the task text. The navigator places reference sections by
+  CI09-REFERENCE section 3, Declarations, not by `load_when`.
+- **Example.** The walk is CI09-REFERENCE section 3, Renders 1 to 6.
 
   An agent with a pipeline question runs `next gitlab pipeline`, then the
   `next` or leaf it chose; `references/access.md` opens only on `BLOCKED`.
@@ -73,8 +63,8 @@ and the `SKILL.md` sentence that points at it.
 ## Changes to `ci-skills`
 
 1. `ci-skills/lib/core/catalog.py`: tags derived in the catalog, consumed
-   from CI09-REFERENCE's `REFERENCES`, which records per reference its
-   `kind` (`operations` or `knowledge`), `index` path and `domain`. For each
+   from CI09-REFERENCE's reference declarations (section 3, Declarations:
+   `REFERENCES` and `REFERENCE_SECTIONS`). For each
    reference this phase adds:
    - the tags;
    - the `load_when` entries;
@@ -85,19 +75,16 @@ and the `SKILL.md` sentence that points at it.
 
    Each command declares its `uses` too. Everything renders into
    `tools.json` with the rest of the catalog. `depends_on` is derived from
-   the `points_to` values, so the link to `glab` is declared once. The
-   navigator reports each choice's size as `bytes` (CI09-REFERENCE,
-   section 3); for the references in the table above those are the measured
-   sizes. How a tag is derived for a reference that has no index
+   the `points_to` values, so the link to `glab` is declared once.
+   How a tag is derived for a reference that has no index
    (`access.md`, `project-binding.md`, and `reading-reports.md`, planned,
    this phase) is not stated by any phase document; the gap is this phase's
    to close before step 1.
 2. Routing grows from symptom → command to symptom → command, reference and
    tags.
 3. `SKILL.md` becomes the router: access first, one sentence that points at
-   `ci-skills/bin/reference.py next` and says that `index.json` and
-   `tools.json` are inputs of the tool, never reading material
-   (CI09-REFERENCE, Loading, measured), the routing table, the option tiers,
+   `ci-skills/bin/reference.py next` (the sentence of CI09-REFERENCE
+   section 3, Steps), the routing table, the option tiers,
    and "load only what matches".
    - Sections 4 to 6 (statuses, correlation, persisting evidence) move
      unchanged to `references/reading-reports.md` (planned, this phase).
@@ -227,8 +214,7 @@ request's final package bytes.
    - Live: the receipt of parts 4 and 5, captured on this laptop (D-SMOKE).
 3. *Smoke*: this phase changes no live behaviour. The static read-back, on
    the D-SMOKE executor: `ci-skills/bin/reference.py next gitlab --json`
-   lists the `commands` area this phase's tags derive, beside
-   CI09-REFERENCE's `ci-yaml` (section 3, measured), and
+   matches CI09-REFERENCE section 3, Render 2, and
    `wc -l ci-skills/SKILL.md` reads back fewer than 500 lines (229 on
    2026-10-06, before the split).
 4. *Evidence*: no receipt for the static read-back; the static evidence is

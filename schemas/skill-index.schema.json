@@ -12,7 +12,8 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0"
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
     },
     "kind": {
       "const": "skill_index"

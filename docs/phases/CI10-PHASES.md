@@ -41,7 +41,7 @@ second implementation of a behaviour the library has is a defect.
 | CI05-VENDOR | vendored trees: `glab` skills and upstream references, one lock | CI03-GATES, CI07-SCHEMA, CI02-CLI |
 | CI01-CATALOG | discover, `list`, `get`, `install` | CI05-VENDOR, CI07-SCHEMA, CI02-CLI |
 | CI06-TESTS | the CI-only test command and coverage report | CI03-GATES, CI01-CATALOG |
-| CI09-REFERENCE | tool operations, knowledge references, the navigator | CI01, CI07, CI05, CI02 |
+| CI09-REFERENCE | tool operations, knowledge references, the navigator | CI01, CI07, CI05, CI02 (navigator: block 0) |
 | CI08-ROUTING | tags in the catalog; the `SKILL.md` router (`REFERENCES` is CI09's) | CI05, CI01, CI09 |
 | CI11-TOOLS | the tool catalogue and the port of the source repo's scripts | CI02-CLI, CI07-SCHEMA, CI09-REFERENCE |
 | CI04-HOOKS | advisory local hooks | CI03-GATES, CI05-VENDOR |
