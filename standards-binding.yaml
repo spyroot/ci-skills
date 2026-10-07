@@ -25,8 +25,8 @@ spec:
     - documentation-rules
     - software-design
     - python-standards
-  providers: []
+  providers: [ ]
   projectAdditions:
     - .coordination/pr-coordinator-policy.md
     - TEAM_GUIDE.md
-  exceptions: []
+  exceptions: [ ]

@@ -586,7 +586,7 @@ implicit files, which rules out a `$TMPDIR` cache. Two layout choices follow, ea
 ## Proposal B: finish the CIxx re-adjustment and add grounded detail (one PR, docs only)
 
 Naming rule, applied everywhere: the phase id is the filename stem, `CI01-CATALOG` ... `CI10-PHASES`; bodies,
-titles, dependency lines and cross-references use that id; the former ids and un-numbered `CI-*` disappear. Observed today
+titles, dependency lines and cross-references use that id; `CI-*` and un-numbered `CI-*` disappear. Observed today
 [fact: `git grep`]: 24 stale names in `CI01-CATALOG.md`, 9 in `CI02-CLI.md`, 5 in `CI03-GATES.md`, 3 in `CI04-HOOKS.md`,
 22 in `CI05-VENDOR.md`, 11 in `CI06-TESTS.md`, 9 in `CI07-SCHEMA.md`, 15 in `CI08-ROUTING.md`, 12 in `CI09-REFERENCE.md`,
 25 in `CI10-PHASES.md`; titles of CI05-CI09 still read `CI-VENDOR` etc.
@@ -608,7 +608,7 @@ inputs, outputs, tokens, order, bound, gate or read-back):
 | `CI03-GATES.md` | no | no | 31 | 4 | 21 |
 | `CI04-HOOKS.md` | no | yes | 24 | 5 | 22 |
 | `CI05-VENDOR.md` | yes (`CI-VENDOR`) | yes | 47 | 3 | 32 |
-| `CI06-TESTS.md` | yes (`CI-TESTS`, "every former-id phase") | no | 32 | 6 | 28 |
+| `CI06-TESTS.md` | yes (`CI-TESTS`, "every GAL phase") | no | 32 | 6 | 28 |
 | `CI07-SCHEMA.md` | yes (`CI-SCHEMA`) | yes | 28 | 0 | 27 |
 | `CI08-ROUTING.md` | yes (`CI-ROUTING`) | yes | 36 | 4 | 19 |
 | `CI09-REFERENCE.md` | yes (`CI-REFERENCE`) | no | 26 | 3 | 18 |
