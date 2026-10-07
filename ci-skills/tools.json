@@ -462,40 +462,65 @@
     },
     "gitlab_job.py": {
       "capabilities": [
-        "filters_records"
+        "filters_records",
+        "time_ranged"
       ],
       "execution_surface": "selected authority API",
       "options": [
         "--binding",
         "--describe",
         "--dry-run",
+        "--from",
         "--human",
         "--job-url",
         "--json",
+        "--last",
+        "--limit",
         "--log-file",
         "--log-format",
         "--log-level",
+        "--name-glob",
         "--output-dir",
+        "--pipeline-id",
+        "--project",
+        "--ref",
         "--revision",
         "--run-id",
         "--search",
+        "--status",
+        "--stuck-after",
         "--target",
+        "--to",
         "--yaml"
       ],
-      "purpose": "Read one CI job with its pipeline, runner and bounded trace.",
+      "purpose": "Get one CI job or list bounded jobs from one GitLab project.",
       "read_only": true,
       "report_kind": "gitlab_job",
       "required_options": [
         "--job-url"
       ],
-      "required_tools": [],
+      "required_tools": [
+        "glab"
+      ],
       "requires_authorities": [
         "gitlab"
       ],
-      "returns": "One record: job, pipeline, runner, and the last 200 trace lines, sanitized.",
+      "returns": "Get: one job, pipeline, runner, and bounded trace. List: up to 500 validated job records, record_count and truncated; PARTIAL if the page scan cannot prove completeness.",
       "side_effects": "none",
-      "subcommands": {},
-      "use_when": "A named job failed and you need its own facts, not the cluster's."
+      "subcommands": {
+        "get": {
+          "purpose": "read one exact job, pipeline, runner, and bounded trace",
+          "required_options": [
+            "--job-url"
+          ]
+        },
+        "list": {
+          "purpose": "filter newest jobs of one verified project",
+          "read_back": "GitLab project jobs keyset API; at most 20 pages of 100",
+          "required_options": []
+        }
+      },
+      "use_when": "You need exact job facts or a filtered view of recent jobs."
     },
     "gitlab_milestone.py": {
       "capabilities": [],

@@ -485,20 +485,41 @@ def execute(
 
 
 def execute_gitlab_job(args: argparse.Namespace) -> int:
-    """Read one job through the GitLab-only target and bound access session."""
+    """Route one job get or bounded list through the GitLab authority.
+
+    :param args: Parsed job command and universal output options.
+    :returns: Shared status exit code.
+    """
     from .collect import collect_gitlab_job, gitlab_job_reference
 
     kind = "gitlab_job"
     if args.describe:
         sys.stdout.write(json.dumps(describe(COMMAND_BY_KIND[kind]), indent=2) + "\n")
         return 0
+    if args.action == "list":
+        return execute_gitlab_job_list(args)
     if args.dry_run and (args.output_dir or args.log_file):
         return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
     missing = missing_required_options(COMMAND_BY_KIND[kind], args)
     if missing:
         return _failure(
-            args, kind, "arguments", f"{', '.join(missing)} is required; see --describe"
+            args, kind, "arguments", f"{', '.join(missing)} is required for get"
         )
+    if any(
+        (
+            args.project,
+            args.status,
+            args.pipeline_id,
+            args.ref,
+            args.last,
+            args.from_time,
+            args.to_time,
+            args.name_glob,
+            args.limit != 50,
+            args.stuck_after != 600,
+        )
+    ):
+        return _failure(args, kind, "arguments", "list_options_require_list")
     source = "target"
     started = time.monotonic()
     try:
@@ -545,6 +566,95 @@ def execute_gitlab_job(args: argparse.Namespace) -> int:
             data["tested_revision"] = session.skill["revision"]["value"]
             data["skill"] = session.skill
             data["target_source"] = session.target_source
+        rendered = emit(data, output_mode(args), args.output_dir)
+        log_event(
+            args, kind, "result", data["status"], elapsed=time.monotonic() - started
+        )
+        sys.stdout.write(rendered)
+        return exit_code(data["status"])
+    except (TargetError, RuntimeError, ValueError, OSError, TypeError, KeyError) as exc:
+        return _failure(args, kind, source, str(exc))
+    except Exception:  # noqa: BLE001 - preserve the machine result on provider failures
+        return _failure(args, kind, source, "unexpected_runtime_failure")
+
+
+def execute_gitlab_job_list(args: argparse.Namespace) -> int:
+    """Bind one project and render the reusable bounded job-list read.
+
+    :param args: Parsed list filters and universal output options.
+    :returns: Shared status exit code.
+    """
+    from .gitlab_jobs import JobQuery, list_jobs
+    from .target import select_gitlab_reference
+
+    kind = "gitlab_job"
+    if args.job_url:
+        return _failure(args, kind, "arguments", "job_url_requires_get")
+    if args.dry_run and (args.output_dir or args.log_file):
+        return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
+    source = "arguments"
+    started = time.monotonic()
+    try:
+        query = JobQuery.from_args(args)
+        source = "target"
+        target, target_source = resolve_gitlab_target(
+            args.target, args.binding, dry_run=args.dry_run
+        )
+        selected_kind, project = select_gitlab_reference(target, project=args.project)
+        if selected_kind != "project":
+            raise TargetError("gitlab_project_required_for_job_list")
+        filters = {"project": project, **query.public()}
+        if args.dry_run:
+            data = report(kind, target.gitlab.url, filters, [], [])
+            data["status"] = DRY_RUN
+            data["access"] = {
+                "status": DRY_RUN,
+                "target": {"kind": "project", "reference": project},
+                "observed_capability": [],
+            }
+            data["collection_probes"] = [
+                "exact GitLab identity and project reads",
+                "bounded GitLab project jobs pages",
+            ]
+            data["target_source"] = target_source
+        else:
+            source = "credential"
+            session = bind_gitlab_session(
+                target,
+                target_kind="project",
+                target_reference=project,
+                target_source=(
+                    f"{target_source};argv:--project" if args.project else target_source
+                ),
+                revision=args.revision,
+            )
+            if not session.skill["revision"]["value"]:
+                raise TargetError("skill_revision_required_for_live_job_list")
+            source = "access"
+            gate = check_gitlab_operation_access(session)
+            if gate["status"] == PASS:
+                source = "list_jobs"
+                result = list_jobs(session, gate["target"]["id"], query)
+                data = report(
+                    kind, target.gitlab.url, filters, result.records, result.errors
+                )
+                truncated = result.truncated
+            else:
+                data = report(kind, target.gitlab.url, filters, [], gate["errors"])
+                data["status"] = BLOCKED
+                truncated = False
+            data["access"] = {
+                "status": gate["status"],
+                "identity": gate["identity"],
+                "target": gate["target"],
+                "observed_capability": gate["observed_capability"],
+            }
+            data["execution_host"] = session.execution_host
+            data["tested_revision"] = session.skill["revision"]["value"]
+            data["skill"] = session.skill
+            data["target_source"] = session.target_source
+        data["operation"] = "list"
+        data["truncated"] = truncated if not args.dry_run else False
         rendered = emit(data, output_mode(args), args.output_dir)
         log_event(
             args, kind, "result", data["status"], elapsed=time.monotonic() - started
