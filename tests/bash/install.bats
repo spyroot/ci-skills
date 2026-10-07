@@ -3,6 +3,25 @@
 setup() {
   repo_root="$(cd -- "${BATS_TEST_DIRNAME}/../.." && pwd -P)"
   destination="${BATS_TEST_TMPDIR}/skills/ci-skills"
+  fake_bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "$fake_bin"
+  cat >"$fake_bin/glab" <<'GLAB'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $1 == skills && $3 == glab-stack ]] || exit 64
+case $2 in
+  get) printf '# glab-stack fixture\n' ;;
+  install)
+    [[ $4 == --path ]] || exit 64
+    mkdir -p "$5/glab-stack"
+    printf '# glab-stack fixture\n' >"$5/glab-stack/SKILL.md"
+    ;;
+  *) exit 64 ;;
+esac
+GLAB
+  chmod +x "$fake_bin/glab"
+  PATH="$fake_bin:$PATH"
+  export PATH
 }
 
 make_install_fixture() {

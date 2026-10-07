@@ -1,0 +1,37 @@
+---
+name: test-install
+"on":
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  test-install:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install fixture and documentation check tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats jq
+          python -m pip install -r requirements.txt pydoclint==0.10.1
+      - name: Validate toolchain schema and manifest
+        run: |
+          check-jsonschema --check-metaschema schemas/configuration/toolchain-dependencies.schema.json
+          check-jsonschema \
+            --schemafile schemas/configuration/toolchain-dependencies.schema.json \
+            toolchain-dependencies.json
+      - name: Check reStructuredText API documentation
+        run: >-
+          pydoclint --style=sphinx --skip-checking-short-docstrings=False
+          tools/agent_profile.py
+      - name: Verify installer behavior with isolated host fixtures
+        run: |
+          pytest -q tests/python/test_agent_profile.py tests/python/test_installer.py
+          bats tests/bash/install.bats

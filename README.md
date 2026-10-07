@@ -104,7 +104,7 @@ changes.
 
 ## Install and first run
 
-Five steps. The third sets a default target, so later commands need no target argument.
+Five steps. The fourth sets a default target, so later commands need no target argument.
 
 Start from a clean checkout, or enter an existing clean checkout:
 
@@ -114,22 +114,39 @@ cd ci-skills
 ```
 
 **1. Install the tools.** This setup uses `git`, `conda`, and `jq`. Python 3.11 or newer with PyYAML is required for
-diagnostics; install `gh`, `glab`, and `kubectl` for the authorities you will access. GitLab-only operations need `glab`
-but do not need `gh` or `kubectl`. `ci-binary-build` also needs `yq`. Create the `ci-skills` conda environment if it is
-absent, then install the repository dependencies into it:
+diagnostics; install `gh` and `kubectl` for the authorities you will access. `./install.sh` installs missing `glab`.
+`ci-binary-build` also needs `yq`. Create the `ci-skills` conda environment if absent, then install the repository
+dependencies:
 
 ```bash
 conda create -n ci-skills python=3.11
 conda run -n ci-skills python -m pip install -r requirements.txt
 ```
 
-**2. Authenticate, as yourself.** The skill ships no credentials and grants no access. Provide the identity needed by
+**2. Install the `ci-skills` skill.** Activate the `ci-skills` conda environment. From a clean committed checkout,
+inspect the installer plan, set `FINGERPRINT` to its printed value, then install the package:
+
+```bash
+conda activate ci-skills
+./install.sh --dry-run
+FINGERPRINT="$(./install.sh --dry-run | jq -r '.fingerprint')"
+./install.sh --apply --confirm-install "$FINGERPRINT" --timeout 600s
+```
+
+`install.sh` forwards to [the copy installer](tools/install_ci_skills.py). It installs at
+`$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The installed copy is
+independent of the checkout. It also installs the bundled `glab-stack` skill under `.agents/skills` in this checkout.
+When `glab` is missing, it installs the declared package with Homebrew on macOS or `apt-get`, `dnf`, or `yum` on Linux.
+If Homebrew is missing, the installer points to its installation instructions. The package's
+[SKILL.md](ci-skills/SKILL.md) routes agent requests to its tools.
+
+**3. Authenticate, as yourself.** The skill ships no credentials and grants no access. Provide the identity needed by
 the commands you run: a Kubernetes administrator for cluster diagnostics, a GitLab instance administrator for GitLab
 diagnostics, and a GitHub identity for the full access receipt. `gh auth login`, `glab auth login`, and your cluster's
 existing login mechanism are supported. A declared token file takes precedence over ambient token variables; the report
 names the effective source.
 
-**3. Create your target file.** This is the step that makes everything else argument-free:
+**4. Create your target file.** This is the step that makes everything else argument-free:
 
 ```bash
 mkdir -p ~/.ci-skills
@@ -141,7 +158,7 @@ Fill in the sections needed by your commands. GitLab-only commands can use `[git
 `access_check.py` receipt needs all three sections. Kubernetes commands need the selected context and exact API server.
 Declare `kubernetes.kubeconfigs` when context and credential span files; otherwise the resolver uses a declared
 `kubeconfig`, `KUBECONFIG`, or `~/.kube/config` in that order, then verifies the context and server. For the
-`--publication` check in step 4, declare the repository's actual `github.required_checks` from branch protection.
+`--publication` check in step 5, declare the repository's actual `github.required_checks` from branch protection.
 
 Never commit credential values or credential-bearing kubeconfigs. A project may keep its target at
 `./.ci-skills/target.toml`; a pipeline must use paths valid on its own runner. The paths inside are true on one machine
@@ -152,7 +169,7 @@ file or the documented `--binding PATH` protocol for an existing kubeconfig reso
 existing Pod routes under `[kubernetes.node_diagnostics]`. Provisioning access is the project's job; this skill resolves
 the selected source and reports it.
 
-**4. Prove access to the authorities you selected.** For a GitLab-only target, read back its configured project and
+**5. Prove access to the authorities you selected.** For a GitLab-only target, read back its configured project and
 administrator identity:
 
 ```bash
@@ -171,21 +188,13 @@ Its `PASS` means every selected authority was reached and each required live rea
 effective source and identity. That is the answer to "which credential am I using" — read it rather than searching the
 host.
 
-**5. Install the `ci-skills` skill.** Steps 1 to 4 make the commands work in a shell. Activate the `ci-skills` conda
-environment on a workstation. From a clean committed checkout, inspect the copy installer plan, set `FINGERPRINT` to its
-printed value, then install the package:
+### Installer reference
 
-```bash
-conda activate ci-skills
-./install.sh --dry-run
-FINGERPRINT="$(./install.sh --dry-run | jq -r '.fingerprint')"
-./install.sh --apply --confirm-install "$FINGERPRINT" --timeout 10s
-```
+The repository's [`toolchain-dependencies.json`](toolchain-dependencies.json) declares the `agent` profile and package
+names. Its version 1.0 contract is checked against the [toolchain schema](schemas/configuration/toolchain-dependencies.schema.json)
+before installation; unknown fields and malformed JSON block the plan.
 
-`install.sh` forwards to [the copy installer](tools/install_ci_skills.py). It installs at
-`$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The installed copy is
-independent of the checkout. The package's [SKILL.md](ci-skills/SKILL.md) routes agent requests to its tools. For a
-different skills directory, use the Python installer:
+For a different skills directory, use the Python installer:
 
 ```bash
 conda run -n ci-skills python tools/install_ci_skills.py \
@@ -196,7 +205,7 @@ To upgrade an existing copy or checkout link, make a new plan and use its finger
 
 ```bash
 FINGERPRINT="$(./install.sh --upgrade --dry-run | jq -r '.fingerprint')"
-./install.sh --upgrade --apply --confirm-upgrade "$FINGERPRINT" --timeout 10s
+./install.sh --upgrade --apply --confirm-upgrade "$FINGERPRINT" --timeout 600s
 ```
 
 Interrupted installations have a separate recovery path:
@@ -217,6 +226,8 @@ A Codex session can install the merged skill straight from GitHub instead:
 ```text
 Install the skill from https://github.com/spyroot/ci-skills/tree/main/ci-skills
 ```
+
+The direct GitHub skill install skips the `glab` and `glab-stack` setup. Use the checkout installer in step 2 for both.
 
 Either way, each execution host still needs its own credentials and its own target file — installation grants nothing.
 

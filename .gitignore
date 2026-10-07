@@ -21,6 +21,7 @@ __pycache__/
 .claude/
 .codex/
 .agent-review/
+.agents/
 AGENT*.md
 CLAUDE*.md
 CODEX*.md
