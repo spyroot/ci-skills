@@ -24,7 +24,9 @@ ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
 def target_candidates() -> list[tuple[str, Path]]:
-    """Return the declared target files in their precedence order."""
+    """Return the declared target files in their precedence order.
+    :return:
+    """
     candidates: list[tuple[str, Path]] = []
     configured = (os.environ.get(TARGET_ENV) or "").strip()
     if configured:
@@ -35,7 +37,11 @@ def target_candidates() -> list[tuple[str, Path]]:
 
 
 def resolve_target_file(explicit: str | None) -> tuple[Path, str]:
-    """Resolve the selected four-tier target file without an ambient profile."""
+    """
+
+    :param explicit:
+    :return:
+    """
     if explicit:
         path = Path(explicit).expanduser()
         if not path.is_file():
@@ -70,6 +76,13 @@ def _path(value: object, base: Path) -> Path:
 def _source_path(
     source: dict[str, Any], base: Path, *, dry_run: bool = False
 ) -> tuple[Path | None, str]:
+    """
+
+    :param source:
+    :param base:
+    :param dry_run:
+    :return:
+    """
     kind = source.get("kind")
     if kind == "file":
         if set(source) != {"kind", "path"}:
@@ -99,22 +112,28 @@ def _source_path(
             or any(not isinstance(part, str) or not part for part in argv)
         ):
             raise TargetError("binding_command_invalid")
+
         command = argv.copy()
+
         if "/" in command[0]:
             command[0] = str(_path(command[0], base))
         executable = shutil.which(command[0])
+
         if executable is None:
             raise TargetError("binding_command_unavailable")
         command[0] = str(Path(executable).resolve())
+
         digest = hashlib.sha256(
             json.dumps(command, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
+
         provenance = f"command:{command[0]}#argv-sha256:{digest}"
         if dry_run:
             return None, provenance
         result = run_command_tail(
             command, timeout=30, max_bytes=4096, max_lines=2, cwd=base
         )
+
         if result.returncode:
             raise TargetError(f"binding_command_{error_class(result)}")
         lines = result.stdout.splitlines()
@@ -133,7 +152,12 @@ def load_project_binding(
     dry_run: bool = False,
     required_surfaces: tuple[str, ...] = AUTHORITIES,
 ) -> Target:
-    """Use only declared sources; advance solely when one is absent."""
+    """Use only declared sources; advance solely when one is absent.
+    :param path:
+    :param dry_run:
+    :param required_surfaces:
+    :return:
+    """
     binding = Path(path).expanduser().resolve()
     try:
         with binding.open("rb") as handle:

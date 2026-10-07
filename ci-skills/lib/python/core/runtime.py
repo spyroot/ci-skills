@@ -259,10 +259,21 @@ def run_command_tail(
     env: dict[str, str | None] | None = None,
     cwd: str | Path | None = None,
 ) -> CommandResult:
-    """Stream a command and retain only bounded stdout/stderr tail bytes."""
+    """Stream a command and retain only bounded stdout/stderr tail bytes.
+    :param argv:
+    :param timeout:
+    :param max_bytes:
+    :param max_lines:
+    :param env:
+    :param cwd:
+    :return: CommandResult
+    :raises ValueError:
+    """
     if max_bytes <= 0 or max_lines <= 0:
         raise ValueError("tail limits must be positive")
+
     command = tuple(str(part) for part in argv)
+
     try:
         process = subprocess.Popen(
             command,

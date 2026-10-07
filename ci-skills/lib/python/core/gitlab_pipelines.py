@@ -1,10 +1,8 @@
 """Read and summarize one exact GitLab pipeline through a bound session."""
 
 from __future__ import annotations
-
 from collections import Counter
 from typing import Any
-
 from .gitlab_api import GlabAPIClient
 from .gitlab_session import BoundGitLabSession
 
@@ -32,6 +30,7 @@ def _job(item: Any, pipeline_id: int) -> dict[str, Any]:
         )
     ):
         raise ValueError("pipeline_job_response_invalid")
+
     failure_reason = item.get("failure_reason")
     if failure_reason is not None and not isinstance(failure_reason, str):
         raise ValueError("pipeline_job_response_invalid")
@@ -74,12 +73,19 @@ def read_pipeline(
 
     The additional page after the cap distinguishes exactly 500 jobs from an
     incomplete result. No pipeline variables or traces are fetched.
+    :param session:
+    :param project_id:
+    :param pipeline_id:
+    :param api_client:
+    :return:
     """
     if not _positive_id(project_id) or not _positive_id(pipeline_id):
         raise ValueError("project_and_pipeline_ids_must_be_positive")
+
     client = api_client or GlabAPIClient()
     base = f"projects/{project_id}/pipelines/{pipeline_id}"
     pipeline = client.get_json(session, base)
+
     if (
         not isinstance(pipeline, dict)
         or not _positive_id(pipeline.get("id"))
@@ -94,28 +100,36 @@ def read_pipeline(
 
     jobs: list[dict[str, Any]] = []
     for page in range(1, MAX_JOB_PAGES + 2):
+
         items = client.get_json(
             session, f"{base}/jobs?per_page={PAGE_SIZE}&page={page}"
         )
+
         if not isinstance(items, list) or len(items) > PAGE_SIZE:
             raise ValueError("pipeline_jobs_envelope_invalid")
+
         if page > MAX_JOB_PAGES:
             if items:
                 errors = [{"source": "jobs", "reason": "job_limit_exceeded"}]
             else:
                 errors = []
             break
+
         jobs.extend(_job(item, pipeline_id) for item in items)
         if len(items) < PAGE_SIZE:
             errors = []
             break
 
     ids = [item["id"] for item in jobs]
+
     if len(ids) != len(set(ids)):
         raise ValueError("pipeline_jobs_duplicate_id")
     stages: dict[str, list[dict[str, Any]]] = {}
+
     for job in jobs:
         stages.setdefault(job["stage"], []).append(job)
+
+
     record = {
         "id": pipeline_id,
         "project_id": project_id,

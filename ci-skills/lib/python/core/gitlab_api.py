@@ -273,7 +273,13 @@ class GlabAPIClient:
         *,
         timeout: int = 25,
         sleep: Callable[[float], None] = time.sleep,
-    ) -> None:
+    ):
+        """
+
+        :param command:
+        :param timeout:
+        :param sleep:
+        """
         if timeout <= 0:
             raise ValueError("timeout must be positive")
         self._command = command
@@ -357,14 +363,19 @@ class GlabAPIClient:
                     raise GitLabAPIError(reason, attempts=READ_ATTEMPTS)
                 self._sleep(_delay(headers or result.stderr, selected, attempt))
         finally:
+
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
+
         if len(result.stdout.encode("utf-8")) > MAX_RESPONSE_BYTES:
             raise GitLabAPIError("response_too_large")
+
         if method == "DELETE" and not payload_text.strip():
             return {}
+
         try:
             payload = json.loads(payload_text)
+
         except (TypeError, ValueError) as exc:
             raise GitLabAPIError("invalid_json") from exc
         if not isinstance(payload, (dict, list)):
