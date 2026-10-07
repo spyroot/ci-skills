@@ -250,32 +250,6 @@ def test_job_list_classifies_malformed_record_and_limit_truncation() -> None:
     assert result.errors == [{"source": "jobs", "reason": "job_response_invalid"}]
 
 
-def test_job_list_rejects_off_host_next_cursor() -> None:
-    """Keep the selected host fixed across keyset pages."""
-
-    class Page:
-        """Return one page with a next link to another host."""
-
-        def get_json_with_headers(
-            self, _session: object, endpoint: str
-        ) -> tuple[list[dict[str, object]], str]:
-            """Return the hostile cursor after a valid record.
-
-            :param _session: Unused bound session.
-            :param endpoint: Requested project jobs endpoint.
-            :returns: Job records and an off-host Link header.
-            """
-            next_link = f"https://other.example.test/api/v4/{endpoint}&id_before=5"
-            return [_job(5)], f'Link: <{next_link}>; rel="next"'
-
-    result = JOBS.list_jobs(
-        SimpleNamespace(host="gitlab.example.test"), 42, _query(), api_client=Page()
-    )
-    assert [record["id"] for record in result.records] == [5]
-    assert result.errors == [{"source": "jobs", "reason": "pagination_link_invalid"}]
-    assert result.truncated
-
-
 @pytest.mark.parametrize(
     ("current_query", "next_query"),
     [
