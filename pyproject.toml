@@ -43,6 +43,9 @@ target-version = "py311"
 # an explicit file list from git ls-files.
 force-exclude = true
 
+[tool.ruff.lint]
+external = ["DOC"]
+
 [tool.ruff.format]
 # The formatter is not run over the demos tree. It does not only move
 # whitespace: it drops redundant parentheses, rewrites single-quoted strings to

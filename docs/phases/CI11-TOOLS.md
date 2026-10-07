@@ -171,13 +171,16 @@ The same ten steps for every row; the row repeats them with the real paths.
 
 1. **Point.** Name the source script by path under the source repo root, the
    functions and lines that implement the task, and its tests.
+
 2. **Bound the task.** One tool does one task we named.
+
 3. **Library first.** Put the logic in `ci-skills/lib/python/core/<module>.py` as
    functions over the existing transports: `core.gitlab_api.GlabAPIClient`
    for GitLab, `core.runtime.run_command_bounded` for `oc`, `kubectl`,
    `podman` and `skopeo`, and one bounded standard-library HTTP helper
    `core/http.py` shared by the Harbor API and the reference fetch. Never a
    second transport, envelope, logger, exit table or redaction.
+
 4. **Declare.** Add the command to `COMMANDS` in `ci-skills/lib/python/core/catalog.py`. Every entry declares `kind`,
    `purpose`, `use_when`, `requires`, `capabilities`, `options` (the command's own options with their help text),
    `required_options` and `returns`. It adds `subcommands`, `mutates`, `required_tools`, `execution_surface` and
@@ -211,15 +214,19 @@ The same ten steps for every row; the row repeats them with the real paths.
    inverted. `schemas/skill-manifest.schema.json` must accept the new `tools.json` and
    `schemas/command-contract.schema.json` the new `--describe` output. Add the tool's `NAV_PLACEMENT` row, and a
    `NAV_NODES` row if its node is new (CI09-REFERENCE section 3, Declarations); the navigator derives the rest.
+
 5. **Thin main.** `ci-skills/bin/<name>.py`: `build_parser()` plus one
    `execute` call, with the shared locator import.
+
 6. **Strip the project.** Every host, project, group, namespace, image name,
    robot name, path and timeout moves to a `target.toml` key or a flag.
+
 7. **Mutations.** Plan by default with `plan_digest`, `--apply --confirm-plan
    DIGEST`, read before and after, independent read-back, cleanup on every
    exit, idempotent second run. The plan, apply and read-back skeleton is
    extracted once from `core/gitlab_actions.py` into `core/action.py`, so
    Harbor and toolbox actions reuse it.
+
 8. **Concurrency.** Independent reads run through the executor pattern
    `core/collect.py` already uses, with a declared worker bound and per-call
    timeout, and each read's duration is recorded beside the wall time; the
@@ -229,9 +236,11 @@ The same ten steps for every row; the row repeats them with the real paths.
    hold many open streams at once, as a separate contract (`software-design.md`
    at the pinned standards revision `56a579c`, "Synchronous and Asynchronous
    Contracts"); no such tool exists in this catalogue.
+
 9. **Tests.** Mocked external commands through the `conftest.py` fixtures;
    the pinned mutating matrix for every `apply`; a receipt kind in
    `tests/acceptance/expected.toml` once the live target is declared there.
+
 10. **Docs.** The catalog entry renders `tools.json`; one routing row in
     `SKILL.md`; the row here carries source, destination, adaptation and
     receipt kind. The source repo is not edited.
@@ -278,34 +287,6 @@ readback_command = ["<doctor command>"]  # toolbox_image.bash:740-743
 latest_alias = true                      # toolbox_image.bash:639
 source_tls_verify = true                 # new; replaces toolbox_image.bash:680
 builder = "openshift"                    # or "podman"; no source, built to the sentence
-
-[openshift]
-node_spec = "<node-spec.yaml>"           # relative to the consuming repository root; read by nothing in the source
-
-[openshift.routes]
-namespaces = ["<namespace>"]             # public-routes.sh:17-18
-expected = []                            # optional expected route list
-wildcard = "<apps domain>"               # public_routes.bash:690
-router_addresses = ["<ip>"]              # public_routes.bash:819
-attempts = 3                             # public-routes.sh:17-18
-interval_seconds = 5                     # public-routes.sh:17-18
-
-[openshift.iso]
-node_iso_namespace = "<namespace>"       # node-iso-server.yaml:16-136
-rhcos_iso_namespace = "<namespace>"      # rhcos-iso-server.yaml:10-102
-node_iso_node_port = 30881               # node-iso-server.yaml
-rhcos_iso_node_port = 30880              # rhcos-iso-server.yaml
-images = {}                              # server and builder images, per manifest
-root_device = "<device>"                 # nodes-config.jq:12-31 (the source bakes in /dev/sda)
-interface = "<nic>"                      # nodes-config.jq (the source bakes in eno1)
-dns = ["<ip>"]                           # nodes-config.jq
-gateway = "<ip>"                         # nodes-config.jq
-build_timeout_seconds = 900              # build.sh:21-35
-arch = "x86_64"                          # get-rhcos-iso.sh:46
-emptydir_sizes = ["8Gi", "4Gi"]          # node-iso-server.yaml
-
-[openshift.nic_mtu]
-# the fields of the source's inventory/clusters/<id>/nic-mtu.yaml (nic_mtu.bash:48); listed when the row lands
 ```
 
 ## One query grammar for every object class
@@ -1306,15 +1287,18 @@ reports PASS.
    under `ci-skills/lib/python/core/`, the catalog entry and the regenerated
    `tools.json`, the `target.toml.template` keys of its row, its
    `[[smoke_cases]]` entry; the command that runs is the tool's smoke line.
+
 2. *Tests*: `tests/python/test_<module>.py` per Library module (mocked `gh`,
    `glab`, `kubectl`, `oc`, `skopeo` and `podman` through the `conftest.py`
    fixtures; the pinned mutating matrix for every `apply`; the worker bound
    and per-call timeout asserted on a fake executor); written with the block;
    run status UNVERIFIED (CI03-GATES, G0).
 3. *Smoke*: the row's line under "Smoke cases", on the D-SMOKE executor.
+
 4. *Evidence*: `tests/acceptance/receipts/<tool>-<case>.json` with `kind`,
    `status`, `records`, `plan_digest` and `readback` (mutations),
    `result_action` (`APPLIED` then `NO_OP`), `execution_host`, `captured_at`.
+
 5. *Verification*: `tools/check_live_acceptance.py --root . --expected
    tests/acceptance/expected.toml --receipts tests/acceptance/receipts
    --skill ci-skills --json`, with the row's `[[smoke_cases]]` entry

@@ -216,13 +216,38 @@ COMMANDS: dict[str, dict[str, Any]] = {
     },
     "gitlab_job.py": {
         "kind": "gitlab_job",
-        "purpose": "Read one CI job with its pipeline, runner and bounded trace.",
-        "use_when": "A named job failed and you need its own facts, not the cluster's.",
+        "purpose": "Get one CI job or list bounded jobs from one GitLab project.",
+        "use_when": "You need exact job facts or a filtered view of recent jobs.",
         "requires": ("gitlab",),
-        "capabilities": ("filters_records",),
-        "options": {"--job-url": "full HTTPS URL of one job on the selected host"},
+        "capabilities": ("filters_records", "time_ranged"),
+        "options": {
+            "--job-url": "full HTTPS URL of one job for get",
+            "--project": "exact project path or numeric ID for list; otherwise use gitlab.project",
+            "--status": "list state; repeatable; includes derived stuck",
+            "--pipeline-id": "list jobs of one numeric pipeline ID",
+            "--ref": "list jobs of one exact branch or tag",
+            "--name-glob": "shell-style job-name pattern for list",
+            "--limit": "maximum matching list records, 1–500 (default 50)",
+            "--stuck-after": "minimum pending or created age in seconds (default 600)",
+        },
         "required_options": ("--job-url",),
-        "returns": "One record: job, pipeline, runner, and the last 200 trace lines, sanitized.",
+        "required_tools": ("glab",),
+        "subcommands": {
+            "get": {
+                "purpose": "read one exact job, pipeline, runner, and bounded trace",
+                "required_options": ["--job-url"],
+            },
+            "list": {
+                "purpose": "filter newest jobs of one verified project",
+                "required_options": [],
+                "read_back": "GitLab project jobs keyset API; at most 20 pages of 100",
+            },
+        },
+        "returns": (
+            "Get: one job, pipeline, runner, and bounded trace. "
+            "List: up to 500 validated job records, record_count and truncated; "
+            "PARTIAL if the page scan cannot prove completeness."
+        ),
     },
     "gitlab_pipeline.py": {
         "kind": "gitlab_pipeline",
@@ -563,14 +588,18 @@ COMMAND_BY_KIND: dict[str, str] = {
 
 
 def missing_required_options(script: str, args: Any) -> list[str]:
-    """Return the declared required options this invocation did not supply.
+    """Return missing options from the selected verb or default command.
 
-    `required_options` is published in `tools.json`, so it has to be the thing
-    that is actually enforced. argparse cannot do it: `--describe` must answer
-    with no other argument. Enforcing it from the declaration keeps one rule.
+    :param script: Command name in the catalog.
+    :param args: Parsed command arguments.
+    :returns: Missing required option names from the published contract.
     """
+    entry = COMMANDS[script]
+    action = getattr(args, "action", None)
+    verb = entry.get("subcommands", {}).get(action, {}) if action else {}
+    required = verb.get("required_options", entry.get("required_options", ()))
     missing = []
-    for option in COMMANDS[script].get("required_options", ()):
+    for option in required:
         destination = option.removeprefix("--").replace("-", "_")
         if not getattr(args, destination, None):
             missing.append(option)

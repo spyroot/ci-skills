@@ -19,9 +19,6 @@ class BoundGitLabSession:
     public fields explicitly; serializing this object would expose a token.
     """
 
-    def __init__(self):
-        pass
-
     origin: str
     host: str
     target_kind: str

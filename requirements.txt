@@ -2,3 +2,4 @@ PyYAML>=6,<7
 pytest>=8,<10
 ruff>=0.13,<1
 check-jsonschema==0.38.0
+jsonschema>=4.25,<5

@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/configuration/toolchain-dependencies.schema.json",
+  "title": "Repository toolchain dependencies",
+  "type": "object",
+  "required": ["$schema", "kind", "schema_version", "dependencies", "profiles", "conda"],
+  "properties": {
+    "$schema": {"const": "./schemas/configuration/toolchain-dependencies.schema.json"},
+    "kind": {"const": "toolchain_dependencies"},
+    "schema_version": {"const": "1.0"},
+    "dependencies": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"$ref": "#/$defs/dependency"}
+    },
+    "profiles": {
+      "type": "object",
+      "required": ["agent"],
+      "properties": {
+        "agent": {
+          "type": "object",
+          "required": ["host", "skills", "skillsDirectory"],
+          "properties": {
+            "host": {"const": ["glab"]},
+            "skills": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}
+            },
+            "skillsDirectory": {"const": ".agents/skills"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "conda": {
+      "type": "object",
+      "required": ["environmentFile", "channels"],
+      "properties": {
+        "brewCask": {"type": "string", "minLength": 1},
+        "prefix": {"type": "string", "minLength": 1},
+        "url": {"type": "string", "minLength": 1},
+        "environmentFile": {"type": "string", "minLength": 1},
+        "channels": {"$ref": "#/$defs/stringArray"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "linux": {
+      "type": "object",
+      "required": ["method"],
+      "properties": {
+        "method": {"enum": ["archive", "go", "npm", "uv"]},
+        "url": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "stripComponents": {"type": "integer", "minimum": 0},
+        "files": {"$ref": "#/$defs/stringArray"},
+        "module": {"type": "string", "minLength": 1},
+        "package": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "dependency": {
+      "type": "object",
+      "required": ["name", "commands"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "commands": {"$ref": "#/$defs/stringArray"},
+        "platform": {"enum": ["linux"]},
+        "brew": {"$ref": "#/$defs/stringArray"},
+        "apt": {"$ref": "#/$defs/stringArray"},
+        "yum": {"$ref": "#/$defs/stringArray"},
+        "probe": {"$ref": "#/$defs/stringArray"},
+        "minimumMajor": {"type": "integer", "minimum": 1},
+        "versionFile": {"type": "string", "minLength": 1},
+        "linux": {"$ref": "#/$defs/linux"}
+      },
+      "additionalProperties": false
+    }
+  }
+}
