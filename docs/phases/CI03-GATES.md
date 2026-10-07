@@ -23,7 +23,8 @@ Superseded 2026-10-06: no workflow, protection disabled (CI10-PHASES, Pull reque
 
 ## Two routes
 
-- **Execution:** `./scripts/check.sh <profile>` runs the gates. Block 0 restores its library and G1 adds the profiles.
+- **Execution:** `./scripts/check.sh <profile>` runs the gates. G1 restores its library (deleted on purpose; block 0
+  does not) and adds the profiles.
 - **Read-back:** `gh pr checks <pr> --json name,state` reads the result for the exact head, once a gate route exists
   (G0).
 
@@ -71,8 +72,8 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   1. **The GitHub preflight, owned by G1.** Recreate `.github/workflows/validate.yml` (planned, CI03-GATES G1) from
      `1108cca^:.github/workflows/validate.yml`. A verbatim restore is red; the edits:
      - its shell list (lines 80-89) names `skills/ci-skills/...` paths (lines 83-86) that now live under `ci-skills/`,
-       and `lib/ci/check.bash` (line 85), which block 0 restores at `ci-skills/lib/bash/ci/check.bash` (planned,
-       CI10-PHASES, Order, block 0, restored from `88bd9f6^`);
+       and `lib/ci/check.bash` (line 85), which G1 restores from `88bd9f6^` (home: CI10-PHASES, Open decisions,
+       Gate library home);
        the restored library lists tracked shell files itself (`git ls-files`,
        `88bd9f6^:lib/ci/check.bash:104-105`), so the step calls the entrypoint instead of carrying a list;
      - `bats --tap tests/*.bats` (line 95) becomes `tests/bash/*.bats`;
@@ -111,7 +112,7 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   - the Bats glob: `bats --tap tests` (line 127) becomes `tests/bash/*.bats`;
   - the exit codes: from the one table in `core/status.py` (0 and 2, `status.py:13`), rendered to
     `ci-skills/lib/bash/core/exit_codes.bash` (planned, CI10-PHASES Refactor), in place of `runtime.bash`'s 64, 65, 66
-    and 69 and the second Bash table in `scripts/bash/core/exit_codes.bash`; the code for a failed gate is D-EXIT
+    and 69; the code for a failed gate is D-EXIT
     (CI02-CLI);
   - its Kubernetes-pod guard (`KUBERNETES_SERVICE_HOST`, lines 185-187) becomes a per-profile rule that G1 decides.
 
@@ -240,7 +241,7 @@ A local static result never replaces the gate route's result.
 
 ## Steps
 
-1. Restore the library in block 0 (CI10-PHASES, Order), then extend `scripts/check.sh` as in G1. The new checks live
+1. Restore the library from `88bd9f6^:lib/ci/check.bash`, then extend `scripts/check.sh` as in G1. The new checks live
    in `ci-skills/lib/bash/ci/check.bash`, and `--help` lists every argument and output mode.
 2. Recreate the workflow the gate route (G0) names from `1108cca^:.github/workflows/validate.yml` with G0's edit list;
    make each step call the entrypoint, add the final aggregator (G6) and the `schedule` trigger (G7), and extend the
@@ -257,7 +258,7 @@ A local static result never replaces the gate route's result.
 
 1. **Delivery.**
    - Changed: `scripts/check.sh` (sources `ci-skills/lib/bash/ci/check.bash`); `ci-skills/lib/bash/ci/check.bash`
-     (restored in block 0; this phase adds the profiles, the gates and the guard rule, G1); `requirements.txt` (G2);
+     (restored by this phase, which also adds the profiles, the gates and the guard rule, G1); `requirements.txt` (G2);
      `tools/check_live_acceptance.py` (the smoke-case verification, G5; the days left, G7);
      `tests/python/test_validate_workflow_policy.py`, `tests/bash/check.bats` and `tests/python/test_live_acceptance.py`
      (part 2).

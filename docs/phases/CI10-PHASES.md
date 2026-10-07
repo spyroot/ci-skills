@@ -203,7 +203,7 @@ One gate per owner: `cli` (CI02-CLI), `schemas` (CI07-SCHEMA), `verify`
 (CI05-VENDOR), `tests` (CI06-TESTS), `reference` (CI09-REFERENCE, section 5),
 `manifest`,
 `neutrality` and the static tools (CI03-GATES, Existing gates); all are
-profiles of one entrypoint, `scripts/check.sh` (CI03-GATES, G1), once block 0
+profiles of one entrypoint, `scripts/check.sh` (CI03-GATES, G1), once G1
 restores its library, so a contributor and any future CI route run the same
 list. Tests run on the gate route (D-GATE).
 

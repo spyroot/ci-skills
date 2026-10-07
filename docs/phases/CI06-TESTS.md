@@ -232,10 +232,10 @@ Tests: CI04-HOOKS, Delivery, test and proof.
 
    Two gaps, none of them closed here by invention: `scripts/check.sh:6`
    sources `lib/ci/check.bash`, deleted in #26, so the entrypoint cannot run
-   until block 0 re-points it (CI10-PHASES, Order); G1 names no argument
+   until CI03-GATES, G1, restores it; G1 names no argument
    that runs one gate, so the argv that runs only `tests` is G1's to name.
    The gate library sits at `ci-skills/lib/bash/ci/check.bash` (planned,
-   CI10-PHASES, Order, block 0), inside the digested tree
+   CI03-GATES, G1), inside the digested tree
    (`core/provenance.py`, `_included`), so adding the `tests` gate moves the
    skill digest (part 5).
 2. *Tests*, written with the block; run status UNVERIFIED (CI03-GATES, G0).

@@ -207,7 +207,7 @@ reports that it recovered.
   CI05-VENDOR): `vendor.py` and `transaction.py` here. CI01-CATALOG extends
   the command with `list`, `get` and `install`; CI09-REFERENCE reuses the
   transaction and the lock.
-- **`tools/skillkit/` imports `core` from `ci-skills/lib`** (CI10-PHASES,
+- **`tools/skillkit/` imports `core` from `ci-skills/lib/python`** (CI10-PHASES,
   Layout, decided), one import direction: `skillkit` imports
   `core.provenance`, as the installer does, and computes the per-file hashes
   through it. Never the reverse: an installed skill ships without `tools/`,
