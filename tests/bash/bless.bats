@@ -50,6 +50,7 @@ setup() {
   run "$fixture/scripts/dev.sh" hooks --apply --confirm-install "$fingerprint" --json
   [ "$status" -eq 0 ]
   [[ "$output" == *'"status": "PASS"'* ]]
+  [[ "$output" == *'"cleanup_status": "PASS"'* ]]
   [ -x "$fixture/.git/hooks/pre-commit" ]
   grep -Fq 'ci-skills-bless-v1' "$fixture/.git/hooks/pre-commit"
 }
@@ -229,6 +230,37 @@ FAKE
   [ -n "$(find "$fixture/.git/hooks" -name 'ci-skills-pre-commit.*' -print)" ]
 }
 
+@test 'development apply reports observed hook cleanup failure' {
+  cp -R "$root/scripts" "$root/lib" "$root/ci-skills" "$fixture/"
+  cp "$root/Makefile" "$root/bless.sh" "$root/environment.yml" \
+    "$root/toolchain-dependencies.json" "$fixture/"
+  plan="$("$fixture/scripts/dev.sh" hooks --dry-run --json)"
+  fingerprint="$(jq -er .plan_fingerprint <<<"$plan")"
+  mkdir -p "$fixture/fake-bin"
+  cat >"$fixture/fake-bin/rm" <<'FAKE'
+#!/usr/bin/env bash
+case "$*" in
+  *ci-skills-pre-commit.*) exit 1 ;;
+esac
+exec /bin/rm "$@"
+FAKE
+  chmod +x "$fixture/fake-bin/rm"
+  result="$BATS_TEST_TMPDIR/dev-cleanup-failure.json"
+  diagnostics="$BATS_TEST_TMPDIR/dev-cleanup-failure.err"
+  run env PATH="$fixture/fake-bin:$PATH" CI_LOG_LEVEL=error bash -c \
+    '"$1" hooks --apply --confirm-install "$2" --json >"$3" 2>"$4"' _ \
+    "$fixture/scripts/dev.sh" "$fingerprint" "$result" "$diagnostics"
+  [ "$status" -eq 1 ]
+  grep -Fq 'CLEANUP_FAIL' "$diagnostics"
+  jq -e '.status == "FAIL" and .cleanup_status == "FAIL" and
+    (.evidence_path | type == "string" and length > 0)' "$result"
+  [ -d "$(jq -r .evidence_path "$result")" ]
+  run check-jsonschema --schemafile "$root/schemas/commands/results/dev.schema.json" \
+    "$result"
+  [ "$status" -eq 0 ]
+  /bin/rm -rf -- "$(jq -r .evidence_path "$result")"
+}
+
 @test 'shared cleanup stack is LIFO, continues after failure, and runs once' {
   journal="$fixture/cleanup-journal"
   run env CI_TEST_JOURNAL="$journal" bash -c '
@@ -290,9 +322,59 @@ FAKE
 
 @test 'bless result schema rejects a passing result with a failing check' {
   printf '%s\n' \
-    '{"kind":"bless_result","schema_version":"1.0","status":"PASS","scope":"staged","exit_code":0,"summary":{"selected_files":1,"check_count":1,"failed_checks":1},"checks":[{"path":"a","check":"json","status":"FAIL"}]}' \
+    '{"kind":"bless_result","schema_version":"1.0","status":"PASS","scope":"staged","exit_code":0,"warning_count":0,"cleanup_status":"PASS","evidence_path":null,"summary":{"selected_files":1,"check_count":1,"failed_checks":1},"checks":[{"path":"a","check":"json","status":"FAIL"}]}' \
     >"$fixture/false-pass.json"
   run check-jsonschema --schemafile "$root/schemas/commands/results/bless.schema.json" \
     "$fixture/false-pass.json"
   [ "$status" -ne 0 ]
+}
+
+@test 'bless schema rejects cleanup failure without retained evidence' {
+  printf '%s\n' \
+    '{"kind":"bless_result","schema_version":"1.0","status":"FAIL","scope":"staged","exit_code":1,"warning_count":0,"cleanup_status":"FAIL","evidence_path":null,"safe_next_step":"Inspect cleanup","summary":{"selected_files":0,"check_count":1,"failed_checks":1},"checks":[{"path":"temporary-directory","check":"cleanup","status":"FAIL"}]}' \
+    >"$fixture/missing-cleanup-evidence.json"
+  run check-jsonschema --schemafile "$root/schemas/commands/results/bless.schema.json" \
+    "$fixture/missing-cleanup-evidence.json"
+  [ "$status" -ne 0 ]
+}
+
+@test 'planned development and bless results record cleanup and match their schemas' {
+  dev_result="$BATS_TEST_TMPDIR/dev-result.json"
+  bless_result="$BATS_TEST_TMPDIR/bless-result.json"
+  CI_LOG_LEVEL=error "$root/scripts/dev.sh" hooks --dry-run --json >"$dev_result"
+  jq -e '.status == "PLANNED" and .cleanup_status == "NOT_APPLICABLE" and
+    .warning_count == 0 and .evidence_path == null' "$dev_result"
+  run check-jsonschema --schemafile "$root/schemas/commands/results/dev.schema.json" \
+    "$dev_result"
+  [ "$status" -eq 0 ]
+
+  CI_LOG_LEVEL=error bash -c 'source "$1"; ci_bless_main "$2" --staged --dry-run --json' _ \
+    "$root/lib/bash/automation/bless.bash" "$fixture" \
+    >"$bless_result" 2>"$BATS_TEST_TMPDIR/bless-result.err"
+  jq -e '.status == "PLANNED" and .cleanup_status == "PASS" and
+    .warning_count == 0 and .evidence_path == null' "$bless_result"
+  run check-jsonschema --schemafile "$root/schemas/commands/results/bless.schema.json" \
+    "$bless_result"
+  [ "$status" -eq 0 ]
+}
+
+@test 'cleanup failure changes the final bless result and exit code' {
+  result="$BATS_TEST_TMPDIR/failed-cleanup-result.json"
+  diagnostics="$BATS_TEST_TMPDIR/failed-cleanup.err"
+  run bash -c '
+    source "$1"
+    ci_runtime_cleanup_dir() { return 1; }
+    ci_bless_main "$2" --staged --dry-run --json >"$3" 2>"$4"
+  ' _ "$root/lib/bash/automation/bless.bash" "$fixture" "$result" "$diagnostics"
+  [ "$status" -eq 1 ]
+  grep -Fq 'CLEANUP_FAIL' "$diagnostics"
+  jq -e '.status == "FAIL" and .exit_code == 1 and .cleanup_status == "FAIL" and
+    .summary.failed_checks == 1 and
+    any(.checks[]; .check == "cleanup" and .status == "FAIL") and
+    (.evidence_path | type == "string" and length > 0)' "$result"
+  [ -d "$(jq -r .evidence_path "$result")" ]
+  /bin/rm -rf -- "$(jq -r .evidence_path "$result")"
+  run check-jsonschema --schemafile "$root/schemas/commands/results/bless.schema.json" \
+    "$result"
+  [ "$status" -eq 0 ]
 }

@@ -56,7 +56,7 @@ pretty-python:
 	@$(CONDA) run -n $(CONDA_ENV) ruff format .
 
 pretty-shell:
-	@shopt -s nullglob; shfmt -w bless.sh scripts/*.sh scripts/bash/core/*.bash lib/bash/core/*.bash lib/bash/automation/*.bash ci-skills/lib/bash
+	@shopt -s nullglob; shfmt -i 2 -w bless.sh scripts/*.sh scripts/bash/core/*.bash lib/bash/core/*.bash lib/bash/automation/*.bash ci-skills/lib/bash
 
 build: docker-build
 

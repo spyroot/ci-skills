@@ -63,10 +63,11 @@ ci_bless_blocked() {
       --arg scope "$scope" --argjson code "$CI_EXIT_BLOCKED" \
       '{kind:"bless_result",schema_version:"1.0",status:"FAIL",scope:$scope,exit_code:$code,
 			run_id:$run,
+			warning_count:0,cleanup_status:"NOT_APPLICABLE",evidence_path:null,
 			summary:{selected_files:0,check_count:1,failed_checks:1},
 			checks:[{path:"prerequisite",check:$check,status:"FAIL"}],safe_next_step:$next}')" || return
   else
-    printf -v result '{"kind":"bless_result","schema_version":"1.0","status":"FAIL","scope":"%s","exit_code":%s,"summary":{"selected_files":0,"check_count":1,"failed_checks":1},"checks":[{"path":"prerequisite","check":"jq","status":"FAIL"}],"safe_next_step":"Run make install to provide jq."}' \
+    printf -v result '{"kind":"bless_result","schema_version":"1.0","status":"FAIL","scope":"%s","exit_code":%s,"warning_count":0,"cleanup_status":"NOT_APPLICABLE","evidence_path":null,"summary":{"selected_files":0,"check_count":1,"failed_checks":1},"checks":[{"path":"prerequisite","check":"jq","status":"FAIL"}],"safe_next_step":"Run make install to provide jq."}' \
       "$scope" "$CI_EXIT_BLOCKED"
   fi
   printf '%s\n' "$result"
@@ -182,7 +183,7 @@ ci_bless_file() {
   *.sh | *.bash | .githooks/pre-commit)
     ci_bless_check "$records" "$scope" "$file" shellcheck "$dry_run" \
       shellcheck -s bash -e SC1091 - || failed=1
-    ci_bless_check "$records" "$scope" "$file" shfmt "$dry_run" shfmt -d - || failed=1
+    ci_bless_check "$records" "$scope" "$file" shfmt "$dry_run" shfmt -i 2 -d - || failed=1
     ;;
   esac
   return "$failed"
@@ -328,15 +329,29 @@ ci_bless_main() {
     --argjson code "$exit_code" \
     --arg next "$next" --arg run "${CI_RUN_ID:-}" \
     '{kind:"bless_result",schema_version:"1.0",status:$status,scope:$scope,exit_code:$code,run_id:$run,
+			warning_count:0,cleanup_status:"PENDING",evidence_path:null,
 			summary:{selected_files:$selected,check_count:length,failed_checks:([.[] | select(.status=="FAIL")] | length)},
 			checks:.} + (if $next == "" then {} else {safe_next_step:$next} end)' "$records")" || return "$CI_EXIT_BLOCKED"
+  if ci_runtime_cleanup_run; then
+    result="$(jq -c '.cleanup_status = "PASS"' <<<"$result")" || return "$CI_EXIT_BLOCKED"
+  else
+    failed=1
+    status=FAIL
+    next="Inspect CLEANUP_FAIL diagnostics and remove the owned temporary directory at $CI_BLESS_TEMP."
+    result="$(jq -c --arg next "$next" --arg evidence "$CI_BLESS_TEMP" \
+      '.status = "FAIL" | .exit_code = 1 | .cleanup_status = "FAIL" |
+		.summary.check_count += 1 | .summary.failed_checks += 1 |
+		.checks += [{path:"temporary-directory",check:"cleanup",status:"FAIL"}] |
+		.safe_next_step = $next | .evidence_path = $evidence' <<<"$result")" || return "$CI_EXIT_BLOCKED"
+  fi
   case "$format" in
   json) printf '%s\n' "$result" ;;
   yaml) printf '%s\n' "$result" | "$conda_bin" run --no-capture-output -n "$env_name" \
     python -c 'import json,sys,yaml; yaml.safe_dump(json.load(sys.stdin),sys.stdout,sort_keys=False)' ;;
   human)
-    printf 'Bless %s: %s (%s files, %s checks)\n' "$scope" "$status" \
-      "$selected" "$(jq -r '.summary.check_count' <<<"$result")"
+    printf 'Bless %s: %s (%s files, %s checks; cleanup %s)\n' "$scope" "$status" \
+      "$selected" "$(jq -r '.summary.check_count' <<<"$result")" \
+      "$(jq -r '.cleanup_status' <<<"$result")"
     [[ "$status" != FAIL ]] || printf 'SAFE_NEXT_STEP: %s\n' "$next" >&2
     ;;
   esac

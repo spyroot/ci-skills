@@ -124,5 +124,11 @@ ci_runtime_exit() {
   if ! ci_runtime_cleanup_run; then
     status="$CI_EXIT_FAILED"
   fi
+  if [[ -n ${CI_RUNTIME_CLEANUP_RECEIPT_FILE:-} ]]; then
+    local cleanup_result=PASS
+    if ((CI_RUNTIME_CLEANUP_STATUS)); then cleanup_result=FAIL; fi
+    printf '%s\n' "$cleanup_result" >"$CI_RUNTIME_CLEANUP_RECEIPT_FILE" ||
+      status="$CI_EXIT_FAILED"
+  fi
   exit "$status"
 }

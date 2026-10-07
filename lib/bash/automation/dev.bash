@@ -72,7 +72,8 @@ ci_dev_plan_fingerprint() {
 }
 
 # Summary: Execute one selected local setup step with a bounded timeout.
-# Arguments: $1: root; $2: operation; $3: plan or apply; $4: timeout in seconds.
+# Arguments: $1: root; $2: operation; $3: plan or apply; $4: timeout in seconds;
+#   $5: optional child cleanup receipt path.
 # Stdout: one plan, no-op, or install observation per step.
 # Stderr: tool diagnostics.
 # Returns: first failed step status or zero.
@@ -81,6 +82,7 @@ ci_dev_plan_fingerprint() {
 # Cleanup: each step owns its temporary resources.
 ci_dev_operation() {
   local root="$1" operation="$2" mode="$3" timeout_seconds="$4" action
+  local cleanup_receipt="${5:-}"
   local -a actions=("$operation")
   if [[ "$mode" == plan ]]; then
     case "$operation" in
@@ -109,7 +111,8 @@ ci_dev_operation() {
         "$root/lib/bash/core/toolchain.bash" "$root" || return
       ;;
     hooks)
-      timeout "$timeout_seconds" "$BASH" -c \
+      if [[ -n "$cleanup_receipt" ]]; then : >"${cleanup_receipt}.started" || return; fi
+      CI_RUNTIME_CLEANUP_RECEIPT_FILE="$cleanup_receipt" timeout "$timeout_seconds" "$BASH" -c \
         "source \"\$1\"; ci_hooks_install \"\$2\"" _ \
         "$root/lib/bash/automation/hooks.bash" "$root" || return
       ;;
@@ -120,24 +123,30 @@ ci_dev_operation() {
 # Summary: Render the final local setup result and a repair action on failure.
 # Arguments: $1: output mode; $2: operation; $3: plan or apply; $4: status;
 #   $5: detail text; $6: safe next step; $7: plan fingerprint;
-#   $8: exit code.
+#   $8: exit code; $9: observed cleanup status; $10: retained evidence path.
 # Stdout: human, JSON, or YAML-compatible result.
 # Stderr: none.
 # Returns: output renderer status.
 ci_dev_result() {
   local format="$1" operation="$2" mode="$3" status="$4" detail="$5" next="$6" fingerprint="${7:-}" result
-  local exit_code="${8:-0}"
+  local exit_code="${8:-0}" cleanup_status="${9:-NOT_APPLICABLE}"
+  local evidence_path="${10:-}"
   if [[ "$format" == human ]]; then
     printf '%s\nci-skills %s %s: %s\n' "$detail" "$operation" "$mode" "$status"
+    printf 'CLEANUP_STATUS: %s\n' "$cleanup_status"
     [[ -z "$fingerprint" ]] || printf 'PLAN_FINGERPRINT: %s\n' "$fingerprint"
     [[ -z "$next" ]] || printf 'SAFE_NEXT_STEP: %s\n' "$next" >&2
     return
   fi
   result="$(jq -n --arg operation "$operation" --arg mode "$mode" --arg status "$status" \
     --arg detail "$detail" --arg next "$next" --arg run "${CI_RUN_ID:-}" \
-    --arg fingerprint "$fingerprint" --argjson code "$exit_code" \
+    --arg fingerprint "$fingerprint" --arg cleanup "$cleanup_status" \
+    --arg evidence "$evidence_path" \
+    --argjson code "$exit_code" \
     '{kind:"dev_result",schema_version:"1.0",operation:$operation,mode:$mode,
-		status:$status,exit_code:$code,run_id:$run,detail:$detail} +
+		status:$status,exit_code:$code,run_id:$run,detail:$detail,
+		warning_count:0,cleanup_status:$cleanup,
+		evidence_path:(if $evidence == "" then null else $evidence end)} +
 		(if $next == "" then {} else {safe_next_step:$next} end) +
 		(if $fingerprint == "" then {} else {plan_fingerprint:$fingerprint} end)')" || return
   printf '%s\n' "$result"
@@ -164,7 +173,8 @@ ci_dev_refuse() {
 ci_dev_main() {
   local root="$1" operation='' mode=plan format=human timeout_seconds=600
   local confirm='' dry_explicit=false apply_explicit=false detail='' status=PASS next='' code=0
-  local plan='' fingerprint=''
+  local plan='' fingerprint='' cleanup_dir='' cleanup_receipt='' cleanup_status=NOT_APPLICABLE
+  local evidence_path=''
   shift
   if [[ "${1:-}" == --help ]]; then
     ci_dev_help
@@ -267,19 +277,45 @@ ci_dev_main() {
   CI_LOG_FORMAT="${CI_LOG_FORMAT:-text}" CI_LOG_LEVEL="${CI_LOG_LEVEL:-info}"
   CI_RUN_ID="${CI_RUN_ID:-}"
   ci_log info dev start "$operation $mode" || return
+  if [[ "$mode" == apply && ("$operation" == hooks || "$operation" == install) ]]; then
+    cleanup_dir="$(mktemp -d)" || return "$CI_EXIT_BLOCKED"
+    cleanup_receipt="$cleanup_dir/cleanup.status"
+  fi
   if [[ "$mode" == plan ]]; then
     detail="$plan"
   else
-    detail="$(ci_dev_operation "$root" "$operation" "$mode" "$timeout_seconds")" || code=$?
+    detail="$(ci_dev_operation "$root" "$operation" "$mode" "$timeout_seconds" \
+      "$cleanup_receipt")" || code=$?
+  fi
+  if [[ -n "$cleanup_dir" ]]; then
+    if [[ -f "$cleanup_receipt" ]]; then
+      IFS= read -r cleanup_status <"$cleanup_receipt" || cleanup_status=UNKNOWN
+      case "$cleanup_status" in PASS | FAIL) ;; *) cleanup_status=UNKNOWN ;; esac
+    elif [[ -f "${cleanup_receipt}.started" ]]; then
+      cleanup_status=UNKNOWN
+    fi
+    if [[ "$cleanup_status" == FAIL || "$cleanup_status" == UNKNOWN ]]; then
+      evidence_path="$cleanup_dir"
+    elif ! ci_runtime_cleanup_dir "$cleanup_dir"; then
+      cleanup_status=FAIL
+      evidence_path="$cleanup_dir"
+    fi
+  fi
+  if [[ ("$cleanup_status" == FAIL || "$cleanup_status" == UNKNOWN) && "$code" == 0 ]]; then
+    code="$CI_EXIT_FAILED"
   fi
   if ((code)); then
     status=FAIL
     next='Inspect the operation diagnosis, repair the named dependency, and rerun the dry-run plan.'
+    if [[ -n "$evidence_path" ]]; then
+      next="Inspect the retained cleanup receipt at $evidence_path, repair the failure, then remove it."
+    fi
     ci_log error dev failed "$operation exited $code" || return
   else
     if [[ "$mode" == plan ]]; then status=PLANNED; fi
     ci_log info dev complete "$operation $mode" || return
   fi
-  ci_dev_result "$format" "$operation" "$mode" "$status" "$detail" "$next" "$fingerprint" "$code" || return
+  ci_dev_result "$format" "$operation" "$mode" "$status" "$detail" "$next" \
+    "$fingerprint" "$code" "$cleanup_status" "$evidence_path" || return
   return "$code"
 }

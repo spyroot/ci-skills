@@ -3,13 +3,16 @@
   "$id": "https://github.com/spyroot/ci-skills/schemas/commands/results/bless.schema.json",
   "title": "bless.sh result",
   "type": "object",
-  "required": ["kind", "schema_version", "status", "scope", "exit_code", "summary", "checks"],
+  "required": ["kind", "schema_version", "status", "scope", "exit_code", "warning_count", "cleanup_status", "evidence_path", "summary", "checks"],
   "properties": {
     "kind": {"const": "bless_result"},
     "schema_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
     "status": {"enum": ["PASS", "FAIL", "PLANNED"]},
     "scope": {"enum": ["staged", "all"]},
     "exit_code": {"enum": [0, 1, 69]},
+    "warning_count": {"type": "integer", "minimum": 0},
+    "cleanup_status": {"enum": ["PASS", "FAIL", "NOT_APPLICABLE"]},
+    "evidence_path": {"type": ["string", "null"], "minLength": 1},
     "run_id": {"type": "string"},
     "safe_next_step": {"type": "string", "minLength": 1},
     "summary": {
@@ -43,7 +46,21 @@
       "then": {
         "properties": {
           "summary": {"properties": {"failed_checks": {"const": 0}}},
+          "cleanup_status": {"const": "PASS"},
           "checks": {"not": {"contains": {"properties": {"status": {"const": "FAIL"}}}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "PLANNED"}}},
+      "then": {"properties": {"cleanup_status": {"const": "PASS"}}}
+    },
+    {
+      "if": {"properties": {"cleanup_status": {"const": "FAIL"}}},
+      "then": {
+        "properties": {
+          "status": {"const": "FAIL"},
+          "evidence_path": {"type": "string", "minLength": 1}
         }
       }
     },

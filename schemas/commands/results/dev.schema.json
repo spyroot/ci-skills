@@ -3,7 +3,7 @@
   "$id": "https://github.com/spyroot/ci-skills/schemas/commands/results/dev.schema.json",
   "title": "scripts/dev.sh result",
   "type": "object",
-  "required": ["kind", "schema_version", "operation", "mode", "status", "exit_code", "run_id", "detail"],
+  "required": ["kind", "schema_version", "operation", "mode", "status", "exit_code", "run_id", "detail", "warning_count", "cleanup_status", "evidence_path"],
   "properties": {
     "kind": {"const": "dev_result"},
     "schema_version": {"const": "1.0"},
@@ -13,12 +13,19 @@
     "exit_code": {"type": "integer", "minimum": 0, "maximum": 255},
     "run_id": {"type": "string"},
     "detail": {"type": "string"},
+    "warning_count": {"type": "integer", "minimum": 0},
+    "cleanup_status": {"enum": ["PASS", "FAIL", "UNKNOWN", "NOT_APPLICABLE"]},
+    "evidence_path": {"type": ["string", "null"], "minLength": 1},
     "plan_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "safe_next_step": {"type": "string", "minLength": 1}
   },
   "allOf": [
     {"if": {"properties": {"status": {"const": "FAIL"}}}, "then": {"required": ["safe_next_step"]}},
-    {"if": {"properties": {"status": {"enum": ["PLANNED", "PASS"]}}}, "then": {"required": ["plan_fingerprint"]}}
+    {"if": {"properties": {"status": {"enum": ["PLANNED", "PASS"]}}}, "then": {"required": ["plan_fingerprint"]}},
+    {"if": {"properties": {"status": {"const": "PLANNED"}}}, "then": {"properties": {"cleanup_status": {"const": "NOT_APPLICABLE"}}}},
+    {"if": {"properties": {"status": {"const": "PASS"}, "operation": {"enum": ["hooks", "install"]}}}, "then": {"properties": {"cleanup_status": {"const": "PASS"}}}},
+    {"if": {"properties": {"status": {"const": "PASS"}, "operation": {"enum": ["toolchain", "conda"]}}}, "then": {"properties": {"cleanup_status": {"const": "NOT_APPLICABLE"}}}},
+    {"if": {"properties": {"cleanup_status": {"const": "FAIL"}}}, "then": {"properties": {"status": {"const": "FAIL"}, "evidence_path": {"type": "string", "minLength": 1}}}}
   ],
   "additionalProperties": false
 }
