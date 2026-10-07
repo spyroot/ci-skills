@@ -1,4 +1,4 @@
-# GAL-REFERENCE adversarial review
+# CI-REFERENCE adversarial review
 
 Target: PR #11, head `e60cc60613ddf0f606938984312cbed29edb8515`.
 The `validate` check passed for this head. This reviews the proposed plan;
@@ -25,10 +25,10 @@ its adapter, declaration and gate have not been implemented.
   exact PR-head and binary version/digest evidence, required status, and
   failure behavior before implementation. A fixture check remains a parser
   test, not installed-binary compatibility proof.
-- **P1 — This phase has no test or order slot.** `GAL-PHASES.md:15` adds
-  GAL-REFERENCE, but its order stops at GAL-HOOKS (`:19-27`) and its merge
-  rule requires the tests GAL-TESTS lists for each phase (`:29-37`).
-  GAL-TESTS has no GAL-REFERENCE section. Specify this phase's dependency,
+- **P1 — This phase has no test or order slot.** `CI-PHASES.md:15` adds
+  CI-REFERENCE, but its order stops at CI-HOOKS (`:19-27`) and its merge
+  rule requires the tests CI-TESTS lists for each phase (`:29-37`).
+  CI-TESTS has no CI-REFERENCE section. Specify this phase's dependency,
   test cases and required gate before claiming it can land.
 - **P2 — `__complete` is not a complete command registry.** Lines 28-31
   treat each line as a command or flag. Cobra also emits argument choices,

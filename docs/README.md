@@ -26,7 +26,7 @@ decisions taken and the open decisions.
 
 ## Records
 
-`GAL-*` is the former name of the `CIxx` phases, renamed in `e6254bd`.
+`CI-*` is the former name of the `CIxx` phases, renamed in `e6254bd`.
 
 | Date | Kind | Record | What it holds |
 | --- | --- | --- | --- |
