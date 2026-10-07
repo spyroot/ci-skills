@@ -258,7 +258,7 @@ bless_check_source_cycle() {
 
 # Summary: Verify that the packaged runtime matches the root source.
 # Arguments: $1 root; $2 snapshot; $3 path list; $4 interpreter; $5 scope.
-# Stderr: mismatch and sync command.
+# Stderr: mismatch and the two paths to reconcile.
 # Returns: 0 on parity or 1 on mismatch.
 bless_check_runtime_sync() {
   local root_runtime=$2/lib/bash/core/runtime.bash
@@ -267,7 +267,7 @@ bless_check_runtime_sync() {
     return 0
   fi
   if ! cmp -s "$root_runtime" "$package_runtime"; then
-    printf 'Bash runtime copy differs; run scripts/sync-bash-runtime.sh --apply.\n' >&2
+    printf 'Bash runtime copy differs; copy lib/bash/core/runtime.bash to ci-skills/lib/bash/core/runtime.bash.\n' >&2
     return "$BLESS_FAILED"
   fi
 }

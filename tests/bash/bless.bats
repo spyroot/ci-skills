@@ -246,58 +246,20 @@ staged() {
   done
 }
 
-@test 'the generated package runtime matches the root source' {
-  run "$repo_root/scripts/sync-bash-runtime.sh" --check
-  [ "$status" -eq 0 ]
-  mkdir -p "$fixture/scripts" "$fixture/lib/bash/core" "$fixture/ci-skills/lib/bash/core"
-  cp "$repo_root/scripts/sync-bash-runtime.sh" "$fixture/scripts/"
+@test 'runtime parity checks staged bytes and rejects a staged package mismatch' {
+  mkdir -p "$fixture/lib/bash/core" "$fixture/ci-skills/lib/bash/core"
   cp "$repo_root/lib/bash/core/runtime.bash" "$fixture/lib/bash/core/"
+  cp "$repo_root/lib/bash/core/runtime.bash" "$fixture/ci-skills/lib/bash/core/"
+  git -C "$fixture" add lib/bash/core/runtime.bash ci-skills/lib/bash/core/runtime.bash
+  git -C "$fixture" checkout-index --all --prefix="${BATS_TEST_TMPDIR}/matching/"
   printf 'drift\n' >"$fixture/ci-skills/lib/bash/core/runtime.bash"
-  run "$fixture/scripts/sync-bash-runtime.sh" --check
+  run bless_check_runtime_sync "$fixture" "${BATS_TEST_TMPDIR}/matching" "$list" '' staged
+  [ "$status" -eq 0 ]
+  git -C "$fixture" add ci-skills/lib/bash/core/runtime.bash
+  git -C "$fixture" checkout-index --all --prefix="${BATS_TEST_TMPDIR}/mismatched/"
+  run bless_check_runtime_sync "$fixture" "${BATS_TEST_TMPDIR}/mismatched" "$list" '' staged
   [ "$status" -eq 1 ]
-  run "$fixture/scripts/sync-bash-runtime.sh" --apply
-  [ "$status" -eq 64 ]
-  [ "$(cat "$fixture/ci-skills/lib/bash/core/runtime.bash")" = drift ]
-  run "$fixture/scripts/sync-bash-runtime.sh" --plan
-  [ "$status" -eq 0 ]
-  plan=$output
-  [[ $plan =~ ^[0-9a-f]{64}$ ]]
-  run "$fixture/scripts/sync-bash-runtime.sh" --apply --confirm-sync \
-    '0000000000000000000000000000000000000000000000000000000000000000'
-  [ "$status" -eq 65 ]
-  [ "$(cat "$fixture/ci-skills/lib/bash/core/runtime.bash")" = drift ]
-  run "$fixture/scripts/sync-bash-runtime.sh" --apply --confirm-sync "$plan"
-  [ "$status" -eq 0 ]
-  cmp -s "$fixture/lib/bash/core/runtime.bash" "$fixture/ci-skills/lib/bash/core/runtime.bash"
-  run "$fixture/scripts/sync-bash-runtime.sh" --plan
-  [ "$status" -eq 0 ]
-  run "$fixture/scripts/sync-bash-runtime.sh" --apply --confirm-sync "$output"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *current* ]]
-}
-
-@test 'failed runtime copy keeps the destination and removes its temporary file' {
-  mkdir -p "$fixture/scripts" "$fixture/lib/bash/core" \
-    "$fixture/ci-skills/lib/bash/core" "$fixture/fakebin"
-  cp "$repo_root/scripts/sync-bash-runtime.sh" "$fixture/scripts/"
-  cp "$repo_root/lib/bash/core/runtime.bash" "$fixture/lib/bash/core/"
-  printf 'drift\n' >"$fixture/ci-skills/lib/bash/core/runtime.bash"
-  cat >"$fixture/fakebin/cp" <<'EOF'
-#!/usr/bin/env bash
-printf 'partial\n' >"$2"
-exit 17
-EOF
-  chmod +x "$fixture/fakebin/cp"
-  run "$fixture/scripts/sync-bash-runtime.sh" --plan
-  [ "$status" -eq 0 ]
-  plan=$output
-  run env PATH="$fixture/fakebin:$PATH" "$fixture/scripts/sync-bash-runtime.sh" \
-    --apply --confirm-sync "$plan"
-  [ "$status" -eq 69 ]
-  [ "$(cat "$fixture/ci-skills/lib/bash/core/runtime.bash")" = drift ]
-  shopt -s nullglob
-  leftovers=("$fixture/ci-skills/lib/bash/core"/.runtime.bash.*)
-  [ "${#leftovers[@]}" -eq 0 ]
+  [[ "$output" == *'copy lib/bash/core/runtime.bash to ci-skills/lib/bash/core/runtime.bash'* ]]
 }
 
 @test 'staged environment name is read from the index snapshot' {
