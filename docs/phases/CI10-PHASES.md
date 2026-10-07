@@ -20,10 +20,10 @@ own design, steps and gates. Read back against the tree at `e85c7c8` on
 
 In the tree today (fixed on 2026-10-04): thin mains in `ci-skills/bin/`, the
 Python library in `ci-skills/lib/python/core/`, the Bash libraries in
-`ci-skills/lib/bash/{core,ci,automation}/`, references in
+`ci-skills/lib/bash/{core,api,automation}/`, references in
 `ci-skills/references/`, the generated `tools.json` beside `SKILL.md`.
 Decided, created by the phases named: maintenance-only Python in
-`tools/skillkit/` importing `core` from `ci-skills/lib` (CI07 first, then CI05, CI09, CI01),
+`tools/skillkit/` importing `core` from `ci-skills/lib/python` (CI07 first, then CI05, CI09, CI01),
 thin maintenance mains in `tools/` plus the one root command `bin/ci-skills`
 (CI05 creates it, CI01 extends it), vendored skills in `vendor/skills/<name>/`
 with the declarations and the one lock in `vendor/` (CI05), vendored

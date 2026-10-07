@@ -98,11 +98,11 @@ Each gap names the requirement, the failure it prevents, and the smallest change
 - **Requirement.** Local runs and any gate route invoke the same repository-owned entrypoint. The pinned standards'
   workspace index names `scripts/check.sh` as the gate entrypoint (`templates/internal/INDEX.yaml`, `gates.entrypoint`).
 - **Existing mechanism.** `scripts/check.sh:5-6` sources `lib/ci/check.bash`, deleted in #26 (commit `88bd9f6`); no
-  `check.bash` exists at any path, so the script cannot run today. Block 0 (CI10-PHASES, Order)
-  restores it at `ci-skills/lib/bash/ci/check.bash` from `88bd9f6^:lib/ci/check.bash` with paths
-  updated: the library sources
-  `skills/ci-skills/lib/python/core/runtime.bash` (line 7), now `ci-skills/lib/bash/core/runtime.bash`, and verifies
-  `skills/ci-skills/SKILL.md` (lines 102-103 and 128-129), now `ci-skills/SKILL.md`. It checks tracked shell files with
+  `check.bash` exists at any path, so the script cannot run today; it was deleted on purpose, and block 0
+  (CI10-PHASES, Order) does not restore it. The deleted library (`88bd9f6^:lib/ci/check.bash`) sourced
+  `skills/ci-skills/lib/core/runtime.bash` (line 7), today `ci-skills/lib/bash/core/runtime.bash`, and verified
+  `skills/ci-skills/SKILL.md` (lines 102-103 and 128-129), today `ci-skills/SKILL.md`. It checks tracked shell
+  files with
   `bash -n`, ShellCheck and shfmt, checks tracked whitespace, YAML and Markdown, scans Git history for secrets and runs
   the Bats suite (lines 116-127). It takes `--dry-run`, `--log-format`, `--log-level`, `--log-file`, `--run-id` and
   `--help` (lines 17-22); its help text says it exits 0, 64 or 69 (lines 26-28), and it also returns 66 for an
