@@ -741,7 +741,7 @@ def manifest() -> dict[str, Any]:
             "create or change a GitLab milestone": "gitlab_milestone.py",
             "open a GitLab bug": "gitlab_issue.py",
             "create or change a GitLab wiki page": "gitlab_wiki.py",
-            "assign or create a GitLab runner": "gitlab_runner.py",
+            "assign, create, or tag a GitLab runner": "gitlab_runner.py",
             "a volume or claim is stuck": "storage_report.py",
             "what the cluster said during an interval": "event_trace.py",
             "connectivity or CNI health": "cilium_status.py",

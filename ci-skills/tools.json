@@ -837,7 +837,7 @@
     "GitLab operation access": "gitlab_access.py",
     "a named CI job failed": "gitlab_job.py",
     "a volume or claim is stuck": "storage_report.py",
-    "assign or create a GitLab runner": "gitlab_runner.py",
+    "assign, create, or tag a GitLab runner": "gitlab_runner.py",
     "check GitLab pipeline progress": "gitlab_pipeline.py",
     "connectivity or CNI health": "cilium_status.py",
     "create or change a GitLab milestone": "gitlab_milestone.py",

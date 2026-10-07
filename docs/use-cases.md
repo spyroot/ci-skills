@@ -650,7 +650,7 @@ watch verb exists at `a2d98c3`, and the planned watch requires `--pipeline-id` (
 **What it must not do.** None recorded.
 
 **Served by today.** Planned: `gitlab_runner.py list|get` (`docs/phases/CI11-TOOLS.md:1108-1127`); today
-`gitlab_runner.py` only assigns and creates runners (`ci-skills/tools.json:594-649`), and `gitlab_job.py` returns a
+`gitlab_runner.py` assigns, creates, and tags runners (`ci-skills/tools.json`), and `gitlab_job.py` returns a
 job's runner (`ci-skills/tools.json:495`). Gap: no runner read verb exists, the executor type needs a new
 `GlabAPIClient.graphql_json` (`docs/phases/CI11-TOOLS.md:106-107`), and "attached" maps to the planned `projects`
 field.

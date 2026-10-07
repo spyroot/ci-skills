@@ -88,7 +88,7 @@ Routing, in short:
 | create, update, or adjust milestone dates | `gitlab_milestone.py` |
 | open a bug issue | `gitlab_issue.py open-bug` |
 | create or update a wiki page | `gitlab_wiki.py` |
-| assign or create a runner record | `gitlab_runner.py` |
+| assign, create, or tag a runner record | `gitlab_runner.py` |
 | Ceph hierarchy and Pods | `ceph_cluster.py --namespace NAME` |
 | physical PCI NIC MTU mismatch across nodes | `k8s_verify_mtu_consistency.py` |
 | Cilium daemon and health on a selected node | `cilium_node.py` |
@@ -111,6 +111,10 @@ required for both the plan and apply when creating a runner record because
 GitLab returns its token once and the destination is bound into the plan;
 the token never appears in a report. Runner registration and online readiness
 are separate from creating its record.
+
+`gitlab_runner.py tag --runner-id ID --tag TAG` adds a tag to an existing runner record. Repeat `--tag` to add several.
+Plan first, then apply with the printed digest; the result reads back the tags before and after the change. Tagging a
+record does not register or start its executor.
 
 For a group runner assignment, the offline plan has no project list and cannot
 authorize apply. Run `gitlab_runner.py assign --group GROUP --runner-id ID

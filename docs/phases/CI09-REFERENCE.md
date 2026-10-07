@@ -1599,7 +1599,7 @@ Placement of every command:
 | `gitlab job` | `gitlab_job.py` | `gitlab_job` |
 | `gitlab milestone` | `gitlab_milestone.py` | `create`, `update`, `adjust-time` |
 | `gitlab pipeline` | `gitlab_pipeline.py` | `get`, `watch` (CI11-TOOLS, Combos) |
-| `gitlab runner` | `gitlab_runner.py` | `assign`, `create` |
+| `gitlab runner` | `gitlab_runner.py` | `assign`, `create`, `tag` |
 | `gitlab wiki` | `gitlab_wiki.py` | `create`, `update` |
 | `k8s build` | `bin/ci-binary-build` | `ci-binary-build` |
 | `k8s ceph` | `ceph_cluster.py`, `ceph_kernel.py` | `ceph_cluster`, `ceph_kernel` |
@@ -1624,6 +1624,7 @@ One purpose per verb, distinct among siblings, read from what each verb's code d
 | `gitlab_wiki.py` | `update` | Replace an existing page's content by its exact slug, with read-back. |
 | `gitlab_runner.py` | `assign` | Assign an existing runner to the selected project or group. |
 | `gitlab_runner.py` | `create` | Create a runner record; its one-time token goes to --token-out. |
+| `gitlab_runner.py` | `tag` | Add tags to an existing runner record, with before/after read-back. |
 | `bin/ci-api` | `check` | Check the credential for one caller-selected GitHub or GitLab host. |
 | `bin/ci-api` | `get` | Read one caller-selected API endpoint with bounded output. |
 
