@@ -17,6 +17,14 @@
       "yum": ["git"]
     },
     {
+      "name": "glab",
+      "commands": ["glab"],
+      "brew": ["glab"],
+      "apt": ["glab"],
+      "yum": ["glab"],
+      "probe": ["glab", "skills", "get", "glab-stack"]
+    },
+    {
       "name": "make",
       "commands": ["make"],
       "brew": ["make"],
@@ -291,6 +299,11 @@
         "taplo"
       ],
       "conda": ["ruff", "yamllint", "check-jsonschema"]
+    },
+    "agent": {
+      "host": ["glab"],
+      "skills": ["glab-stack"],
+      "skillsDirectory": ".agents/skills"
     }
   },
   "conda": {

@@ -24,6 +24,11 @@
           "brew": {"$ref": "#/$defs/stringArray"},
           "apt": {"$ref": "#/$defs/stringArray"},
           "yum": {"$ref": "#/$defs/stringArray"},
+          "probe": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
           "minimumMajor": {"type": "integer", "minimum": 1},
           "versionFile": {"type": "string", "minLength": 1},
           "linux": {
@@ -45,7 +50,7 @@
     },
     "profiles": {
       "type": "object",
-      "required": ["bless"],
+      "required": ["bless", "agent"],
       "properties": {
         "bless": {
           "type": "object",
@@ -53,6 +58,16 @@
           "properties": {
             "host": {"$ref": "#/$defs/stringArray"},
             "conda": {"$ref": "#/$defs/stringArray"}
+          },
+          "additionalProperties": false
+        },
+        "agent": {
+          "type": "object",
+          "required": ["host", "skills", "skillsDirectory"],
+          "properties": {
+            "host": {"$ref": "#/$defs/stringArray"},
+          "skills": {"$ref": "#/$defs/skillNames"},
+            "skillsDirectory": {"const": ".agents/skills"}
           },
           "additionalProperties": false
         }
@@ -73,6 +88,12 @@
     }
   },
   "$defs": {
+    "skillNames": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}
+    },
     "stringArray": {
       "type": "array",
       "items": {"type": "string", "minLength": 1}

@@ -10,7 +10,7 @@ source "${BASH_SOURCE[0]%/*}/hooks.bash"
 # Returns: 0.
 ci_dev_help() {
   cat <<'HELP'
-Summary: Prepare the ci-skills development toolchain and Git hook (audience: agent and human).
+Summary: Prepare the ci-skills development tools, bundled agent skills, and Git hook (audience: agent and human).
 
 Examples:
   Inspect the complete install plan without changing tools or hooks:
@@ -19,7 +19,7 @@ Examples:
   scripts/dev.sh install --apply --confirm-install PLAN_FINGERPRINT
 
 Options:
-  install|toolchain|conda|hooks  Select one development operation.
+  install|toolchain|conda|hooks  Select one development operation; install includes glab-stack.
   --dry-run                   Show the plan; default.
   --apply --confirm-install SHA256  Execute the reviewed plan.
   --timeout SECONDS           Bound each install step; default 600.
@@ -37,7 +37,7 @@ Output modes:
 
 Exit 0: planned or applied; 1: operation/read-back failed;
 64: bad arguments or stale plan; 65: invalid manifest; 69: missing prerequisite;
-73: foreign or competing pre-commit hook.
+73: foreign or conflicting hook or agent skill.
 
 Usage:
   scripts/dev.sh OPERATION [--dry-run|--apply --confirm-install SHA256] [options]
@@ -86,23 +86,33 @@ ci_dev_operation() {
   local -a actions=("$operation")
   if [[ "$mode" == plan ]]; then
     case "$operation" in
-    toolchain) ci_toolchain_profile "$root" bless plan ;;
+    toolchain)
+      ci_toolchain_profile "$root" bless plan || return
+      ci_toolchain_profile "$root" agent plan
+      ;;
     conda) ci_toolchain_environment "$root" ci-skills plan ;;
     hooks) ci_hooks_plan "$root" ;;
     install)
       ci_toolchain_profile "$root" bless plan || return
+      ci_toolchain_profile "$root" agent plan || return
+      ci_toolchain_bundled_skills "$root" agent plan || return
       ci_toolchain_environment "$root" ci-skills plan || return
       ci_hooks_plan "$root"
       ;;
     esac
     return
   fi
-  if [[ "$operation" == install ]]; then actions=(toolchain conda hooks); fi
+  if [[ "$operation" == install ]]; then actions=(toolchain skills conda hooks); fi
   for action in "${actions[@]}"; do
     case "$action" in
     toolchain)
       timeout "$timeout_seconds" bash -c \
-        "source \"\$1\"; ci_toolchain_profile \"\$2\" bless install" _ \
+        "source \"\$1\"; ci_toolchain_profile \"\$2\" bless install && ci_toolchain_profile \"\$2\" agent install" _ \
+        "$root/lib/bash/core/toolchain.bash" "$root" || return
+      ;;
+    skills)
+      timeout "$timeout_seconds" bash -c \
+        "source \"\$1\"; ci_toolchain_bundled_skills \"\$2\" agent install" _ \
         "$root/lib/bash/core/toolchain.bash" "$root" || return
       ;;
     conda)

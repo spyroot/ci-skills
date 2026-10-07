@@ -14,8 +14,8 @@ DOCKER_PLATFORM ?= linux/amd64
 
 help:
 	@printf '%s\n' \
-		'install           Install declared hook tools, the conda environment, and the pre-commit hook.' \
-		'toolchain         Install missing host tools in the bless profile.' \
+		'install           Install declared tools, glab-stack, the conda environment, and the pre-commit hook.' \
+		'toolchain         Install missing host tools in the bless and agent profiles.' \
 		'conda             Create or update the ci-skills environment from environment.yml.' \
 		'install-hooks     Install the repository hook without overriding global hooks.' \
 		'bless             Install or verify the hook, then check exact staged index content.' \
