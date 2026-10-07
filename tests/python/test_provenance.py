@@ -8,11 +8,11 @@ dirty subtree must never silently claim the commit that does not contain it.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
-from tests.python.conftest import SCRIPT_ROOT, import_script_module
+
+from tests.python.conftest import SCRIPT_ROOT, git, import_script_module
 
 SKILL_ROOT = SCRIPT_ROOT.parent
 FOREIGN_SHA = "b" * 40
@@ -20,13 +20,6 @@ FOREIGN_SHA = "b" * 40
 
 def _provenance():
     return import_script_module("core.provenance")
-
-
-def _git(root: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), *args], capture_output=True, check=True, text=True
-    )
-    return result.stdout.strip()
 
 
 @pytest.fixture
@@ -90,12 +83,12 @@ def test_a_dirty_skill_subtree_is_reported_not_silently_claimed(tmp_path):
     repo = tmp_path / "repo"
     skill = repo / "skills" / "unit"
     skill.mkdir(parents=True)
-    _git(repo, "init", "-q", ".")
-    _git(repo, "config", "user.email", "unit@example.test")
-    _git(repo, "config", "user.name", "unit")
+    git(repo, "init", "-q", ".")
+    git(repo, "config", "user.email", "unit@example.test")
+    git(repo, "config", "user.name", "unit")
     (skill / "SKILL.md").write_text("---\nname: unit\n---\n", encoding="utf-8")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "baseline")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "baseline")
 
     clean = provenance.skill_identity(skill, None)
     assert clean["revision"]["verified"] is True
@@ -115,12 +108,12 @@ def test_an_installed_copy_inside_an_unrelated_repository_claims_nothing(tmp_pat
     enclosing = tmp_path / "other"
     copy = enclosing / "vendor" / "skill"
     copy.mkdir(parents=True)
-    _git(enclosing, "init", "-q", ".")
-    _git(enclosing, "config", "user.email", "unit@example.test")
-    _git(enclosing, "config", "user.name", "unit")
+    git(enclosing, "init", "-q", ".")
+    git(enclosing, "config", "user.email", "unit@example.test")
+    git(enclosing, "config", "user.name", "unit")
     (enclosing / "unrelated.txt").write_text("x\n", encoding="utf-8")
-    _git(enclosing, "add", "unrelated.txt")
-    _git(enclosing, "commit", "-qm", "unrelated")
+    git(enclosing, "add", "unrelated.txt")
+    git(enclosing, "commit", "-qm", "unrelated")
     (copy / "SKILL.md").write_text("---\nname: unit\n---\n", encoding="utf-8")
 
     identity = provenance.skill_identity(copy, None)

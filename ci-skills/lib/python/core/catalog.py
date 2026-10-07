@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .endpoints import TARGET_CONTRACT
+
 SCHEMA_VERSION = "1.0"
 SKILL_NAME = "ci-skills"
 
@@ -61,7 +63,8 @@ CAPABILITY_OPTIONS: dict[str, dict[str, str]] = {
     },
 }
 
-AUTHORITIES = ("github", "gitlab", "kubernetes")
+# The authorities a target file declares; `core/endpoints.py` owns the list.
+AUTHORITIES = TARGET_CONTRACT.authorities
 
 # The token variables each client honours, most preferred first. Declared here
 # because three places need the same answer -- source binding, the unbound

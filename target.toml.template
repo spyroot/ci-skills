@@ -13,6 +13,9 @@
 #
 # This file is NONSECRET: it names authorities and points at credential files.
 # It must contain no token, password or key — the parser rejects those fields.
+# The allowed keys are declared in ci-skills/lib/python/core/endpoints.py:
+# per authority, an endpoint and its access. gates/gate-ci-skills-endpoints.py
+# refuses any other key, here and in every documented example.
 #
 # Two rules about where the filled-in copy lives, both learned the hard way:
 #

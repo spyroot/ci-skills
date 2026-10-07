@@ -226,6 +226,10 @@ list. Tests run on the gate route (D-GATE).
   `ci-skills`.
 - 2026-10-06, D-GATE: no gate for now. Every test and receipt claim stays
   unverified until a route exists.
+- 2026-10-07: a target file holds an endpoint and its access per authority,
+  nothing else; `gate-ci-skills-endpoints` (CI03-GATES) refuses any other key.
+  It is the first check since D-GATE, and it creates `tools/skillkit/` for its
+  maintenance-only library.
 - 2026-10-06, D-DIGEST: `references/vendor/**` is excluded from the
   executed-code digest; the lock digests it on its own.
 - 2026-10-06, D-HOME: knowledge references live in CI09-REFERENCE.

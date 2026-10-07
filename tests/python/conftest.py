@@ -28,6 +28,9 @@ def load_module(module_name: str, path: Path) -> ModuleType:
     if spec is None or spec.loader is None:
         pytest.fail(f"cannot import module under test: {path.relative_to(REPO_ROOT)}")
     module = util.module_from_spec(spec)
+    # Registered before it runs, as importlib documents: dataclasses resolve
+    # their string annotations through sys.modules[cls.__module__].
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -74,6 +77,14 @@ def fake_bin(tmp_path: Path) -> Path:
 def call_journal(tmp_path: Path) -> Path:
     """Capture fake external command calls in JSON Lines form."""
     return tmp_path / "calls.jsonl"
+
+
+def git(root: Path, *args: str) -> str:
+    """Run git in one repository and return its stripped standard output."""
+    result = subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, check=True, text=True
+    )
+    return result.stdout.strip()
 
 
 def install_executable(directory: Path, name: str, body: str) -> Path:

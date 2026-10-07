@@ -38,6 +38,7 @@ adds the record, or `today` where the record exists in the tree.
 | `smoke-case` | not named yet | each `[[smoke_cases]]` entry of `expected.toml` | by hand | missing |
 | `command-contract` | `command_contract` | each command's `--describe` | `core/catalog.py` | implemented |
 | `command-result` | none, the envelope | the fields every report kind shares | `core/report.py` | missing |
+| `ci_skills_endpoints` | `ci_skills_endpoints` | gate results | `tools/skillkit/endpoint_gate.py` | implemented |
 
 Implemented, each checked with `check-jsonschema --schemafile <schema> <record>` (plus `--base-uri` where a schema
 reuses another's `$defs`):
@@ -62,6 +63,11 @@ reuses another's `$defs`):
 - [`schemas/gitlab-pipeline-watch.schema.json`](../../schemas/gitlab-pipeline-watch.schema.json), built from the
   pipeline watch result in CI11-TOOLS, Combos; it accepts that result and refuses an unknown `via` and a depth
   over 5. Its producer, `gitlab_pipeline.py watch`, is not built yet (CI11-TOOLS).
+- [`schemas/ci_skills_endpoints.schema.json`](../../schemas/ci_skills_endpoints.schema.json), the result of
+  `gates/gate-ci-skills-endpoints.py` (CI03-GATES, gate-ci-skills-endpoints); its producer is built. The gate's job
+  checks the schema against its metaschema and validates every result it prints; the fixtures in
+  `tests/python/test_endpoints.py` accept a valid record and refuse a missing required field, an unknown field, a
+  wrong type, an unknown rule, MAJOR 2 and a document without its line.
 
 Every row marked missing is this phase's to implement; a record kind without its schema cannot be emitted.
 
