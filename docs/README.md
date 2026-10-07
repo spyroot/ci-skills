@@ -7,7 +7,7 @@ work still to do, not a capability that exists. Start with [CI10-PHASES](phases/
 ## Capabilities
 
 Available rows are the 17 commands [`ci-skills/tools.json`](../ci-skills/tools.json) declares, generated from
-`ci-skills/lib/core/catalog.py`; run any of them with `--describe` for its contract. Details names the
+`ci-skills/lib/python/core/catalog.py`; run any of them with `--describe` for its contract. Details names the
 authorities a command reads; "writes" means it changes state only after a confirmed plan.
 
 | Capability | What the agent can accomplish | Available or planned | Details |

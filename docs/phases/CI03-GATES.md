@@ -101,7 +101,7 @@ Each gap names the requirement, the failure it prevents, and the smallest change
   `check.bash` exists at any path, so the script cannot run today. Block 0 (CI10-PHASES, Order)
   restores it at `ci-skills/lib/bash/ci/check.bash` from `88bd9f6^:lib/ci/check.bash` with paths
   updated: the library sources
-  `skills/ci-skills/lib/core/runtime.bash` (line 7), now `ci-skills/lib/bash/core/runtime.bash`, and verifies
+  `skills/ci-skills/lib/python/core/runtime.bash` (line 7), now `ci-skills/lib/bash/core/runtime.bash`, and verifies
   `skills/ci-skills/SKILL.md` (lines 102-103 and 128-129), now `ci-skills/SKILL.md`. It checks tracked shell files with
   `bash -n`, ShellCheck and shfmt, checks tracked whitespace, YAML and Markdown, scans Git history for secrets and runs
   the Bats suite (lines 116-127). It takes `--dry-run`, `--log-format`, `--log-level`, `--log-file`, `--run-id` and
@@ -306,7 +306,7 @@ A local static result never replaces the gate route's result.
    workflow exists, the `gh pr checks` output for the head commit. The phase does change the skill digest:
    `ci-skills/lib/bash/ci/check.bash` lies inside the digested tree (`tree_digest` walks the skill root and excludes
    only `__pycache__`, `.pyc`, `.pyo` and `.DS_Store`: `_included` and `tree_digest`,
-   `ci-skills/lib/core/provenance.py:43-75`; D-DIGEST excludes `references/vendor/**`), so the receipts under
+   `ci-skills/lib/python/core/provenance.py:43-75`; D-DIGEST excludes `references/vendor/**`), so the receipts under
    `tests/acceptance/receipts/`, already `skill_digest_mismatch` (CI10-PHASES, Pull request status), are recaptured
    on the declared executor (D-SMOKE) after the last skill edit.
    The fields the checker compares on the publication receipt (`tests/acceptance/receipts/operator-laptop.json`),

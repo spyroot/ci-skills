@@ -55,14 +55,14 @@ navigator's data.
 | Part | Value |
 | --- | --- |
 | Capability | route an agent to one file |
-| Owner | `ci-skills/lib/core/catalog.py` in `ci-skills` |
+| Owner | `ci-skills/lib/python/core/catalog.py` in `ci-skills` |
 | Entrypoint | `tools/render_manifest.py` |
 | Result | `skill_manifest` (today's `tools.json` shape) |
 | Read-back | byte-equality test on `tools.json`; `bin/reference.py next gitlab --json`; a fresh live receipt |
 
 ## Changes to `ci-skills`
 
-1. `ci-skills/lib/core/catalog.py`: tags derived in the catalog, consumed
+1. `ci-skills/lib/python/core/catalog.py`: tags derived in the catalog, consumed
    from CI09-REFERENCE's reference declarations (section 3, Declarations:
    `REFERENCES` and `REFERENCE_SECTIONS`). For each
    reference this phase adds:
@@ -121,7 +121,7 @@ Nothing in the code reads them, so their content would be invented.
 
 How `ci-skills` comes to sit on top of `glab`:
 
-1. In `ci-skills/lib/core/catalog.py`, add the derived tags, the `load_when`
+1. In `ci-skills/lib/python/core/catalog.py`, add the derived tags, the `load_when`
    entries and `uses` to the `REFERENCES` entries CI09-REFERENCE declares,
    and add the entries for `references/reading-reports.md` and
    `references/conditional/gitlab-writes.md`, the latter with
@@ -173,7 +173,7 @@ request's final package bytes.
 
 ## Delivery, test and proof
 
-1. *Delivery*: `ci-skills/lib/core/catalog.py` (the derived tags,
+1. *Delivery*: `ci-skills/lib/python/core/catalog.py` (the derived tags,
    `load_when`, `points_to` and `uses` on the `REFERENCES` entries and on
    each command), the rendered `ci-skills/tools.json`, the router sentence in
    `ci-skills/SKILL.md`, `ci-skills/references/reading-reports.md` and

@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import tomllib
 
 from .catalog import AUTHORITIES
+from .paths import SKILL_ROOT
 
 
 class TargetError(ValueError):
@@ -273,7 +274,7 @@ def _read_target_data(source: Path, skill_root: Path) -> dict[str, object]:
 def load_gitlab_target(path: str | Path) -> GitLabOperationTarget:
     """Load only GitLab settings, even when other allowed tables are present."""
     source = Path(path).expanduser()
-    skill_root = Path(__file__).resolve().parents[2]
+    skill_root = SKILL_ROOT
     data = _read_target_data(source, skill_root)
     if "gitlab" not in data or set(data) - {"github", "gitlab", "kubernetes"}:
         raise TargetError("GitLab operations need a gitlab table without extra tables")
@@ -367,7 +368,7 @@ def load_target(
     ):
         raise TargetError("required_target_surfaces_invalid")
     source = Path(path).expanduser()
-    skill_root = Path(__file__).resolve().parents[2]
+    skill_root = SKILL_ROOT
     data = _read_target_data(source, skill_root)
     if set(data) - set(AUTHORITIES) or set(required_surfaces) - set(data):
         raise TargetError(

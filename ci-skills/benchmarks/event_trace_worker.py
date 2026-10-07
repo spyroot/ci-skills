@@ -35,12 +35,12 @@ def _digest(value: Any) -> str:
 
 def _source(root: Path, revision: str) -> Path:
     root = root.resolve()
-    scripts = root / "skills" / "ci-skills" / "scripts"
-    if not scripts.is_dir():
-        raise RuntimeError("skill_scripts_missing")
-    source_identity(root, revision, scripts.parent)
-    sys.path.insert(0, str(scripts))
-    return scripts
+    library = root / "ci-skills" / "lib" / "python"
+    if not library.is_dir():
+        raise RuntimeError("skill_library_missing")
+    source_identity(root, revision, library.parents[1])
+    sys.path.insert(0, str(library))
+    return library
 
 
 def _harness(arguments: argparse.Namespace) -> dict[str, Any]:

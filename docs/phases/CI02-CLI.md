@@ -237,12 +237,12 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
 
 1. *Delivery.* Created: `schemas/command-contract.schema.json` and
    `schemas/command-result.schema.json` (planned, CI07-SCHEMA; `schemas/`
-   exists and is empty). Changed: `ci-skills/lib/core/catalog.py` (one help
+   exists and is empty). Changed: `ci-skills/lib/python/core/catalog.py` (one help
    text per option; `cilium_status.py` leaves `namespaced` and gains
-   `--cilium-namespace`), `ci-skills/lib/core/cli.py` and
-   `ci-skills/lib/core/node_local_cli.py` (the parsers read the catalog's
+   `--cilium-namespace`), `ci-skills/lib/python/core/cli.py` and
+   `ci-skills/lib/python/core/node_local_cli.py` (the parsers read the catalog's
    text), `ci-skills/bin/cilium_status.py` and
-   `ci-skills/lib/core/collect.py:623` (the rename), `ci-skills/tools.json`
+   `ci-skills/lib/python/core/collect.py:623` (the rename), `ci-skills/tools.json`
    (regenerated), `tests/python/test_cli_contract.py`,
    `tests/python/test_catalog.py`, `tests/bash/check.bats`, and
    `scripts/check.sh` with its library for the `cli` gate. The command that

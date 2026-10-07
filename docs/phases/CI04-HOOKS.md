@@ -109,7 +109,7 @@ deleted in #27 (`1108cca`; CI10-PHASES, Pull request status).
 
 Agent-harness hooks (for example Claude Code `PreToolUse`/`PostToolUse`) are not tracked here. If used: block edits to
 `ci-skills/tools.json`, `tests/acceptance/`, the vendored trees and `vendor/vendor.lock.json` (planned, CI05-VENDOR);
-run `ruff format` after a `*.py` edit and `tools/render_manifest.py` after a `ci-skills/lib/core/catalog.py` edit.
+run `ruff format` after a `*.py` edit and `tools/render_manifest.py` after a `ci-skills/lib/python/core/catalog.py` edit.
 
 ## Steps
 

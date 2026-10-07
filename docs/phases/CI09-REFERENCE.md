@@ -19,7 +19,7 @@ kinds, declared with the same `uses` pointers (CI07-SCHEMA):
 | Part | Value |
 | --- | --- |
 | Capability | declare every external operation our code runs and check it against the installed binary |
-| Owner | `ci-skills/lib/core/tool_operations.py` (the declarations, the `__complete` parser, the checks) |
+| Owner | `ci-skills/lib/python/core/tool_operations.py` (the declarations, the `__complete` parser, the checks) |
 | Entrypoint | `bin/ci-skills tools [NAME] [--describe ID] [--complete]` (the root maintenance command, CI05) |
 | Result | `tool_operations` (`schemas/tool-operations.schema.json`, CI07-SCHEMA) |
 | Read-back | `tests/python/test_tool_operations.py`, against fixtures and, on the D-SMOKE executor, the binaries |
@@ -49,7 +49,7 @@ Measured on 2026-10-02 against the local binaries:
 ### What the code calls today
 
 Derived on 2026-10-06 from every `run_command`, `kubectl_argv`, `oc_argv` and
-`GlabAPIClient` call site under `ci-skills/lib/core/` (file:line beside each
+`GlabAPIClient` call site under `ci-skills/lib/python/core/` (file:line beside each
 row). A command name alone cannot say whether a call is read-only; the
 operation (command, method, endpoint class, fixed arguments) can.
 
@@ -138,7 +138,7 @@ Proposed: **D, declared operations checked against the installed tool, with
 C as optional navigation.**
 
 - **Declare.** Every operation in the table above, with its exact `argv`,
-  method, flags and `mutates`, in `ci-skills/lib/core/tool_operations.py`;
+  method, flags and `mutates`, in `ci-skills/lib/python/core/tool_operations.py`;
   the contract test asserts that no unbounded `api` or `exec` operation is
   labelled read-only.
 - **Check against the real tool.** Every declared command and flag must
@@ -172,7 +172,7 @@ any project, under any domain. It follows the Agent Skills layout:
 | Part | Value |
 | --- | --- |
 | Capability | vendor N upstream pages as verbatim chunks with a derived index; serve one chunk, part or card |
-| Owner | `ci-skills/lib/core/reference.py` (chunk, anchor, index, verify, lookup) |
+| Owner | `ci-skills/lib/python/core/reference.py` (chunk, anchor, index, verify, lookup) |
 | Entrypoints | installed: `ci-skills/bin/reference.py next\|get\|verify`; checkout: `tools/update_reference.py` |
 | Result | `reference_next` and `reference_section` (section 3), `reference_verify`, `reference_index`, lock entries |
 | Read-back | `verify` recomputes every digest and the index from the committed files; `update` runs it last |
@@ -321,7 +321,7 @@ implementations exist).
 
 1. **Fetch** (checkout only, network). GET the page and the schema at
    `https://gitlab.com/gitlab-org/gitlab/-/raw/<sha>/<path>` with a timeout
-   and a 1 MiB byte bound through `ci-skills/lib/core/http.py`, the bounded
+   and a 1 MiB byte bound through `ci-skills/lib/python/core/http.py`, the bounded
    standard-library HTTP helper this phase adds (CI11-TOOLS reuses it);
    `<sha>` is `--sha`, never a branch name. Modes of `tools/update_reference.py`,
    defined once: the default run prints the plan (URLs, commit, expected
@@ -1720,10 +1720,10 @@ Who adds what, in order:
 
 1. The pipeline watch pull request (CI11-TOOLS, Pipeline watch, exact) lands first, so `get` and `watch` exist.
 2. The agent that claims the queue record `CI09-POINTER-OUTPUT` then delivers, in one pull request after block 0:
-   - `ci-skills/lib/core/catalog.py`: the tables above as data, with the verb purposes, `required_tools` for the
+   - `ci-skills/lib/python/core/catalog.py`: the tables above as data, with the verb purposes, `required_tools` for the
      GitLab commands and the `watch` fields;
-   - `ci-skills/lib/core/navigate.py`: builds every answer and section from that data, the commands' options and the
-     reference files, and draws the human view by the rules above; it types no other text than the fixed texts;
+   - `ci-skills/lib/python/core/navigate.py`: builds every answer and section from that data, the commands' options and
+     the reference files, and draws the human view by the rules above; it types no other text than the fixed texts;
    - `ci-skills/bin/reference.py`: a thin main with the grammar above and `--describe`;
    - `ci-skills/tools.json` re-rendered, and one `SKILL.md` sentence: "Start at `bin/reference.py next` and follow
      the pointers; never read `tools.json`, an `index.json` or a whole reference."
@@ -1836,7 +1836,7 @@ its reason tokens, defined here once.
 
 1. Block 0 of CI10-PHASES (the locator and path repairs) lands first; the
    navigator and `get` depend on importable bins and a current `tools.json`.
-2. Add `ci-skills/lib/core/{reference,navigate,http,tool_operations}.py`, the
+2. Add `ci-skills/lib/python/core/{reference,navigate,http,tool_operations}.py`, the
    offline command path in `core/cli.py`, and the `OFFLINE_COMMANDS` and
    `REFERENCES` tables in `core/catalog.py` (this phase owns `REFERENCES`;
    CI08-ROUTING adds the tags); regenerate `tools.json`.

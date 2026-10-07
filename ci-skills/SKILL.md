@@ -11,7 +11,7 @@ metadata:
 
 The directory containing this file is the installed skill root. Keep the
 working directory at the calling project root so its `.ci-skills/target.toml`
-can be selected. Run Python entrypoints under `../scripts` with Python 3.11 or
+can be selected. Run Python entrypoints under `bin/` with Python 3.11 or
 newer; the documented environment uses `conda run -n ci-skills python`.
 Run Bash entrypoints under `bin/` by path. Use these commands for supported
 operations instead of rebuilding them with one-off CLI parsing.
@@ -35,7 +35,7 @@ reads back GitLab identity and target before applying a change.
 
 For one receipt proving all three authorities, run:
 
-    scripts/access_check.py --json
+    bin/access_check.py --json
 
 Add `--publication` when repository administration and required-check read-back
 are part of the requested proof. Add `--ceph-namespace NAME` when the receipt
@@ -183,8 +183,8 @@ sensitive text.
 
 Declare `[kubernetes.node_diagnostics]` and an existing Pod route in the
 selected `.ci-skills/target.toml` (see the template). Run
-`scripts/cilium_node.py --json` to execute `cilium-dbg` and `cilium-health`
-inside that agent Pod without a TTY. Run `scripts/ceph_kernel.py --json` to
+`bin/cilium_node.py --json` to execute `cilium-dbg` and `cilium-health`
+inside that agent Pod without a TTY. Run `bin/ceph_kernel.py --json` to
 classify recent host journal messages through a selected existing Pod whose
 host journal mount is read back first. Both accept `--target` or `--binding`
 and use the same pinned kubeconfig/context/server and Kubernetes access gate
@@ -198,10 +198,10 @@ On OpenShift, for Ceph connectivity, RBD timeout, or cross-node network
 symptoms, check physical MTU consistency before searching node interfaces by
 hand. This command requires `oc` as well as `kubectl`, and blocks if the
 selected API is not OpenShift. Run
-`scripts/k8s_verify_mtu_consistency.py --json` in the selected project. It
+`bin/k8s_verify_mtu_consistency.py --json` in the selected project. It
 resolves the same exact Kubernetes target, verifies access, reads the node
 inventory, and returns `plan_digest` without creating a Pod. Then run
-`scripts/k8s_verify_mtu_consistency.py --apply --confirm-plan SHA256 --json`
+`bin/k8s_verify_mtu_consistency.py --apply --confirm-plan SHA256 --json`
 using that digest. `--node NAME` restricts both calls to one existing node.
 
 The apply uses `oc debug node/NAME` to read `ip -d -j addr show` through
@@ -216,7 +216,7 @@ change host interfaces or repair networking.
 
 ## 9. Use the Bash tools
 
-`../bin/ci-api` performs a bounded GET against a caller-selected GitHub or
+`bin/ci-api` performs a bounded GET against a caller-selected GitHub or
 GitLab API endpoint. Supply its exact provider, host, endpoint, and token file
 when the target declares one. It does not resolve `target.toml`; its result is
 separate from an exact-target access receipt. `bin/ci-binary-build` produces
