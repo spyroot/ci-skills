@@ -25,7 +25,7 @@ from jsonschema.exceptions import SchemaError, ValidationError
 
 
 class AgentProfileReason(StrEnum):
-    """Stable installer failure reasons shared by the profile and CLI."""
+    """Stable installer failure reasons shared by the profile and CLI."""  # noqa: DOC601, DOC603
 
     PROFILE_INVALID = "agent_profile_invalid"
     DESTINATION_UNSAFE = "agent_destination_unsafe"
@@ -73,7 +73,7 @@ class AgentProfile:
         :param repository_root: Root of the repository invoking the installer.
         :raises AgentProfileError: If the contract or destination is invalid.
         :raises OSError: If the manifest or schema cannot be read.
-        """
+        """  # noqa: DOC503
         self.root = root.resolve()
         self.repository_root = repository_root.resolve()
         self.manifest = self.root / "toolchain-dependencies.json"
@@ -129,7 +129,7 @@ class AgentProfile:
         :param raw: UTF-8 JSON bytes.
         :returns: Decoded JSON object.
         :raises AgentProfileError: If the contract is malformed.
-        """
+        """  # noqa: DOC502
 
         def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             """Reject duplicate object keys during JSON decoding.
@@ -206,7 +206,7 @@ class AgentProfile:
         :param deadline: Monotonic deadline for the glab read.
         :returns: Bundled ``SKILL.md`` bytes.
         :raises AgentProfileError: If glab cannot supply the skill.
-        """
+        """  # noqa: DOC502
         return self._run(["glab", "skills", "get", name], deadline)
 
     def _host_install_command(self) -> list[str]:
