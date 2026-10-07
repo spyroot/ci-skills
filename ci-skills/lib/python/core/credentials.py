@@ -1,4 +1,9 @@
-"""Resolve effective CLI credential sources once for a diagnostic invocation."""
+"""Resolve effective CLI credential sources once for a diagnostic invocation.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,7 @@ import hashlib
 import os
 import socket
 import subprocess
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -37,6 +43,104 @@ class Sources:
     # name, so a file rewritten in between would redirect the commands with no
     # second comparison.
     kubeconfig_digests: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ResolvedGitLabCredential:
+    """Hold one selected GitLab token and its reportable source."""
+
+    source: str
+    token: str = field(repr=False, compare=False)
+
+
+class GitLabAuthentication(ABC):
+    """Bind one GitLab target through a selectable credential source."""
+
+    def __init__(self, target: GitLabOperationTarget) -> None:
+        """Retain the selected GitLab target for this authentication attempt.
+
+        :param target: Validated host and target configuration to bind.
+        """
+        self._target = target
+
+    @abstractmethod
+    def resolve(self) -> ResolvedGitLabCredential:
+        """Resolve the selected credential without exposing it in a report.
+
+        :returns: Token and reportable source for the exact target host.
+        :raises TargetError: If the selected source is empty or unreadable.
+        """
+
+    def bind(
+        self,
+        *,
+        target_kind: str,
+        target_reference: str,
+        target_source: str,
+        revision: str | None = None,
+    ) -> BoundGitLabSession:
+        """Bind credential, host, target, and skill identity for one operation.
+
+        :param target_kind: Exact GitLab target kind, project or group.
+        :param target_reference: Exact project or group reference.
+        :param target_source: Reportable source of the selected target.
+        :param revision: Explicit skill revision for an installed copy.
+        :returns: Session used for access read-back and later API operations.
+        :raises TargetError: If target selection or credential binding fails.
+        """
+        if target_kind not in {"project", "group"} or not target_reference:
+            raise TargetError("gitlab_target_missing")
+        credential = self.resolve()
+        identity = resolve_skill_identity(revision)
+        environment: dict[str, str | None] = {
+            **dict.fromkeys(GITLAB_VARIABLES),
+            "CI_JOB_TOKEN": None,
+            "GLAB_ENABLE_CI_AUTOLOGIN": None,
+            "GITLAB_HOST": self._target.gitlab.host,
+            "GLAB_NO_PROMPT": "1",
+            "GITLAB_TOKEN": credential.token,
+        }
+        return BoundGitLabSession(
+            origin=self._target.gitlab.url,
+            host=self._target.gitlab.host,
+            target_kind=target_kind,
+            target_reference=target_reference,
+            target_source=target_source,
+            target_file=self._target.source_file,
+            credential_source=credential.source,
+            credential_digest=(
+                "sha256:" + hashlib.sha256(credential.token.encode("utf-8")).hexdigest()
+            ),
+            execution_host=socket.getfqdn(),
+            skill=identity,
+            environment=MappingProxyType(environment),
+        )
+
+
+class ConfiguredGitLabAuthentication(GitLabAuthentication):
+    """Resolve the declared file, environment, or exact-host glab store."""
+
+    def resolve(self) -> ResolvedGitLabCredential:
+        """Select one credential without falling through after a bad source.
+
+        :returns: Token and source selected by the target configuration.
+        :raises TargetError: If the selected token cannot be read or pinned.
+        """
+        source = _token_source(
+            self._target.gitlab.token_file,
+            GITLAB_VARIABLES,
+            f"glab-credential-store:{self._target.gitlab.host}",
+        )
+        if source.reference.startswith("glab-credential-store:"):
+            token = _glab_store_token(self._target.gitlab.host)
+        else:
+            selected = [
+                value for value in source.environment.values() if value is not None
+            ]
+            if len(selected) != 1:
+                raise TargetError("credential_source_unresolved")
+            token = selected[0]
+        return ResolvedGitLabCredential(source.reference, token)
 
 
 def _file_token(path: Path) -> str:
@@ -251,46 +355,19 @@ def bind_gitlab_session(
     target_source: str,
     revision: str | None = None,
 ) -> BoundGitLabSession:
-    """Freeze the selected GitLab token for all checks and later API calls.
+    """Bind the selected target through the shared authentication interface.
 
-    An explicit file wins over environment and store. An unreadable selected
-    source blocks; it never falls through to another credential or host.
+    :param target: Validated GitLab host and credential configuration.
+    :param target_kind: Exact GitLab target kind, project or group.
+    :param target_reference: Exact project or group reference.
+    :param target_source: Reportable source of the selected target.
+    :param revision: Explicit skill revision for an installed copy.
+    :returns: Bound session for access read-back and API operations.
+    :raises TargetError: If target selection or credential binding fails.
     """
-    if target_kind not in {"project", "group"} or not target_reference:
-        raise TargetError("gitlab_target_missing")
-    source = _token_source(
-        target.gitlab.token_file,
-        GITLAB_VARIABLES,
-        f"glab-credential-store:{target.gitlab.host}",
-    )
-    if source.reference.startswith("glab-credential-store:"):
-        token = _glab_store_token(target.gitlab.host)
-    else:
-        selected = [value for value in source.environment.values() if value is not None]
-        if len(selected) != 1:
-            raise TargetError("credential_source_unresolved")
-        token = selected[0]
-    identity = resolve_skill_identity(revision)
-    # The controlled child cannot silently substitute another token or CI
-    # login. The transport also pins --hostname to this same selected host.
-    environment: dict[str, str | None] = {
-        **dict.fromkeys(GITLAB_VARIABLES),
-        "CI_JOB_TOKEN": None,
-        "GLAB_ENABLE_CI_AUTOLOGIN": None,
-        "GITLAB_HOST": target.gitlab.host,
-        "GLAB_NO_PROMPT": "1",
-        "GITLAB_TOKEN": token,
-    }
-    return BoundGitLabSession(
-        origin=target.gitlab.url,
-        host=target.gitlab.host,
+    return ConfiguredGitLabAuthentication(target).bind(
         target_kind=target_kind,
         target_reference=target_reference,
         target_source=target_source,
-        target_file=target.source_file,
-        credential_source=source.reference,
-        credential_digest="sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest(),
-        execution_host=socket.getfqdn(),
-        skill=identity,
-        environment=MappingProxyType(environment),
+        revision=revision,
     )
