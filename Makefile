@@ -18,7 +18,7 @@ help:
 		'toolchain         Install missing host tools in the bless profile.' \
 		'conda             Create or update the ci-skills environment from environment.yml.' \
 		'install-hooks     Install the repository hook without overriding global hooks.' \
-		'bless             Check exact staged index content; this is the commit hook command.' \
+		'bless             Install or verify the hook, then check exact staged index content.' \
 		'bless-all         Check tracked working-tree files without rewriting them.' \
 		'pretty            Format tracked Markdown, Python, and Bash files; never stage them.' \
 		'build             Build the Ubuntu Linux development image.' \
@@ -40,7 +40,7 @@ install-hooks:
 	@fingerprint=$$($(ROOT)/scripts/dev.sh hooks --dry-run --json | jq -er .plan_fingerprint) && \
 		$(ROOT)/scripts/dev.sh hooks --apply --confirm-install "$$fingerprint"
 
-bless:
+bless: install-hooks
 	@$(ROOT)/bless.sh --staged
 
 bless-all:

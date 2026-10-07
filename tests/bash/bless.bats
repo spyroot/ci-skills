@@ -53,6 +53,7 @@ setup() {
   [[ "$output" == *'"cleanup_status": "PASS"'* ]]
   [ -x "$fixture/.git/hooks/pre-commit" ]
   grep -Fq 'ci-skills-bless-v1' "$fixture/.git/hooks/pre-commit"
+  grep -Fq 'exec "$root/bless.sh" --staged' "$fixture/.git/hooks/pre-commit"
 }
 
 @test 'hook apply refuses a stale plan without installing a hook' {
@@ -303,13 +304,15 @@ FAKE
 }
 
 @test 'installed hook commits staged JSON while rejecting staged invalid JSON' {
-  cp "$root/bless.sh" "$root/.markdownlint-cli2.yaml" "$root/.gitleaks.toml" \
+  cp "$root/Makefile" "$root/bless.sh" "$root/.markdownlint-cli2.yaml" "$root/.gitleaks.toml" \
     "$root/environment.yml" "$root/toolchain-dependencies.json" "$fixture/"
   cp -R "$root/scripts" "$root/lib" "$root/schemas" "$root/ci-skills" "$fixture/"
-  bash -c 'source "$1"; ci_hooks_install "$2"' _ \
-    "$root/lib/bash/automation/hooks.bash" "$fixture"
   printf '{"value":1}\n' >"$fixture/example.json"
   git -C "$fixture" add example.json
+  run make -C "$fixture" bless
+  [ "$status" -eq 0 ]
+  [ -x "$fixture/.git/hooks/pre-commit" ]
+  grep -Fq 'exec "$root/bless.sh" --staged' "$fixture/.git/hooks/pre-commit"
   printf '{"broken":' >"$fixture/example.json"
   run git -C "$fixture" commit -qm 'valid staged content'
   [ "$status" -eq 0 ]
