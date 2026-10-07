@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Classify recent local kernel Ceph/RBD journal entries into actions."""
 
+import _bootstrap  # noqa: F401
 from core.node_local_cli import parser, run
 
 

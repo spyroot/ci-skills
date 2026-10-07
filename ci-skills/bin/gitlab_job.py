@@ -1,27 +1,51 @@
 #!/usr/bin/env python3
-"""Read a selected GitLab CI job and its bounded trace."""
+"""Read one GitLab job or list bounded jobs from the selected project."""
 
 import argparse
 
+import _bootstrap  # noqa: F401
 from core.cli import execute_gitlab_job, parser
 
 
-# The parser is built by its own function so the declared interface can be
-# compared with the real one without rendering help text: the epilog names
-# several flags as prose, and a text scan cannot tell those apart from the
-# options argparse actually accepts. See tests/test_catalog.py.
 def build_parser() -> argparse.ArgumentParser:
-    """Return this command's parser: the universal tier plus its own options."""
+    """Return the declared GitLab job interface.
+
+    :returns: Parser for the existing get route and the bounded list route.
+    """
     cli = parser(
-        "Report job, pipeline, runner, and bounded trace data from the selected GitLab host.",
+        "Get one GitLab job or list bounded jobs from one selected project.",
         kind="gitlab_job",
     )
+    cli.add_argument("action", nargs="?", choices=("get", "list"), default="get")
     cli.add_argument(
         "--job-url",
         metavar="URL",
-        help="full HTTPS URL for one GitLab job (required unless --describe)",
+        help="full HTTPS URL for get (required unless --describe)",
     )
+    cli.add_argument("--project", metavar="PROJECT", help="exact project for list")
     cli.add_argument("--search", metavar="TEXT", help="case-insensitive text filter")
+    cli.add_argument(
+        "--status",
+        action="append",
+        choices=("failed", "success", "running", "pending", "canceled", "stuck"),
+        help="list status; repeat to select several",
+    )
+    cli.add_argument("--pipeline-id", type=int, help="list jobs of one pipeline")
+    cli.add_argument("--ref", help="list jobs on this exact branch or tag")
+    cli.add_argument("--last", help="list window ending now, such as 2h or 7d")
+    cli.add_argument("--from", dest="from_time", help="inclusive RFC3339 start")
+    cli.add_argument("--to", dest="to_time", help="inclusive RFC3339 end")
+    cli.add_argument("--name-glob", help="shell-style job name pattern")
+    cli.add_argument(
+        "--limit", type=int, default=50, help="maximum list records (1–500)"
+    )
+    cli.add_argument(
+        "--stuck-after",
+        type=int,
+        default=600,
+        metavar="SECONDS",
+        help="minimum age of a pending or created job (default: 600)",
+    )
     return cli
 
 

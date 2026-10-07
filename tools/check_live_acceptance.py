@@ -448,9 +448,9 @@ def _runner_smoke_cleanup_verified(
 def _redactor():
     """Return the skill's own redactor, so one rule covers capture and review."""
     root = Path(__file__).resolve().parents[1]
-    scripts = root / "skills" / "ci-skills" / "scripts"
-    if str(scripts) not in sys.path:
-        sys.path.insert(0, str(scripts))
+    library = root / "ci-skills" / "lib" / "python"
+    if str(library) not in sys.path:
+        sys.path.insert(0, str(library))
     try:
         from core.runtime import redact_tree
     except ImportError:
@@ -630,17 +630,17 @@ def main() -> int:
     cli.add_argument(
         "--expected",
         metavar="PATH",
-        help="expectations file (default: <root>/acceptance/expected.toml)",
+        help="expectations file (default: <root>/tests/acceptance/expected.toml)",
     )
     cli.add_argument(
         "--receipts",
         metavar="PATH",
-        help="receipt directory (default: <root>/acceptance/receipts)",
+        help="receipt directory (default: <root>/tests/acceptance/receipts)",
     )
     cli.add_argument(
         "--skill",
         metavar="PATH",
-        help="skill root (default: <root>/skills/ci-skills)",
+        help="skill root (default: <root>/ci-skills)",
     )
     modes = cli.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print JSON")
@@ -649,12 +649,16 @@ def main() -> int:
 
     root = Path(args.root).resolve()
     expected_path = (
-        Path(args.expected) if args.expected else root / "acceptance" / "expected.toml"
+        Path(args.expected)
+        if args.expected
+        else root / "tests" / "acceptance" / "expected.toml"
     )
     receipts_path = (
-        Path(args.receipts) if args.receipts else root / "acceptance" / "receipts"
+        Path(args.receipts)
+        if args.receipts
+        else root / "tests" / "acceptance" / "receipts"
     )
-    skill_path = Path(args.skill) if args.skill else root / "skills" / "ci-skills"
+    skill_path = Path(args.skill) if args.skill else root / "ci-skills"
     _redactor()
     try:
         data = evaluate(

@@ -10,91 +10,132 @@ ci_source_graph_content() {
   if [[ "$1" == staged ]]; then git show ":$2"; else cat -- "./$2"; fi
 }
 
-# Summary: List shell files tracked by the selected Git view.
+# Summary: List every added, copied, modified, or renamed index path.
+# Arguments: none.
+# Stdout: NUL-separated repository-relative paths.
+# Stderr: Git diagnostics.
+# Returns: 0 on success; a Git failure status otherwise.
+ci_source_graph_selected_staged_paths() (
+  git diff --cached --name-only -z --diff-filter=ACMR
+)
+
+# Summary: List shell files in the selected index or nonignored working view.
 # Arguments: $1: staged or all.
 # Stdout: NUL-separated repository-relative paths.
 # Stderr: Git diagnostics.
 # Returns: Git status.
-ci_source_graph_files() {
-  local file first
-  while IFS= read -r -d '' file; do
-    case "$file" in
-    *.bash | *.sh) printf '%s\0' "$file" ;;
-    *)
-      first="$(ci_source_graph_content "$1" "$file" | head -1)" || return
-      [[ "$first" == '#!'*bash* ]] && printf '%s\0' "$file"
-      ;;
-    esac
-  done < <(git ls-files -z)
-}
-
-# Summary: Print resolved source edges and reject gaps in selected shell files.
-# Arguments: $1: staged or all.
-# Stdout: tab-separated source and target paths.
-# Stderr: missing annotation or target diagnostics.
-# Returns: 0 when selected edges resolve; 1 on a missing dependency.
-ci_source_graph_edges() {
-  local scope="$1" file content target annotations sources strict=0 statement actual index
-  local -A changed=() deleted=()
-  local -a source_lines=() annotation_lines=()
-  if [[ "$scope" == staged ]]; then
-    while IFS= read -r -d '' file; do changed["$file"]=1; done \
-      < <(git diff --cached --name-only -z --diff-filter=ACMR)
-    while IFS= read -r -d '' file; do deleted["$file"]=1; done \
-      < <(git diff --cached --name-only -z --diff-filter=D)
+ci_source_graph_files() (
+  local file first inventory
+  inventory="$(mktemp)" || return
+  trap 'rm -f -- "$inventory"' EXIT
+  if [[ "$1" == staged ]]; then
+    git ls-files -z >"$inventory" || return
+  else
+    git ls-files --cached --others --exclude-standard -z >"$inventory" || return
   fi
   while IFS= read -r -d '' file; do
-    [[ "$scope" != all && -z "${changed[$file]:-}" ]] || strict=1
-    content="$(ci_source_graph_content "$scope" "$file")" || return 1
-    annotations="$(sed -n 's/^[[:space:]]*#[[:space:]]*shellcheck source=\([^[:space:]]*\).*/\1/p' <<<"$content")"
-    sources="$(awk '/^[[:space:]]*(source|\.)[[:space:]]/{print}' <<<"$content" |
-      sed '/^[[:space:]]*\. as [\$]/d')"
-    if ((strict)); then
-      if [[ "$(printf '%s\n' "$sources" | sed '/^$/d' | wc -l)" != "$(printf '%s\n' "$annotations" | sed '/^$/d' | wc -l)" ]]; then
-        printf 'Missing or extra source annotation in %s\n' "$file" >&2
+    [[ "$1" != all || -f "./$file" ]] || continue
+    case "$file" in
+    *.bash | *.sh | *.bats | .githooks/*) printf '%s\0' "$file" ;;
+    *)
+      first="$(ci_source_graph_content "$1" "$file" | sed -n '1p')" || return
+      if [[ "$first" == '#!'*bash* ]]; then
+        printf '%s\0' "$file"
+      fi
+      ;;
+    esac
+  done <"$inventory"
+  return 0
+)
+
+# Summary: Read literal source targets that do not need an annotation.
+# Arguments: $1 Bash source text.
+# Stdout: one relative target per line.
+# Returns: 0.
+ci_source_graph_literals() {
+  sed -n -E \
+    -e 's/^[[:space:]]*(source|\.)[[:space:]]+"([A-Za-z0-9._/-]+)".*/\2/p' \
+    -e "s/^[[:space:]]*(source|\.)[[:space:]]+'([A-Za-z0-9._/-]+)'.*/\\2/p" \
+    -e 's/^[[:space:]]*(source|\.)[[:space:]]+([A-Za-z0-9._/-]+)([[:space:]]|$).*/\2/p' \
+    <<<"$1"
+}
+
+# Summary: Require a declared target beside each dynamic source in changed Bash.
+# Arguments: $1 Bash source text; $2 repository-relative path.
+# Stderr: the path of an undeclared dynamic source.
+# Returns: 0 when each dynamic source is declared; 1 otherwise.
+ci_source_graph_dynamic_annotations() {
+  local content=$1 file=$2 line annotation=0
+  while IFS= read -r line; do
+    if [[ $line =~ ^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+source=[^[:space:]]+ ]]; then
+      annotation=1
+      continue
+    fi
+    if [[ $line =~ ^[[:space:]]*(source|\.)[[:space:]]+ ]]; then
+      if [[ -z $(ci_source_graph_literals "$line") && $annotation -ne 1 ]]; then
+        printf 'Dynamic Bash source in %s needs a shellcheck source annotation\n' "$file" >&2
         return 1
       fi
-      if [[ -n "$sources" ]]; then
-        mapfile -t source_lines <<<"$sources"
-        mapfile -t annotation_lines <<<"$annotations"
-        for index in "${!source_lines[@]}"; do
-          statement="${source_lines[$index]}"
-          if [[ "$statement" =~ ^[[:space:]]*(source|\.)[[:space:]]+(.+)$ ]]; then
-            actual="${BASH_REMATCH[2]}"
-            actual="${actual#\"}"
-            actual="${actual%\"}"
-            actual="${actual#\'}"
-            actual="${actual%\'}"
-            if [[ "$actual" =~ ^[A-Za-z0-9._/-]+$ &&
-              "$actual" != "${annotation_lines[$index]}" ]]; then
-              printf 'Source annotation disagrees with literal target in %s\n' "$file" >&2
-              return 1
-            fi
-          fi
-        done
-      fi
+      annotation=0
+    elif [[ ! $line =~ ^[[:space:]]*(#|$) ]]; then
+      annotation=0
     fi
+  done <<<"$content"
+}
+
+# Summary: Print source edges and reject gaps in changed staged shell files.
+# Arguments: $1 staged or all.
+# Stdout: tab-separated source and target paths.
+# Stderr: missing selected target diagnostics.
+# Returns: 0 when edges resolve; 1 on an invalid changed source.
+ci_source_graph_edges() (
+  local scope="$1" file content target annotations literals targets
+  local inventory_dir selected_inventory deleted_inventory files_inventory
+  local -A changed=() deleted=()
+  inventory_dir="$(mktemp -d)" || return
+  trap 'rm -rf -- "$inventory_dir"' EXIT
+  files_inventory="$inventory_dir/files"
+  ci_source_graph_files "$scope" >"$files_inventory" || return
+  if [[ "$scope" == staged ]]; then
+    selected_inventory="$inventory_dir/selected"
+    deleted_inventory="$inventory_dir/deleted"
+    ci_source_graph_selected_staged_paths >"$selected_inventory" || return
+    git diff --cached --no-renames --name-only -z --diff-filter=D \
+      >"$deleted_inventory" || return
+    while IFS= read -r -d '' file; do changed["$file"]=1; done \
+      <"$selected_inventory"
+    while IFS= read -r -d '' file; do deleted["$file"]=1; done \
+      <"$deleted_inventory"
+  fi
+  while IFS= read -r -d '' file; do
+    content="$(ci_source_graph_content "$scope" "$file")" || return 1
+    if [[ "$scope" == staged && -n "${changed[$file]:-}" ]]; then
+      ci_source_graph_dynamic_annotations "$content" "$file" || return 1
+    fi
+    annotations="$(sed -n 's/^[[:space:]]*#[[:space:]]*shellcheck source=\([^[:space:]]*\).*/\1/p' <<<"$content")"
+    literals="$(ci_source_graph_literals "$content")" || return 1
+    targets="$(printf '%s\n%s\n' "$annotations" "$literals" | sed '/^$/d' | sort -u)" ||
+      return 1
     while IFS= read -r target; do
       [[ -n "$target" ]] || continue
+      target="${target#./}"
       if [[ "$scope" == staged ]]; then
         if ! git cat-file -e ":$target" 2>/dev/null; then
-          if ((strict)) || [[ -n "${deleted[$target]:-}" ]]; then
+          if [[ -n "${changed[$file]:-}" || -n "${deleted[$target]:-}" ]]; then
             printf 'Missing staged Bash dependency %s from %s\n' "$target" "$file" >&2
             return 1
           fi
           continue
         fi
       elif [[ ! -f "$target" ]]; then
-        printf 'Missing Bash dependency %s from %s\n' "$target" "$file" >&2
-        return 1
+        continue
       fi
       printf '%s\t%s\n' "$file" "$target"
-    done <<<"$annotations"
-    strict=0
-  done < <(ci_source_graph_files "$scope")
-}
+    done <<<"$targets"
+  done <"$files_inventory"
+)
 
-# Summary: Reject a selected Bash source graph with a cycle or missing edge.
+# Summary: Reject a selected Bash source graph with a cycle or invalid edge.
 # Arguments: $1: staged or all.
 # Stderr: one dependency or cycle diagnostic.
 # Returns: 0 if acyclic and resolved; 1 otherwise.

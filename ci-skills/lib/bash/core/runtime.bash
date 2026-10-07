@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Shared Bash foundation for repository checks and installed Bash commands.
+# Author Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
 
 [[ ${CI_SKILLS_RUNTIME_LOADED:-0} == 1 ]] && return 0
 CI_SKILLS_RUNTIME_LOADED=1
@@ -9,8 +11,9 @@ CI_EXIT_MISSING=66
 CI_EXIT_BLOCKED=69
 
 # Summary: Report a classified failure and the next action.
-# Arguments: exit class, message, next action.
-# Stderr: bounded diagnostic. Returns: supplied exit class.
+# Arguments: $1 exit class; $2 message; $3 next action.
+# Stderr: bounded diagnostic.
+# Returns: supplied exit class.
 ci_fail() {
   local status=$1 message=$2 next=$3
   printf 'BLOCKER: %s\nSAFE_NEXT_STEP: %s\n' "$message" "$next" >&2

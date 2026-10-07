@@ -10,26 +10,15 @@ right.
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-from conftest import REPO_ROOT, load_module
+from conftest import REPO_ROOT, git, load_module
 
 CLASSIFY = load_module(
     "classify_changed_paths", REPO_ROOT / "tools" / "classify_changed_paths.py"
 )
-
-
-def _git(root: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), *args],
-        capture_output=True,
-        check=True,
-        text=True,
-    )
-    return result.stdout.strip()
 
 
 @pytest.fixture
@@ -37,25 +26,25 @@ def repo(tmp_path: Path) -> Path:
     """Build a fixture repository with one committed baseline."""
     root = tmp_path / "fixture"
     root.mkdir()
-    _git(root, "init", "-q", ".")
-    _git(root, "config", "user.email", "unit@example.test")
-    _git(root, "config", "user.name", "unit")
+    git(root, "init", "-q", ".")
+    git(root, "config", "user.email", "unit@example.test")
+    git(root, "config", "user.name", "unit")
     (root / "keep.md").write_text("# keep\n", encoding="utf-8")
     (root / "module.py").write_text("value = 1\n", encoding="utf-8")
     (root / "doomed.py").write_text("doomed = True\n", encoding="utf-8")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-qm", "baseline")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "baseline")
     return root
 
 
 def _classify(root: Path) -> dict:
-    return CLASSIFY.classify(root, _git(root, "rev-parse", "HEAD~1"), "HEAD")
+    return CLASSIFY.classify(root, git(root, "rev-parse", "HEAD~1"), "HEAD")
 
 
 def test_a_deleted_python_file_is_counted(repo: Path):
     """A commit that only deletes a module must still run the Python gates."""
-    _git(repo, "rm", "-q", "doomed.py")
-    _git(repo, "commit", "-qm", "delete a module")
+    git(repo, "rm", "-q", "doomed.py")
+    git(repo, "commit", "-qm", "delete a module")
 
     data = _classify(repo)
 
@@ -65,8 +54,8 @@ def test_a_deleted_python_file_is_counted(repo: Path):
 
 def test_a_python_to_markdown_rename_counts_the_source(repo: Path):
     """Only the rename DESTINATION is reported by name-only, hiding the source."""
-    _git(repo, "mv", "module.py", "module.md")
-    _git(repo, "commit", "-qm", "rename a module to markdown")
+    git(repo, "mv", "module.py", "module.md")
+    git(repo, "commit", "-qm", "rename a module to markdown")
 
     data = _classify(repo)
 
@@ -80,8 +69,8 @@ def test_a_type_change_is_counted(repo: Path):
     target = repo / "module.py"
     target.unlink()
     target.symlink_to("keep.md")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "turn a module into a symlink")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "turn a module into a symlink")
 
     data = _classify(repo)
 
@@ -91,8 +80,8 @@ def test_a_type_change_is_counted(repo: Path):
 def test_a_markdown_only_change_stays_zero(repo: Path):
     """The skip rule itself is preserved: Markdown alone runs no Python gate."""
     (repo / "keep.md").write_text("# keep\n\nmore\n", encoding="utf-8")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "edit markdown")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "edit markdown")
 
     data = _classify(repo)
 
@@ -102,8 +91,8 @@ def test_a_markdown_only_change_stays_zero(repo: Path):
 
 def test_a_markdown_to_python_rename_counts_the_destination(repo: Path):
     """The mirror case: a new module arriving by rename must be gated."""
-    _git(repo, "mv", "keep.md", "keep.py")
-    _git(repo, "commit", "-qm", "rename markdown to a module")
+    git(repo, "mv", "keep.md", "keep.py")
+    git(repo, "commit", "-qm", "rename markdown to a module")
 
     data = _classify(repo)
 
@@ -133,10 +122,10 @@ def test_an_unreadable_range_blocks(repo: Path):
 
 def test_github_output_receives_the_counts(repo: Path, tmp_path: Path):
     """The workflow step consumes these three keys."""
-    _git(repo, "rm", "-q", "doomed.py")
-    _git(repo, "commit", "-qm", "delete a module")
+    git(repo, "rm", "-q", "doomed.py")
+    git(repo, "commit", "-qm", "delete a module")
     output = tmp_path / "github_output"
-    base = _git(repo, "rev-parse", "HEAD~1")
+    base = git(repo, "rev-parse", "HEAD~1")
 
     argv = sys.argv
     sys.argv = [

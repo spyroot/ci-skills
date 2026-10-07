@@ -20,7 +20,6 @@ __pycache__/
 # are never committed.
 .claude/
 .codex/
-.agents/
 .agent-review/
 AGENT*.md
 CLAUDE*.md

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/reference-section.schema.json",
+  "title": "reference_section",
+  "description": "One answer of ci-skills/bin/reference.py get (CI09-REFERENCE section 3): one section's own text, verbatim and bounded, the pin it was read at, and pointers to its subsections.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "reference",
+    "anchor",
+    "pinned",
+    "text",
+    "choices",
+    "continuation"
+  ],
+  "properties": {
+    "kind": {
+      "const": "reference_section"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "reference": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "anchor": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "tier": {
+      "type": "string",
+      "pattern": "^(card|part:[a-z0-9-]+)$"
+    },
+    "pinned": {
+      "type": "string",
+      "minLength": 1
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 8192
+    },
+    "choices": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "reference-next.schema.json#/$defs/choice"
+      }
+    },
+    "continuation": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "reference-next.schema.json#/$defs/pointer"
+        }
+      ]
+    },
+    "error": {
+      "$ref": "reference-next.schema.json#/$defs/error"
+    }
+  }
+}

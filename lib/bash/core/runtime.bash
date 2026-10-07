@@ -1,134 +1,121 @@
 #!/usr/bin/env bash
-# Development Bash runtime shared by bless, dev, and the hook installer.
-# shellcheck source=ci-skills/lib/bash/core/runtime.bash
-source "${BASH_SOURCE[0]%/*}/../../../ci-skills/lib/bash/core/runtime.bash"
+# Shared Bash foundation for repository checks and installed Bash commands.
+# Author Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
 
-[[ ${CI_DEV_RUNTIME_LOADED:-0} == 1 ]] && return 0
-CI_DEV_RUNTIME_LOADED=1
+[[ ${CI_SKILLS_RUNTIME_LOADED:-0} == 1 ]] && return 0
+CI_SKILLS_RUNTIME_LOADED=1
 
-CI_EXIT_FAILED=1
-# shellcheck disable=SC2034 # Consumed by the sourced hook installer.
-CI_EXIT_CONFLICT=73
-CI_EXIT_SIGNAL_HUP=129
-CI_EXIT_SIGNAL_INT=130
-CI_EXIT_SIGNAL_TERM=143
+CI_EXIT_USAGE=64
+CI_EXIT_DATA=65
+CI_EXIT_MISSING=66
+CI_EXIT_BLOCKED=69
 
-# Summary: Re-execute a thin entrypoint with an available Bash 5 runtime.
-# Arguments: entrypoint path, then its original arguments.
-# Returns: 0 under Bash 5; blocked status when none is available.
-ci_runtime_require_bash5() {
-  local entrypoint=$1 candidate path_candidate=''
-  shift
-  if ((BASH_VERSINFO[0] >= 5)); then return 0; fi
-  path_candidate="$(command -v bash || true)"
-  for candidate in "$path_candidate" /opt/homebrew/bin/bash /usr/local/bin/bash /usr/bin/bash; do
-    if [[ -x $candidate ]] && "$candidate" -c '((BASH_VERSINFO[0] >= 5))' 2>/dev/null; then
-      exec "$candidate" "$entrypoint" "$@"
-    fi
-  done
-  ci_fail "$CI_EXIT_BLOCKED" 'Bash 5 or newer is unavailable' \
-    'Use the Bash path reported by agent-tools.sh.'
+# Summary: Report a classified failure and the next action.
+# Arguments: $1 exit class; $2 message; $3 next action.
+# Stderr: bounded diagnostic.
+# Returns: supplied exit class.
+ci_fail() {
+  local status=$1 message=$2 next=$3
+  printf 'BLOCKER: %s\nSAFE_NEXT_STEP: %s\n' "$message" "$next" >&2
+  return "$status"
 }
 
-# Summary: Exit with the shared signal status so EXIT cleanup can run.
-# Arguments: HUP, INT, or TERM.
-ci_runtime_signal_exit() {
-  case $1 in
-  HUP) exit "$CI_EXIT_SIGNAL_HUP" ;;
-  INT) exit "$CI_EXIT_SIGNAL_INT" ;;
-  TERM) exit "$CI_EXIT_SIGNAL_TERM" ;;
+# Summary: Write one diagnostic at or above the requested log level.
+# Arguments: level, component, event, message.
+# Stderr: text or JSON Lines; optional log file receives the same line.
+# Returns: 0 if written or suppressed; failure if the log cannot be written.
+ci_log() {
+  local level=$1 component=$2 event=$3 message=$4 line timestamp
+  local rank=0 minimum=0
+  case $level in
+  debug) rank=0 ;; info) rank=1 ;; warning) rank=2 ;; error) rank=3 ;;
   *) return "$CI_EXIT_USAGE" ;;
   esac
-}
-
-# Summary: Initialize one process-owned LIFO cleanup stack and lifecycle traps.
-# Side effects: installs the shared ERR, EXIT, HUP, INT, and TERM handlers.
-# Idempotency: a second call keeps the current stack and traps.
-ci_runtime_lifecycle_begin() {
-  if [[ ${CI_RUNTIME_LIFECYCLE_ACTIVE:-0} == 1 ]]; then return 0; fi
-  CI_RUNTIME_LIFECYCLE_ACTIVE=1
-  CI_RUNTIME_CLEANUP_FUNCTIONS=()
-  CI_RUNTIME_CLEANUP_ARGUMENTS=()
-  CI_RUNTIME_CLEANUP_RAN=0
-  CI_RUNTIME_CLEANUP_STATUS=0
-  CI_RUNTIME_ERR_STATUS=0
-  trap 'ci_runtime_error "$?"' ERR
-  trap 'ci_runtime_exit "$?"' EXIT
-  trap 'ci_runtime_signal_exit HUP' HUP
-  trap 'ci_runtime_signal_exit INT' INT
-  trap 'ci_runtime_signal_exit TERM' TERM
-}
-
-# Summary: Register one existing cleanup function and its single resource argument.
-# Arguments: cleanup function name, resource identifier.
-# Returns: 0 or usage status for an invalid registration.
-ci_runtime_cleanup_push() {
-  [[ ${CI_RUNTIME_LIFECYCLE_ACTIVE:-0} == 1 && $# == 2 ]] || return "$CI_EXIT_USAGE"
-  declare -F "$1" >/dev/null || return "$CI_EXIT_USAGE"
-  CI_RUNTIME_CLEANUP_FUNCTIONS+=("$1")
-  CI_RUNTIME_CLEANUP_ARGUMENTS+=("$2")
-}
-
-# Summary: Remove one owned temporary file and prove its absence.
-# Arguments: nonempty file path.
-ci_runtime_cleanup_file() {
-  [[ -n $1 ]] || return "$CI_EXIT_USAGE"
-  rm -f -- "$1" || return "$CI_EXIT_FAILED"
-  [[ ! -e $1 && ! -L $1 ]]
-}
-
-# Summary: Remove one owned temporary directory and prove its absence.
-# Arguments: nonempty directory path.
-ci_runtime_cleanup_dir() {
-  [[ -n $1 && $1 != / ]] || return "$CI_EXIT_USAGE"
-  rm -rf -- "$1" || return "$CI_EXIT_FAILED"
-  [[ ! -e $1 && ! -L $1 ]]
-}
-
-# Summary: Run registered cleanup actions in reverse order and record each result.
-# Stderr: one bounded PASS or FAIL line per action, without resource contents.
-# Returns: 1 if any action fails, including on a repeated call.
-ci_runtime_cleanup_run() {
-  local index failed=0 function
-  if [[ ${CI_RUNTIME_CLEANUP_RAN:-0} == 1 ]]; then
-    return "$CI_RUNTIME_CLEANUP_STATUS"
+  case ${CI_LOG_LEVEL:-info} in
+  debug) minimum=0 ;; info) minimum=1 ;; warning) minimum=2 ;;
+  error) minimum=3 ;; *) return "$CI_EXIT_USAGE" ;;
+  esac
+  ((rank >= minimum)) || return 0
+  timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ') || return
+  if [[ ${CI_LOG_FORMAT:-text} == json ]]; then
+    line=$(jq -cn --arg ts "$timestamp" --arg level "$level" \
+      --arg run "${CI_RUN_ID:-}" --arg component "$component" \
+      --arg event "$event" --arg message "$message" \
+      '{timestamp:$ts,level:$level,runId:$run,component:$component,event:$event,message:$message}') || return
+  else
+    line="$timestamp $level $component $event: $message"
   fi
-  CI_RUNTIME_CLEANUP_RAN=1
-  for ((index = ${#CI_RUNTIME_CLEANUP_FUNCTIONS[@]} - 1; index >= 0; index--)); do
-    function="${CI_RUNTIME_CLEANUP_FUNCTIONS[$index]}"
-    if "$function" "${CI_RUNTIME_CLEANUP_ARGUMENTS[$index]}"; then
-      printf 'CLEANUP_PASS: %s\n' "$function" >&2
-    else
-      printf 'CLEANUP_FAIL: %s\n' "$function" >&2
-      failed=1
-    fi
-  done
-  CI_RUNTIME_CLEANUP_STATUS="$failed"
-  return "$failed"
+  printf '%s\n' "$line" >&2
+  if [[ -n ${CI_LOG_FILE:-} ]]; then
+    printf '%s\n' "$line" >>"$CI_LOG_FILE" || return
+  fi
 }
 
-# Summary: Record an unhandled command error for final lifecycle status.
-# Arguments: command exit status.
-ci_runtime_error() {
-  CI_RUNTIME_ERR_STATUS="$1"
+# Summary: Load the single token line from a selected credential file.
+# Arguments: file path, output variable name.
+# Stdout: none. Stderr: classified failure without credential content.
+# Returns: 0, usage, missing input, or invalid credential data.
+ci_token_from_file() {
+  local path=$1 output_name=$2 value='' extra='' extra_status=0
+  [[ $output_name =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return "$CI_EXIT_USAGE"
+  [[ -f $path && -r $path ]] || ci_fail "$CI_EXIT_MISSING" \
+    'credential file is unreadable' 'Provide a readable --token-file path.' || return $?
+  {
+    IFS= read -r value || :
+    IFS= read -r extra || extra_status=$?
+  } <"$path"
+  value=${value%$'\r'}
+  [[ -n $value ]] || ci_fail "$CI_EXIT_MISSING" \
+    'credential file is empty' 'Provide a non-empty --token-file.' || return $?
+  if ((extra_status == 0)) || [[ -n $extra ]]; then
+    ci_fail "$CI_EXIT_DATA" 'credential file has multiple lines' \
+      'Provide one token value in the selected file.'
+    return $?
+  fi
+  [[ ${#value} -le 4096 ]] || ci_fail "$CI_EXIT_DATA" \
+    'credential value is too long' 'Check the selected token file.' || return $?
+  printf -v "$output_name" '%s' "$value"
 }
 
-# Summary: Run the shared cleanup stack and make incomplete cleanup fatal.
-# Arguments: process exit status before cleanup.
-ci_runtime_exit() {
-  local status="$1"
-  trap - ERR EXIT HUP INT TERM
-  if [[ "$status" == 0 && ${CI_RUNTIME_ERR_STATUS:-0} != 0 ]]; then
-    status="$CI_RUNTIME_ERR_STATUS"
+# Summary: Calculate the SHA-256 of bytes read from stdin.
+# Stdout: lowercase hex digest. Returns: hash command status.
+ci_sha256_stdin() {
+  local result=''
+  if command -v shasum >/dev/null 2>&1; then
+    result=$(shasum -a 256) || return
+  elif command -v sha256sum >/dev/null 2>&1; then
+    result=$(sha256sum) || return
+  else
+    ci_fail "$CI_EXIT_BLOCKED" 'SHA-256 command is unavailable' \
+      'Install shasum or sha256sum.'
+    return $?
   fi
-  if ! ci_runtime_cleanup_run; then
-    status="$CI_EXIT_FAILED"
-  fi
-  if [[ -n ${CI_RUNTIME_CLEANUP_RECEIPT_FILE:-} ]]; then
-    local cleanup_result=PASS
-    if ((CI_RUNTIME_CLEANUP_STATUS)); then cleanup_result=FAIL; fi
-    printf '%s\n' "$cleanup_result" >"$CI_RUNTIME_CLEANUP_RECEIPT_FILE" ||
-      status="$CI_EXIT_FAILED"
-  fi
-  exit "$status"
+  printf '%s\n' "${result%% *}"
+}
+
+# Summary: Identify a clean, tracked skill checkout by its exact Git commit.
+# Arguments: absolute source root, tracked manifest path (default: SKILL.md).
+# Stdout: full commit SHA. Stderr: classified blocker.
+# Returns: zero or blocked class.
+ci_verified_source_revision() {
+  local source=$1 manifest=${2:-SKILL.md} root='' revision='' changes=''
+  root=$(git -C "$source" rev-parse --show-toplevel 2>/dev/null) ||
+    ci_fail "$CI_EXIT_BLOCKED" 'skill source is not a Git checkout' \
+      'Install from a committed skill checkout.' || return $?
+  [[ $root == "$source" ]] || ci_fail "$CI_EXIT_BLOCKED" \
+    'skill source is not the checkout root' \
+    'Use the repository root that owns SKILL.md.' || return $?
+  git -C "$source" ls-files --error-unmatch "$manifest" >/dev/null 2>&1 ||
+    ci_fail "$CI_EXIT_BLOCKED" 'skill manifest is not tracked' \
+      'Commit the selected skill manifest before installation.' || return $?
+  changes=$(git -C "$source" status --porcelain=v1 --untracked-files=all) ||
+    ci_fail "$CI_EXIT_BLOCKED" 'skill source status is unreadable' \
+      'Inspect the Git checkout before installation.' || return $?
+  [[ -z $changes ]] || ci_fail "$CI_EXIT_BLOCKED" \
+    'skill source has uncommitted changes' \
+    'Commit or remove source changes, then make a new install plan.' || return $?
+  revision=$(git -C "$source" rev-parse --verify 'HEAD^{commit}') ||
+    ci_fail "$CI_EXIT_BLOCKED" 'skill source revision is unavailable' \
+      'Install from a committed skill checkout.' || return $?
+  printf '%s\n' "$revision"
 }

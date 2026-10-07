@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  repo_root="$(cd -- "${BATS_TEST_DIRNAME}/.." && pwd -P)"
+  repo_root="$(cd -- "${BATS_TEST_DIRNAME}/../.." && pwd -P)"
   destination="${BATS_TEST_TMPDIR}/skills/ci-skills"
 }
 
@@ -29,7 +29,7 @@ make_install_fixture() {
   run "$tool" --destination "$destination" --dry-run
   [ "$status" -eq 0 ]
   [ "$(jq -r .mode <<<"$output")" = "dry-run" ]
-  [ "$(jq -r .source <<<"$output")" = "$source_root/skills/ci-skills" ]
+  [ "$(jq -r .source <<<"$output")" = "$source_root/ci-skills" ]
   [ "$(jq -r .destination <<<"$output")" = "$destination" ]
   [ "$(jq -r .source_revision <<<"$output")" = "$source_revision" ]
   jq -e '.mutable_link == false and (.fingerprint | length == 64)' <<<"$output" >/dev/null
@@ -58,7 +58,7 @@ make_install_fixture() {
   [ -d "$destination" ]
   [ ! -L "$destination" ]
   [ "$(jq -r .status <<<"$output")" = "PASS" ]
-  cmp "$source_root/skills/ci-skills/SKILL.md" "$destination/SKILL.md"
+  cmp "$source_root/ci-skills/SKILL.md" "$destination/SKILL.md"
   run "$tool" --destination "$destination" --upgrade --dry-run
   [ "$status" -eq 0 ]
   upgrade_fingerprint=$(jq -r .fingerprint <<<"$output")
@@ -92,7 +92,7 @@ make_install_fixture() {
   backup=$(jq -r .previous_version <<<"$output")
   [ -L "$backup" ]
   [ "$(readlink "$backup")" = "$source_root" ]
-  cmp "$source_root/skills/ci-skills/SKILL.md" "$destination/SKILL.md"
+  cmp "$source_root/ci-skills/SKILL.md" "$destination/SKILL.md"
 }
 
 @test 'apply blocks when tracked source bytes changed after planning' {
@@ -100,7 +100,7 @@ make_install_fixture() {
   run "$tool" --destination "$destination" --dry-run
   [ "$status" -eq 0 ]
   fingerprint=$(jq -r .fingerprint <<<"$output")
-  printf '\nchanged after dry-run\n' >>"${source_root}/skills/ci-skills/SKILL.md"
+  printf '\nchanged after dry-run\n' >>"${source_root}/ci-skills/SKILL.md"
   run "$tool" --destination "$destination" --apply \
     --timeout 10s --confirm-install "$fingerprint"
   [ "$status" -eq 2 ]
@@ -113,8 +113,8 @@ make_install_fixture() {
   run "$tool" --destination "$destination" --dry-run
   [ "$status" -eq 0 ]
   fingerprint=$(jq -r .fingerprint <<<"$output")
-  printf '\nnew committed skill\n' >>"${source_root}/skills/ci-skills/SKILL.md"
-  git -C "$source_root" add skills/ci-skills/SKILL.md
+  printf '\nnew committed skill\n' >>"${source_root}/ci-skills/SKILL.md"
+  git -C "$source_root" add ci-skills/SKILL.md
   git -C "$source_root" commit --quiet -m "change skill"
   run "$tool" --destination "$destination" --apply \
     --timeout 10s --confirm-install "$fingerprint"

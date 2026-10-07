@@ -13,7 +13,7 @@ import pytest
 import yaml
 from tests.python.conftest import REPO_ROOT, install_executable, load_module
 
-SKILL_ROOT = REPO_ROOT / "skills" / "ci-skills"
+SKILL_ROOT = REPO_ROOT / "ci-skills"
 
 ENTRYPOINT_CASES = (
     ("access_check.py", (), "access_check", "PASS"),
@@ -619,7 +619,7 @@ def _run_installed_node_script(
 ) -> subprocess.CompletedProcess[str]:
     """Run an installed node script directly from an unrelated directory."""
     return subprocess.run(
-        [sys.executable, str(installed / "scripts" / script_name), *args],
+        [sys.executable, str(installed / "bin" / script_name), *args],
         check=False,
         capture_output=True,
         cwd=cwd,
@@ -683,7 +683,7 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     result = subprocess.run(
         [
             sys.executable,
-            str(installed / "scripts" / script_name),
+            str(installed / "bin" / script_name),
             "--target",
             str(target),
             "--revision",
@@ -711,7 +711,7 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     failure = subprocess.run(
         [
             sys.executable,
-            str(installed / "scripts" / script_name),
+            str(installed / "bin" / script_name),
             "--target",
             str(tmp_path / "missing-target.toml"),
             mode,
@@ -759,7 +759,7 @@ def test_installed_mtu_entrypoint_plans_and_applies_from_unrelated_cwd(
             "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
         }
     )
-    script = installed / "scripts" / "k8s_verify_mtu_consistency.py"
+    script = installed / "bin" / "k8s_verify_mtu_consistency.py"
     base = [sys.executable, str(script), "--target", str(target), mode]
     plan = subprocess.run(
         base,
@@ -823,7 +823,7 @@ def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
     result = subprocess.run(
         [
             sys.executable,
-            str(installed / "scripts" / "access_check.py"),
+            str(installed / "bin" / "access_check.py"),
             "--target",
             str(target),
             "--revision",
@@ -871,7 +871,7 @@ def test_installed_api_and_ceph_invalid_args_are_structured(
     result = subprocess.run(
         [
             sys.executable,
-            str(installed / "scripts" / script_name),
+            str(installed / "bin" / script_name),
             "--definitely-invalid",
             mode,
         ],
@@ -916,7 +916,7 @@ def test_installed_node_entrypoints_dry_run_from_unrelated_cwd(
     result = subprocess.run(
         [
             sys.executable,
-            str(installed / "scripts" / script_name),
+            str(installed / "bin" / script_name),
             "--target",
             str(target),
             "--dry-run",
@@ -1060,7 +1060,7 @@ def test_installed_node_entrypoints_invalid_args_are_structured(
     result = subprocess.run(
         [
             sys.executable,
-            str(installed / "scripts" / script_name),
+            str(installed / "bin" / script_name),
             "--unknown",
             mode,
         ],

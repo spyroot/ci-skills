@@ -11,7 +11,8 @@ versioned.
 ## Schemas
 
 All schemas live under `schemas/` at the repository root (planned, this
-phase; the directory exists today and is empty), one file per record kind,
+phase; `command-contract`, `skill-index`, `skill-manifest`, `reference-next`, `reference-section` and
+`gitlab-pipeline-watch` are implemented so far), one file per record kind,
 named `<kind>.schema.json`. They use JSON Schema draft 2020-12 and the style
 of the shared standards' own schemas: `$schema`, `$id`, `title`, `type`,
 `required`, `properties` and `$defs`. A kind without a schema cannot be
@@ -21,19 +22,102 @@ emitted, and a schema change without a version bump fails the `schemas` gate
 record's `kind` and its producer, and the last column names the phase that
 adds the record, or `today` where the record exists in the tree.
 
-| Schema | `kind` | Validates | Producer | Lands in |
+| Schema | `kind` | Validates | Producer | Status |
 | --- | --- | --- | --- | --- |
-| `skill-frontmatter` | none, upstream shape | the YAML block in each `SKILL.md` | authors | today |
-| `skill-manifest` | `skill_manifest` | `ci-skills/tools.json` | `tools/render_manifest.py` | today |
-| `skill-index` | `skill_index` | `bin/ci-skills list --json` | `tools/skillkit/discover.py` | CI01-CATALOG |
-| `vendor-lock` | `skill_vendor_lock` | `vendor/vendor.lock.json` | `bin/ci-skills update` | CI05-VENDOR |
-| `vendor-declarations` | not named yet | `vendor/vendor.toml` | by hand | CI05-VENDOR |
-| `tool-operations` | `tool_operations` | `bin/ci-skills tools --json` | `core/tool_operations.py` | CI09-REFERENCE |
-| `reference-index` | `reference_index` | a reference's `index.json` | `tools/update_reference.py` | CI09-REFERENCE |
-| `openai-agent-metadata` | none, upstream shape | `agents/openai.yaml` | `tools/render_manifest.py` | CI01-CATALOG |
-| `smoke-case` | not named yet | each `[[smoke_cases]]` entry of `expected.toml` | by hand | CI03-GATES, G5 |
-| `command-contract` | `command_contract` | each command's `--describe` | `core/catalog.py` | today |
-| `command-result` | none, the envelope | the fields every report kind shares | `core/report.py` | today |
+| `skill-frontmatter` | none, upstream shape | the YAML block in each `SKILL.md` | authors | missing |
+| `skill-manifest` | `skill_manifest` | `ci-skills/tools.json` | `tools/render_manifest.py` | implemented |
+| `skill-index` | `skill_index` | `bin/ci-skills list --json` | `tools/skillkit/discover.py` | implemented |
+| `reference-next` | `reference_next` | `next` answers and the shared pointer | `core/navigate.py` | implemented |
+| `reference-section` | `reference_section` | `reference.py get` answers | `core/navigate.py` | implemented |
+| `gitlab-pipeline-watch` | `gitlab_pipeline_watch` | `watch` results | `core/gitlab_pipelines.py` | implemented |
+| `vendor-lock` | `skill_vendor_lock` | `vendor/vendor.lock.json` | `bin/ci-skills update` | missing |
+| `vendor-declarations` | not named yet | `vendor/vendor.toml` | by hand | missing |
+| `tool-operations` | `tool_operations` | `bin/ci-skills tools --json` | `core/tool_operations.py` | missing |
+| `reference-index` | `reference_index` | a reference's `index.json` | `tools/update_reference.py` | missing |
+| `openai-agent-metadata` | none, upstream shape | `agents/openai.yaml` | `tools/render_manifest.py` | missing |
+| `smoke-case` | not named yet | each `[[smoke_cases]]` entry of `expected.toml` | by hand | missing |
+| `command-contract` | `command_contract` | each command's `--describe` | `core/catalog.py` | implemented |
+| `command-result` | none, the envelope | the fields every report kind shares | `core/report.py` | missing |
+| `ci_skills_endpoints` | `ci_skills_endpoints` | gate results | `tools/skillkit/endpoint_gate.py` | implemented |
+
+Implemented, each checked with `check-jsonschema --schemafile <schema> <record>` (plus `--base-uri` where a schema
+reuses another's `$defs`):
+
+- [`schemas/command-contract.schema.json`](../../schemas/command-contract.schema.json), built from the
+  `--describe` output of all 15 Python commands; it accepts all 15 and refuses an unknown field, a missing `kind`
+  and a malformed option name.
+- [`schemas/skill-index.schema.json`](../../schemas/skill-index.schema.json), built from CI01-CATALOG's index
+  record; it accepts that section's example and the `ci-skills` record read from `ci-skills/SKILL.md` and
+  `tools.json`, and refuses a local skill without its manifest, a vendored skill with one, an unknown field, an
+  unknown error rule and an invalid name. Its producer, `bin/ci-skills list`, is not built yet (CI01-CATALOG).
+- [`schemas/skill-manifest.schema.json`](../../schemas/skill-manifest.schema.json), built from
+  `ci-skills/tools.json`; it accepts that file and refuses an unknown field, an entry without `purpose`, an option
+  name without dashes, `read_only` as text and an unknown authority.
+- [`schemas/reference-next.schema.json`](../../schemas/reference-next.schema.json) and
+  [`schemas/reference-section.schema.json`](../../schemas/reference-section.schema.json), built from CI09-REFERENCE
+  section 3's renders; they accept all of them and a 1.1 answer, and refuse an unknown field, a capability without
+  `read_back`, a read choice without `when`, an unavailable verb with a pointer, 13 choices, a 101-character
+  summary, an unknown action or error reason, MAJOR 2 and an unknown tier. `reference-section` reuses the choice
+  and pointer of `reference-next`, so its commands add `--base-uri`. Their producer, `reference.py`, is not built
+  yet (CI09-REFERENCE).
+- [`schemas/gitlab-pipeline-watch.schema.json`](../../schemas/gitlab-pipeline-watch.schema.json), built from the
+  pipeline watch result in CI11-TOOLS, Combos; it accepts that result and refuses an unknown `via` and a depth
+  over 5. Its producer, `gitlab_pipeline.py watch`, is not built yet (CI11-TOOLS).
+- [`schemas/ci_skills_endpoints.schema.json`](../../schemas/ci_skills_endpoints.schema.json), the result of
+  `gates/gate-ci-skills-endpoints.py` (CI03-GATES, gate-ci-skills-endpoints); its producer is built. The gate's job
+  checks the schema against its metaschema and validates every result it prints; the fixtures in
+  `tests/python/test_endpoints.py` accept a valid record and refuse a missing required field, an unknown field, a
+  wrong type, an unknown rule, MAJOR 2 and a document without its line.
+
+Every row marked missing is this phase's to implement; a record kind without its schema cannot be emitted.
+
+### Adding a schema
+
+A new schema is one file, `schemas/<schema>.schema.json`, named as its row in the table above. It must include:
+
+- `"$schema": "https://json-schema.org/draft/2020-12/schema"`, an `$id` under
+  `https://github.com/spyroot/ci-skills/schemas/`, `title` set to the record kind, and a `description` that names
+  the record and the producer that writes it;
+- `type: object` and `additionalProperties: false` at every object level, so a field the schema does not name is
+  refused;
+- `required` listing every field the record always carries, with `kind` as `const` and `schema_version` as its
+  MAJOR pattern, for example `^1\.[0-9]+$` (Versions), so a MINOR addition never breaks a reader;
+- maps (option names, exit codes, status tokens, command names) as `propertyNames` plus `additionalProperties`,
+  never as a fixed key list;
+- shapes taken from real records: the producer's output when it exists (`command-contract`: all 15 `--describe`
+  outputs; `skill-manifest`: `ci-skills/tools.json`), otherwise the owning phase's record definition
+  (`skill-index`: CI01-CATALOG, Index record). A field the real records hold in two shapes accepts both:
+  `subcommands` is a map for the Python commands and a list for the Bash ones.
+
+Proof, before the row says implemented:
+
+1. `check-jsonschema --check-metaschema schemas/<schema>.schema.json` passes.
+2. `check-jsonschema --schemafile schemas/<schema>.schema.json <record>` accepts every real record.
+   A schema that reuses another's `$defs` names it by file, and its commands add
+   `--base-uri "file://$PWD/schemas/<schema>.schema.json"` so the reference resolves locally.
+3. The same command refuses at least three broken copies: an unknown field, a missing required field, and one
+   value that breaks a declared rule.
+4. The table row says `implemented`, and the producer's phase document links the file.
+
+Example, the top of `schemas/skill-index.schema.json` (the file adds `description` and `$defs`):
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/skill-index.schema.json",
+  "title": "skill_index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "skills"],
+  "properties": {
+    "schema_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+    "kind": {"const": "skill_index"},
+    "skills": {"type": "array", "items": {"$ref": "#/$defs/skill"}},
+    "errors": {"type": "array", "items": {"$ref": "#/$defs/error"}}
+  }
+}
+```
+
 | one file per report kind | the kinds below | a command's result and its receipt | the command | see below |
 
 Notes on the rows:
@@ -89,9 +173,8 @@ The report kinds, one `<kind>.schema.json` each:
 - `skill_install` (`bin/ci-skills install`, planned, CI01-CATALOG);
 - `skill_vendor_check` and `skill_vendor_update` (`bin/ci-skills verify` and
   `update`, planned, CI05-VENDOR);
-- `reference_next`, `reference_record`, `reference_list` and `reference_verify`
-  (`ci-skills/bin/reference.py next`, `get` and `verify`, planned,
-  CI09-REFERENCE).
+- `reference_verify` (`ci-skills/bin/reference.py verify`, planned,
+  CI09-REFERENCE); `reference_next` and `reference_section` are in the table above.
 
 ## Rules every schema follows
 
@@ -156,7 +239,7 @@ CI08-ROUTING consumes them.
   and a summary on a terminal; its result kind is `schema_check`.
 - **Gate.** The `schemas` gate of `scripts/check.sh` (CI03-GATES, G1, which
   also owns how one gate is selected; the script's library,
-  `ci-skills/lib/bash/ci/check.bash` (planned, CI10-PHASES, block 0), is
+  the gate library (CI03-GATES, G1; home: CI10-PHASES, Gate library home), is
   restored first) runs `tools/check_schemas.py --root . --json`, which:
   - checks every schema against the 2020-12 metaschema;
   - validates every committed record against its schema: `ci-skills/tools.json`,
@@ -200,6 +283,48 @@ CI08-ROUTING consumes them.
   version, and whether it is MINOR or MAJOR follows from whether CI02-CLI
   binds those fields as optional or required.
 
+### Adding what we missed
+
+We will miss something. A miss is added as a MINOR change while existing readers keep working, in one pull request
+that changes the schema, the producer and the one owning document together:
+
+| We missed | Change | Version |
+| --- | --- | --- |
+| a field | add it as optional; producers emit it from the new MINOR on | MINOR |
+| an enum value (a choice kind, a pointer action, a relation) | add the value | MINOR |
+| a reserved segment or a node | add it; refuse a node named like a reserved segment | MINOR |
+| a field's name, type or meaning, or making it required | a new MAJOR file beside the old one (step 3 below) | MAJOR |
+
+A reader built for an older MINOR skips a choice, pointer or relation whose enum value it does not know, ignores
+fields it does not know, and never fails the whole answer for them.
+
+Exhibit, a miss we already know of: the priority and severity sections say their meaning lives in another reference,
+and no relation can say so. The fix is one enum value in `schemas/reference-next.schema.json`, shown in that file's
+own formatting:
+
+```diff
+         "rel": {
+           "enum": [
+-            "infers"
++            "infers",
++            "meaning_in"
+           ]
+         },
+```
+
+The producer then answers with `"schema_version": "1.1"`. Once the handbook's triage page is declared as reference
+`gitlab-handbook-triage` (CI09-REFERENCE section 3, Declarations), the priority cluster may carry this relation:
+
+```json
+{"from": "priority-labels", "rel": "meaning_in", "to": "gitlab-handbook-triage.priority", "evidence": "priority-labels"}
+```
+
+The `^1\.[0-9]+$` pattern accepts both 1.0 and 1.1 answers; nothing else changes.
+
+`reference-next`, `reference-section` and `gitlab-pipeline-watch` start at 1.0 although their producers are not
+built yet: we fixed their shape by example, so they are locked contracts, not shapes in review, and step 1
+below does not apply to them.
+
 How a version is promoted:
 
 1. A new shape starts at `0.<minor>` while its phase is in review. Nothing
@@ -233,7 +358,7 @@ changing its version, or bumps MAJOR without adding the new file.
    `1.0`: `skill-manifest`, `command-contract`, `command-result`, the 17
    catalog kinds, `gitlab_runner_smoke_cleanup`, `live_acceptance` and
    `project_neutrality`, whose records already stamp `schema_version` `1.0`
-   (`ci-skills/lib/core/catalog.py:26`, `core/report.py:52`,
+   (`ci-skills/lib/python/core/catalog.py:26`, `core/report.py:52`,
    `tools/check_live_acceptance.py:615`, `tools/check_project_neutrality.py:52`);
    `skill-frontmatter`, whose records carry no identity fields (Identity);
    and `manifest_check` and `manifest_render`, which carry `kind` without

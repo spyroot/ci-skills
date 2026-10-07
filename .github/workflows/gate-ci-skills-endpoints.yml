@@ -1,0 +1,46 @@
+---
+name: gate-ci-skills-endpoints
+"on":
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  # Target files hold an endpoint and its access per authority, nothing else
+  # (docs/phases/CI03-GATES.md, gate-ci-skills-endpoints). The allowed keys are
+  # declared once in ci-skills/lib/python/core/endpoints.py.
+  gate-ci-skills-endpoints:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install the pinned schema validator (requirements.txt)
+        run: python -m pip install "$(grep '^check-jsonschema==' requirements.txt)"
+
+      - name: The result schema passes its metaschema
+        run: check-jsonschema --check-metaschema schemas/ci_skills_endpoints.schema.json
+
+      - name: gate-ci-skills-endpoints
+        shell: bash
+        env:
+          COMPARISON_BASE: >-
+            ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base_sha="$COMPARISON_BASE"
+          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
+            base_sha="$(git rev-parse "$GITHUB_SHA^")"
+          fi
+          status=0
+          python gates/gate-ci-skills-endpoints.py --base "$base_sha" --json \
+            > endpoints.json || status=$?
+          cat endpoints.json
+          check-jsonschema --schemafile schemas/ci_skills_endpoints.schema.json \
+            endpoints.json
+          exit "$status"

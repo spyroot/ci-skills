@@ -1,0 +1,368 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/skill-manifest.schema.json",
+  "title": "skill_manifest",
+  "description": "ci-skills/tools.json, which tools/render_manifest.py generates from ci-skills/lib/python/core/catalog.py. Derived from the committed file on 2026-10-06; closed: unknown fields are refused.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "access_protocol",
+    "authorities",
+    "capability_options",
+    "commands",
+    "default_output",
+    "exit_codes",
+    "kind",
+    "node_local_options",
+    "read_only",
+    "routing",
+    "schema_version",
+    "skill",
+    "status_values",
+    "target_protocol",
+    "universal_options"
+  ],
+  "properties": {
+    "access_protocol": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "github",
+          "gitlab",
+          "kubernetes",
+          "no_search",
+          "rule",
+          "warning"
+        ]
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "when"
+              ],
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "when": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          }
+        ]
+      }
+    },
+    "authorities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "github",
+          "gitlab",
+          "kubernetes"
+        ]
+      }
+    },
+    "capability_options": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "filters_records",
+          "namespaced",
+          "node_scoped",
+          "time_ranged"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "propertyNames": {
+          "pattern": "^--[a-z0-9][a-z0-9-]*$"
+        },
+        "additionalProperties": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(bin/)?[a-z0-9_-]+(\\.py)?$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "execution_surface",
+          "options",
+          "purpose",
+          "report_kind",
+          "required_options",
+          "required_tools",
+          "requires_authorities",
+          "returns",
+          "use_when"
+        ],
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "filters_records",
+                "namespaced",
+                "node_scoped",
+                "time_ranged"
+              ]
+            }
+          },
+          "execution_surface": {
+            "type": "string",
+            "minLength": 1
+          },
+          "options": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^--[a-z0-9][a-z0-9-]*$"
+            }
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "report_kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required_options": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^--[a-z0-9][a-z0-9-]*( .+)?$"
+            }
+          },
+          "required_tools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "requires_authorities": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "github",
+                "gitlab",
+                "kubernetes",
+                "one caller-selected GitHub or GitLab host"
+              ]
+            }
+          },
+          "returns": {
+            "type": "string",
+            "minLength": 1
+          },
+          "side_effects": {
+            "type": "string",
+            "minLength": 1
+          },
+          "subcommands": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {
+                    "purpose": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "required_options": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^--[a-z0-9][a-z0-9-]*( .+)?$"
+                      }
+                    },
+                    "kind": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    },
+                    "returns": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "read_back": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "mutates": {
+                      "type": "boolean"
+                    },
+                    "side_effects": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "options": {
+                      "type": "object",
+                      "propertyNames": {
+                        "pattern": "^--[a-z0-9][a-z0-9-]*$"
+                      },
+                      "additionalProperties": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ]
+          },
+          "use_when": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "default_output": {
+      "type": "string",
+      "minLength": 1
+    },
+    "exit_codes": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[0-9]+$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "kind": {
+      "const": "skill_manifest"
+    },
+    "node_local_options": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^--[a-z0-9][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "read_only": {
+      "type": "boolean"
+    },
+    "routing": {
+      "type": "object",
+      "propertyNames": {
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$"
+    },
+    "skill": {
+      "const": "ci-skills"
+    },
+    "status_values": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "BLOCKED",
+          "DRY_RUN",
+          "PARTIAL",
+          "PASS",
+          "PLANNED",
+          "UNKNOWN"
+        ]
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "target_protocol": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "location",
+          "scope",
+          "source",
+          "when"
+        ],
+        "properties": {
+          "location": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scope": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "when": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "universal_options": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^--[a-z0-9][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}
