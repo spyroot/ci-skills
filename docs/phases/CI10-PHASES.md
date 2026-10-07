@@ -67,12 +67,11 @@ second implementation of a behaviour the library has is a defect.
    `tools/check_live_acceptance.py --help` shows the current default paths;
    the installed copy under `~/.codex/skills` is reinstalled (today it
    carries both `bin/` and `scripts/`).
+
 1. These phase documents, in one pull request (#29).
-2. CI03-GATES (G0 records D-GATE).
+1. 2. CI03-GATES (G0 records D-GATE).
 3. CI07-SCHEMA, then CI02-CLI.
-4. CI05-VENDOR.
 5. CI01-CATALOG.
-6. CI06-TESTS.
 7. CI09-REFERENCE, then CI08-ROUTING on top of it.
 8. CI11-TOOLS, one tool per pull request in the catalogue's order.
 9. CI04-HOOKS.

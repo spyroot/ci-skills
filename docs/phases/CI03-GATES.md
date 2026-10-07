@@ -4,52 +4,26 @@ Status: proposed. Order and dependencies: CI10-PHASES, Phases.
 
 ## Goal
 
-One list of checks, run the same way by a contributor and by CI, and one clear statement of what a merge requires.
-
-## Merge gate
-
-- **Protection on `main`, read back on 2026-10-02.** The `validate` workflow (`.github/workflows/validate.yml`) is the
-  one required check. The branch must be up to date with `main`, the rule applies to administrators, and no approving
-  review is required (see G3).
-- **Exact commits.** Merge evidence names four commits:
-  - the pull request's head commit;
-  - the test-merge commit that GitHub checked, when it builds one;
-  - the commit the check run reports;
-  - the base commit.
-
-  A result for any other commit is stale.
-
-Superseded 2026-10-06: no workflow, protection disabled (CI10-PHASES, Pull request status); the route is D-GATE (G0).
-
-## Two routes
-
-- **Execution:** `./scripts/check.sh <profile>` runs the gates. G1 restores its library (deleted on purpose; block 0
-  does not) and adds the profiles.
-- **Read-back:** `gh pr checks <pr> --json name,state` reads the result for the exact head, once a gate route exists
-  (G0).
-
-One does not replace the other.
-
 ## Existing gates
 
-These stay. Each one moves behind `./scripts/check.sh` without losing its guarantee. The status of each is as read back
-on 2026-10-06 (CI10-PHASES, Pull request status) or observed in the tree that day.
-
-- **Branch protection on `main`.** Disabled, and no workflow exists (G0). Recreate the workflow the gate route (G0)
-  names; the step list to restore is at `1108cca^:.github/workflows/validate.yml`.
 - **`tests/python/test_validate_workflow_policy.py`** asserts that the static steps exist and that live acceptance is
   unconditional (lines 15-57). It reads `.github/workflows/validate.yml` (line 8), deleted in #27, so it cannot pass
   until that workflow is recreated.
+
 - **`tools/check_live_acceptance.py`** checks that each receipt's `skill.digest` equals the skill's `tree_digest`, with
   the other fields listed in "Delivery, test and proof", part 4. It reports `skill_digest_mismatch` on every
   committed receipt (observed on 2026-10-06, before block 0 re-pointed `tools/*.py` at `ci-skills/lib/python`).
+
 - **The byte-equality test in `tests/python/test_catalog.py`** (`test_the_rendered_manifest_matches_the_module`, line
   121) checks that `tools.json` equals the catalog's render.
+
 - **`manifest`**: `tools/render_manifest.py --check` prints `CURRENT` or `STALE` (lines 69-71). Since block 0 it prints
   `CURRENT`. Tool exists; gate id pending G1.
+
 - **`neutrality`**: `tools/check_project_neutrality.py --root . --json` reports `PASS` or `FAIL` (line 54). Since
   block 0 it reports `PASS`; before, it reported `FAIL` on `Makefile`, `pyproject.toml` and
   `scripts/bash/core/result.bash`. Tool exists; gate id pending G1.
+
 - **Static tools** (CI10-PHASES, "Gates that make every tool conform"): `ruff check`, `ruff format --check`,
   markdownlint-cli2, shellcheck, shfmt, yamllint, gitleaks and `git diff --check`. Each: tool exists; gate id pending
   G1. The restored library names its checks `whitespace`, `bash-n`, `shellcheck`, `shfmt`, `yaml`, `markdown`,
