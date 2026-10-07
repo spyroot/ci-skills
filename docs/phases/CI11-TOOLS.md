@@ -172,13 +172,13 @@ The same ten steps for every row; the row repeats them with the real paths.
 1. **Point.** Name the source script by path under the source repo root, the
    functions and lines that implement the task, and its tests.
 2. **Bound the task.** One tool does one task we named.
-3. **Library first.** Put the logic in `ci-skills/lib/core/<module>.py` as
+3. **Library first.** Put the logic in `ci-skills/lib/python/core/<module>.py` as
    functions over the existing transports: `core.gitlab_api.GlabAPIClient`
    for GitLab, `core.runtime.run_command_bounded` for `oc`, `kubectl`,
    `podman` and `skopeo`, and one bounded standard-library HTTP helper
    `core/http.py` shared by the Harbor API and the reference fetch. Never a
    second transport, envelope, logger, exit table or redaction.
-4. **Declare.** Add the command to `COMMANDS` in `ci-skills/lib/core/catalog.py`. Every entry declares `kind`,
+4. **Declare.** Add the command to `COMMANDS` in `ci-skills/lib/python/core/catalog.py`. Every entry declares `kind`,
    `purpose`, `use_when`, `requires`, `capabilities`, `options` (the command's own options with their help text),
    `required_options` and `returns`. It adds `subcommands`, `mutates`, `required_tools`, `execution_surface` and
    `side_effects` only when they differ from the defaults: none, false, none, "selected authority API" and
@@ -1303,7 +1303,7 @@ reports PASS.
 ## Delivery, test and proof
 
 1. *Delivery*, per tool: `ci-skills/bin/<tool>.py`, the Library module cell
-   under `ci-skills/lib/core/`, the catalog entry and the regenerated
+   under `ci-skills/lib/python/core/`, the catalog entry and the regenerated
    `tools.json`, the `target.toml.template` keys of its row, its
    `[[smoke_cases]]` entry; the command that runs is the tool's smoke line.
 2. *Tests*: `tests/python/test_<module>.py` per Library module (mocked `gh`,

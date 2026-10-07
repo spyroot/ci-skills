@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Plan, apply, and verify GitLab runner assignment or creation."""
 
+import _bootstrap  # noqa: F401
 from core.gitlab_actions import action_parser, run_action_cli
 
 

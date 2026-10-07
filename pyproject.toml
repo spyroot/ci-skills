@@ -26,7 +26,7 @@ wheel.reproducible = true
 [tool.scikit-build.wheel.packages]
 "demos/hiddengems" = "demos/hiddengems"
 
-# Settings for the Python tools in the galileo conda environment
+# Settings for the Python tools in the conda environment
 # (environment.yml). CI runs both through scripts/ci/static-gate.sh, as the
 # static:pytest and static:ruff gates declared in gates/manifest.yaml.
 

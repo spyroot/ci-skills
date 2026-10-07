@@ -185,12 +185,12 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
             "baseline": source_identity(
                 baseline_root,
                 arguments.baseline_sha,
-                baseline_root / "skills" / "ci-skills",
+                baseline_root / "ci-skills",
             ),
             "candidate": source_identity(
                 candidate_root,
                 arguments.candidate_sha,
-                candidate_root / "skills" / "ci-skills",
+                candidate_root / "ci-skills",
             ),
         }
     except SourceIdentityError as exc:

@@ -352,7 +352,7 @@ changing its version, or bumps MAJOR without adding the new file.
    `1.0`: `skill-manifest`, `command-contract`, `command-result`, the 17
    catalog kinds, `gitlab_runner_smoke_cleanup`, `live_acceptance` and
    `project_neutrality`, whose records already stamp `schema_version` `1.0`
-   (`ci-skills/lib/core/catalog.py:26`, `core/report.py:52`,
+   (`ci-skills/lib/python/core/catalog.py:26`, `core/report.py:52`,
    `tools/check_live_acceptance.py:615`, `tools/check_project_neutrality.py:52`);
    `skill-frontmatter`, whose records carry no identity fields (Identity);
    and `manifest_check` and `manifest_render`, which carry `kind` without

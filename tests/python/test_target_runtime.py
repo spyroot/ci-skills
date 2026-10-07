@@ -5,10 +5,9 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 import pytest
-from tests.python.conftest import import_script_module
+from tests.python.conftest import REPO_ROOT, import_script_module
 
 
 def test_load_target_accepts_exact_nonsecret_authorities(target_file):
@@ -53,11 +52,19 @@ def test_load_target_accepts_optional_gitlab_token_file_path(tmp_path):
     assert not hasattr(target.gitlab, "token")
 
 
+def test_skill_root_is_the_folder_that_holds_skill_md():
+    """core.paths declares the skill root once; the boundary tests below rely on it."""
+    skill_root = import_script_module("core.paths").SKILL_ROOT
+
+    assert skill_root == REPO_ROOT / "ci-skills"
+    assert (skill_root / "SKILL.md").is_file()
+
+
 def test_ambient_kubeconfig_cannot_point_into_installed_skill(monkeypatch, target_file):
     """An environment override cannot bypass the declared file boundary."""
     target_mod = import_script_module("core.target")
     credentials = import_script_module("core.credentials")
-    skill_root = Path(credentials.__file__).resolve().parents[2]
+    skill_root = import_script_module("core.paths").SKILL_ROOT
     monkeypatch.setenv("KUBECONFIG", str(skill_root / "inside.kubeconfig"))
 
     with pytest.raises(target_mod.TargetError, match="stored outside"):
@@ -68,7 +75,7 @@ def test_default_kubeconfig_cannot_point_into_installed_skill(monkeypatch, targe
     """The kubectl default obeys the same selected-file boundary."""
     target_mod = import_script_module("core.target")
     credentials = import_script_module("core.credentials")
-    skill_root = Path(credentials.__file__).resolve().parents[2]
+    skill_root = import_script_module("core.paths").SKILL_ROOT
     monkeypatch.delenv("KUBECONFIG", raising=False)
     monkeypatch.setenv("HOME", str(skill_root))
 

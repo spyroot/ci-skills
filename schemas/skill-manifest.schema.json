@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/spyroot/ci-skills/schemas/skill-manifest.schema.json",
   "title": "skill_manifest",
-  "description": "ci-skills/tools.json, which tools/render_manifest.py generates from ci-skills/lib/core/catalog.py. Derived from the committed file on 2026-10-06; closed: unknown fields are refused.",
+  "description": "ci-skills/tools.json, which tools/render_manifest.py generates from ci-skills/lib/python/core/catalog.py. Derived from the committed file on 2026-10-06; closed: unknown fields are refused.",
   "type": "object",
   "additionalProperties": false,
   "required": [
