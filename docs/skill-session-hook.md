@@ -26,6 +26,11 @@ trusted source path for later sessions.
   default. The agent's permissions and the command's plan and result govern
   execution.
 
+`PreToolUse` observes a tool call made while the agent follows `SKILL.md`, not
+the act of reading the skill. Both agents can match shell calls such as
+`glab api` or a CI Skills `bin/` command; MCP calls match by their tool name.
+Codex also maps unified exec calls to its `Bash` hook matcher.
+
 Claude user hooks belong in `~/.claude/settings.json`; project hooks belong in
 `.claude/settings.json`. Codex also supports hooks at `~/.codex/hooks.json` or
 `<repo>/.codex/hooks.json`, but its documented `SessionStart` output has no
