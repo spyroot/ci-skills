@@ -17,22 +17,22 @@ How an agent uses ci-skills, at a high level. Commands are in `ci-skills/bin/`; 
 
 ## Use cases
 
-| The user says | The agent runs | Today |
+| The user says | The agent runs | Status |
 | --- | --- | --- |
-| "Can you reach my GitLab and cluster?" | `access_check.py`, `gitlab_access.py check` | shipped |
-| "What happened in this job?" (URL) | `gitlab_job.py --job-url URL` | shipped |
-| "How is this pipeline doing?" (ID known) | `gitlab_pipeline.py --pipeline-id ID` | shipped |
-| "I just started a pipeline, watch it" | `gitlab_pipeline.py watch` (root and every pipeline it starts) | planned |
-| "Create a milestone, a bug or a wiki page" | `gitlab_milestone.py`, `gitlab_issue.py`, `gitlab_wiki.py` | shipped |
-| "Assign or create a runner" | `gitlab_runner.py` | shipped |
-| "Is my cluster healthy?" | `cluster_health.py` | planned |
-| "Why is this volume stuck?" | `storage_report.py` | shipped |
-| "What did the cluster say around the failure?" | `event_trace.py --last 2h` | shipped |
-| "Is Cilium ok?" | `cilium_status.py`, then `cilium_node.py` for one node | shipped |
-| "Is Ceph ok?" | `ceph_cluster.py`, `ceph_kernel.py` | shipped |
-| "Are the node MTUs consistent?" | `k8s_verify_mtu_consistency.py` | shipped |
-| "Build the toolbox and push it to Harbor" | `toolbox_build.py`, `harbor_push.py` | planned |
-| "What does `trigger:forward` do?" | `reference.py next` | planned |
+| "Can you reach my GitLab and cluster?" | `access_check.py`, `gitlab_access.py check` | current |
+| "What happened in this job?" (URL) | `gitlab_job.py --job-url URL` | current |
+| "How is this pipeline doing?" (ID known) | `gitlab_pipeline.py --pipeline-id ID` | current |
+| "Watch the pipeline I started" | `gitlab_pipeline.py watch` (root and descendants) | under development |
+| "Create a milestone, a bug or a wiki page" | `gitlab_milestone.py`, `gitlab_issue.py`, `gitlab_wiki.py` | current |
+| "Assign or create a runner" | `gitlab_runner.py` | current |
+| "Is my cluster healthy?" | `cluster_health.py` | planned in next delivery |
+| "Why is this volume stuck?" | `storage_report.py` | current |
+| "What did the cluster say around the failure?" | `event_trace.py --last 2h` | current |
+| "Is Cilium ok?" | `cilium_status.py`, then `cilium_node.py` for one node | current |
+| "Is Ceph ok?" | `ceph_cluster.py`, `ceph_kernel.py` | current |
+| "Are the node MTUs consistent?" | `k8s_verify_mtu_consistency.py` | current |
+| "Build the toolbox and push it to Harbor" | `toolbox_build.py`, `harbor_push.py` | planned in next delivery |
+| "What does `trigger:forward` do?" | `reference.py next` | planned in next delivery |
 
 ## Rules the agent follows
 
@@ -40,4 +40,4 @@ How an agent uses ci-skills, at a high level. Commands are in `ci-skills/bin/`; 
 - Never a new argument for something the tool can read itself.
 - Read the command's `--describe` or `--help`, not the source, before using it.
 - A write (milestone, issue, wiki, runner) shows a plan first and applies only with `--apply --confirm-plan`.
-- Planned rows are not available yet; say so instead of improvising them.
+- Under-development and next-delivery rows are not available yet; say so instead of improvising them.
