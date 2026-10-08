@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-08T00:12:13.513159+00:00",
+  "captured_at": "2026-10-08T10:41:32.355169+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,47 +18,35 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "0eccfdde5919505ffeb2c7bd1801ee52a2cbe569a04dbb595f755719f49147e2",
+    "body_sha256": "b6300ac644c5f36e51191d525aee1d2b6c8fc924765d5356b04e7db6ef5c6754",
     "confirmation_ready": true,
     "fields": [
       "tag_list"
     ],
     "one_time_sink_required": false,
     "operation": "tag",
-    "plan_digest": "ca29a8186dbfb1c929b9af83ec191a7e734d0a3c4a68073ff4e7b6f496451dd7",
+    "plan_digest": "0ae6fcf1f283b21a21c463e2c4b99e3d74b0260e582e5ecb180ed49cf4fcc779",
     "project_ids": null,
     "requested_tags": [
-      "ci-skills-smoke-rst-qa-fix"
+      "ci-skills-runner-live-055b4f5-20261008T104039Z-tag"
     ],
-    "resource_id": 53,
+    "resource_id": 55,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "ca29a8186dbfb1c929b9af83ec191a7e734d0a3c4a68073ff4e7b6f496451dd7",
+  "plan_digest": "0ae6fcf1f283b21a21c463e2c4b99e3d74b0260e582e5ecb180ed49cf4fcc779",
   "readback": {
     "action": "NO_OP",
     "added_tags": [],
     "after_tags": [
-      "ci-skills-smoke-initial",
-      "ci-skills-smoke-added",
-      "ci-skills-smoke-receipt",
-      "ci-skills-smoke-qa-fix",
-      "ci-skills-smoke-doc",
-      "ci-skills-smoke-uncertain-fix",
-      "ci-skills-smoke-rst-gate",
-      "ci-skills-smoke-rst-qa-fix"
+      "ci-skills-runner-live-055b4f5-20261008T104039Z-initial",
+      "ci-skills-runner-live-055b4f5-20261008T104039Z-tag"
     ],
     "before_tags": [
-      "ci-skills-smoke-initial",
-      "ci-skills-smoke-added",
-      "ci-skills-smoke-receipt",
-      "ci-skills-smoke-qa-fix",
-      "ci-skills-smoke-doc",
-      "ci-skills-smoke-uncertain-fix",
-      "ci-skills-smoke-rst-gate",
-      "ci-skills-smoke-rst-qa-fix"
+      "ci-skills-runner-live-055b4f5-20261008T104039Z-initial",
+      "ci-skills-runner-live-055b4f5-20261008T104039Z-tag"
     ],
-    "id": 53,
+    "id": 55,
     "mutated": false,
     "verified": true
   },
@@ -67,26 +55,14 @@
       "action": "NO_OP",
       "added_tags": [],
       "after_tags": [
-        "ci-skills-smoke-initial",
-        "ci-skills-smoke-added",
-        "ci-skills-smoke-receipt",
-        "ci-skills-smoke-qa-fix",
-        "ci-skills-smoke-doc",
-        "ci-skills-smoke-uncertain-fix",
-        "ci-skills-smoke-rst-gate",
-        "ci-skills-smoke-rst-qa-fix"
+        "ci-skills-runner-live-055b4f5-20261008T104039Z-initial",
+        "ci-skills-runner-live-055b4f5-20261008T104039Z-tag"
       ],
       "before_tags": [
-        "ci-skills-smoke-initial",
-        "ci-skills-smoke-added",
-        "ci-skills-smoke-receipt",
-        "ci-skills-smoke-qa-fix",
-        "ci-skills-smoke-doc",
-        "ci-skills-smoke-uncertain-fix",
-        "ci-skills-smoke-rst-gate",
-        "ci-skills-smoke-rst-qa-fix"
+        "ci-skills-runner-live-055b4f5-20261008T104039Z-initial",
+        "ci-skills-runner-live-055b4f5-20261008T104039Z-tag"
       ],
-      "id": 53,
+      "id": 55,
       "mutated": false,
       "verified": true
     }
@@ -99,11 +75,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "01138b2d8e09ace553136442e50f295858e0af21ecf98c0fd3b539c3200b18af",
+    "digest": "3fe1ae7f3eac9d2e93ceb7684411bf8d47c76bc689685c74c1fd70ef23b7aefa",
     "file_count": 66,
     "revision": {
       "source": "git_head",
-      "value": "348287dac00d5781ef92b885afecb46641448540",
+      "value": "055b4f559c79c41063c7228c98c991065b4c98b7",
       "verified": true
     }
   },
@@ -117,8 +93,8 @@
     "reference": "hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "argv:--target;argv:--project",
-  "tested_revision": "348287dac00d5781ef92b885afecb46641448540",
+  "target_source": "user;argv:--project",
+  "tested_revision": "055b4f559c79c41063c7228c98c991065b4c98b7",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

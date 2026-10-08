@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-08T10:41:24.086725+00:00",
+  "captured_at": "2026-10-08T10:42:12.205633+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -13,63 +13,54 @@
     "web_url": "https://gitlab.dcloud.run/spyroot"
   },
   "kind": "gitlab_runner",
-  "mutated": true,
-  "operation": "tag",
+  "mutated": false,
+  "operation": "delete",
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "b6300ac644c5f36e51191d525aee1d2b6c8fc924765d5356b04e7db6ef5c6754",
+    "body_sha256": "62faba5c6b37436df73346dc65a66ecb29e36982b600db1c72fb9e21cf967e71",
     "confirmation_ready": true,
     "fields": [
-      "tag_list"
+      "description"
     ],
     "one_time_sink_required": false,
-    "operation": "tag",
-    "plan_digest": "0ae6fcf1f283b21a21c463e2c4b99e3d74b0260e582e5ecb180ed49cf4fcc779",
+    "operation": "delete",
+    "plan_digest": "a4e237af3959d57fb420c769ed45f894c91a9e247a17e62921d32366f0cd205a",
     "project_ids": null,
-    "requested_tags": [
-      "ci-skills-runner-live-055b4f5-20261008T104039Z-tag"
-    ],
     "resource_id": 55,
+    "runner_snapshot": {
+      "id": 55,
+      "present": false
+    },
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "0ae6fcf1f283b21a21c463e2c4b99e3d74b0260e582e5ecb180ed49cf4fcc779",
+  "plan_digest": "a4e237af3959d57fb420c769ed45f894c91a9e247a17e62921d32366f0cd205a",
   "readback": {
-    "action": "APPLIED",
-    "added_tags": [
-      "ci-skills-runner-live-055b4f5-20261008T104039Z-tag"
-    ],
-    "after_tags": [
-      "ci-skills-runner-live-055b4f5-20261008T104039Z-initial",
-      "ci-skills-runner-live-055b4f5-20261008T104039Z-tag"
-    ],
-    "before_tags": [
-      "ci-skills-runner-live-055b4f5-20261008T104039Z-initial"
-    ],
+    "action": "NO_OP",
+    "after": {
+      "global_get_status": 404,
+      "scoped_absent": true
+    },
+    "before": null,
     "id": 55,
-    "mutated": true,
+    "mutated": false,
     "verified": true
   },
   "records": [
     {
-      "action": "APPLIED",
-      "added_tags": [
-        "ci-skills-runner-live-055b4f5-20261008T104039Z-tag"
-      ],
-      "after_tags": [
-        "ci-skills-runner-live-055b4f5-20261008T104039Z-initial",
-        "ci-skills-runner-live-055b4f5-20261008T104039Z-tag"
-      ],
-      "before_tags": [
-        "ci-skills-runner-live-055b4f5-20261008T104039Z-initial"
-      ],
+      "action": "NO_OP",
+      "after": {
+        "global_get_status": 404,
+        "scoped_absent": true
+      },
+      "before": null,
       "id": 55,
-      "mutated": true,
+      "mutated": false,
       "verified": true
     }
   ],
-  "result_action": "APPLIED",
+  "result_action": "NO_OP",
   "schema_version": "1.0",
   "skill": {
     "algorithm": "sha256-tree-v1",
