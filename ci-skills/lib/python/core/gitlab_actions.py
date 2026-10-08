@@ -476,7 +476,7 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
         "--timeout", type=int, default=25, metavar="SECONDS", help="per-request timeout"
     )
     result.add_argument(
-        "--receipt-out", metavar="PATH", help="write one sanitized apply receipt"
+        "--receipt-out", metavar="PATH", help="write one portable live receipt"
     )
     return result
 
@@ -631,9 +631,7 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         return _failure(args, kind, "arguments", "action_required")
     runner_read = kind == "gitlab_runner" and args.action in {"get", "list"}
     runner_delete = kind == "gitlab_runner" and args.action == "delete"
-    if runner_read and (
-        args.apply or args.confirm_plan or args.live_plan or args.receipt_out
-    ):
+    if runner_read and (args.apply or args.confirm_plan or args.live_plan):
         return _failure(args, kind, "arguments", "runner_read_rejects_apply_options")
     if runner_read and args.dry_run and (args.output_dir or args.log_file):
         return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
@@ -646,8 +644,8 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         return _failure(args, kind, "arguments", "timeout_out_of_range")
     if args.confirm_plan and not args.apply:
         return _failure(args, kind, "arguments", "confirm_plan_requires_apply")
-    if args.receipt_out and not args.apply:
-        return _failure(args, kind, "arguments", "receipt_out_requires_apply")
+    if args.receipt_out and not (args.apply or (runner_read and not args.dry_run)):
+        return _failure(args, kind, "arguments", "receipt_out_requires_live_run")
     if (
         not args.apply
         and not live_plan

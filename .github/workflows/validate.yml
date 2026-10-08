@@ -50,8 +50,21 @@ jobs:
           check-jsonschema --check-metaschema schemas/results/gitlab-runner-delete.schema.json
           check-jsonschema --schemafile schemas/results/gitlab-runner-tag.schema.json \
             tests/acceptance/runner-tag/*.json
+          if compgen -G 'tests/acceptance/runner-lifecycle/*-get.json' > /dev/null; then
+            check-jsonschema --schemafile schemas/results/gitlab-runner-read.schema.json \
+              tests/acceptance/runner-lifecycle/*-get.json
+          fi
+          if compgen -G 'tests/acceptance/runner-lifecycle/*-list.json' > /dev/null; then
+            check-jsonschema --schemafile schemas/results/gitlab-runner-read.schema.json \
+              tests/acceptance/runner-lifecycle/*-list.json
+          fi
+          if compgen -G 'tests/acceptance/runner-lifecycle/*-delete-*.json' > /dev/null; then
+            check-jsonschema --schemafile schemas/results/gitlab-runner-delete.schema.json \
+              tests/acceptance/runner-lifecycle/*-delete-*.json
+          fi
       - name: Exercise runner command and contract
         run: |
+          python -m pytest -q tests/python/test_live_acceptance.py
           python -m pytest -q tests/python/test_gitlab_actions.py \
             tests/python/test_gitlab_runner_recovery.py \
             tests/python/test_gitlab_runner_lifecycle.py \

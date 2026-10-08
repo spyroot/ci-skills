@@ -980,7 +980,7 @@ def delete_snapshot(
     :returns: Snapshot to include in the confirmation digest.
     :raises ActionError: If the selected runner cannot be safely identified.
     :raises GitLabAPIError: If a provider read fails.
-    """
+    """  # noqa: DOC502,DOC503 - delegated observation propagates these errors
     return _delete_observation(api, session, plan, target_id)[0]
 
 
@@ -994,7 +994,7 @@ def _delete(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[st
     :returns: Before state, write outcome, and independent absence read-back.
     :raises ActionError: If the selected runner identity or scope differs.
     :raises GitLabAPIError: If a terminal provider request fails.
-    """  # noqa: DOC502 - provider failures propagate from the shared client
+    """  # noqa: DOC502,DOC503 - provider failures propagate from the shared client
     if plan.runner_snapshot is None:
         raise ActionError("runner_delete_requires_live_plan")
     scope = f"{plan.target_kind}s/{target_id}/runners"

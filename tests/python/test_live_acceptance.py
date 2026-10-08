@@ -10,18 +10,28 @@ checked "file exists and says PASS" would pass every one of them.
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from tests.python.conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
+
+from tests.python.conftest import (
+    REPO_ROOT,
+    SCRIPT_ROOT,
+    import_script_module,
+    load_module,
+)
 
 ACCEPTANCE = load_module(
     "check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
 )
+PORTABLE = import_script_module("core.portable")
 SKILL_ROOT = SCRIPT_ROOT.parent
 HOST = "declared-host.example.test"
-NOW = datetime(2026, 6, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 1, tzinfo=UTC)
 
 
 def _digest() -> str:
@@ -325,7 +335,7 @@ def test_real_operation_envelope_round_trips_through_portable_receipt(tmp_path):
             required,
             {"max_receipt_age_days": 30},
             _digest(),
-            datetime.now(timezone.utc),
+            datetime.now(UTC),
         )
 
     assert problems() == ["runner.json:runner_smoke_cleanup_unproven"]
@@ -443,6 +453,139 @@ def _gitlab_receipts() -> dict[str, dict]:
     }
 
 
+def _runner_lifecycle_expectations() -> dict:
+    expected = _expected()
+    shared = {
+        "execution_host": HOST,
+        "origin": "https://gitlab.example.test",
+        "username": "unit-gl",
+        "target_kind": "project",
+        "target_id": 12,
+        "target_path": "unit/repo",
+    }
+    expected["gitlab_receipts"] = [
+        {
+            "label": "runner-get",
+            "kind": "gitlab_runner",
+            "operation": "get",
+            **shared,
+        },
+        {
+            "label": "runner-list",
+            "kind": "gitlab_runner",
+            "operation": "list",
+            **shared,
+        },
+        {
+            "label": "runner-delete-applied",
+            "kind": "gitlab_runner",
+            "operation": "delete",
+            "result_action": "APPLIED",
+            **shared,
+        },
+        {
+            "label": "runner-delete-no-op",
+            "kind": "gitlab_runner",
+            "operation": "delete",
+            "result_action": "NO_OP",
+            **shared,
+        },
+    ]
+    return expected
+
+
+def _runner_record(identifier: int = 7) -> dict:
+    return {
+        "id": identifier,
+        "description": "unit-runner",
+        "runner_type": "project_type",
+        "tag_list": ["unit"],
+        "status": "online",
+        "online": True,
+        "paused": False,
+        "is_shared": False,
+        "access_level": "not_protected",
+        "job_execution_status": "idle",
+        "projects": [12],
+        "contacted_at": None,
+        "version": None,
+        "platform": None,
+        "architecture": None,
+    }
+
+
+def _runner_read_receipt(operation: str, records: list[dict] | None = None) -> dict:
+    selected = records if records is not None else [_runner_record()]
+    receipt = {
+        **_gitlab_receipts()["bug.json"],
+        "kind": "gitlab_runner",
+        "operation": operation,
+        "phase": "READ",
+        "mutated": False,
+        "records": selected,
+        "readback": {
+            "verified": True,
+            "record_count": len(selected),
+            "truncated": False,
+        },
+        "related_job": None,
+    }
+    receipt.pop("result_action", None)
+    return receipt
+
+
+def _runner_delete_receipt(action: str) -> dict:
+    mutated = action == "APPLIED"
+    before = _runner_record() if mutated else None
+    snapshot = {
+        "id": 7,
+        "present": mutated,
+    }
+    if mutated:
+        snapshot.update(
+            {
+                "runner_type": "project_type",
+                "description": "unit-runner",
+                "project_ids": [12],
+            }
+        )
+    record = {
+        "action": action,
+        "id": 7,
+        "verified": True,
+        "mutated": mutated,
+        "before": before,
+        "after": {
+            "scoped_absent": True,
+            "global_get_status": 404,
+            "write_error": None,
+        },
+    }
+    return {
+        **_gitlab_receipts()["bug.json"],
+        "kind": "gitlab_runner",
+        "operation": "delete",
+        "phase": "APPLY",
+        "mutated": mutated,
+        "result_action": action,
+        "plan": {
+            "operation": "delete",
+            "target_kind": "project",
+            "target_reference": "unit/repo",
+            "resource_id": 7,
+            "project_ids": None,
+            "confirmation_ready": True,
+            "fields": [],
+            "body_sha256": "b" * 64,
+            "plan_digest": "c" * 64,
+            "one_time_sink_required": False,
+            "runner_snapshot": snapshot,
+        },
+        "records": [record],
+        "readback": record,
+    }
+
+
 def test_same_host_diagnostic_and_gitlab_operation_receipts_are_all_required():
     receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
     result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
@@ -519,6 +662,141 @@ def test_unexpected_same_host_operation_receipt_blocks():
     assert "access.json:receipt_not_declared" in result["problems"]
 
 
+def test_runner_read_and_delete_receipts_are_all_required():
+    receipts = {
+        "declared.json": _receipt(),
+        "runner-get.json": _runner_read_receipt("get"),
+        "runner-list.json": _runner_read_receipt("list", [_runner_record(7)]),
+        "runner-delete-applied.json": _runner_delete_receipt("APPLIED"),
+        "runner-delete-no-op.json": _runner_delete_receipt("NO_OP"),
+    }
+
+    result = ACCEPTANCE.evaluate(
+        _runner_lifecycle_expectations(), receipts, SKILL_ROOT, now=NOW
+    )
+
+    assert result["status"] == "PASS", result["problems"]
+    assert result["accepted"] == [
+        "declared.json",
+        "runner-delete-applied.json",
+        "runner-delete-no-op.json",
+        "runner-get.json",
+        "runner-list.json",
+    ]
+
+
+def test_runner_read_receipt_must_show_live_records():
+    receipts = {
+        "declared.json": _receipt(),
+        "runner-get.json": _runner_read_receipt("get", []),
+        "runner-list.json": _runner_read_receipt("list", [_runner_record(7)]),
+        "runner-delete-applied.json": _runner_delete_receipt("APPLIED"),
+        "runner-delete-no-op.json": _runner_delete_receipt("NO_OP"),
+    }
+
+    result = ACCEPTANCE.evaluate(
+        _runner_lifecycle_expectations(), receipts, SKILL_ROOT, now=NOW
+    )
+
+    assert "runner-get.json:read_operation_readback_missing" in result["problems"]
+    assert "runner-get.json:runner_get_cardinality_unexpected" in result["problems"]
+
+
+def test_runner_delete_receipt_must_prove_absence_readback():
+    receipts = {
+        "declared.json": _receipt(),
+        "runner-get.json": _runner_read_receipt("get"),
+        "runner-list.json": _runner_read_receipt("list", [_runner_record(7)]),
+        "runner-delete-applied.json": _runner_delete_receipt("APPLIED"),
+        "runner-delete-no-op.json": _runner_delete_receipt("NO_OP"),
+    }
+    receipts["runner-delete-applied.json"]["readback"]["after"]["scoped_absent"] = False
+
+    result = ACCEPTANCE.evaluate(
+        _runner_lifecycle_expectations(), receipts, SKILL_ROOT, now=NOW
+    )
+
+    assert (
+        "runner-delete-applied.json:runner_delete_readback_unproven"
+        in result["problems"]
+    )
+
+
+def test_missing_runner_lifecycle_receipt_blocks():
+    receipts = {
+        "declared.json": _receipt(),
+        "runner-get.json": _runner_read_receipt("get"),
+        "runner-delete-applied.json": _runner_delete_receipt("APPLIED"),
+        "runner-delete-no-op.json": _runner_delete_receipt("NO_OP"),
+    }
+
+    result = ACCEPTANCE.evaluate(
+        _runner_lifecycle_expectations(), receipts, SKILL_ROOT, now=NOW
+    )
+
+    assert "runner-list:receipt_missing" in result["problems"]
+
+
+def test_committed_runner_lifecycle_receipts_match_current_skill():
+    expected = ACCEPTANCE._load_expected(
+        REPO_ROOT / "tests" / "acceptance" / "expected.toml"
+    )
+    expected["executors"] = []
+    expected["gitlab_receipts"] = [
+        item
+        for item in expected["gitlab_receipts"]
+        if item.get("label")
+        in {"runner-get", "runner-list", "runner-delete-applied", "runner-delete-no-op"}
+    ]
+    receipts = ACCEPTANCE._load_receipts(
+        REPO_ROOT / "tests" / "acceptance" / "runner-lifecycle"
+    )
+    result = ACCEPTANCE.evaluate(expected, receipts, SKILL_ROOT)
+
+    assert result["status"] == "PASS", result["problems"]
+    assert set(result["accepted"]) == set(receipts)
+    runner_id = receipts["runner-get.json"]["records"][0]["id"]
+    assert runner_id == receipts["runner-list.json"]["records"][0]["id"]
+    assert runner_id == receipts["runner-delete-applied.json"]["records"][0]["id"]
+    assert runner_id == receipts["runner-delete-no_op.json"]["records"][0]["id"]
+    for directory in ("runner-tag", "runner-lifecycle"):
+        for path in (REPO_ROOT / "tests" / "acceptance" / directory).glob("*.json"):
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+            assert (
+                ACCEPTANCE.check_candidate_identity(receipt, REPO_ROOT, SKILL_ROOT)
+                == []
+            ), path.name
+
+
+def test_candidate_identity_rejects_unrelated_and_old_source(tmp_path):
+    path = REPO_ROOT / "tests/acceptance/runner-lifecycle/runner-get.json"
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    unrelated = deepcopy(receipt)
+    unrelated["tested_revision"] = "0" * 40
+    unrelated["skill"]["revision"]["value"] = "0" * 40
+    assert ACCEPTANCE.check_candidate_identity(unrelated, REPO_ROOT, SKILL_ROOT) == [
+        "candidate_revision_not_ancestor"
+    ]
+
+    root_commit = subprocess.check_output(
+        ["git", "-C", str(REPO_ROOT), "rev-list", "--max-parents=0", "HEAD"],
+        text=True,
+    ).splitlines()[0]
+    old = deepcopy(receipt)
+    old["tested_revision"] = root_commit
+    old["skill"]["revision"]["value"] = root_commit
+    assert ACCEPTANCE.check_candidate_identity(old, REPO_ROOT, SKILL_ROOT) == [
+        "candidate_skill_tree_mismatch"
+    ]
+
+    different_skill = tmp_path / "ci-skills"
+    different_skill.mkdir()
+    (different_skill / "SKILL.md").write_text("different candidate", encoding="utf-8")
+    assert ACCEPTANCE.check_candidate_identity(receipt, REPO_ROOT, different_skill) == [
+        "candidate_skill_digest_mismatch"
+    ]
+
+
 def test_expectations_without_an_executor_block_rather_than_pass(tmp_path):
     path = tmp_path / "expected.toml"
     path.write_text("max_receipt_age_days = 30\n", encoding="utf-8")
@@ -586,7 +864,8 @@ def test_missing_expectations_emits_structured_json_failure(
 
 def test_no_committed_receipt_carries_a_host_path():
     """The committable form is what makes a real receipt publishable at all."""
-    for path in (REPO_ROOT / "tests" / "acceptance" / "receipts").glob("*.json"):
-        body = json.dumps(json.loads(path.read_text(encoding="utf-8")))
-        assert "/Users/" not in body, path.name
-        assert "/home/" not in body, path.name
+    for path in (REPO_ROOT / "tests" / "acceptance").rglob("*.json"):
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        assert PORTABLE.portable(receipt) == receipt, path.name
+        body = json.dumps(receipt)
+        assert re.search(r"/(?:Users|home|private|tmp|var)/", body) is None, path.name

@@ -119,7 +119,8 @@ record does not register or start its executor.
 For a failed job in a pipeline, use `gitlab_runner.py get --job-id JOB_ID --project PROJECT --json`. It resolves the
 job's runner ID and returns a compact job-to-runner relation with tags, online state, protection level, sharing, and
 project IDs. `get --runner-id ID` reads a known runner directly. Use `list --project PROJECT --filter protected` to
-narrow a project view; repeated filters combine. `get` and `list` are live reads unless `--dry-run` is supplied.
+narrow a project view; repeated filters combine. `get` and `list` are live reads unless `--dry-run` is supplied; use
+`--receipt-out PATH` to save their portable live evidence.
 `delete --runner-id ID --project PROJECT --live-plan` reads the exact runner identity and affected project IDs and
 prints an apply-ready digest. Apply with that `--confirm-plan` digest; a changed identity or assignment set refuses the
 delete. Deletion verifies a global 404 and absence from the selected project or group listing.

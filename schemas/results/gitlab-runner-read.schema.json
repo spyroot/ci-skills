@@ -57,7 +57,7 @@
     "verified_target": {"$ref":"#/$defs/verified_target"},
     "credential_source": {"type":"string","minLength":1},
     "credential_digest": {"type":"string","minLength":1},
-    "skill": {"type":"object"},
+    "skill": {"$ref":"#/$defs/skill"},
     "related_job": {
       "oneOf": [
         {"type":"null"},
@@ -76,7 +76,12 @@
       ]
     },
     "records": {"type":"array","maxItems":100,"items":{"$ref":"#/$defs/runner"}},
-    "readback": {"type":"object"},
+    "readback": {
+      "oneOf": [
+        {"$ref":"#/$defs/verified_readback"},
+        {"$ref":"#/$defs/failed_readback"}
+      ]
+    },
     "errors": {
       "type": "array",
       "items": {
@@ -92,7 +97,8 @@
       "properties": {"record_count":{"type":"integer","minimum":0,"maximum":100},"error_count":{"type":"integer","minimum":0}},
       "additionalProperties": false
     },
-    "report_files": {"type":"object"}
+    "report_files": {"$ref":"#/$defs/report_files"},
+    "cleanup": {"$ref":"#/$defs/cleanup"}
   },
   "allOf": [
     {
@@ -122,16 +128,7 @@
           "identity": {"$ref":"#/$defs/identity"},
           "verified_target": {"$ref":"#/$defs/verified_target"},
           "errors": {"maxItems":0},
-          "readback": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["verified","record_count","truncated"],
-            "properties": {
-              "verified": {"const":true},
-              "record_count": {"type":"integer","minimum":0,"maximum":100},
-              "truncated": {"type":"boolean"}
-            }
-          },
+          "readback": {"$ref":"#/$defs/verified_readback"},
           "summary": {"properties":{"error_count":{"const":0}}}
         }
       }
@@ -151,7 +148,13 @@
     },
     {
       "if": {"properties":{"status":{"const":"BLOCKED"}},"required":["status"]},
-      "then": {"properties":{"errors":{"minItems":1}}}
+      "then": {
+        "properties": {"errors":{"minItems":1},"summary":{"properties":{"error_count":{"minimum":1}}}}
+      }
+    },
+    {
+      "if": {"required":["operation"],"properties":{"status":{"const":"BLOCKED"}}},
+      "then": {"required":["plan","plan_digest","phase","target","readback","mutated"]}
     }
   ],
   "$defs": {
@@ -252,6 +255,29 @@
           }
         }
       ]
+    },
+    "failed_readback": {"type":"object","additionalProperties":false,"required":["verified"],"properties":{"verified":{"const":false}}},
+    "report_files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["json","text"],
+      "properties": {"json":{"type":"string","minLength":1},"text":{"type":"string","minLength":1}}
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {"status":{"enum":["NOT_APPLICABLE","NOT_PERFORMED","BLOCKED"]},"reason":{"type":"string","minLength":1}}
+    },
+    "verified_readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verified","record_count","truncated"],
+      "properties": {
+        "verified": {"const":true},
+        "record_count": {"type":"integer","minimum":0,"maximum":100},
+        "truncated": {"type":"boolean"}
+      }
     }
   },
   "additionalProperties": false

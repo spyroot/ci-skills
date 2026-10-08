@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,6 +43,9 @@ READ_VALIDATOR = Draft202012Validator(
 )
 DELETE_VALIDATOR = Draft202012Validator(
     json.loads((ROOT / "schemas/results/gitlab-runner-delete.schema.json").read_text())
+)
+TAG_VALIDATOR = Draft202012Validator(
+    json.loads((ROOT / "schemas/results/gitlab-runner-tag.schema.json").read_text())
 )
 
 
@@ -369,6 +373,52 @@ def test_runner_live_operation_refuses_unverified_skill_before_api(
     assert output["errors"][0]["reason"] == "skill_revision_unverified"
 
 
+def test_runner_read_cli_writes_portable_live_receipt(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    plan = _plan("get", {"description": None}, resource_id=23)
+    session = SimpleNamespace(
+        skill=VERIFIED_SKILL,
+        credential_source="file:/selected/credential",
+        credential_digest="sha256:unit",
+    )
+    monkeypatch.setattr(
+        ACTION, "resolve_gitlab_target", lambda *a, **kw: (object(), "unit")
+    )
+    monkeypatch.setattr(ACTION, "make_plan", lambda *a, **kw: plan)
+    monkeypatch.setattr(ACTION, "bind_gitlab_session", lambda *a, **kw: session)
+    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda **kw: object())
+    monkeypatch.setattr(
+        ACTION,
+        "check_gitlab_operation_access",
+        lambda *a, **kw: {
+            "status": "PASS",
+            "identity": VERIFIED_IDENTITY,
+            "target": VERIFIED_TARGET,
+        },
+    )
+    monkeypatch.setattr(
+        RUNNERS,
+        "read",
+        lambda *a: RUNNERS.RunnerReadResult([RUNNERS._record(_runner())], False, None),
+    )
+    receipt_path = tmp_path / "runner-get.json"
+    assert (
+        ACTION.run_action_cli(
+            "gitlab_runner",
+            ["get", "--runner-id", "23", "--receipt-out", str(receipt_path), "--json"],
+        )
+        == 0
+    )
+    stdout = json.loads(capsys.readouterr().out)
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert stdout["target_file"] == "/selected/target.toml"
+    assert receipt["target_file"].startswith("path:")
+    assert receipt["credential_source"].startswith("file:path:")
+    assert receipt["records"][0]["id"] == 23
+    READ_VALIDATOR.validate(receipt)
+
+
 def test_runner_live_result_schemas_reject_unverified_skill_and_empty_identity() -> (
     None
 ):
@@ -423,3 +473,322 @@ def test_runner_delete_live_plan_binds_assignments_in_digest() -> None:
         skill=VERIFIED_SKILL,
     )
     DELETE_VALIDATOR.validate(result)
+
+
+def test_runner_delete_partial_requires_verified_context_and_readback() -> None:
+    snapshot = {
+        "id": 23,
+        "present": True,
+        "runner_type": "project_type",
+        "description": "owned-runner",
+        "project_ids": [42],
+    }
+    plan = replace(
+        _plan("delete", {"description": None}, resource_id=23),
+        runner_snapshot=snapshot,
+    )
+    record = {
+        "action": "UNVERIFIED",
+        "id": 23,
+        "verified": False,
+        "mutated": None,
+        "before": RUNNERS._record(_runner()),
+        "after": {
+            "verified": False,
+            "scoped_absent": False,
+            "global_get_status": 200,
+            "write_error": "request_timeout",
+        },
+        "errors": [{"project_id": 42, "reason": "runner_delete_readback_mismatch"}],
+        "cleanup": {
+            "status": "NOT_PERFORMED",
+            "reason": "runner_delete_outcome_unverified",
+        },
+    }
+    result = ACTION._result(
+        plan,
+        "PARTIAL",
+        phase="APPLY",
+        mutated=None,
+        result_action="UNVERIFIED",
+        records=[record],
+        readback=record,
+        errors=[{"source": "project:42", "reason": "runner_delete_readback_mismatch"}],
+        cleanup=record["cleanup"],
+        identity=VERIFIED_IDENTITY,
+        verified_target=VERIFIED_TARGET,
+        credential_source="unit",
+        credential_digest="sha256:unit",
+        skill=VERIFIED_SKILL,
+    )
+    DELETE_VALIDATOR.validate(result)
+    del result["identity"]
+    with pytest.raises(ValidationError):
+        DELETE_VALIDATOR.validate(result)
+
+
+def test_runner_result_schemas_close_every_status_shape() -> None:
+    live = {
+        "identity": VERIFIED_IDENTITY,
+        "verified_target": VERIFIED_TARGET,
+        "credential_source": "unit",
+        "credential_digest": "sha256:unit",
+        "skill": VERIFIED_SKILL,
+    }
+    failure = [{"source": "gitlab_action", "reason": "provider_unavailable"}]
+    no_write = {"status": "NOT_APPLICABLE", "reason": "no_write_attempted"}
+    read_plan = _plan("get", {"description": None}, resource_id=23)
+    tag_plan = _plan("tag", {"tag_list": ["smoke"]}, resource_id=23)
+    snapshot = {
+        "id": 23,
+        "present": True,
+        "runner_type": "project_type",
+        "description": "owned-runner",
+        "project_ids": [42],
+    }
+    delete_plan = replace(
+        _plan("delete", {"description": None}, resource_id=23),
+        runner_snapshot=snapshot,
+    )
+    deleted = {
+        "action": "APPLIED",
+        "id": 23,
+        "verified": True,
+        "mutated": True,
+        "before": RUNNERS._record(_runner()),
+        "after": {
+            "verified": True,
+            "scoped_absent": True,
+            "global_get_status": 404,
+            "write_error": None,
+        },
+    }
+    delete_partial = {
+        **deleted,
+        "action": "UNVERIFIED",
+        "verified": False,
+        "mutated": None,
+        "after": {
+            "verified": False,
+            "scoped_absent": False,
+            "global_get_status": 200,
+            "write_error": "request_timeout",
+        },
+        "errors": [{"project_id": 42, "reason": "runner_delete_readback_mismatch"}],
+        "cleanup": {
+            "status": "NOT_PERFORMED",
+            "reason": "runner_delete_outcome_unverified",
+        },
+    }
+    tag_partial = {
+        "action": "UNVERIFIED",
+        "id": 23,
+        "verified": False,
+        "mutated": None,
+        "uncertain": True,
+        "before_tags": ["existing"],
+        "expected_tags": ["existing", "smoke"],
+        "errors": [{"project_id": 42, "reason": "runner_tag_readback_mismatch"}],
+        "cleanup": {
+            "status": "NOT_PERFORMED",
+            "reason": "post_write_readback_mismatch",
+        },
+    }
+    tag_pass = json.loads(
+        (ROOT / "tests/acceptance/runner-tag/runner-tag-applied.json").read_text()
+    )
+    cases = [
+        (
+            "read_dry_run",
+            READ_VALIDATOR,
+            ACTION._result(read_plan, "DRY_RUN", phase="OFFLINE_PLAN", mutated=False),
+        ),
+        (
+            "read_pass",
+            READ_VALIDATOR,
+            ACTION._result(
+                read_plan,
+                "PASS",
+                phase="READ",
+                mutated=False,
+                records=[RUNNERS._record(_runner())],
+                related_job=None,
+                readback={"verified": True, "record_count": 1, "truncated": False},
+                **live,
+            ),
+        ),
+        (
+            "read_blocked",
+            READ_VALIDATOR,
+            ACTION._result(
+                read_plan,
+                "BLOCKED",
+                phase="ACCESS",
+                mutated=False,
+                readback={"verified": False},
+                cleanup=no_write,
+                errors=failure,
+            ),
+        ),
+        (
+            "delete_dry_run",
+            DELETE_VALIDATOR,
+            ACTION._result(
+                _plan("delete", {"description": None}, resource_id=23),
+                "DRY_RUN",
+                phase="OFFLINE_PLAN",
+                mutated=False,
+            ),
+        ),
+        (
+            "delete_planned",
+            DELETE_VALIDATOR,
+            ACTION._result(
+                delete_plan,
+                "PLANNED",
+                phase="LIVE_PLAN",
+                mutated=False,
+                readback={"verified": True, "runner_snapshot": snapshot},
+                **live,
+            ),
+        ),
+        (
+            "delete_pass",
+            DELETE_VALIDATOR,
+            ACTION._result(
+                delete_plan,
+                "PASS",
+                phase="APPLY",
+                mutated=True,
+                result_action="APPLIED",
+                records=[deleted],
+                readback=deleted,
+                cleanup={"status": "NOT_APPLICABLE"},
+                **live,
+            ),
+        ),
+        (
+            "delete_partial",
+            DELETE_VALIDATOR,
+            ACTION._result(
+                delete_plan,
+                "PARTIAL",
+                phase="APPLY",
+                mutated=None,
+                result_action="UNVERIFIED",
+                records=[delete_partial],
+                readback=delete_partial,
+                errors=[
+                    {
+                        "source": "project:42",
+                        "reason": "runner_delete_readback_mismatch",
+                    }
+                ],
+                cleanup=delete_partial["cleanup"],
+                **live,
+            ),
+        ),
+        (
+            "delete_blocked",
+            DELETE_VALIDATOR,
+            ACTION._result(
+                delete_plan,
+                "BLOCKED",
+                phase="ACCESS",
+                mutated=False,
+                readback={"verified": False},
+                cleanup=no_write,
+                errors=failure,
+            ),
+        ),
+        (
+            "tag_dry_run",
+            TAG_VALIDATOR,
+            ACTION._result(tag_plan, "DRY_RUN", phase="OFFLINE_PLAN", mutated=False),
+        ),
+        ("tag_pass", TAG_VALIDATOR, tag_pass),
+        (
+            "tag_partial",
+            TAG_VALIDATOR,
+            ACTION._result(
+                tag_plan,
+                "PARTIAL",
+                phase="APPLY",
+                mutated=None,
+                result_action="UNVERIFIED",
+                records=[tag_partial],
+                readback=tag_partial,
+                errors=[
+                    {"source": "project:42", "reason": "runner_tag_readback_mismatch"}
+                ],
+                cleanup=tag_partial["cleanup"],
+                **live,
+            ),
+        ),
+        (
+            "tag_blocked",
+            TAG_VALIDATOR,
+            ACTION._result(
+                tag_plan,
+                "BLOCKED",
+                phase="ACCESS",
+                mutated=False,
+                readback={"verified": False},
+                cleanup=no_write,
+                errors=failure,
+            ),
+        ),
+    ]
+    for name, validator, result in cases:
+        validator.validate(result)
+        unknown = deepcopy(result)
+        if "skill" in unknown:
+            unknown["skill"]["unknown_field"] = True
+        else:
+            unknown["plan"]["unknown_field"] = True
+        with pytest.raises(ValidationError, match="Additional properties"):
+            validator.validate(unknown)
+        missing = deepcopy(result)
+        required = {
+            "DRY_RUN": "plan",
+            "PLANNED": "readback",
+            "PASS": "readback",
+            "PARTIAL": "cleanup",
+            "BLOCKED": "errors",
+        }[result["status"]]
+        del missing[required]
+        with pytest.raises(ValidationError):
+            validator.validate(missing)
+        wrong_type = deepcopy(result)
+        wrong_type["summary"]["record_count"] = "unknown"
+        with pytest.raises(ValidationError):
+            validator.validate(wrong_type)
+        if "readback" in result:
+            unknown_readback = deepcopy(result)
+            unknown_readback["readback"]["unknown_field"] = True
+            with pytest.raises(ValidationError):
+                validator.validate(unknown_readback)
+        if "cleanup" in result:
+            unknown_cleanup = deepcopy(result)
+            unknown_cleanup["cleanup"]["unknown_field"] = True
+            with pytest.raises(ValidationError):
+                validator.validate(unknown_cleanup)
+        if result["records"] and "errors" in result["records"][0]:
+            unknown_record_error = deepcopy(result)
+            unknown_record_error["records"][0]["errors"][0]["unknown_field"] = True
+            with pytest.raises(ValidationError):
+                validator.validate(unknown_record_error)
+        with_report_files = deepcopy(result)
+        with_report_files["report_files"] = {
+            "json": "/receipt/result.json",
+            "text": "/receipt/result.txt",
+        }
+        validator.validate(with_report_files)
+        with_report_files["report_files"]["unknown_field"] = True
+        with pytest.raises(ValidationError):
+            validator.validate(with_report_files)
+        if name == "tag_partial":
+            missing_uncertainty = deepcopy(result)
+            del missing_uncertainty["readback"]["uncertain"]
+            with pytest.raises(ValidationError):
+                validator.validate(missing_uncertainty)
