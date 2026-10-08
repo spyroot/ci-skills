@@ -8,8 +8,8 @@ How an agent uses ci-skills, at a high level. Commands are in `ci-skills/bin/`; 
   `kubectl`, `oc` or `glab` calls.
 - Which GitLab, cluster or registry, and where its access is: `~/.ci-skills/target.toml` (a project's
   `.ci-skills/target.toml` overrides it). Nothing else goes there.
-- Everything else (pods, nodes, namespaces, pipelines, jobs, milestones, merge requests) is read live at run time,
-  never passed as an argument.
+- Commands read live resources at run time. Give an exact ID or URL when a shipped command requires one; the selected
+  project defaults to the target file when the command supports it.
 - A command returns facts in one compact record (`--json`, `--yaml`, or a human summary); the agent and the user
   decide what to do next.
 - When the agent does not know where to look, it follows small pointers one level at a time instead of reading big
@@ -21,7 +21,7 @@ How an agent uses ci-skills, at a high level. Commands are in `ci-skills/bin/`; 
 | --- | --- | --- |
 | "Can you reach my GitLab and cluster?" | `access_check.py`, `gitlab_access.py check` | shipped |
 | "What happened in this job?" (URL) | `gitlab_job.py --job-url URL` | shipped |
-| "How is this pipeline doing?" | `gitlab_pipeline.py` | shipped |
+| "How is this pipeline doing?" (ID known) | `gitlab_pipeline.py --pipeline-id ID` | shipped |
 | "I just started a pipeline, watch it" | `gitlab_pipeline.py watch` (root and every pipeline it starts) | planned |
 | "Create a milestone, a bug or a wiki page" | `gitlab_milestone.py`, `gitlab_issue.py`, `gitlab_wiki.py` | shipped |
 | "Assign or create a runner" | `gitlab_runner.py` | shipped |
