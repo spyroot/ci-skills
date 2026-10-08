@@ -17,22 +17,51 @@ How an agent uses ci-skills, at a high level. Commands are in `ci-skills/bin/`; 
 
 ## Use cases
 
-| The user says | The agent runs | Status |
-| --- | --- | --- |
-| "Can you reach my GitLab and cluster?" | `access_check.py`, `gitlab_access.py check` | current |
-| "What happened in this job?" (URL) | `gitlab_job.py --job-url URL` | current |
-| "How is this pipeline doing?" (ID known) | `gitlab_pipeline.py --pipeline-id ID` | current |
-| "Watch the pipeline I started" | `gitlab_pipeline.py watch` (root and descendants) | under development |
-| "Create a milestone, a bug or a wiki page" | `gitlab_milestone.py`, `gitlab_issue.py`, `gitlab_wiki.py` | current |
-| "Assign or create a runner" | `gitlab_runner.py` | current |
-| "Is my cluster healthy?" | `cluster_health.py` | planned in next delivery |
-| "Why is this volume stuck?" | `storage_report.py` | current |
-| "What did the cluster say around the failure?" | `event_trace.py --last 2h` | current |
-| "Is Cilium ok?" | `cilium_status.py`, then `cilium_node.py` for one node | current |
-| "Is Ceph ok?" | `ceph_cluster.py`, `ceph_kernel.py` | current |
-| "Are the node MTUs consistent?" | `k8s_verify_mtu_consistency.py` | current |
-| "Build the toolbox and push it to Harbor" | `toolbox_build.py`, `harbor_push.py` | planned in next delivery |
-| "What does `trigger:forward` do?" | `reference.py next` | planned in next delivery |
+The route column names a command family or owning plan. Read a current command's `--help` or `--describe` for its exact
+arguments. An under-development route may expose only part of the use case; next-delivery routes are not installed.
+
+| ID | Use case | Route or owner | Status |
+| --- | --- | --- | --- |
+| UC-01 | Prove access | GitLab: `gitlab_access.py check`; all three: `access_check.py` | under development |
+| UC-02 | Select endpoints and access | `~/.ci-skills/target.toml` | current |
+| UC-03 | Discover platform locations beyond the target | CI11-TOOLS | planned in next delivery |
+| UC-04 | Install at the requested skill scope | `install.sh`; CI01-CATALOG | under development |
+| UC-05 | Discover one reference level per call | `reference.py next`; CI09-REFERENCE | planned in next delivery |
+| UC-06 | Follow bounded reference pointers | `reference.py next`; CI09-REFERENCE | planned in next delivery |
+| UC-07 | Find tools by short names | CI09-REFERENCE navigator | under development |
+| UC-08 | See what exists and what is planned | `ci-skills/tools.json`; this table | current |
+| UC-09 | Run GitLab work through glab | `core/gitlab_api.py` | under development |
+| UC-10 | Read one job by URL | `gitlab_job.py --job-url URL` | current |
+| UC-11 | Find jobs by state and time | `gitlab_job.py list` | current |
+| UC-12 | Correlate the last failed job and events | CI11-TOOLS | under development |
+| UC-13 | Select last pipeline, named jobs and schedules | `gitlab_pipeline.py`; CI11-TOOLS | under development |
+| UC-14 | Watch a pipeline and descendants | `gitlab_pipeline.py watch`; CI11-TOOLS | under development |
+| UC-15 | Read a quick runner view | CI11-TOOLS | planned in next delivery |
+| UC-16 | Check an MR like gh-fix-ci | `gitlab_mr.py check`; CI11-TOOLS | planned in next delivery |
+| UC-17 | Combine milestone, labels and MR checks | CI11-TOOLS | under development |
+| UC-18 | See cluster health in one record | `cluster_health.py`; CI11-TOOLS | planned in next delivery |
+| UC-19 | Diagnose a stuck volume or claim | `storage_report.py` | current |
+| UC-20 | Read events over a chosen window | `event_trace.py --last 2h` | current |
+| UC-21 | Read Cilium health | `cilium_status.py`, `cilium_node.py` | current |
+| UC-22 | Collect independent facts in parallel | `core/collect.py`; CI11-TOOLS | under development |
+| UC-23 | View and act on OpenShift state | `ocp_*.py`; CI11-TOOLS | planned in next delivery |
+| UC-24 | Build toolbox; push to Harbor | `toolbox_build.py`, `harbor_push.py`; CI11-TOOLS | planned in next delivery |
+| UC-25 | Read one upstream section on demand | CI09-REFERENCE | planned in next delivery |
+| UC-26 | Explain one label family | CI09-REFERENCE | planned in next delivery |
+| UC-27 | Answer from MCP reference nodes | CI09-REFERENCE | planned in next delivery |
+| UC-28 | Port a script onto a shared library | CI11-TOOLS | planned in next delivery |
+| UC-29 | Extend the tool manifest and schema | `tools/render_manifest.py`; CI07-SCHEMA | under development |
+| UC-30 | Lock reference navigator output | CI09-REFERENCE | planned in next delivery |
+| UC-31 | Require versioned schemas | `tools/check_schemas.py`; CI07-SCHEMA | planned in next delivery |
+| UC-32 | Reject new target keys without approval | `gate-ci-skills-endpoints`; CI11-TOOLS | under development |
+| UC-33 | Prove live smoke by read-back | `tools/check_live_acceptance.py` | under development |
+| UC-34 | Read merge and review state before locking | pr-coordinator; CI11-TOOLS | under development |
+
+No shipped command checks GitLab and Kubernetes together. `access_check.py` currently also requires GitHub.
+
+Current individual writes use `gitlab_milestone.py create`, `gitlab_issue.py open-bug`, `gitlab_wiki.py create`, and
+`gitlab_runner.py assign|create`. They plan first and require `--apply --confirm-plan` to write. The current MTU
+command also plans first; its confirmed run uses temporary debug Pods.
 
 ## Rules the agent follows
 
@@ -40,4 +69,4 @@ How an agent uses ci-skills, at a high level. Commands are in `ci-skills/bin/`; 
 - Never a new argument for something the tool can read itself.
 - Read the command's `--describe` or `--help`, not the source, before using it.
 - A write (milestone, issue, wiki, runner) shows a plan first and applies only with `--apply --confirm-plan`.
-- Under-development and next-delivery rows are not available yet; say so instead of improvising them.
+- For an under-development route, name the missing part. Do not run a next-delivery route as if it were installed.
