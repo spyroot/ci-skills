@@ -31,7 +31,24 @@ MAX_TAG_UPDATE_ATTEMPTS: Final[int] = 2
 
 
 class RunnerRecord(TypedDict):
-    """Bounded public fields from one GitLab runner read."""
+    """Bounded public fields from one GitLab runner read.
+
+    :ivar id: Runner ID.
+    :ivar description: Runner description, when set.
+    :ivar runner_type: GitLab runner scope type.
+    :ivar tag_list: Runner job tags.
+    :ivar status: Runner status reported by GitLab.
+    :ivar online: Whether GitLab reports the runner online.
+    :ivar paused: Whether the runner is paused.
+    :ivar is_shared: Whether GitLab reports the runner as shared.
+    :ivar access_level: Protected or unprotected ref access.
+    :ivar job_execution_status: Current job execution state.
+    :ivar projects: IDs of linked projects, when returned.
+    :ivar contacted_at: Last contact timestamp, when returned.
+    :ivar version: Runner version, when returned.
+    :ivar platform: Runner platform, when returned.
+    :ivar architecture: Runner architecture, when returned.
+    """
 
     id: int
     description: str | None
@@ -51,7 +68,14 @@ class RunnerRecord(TypedDict):
 
 
 class RelatedJob(TypedDict):
-    """Exact job identity that led to a runner read."""
+    """Exact job identity that led to a runner read.
+
+    :ivar id: Job ID.
+    :ivar status: Observed job status.
+    :ivar failure_reason: Provider failure reason, when available.
+    :ivar pipeline_id: Parent pipeline ID, when available.
+    :ivar runner_id: Assigned runner ID, or ``None`` while unassigned.
+    """
 
     id: int
     status: str
@@ -62,7 +86,12 @@ class RelatedJob(TypedDict):
 
 @dataclass(frozen=True)
 class RunnerReadResult:
-    """Compact runner records and their source relation."""
+    """Compact runner records and their source relation.
+
+    :ivar records: Selected public runner records.
+    :ivar truncated: Whether more matching runners exist.
+    :ivar related_job: Job that led to the runner, when selected by job ID.
+    """
 
     records: list[RunnerRecord]
     truncated: bool
@@ -518,7 +547,7 @@ def read(api: Any, session: Any, plan: ActionPlan, target_id: int) -> RunnerRead
     :returns: Public runner records, truncation, and selected job relation.
     :raises ActionError: If the selected runner is absent, ambiguous, or malformed.
     :raises GitLabAPIError: If a provider read fails.
-    """  # noqa: DOC502 - provider read failures propagate from the API client
+    """  # noqa: DOC502,DOC503 - provider failures propagate from API calls
     scope = f"{plan.target_kind}s/{target_id}/runners"
     description = plan.body.get("description")
     if plan.operation == "get":
@@ -1081,7 +1110,7 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
     :returns: Action record with independent read-back evidence.
     :raises ActionError: If a selected resource or response is invalid.
     :raises GitLabAPIError: If a terminal provider operation fails.
-    """  # noqa: DOC502 - exceptions propagate from the dispatched action
+    """  # noqa: DOC502,DOC503 - exceptions propagate from dispatched actions
     if plan.operation == "assign":
         return _assign(api, session, plan, target_id)
     if plan.operation == "tag":
