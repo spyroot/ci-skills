@@ -10,6 +10,7 @@ decisions taken and the open decisions.
 
 | Document | Subject |
 | --- | --- |
+| [Agent capability model](capability-model.md) | discovery, focused workflows and effect-to-cause investigation |
 | [CI01-CATALOG](phases/CI01-CATALOG.md) | discover, list, get, install; Codex metadata and install scopes |
 | [CI02-CLI](phases/CI02-CLI.md) | one command-line contract |
 | [CI07-SCHEMA](phases/CI07-SCHEMA.md) | record schemas |
