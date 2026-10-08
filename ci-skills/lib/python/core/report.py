@@ -108,6 +108,16 @@ def human(data: dict[str, Any]) -> str:
     if data.get("kind") == "gitlab_runner":
         lines.append(f"Operation: {data.get('operation', 'unknown')}")
         lines.append(f"Plan: {data.get('plan_digest', 'unavailable')}")
+        related = data.get("related_job")
+        if isinstance(related, dict):
+            lines.append(
+                f"Related job: id={related.get('id')} status={related.get('status')} "
+                f"runner_id={related.get('runner_id')}"
+            )
+            if related.get("failure_reason"):
+                lines.append(
+                    "  failure_reason=" + sanitize(related["failure_reason"], 120)
+                )
         requested = (data.get("plan") or {}).get("requested_tags")
         if requested is not None:
             lines.append("Requested tags: " + ",".join(requested))
@@ -152,11 +162,24 @@ def human(data: dict[str, Any]) -> str:
             if item.get("stuck"):
                 lines.append("    stuck=true")
         elif kind == "gitlab_runner":
-            lines[-1] = (
-                f"  runner_id={item.get('id', 'unknown')}"
-                f"  action={item.get('action', 'unknown')}"
-                f"  verified={str(item.get('verified', False)).lower()}"
-            )
+            if data.get("operation") in {"get", "list"}:
+                lines[-1] = (
+                    f"  runner_id={item.get('id', 'unknown')}"
+                    f"  status={item.get('status', 'unknown')}"
+                    f"  online={item.get('online', 'unknown')}"
+                    f"  access={item.get('access_level', 'unknown')}"
+                    f"  shared={item.get('is_shared', 'unknown')}"
+                    f"  tags={','.join(item.get('tag_list', []))}"
+                )
+                lines.append(f"    projects={item.get('projects', [])}")
+            else:
+                lines[-1] = (
+                    f"  runner_id={item.get('id', 'unknown')}"
+                    f"  action={item.get('action', 'unknown')}"
+                    f"  verified={str(item.get('verified', False)).lower()}"
+                )
+                if data.get("operation") == "delete":
+                    lines.append(f"    absence={item.get('after', {})}")
             if "before_tags" in item:
                 lines.append("    before_tags=" + ",".join(item["before_tags"]))
             if "after_tags" in item:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan, apply, and verify GitLab runner assignment, creation, or tagging."""
+"""Read scoped GitLab runners and plan, apply, or verify record changes."""
 
 import _bootstrap  # noqa: F401
 from core.gitlab_actions import action_parser, run_action_cli

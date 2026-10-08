@@ -372,7 +372,7 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
         "gitlab_milestone": ("create", "update", "adjust-time"),
         "gitlab_issue": ("open-bug", "create-bug"),
         "gitlab_wiki": ("create", "update"),
-        "gitlab_runner": ("assign", "create", "tag"),
+        "gitlab_runner": ("assign", "create", "delete", "get", "list", "tag"),
     }
     result.add_argument(
         "action", nargs="?", choices=choices[kind], help="operation to plan or apply"
@@ -412,7 +412,12 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
             help="read exact group project IDs and print an apply-ready plan without writes",
         )
         result.add_argument(
-            "--runner-id", type=int, help="numeric runner ID for assignment or tagging"
+            "--runner-id",
+            type=int,
+            help="numeric runner ID for assign, tag, get, or delete",
+        )
+        result.add_argument(
+            "--job-id", type=int, help="get the runner related to one project job ID"
         )
         result.add_argument(
             "--runner-type",
@@ -420,6 +425,28 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
             help="runner scope for create",
         )
         result.add_argument("--description", help="server-visible runner recovery key")
+        result.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="maximum runner records for list (1-100)",
+        )
+        result.add_argument(
+            "--filter",
+            action="append",
+            default=[],
+            choices=(
+                "protected",
+                "unprotected",
+                "online",
+                "offline",
+                "shared",
+                "dedicated",
+                "paused",
+                "active",
+            ),
+            help="list runner state filter; repeat to combine conditions",
+        )
         result.add_argument(
             "--tag",
             action="append",
@@ -592,6 +619,13 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         return 0
     if not args.action:
         return _failure(args, kind, "arguments", "action_required")
+    runner_read = kind == "gitlab_runner" and args.action in {"get", "list"}
+    if runner_read and (
+        args.apply or args.confirm_plan or args.live_plan or args.receipt_out
+    ):
+        return _failure(args, kind, "arguments", "runner_read_rejects_apply_options")
+    if runner_read and args.dry_run and (args.output_dir or args.log_file):
+        return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
     if args.apply and args.dry_run:
         return _failure(args, kind, "arguments", "apply_and_dry_run_conflict")
     live_plan = getattr(args, "live_plan", False)
@@ -603,7 +637,12 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         return _failure(args, kind, "arguments", "confirm_plan_requires_apply")
     if args.receipt_out and not args.apply:
         return _failure(args, kind, "arguments", "receipt_out_requires_apply")
-    if not args.apply and not live_plan and (args.output_dir or args.log_file):
+    if (
+        not args.apply
+        and not live_plan
+        and not runner_read
+        and (args.output_dir or args.log_file)
+    ):
         return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
     plan: ActionPlan | None = None
     session: Any = None
@@ -613,7 +652,11 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
     mutated: bool | None = False
     try:
         target, target_source = resolve_gitlab_target(
-            args.target, args.binding, dry_run=not args.apply and not live_plan
+            args.target,
+            args.binding,
+            dry_run=not args.apply
+            and not live_plan
+            and (not runner_read or args.dry_run),
         )
         plan = make_plan(kind, args, target, target_source)
         group_assignment = (
@@ -623,7 +666,9 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         )
         if live_plan and not group_assignment:
             raise ActionError("live_plan_requires_group_runner_assignment")
-        if not args.apply and not live_plan:
+        if (runner_read and args.dry_run) or (
+            not args.apply and not live_plan and not runner_read
+        ):
             data = _result(plan, DRY_RUN, phase="OFFLINE_PLAN", mutated=False)
         else:
             phase = "ACCESS"
@@ -673,7 +718,31 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
                         api, session, _id(selected["id"], "target")
                     ),
                 )
-            if live_plan:
+            if runner_read:
+                from .gitlab_runners import read
+
+                phase = "READ"
+                selected = _object(access.get("target"), "access_target", "kind", "id")
+                observation = read(api, session, plan, _id(selected["id"], "target"))
+                data = _result(
+                    plan,
+                    PASS,
+                    phase="READ",
+                    mutated=False,
+                    records=observation.records,
+                    identity=access.get("identity"),
+                    verified_target=access.get("target"),
+                    credential_source=session.credential_source,
+                    credential_digest=session.credential_digest,
+                    skill=session.skill,
+                    readback={
+                        "verified": True,
+                        "record_count": len(observation.records),
+                        "truncated": observation.truncated,
+                    },
+                    related_job=observation.related_job,
+                )
+            elif live_plan:
                 phase = "LIVE_PLAN"
                 data = _result(
                     plan,

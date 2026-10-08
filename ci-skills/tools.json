@@ -626,9 +626,12 @@
         "--describe",
         "--description",
         "--dry-run",
+        "--filter",
         "--group",
         "--human",
+        "--job-id",
         "--json",
+        "--limit",
         "--live-plan",
         "--log-file",
         "--log-format",
@@ -646,7 +649,7 @@
         "--token-out",
         "--yaml"
       ],
-      "purpose": "Assign, create, or tag a selected GitLab runner record and verify it.",
+      "purpose": "Read and manage a selected GitLab runner record with verified actions.",
       "read_only": false,
       "report_kind": "gitlab_runner",
       "required_options": [],
@@ -654,8 +657,8 @@
       "requires_authorities": [
         "gitlab"
       ],
-      "returns": "A sanitized plan or verified runner record, assignment, and before/after tag evidence.",
-      "side_effects": "Apply may create a runner record, assign it, or update its tags.",
+      "returns": "Public runner fields, a sanitized plan, or verified before/after action evidence.",
+      "side_effects": "Apply may create, assign, tag, or delete a runner record.",
       "subcommands": {
         "assign": {
           "mutates": true,
@@ -677,6 +680,28 @@
           ],
           "side_effects": "Apply may create a runner record and write the token file."
         },
+        "delete": {
+          "mutates": true,
+          "purpose": "Delete one runner by ID or exact unique description after scoped identity read-back.",
+          "read_back": "Require global 404 and absence from the selected scope.",
+          "required_options": [],
+          "result_schema": "schemas/results/gitlab-runner-delete.schema.json",
+          "side_effects": "Apply deletes the selected runner record."
+        },
+        "get": {
+          "mutates": false,
+          "purpose": "Read one runner by ID, exact unique description, or related project job ID.",
+          "read_back": "Read the selected job when given, then runner details and selected-scope membership.",
+          "required_options": [],
+          "result_schema": "schemas/results/gitlab-runner-read.schema.json"
+        },
+        "list": {
+          "mutates": false,
+          "purpose": "List bounded scoped runners with optional exact description and state filters.",
+          "read_back": "Read each matching runner from the bound GitLab API.",
+          "required_options": [],
+          "result_schema": "schemas/results/gitlab-runner-read.schema.json"
+        },
         "tag": {
           "mutates": true,
           "purpose": "Add tags to an existing runner record.",
@@ -689,7 +714,7 @@
           "side_effects": "Apply may update the runner tag list."
         }
       },
-      "use_when": "A selected project or group needs runner assignment, creation, or tags."
+      "use_when": "A job names a runner to inspect, or a project needs runner record management."
     },
     "gitlab_wiki.py": {
       "capabilities": [],
@@ -849,7 +874,6 @@
     "GitLab operation access": "gitlab_access.py",
     "a named CI job failed": "gitlab_job.py",
     "a volume or claim is stuck": "storage_report.py",
-    "assign, create, or tag a GitLab runner": "gitlab_runner.py",
     "check GitLab pipeline progress": "gitlab_pipeline.py",
     "connectivity or CNI health": "cilium_status.py",
     "create or change a GitLab milestone": "gitlab_milestone.py",
@@ -860,6 +884,7 @@
     "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
     "prove all three authorities": "access_check.py",
     "read a caller-selected Git API resource": "bin/ci-api",
+    "read or manage a GitLab runner": "gitlab_runner.py",
     "what the cluster said during an interval": "event_trace.py"
   },
   "schema_version": "1.0",

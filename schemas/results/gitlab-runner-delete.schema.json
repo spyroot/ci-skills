@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/gitlab-runner-delete.schema.json",
+  "title": "GitLab runner deletion result",
+  "description": "A confirmed scoped delete with global 404 and scoped-absence read-back, or a verified no-op.",
+  "type": "object",
+  "required": ["schema_version", "kind", "status", "captured_at", "errors", "summary"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "gitlab_runner"},
+    "status": {"enum": ["DRY_RUN", "PASS", "PARTIAL", "BLOCKED"]},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "execution_host": {"type": "string", "minLength": 1},
+    "tested_revision": {"type": ["string", "null"]},
+    "origin": {"type": "string", "pattern": "^https://"},
+    "target": {"type": "object"},
+    "target_file": {"type": "string", "minLength": 1},
+    "target_source": {"type": "string", "minLength": 1},
+    "operation": {"const": "delete"},
+    "phase": {"enum": ["OFFLINE_PLAN", "ACCESS", "APPLY"]},
+    "mutated": {"type": ["boolean", "null"]},
+    "plan_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "plan": {"type": "object"},
+    "result_action": {"enum": ["APPLIED", "NO_OP", "UNVERIFIED"]},
+    "records": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/record"}},
+    "readback": {"type": "object"},
+    "identity": {"type": "object"},
+    "verified_target": {"type": "object"},
+    "credential_source": {"type": "string", "minLength": 1},
+    "credential_digest": {"type": "string", "minLength": 1},
+    "skill": {"type": "object"},
+    "cleanup": {"type": "object"},
+    "errors": {"type": "array", "items": {"type": "object"}},
+    "summary": {
+      "type": "object",
+      "required": ["record_count", "error_count"],
+      "properties": {
+        "record_count": {"type": "integer", "minimum": 0, "maximum": 1},
+        "error_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "report_files": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}, "required": ["status"]},
+      "then": {
+        "required": ["operation", "phase", "records", "readback", "result_action", "identity", "verified_target", "credential_source", "credential_digest", "skill"],
+        "properties": {
+          "phase": {"const": "APPLY"},
+          "records": {"minItems": 1},
+          "readback": {"$ref": "#/$defs/record"},
+          "result_action": {"enum": ["APPLIED", "NO_OP"]},
+          "errors": {"maxItems": 0}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "DRY_RUN"}}, "required": ["status"]},
+      "then": {"required": ["operation", "phase", "records"], "properties": {"phase": {"const": "OFFLINE_PLAN"}, "mutated": {"const": false}, "records": {"maxItems": 0}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "BLOCKED"}}, "required": ["status"]},
+      "then": {"properties": {"errors": {"minItems": 1}}}
+    }
+  ],
+  "$defs": {
+    "record": {
+      "type": "object",
+      "required": ["action", "id", "verified", "mutated", "before", "after"],
+      "properties": {
+        "action": {"enum": ["APPLIED", "NO_OP", "UNVERIFIED"]},
+        "id": {"type": ["integer", "null"], "minimum": 1},
+        "verified": {"type": "boolean"},
+        "mutated": {"type": ["boolean", "null"]},
+        "before": {"type": ["object", "null"]},
+        "after": {
+          "type": "object",
+          "required": ["scoped_absent", "global_get_status"],
+          "properties": {
+            "scoped_absent": {"type": "boolean"},
+            "global_get_status": {"type": ["integer", "null"], "enum": [200, 404, null]},
+            "write_error": {"type": ["string", "null"]}
+          }
+        },
+        "errors": {"type": "array"},
+        "cleanup": {"type": "object"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"action": {"const": "APPLIED"}}, "required": ["action"]},
+          "then": {
+            "properties": {
+              "verified": {"const": true},
+              "mutated": {"const": true},
+              "after": {"properties": {"scoped_absent": {"const": true}, "global_get_status": {"const": 404}}}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"action": {"const": "NO_OP"}}, "required": ["action"]},
+          "then": {"properties": {"verified": {"const": true}, "mutated": {"const": false}, "after": {"properties": {"scoped_absent": {"const": true}}}}}
+        }
+      ]
+    }
+  }
+}
