@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-08T00:05:47.860922+00:00",
+  "captured_at": "2026-10-08T00:12:00.081968+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,27 +18,27 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "c598529a57ea7f2766fb626b770c497a6f7c9752c98192144b5e30e26d449ce6",
+    "body_sha256": "0eccfdde5919505ffeb2c7bd1801ee52a2cbe569a04dbb595f755719f49147e2",
     "confirmation_ready": true,
     "fields": [
       "tag_list"
     ],
     "one_time_sink_required": false,
     "operation": "tag",
-    "plan_digest": "8faba0a48c94dcf717fe7576dda4748061a8a40fc41088596b34e4a6f73068e7",
+    "plan_digest": "ca29a8186dbfb1c929b9af83ec191a7e734d0a3c4a68073ff4e7b6f496451dd7",
     "project_ids": null,
     "requested_tags": [
-      "ci-skills-smoke-rst-gate"
+      "ci-skills-smoke-rst-qa-fix"
     ],
     "resource_id": 53,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "8faba0a48c94dcf717fe7576dda4748061a8a40fc41088596b34e4a6f73068e7",
+  "plan_digest": "ca29a8186dbfb1c929b9af83ec191a7e734d0a3c4a68073ff4e7b6f496451dd7",
   "readback": {
     "action": "APPLIED",
     "added_tags": [
-      "ci-skills-smoke-rst-gate"
+      "ci-skills-smoke-rst-qa-fix"
     ],
     "after_tags": [
       "ci-skills-smoke-initial",
@@ -47,7 +47,8 @@
       "ci-skills-smoke-qa-fix",
       "ci-skills-smoke-doc",
       "ci-skills-smoke-uncertain-fix",
-      "ci-skills-smoke-rst-gate"
+      "ci-skills-smoke-rst-gate",
+      "ci-skills-smoke-rst-qa-fix"
     ],
     "before_tags": [
       "ci-skills-smoke-initial",
@@ -55,7 +56,8 @@
       "ci-skills-smoke-receipt",
       "ci-skills-smoke-qa-fix",
       "ci-skills-smoke-doc",
-      "ci-skills-smoke-uncertain-fix"
+      "ci-skills-smoke-uncertain-fix",
+      "ci-skills-smoke-rst-gate"
     ],
     "id": 53,
     "mutated": true,
@@ -65,7 +67,7 @@
     {
       "action": "APPLIED",
       "added_tags": [
-        "ci-skills-smoke-rst-gate"
+        "ci-skills-smoke-rst-qa-fix"
       ],
       "after_tags": [
         "ci-skills-smoke-initial",
@@ -74,7 +76,8 @@
         "ci-skills-smoke-qa-fix",
         "ci-skills-smoke-doc",
         "ci-skills-smoke-uncertain-fix",
-        "ci-skills-smoke-rst-gate"
+        "ci-skills-smoke-rst-gate",
+        "ci-skills-smoke-rst-qa-fix"
       ],
       "before_tags": [
         "ci-skills-smoke-initial",
@@ -82,7 +85,8 @@
         "ci-skills-smoke-receipt",
         "ci-skills-smoke-qa-fix",
         "ci-skills-smoke-doc",
-        "ci-skills-smoke-uncertain-fix"
+        "ci-skills-smoke-uncertain-fix",
+        "ci-skills-smoke-rst-gate"
       ],
       "id": 53,
       "mutated": true,
@@ -97,11 +101,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "01ef6f1f5cc982444fefc503ff134865358225fbc8c62d033264013d1934c49d",
+    "digest": "01138b2d8e09ace553136442e50f295858e0af21ecf98c0fd3b539c3200b18af",
     "file_count": 66,
     "revision": {
       "source": "git_head",
-      "value": "bc3d5bb3478b51bc2b33ab4b3882bfb18402b819",
+      "value": "348287dac00d5781ef92b885afecb46641448540",
       "verified": true
     }
   },
@@ -116,7 +120,7 @@
   },
   "target_file": "path:5e5380df1eda",
   "target_source": "argv:--target;argv:--project",
-  "tested_revision": "bc3d5bb3478b51bc2b33ab4b3882bfb18402b819",
+  "tested_revision": "348287dac00d5781ef92b885afecb46641448540",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,
