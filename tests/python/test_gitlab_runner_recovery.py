@@ -244,6 +244,9 @@ def test_runner_create_requires_token_sink_during_offline_plan():
         runner_id=None,
         token_out=None,
         apply=False,
+        limit=10,
+        filter=[],
+        job_id=None,
     )
     with pytest.raises(
         ACTION.ActionError, match="token_out_required_for_runner_create_plan"

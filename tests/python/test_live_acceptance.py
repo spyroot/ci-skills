@@ -751,7 +751,9 @@ def test_committed_runner_lifecycle_receipts_match_current_skill():
     receipts = ACCEPTANCE._load_receipts(
         REPO_ROOT / "tests" / "acceptance" / "runner-lifecycle"
     )
-    result = ACCEPTANCE.evaluate(expected, receipts, SKILL_ROOT)
+    result = ACCEPTANCE.evaluate(
+        expected, receipts, SKILL_ROOT, repository_root=REPO_ROOT
+    )
 
     assert result["status"] == "PASS", result["problems"]
     assert set(result["accepted"]) == set(receipts)
@@ -795,6 +797,37 @@ def test_candidate_identity_rejects_unrelated_and_old_source(tmp_path):
     assert ACCEPTANCE.check_candidate_identity(receipt, REPO_ROOT, different_skill) == [
         "candidate_skill_digest_mismatch"
     ]
+
+
+def test_acceptance_cli_rejects_wrong_runner_source(monkeypatch, capsys):
+    expected = ACCEPTANCE._load_expected(
+        REPO_ROOT / "tests" / "acceptance" / "expected.toml"
+    )
+    expected["executors"] = []
+    expected["gitlab_receipts"] = [
+        item
+        for item in expected["gitlab_receipts"]
+        if item.get("label") == "runner-get"
+    ]
+    receipt = json.loads(
+        (REPO_ROOT / "tests/acceptance/runner-lifecycle/runner-get.json").read_text()
+    )
+    receipt["tested_revision"] = "0" * 40
+    receipt["skill"]["revision"]["value"] = "0" * 40
+    monkeypatch.setattr(ACCEPTANCE, "_load_expected", lambda _path: expected)
+    monkeypatch.setattr(
+        ACCEPTANCE,
+        "_load_receipt_dirs",
+        lambda _paths: {"runner-get.json": receipt},
+    )
+    monkeypatch.setattr(
+        sys, "argv", ["check_live_acceptance.py", "--root", str(REPO_ROOT), "--json"]
+    )
+
+    assert ACCEPTANCE.main() == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "BLOCKED"
+    assert "runner-get.json:candidate_revision_not_ancestor" in output["problems"]
 
 
 def test_expectations_without_an_executor_block_rather_than_pass(tmp_path):

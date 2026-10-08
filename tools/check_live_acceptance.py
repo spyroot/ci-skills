@@ -681,8 +681,17 @@ def evaluate(
     skill_root: Path,
     *,
     now: datetime | None = None,
+    repository_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Compare committed receipts against the operator's expectations."""
+    """Compare committed receipts against the operator's expectations.
+
+    :param expected: Required live observations and selected targets.
+    :param receipts: Parsed receipt data keyed by file name.
+    :param skill_root: Candidate skill tree used for digest comparison.
+    :param now: Optional reference time for receipt freshness.
+    :param repository_root: Git checkout for exact source commit verification.
+    :returns: Acceptance status, accepted receipts, and stable problem reasons.
+    """
     from core.provenance import tree_digest
 
     now = now or datetime.now(UTC)
@@ -773,6 +782,13 @@ def evaluate(
             found = _check_gitlab_receipt(
                 name, receipt, required, expected, digest, now
             )
+            if repository_root is not None:
+                found.extend(
+                    f"{name}:{reason}"
+                    for reason in check_candidate_identity(
+                        receipt, repository_root, skill_root
+                    )
+                )
         except (AttributeError, KeyError, TypeError, ValueError):
             found = [f"{name}:receipt_invalid_shape"]
         problems.extend(found)
@@ -874,6 +890,7 @@ def main() -> int:
             _load_expected(expected_path),
             _load_receipt_dirs(receipts_paths),
             skill_path,
+            repository_root=root,
         )
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {
