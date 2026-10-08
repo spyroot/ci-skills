@@ -578,9 +578,9 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
 
     :param kind: Registered GitLab action command.
     :param argv: Optional argument vector; defaults to process arguments.
-    :returns: Exit code matching the emitted action status.
-    :raises ActionError: If a confirmed plan cannot be applied safely.
-    """
+    :returns: Exit code for the emitted result; action errors become structured
+        blocked or partial output.
+    """  # noqa: DOC501, DOC503 - raised actions are caught and rendered below
     started = time.monotonic()
     args = action_parser(kind).parse_args(argv)
     if args.describe:
