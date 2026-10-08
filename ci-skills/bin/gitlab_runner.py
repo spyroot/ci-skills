@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Plan, apply, and verify GitLab runner assignment or creation."""
+"""Read scoped GitLab runners and plan, apply, or verify record changes."""
 
 import _bootstrap  # noqa: F401
 from core.gitlab_actions import action_parser, run_action_cli
 
 
 def build_parser():
-    """Return this command's declared parser for callers and contract checks."""
+    """Return this command's parser for callers and contract checks.
+
+    :returns: Parser with the runner command's declared options.
+    """
     return action_parser("gitlab_runner")
 
 

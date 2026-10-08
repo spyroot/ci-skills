@@ -60,7 +60,7 @@ arguments. An under-development route may expose only part of the use case; next
 No shipped command checks GitLab and Kubernetes together. `access_check.py` currently also requires GitHub.
 
 Current individual writes use `gitlab_milestone.py create`, `gitlab_issue.py open-bug`, `gitlab_wiki.py create`, and
-`gitlab_runner.py assign|create`. They plan first and require `--apply --confirm-plan` to write. The current MTU
+`gitlab_runner.py assign|create|tag`. They plan first and require `--apply --confirm-plan` to write. The current MTU
 command also plans first; its confirmed run uses temporary debug Pods.
 
 ## Rules the agent follows

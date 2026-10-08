@@ -1,0 +1,446 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/gitlab-runner-delete.schema.json",
+  "title": "GitLab runner deletion result",
+  "description": "A confirmed scoped delete with global 404 and scoped-absence read-back, or a verified no-op.",
+  "type": "object",
+  "required": ["schema_version","kind","status","captured_at","errors","summary"],
+  "properties": {
+    "schema_version": {"const":"1.0"},
+    "kind": {"const":"gitlab_runner"},
+    "status": {"enum":["DRY_RUN","PLANNED","PASS","PARTIAL","BLOCKED"]},
+    "captured_at": {"type":"string","format":"date-time"},
+    "execution_host": {"type":"string","minLength":1},
+    "tested_revision": {"type":["string","null"]},
+    "origin": {"type":"string","pattern":"^https://"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind","reference"],
+      "properties": {"kind":{"enum":["project","group"]},"reference":{"type":"string","minLength":1}}
+    },
+    "target_file": {"type":"string","minLength":1},
+    "target_source": {"type":"string","minLength":1},
+    "operation": {"const":"delete"},
+    "phase": {"enum":["OFFLINE_PLAN","ACCESS","LIVE_PLAN","APPLY"]},
+    "mutated": {"type":["boolean","null"]},
+    "plan_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "target_kind",
+        "target_reference",
+        "resource_id",
+        "project_ids",
+        "confirmation_ready",
+        "fields",
+        "body_sha256",
+        "plan_digest",
+        "one_time_sink_required",
+        "runner_snapshot"
+      ],
+      "properties": {
+        "operation": {"const":"delete"},
+        "target_kind": {"enum":["project","group"]},
+        "target_reference": {"type":"string","minLength":1},
+        "resource_id": {"type":"integer","minimum":1},
+        "project_ids": {"type":"null"},
+        "confirmation_ready": {"type":"boolean"},
+        "fields": {"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}},
+        "body_sha256": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "plan_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "one_time_sink_required": {"const":false},
+        "runner_snapshot": {"oneOf":[{"type":"null"},{"$ref":"#/$defs/delete_snapshot"}]}
+      }
+    },
+    "result_action": {"enum":["APPLIED","NO_OP","UNVERIFIED"]},
+    "records": {"type":"array","maxItems":1,"items":{"$ref":"#/$defs/record"}},
+    "readback": {
+      "oneOf": [
+        {"$ref":"#/$defs/planned_readback"},
+        {"$ref":"#/$defs/record"},
+        {"$ref":"#/$defs/failed_readback"}
+      ]
+    },
+    "identity": {"$ref":"#/$defs/identity"},
+    "verified_target": {"$ref":"#/$defs/verified_target"},
+    "credential_source": {"type":"string","minLength":1},
+    "credential_digest": {"type":"string","minLength":1},
+    "skill": {"$ref":"#/$defs/skill"},
+    "cleanup": {"$ref":"#/$defs/cleanup"},
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source","reason"],
+        "properties": {"source":{"type":"string","minLength":1},"reason":{"type":"string","minLength":1}}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["record_count","error_count"],
+      "properties": {"record_count":{"type":"integer","minimum":0,"maximum":1},"error_count":{"type":"integer","minimum":0}},
+      "additionalProperties": false
+    },
+    "report_files": {"$ref":"#/$defs/report_files"}
+  },
+  "allOf": [
+    {
+      "if": {"properties":{"status":{"const":"PASS"}},"required":["status"]},
+      "then": {
+        "required": [
+          "operation",
+          "phase",
+          "mutated",
+          "plan",
+          "plan_digest",
+          "records",
+          "readback",
+          "result_action",
+          "identity",
+          "verified_target",
+          "credential_source",
+          "credential_digest",
+          "skill",
+          "tested_revision"
+        ],
+        "properties": {
+          "phase": {"const":"APPLY"},
+          "mutated": {"type":"boolean"},
+          "tested_revision": {"type":"string","pattern":"^[0-9a-f]{40}$"},
+          "skill": {"$ref":"#/$defs/verified_skill"},
+          "identity": {"$ref":"#/$defs/identity"},
+          "verified_target": {"$ref":"#/$defs/verified_target"},
+          "plan": {
+            "properties": {"confirmation_ready":{"const":true},"runner_snapshot":{"$ref":"#/$defs/delete_snapshot"}}
+          },
+          "records": {"minItems":1,"maxItems":1},
+          "readback": {"$ref":"#/$defs/record"},
+          "result_action": {"enum":["APPLIED","NO_OP"]},
+          "errors": {"maxItems":0},
+          "summary": {"properties":{"record_count":{"const":1},"error_count":{"const":0}}}
+        }
+      }
+    },
+    {
+      "if": {"properties":{"status":{"const":"PARTIAL"}},"required":["status"]},
+      "then": {
+        "required": [
+          "operation",
+          "phase",
+          "mutated",
+          "plan",
+          "plan_digest",
+          "records",
+          "readback",
+          "result_action",
+          "identity",
+          "verified_target",
+          "credential_source",
+          "credential_digest",
+          "skill",
+          "tested_revision",
+          "cleanup"
+        ],
+        "properties": {
+          "phase": {"const":"APPLY"},
+          "tested_revision": {"type":"string","pattern":"^[0-9a-f]{40}$"},
+          "skill": {"$ref":"#/$defs/verified_skill"},
+          "identity": {"$ref":"#/$defs/identity"},
+          "verified_target": {"$ref":"#/$defs/verified_target"},
+          "plan": {
+            "properties": {"confirmation_ready":{"const":true},"runner_snapshot":{"$ref":"#/$defs/delete_snapshot"}}
+          },
+          "records": {"minItems":1,"maxItems":1,"items":{"$ref":"#/$defs/unverified_record"}},
+          "readback": {"$ref":"#/$defs/unverified_record"},
+          "result_action": {"const":"UNVERIFIED"},
+          "summary": {"properties":{"record_count":{"const":1},"error_count":{"minimum":1}}},
+          "cleanup": {"properties":{"status":{"const":"NOT_PERFORMED"}},"required":["reason"]},
+          "errors": {"minItems":1}
+        }
+      }
+    },
+    {
+      "if": {"properties":{"status":{"const":"PLANNED"}},"required":["status"]},
+      "then": {
+        "required": [
+          "operation",
+          "phase",
+          "mutated",
+          "plan",
+          "plan_digest",
+          "records",
+          "readback",
+          "identity",
+          "verified_target",
+          "credential_source",
+          "credential_digest",
+          "skill",
+          "tested_revision"
+        ],
+        "properties": {
+          "phase": {"const":"LIVE_PLAN"},
+          "mutated": {"const":false},
+          "tested_revision": {"type":"string","pattern":"^[0-9a-f]{40}$"},
+          "skill": {"$ref":"#/$defs/verified_skill"},
+          "identity": {"$ref":"#/$defs/identity"},
+          "verified_target": {"$ref":"#/$defs/verified_target"},
+          "plan": {
+            "properties": {"confirmation_ready":{"const":true},"runner_snapshot":{"$ref":"#/$defs/delete_snapshot"}}
+          },
+          "records": {"maxItems":0},
+          "errors": {"maxItems":0},
+          "readback": {"$ref":"#/$defs/planned_readback"},
+          "summary": {"properties":{"record_count":{"const":0},"error_count":{"const":0}}}
+        }
+      }
+    },
+    {
+      "if": {"properties":{"status":{"const":"DRY_RUN"}},"required":["status"]},
+      "then": {
+        "required": ["operation","phase","mutated","plan","records"],
+        "properties": {
+          "phase": {"const":"OFFLINE_PLAN"},
+          "mutated": {"const":false},
+          "records": {"maxItems":0},
+          "errors": {"maxItems":0},
+          "plan": {
+            "properties": {"confirmation_ready":{"const":false},"runner_snapshot":{"type":"null"}}
+          },
+          "summary": {"properties":{"record_count":{"const":0},"error_count":{"const":0}}}
+        }
+      }
+    },
+    {
+      "if": {"properties":{"status":{"const":"BLOCKED"}},"required":["status"]},
+      "then": {
+        "properties": {"errors":{"minItems":1},"summary":{"properties":{"error_count":{"minimum":1}}}}
+      }
+    },
+    {
+      "if": {"required":["operation"],"properties":{"status":{"const":"BLOCKED"}}},
+      "then": {"required":["plan","plan_digest","phase","target","readback","mutated"]}
+    }
+  ],
+  "$defs": {
+    "record": {
+      "type": "object",
+      "required": ["action","id","verified","mutated","before","after"],
+      "properties": {
+        "action": {"enum":["APPLIED","NO_OP","UNVERIFIED"]},
+        "id": {"type":"integer","minimum":1},
+        "verified": {"type":"boolean"},
+        "mutated": {"type":["boolean","null"]},
+        "before": {"oneOf":[{"type":"null"},{"$ref":"#/$defs/runner"}]},
+        "after": {
+          "type": "object",
+          "required": ["scoped_absent","global_get_status"],
+          "properties": {
+            "verified": {"type":"boolean"},
+            "scoped_absent": {"type":"boolean"},
+            "global_get_status": {"type":["integer","null"],"enum":[200,404,null]},
+            "write_error": {"type":["string","null"]}
+          },
+          "additionalProperties": false
+        },
+        "errors": {"type":"array","minItems":1,"items":{"$ref":"#/$defs/project_error"}},
+        "cleanup": {"$ref":"#/$defs/cleanup"}
+      },
+      "allOf": [
+        {
+          "if": {"properties":{"action":{"const":"APPLIED"}},"required":["action"]},
+          "then": {
+            "properties": {
+              "verified": {"const":true},
+              "mutated": {"const":true},
+              "before": {"$ref":"#/$defs/runner"},
+              "after": {
+                "required": ["verified"],
+                "properties": {"verified":{"const":true},"scoped_absent":{"const":true},"global_get_status":{"const":404}}
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties":{"action":{"const":"UNVERIFIED"}},"required":["action"]},
+          "then": {
+            "properties": {
+              "verified": {"const":false},
+              "before": {"$ref":"#/$defs/runner"},
+              "after": {"required":["verified"],"properties":{"verified":{"const":false}}},
+              "cleanup": {"properties":{"status":{"const":"NOT_PERFORMED"}},"required":["reason"]}
+            },
+            "required": ["errors","cleanup"]
+          }
+        },
+        {
+          "if": {"properties":{"action":{"const":"NO_OP"}},"required":["action"]},
+          "then": {
+            "properties": {
+              "verified": {"const":true},
+              "mutated": {"const":false},
+              "before": {"type":"null"},
+              "after": {"properties":{"scoped_absent":{"const":true},"global_get_status":{"const":404}}}
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "unverified_record": {
+      "allOf": [
+        {"$ref":"#/$defs/record"},
+        {"properties":{"action":{"const":"UNVERIFIED"}}}
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id","username","web_url"],
+      "properties": {
+        "id": {"type":"integer","minimum":1},
+        "username": {"type":"string","minLength":1},
+        "web_url": {"type":"string","pattern":"^https://"}
+      }
+    },
+    "verified_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind","id","full_path","web_url"],
+      "properties": {
+        "kind": {"enum":["project","group"]},
+        "id": {"type":"integer","minimum":1},
+        "full_path": {"type":"string","minLength":1},
+        "web_url": {"type":"string","pattern":"^https://"}
+      }
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm","digest","file_count","revision","consuming_project"],
+      "properties": {
+        "algorithm": {"const":"sha256-tree-v1"},
+        "digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "file_count": {"type":"integer","minimum":1},
+        "revision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value","source","verified"],
+          "properties": {
+            "value": {"type":["string","null"],"pattern":"^[0-9a-f]{40}$"},
+            "source": {"type":["string","null"],"minLength":1},
+            "verified": {"type":"boolean"},
+            "detail": {"type":"string","minLength":1}
+          }
+        },
+        "consuming_project": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commit","source"],
+          "properties": {"commit":{"type":["string","null"],"minLength":1},"source":{"type":["string","null"],"minLength":1}}
+        }
+      }
+    },
+    "verified_skill": {
+      "allOf": [
+        {"$ref":"#/$defs/skill"},
+        {
+          "properties": {
+            "revision": {
+              "properties": {"value":{"type":"string","pattern":"^[0-9a-f]{40}$"},"verified":{"const":true}}
+            }
+          }
+        }
+      ]
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "runner_type",
+        "tag_list",
+        "status",
+        "online",
+        "paused",
+        "is_shared",
+        "access_level",
+        "job_execution_status",
+        "projects",
+        "contacted_at",
+        "version",
+        "platform",
+        "architecture"
+      ],
+      "properties": {
+        "id": {"type":"integer","minimum":1},
+        "description": {"type":["string","null"]},
+        "runner_type": {"type":"string","minLength":1},
+        "tag_list": {"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}},
+        "status": {"type":["string","null"]},
+        "online": {"type":["boolean","null"]},
+        "paused": {"type":["boolean","null"]},
+        "is_shared": {"type":["boolean","null"]},
+        "access_level": {"type":["string","null"]},
+        "job_execution_status": {"type":["string","null"]},
+        "projects": {"type":["array","null"],"uniqueItems":true,"items":{"type":"integer","minimum":1}},
+        "contacted_at": {"type":["string","null"]},
+        "version": {"type":["string","null"]},
+        "platform": {"type":["string","null"]},
+        "architecture": {"type":["string","null"]}
+      }
+    },
+    "delete_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id","present"],
+      "properties": {
+        "id": {"type":"integer","minimum":1},
+        "present": {"type":"boolean"},
+        "runner_type": {"type":"string","minLength":1},
+        "description": {"type":["string","null"]},
+        "project_ids": {"type":"array","uniqueItems":true,"items":{"type":"integer","minimum":1}}
+      },
+      "allOf": [
+        {
+          "if": {"properties":{"present":{"const":true}},"required":["present"]},
+          "then": {"required":["runner_type","description","project_ids"]}
+        },
+        {
+          "if": {"properties":{"present":{"const":false}},"required":["present"]},
+          "then": {"properties":{"runner_type":false,"description":false,"project_ids":false}}
+        }
+      ]
+    },
+    "failed_readback": {"type":"object","additionalProperties":false,"required":["verified"],"properties":{"verified":{"const":false}}},
+    "report_files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["json","text"],
+      "properties": {"json":{"type":"string","minLength":1},"text":{"type":"string","minLength":1}}
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {"status":{"enum":["NOT_APPLICABLE","NOT_PERFORMED","BLOCKED"]},"reason":{"type":"string","minLength":1}}
+    },
+    "project_error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_id","reason"],
+      "properties": {"project_id":{"type":"integer","minimum":1},"reason":{"type":"string","minLength":1}}
+    },
+    "planned_readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verified","runner_snapshot"],
+      "properties": {"verified":{"const":true},"runner_snapshot":{"$ref":"#/$defs/delete_snapshot"}}
+    }
+  },
+  "additionalProperties": false
+}

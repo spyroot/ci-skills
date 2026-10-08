@@ -81,7 +81,11 @@ GITHUB_CLOUD_SUFFIX = ".ghe.com"
 
 
 def github_variables(host: str) -> tuple[str, ...]:
-    """Return the variables gh uses for GitHub Cloud or Enterprise Server."""
+    """Select credential variable names for the GitHub host.
+
+    :param host: GitHub Cloud or Enterprise Server hostname.
+    :returns: Credential variable names checked for that host.
+    """
     return (
         GITHUB_CLOUD_VARIABLES
         if host == GITHUB_DOTCOM_HOST or host.endswith(GITHUB_CLOUD_SUFFIX)
@@ -358,32 +362,76 @@ COMMANDS: dict[str, dict[str, Any]] = {
     },
     "gitlab_runner.py": {
         "kind": "gitlab_runner",
-        "purpose": "Assign an existing runner or create a runner record and verify it.",
-        "use_when": "A selected project or group needs runner assignment or creation.",
+        "purpose": "Read and manage a selected GitLab runner record with verified actions.",
+        "use_when": "A job names a runner to inspect, or a project needs runner record management.",
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "Apply may create, assign, tag, or delete a runner record.",
         "options": {
             "--project": "exact project path or numeric ID",
             "--group": "exact group path or numeric ID",
-            "--runner-id": "numeric existing runner ID for assignment",
+            "--runner-id": "numeric runner ID, required for assign, tag, and delete",
+            "--job-id": "project job ID whose related runner get should inspect",
             "--runner-type": "project or group scope for creation",
             "--description": "runner description and server-visible recovery key",
-            "--tag": "runner tag; repeat for multiple tags",
+            "--limit": "maximum returned runner records for list (1-100, default 10)",
+            "--filter": "repeatable runner state filter: protected, unprotected, online, offline, shared, dedicated, paused, active",
+            "--tag": "runner tag for create or tag; repeat for multiple tags",
             "--token-out": "caller-selected 0600 file for the one-time runner token",
-            "--live-plan": "read exact group project IDs and print an apply-ready plan without writes",
+            "--live-plan": "read group assignment or runner deletion identity and print an apply-ready plan without writes",
             "--apply": "perform the validated change",
-            "--confirm-plan": "SHA-256 fingerprint printed by the live plan for group assignment, otherwise the dry-run plan",
+            "--confirm-plan": "SHA-256 fingerprint from the live plan for group assignment or delete, otherwise the dry-run plan",
             "--timeout": "maximum seconds for each external request",
             "--receipt-out": "write a sanitized, shareable operation receipt",
         },
         "subcommands": {
-            "assign": {"required_options": ["--runner-id"]},
+            "get": {
+                "required_options": [],
+                "result_schema": "schemas/results/gitlab-runner-read.schema.json",
+                "purpose": "Read one runner by ID, exact unique description, or related project job ID.",
+                "mutates": False,
+                "read_back": "Read the selected job when given, then runner details and selected-scope membership.",
+            },
+            "list": {
+                "required_options": [],
+                "result_schema": "schemas/results/gitlab-runner-read.schema.json",
+                "purpose": "List bounded scoped runners with optional exact description and state filters.",
+                "mutates": False,
+                "read_back": "Read each matching runner from the bound GitLab API.",
+            },
+            "assign": {
+                "required_options": ["--runner-id"],
+                "purpose": "Assign an existing runner to the selected project or group.",
+                "mutates": True,
+                "side_effects": "Apply may attach a runner to selected projects.",
+                "read_back": "Read scoped runner membership after assignment.",
+            },
             "create": {
-                "required_options": ["--runner-type", "--description", "--token-out"]
+                "required_options": ["--runner-type", "--description", "--token-out"],
+                "purpose": "Create a runner record and save its one-time token.",
+                "mutates": True,
+                "side_effects": "Apply may create a runner record and write the token file.",
+                "read_back": "Read the new runner record and scoped listing.",
+            },
+            "delete": {
+                "required_options": ["--runner-id"],
+                "result_schema": "schemas/results/gitlab-runner-delete.schema.json",
+                "purpose": "Delete one runner by ID after a live plan binds its identity and project assignments.",
+                "mutates": True,
+                "side_effects": "Apply deletes the selected runner record.",
+                "read_back": "Require global 404 and absence from the selected scope.",
+            },
+            "tag": {
+                "required_options": ["--runner-id", "--tag"],
+                "result_schema": "schemas/results/gitlab-runner-tag.schema.json",
+                "purpose": "Add tags to an existing runner record.",
+                "mutates": True,
+                "side_effects": "Apply may update the runner tag list.",
+                "read_back": "Read tags from a fresh runner GET and scoped listing.",
             },
         },
-        "returns": "A sanitized plan or verified runner record and assignment evidence.",
+        "returns": "Public runner fields, a sanitized plan, or verified before/after action evidence.",
     },
     "storage_report.py": {
         "kind": "storage_report",
@@ -607,7 +655,11 @@ def missing_required_options(script: str, args: Any) -> list[str]:
 
 
 def options_for(script: str) -> dict[str, str]:
-    """Return every option one command accepts, tier options included."""
+    """Collect universal, capability, and command options.
+
+    :param script: Command filename registered in the catalog.
+    :returns: Option names mapped to their help descriptions.
+    """
     entry = COMMANDS[script]
     merged = dict(UNIVERSAL_OPTIONS)
     for capability in entry["capabilities"]:
@@ -617,7 +669,11 @@ def options_for(script: str) -> dict[str, str]:
 
 
 def describe(script: str) -> dict[str, Any]:
-    """Return one command's contract, for `--describe`."""
+    """Build one command contract for ``--describe``.
+
+    :param script: Command filename registered in the catalog.
+    :returns: Machine-readable command contract.
+    """
     entry = COMMANDS[script]
     return {
         "schema_version": SCHEMA_VERSION,
@@ -646,7 +702,11 @@ def describe(script: str) -> dict[str, Any]:
 
 
 def describe_node(script: str) -> dict[str, Any]:
-    """Return the contract for a node read through an existing selected Pod."""
+    """Build the contract for a node read through a selected Pod.
+
+    :param script: Registered node-local command filename.
+    :returns: Machine-readable node command contract.
+    """
     entry = NODE_LOCAL_COMMANDS[script]
     return {
         "schema_version": SCHEMA_VERSION,
@@ -672,7 +732,10 @@ def describe_node(script: str) -> dict[str, Any]:
 
 
 def manifest() -> dict[str, Any]:
-    """Return the whole-skill manifest rendered into `tools.json`."""
+    """Build the complete skill manifest for ``tools.json``.
+
+    :returns: Command and authority catalog for installed agents.
+    """
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "skill_manifest",
@@ -737,7 +800,7 @@ def manifest() -> dict[str, Any]:
             "create or change a GitLab milestone": "gitlab_milestone.py",
             "open a GitLab bug": "gitlab_issue.py",
             "create or change a GitLab wiki page": "gitlab_wiki.py",
-            "assign or create a GitLab runner": "gitlab_runner.py",
+            "read or manage a GitLab runner": "gitlab_runner.py",
             "a volume or claim is stuck": "storage_report.py",
             "what the cluster said during an interval": "event_trace.py",
             "connectivity or CNI health": "cilium_status.py",

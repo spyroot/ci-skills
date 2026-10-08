@@ -88,7 +88,7 @@ Routing, in short:
 | create, update, or adjust milestone dates | `gitlab_milestone.py` |
 | open a bug issue | `gitlab_issue.py open-bug` |
 | create or update a wiki page | `gitlab_wiki.py` |
-| assign or create a runner record | `gitlab_runner.py` |
+| inspect, filter, create, assign, tag, or delete a runner record | `gitlab_runner.py` |
 | Ceph hierarchy and Pods | `ceph_cluster.py --namespace NAME` |
 | physical PCI NIC MTU mismatch across nodes | `k8s_verify_mtu_consistency.py` |
 | Cilium daemon and health on a selected node | `cilium_node.py` |
@@ -111,6 +111,19 @@ required for both the plan and apply when creating a runner record because
 GitLab returns its token once and the destination is bound into the plan;
 the token never appears in a report. Runner registration and online readiness
 are separate from creating its record.
+
+`gitlab_runner.py tag --runner-id ID --tag TAG` adds a tag to an existing runner record. Repeat `--tag` to add several.
+Plan first, then apply with the printed digest; the result reads back the tags before and after the change. Tagging a
+record does not register or start its executor.
+
+For a failed job in a pipeline, use `gitlab_runner.py get --job-id JOB_ID --project PROJECT --json`. It resolves the
+job's runner ID and returns a compact job-to-runner relation with tags, online state, protection level, sharing, and
+project IDs. `get --runner-id ID` reads a known runner directly. Use `list --project PROJECT --filter protected` to
+narrow a project view; repeated filters combine. `get` and `list` are live reads unless `--dry-run` is supplied; use
+`--receipt-out PATH` to save their portable live evidence.
+`delete --runner-id ID --project PROJECT --live-plan` reads the exact runner identity and affected project IDs and
+prints an apply-ready digest. Apply with that `--confirm-plan` digest; a changed identity or assignment set refuses the
+delete. Deletion verifies a global 404 and absence from the selected project or group listing.
 
 For a group runner assignment, the offline plan has no project list and cannot
 authorize apply. Run `gitlab_runner.py assign --group GROUP --runner-id ID

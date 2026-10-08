@@ -28,6 +28,24 @@ RENDER = load_module("render_manifest", REPO_ROOT / "tools" / "render_manifest.p
 MANIFEST_PATH = SCRIPT_ROOT.parent / "tools.json"
 
 
+def test_runner_actions_declare_mutation_and_readback():
+    """Expose each runner write and its read-back in the machine contract."""
+    contract = CATALOG.describe("gitlab_runner.py")
+    assert contract["mutates"] is True
+    assert contract["side_effects"] != "none"
+    for action in ("assign", "create", "delete", "tag"):
+        verb = contract["subcommands"][action]
+        assert verb["mutates"] is True
+        assert verb["side_effects"] != "none"
+        assert verb["purpose"]
+        assert verb["read_back"]
+    for action in ("get", "list"):
+        verb = contract["subcommands"][action]
+        assert verb["mutates"] is False
+        assert verb["read_back"]
+        assert verb["result_schema"] == "schemas/results/gitlab-runner-read.schema.json"
+
+
 def _actual_options(script: str) -> set[str]:
     """Read the options a command really accepts, from its own parser.
 

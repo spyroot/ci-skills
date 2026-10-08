@@ -15,8 +15,8 @@ target from caller input or the configured binding and returns evidence that an 
   milestone.
 - [Write wiki pages](ci-skills/bin/gitlab_wiki.py): create or update a page from supplied content, including
   documentation links.
-- [Manage runners](ci-skills/bin/gitlab_runner.py): assign an existing runner or create a runner record with runner
-  tags.
+- [Manage runners](ci-skills/bin/gitlab_runner.py): inspect and list runners, assign or create a runner record, add
+  tags, or delete an exact runner ID after a live plan.
 - [Diagnose Kubernetes and OpenShift](ci-skills/bin/): inspect storage, events, Cilium, Ceph, and node MTU consistency.
 - Use [ci-api](ci-skills/bin/ci-api) for bounded Git API reads and [ci-binary-build](ci-skills/bin/ci-binary-build) for
   exact-commit OpenShift build planning.
@@ -55,8 +55,8 @@ Four patterns describe what a tool does. They can overlap: a combined report may
 - **Generic Combo:** [Ceph cluster diagnostics](ci-skills/bin/ceph_cluster.py) combines cluster health, OSD hierarchy,
   placement groups, and Pods; [Ceph kernel diagnostics](ci-skills/bin/ceph_kernel.py) adds selected node events.
 - **Toolchain Combination:** [ci-binary-build](ci-skills/bin/ci-binary-build) plans an exact-commit OpenShift build, and
-  [gitlab_runner.py](ci-skills/bin/gitlab_runner.py) plans and applies runner creation or assignment. The complete
-  example workflows above remain proposed.
+  [gitlab_runner.py](ci-skills/bin/gitlab_runner.py) plans and applies runner creation, assignment, tagging, or deletion.
+  The complete example workflows above remain proposed.
 
 ## Required next delivery
 
@@ -292,7 +292,7 @@ conda run -n ci-skills python \
 The second command prints a `DRY_RUN` plan with `plan_digest` and makes no API call. When the requested change is
 authorized, pass that digest with `--apply --confirm-plan DIGEST`; the command rechecks the selected credential,
 identity, and target, reads the resource before changing it, and independently reads it back. The same pattern applies
-to `gitlab_issue.py open-bug`, `gitlab_wiki.py create|update`, and `gitlab_runner.py assign|create`. Runner creation
+to `gitlab_issue.py open-bug`, `gitlab_wiki.py create|update`, and `gitlab_runner.py assign|create|tag`. Runner creation
 requires the same `--token-out PATH` on the dry-run plan and apply to bind the one-time token destination into the plan
 digest. The token is saved at that caller-selected path; creating a record does not register or start a runner.
 
@@ -307,6 +307,9 @@ Group runner assignment has one extra read-only step: select `gitlab.group` in t
 `gitlab_runner.py assign --runner-id ID --live-plan --json` to read the exact project IDs. Its `PLANNED` result supplies
 the digest for `--apply --confirm-plan DIGEST`. Apply rechecks group membership and blocks before a write if it changed.
 The default offline `DRY_RUN` plan makes no API call and is not apply-ready for a group.
+
+`gitlab_runner.py get|list` reads selected live runners. Deletion requires `delete --runner-id ID --live-plan` to bind
+the exact identity and project assignments before `--apply --confirm-plan DIGEST`; apply rechecks that snapshot.
 
 Run `<command> --describe` for the machine contract and `--help` for examples. The generated `tools.json` marks each
 command read-only or mutating, lists its subcommands and options, and routes an agent to the correct first access call.
@@ -343,8 +346,8 @@ paired JSON and text files; without that option no report file is written.
   Kubernetes access.
 - `gitlab_milestone.py create|update|adjust-time` manages exact milestone IDs and dates;
   `gitlab_issue.py open-bug|create-bug` creates or reuses a bug.
-- `gitlab_wiki.py create|update` manages one selected page; `gitlab_runner.py assign|create` manages a selected runner
-  scope. These commands default to dry-run and require a matching plan fingerprint to apply.
+- `gitlab_wiki.py create|update` manages one selected page; `gitlab_runner.py assign|create|tag|delete` changes a
+  selected runner scope. These actions require a matching plan fingerprint to apply; `get|list` are live reads.
 - `ceph_cluster.py --namespace NAME` reads Ceph health, root/rack/host/OSD hierarchy, inactive PGs, and OSD/monitor Pods
   on the pinned cluster. It accepts `--operator`, `--node`, `--ready`, and `--condition` filters.
 - `k8s_verify_mtu_consistency.py --json` reads the selected node inventory and prints a plan digest. To collect PCI

@@ -8,7 +8,7 @@ import re
 import shutil
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +51,7 @@ def report(
     return {
         "schema_version": "1.0",
         "kind": kind,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": datetime.now(UTC).isoformat(),
         "target": target,
         "filters": filters,
         "records": records,
@@ -62,6 +62,11 @@ def report(
 
 
 def human(data: dict[str, Any]) -> str:
+    """Render bounded operator output from one structured result.
+
+    :param data: Versioned command result or operation plan.
+    :returns: Human-readable status and selected evidence fields.
+    """
     if data.get("kind") == "k8s_verify_mtu_consistency":
         records = data.get("records", [])
         lines = [
@@ -100,6 +105,22 @@ def human(data: dict[str, Any]) -> str:
         f"Target: {data.get('target', 'unknown')}",
         f"Records: {len(data.get('records', []))}",
     ]
+    if data.get("kind") == "gitlab_runner":
+        lines.append(f"Operation: {data.get('operation', 'unknown')}")
+        lines.append(f"Plan: {data.get('plan_digest', 'unavailable')}")
+        related = data.get("related_job")
+        if isinstance(related, dict):
+            lines.append(
+                f"Related job: id={related.get('id')} status={related.get('status')} "
+                f"runner_id={related.get('runner_id')}"
+            )
+            if related.get("failure_reason"):
+                lines.append(
+                    "  failure_reason=" + sanitize(related["failure_reason"], 120)
+                )
+        requested = (data.get("plan") or {}).get("requested_tags")
+        if requested is not None:
+            lines.append("Requested tags: " + ",".join(requested))
     for item in data.get("records", []):
         fields = (
             "timestamp",
@@ -140,6 +161,29 @@ def human(data: dict[str, Any]) -> str:
                 )
             if item.get("stuck"):
                 lines.append("    stuck=true")
+        elif kind == "gitlab_runner":
+            if data.get("operation") in {"get", "list"}:
+                lines[-1] = (
+                    f"  runner_id={item.get('id', 'unknown')}"
+                    f"  status={item.get('status', 'unknown')}"
+                    f"  online={item.get('online', 'unknown')}"
+                    f"  access={item.get('access_level', 'unknown')}"
+                    f"  shared={item.get('is_shared', 'unknown')}"
+                    f"  tags={','.join(item.get('tag_list', []))}"
+                )
+                lines.append(f"    projects={item.get('projects', [])}")
+            else:
+                lines[-1] = (
+                    f"  runner_id={item.get('id', 'unknown')}"
+                    f"  action={item.get('action', 'unknown')}"
+                    f"  verified={str(item.get('verified', False)).lower()}"
+                )
+                if data.get("operation") == "delete":
+                    lines.append(f"    absence={item.get('after', {})}")
+            if "before_tags" in item:
+                lines.append("    before_tags=" + ",".join(item["before_tags"]))
+            if "after_tags" in item:
+                lines.append("    after_tags=" + ",".join(item["after_tags"]))
         elif kind == "gitlab_job":
             lines.append(f"    failure_reason={item.get('failure_reason')}")
             for label in ("pipeline", "runner"):
@@ -235,12 +279,13 @@ def _report_file_lines(data: dict[str, Any]) -> list[str]:
 
 
 def emit(data: dict[str, Any], mode: str, output_dir: str | None = None) -> str:
-    """Render one in-memory collection and optionally persist paired reports.
+    """Redact and render a report, optionally persisting paired files.
 
-    Redaction happens HERE, once, before anything is serialized or written, so
-    every output path is covered: the returned JSON, YAML and human text, and
-    both files under an output directory. Redacting inside one renderer would
-    leave the others raw.
+    :param data: In-memory collection to redact before serialization.
+    :param mode: Selected JSON, YAML, or human output mode.
+    :param output_dir: Optional directory for paired report files.
+    :returns: Redacted report text in the selected format.
+    :raises RuntimeError: If YAML output is selected without PyYAML.
     """
     data = redact_tree(data)
     if mode == "yaml":

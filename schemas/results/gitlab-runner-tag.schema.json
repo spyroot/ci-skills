@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/gitlab-runner-tag.schema.json",
+  "title": "GitLab runner tag action result",
+  "description": "JSON or YAML from gitlab_runner.py tag. PASS proves a scoped runner GET after mutation; DRY_RUN is an offline plan; BLOCKED and PARTIAL are not success.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version","kind","status","captured_at","errors","summary"],
+  "properties": {
+    "schema_version": {"const":"1.0"},
+    "kind": {"const":"gitlab_runner"},
+    "status": {"enum":["DRY_RUN","PASS","PARTIAL","BLOCKED"]},
+    "captured_at": {"type":"string","format":"date-time"},
+    "execution_host": {"type":"string","minLength":1},
+    "tested_revision": {"type":["string","null"]},
+    "operation": {"const":"tag"},
+    "origin": {"type":"string","pattern":"^https://"},
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind","reference"],
+      "properties": {"kind":{"enum":["project","group"]},"reference":{"type":"string","minLength":1}}
+    },
+    "target_file": {"type":"string","minLength":1},
+    "target_source": {"type":"string","minLength":1},
+    "phase": {"enum":["OFFLINE_PLAN","ACCESS","APPLY"]},
+    "plan_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "target_kind",
+        "target_reference",
+        "resource_id",
+        "project_ids",
+        "confirmation_ready",
+        "fields",
+        "body_sha256",
+        "plan_digest",
+        "one_time_sink_required",
+        "requested_tags"
+      ],
+      "properties": {
+        "operation": {"const":"tag"},
+        "target_kind": {"enum":["project","group"]},
+        "target_reference": {"type":"string","minLength":1},
+        "resource_id": {"type":"integer","minimum":1},
+        "project_ids": {"type":"null"},
+        "confirmation_ready": {"const":true},
+        "fields": {"const":["tag_list"]},
+        "body_sha256": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "plan_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "one_time_sink_required": {"const":false},
+        "requested_tags": {"$ref":"#/$defs/tags"}
+      }
+    },
+    "mutated": {"type":["boolean","null"]},
+    "records": {"type":"array","maxItems":1,"items":{"$ref":"#/$defs/record"}},
+    "readback": {"oneOf":[{"$ref":"#/$defs/record"},{"$ref":"#/$defs/failed_readback"}]},
+    "result_action": {"enum":["APPLIED","NO_OP","UNVERIFIED"]},
+    "identity": {"$ref":"#/$defs/identity"},
+    "verified_target": {"$ref":"#/$defs/verified_target"},
+    "credential_source": {"type":"string","minLength":1},
+    "credential_digest": {"type":"string","minLength":1},
+    "skill": {"$ref":"#/$defs/skill"},
+    "cleanup": {"$ref":"#/$defs/cleanup"},
+    "report_files": {"$ref":"#/$defs/report_files"},
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source","reason"],
+        "properties": {"source":{"type":"string","minLength":1},"reason":{"type":"string","minLength":1}}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record_count","error_count"],
+      "properties": {"record_count":{"type":"integer","minimum":0,"maximum":1},"error_count":{"type":"integer","minimum":0}}
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties":{"status":{"const":"PASS"}},"required":["status"]},
+      "then": {
+        "required": [
+          "operation",
+          "phase",
+          "plan",
+          "plan_digest",
+          "records",
+          "readback",
+          "result_action",
+          "identity",
+          "verified_target",
+          "credential_source",
+          "credential_digest",
+          "skill",
+          "tested_revision"
+        ],
+        "properties": {
+          "phase": {"const":"APPLY"},
+          "tested_revision": {"type":"string","pattern":"^[0-9a-f]{40}$"},
+          "skill": {"$ref":"#/$defs/verified_skill"},
+          "identity": {"$ref":"#/$defs/identity"},
+          "verified_target": {"$ref":"#/$defs/verified_target"},
+          "records": {"minItems":1},
+          "readback": {"allOf":[{"$ref":"#/$defs/record"},{"properties":{"verified":{"const":true}}}]},
+          "errors": {"maxItems":0},
+          "summary": {"properties":{"record_count":{"const":1},"error_count":{"const":0}}}
+        }
+      }
+    },
+    {
+      "if": {"properties":{"status":{"const":"DRY_RUN"}},"required":["status"]},
+      "then": {
+        "required": ["operation","phase","plan","plan_digest","records"],
+        "properties": {
+          "phase": {"const":"OFFLINE_PLAN"},
+          "mutated": {"const":false},
+          "records": {"maxItems":0},
+          "errors": {"maxItems":0},
+          "summary": {"properties":{"record_count":{"const":0},"error_count":{"const":0}}}
+        }
+      }
+    },
+    {
+      "if": {"properties":{"status":{"const":"PARTIAL"}},"required":["status"]},
+      "then": {
+        "required": [
+          "operation",
+          "phase",
+          "plan",
+          "plan_digest",
+          "records",
+          "readback",
+          "result_action",
+          "mutated",
+          "cleanup",
+          "identity",
+          "verified_target",
+          "credential_source",
+          "credential_digest",
+          "skill",
+          "tested_revision"
+        ],
+        "properties": {
+          "phase": {"const":"APPLY"},
+          "tested_revision": {"type":"string","pattern":"^[0-9a-f]{40}$"},
+          "skill": {"$ref":"#/$defs/verified_skill"},
+          "identity": {"$ref":"#/$defs/identity"},
+          "verified_target": {"$ref":"#/$defs/verified_target"},
+          "result_action": {"const":"UNVERIFIED"},
+          "mutated": {"type":["boolean","null"]},
+          "records": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {"$ref":"#/$defs/unverified_record"}
+          },
+          "readback": {
+            "$ref":"#/$defs/unverified_record"
+          },
+          "cleanup": {"properties":{"status":{"const":"NOT_PERFORMED"}},"required":["reason"]},
+          "errors": {"minItems":1},
+          "summary": {"properties":{"record_count":{"const":1},"error_count":{"minimum":1}}}
+        }
+      }
+    },
+    {
+      "if": {"properties":{"status":{"const":"BLOCKED"}},"required":["status"]},
+      "then": {
+        "properties": {"errors":{"minItems":1},"summary":{"properties":{"error_count":{"minimum":1}}}}
+      }
+    },
+    {
+      "if": {"required":["operation"],"properties":{"status":{"const":"BLOCKED"}}},
+      "then": {"required":["plan","plan_digest","phase","target","readback","mutated"]}
+    }
+  ],
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id","username","web_url"],
+      "properties": {
+        "id": {"type":"integer","minimum":1},
+        "username": {"type":"string","minLength":1},
+        "web_url": {"type":"string","pattern":"^https://"}
+      }
+    },
+    "verified_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind","id","full_path","web_url"],
+      "properties": {
+        "kind": {"enum":["project","group"]},
+        "id": {"type":"integer","minimum":1},
+        "full_path": {"type":"string","minLength":1},
+        "web_url": {"type":"string","pattern":"^https://"}
+      }
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm","digest","file_count","revision","consuming_project"],
+      "properties": {
+        "algorithm": {"const":"sha256-tree-v1"},
+        "digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "file_count": {"type":"integer","minimum":1},
+        "revision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value","source","verified"],
+          "properties": {
+            "value": {"type":["string","null"],"pattern":"^[0-9a-f]{40}$"},
+            "source": {"type":["string","null"],"minLength":1},
+            "verified": {"type":"boolean"},
+            "detail": {"type":"string","minLength":1}
+          }
+        },
+        "consuming_project": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["commit","source"],
+          "properties": {"commit":{"type":["string","null"],"minLength":1},"source":{"type":["string","null"],"minLength":1}}
+        }
+      }
+    },
+    "verified_skill": {
+      "allOf": [
+        {"$ref":"#/$defs/skill"},
+        {
+          "properties": {
+            "revision": {
+              "properties": {"value":{"type":"string","pattern":"^[0-9a-f]{40}$"},"verified":{"const":true}}
+            }
+          }
+        }
+      ]
+    },
+    "tags": {"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string","minLength":1}},
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action","id","verified"],
+      "properties": {
+        "action": {"enum":["APPLIED","NO_OP","UNVERIFIED"]},
+        "id": {"type":"integer","minimum":1},
+        "verified": {"type":"boolean"},
+        "mutated": {"type":["boolean","null"]},
+        "before_tags": {"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}},
+        "after_tags": {"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}},
+        "added_tags": {"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}},
+        "expected_tags": {"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}},
+        "uncertain": {"type":"boolean"},
+        "reconciled": {"type":"boolean"},
+        "errors": {"type":"array","minItems":1,"items":{"$ref":"#/$defs/project_error"}},
+        "cleanup": {"$ref":"#/$defs/cleanup"}
+      },
+      "allOf": [
+        {
+          "if": {"properties":{"verified":{"const":true}},"required":["verified"]},
+          "then": {"required":["before_tags","after_tags","added_tags"]}
+        }
+      ]
+    },
+    "unverified_record": {
+      "allOf": [
+        {"$ref":"#/$defs/record"},
+        {
+          "required": ["action","id","verified","mutated","uncertain","before_tags","expected_tags","errors","cleanup"],
+          "properties": {
+            "action": {"const":"UNVERIFIED"},
+            "verified": {"const":false},
+            "uncertain": {"const":true},
+            "cleanup": {"properties":{"status":{"const":"NOT_PERFORMED"}},"required":["reason"]}
+          }
+        }
+      ]
+    },
+    "failed_readback": {"type":"object","additionalProperties":false,"required":["verified"],"properties":{"verified":{"const":false}}},
+    "report_files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["json","text"],
+      "properties": {"json":{"type":"string","minLength":1},"text":{"type":"string","minLength":1}}
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {"status":{"enum":["NOT_APPLICABLE","NOT_PERFORMED","BLOCKED"]},"reason":{"type":"string","minLength":1}}
+    },
+    "project_error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_id","reason"],
+      "properties": {"project_id":{"type":"integer","minimum":1},"reason":{"type":"string","minLength":1}}
+    }
+  }
+}

@@ -7,11 +7,10 @@ the receipt a real host produced and refuses it when it is missing, stale, from
 an undeclared executor, aimed at different targets, or produced by different
 code.
 
-The load-bearing comparison is the skill DIGEST, not a commit SHA. A receipt can
-never carry the SHA of the commit that adds it, and a SHA is unverifiable where
-it is claimed anyway. A digest recomputed from the checked-out skill tree is
-verifiable here, and it fails exactly when the code that ran differs from the
-code under review -- which is what "wrong revision" has to mean.
+The candidate check pairs the exact source commit with the skill tree digest.
+The receipt commit cannot contain its own SHA, so acceptance verifies that the
+tested source commit is an ancestor and its skill tree equals the checked-out
+candidate before comparing the recomputed digest.
 
 This is plain data: an operator-owned expectations file, receipts as files, and
 one comparison function.
@@ -24,12 +23,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
-from datetime import datetime, timezone
+import tomllib
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-
-import tomllib
 
 SCHEMA_VERSION = "1.0"
 RECEIPT_KIND = "access_check"
@@ -56,14 +56,27 @@ REPEATABLE_GITLAB_OPERATIONS = (
     ("gitlab_wiki", "update"),
     ("gitlab_runner", "assign"),
 )
-REQUIRED_GITLAB_OPERATIONS = {
-    ("gitlab_access", None, None),
-    ("gitlab_runner", "create", "APPLIED"),
-} | {
-    (kind, operation, action)
-    for kind, operation in REPEATABLE_GITLAB_OPERATIONS
-    for action in ("APPLIED", "NO_OP")
-}
+READ_ONLY_GITLAB_OPERATIONS = (
+    ("gitlab_runner", "get"),
+    ("gitlab_runner", "list"),
+)
+RUNNER_DELETE_OPERATIONS = (
+    ("gitlab_runner", "delete", "APPLIED"),
+    ("gitlab_runner", "delete", "NO_OP"),
+)
+REQUIRED_GITLAB_OPERATIONS = (
+    {
+        ("gitlab_access", None, None),
+        ("gitlab_runner", "create", "APPLIED"),
+        *RUNNER_DELETE_OPERATIONS,
+    }
+    | {
+        (kind, operation, action)
+        for kind, operation in REPEATABLE_GITLAB_OPERATIONS
+        for action in ("APPLIED", "NO_OP")
+    }
+    | {(kind, operation, None) for kind, operation in READ_ONLY_GITLAB_OPERATIONS}
+)
 
 
 class AcceptanceError(RuntimeError):
@@ -108,13 +121,7 @@ def _load_expected(path: Path) -> dict[str, Any]:
                 "target_path",
             )
         )
-        or (
-            item.get("kind") != "gitlab_access"
-            and (
-                not item.get("operation")
-                or item.get("result_action") not in {"APPLIED", "NO_OP"}
-            )
-        )
+        or not _expected_gitlab_operation_valid(item)
         for item in operations
     ):
         raise AcceptanceError("gitlab_receipt_expectation_invalid")
@@ -139,6 +146,21 @@ def _load_expected(path: Path) -> dict[str, Any]:
     return data
 
 
+def _expected_gitlab_operation_valid(item: dict[str, Any]) -> bool:
+    """Validate one declared GitLab live receipt expectation.
+
+    :param item: Parsed expectation entry from ``expected.toml``.
+    :returns: ``True`` when operation fields match the declared receipt kind.
+    """
+    kind = item.get("kind")
+    if kind == "gitlab_access":
+        return True
+    operation = item.get("operation")
+    if (kind, operation) in READ_ONLY_GITLAB_OPERATIONS:
+        return item.get("result_action") is None
+    return bool(operation) and item.get("result_action") in {"APPLIED", "NO_OP"}
+
+
 def _load_receipts(directory: Path) -> dict[str, Any]:
     if not directory.is_dir():
         raise AcceptanceError(f"receipt_directory_missing:{directory}")
@@ -156,14 +178,97 @@ def _load_receipts(directory: Path) -> dict[str, Any]:
     return receipts
 
 
+def _load_receipt_dirs(paths: Sequence[Path]) -> dict[str, Any]:
+    """Load committed acceptance receipts from one or more directories.
+
+    :param paths: Candidate receipt directories in priority order.
+    :returns: Mapping of unique file names to parsed receipt objects.
+    :raises AcceptanceError: If a required directory is unreadable, a receipt
+        is malformed, or two directories contain the same receipt name.
+    """
+    receipts: dict[str, Any] = {}
+    for index, directory in enumerate(paths):
+        if not directory.exists():
+            if index == 0:
+                raise AcceptanceError(f"receipt_directory_missing:{directory}")
+            continue
+        for name, receipt in _load_receipts(directory).items():
+            if name in receipts:
+                raise AcceptanceError(f"receipt_duplicate:{name}")
+            receipts[name] = receipt
+    if not receipts:
+        raise AcceptanceError("receipts_missing")
+    return receipts
+
+
+def check_candidate_identity(
+    receipt: dict[str, Any], repository_root: Path, skill_root: Path
+) -> list[str]:
+    """Verify a committed receipt against the exact candidate skill tree.
+
+    :param receipt: Live receipt with a verified tested source revision.
+    :param repository_root: Git checkout containing the candidate HEAD.
+    :param skill_root: Candidate's ``ci-skills`` directory.
+    :returns: Stable reasons when ancestry, tree identity, or digest differs.
+    """
+    revision = receipt.get("tested_revision")
+    skill = _mapping(receipt.get("skill"))
+    source = _mapping(skill.get("revision"))
+    if (
+        not isinstance(revision, str)
+        or re.fullmatch(r"[0-9a-f]{40}", revision) is None
+        or source.get("verified") is not True
+        or source.get("value") != revision
+    ):
+        return ["candidate_revision_unverified"]
+
+    def git(*args: str) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return subprocess.run(
+                ["git", "-C", str(repository_root), *args],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError:
+            return None
+
+    ancestor = git("merge-base", "--is-ancestor", revision, "HEAD")
+    if ancestor is None or ancestor.returncode != 0:
+        return ["candidate_revision_not_ancestor"]
+    tested_tree = git("rev-parse", f"{revision}:ci-skills")
+    current_tree = git("rev-parse", "HEAD:ci-skills")
+    if (
+        tested_tree is None
+        or current_tree is None
+        or tested_tree.returncode != 0
+        or current_tree.returncode != 0
+        or tested_tree.stdout.strip() != current_tree.stdout.strip()
+    ):
+        return ["candidate_skill_tree_mismatch"]
+    if _redactor() is None:
+        return ["candidate_digest_unavailable"]
+    try:
+        from core.provenance import tree_digest
+
+        current = tree_digest(skill_root)
+    except (ImportError, OSError, ValueError):
+        return ["candidate_digest_unavailable"]
+    if any(
+        skill.get(key) != current[key] for key in ("algorithm", "digest", "file_count")
+    ):
+        return ["candidate_skill_digest_mismatch"]
+    return []
+
+
 def _parse_time(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _check_common(
@@ -355,15 +460,18 @@ def _check_gitlab_receipt(
         or target.get("full_path") != required.get("target_path")
     ):
         problems.append(f"{name}:target_mismatch")
+    operation = required.get("operation") if kind != "gitlab_access" else None
     if kind == "gitlab_access":
         if not {"identity_read", "target_read"} <= set(
             receipt.get("observed_capability") or []
         ):
             problems.append(f"{name}:access_readback_missing")
+    elif (kind, operation) in READ_ONLY_GITLAB_OPERATIONS:
+        problems.extend(_check_gitlab_read_receipt(name, receipt, required))
     elif (
         receipt.get("phase") != "APPLY"
         or receipt.get("mutated") is not (required.get("result_action") == "APPLIED")
-        or receipt.get("operation") != required.get("operation")
+        or receipt.get("operation") != operation
         or receipt.get("result_action") != required.get("result_action")
         or not isinstance(receipt.get("readback"), dict)
         or receipt["readback"].get("verified") is not True
@@ -378,7 +486,106 @@ def _check_gitlab_receipt(
         and not _runner_smoke_cleanup_verified(receipt, required, digest, now, expected)
     ):
         problems.append(f"{name}:runner_smoke_cleanup_unproven")
+    if (
+        kind == "gitlab_runner"
+        and operation == "delete"
+        and not _runner_delete_readback_verified(receipt, required)
+    ):
+        problems.append(f"{name}:runner_delete_readback_unproven")
     return problems
+
+
+def _check_gitlab_read_receipt(
+    name: str, receipt: dict[str, Any], required: dict[str, Any]
+) -> list[str]:
+    """Validate a live read receipt that must not mutate GitLab.
+
+    :param name: Receipt file name used in diagnostics.
+    :param receipt: Parsed receipt object.
+    :param required: Expected operation and target entry.
+    :returns: Acceptance problems for this read receipt.
+    """
+    problems: list[str] = []
+    records = receipt.get("records")
+    readback = receipt.get("readback")
+    if (
+        receipt.get("status") != "PASS"
+        or receipt.get("phase") != "READ"
+        or receipt.get("mutated") is not False
+        or receipt.get("operation") != required.get("operation")
+        or receipt.get("result_action") is not None
+        or receipt.get("errors")
+        or not isinstance(records, list)
+        or not records
+        or not isinstance(readback, dict)
+        or readback.get("verified") is not True
+        or readback.get("record_count") != len(records)
+    ):
+        problems.append(f"{name}:read_operation_readback_missing")
+    if required.get("operation") == "get" and (
+        not isinstance(records, list) or len(records) != 1
+    ):
+        problems.append(f"{name}:runner_get_cardinality_unexpected")
+    if isinstance(records, list) and any(
+        not isinstance(record, dict)
+        or type(record.get("id")) is not int
+        or record["id"] <= 0
+        for record in records
+    ):
+        problems.append(f"{name}:runner_record_identity_missing")
+    return problems
+
+
+def _runner_delete_readback_verified(
+    receipt: dict[str, Any], required: dict[str, Any]
+) -> bool:
+    """Check delete-specific before/action/absence evidence.
+
+    :param receipt: Parsed runner delete receipt.
+    :param required: Expected delete operation and result action.
+    :returns: ``True`` when delete read-back proves the declared result.
+    """
+    record = receipt.get("readback")
+    records = receipt.get("records")
+    plan = receipt.get("plan")
+    if (
+        not isinstance(record, dict)
+        or not isinstance(records, list)
+        or records != [record]
+        or not isinstance(plan, dict)
+        or record.get("action") != required.get("result_action")
+        or record.get("verified") is not True
+        or record.get("id") != plan.get("resource_id")
+        or type(record.get("id")) is not int
+        or record["id"] <= 0
+    ):
+        return False
+    after = record.get("after")
+    if (
+        not isinstance(after, dict)
+        or after.get("global_get_status") != 404
+        or after.get("scoped_absent") is not True
+        or after.get("write_error") not in (None, "")
+    ):
+        return False
+    before = record.get("before")
+    snapshot = plan.get("runner_snapshot")
+    if required.get("result_action") == "APPLIED":
+        return (
+            record.get("mutated") is True
+            and isinstance(before, dict)
+            and before.get("id") == record["id"]
+            and isinstance(snapshot, dict)
+            and snapshot.get("id") == record["id"]
+            and snapshot.get("present") is True
+        )
+    return (
+        record.get("mutated") is False
+        and before is None
+        and isinstance(snapshot, dict)
+        and snapshot.get("id") == record["id"]
+        and snapshot.get("present") is False
+    )
 
 
 def _runner_smoke_cleanup_verified(
@@ -474,11 +681,20 @@ def evaluate(
     skill_root: Path,
     *,
     now: datetime | None = None,
+    repository_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Compare committed receipts against the operator's expectations."""
+    """Compare committed receipts against the operator's expectations.
+
+    :param expected: Required live observations and selected targets.
+    :param receipts: Parsed receipt data keyed by file name.
+    :param skill_root: Candidate skill tree used for digest comparison.
+    :param now: Optional reference time for receipt freshness.
+    :param repository_root: Git checkout for exact source commit verification.
+    :returns: Acceptance status, accepted receipts, and stable problem reasons.
+    """
     from core.provenance import tree_digest
 
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     digest = tree_digest(skill_root)["digest"]
     by_host: dict[str, list[tuple[str, dict[str, Any]]]] = {}
     for name, receipt in receipts.items():
@@ -566,6 +782,13 @@ def evaluate(
             found = _check_gitlab_receipt(
                 name, receipt, required, expected, digest, now
             )
+            if repository_root is not None:
+                found.extend(
+                    f"{name}:{reason}"
+                    for reason in check_candidate_identity(
+                        receipt, repository_root, skill_root
+                    )
+                )
         except (AttributeError, KeyError, TypeError, ValueError):
             found = [f"{name}:receipt_invalid_shape"]
         problems.extend(found)
@@ -653,16 +876,21 @@ def main() -> int:
         if args.expected
         else root / "tests" / "acceptance" / "expected.toml"
     )
-    receipts_path = (
+    receipts_paths = [
         Path(args.receipts)
         if args.receipts
         else root / "tests" / "acceptance" / "receipts"
-    )
+    ]
+    if not args.receipts:
+        receipts_paths.append(root / "tests" / "acceptance" / "runner-lifecycle")
     skill_path = Path(args.skill) if args.skill else root / "ci-skills"
     _redactor()
     try:
         data = evaluate(
-            _load_expected(expected_path), _load_receipts(receipts_path), skill_path
+            _load_expected(expected_path),
+            _load_receipt_dirs(receipts_paths),
+            skill_path,
+            repository_root=root,
         )
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {

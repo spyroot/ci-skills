@@ -12,7 +12,7 @@ import stat
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -48,6 +48,11 @@ class GitLabAPIError(RuntimeError):
     """A classified API failure with no response body or credential value."""
 
     def __init__(self, reason: str, *, attempts: int = 1) -> None:
+        """Record a redacted provider failure and retry count.
+
+        :param reason: Classified error reason without response content.
+        :param attempts: Number of transport attempts made.
+        """
         self.reason = reason
         self.attempts = attempts
         super().__init__(reason)
@@ -57,14 +62,24 @@ GitLabApiError = GitLabAPIError
 
 
 def uncertain_write(error: GitLabAPIError) -> bool:
-    """A write may have reached GitLab even though its result was lost."""
+    """Identify transport failures with an unknown write outcome.
+
+    :param error: Classified failure from the GitLab transport.
+    :returns: Whether the request may have reached GitLab.
+    """
     return error.reason in _UNCERTAIN_WRITE
 
 
 def unverified_write(
     target_id: int, resource: dict[str, Any], reason: str
 ) -> dict[str, Any]:
-    """Keep a successful write's known resource in a PARTIAL adapter record."""
+    """Preserve an unverified write in a partial action record.
+
+    :param target_id: Numeric ID of the selected GitLab target.
+    :param resource: Known fields from the provider write response.
+    :param reason: Reason independent read-back was unavailable.
+    :returns: Partial action record with an explicit uncertain outcome.
+    """
     return {
         "action": "APPLIED",
         "verified": False,
@@ -175,6 +190,11 @@ class CreateGuard:
     """A same-host create lock with a crash-persistent uncertain marker."""
 
     def __init__(self, descriptor: int) -> None:
+        """Load the lock's persistent uncertain-create marker.
+
+        :param descriptor: Open descriptor for the selected create lock.
+        :raises GitLabAPIError: If the marker contains an unknown state.
+        """
         self._descriptor = descriptor
         os.lseek(descriptor, 0, os.SEEK_SET)
         state = os.read(descriptor, 16)
@@ -198,7 +218,10 @@ class CreateGuard:
         self._set(b"pending\n")
 
     def reconcile_absent(self) -> None:
-        """Clear an earlier uncertain create only after a complete empty read."""
+        """Clear an uncertain create after an independent empty read.
+
+        :raises GitLabAPIError: If an earlier create is absent and needs a new plan.
+        """
         if self.pending:
             self.clear()
             raise GitLabAPIError("create_outcome_uncertain_absent_after_readback_retry")
@@ -209,15 +232,12 @@ class CreateGuard:
 
 
 @contextmanager
-def create_guard(
-    origin: str, target_kind: str, target_id: int, kind: str, title: str
-) -> Iterator[CreateGuard]:
-    """Serialize one title's search/create/read-back across local processes.
+def _locked_descriptor(identity: Sequence[str | int]) -> Iterator[int]:
+    """Lock one resource identity in a private local file.
 
-    Locks are scoped by exact host and numeric target. No title is written to
-    the lock file. A create started but not independently verified leaves a
-    pending marker, so a later invocation may read back but cannot send a new
-    POST when the first POST's outcome remains unknown.
+    :param identity: Exact provider and resource identifiers; never a credential.
+    :returns: Open, exclusively locked descriptor for the caller's operation.
+    :raises GitLabAPIError: If the lock path is unsafe or acquisition times out.
     """
     root = _lock_root()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -227,11 +247,9 @@ def create_guard(
         or metadata.st_uid != os.getuid()
         or metadata.st_mode & 0o077
     ):
-        raise GitLabAPIError("create_lock_directory_unsafe")
-    identity = json.dumps(
-        [origin, target_kind, target_id, kind, title], separators=(",", ":")
-    )
-    name = hashlib.sha256(identity.encode("utf-8")).hexdigest() + ".lock"
+        raise GitLabAPIError("resource_lock_directory_unsafe")
+    encoded = json.dumps(identity, separators=(",", ":"))
+    name = hashlib.sha256(encoded.encode("utf-8")).hexdigest() + ".lock"
     flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(root / name, flags, 0o600)
     try:
@@ -241,7 +259,7 @@ def create_guard(
             or metadata.st_uid != os.getuid()
             or metadata.st_mode & 0o077
         ):
-            raise GitLabAPIError("create_lock_file_unsafe")
+            raise GitLabAPIError("resource_lock_file_unsafe")
         deadline = time.monotonic() + CREATE_LOCK_WAIT_SECONDS
         while True:
             try:
@@ -251,12 +269,45 @@ def create_guard(
                 if exc.errno not in (errno.EAGAIN, errno.EACCES):
                     raise
                 if time.monotonic() >= deadline:
-                    raise GitLabAPIError("create_lock_timeout") from exc
+                    raise GitLabAPIError("resource_lock_timeout") from exc
                 time.sleep(0.05)
-        yield CreateGuard(descriptor)
+        yield descriptor
     finally:
         fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)
+
+
+@contextmanager
+def create_guard(
+    origin: str, target_kind: str, target_id: int, kind: str, title: str
+) -> Iterator[CreateGuard]:
+    """Serialize one creation and retain its crash-recovery marker.
+
+    :param origin: Bound GitLab origin.
+    :param target_kind: Project or group scope.
+    :param target_id: Access-verified scope ID.
+    :param kind: Resource class being created.
+    :param title: Server-visible uniqueness key.
+    :yields: Guard that records an uncertain POST until reconciliation.
+    :ytype: CreateGuard
+    :raises GitLabAPIError: If the lock or recovery marker is unsafe.
+    """  # noqa: DOC502 - lock failures propagate from the context manager
+    with _locked_descriptor([origin, target_kind, target_id, kind, title]) as fd:
+        yield CreateGuard(fd)
+
+
+@contextmanager
+def runner_update_guard(origin: str, runner_id: int) -> Iterator[None]:
+    """Serialize local updates to one runner across selected projects.
+
+    :param origin: Bound GitLab origin.
+    :param runner_id: Runner ID shared by every project selection.
+    :yields: Control after the resource lock is acquired.
+    :ytype: None
+    :raises GitLabAPIError: If the local lock cannot be acquired safely.
+    """  # noqa: DOC502 - lock failures propagate from the context manager
+    with _locked_descriptor([origin, "runner", runner_id]):
+        yield
 
 
 class GlabAPIClient:
@@ -274,11 +325,12 @@ class GlabAPIClient:
         timeout: int = 25,
         sleep: Callable[[float], None] = time.sleep,
     ):
-        """
+        """Bind the GitLab transport to a command runner and timeout.
 
-        :param command:
-        :param timeout:
-        :param sleep:
+        :param command: Injectable command executor for GitLab requests.
+        :param timeout: Positive per-request timeout in seconds.
+        :param sleep: Delay function used for bounded retries.
+        :raises ValueError: If the timeout is not positive.
         """
         if timeout <= 0:
             raise ValueError("timeout must be positive")
@@ -309,7 +361,12 @@ class GlabAPIClient:
         return self._request(session, "PUT", endpoint, body)
 
     def delete_json(self, session: Any, endpoint: str) -> Any:
-        """Issue one DELETE and accept GitLab's empty 204 response."""
+        """Issue a DELETE and accept GitLab's empty 204 response.
+
+        :param session: Bound GitLab session.
+        :param endpoint: Relative GitLab API endpoint to delete.
+        :returns: Parsed response or ``None`` for an empty response.
+        """
         return self._request(session, "DELETE", endpoint)
 
     def _request(

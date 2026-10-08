@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import stat
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from pathlib import Path
+from threading import Event, Lock
 from types import SimpleNamespace
 
 import pytest
+from jsonschema import Draft202012Validator
+
 from tests.python.conftest import import_script_module
 
 ACTION = import_script_module("core.gitlab_actions")
@@ -17,6 +22,44 @@ MILESTONES = import_script_module("core.gitlab_milestones")
 ISSUES = import_script_module("core.gitlab_issues")
 WIKIS = import_script_module("core.gitlab_wikis")
 RUNNERS = import_script_module("core.gitlab_runners")
+REPORT = import_script_module("core.report")
+PROVENANCE = import_script_module("core.provenance")
+
+TAG_SCHEMA = json.loads(
+    (
+        Path(__file__).parents[2] / "schemas/results/gitlab-runner-tag.schema.json"
+    ).read_text(encoding="utf-8")
+)
+TAG_VALIDATOR = Draft202012Validator(TAG_SCHEMA)
+
+
+def test_committed_runner_tag_receipts_match_live_contract():
+    root = Path(__file__).parents[2]
+    receipts = root / "tests/acceptance/runner-tag"
+    applied = json.loads((receipts / "runner-tag-applied.json").read_text())
+    repeated = json.loads((receipts / "runner-tag-no_op.json").read_text())
+    digest = PROVENANCE.tree_digest(root / "ci-skills")["digest"]
+
+    for result in (applied, repeated):
+        TAG_VALIDATOR.validate(result)
+        assert result["skill"]["digest"] == digest
+        assert result["skill"]["revision"]["verified"] is True
+        assert result["tested_revision"] == result["skill"]["revision"]["value"]
+        assert result["verified_target"]["full_path"] == "hott/test"
+        assert result["readback"]["verified"] is True
+
+    added = applied["plan"]["requested_tags"]
+    assert applied["result_action"] == "APPLIED"
+    assert applied["readback"]["added_tags"] == added
+    assert set(applied["readback"]["before_tags"]).isdisjoint(added)
+    assert set(applied["readback"]["before_tags"] + added) <= set(
+        applied["readback"]["after_tags"]
+    )
+    assert repeated["result_action"] == "NO_OP"
+    assert repeated["readback"]["mutated"] is False
+    assert applied["plan_digest"] == repeated["plan_digest"]
+    assert applied["readback"]["id"] == repeated["readback"]["id"]
+    assert applied["readback"]["after_tags"] == repeated["readback"]["after_tags"]
 
 
 def _plan(
@@ -75,6 +118,55 @@ class FakeAPI:
 
 def _list(endpoint):
     return endpoint + ("&" if "?" in endpoint else "?") + "per_page=100&page=1"
+
+
+def _tag_output(plan, record):
+    """Render one runner-action record through the shared result adapter.
+
+    :param plan: Confirmed runner action plan.
+    :param record: Result returned by the runner action.
+    :returns: JSON-compatible result for schema validation.
+    """
+    errors = [
+        {"source": f"project:{item['project_id']}", "reason": item["reason"]}
+        for item in record.get("errors", [])
+    ]
+    data = ACTION._result(
+        plan,
+        "PASS" if record["verified"] else "PARTIAL",
+        phase="APPLY",
+        mutated=record["mutated"],
+        result_action=record["action"],
+        records=[record],
+        errors=errors,
+        readback=record,
+        cleanup=record.get("cleanup", {"status": "NOT_APPLICABLE"}),
+        identity={
+            "id": 1,
+            "username": "test",
+            "web_url": "https://gitlab.example.test/test",
+        },
+        verified_target={
+            "id": 42,
+            "kind": "project",
+            "full_path": "team/repo",
+            "web_url": "https://gitlab.example.test/team/repo",
+        },
+        credential_source="unit",
+        credential_digest="sha256:unit",
+        skill={
+            "algorithm": "sha256-tree-v1",
+            "digest": "b" * 64,
+            "file_count": 1,
+            "revision": {
+                "verified": True,
+                "value": plan.revision,
+                "source": "git_head",
+            },
+            "consuming_project": {"commit": None, "source": None},
+        },
+    )
+    return json.loads(REPORT.emit(data, "json"))
 
 
 def test_plan_fingerprint_binds_body_target_and_source():
@@ -395,7 +487,11 @@ def test_runner_create_saves_token_0600_without_reporting_it(
     plan = _plan(
         "gitlab_runner",
         "create",
-        {"runner_type": "project_type", "description": "unique-runner"},
+        {
+            "runner_type": "project_type",
+            "description": "unique-runner",
+            "tag_list": "first,second",
+        },
         token_out=destination,
     )
     scope = "projects/42/runners"
@@ -403,7 +499,13 @@ def test_runner_create_saves_token_0600_without_reporting_it(
         {
             ("GET", _list(scope)): [[], [{"id": 23, "description": "unique-runner"}]],
             ("POST", "user/runners"): [{"id": 23, "token": "private-one-time-value"}],
-            ("GET", "runners/23"): [{"id": 23, "description": "unique-runner"}],
+            ("GET", "runners/23"): [
+                {
+                    "id": 23,
+                    "description": "unique-runner",
+                    "tag_list": ["first", "second"],
+                }
+            ],
         }
     )
     result = RUNNERS.apply(api, object(), plan, 42)
@@ -416,6 +518,247 @@ def test_runner_create_saves_token_0600_without_reporting_it(
     assert stat.S_IMODE(destination.stat().st_mode) == 0o600
     assert "private-one-time-value" not in json.dumps(result)
     assert str(destination) not in json.dumps(result)
+    assert result["after_tags"] == ["first", "second"]
+
+
+def test_runner_tag_adds_to_selected_runner_and_reads_back():
+    plan = _plan("gitlab_runner", "tag", {"tag_list": ["new"]}, resource_id=23)
+    scope = "projects/42/runners"
+    runner = {
+        "id": 23,
+        "description": "owned-runner",
+        "runner_type": "project_type",
+        "tag_list": ["existing"],
+    }
+    api = FakeAPI(
+        {
+            ("GET", "runners/23"): [
+                runner,
+                {**runner, "tag_list": ["existing", "new"]},
+            ],
+            ("GET", _list(scope)): [[{"id": 23}], [{"id": 23}]],
+            ("PUT", "runners/23"): [{"id": 23}],
+        }
+    )
+    result = RUNNERS.apply(api, object(), plan, 42)
+    assert result == {
+        "action": "APPLIED",
+        "id": 23,
+        "verified": True,
+        "mutated": True,
+        "before_tags": ["existing"],
+        "after_tags": ["existing", "new"],
+        "added_tags": ["new"],
+    }
+    assert ("PUT", "runners/23", {"tag_list": ["existing", "new"]}) in api.calls
+    output = _tag_output(plan, result)
+    TAG_VALIDATOR.validate(output)
+    for broken in (
+        {"tested_revision": None},
+        {"identity": {}},
+        {"verified_target": {}},
+        {"skill": {"revision": {"verified": False, "value": plan.revision}}},
+    ):
+        assert not TAG_VALIDATOR.is_valid({**output, **broken})
+    for field in ("digest", "algorithm", "file_count", "consuming_project"):
+        invalid = deepcopy(output)
+        del invalid["skill"][field]
+        assert not TAG_VALIDATOR.is_valid(invalid)
+    for field in ("web_url", "username"):
+        invalid = deepcopy(output)
+        del invalid["identity"][field]
+        assert not TAG_VALIDATOR.is_valid(invalid)
+    for field in ("web_url", "full_path"):
+        invalid = deepcopy(output)
+        del invalid["verified_target"][field]
+        assert not TAG_VALIDATOR.is_valid(invalid)
+    for field in ("identity", "verified_target", "skill"):
+        invalid = deepcopy(output)
+        invalid[field]["unexpected"] = True
+        assert not TAG_VALIDATOR.is_valid(invalid)
+
+
+def test_runner_tag_uses_only_verified_bound_revision():
+    verified = SimpleNamespace(
+        skill={"revision": {"verified": True, "value": "a" * 40}}
+    )
+    unverified = SimpleNamespace(
+        skill={"revision": {"verified": False, "value": "a" * 40}}
+    )
+    assert ACTION._verified_skill_revision(verified) == "a" * 40
+    assert ACTION._verified_skill_revision(unverified) is None
+
+
+def test_runner_tag_is_no_op_when_tag_already_exists():
+    plan = _plan("gitlab_runner", "tag", {"tag_list": ["existing"]}, resource_id=23)
+    api = FakeAPI(
+        {
+            ("GET", "runners/23"): [
+                {
+                    "id": 23,
+                    "description": "owned-runner",
+                    "runner_type": "project_type",
+                    "tag_list": ["existing"],
+                }
+            ],
+            ("GET", _list("projects/42/runners")): [[{"id": 23}]],
+        }
+    )
+    result = RUNNERS.apply(api, object(), plan, 42)
+    assert result["action"] == "NO_OP"
+    assert result["mutated"] is False
+    assert all(call[0] != "PUT" for call in api.calls)
+    TAG_VALIDATOR.validate(_tag_output(plan, result))
+
+
+def test_runner_tag_refuses_runner_outside_selected_project():
+    plan = _plan("gitlab_runner", "tag", {"tag_list": ["new"]}, resource_id=23)
+    api = FakeAPI(
+        {
+            ("GET", "runners/23"): [
+                {
+                    "id": 23,
+                    "description": "elsewhere",
+                    "runner_type": "project_type",
+                    "tag_list": [],
+                }
+            ],
+            ("GET", _list("projects/42/runners")): [[]],
+        }
+    )
+    with pytest.raises(ACTION.ActionError, match="runner_scope_readback_mismatch"):
+        RUNNERS.apply(api, object(), plan, 42)
+    assert all(call[0] != "PUT" for call in api.calls)
+
+
+def test_runner_tag_partial_output_requires_readback_and_cleanup():
+    plan = _plan("gitlab_runner", "tag", {"tag_list": ["new"]}, resource_id=23)
+    current = {
+        "id": 23,
+        "description": "owned-runner",
+        "runner_type": "project_type",
+        "tag_list": ["existing"],
+    }
+    api = FakeAPI(
+        {
+            ("GET", "runners/23"): [current, current, current],
+            ("GET", _list("projects/42/runners")): [
+                [{"id": 23}],
+                [{"id": 23}],
+                [{"id": 23}],
+            ],
+            ("PUT", "runners/23"): [{"id": 23}, {"id": 23}],
+        }
+    )
+    result = RUNNERS.apply(api, object(), plan, 42)
+    assert result["verified"] is False
+    assert result["action"] == "UNVERIFIED"
+    assert result["mutated"] is None
+    assert result["after_tags"] == ["existing"]
+    assert result["errors"][0]["reason"] == "runner_tag_readback_mismatch"
+    output = _tag_output(plan, result)
+    TAG_VALIDATOR.validate(output)
+    for field in ("readback", "mutated", "cleanup"):
+        invalid = deepcopy(output)
+        del invalid[field]
+        assert not TAG_VALIDATOR.is_valid(invalid)
+
+
+def test_runner_tag_uncertain_put_and_failed_readback_has_unknown_mutation():
+    """Keep mutation unknown when neither PUT nor GET confirms the outcome."""
+    plan = _plan("gitlab_runner", "tag", {"tag_list": ["new"]}, resource_id=23)
+    current = {
+        "id": 23,
+        "description": "owned-runner",
+        "runner_type": "project_type",
+        "tag_list": ["existing"],
+    }
+    api = FakeAPI(
+        {
+            ("GET", "runners/23"): [current, API.GitLabAPIError("timeout")],
+            ("GET", _list("projects/42/runners")): [[{"id": 23}]],
+            ("PUT", "runners/23"): [API.GitLabAPIError("timeout")],
+        }
+    )
+    result = RUNNERS.apply(api, object(), plan, 42)
+    assert result["action"] == "UNVERIFIED"
+    assert result["mutated"] is None
+    assert result["verified"] is False
+    assert result["uncertain"] is True
+    assert result["errors"][0]["reason"] == "runner_tag_readback_unavailable"
+    TAG_VALIDATOR.validate(_tag_output(plan, result))
+
+
+def test_concurrent_runner_tag_additions_preserve_both_tags(tmp_path, monkeypatch):
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
+    first_write_started = Event()
+    release_first_write = Event()
+    second_runner_read = Event()
+
+    class SharedRunnerAPI:
+        def __init__(self):
+            self.tags = ["existing"]
+            self.read_count = 0
+            self.write_count = 0
+            self.lock = Lock()
+
+        def get_json(self, _session, endpoint):
+            if endpoint != "runners/23":
+                return [{"id": 23}]
+            with self.lock:
+                self.read_count += 1
+                if self.read_count == 2:
+                    second_runner_read.set()
+                tags = list(self.tags)
+            return {
+                "id": 23,
+                "description": "owned-runner",
+                "runner_type": "project_type",
+                "tag_list": tags,
+            }
+
+        def put_json(self, _session, _endpoint, body):
+            with self.lock:
+                self.write_count += 1
+                first = self.write_count == 1
+            if first:
+                first_write_started.set()
+                assert release_first_write.wait(2)
+            with self.lock:
+                self.tags = list(body["tag_list"])
+            return {"id": 23}
+
+    api = SharedRunnerAPI()
+    first = _plan("gitlab_runner", "tag", {"tag_list": ["alpha"]}, resource_id=23)
+    second = _plan("gitlab_runner", "tag", {"tag_list": ["beta"]}, resource_id=23)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        alpha = pool.submit(RUNNERS.apply, api, object(), first, 42)
+        assert first_write_started.wait(2)
+        beta = pool.submit(RUNNERS.apply, api, object(), second, 42)
+        if second_runner_read.wait(0.1):
+            beta.result(timeout=2)
+        release_first_write.set()
+        results = [alpha.result(timeout=2), beta.result(timeout=2)]
+    assert all(result["verified"] for result in results)
+    assert set(api.tags) == {"existing", "alpha", "beta"}
+
+
+def test_runner_tag_dry_run_and_refusal_match_schema(tmp_path, capsys):
+    target = tmp_path / "target.toml"
+    target.write_text(
+        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "team/repo"\n',
+        encoding="utf-8",
+    )
+    common = ["tag", "--target", str(target), "--runner-id", "23", "--json"]
+    assert ACTION.run_action_cli("gitlab_runner", [*common, "--tag", "new"]) == 0
+    dry_run = json.loads(capsys.readouterr().out)
+    TAG_VALIDATOR.validate(dry_run)
+    assert dry_run["status"] == "DRY_RUN"
+
+    assert ACTION.run_action_cli("gitlab_runner", common) != 0
+    blocked = json.loads(capsys.readouterr().out)
+    TAG_VALIDATOR.validate(blocked)
+    assert blocked["errors"][0]["reason"] == "tag_requires_tag"
 
 
 def test_runner_create_uncertain_provider_result_leaves_no_token_file(

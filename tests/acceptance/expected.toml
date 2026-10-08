@@ -195,6 +195,52 @@ operation = "create"
 result_action = "APPLIED"
 
 [[gitlab_receipts]]
+label = "runner-get"
+kind = "gitlab_runner"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "get"
+
+[[gitlab_receipts]]
+label = "runner-list"
+kind = "gitlab_runner"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "list"
+
+[[gitlab_receipts]]
+label = "runner-delete-applied"
+kind = "gitlab_runner"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "delete"
+result_action = "APPLIED"
+
+[[gitlab_receipts]]
+label = "runner-delete-no-op"
+kind = "gitlab_runner"
+execution_host = "mac.lan"
+origin = "https://gitlab.dcloud.run"
+username = "spyroot"
+target_kind = "project"
+target_id = 123
+target_path = "hott/test"
+operation = "delete"
+result_action = "NO_OP"
+
+[[gitlab_receipts]]
 kind = "gitlab_runner"
 execution_host = "mac.lan"
 origin = "https://gitlab.dcloud.run"

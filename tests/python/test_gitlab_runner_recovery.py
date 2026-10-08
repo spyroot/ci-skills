@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 from tests.python.conftest import import_script_module
 
 ACTION = import_script_module("core.gitlab_actions")
@@ -185,7 +186,10 @@ def test_runner_token_write_readback_failure_deletes_created_runner(
         {
             ("GET", _list(scope)): [[], []],
             ("POST", "user/runners"): [{"id": 23, "token": "secret"}],
-            ("GET", "runners/23"): [{"id": 23, "description": "fresh-runner"}],
+            ("GET", "runners/23"): [
+                {"id": 23, "description": "fresh-runner"},
+                API.GitLabAPIError("provider_404"),
+            ],
             ("DELETE", "runners/23"): [{}],
         }
     )
@@ -240,6 +244,9 @@ def test_runner_create_requires_token_sink_during_offline_plan():
         runner_id=None,
         token_out=None,
         apply=False,
+        limit=10,
+        filter=[],
+        job_id=None,
     )
     with pytest.raises(
         ACTION.ActionError, match="token_out_required_for_runner_create_plan"
