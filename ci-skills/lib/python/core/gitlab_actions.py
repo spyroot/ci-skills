@@ -43,6 +43,7 @@ class ActionPlan:
     token_out: str | None = None
     revision: str | None = None
     project_ids: tuple[int, ...] | None = None
+    runner_snapshot: dict[str, Any] | None = None
 
     @property
     def digest(self) -> str:
@@ -61,6 +62,8 @@ class ActionPlan:
             "revision": self.revision,
             "project_ids": self.project_ids,
         }
+        if self.kind == "gitlab_runner" and self.operation == "delete":
+            data["runner_snapshot"] = self.runner_snapshot
         encoded = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
 
@@ -79,9 +82,14 @@ class ActionPlan:
             else None,
             "confirmation_ready": not (
                 self.kind == "gitlab_runner"
-                and self.operation == "assign"
-                and self.target_kind == "group"
-                and self.project_ids is None
+                and (
+                    (
+                        self.operation == "assign"
+                        and self.target_kind == "group"
+                        and self.project_ids is None
+                    )
+                    or (self.operation == "delete" and self.runner_snapshot is None)
+                )
             ),
             "fields": sorted(self.body),
             "body_sha256": hashlib.sha256(
@@ -96,6 +104,8 @@ class ActionPlan:
             result["requested_tags"] = (
                 tags.split(",") if isinstance(tags, str) else list(tags)
             )
+        if self.kind == "gitlab_runner" and self.operation == "delete":
+            result["runner_snapshot"] = self.runner_snapshot
         return result
 
 
@@ -409,12 +419,12 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
         result.add_argument(
             "--live-plan",
             action="store_true",
-            help="read exact group project IDs and print an apply-ready plan without writes",
+            help="read group assignment or runner deletion identity for an apply-ready plan",
         )
         result.add_argument(
             "--runner-id",
             type=int,
-            help="numeric runner ID for assign, tag, get, or delete",
+            help="numeric runner ID; required for assign, tag, and delete",
         )
         result.add_argument(
             "--job-id", type=int, help="get the runner related to one project job ID"
@@ -620,6 +630,7 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
     if not args.action:
         return _failure(args, kind, "arguments", "action_required")
     runner_read = kind == "gitlab_runner" and args.action in {"get", "list"}
+    runner_delete = kind == "gitlab_runner" and args.action == "delete"
     if runner_read and (
         args.apply or args.confirm_plan or args.live_plan or args.receipt_out
     ):
@@ -664,8 +675,8 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
             and plan.operation == "assign"
             and plan.target_kind == "group"
         )
-        if live_plan and not group_assignment:
-            raise ActionError("live_plan_requires_group_runner_assignment")
+        if live_plan and not (group_assignment or runner_delete):
+            raise ActionError("live_plan_requires_group_assignment_or_runner_delete")
         if (runner_read and args.dry_run) or (
             not args.apply and not live_plan and not runner_read
         ):
@@ -674,7 +685,7 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
             phase = "ACCESS"
             if (
                 args.apply
-                and not group_assignment
+                and not (group_assignment or runner_delete)
                 and (not args.confirm_plan or args.confirm_plan != plan.digest)
             ):
                 raise ActionError("confirm_plan_mismatch_rerun_dry_run")
@@ -687,7 +698,7 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
             )
             if (
                 plan.kind == "gitlab_runner"
-                and plan.operation == "tag"
+                and plan.operation in {"tag", "get", "list", "delete"}
                 and _verified_skill_revision(session) is None
             ):
                 raise ActionError("skill_revision_unverified")
@@ -716,6 +727,16 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
                     plan,
                     project_ids=project_ids(
                         api, session, _id(selected["id"], "target")
+                    ),
+                )
+            if runner_delete:
+                from .gitlab_runners import delete_snapshot
+
+                selected = _object(access.get("target"), "access_target", "kind", "id")
+                plan = replace(
+                    plan,
+                    runner_snapshot=delete_snapshot(
+                        api, session, plan, _id(selected["id"], "target")
                     ),
                 )
             if runner_read:
@@ -756,7 +777,11 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
                     skill=session.skill,
                     readback={
                         "verified": True,
-                        "project_ids": list(plan.project_ids or ()),
+                        **(
+                            {"runner_snapshot": plan.runner_snapshot}
+                            if runner_delete
+                            else {"project_ids": list(plan.project_ids or ())}
+                        ),
                     },
                 )
             else:

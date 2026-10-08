@@ -33,21 +33,65 @@ MAX_TAG_UPDATE_ATTEMPTS: Final[int] = 2
 class RunnerRecord(TypedDict):
     """Bounded public fields from one GitLab runner read.
 
-    :ivar id: Runner ID.
-    :ivar description: Runner description, when set.
-    :ivar runner_type: GitLab runner scope type.
-    :ivar tag_list: Runner job tags.
-    :ivar status: Runner status reported by GitLab.
-    :ivar online: Whether GitLab reports the runner online.
-    :ivar paused: Whether the runner is paused.
-    :ivar is_shared: Whether GitLab reports the runner as shared.
-    :ivar access_level: Protected or unprotected ref access.
-    :ivar job_execution_status: Current job execution state.
-    :ivar projects: IDs of linked projects, when returned.
-    :ivar contacted_at: Last contact timestamp, when returned.
-    :ivar version: Runner version, when returned.
-    :ivar platform: Runner platform, when returned.
-    :ivar architecture: Runner architecture, when returned.
+    .. attribute :: id
+        :type: int
+        Runner ID.
+
+    .. attribute :: description
+        :type: str | None
+        Runner description, when set.
+
+    .. attribute :: runner_type
+        :type: str
+        GitLab runner scope type.
+
+    .. attribute :: tag_list
+        :type: list[str]
+        Runner job tags.
+
+    .. attribute :: status
+        :type: str | None
+        Runner status reported by GitLab.
+
+    .. attribute :: online
+        :type: bool | None
+        Whether GitLab reports the runner online.
+
+    .. attribute :: paused
+        :type: bool | None
+        Whether the runner is paused.
+
+    .. attribute :: is_shared
+        :type: bool | None
+        Whether GitLab reports the runner as shared.
+
+    .. attribute :: access_level
+        :type: str | None
+        Protected or unprotected ref access.
+
+    .. attribute :: job_execution_status
+        :type: str | None
+        Current job execution state.
+
+    .. attribute :: projects
+        :type: list[int] | None
+        IDs of linked projects, when returned.
+
+    .. attribute :: contacted_at
+        :type: str | None
+        Last contact timestamp, when returned.
+
+    .. attribute :: version
+        :type: str | None
+        Runner version, when returned.
+
+    .. attribute :: platform
+        :type: str | None
+        Runner platform, when returned.
+
+    .. attribute :: architecture
+        :type: str | None
+        Runner architecture, when returned.
     """
 
     id: int
@@ -70,11 +114,25 @@ class RunnerRecord(TypedDict):
 class RelatedJob(TypedDict):
     """Exact job identity that led to a runner read.
 
-    :ivar id: Job ID.
-    :ivar status: Observed job status.
-    :ivar failure_reason: Provider failure reason, when available.
-    :ivar pipeline_id: Parent pipeline ID, when available.
-    :ivar runner_id: Assigned runner ID, or ``None`` while unassigned.
+    .. attribute :: id
+        :type: int
+        Job ID.
+
+    .. attribute :: status
+        :type: str
+        Observed job status.
+
+    .. attribute :: failure_reason
+        :type: str | None
+        Provider failure reason, when available.
+
+    .. attribute :: pipeline_id
+        :type: int | None
+        Parent pipeline ID, when available.
+
+    .. attribute :: runner_id
+        :type: int | None
+        Assigned runner ID, or ``None`` while unassigned.
     """
 
     id: int
@@ -88,9 +146,17 @@ class RelatedJob(TypedDict):
 class RunnerReadResult:
     """Compact runner records and their source relation.
 
-    :ivar records: Selected public runner records.
-    :ivar truncated: Whether more matching runners exist.
-    :ivar related_job: Job that led to the runner, when selected by job ID.
+    .. attribute :: records
+        :type: list[RunnerRecord]
+        Selected public runner records.
+
+    .. attribute :: truncated
+        :type: bool
+        Whether more matching runners exist.
+
+    .. attribute :: related_job
+        :type: RelatedJob | None
+        Job that led to the runner, when selected by job ID.
     """
 
     records: list[RunnerRecord]
@@ -146,6 +212,8 @@ def prepare(
             if args.runner_id is not None or args.description:
                 raise ActionError("job_id_conflicts_with_runner_selector")
             return {"job_id": _positive(args.job_id, "job_id")}, None, None
+        if args.action == "delete" and args.runner_id is None:
+            raise ActionError("runner_delete_requires_runner_id")
         if args.runner_id is None and not args.description:
             raise ActionError("runner_id_or_description_required")
         identifier = (
@@ -603,7 +671,7 @@ def _related_job(api: Any, session: Any, project_id: int, job_id: int) -> Relate
     :returns: Job state and exact runner relation, including an unassigned job.
     :raises ActionError: If the provider job identity or relation is malformed.
     :raises GitLabAPIError: If the selected job read fails.
-    """  # noqa: DOC502 - API errors propagate from the shared client
+    """  # noqa: DOC502,DOC503 - API errors propagate from the shared client
     job = _object(
         api.get_json(session, f"projects/{project_id}/jobs/{job_id}"),
         "runner_job",
@@ -825,7 +893,7 @@ def _delete_and_read_absence(
     :returns: Classified write outcome and independent absence observations.
     :raises GitLabAPIError: If a terminal delete or read fails.
     :raises ActionError: If scoped runner listing is malformed.
-    """  # noqa: DOC502 - API errors propagate from the shared client
+    """  # noqa: DOC502,DOC503 - API errors propagate from the shared client
     write_error: str | None = None
     try:
         api.delete_json(session, f"runners/{runner_id}")
@@ -853,6 +921,69 @@ def _delete_and_read_absence(
     }
 
 
+def _delete_observation(
+    api: Any, session: Any, plan: ActionPlan, target_id: int
+) -> tuple[dict[str, Any], RunnerRecord | None]:
+    """Read the exact runner identity and assignments a delete would affect.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated session for the selected target.
+    :param plan: Runner ID and optional expected description.
+    :param target_id: Access-verified project or group ID.
+    :returns: Confirmable snapshot and public runner state, or verified absence.
+    :raises ActionError: If identity, scope, or assignments cannot be verified.
+    :raises GitLabAPIError: If a provider read fails for a reason other than 404.
+    """
+    identifier = _positive(plan.resource_id, "runner_id")
+    scope = f"{plan.target_kind}s/{target_id}/runners"
+    try:
+        observed = _runner_readback(
+            api, session, scope, identifier, plan.body.get("description")
+        )
+    except GitLabAPIError as exc:
+        if exc.reason != "provider_404":
+            raise
+        scoped_ids = {
+            _id(item["id"], "runner")
+            for item in _fields(_pages(api, session, scope), "runner_list", "id")
+        }
+        if identifier in scoped_ids:
+            raise ActionError("runner_global_scope_disagree") from exc
+        return {"id": identifier, "present": False}, None
+    record = _record(observed)
+    if record["runner_type"] != f"{plan.target_kind}_type":
+        raise ActionError("runner_scope_type_mismatch")
+    projects = record["projects"]
+    if projects is None:
+        raise ActionError("runner_projects_unavailable_for_delete_plan")
+    return (
+        {
+            "id": identifier,
+            "present": True,
+            "runner_type": record["runner_type"],
+            "description": record["description"],
+            "project_ids": sorted(projects),
+        },
+        record,
+    )
+
+
+def delete_snapshot(
+    api: Any, session: Any, plan: ActionPlan, target_id: int
+) -> dict[str, Any]:
+    """Bind a live delete plan to the exact runner and project assignments.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated session for the selected target.
+    :param plan: Runner deletion request with a numeric ID.
+    :param target_id: Access-verified project or group ID.
+    :returns: Snapshot to include in the confirmation digest.
+    :raises ActionError: If the selected runner cannot be safely identified.
+    :raises GitLabAPIError: If a provider read fails.
+    """
+    return _delete_observation(api, session, plan, target_id)[0]
+
+
 def _delete(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
     """Delete only the runner identified in the confirmed selected scope.
 
@@ -864,33 +995,15 @@ def _delete(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[st
     :raises ActionError: If the selected runner identity or scope differs.
     :raises GitLabAPIError: If a terminal provider request fails.
     """  # noqa: DOC502 - provider failures propagate from the shared client
+    if plan.runner_snapshot is None:
+        raise ActionError("runner_delete_requires_live_plan")
     scope = f"{plan.target_kind}s/{target_id}/runners"
-    description = plan.body.get("description")
-    identifier = plan.resource_id
-    if identifier is None:
-        identifier = _unique_runner_id(api, session, scope, description)
-        if identifier is None:
-            return {
-                "action": "NO_OP",
-                "id": None,
-                "verified": True,
-                "mutated": False,
-                "before": None,
-                "after": {"scoped_absent": True, "global_get_status": None},
-            }
-    identifier = _positive(identifier, "runner_id")
+    identifier = _positive(plan.resource_id, "runner_id")
     with runner_update_guard(plan.origin, identifier):
-        try:
-            observed = _runner_readback(api, session, scope, identifier, description)
-        except GitLabAPIError as exc:
-            if exc.reason != "provider_404":
-                raise
-            scoped_ids = {
-                _id(item["id"], "runner")
-                for item in _fields(_pages(api, session, scope), "runner_list", "id")
-            }
-            if identifier in scoped_ids:
-                raise ActionError("runner_global_scope_disagree") from exc
+        current, before = _delete_observation(api, session, plan, target_id)
+        if current != plan.runner_snapshot:
+            raise ActionError("runner_changed_rerun_live_plan")
+        if before is None:
             return {
                 "action": "NO_OP",
                 "id": identifier,
@@ -899,9 +1012,6 @@ def _delete(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[st
                 "before": None,
                 "after": {"scoped_absent": True, "global_get_status": 404},
             }
-        if observed.get("runner_type") != f"{plan.target_kind}_type":
-            raise ActionError("runner_scope_type_mismatch")
-        before = _record(observed)
         after = _delete_and_read_absence(api, session, scope, identifier)
         if after["verified"]:
             return {

@@ -682,9 +682,11 @@
         },
         "delete": {
           "mutates": true,
-          "purpose": "Delete one runner by ID or exact unique description after scoped identity read-back.",
+          "purpose": "Delete one runner by ID after a live plan binds its identity and project assignments.",
           "read_back": "Require global 404 and absence from the selected scope.",
-          "required_options": [],
+          "required_options": [
+            "--runner-id"
+          ],
           "result_schema": "schemas/results/gitlab-runner-delete.schema.json",
           "side_effects": "Apply deletes the selected runner record."
         },
