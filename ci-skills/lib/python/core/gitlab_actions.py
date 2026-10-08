@@ -198,7 +198,15 @@ def make_plan(
     target: GitLabOperationTarget,
     target_source: str,
 ) -> ActionPlan:
-    """Validate one action and fingerprint its exact target and input body."""
+    """Validate one action and fingerprint its target and input body.
+
+    :param kind: Registered GitLab action command.
+    :param args: Parsed command arguments.
+    :param target: Selected GitLab target configuration.
+    :param target_source: Location that selected the target.
+    :returns: Confirmable plan bound to the exact requested operation.
+    :raises ActionError: If the action or selected target is invalid.
+    """
     target_kind, reference, selector = _select_target(target, args, kind)
     operation = "open-bug" if args.action == "create-bug" else args.action
     if kind == "gitlab_milestone":
@@ -311,7 +319,15 @@ def _same(current: dict[str, Any], body: dict[str, Any]) -> bool:
 def apply_plan(
     api: Any, session: Any, access: dict[str, Any], plan: ActionPlan
 ) -> dict[str, Any]:
-    """Use the access-verified numeric target and the same bound credential."""
+    """Apply a plan using its verified target and bound credential.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated session used for access verification.
+    :param access: Live access result containing the numeric target.
+    :param plan: Confirmed action plan to dispatch.
+    :returns: Provider action record and read-back evidence.
+    :raises ActionError: If target access or the action kind is invalid.
+    """
     if access.get("status") != PASS:
         raise ActionError("gitlab_access_not_pass")
     target = _object(access.get("target"), "access_target", "kind", "id")
@@ -348,7 +364,7 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
     :param kind: Registered GitLab action kind.
     :returns: Parser with universal and kind-specific options.
     :raises KeyError: If the action kind is not registered.
-    """
+    """  # noqa: DOC502 - registration errors propagate from parser()
     result = parser(
         f"Plan, apply, and verify {kind.replace('_', ' ')} changes.", kind=kind
     )
@@ -558,7 +574,13 @@ def _planned_failure(
 
 
 def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
-    """Adapter used by every operation entrypoint; no other CLI owns writes."""
+    """Run a GitLab action through the shared plan and apply adapter.
+
+    :param kind: Registered GitLab action command.
+    :param argv: Optional argument vector; defaults to process arguments.
+    :returns: Exit code matching the emitted action status.
+    :raises ActionError: If a confirmed plan cannot be applied safely.
+    """
     started = time.monotonic()
     args = action_parser(kind).parse_args(argv)
     if args.describe:

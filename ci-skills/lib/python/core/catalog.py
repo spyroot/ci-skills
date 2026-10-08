@@ -81,7 +81,11 @@ GITHUB_CLOUD_SUFFIX = ".ghe.com"
 
 
 def github_variables(host: str) -> tuple[str, ...]:
-    """Return the variables gh uses for GitHub Cloud or Enterprise Server."""
+    """Select credential variable names for the GitHub host.
+
+    :param host: GitHub Cloud or Enterprise Server hostname.
+    :returns: Credential variable names checked for that host.
+    """
     return (
         GITHUB_CLOUD_VARIABLES
         if host == GITHUB_DOTCOM_HOST or host.endswith(GITHUB_CLOUD_SUFFIX)
@@ -626,7 +630,11 @@ def missing_required_options(script: str, args: Any) -> list[str]:
 
 
 def options_for(script: str) -> dict[str, str]:
-    """Return every option one command accepts, tier options included."""
+    """Collect universal, capability, and command options.
+
+    :param script: Command filename registered in the catalog.
+    :returns: Option names mapped to their help descriptions.
+    """
     entry = COMMANDS[script]
     merged = dict(UNIVERSAL_OPTIONS)
     for capability in entry["capabilities"]:
@@ -636,7 +644,11 @@ def options_for(script: str) -> dict[str, str]:
 
 
 def describe(script: str) -> dict[str, Any]:
-    """Return one command's contract, for `--describe`."""
+    """Build one command contract for ``--describe``.
+
+    :param script: Command filename registered in the catalog.
+    :returns: Machine-readable command contract.
+    """
     entry = COMMANDS[script]
     return {
         "schema_version": SCHEMA_VERSION,
@@ -665,7 +677,11 @@ def describe(script: str) -> dict[str, Any]:
 
 
 def describe_node(script: str) -> dict[str, Any]:
-    """Return the contract for a node read through an existing selected Pod."""
+    """Build the contract for a node read through a selected Pod.
+
+    :param script: Registered node-local command filename.
+    :returns: Machine-readable node command contract.
+    """
     entry = NODE_LOCAL_COMMANDS[script]
     return {
         "schema_version": SCHEMA_VERSION,
@@ -691,7 +707,10 @@ def describe_node(script: str) -> dict[str, Any]:
 
 
 def manifest() -> dict[str, Any]:
-    """Return the whole-skill manifest rendered into `tools.json`."""
+    """Build the complete skill manifest for ``tools.json``.
+
+    :returns: Command and authority catalog for installed agents.
+    """
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "skill_manifest",

@@ -256,12 +256,13 @@ def _report_file_lines(data: dict[str, Any]) -> list[str]:
 
 
 def emit(data: dict[str, Any], mode: str, output_dir: str | None = None) -> str:
-    """Render one in-memory collection and optionally persist paired reports.
+    """Redact and render a report, optionally persisting paired files.
 
-    Redaction happens HERE, once, before anything is serialized or written, so
-    every output path is covered: the returned JSON, YAML and human text, and
-    both files under an output directory. Redacting inside one renderer would
-    leave the others raw.
+    :param data: In-memory collection to redact before serialization.
+    :param mode: Selected JSON, YAML, or human output mode.
+    :param output_dir: Optional directory for paired report files.
+    :returns: Redacted report text in the selected format.
+    :raises RuntimeError: If YAML output is selected without PyYAML.
     """
     data = redact_tree(data)
     if mode == "yaml":

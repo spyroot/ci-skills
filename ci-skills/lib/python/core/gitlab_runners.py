@@ -104,7 +104,14 @@ def _observed_tags(value: Any) -> list[str]:
 
 
 def project_ids(api: Any, session: Any, group_id: int) -> tuple[int, ...]:
-    """Resolve the complete, validated group membership for a live plan."""
+    """Resolve validated group membership for a live runner plan.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated GitLab session.
+    :param group_id: Group whose direct and subgroup projects are selected.
+    :returns: Sorted project IDs from the live group response.
+    :raises ActionError: If membership is empty, duplicated, or malformed.
+    """
     projects = _pages(
         api,
         session,
@@ -121,7 +128,14 @@ def project_ids(api: Any, session: Any, group_id: int) -> tuple[int, ...]:
 
 
 def _direct_projects(api: Any, session: Any, runner_id: int) -> frozenset[int]:
-    """Use runner details; project runner lists include inherited availability."""
+    """Read direct runner assignments without inherited availability.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated GitLab session.
+    :param runner_id: Project runner whose assignments are needed.
+    :returns: IDs of directly assigned projects.
+    :raises ActionError: If runner identity, type, or projects are invalid.
+    """
     runner = _object(
         api.get_json(session, f"runners/{runner_id}"),
         "runner",
@@ -154,7 +168,14 @@ def _membership_snapshot(
     runner_id: int,
     identifiers: tuple[int, ...],
 ) -> dict[int, bool]:
-    """Read direct associations once for every project in the selected set."""
+    """Snapshot direct assignments for selected project IDs.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated GitLab session.
+    :param runner_id: Runner whose assignments are read.
+    :param identifiers: Project IDs selected for the action.
+    :returns: Each project ID mapped to its current assignment state.
+    """
     direct = _direct_projects(api, session, runner_id)
     return {project_id: project_id in direct for project_id in identifiers}
 
@@ -166,7 +187,15 @@ def _rollback_assignments(
     attempted: list[int],
     baseline: dict[int, bool],
 ) -> dict[str, Any]:
-    """Remove only assignments attempted here, then read all affected states."""
+    """Undo attempted assignments and read their final state.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated GitLab session.
+    :param runner_id: Runner whose attempted assignments are removed.
+    :param attempted: Project IDs changed by this invocation.
+    :param baseline: Assignment state before the action.
+    :returns: Cleanup status, final restoration flag, and per-project records.
+    """
     records: list[dict[str, Any]] = []
     for project_id in reversed(attempted):
         scope = f"projects/{project_id}/runners/{runner_id}"
@@ -305,7 +334,6 @@ def _runner_readback(
     :param expected_tags: Optional exact tag set for creation.
     :returns: Provider runner record with a validated ``tag_list``.
     :raises ActionError: If identity, scope, or tags do not match.
-    :raises GitLabAPIError: If either live read fails.
     """
     observed = _object(
         api.get_json(session, f"runners/{runner_id}"),
@@ -441,7 +469,15 @@ def _tag(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, 
 def _rollback_created_runner(
     api: Any, session: Any, scope: str, runner_id: int, description: str
 ) -> dict[str, Any]:
-    """Delete only the runner independently identified as this new record."""
+    """Delete the newly created runner after confirming its identity.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated GitLab session.
+    :param scope: Project or group runner-list endpoint.
+    :param runner_id: ID returned by runner creation.
+    :param description: Description selected for the new runner.
+    :returns: Cleanup status and independent absence read-back.
+    """
     try:
         observed = _object(
             api.get_json(session, f"runners/{runner_id}"),
@@ -645,7 +681,7 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
     :returns: Action record with independent read-back evidence.
     :raises ActionError: If a selected resource or response is invalid.
     :raises GitLabAPIError: If a terminal provider operation fails.
-    """
+    """  # noqa: DOC502 - exceptions propagate from the dispatched action
     if plan.operation == "assign":
         return _assign(api, session, plan, target_id)
     if plan.operation == "tag":

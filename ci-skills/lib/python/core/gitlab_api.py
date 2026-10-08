@@ -48,6 +48,11 @@ class GitLabAPIError(RuntimeError):
     """A classified API failure with no response body or credential value."""
 
     def __init__(self, reason: str, *, attempts: int = 1) -> None:
+        """Record a redacted provider failure and retry count.
+
+        :param reason: Classified error reason without response content.
+        :param attempts: Number of transport attempts made.
+        """
         self.reason = reason
         self.attempts = attempts
         super().__init__(reason)
@@ -57,14 +62,24 @@ GitLabApiError = GitLabAPIError
 
 
 def uncertain_write(error: GitLabAPIError) -> bool:
-    """A write may have reached GitLab even though its result was lost."""
+    """Identify transport failures with an unknown write outcome.
+
+    :param error: Classified failure from the GitLab transport.
+    :returns: Whether the request may have reached GitLab.
+    """
     return error.reason in _UNCERTAIN_WRITE
 
 
 def unverified_write(
     target_id: int, resource: dict[str, Any], reason: str
 ) -> dict[str, Any]:
-    """Keep a successful write's known resource in a PARTIAL adapter record."""
+    """Preserve an unverified write in a partial action record.
+
+    :param target_id: Numeric ID of the selected GitLab target.
+    :param resource: Known fields from the provider write response.
+    :param reason: Reason independent read-back was unavailable.
+    :returns: Partial action record with an explicit uncertain outcome.
+    """
     return {
         "action": "APPLIED",
         "verified": False,
@@ -175,6 +190,11 @@ class CreateGuard:
     """A same-host create lock with a crash-persistent uncertain marker."""
 
     def __init__(self, descriptor: int) -> None:
+        """Load the lock's persistent uncertain-create marker.
+
+        :param descriptor: Open descriptor for the selected create lock.
+        :raises GitLabAPIError: If the marker contains an unknown state.
+        """
         self._descriptor = descriptor
         os.lseek(descriptor, 0, os.SEEK_SET)
         state = os.read(descriptor, 16)
@@ -198,7 +218,10 @@ class CreateGuard:
         self._set(b"pending\n")
 
     def reconcile_absent(self) -> None:
-        """Clear an earlier uncertain create only after a complete empty read."""
+        """Clear an uncertain create after an independent empty read.
+
+        :raises GitLabAPIError: If an earlier create is absent and needs a new plan.
+        """
         if self.pending:
             self.clear()
             raise GitLabAPIError("create_outcome_uncertain_absent_after_readback_retry")
@@ -265,9 +288,10 @@ def create_guard(
     :param target_id: Access-verified scope ID.
     :param kind: Resource class being created.
     :param title: Server-visible uniqueness key.
-    :returns: Guard that records an uncertain POST until reconciliation.
+    :yields: Guard that records an uncertain POST until reconciliation.
+    :ytype: CreateGuard
     :raises GitLabAPIError: If the lock or recovery marker is unsafe.
-    """
+    """  # noqa: DOC502 - lock failures propagate from the context manager
     with _locked_descriptor([origin, target_kind, target_id, kind, title]) as fd:
         yield CreateGuard(fd)
 
@@ -278,9 +302,10 @@ def runner_update_guard(origin: str, runner_id: int) -> Iterator[None]:
 
     :param origin: Bound GitLab origin.
     :param runner_id: Runner ID shared by every project selection.
-    :returns: Control after the resource lock is acquired.
+    :yields: Control after the resource lock is acquired.
+    :ytype: None
     :raises GitLabAPIError: If the local lock cannot be acquired safely.
-    """
+    """  # noqa: DOC502 - lock failures propagate from the context manager
     with _locked_descriptor([origin, "runner", runner_id]):
         yield
 
@@ -300,11 +325,12 @@ class GlabAPIClient:
         timeout: int = 25,
         sleep: Callable[[float], None] = time.sleep,
     ):
-        """
+        """Bind the GitLab transport to a command runner and timeout.
 
-        :param command:
-        :param timeout:
-        :param sleep:
+        :param command: Injectable command executor for GitLab requests.
+        :param timeout: Positive per-request timeout in seconds.
+        :param sleep: Delay function used for bounded retries.
+        :raises ValueError: If the timeout is not positive.
         """
         if timeout <= 0:
             raise ValueError("timeout must be positive")
@@ -335,7 +361,12 @@ class GlabAPIClient:
         return self._request(session, "PUT", endpoint, body)
 
     def delete_json(self, session: Any, endpoint: str) -> Any:
-        """Issue one DELETE and accept GitLab's empty 204 response."""
+        """Issue a DELETE and accept GitLab's empty 204 response.
+
+        :param session: Bound GitLab session.
+        :param endpoint: Relative GitLab API endpoint to delete.
+        :returns: Parsed response or ``None`` for an empty response.
+        """
         return self._request(session, "DELETE", endpoint)
 
     def _request(

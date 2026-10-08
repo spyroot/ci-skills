@@ -6,7 +6,10 @@ from core.gitlab_actions import action_parser, run_action_cli
 
 
 def build_parser():
-    """Return this command's declared parser for callers and contract checks."""
+    """Return this command's parser for callers and contract checks.
+
+    :returns: Parser with the runner command's declared options.
+    """
     return action_parser("gitlab_runner")
 
 

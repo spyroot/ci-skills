@@ -1,0 +1,55 @@
+---
+name: validate
+"on":
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install declared Python tools and existing docstring checker
+        run: python -m pip install -r requirements.txt pydoclint==0.10.1
+      - name: Check runner Python style
+        run: |
+          ruff check ci-skills/bin/gitlab_runner.py ci-skills/lib/python/core/gitlab_runners.py
+          ruff format --check ci-skills/bin/gitlab_runner.py ci-skills/lib/python/core/gitlab_runners.py
+      - name: Check reStructuredText API docstrings
+        run: |
+          pydoclint --style=sphinx --skip-checking-short-docstrings=False \
+            --skip-checking-private-functions=True \
+            --arg-type-hints-in-docstring=False --check-return-types=False \
+            --allow-init-docstring=True \
+            ci-skills/lib/python/core/gitlab_runners.py \
+            ci-skills/lib/python/core/gitlab_actions.py \
+            ci-skills/lib/python/core/gitlab_api.py \
+            ci-skills/lib/python/core/catalog.py \
+            ci-skills/lib/python/core/report.py \
+            ci-skills/bin/gitlab_runner.py
+          pydoclint --style=sphinx --skip-checking-short-docstrings=False \
+            --arg-type-hints-in-docstring=False --check-return-types=False \
+            --allow-init-docstring=True \
+            ci-skills/lib/python/core/gitlab_runners.py ci-skills/bin/gitlab_runner.py
+      - name: Check manifest and runner receipt schema
+        run: |
+          python tools/render_manifest.py --check
+          check-jsonschema --check-metaschema schemas/results/gitlab-runner-tag.schema.json
+          check-jsonschema --schemafile schemas/results/gitlab-runner-tag.schema.json \
+            tests/acceptance/runner-tag/*.json
+      - name: Exercise runner command and contract
+        run: |
+          python -m pytest -q tests/python/test_gitlab_actions.py \
+            tests/python/test_gitlab_runner_recovery.py \
+            tests/python/test_catalog.py
+      - name: Check patch whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: git diff --check "$BASE_SHA" HEAD
