@@ -1,49 +1,52 @@
-# Agent lifecycle hooks for CI Skills
+# Agent hooks for CI Skills
 
-**Recommendation:** install the skill before starting an agent session. A hook
-is useful only when a local source changes between sessions or a failed tool
-call needs a short recovery hint. Hooks do not run CI Skills capabilities.
-The current installer does not register lifecycle hooks; these are options
-for a later integration. A refresh hook would need the installer to record a
-trusted source path for later sessions.
+An agent lifecycle hook is registered in Codex or Claude settings and runs on
+their tool events. `PreToolUse` sees a proposed tool call; `PostToolUse` sees
+its result. `statusMessage` labels the brief hook run in the UI. Git invokes
+pre-commit hooks during `git commit`; they are unrelated to this design. The
+CI Skills command performs the work and reports its result.
 
-- `SessionStart`: optional Claude Code refresh from the source checkout chosen
-  during installation. After a successful change, print
-  `{"hookSpecificOutput":{"hookEventName":"SessionStart","reloadSkills":true}}`
-  so Claude sees the skill on the first prompt. No change means no reload.
-- `PostToolUseFailure`: optional Claude Code hint after a failed command, such
-  as “read back the runner before retrying.” The command owns failure reporting
-  and provider read-back.
-- `PreToolUse`: optional guard for a named operation. Claude passes the
-  proposed `tool_name` and `tool_input` before execution; a hook can return
-  `permissionDecision: "deny"`. For example, it can deny a proposed
-  `glab api ... -X POST` Bash call and name the CI Skills runner plan. For an
-  access question, it can point to `gitlab_access.py check --json`, which
-  reports the selected target and identity. An MCP tool
-  needs its own matcher; command-text matching is fragile, so no broad guard
-  is installed by default.
-- `PermissionRequest`, `PermissionDenied`, `PostToolUse`: no CI Skills hook by
-  default. The agent's permissions and the command's plan and result govern
-  execution.
+## Delivery
 
-`PreToolUse` observes a tool call made while the agent follows `SKILL.md`, not
-the act of reading the skill. Both agents can match shell calls such as
-`glab api` or a CI Skills `bin/` command; MCP calls match by their tool name.
-Codex also maps unified exec calls to its `Bash` hook matcher.
+The installer does not register these hooks today. The next delivery adds one
+adapter beside the installed skill. A default Codex install registers it in
+`~/.codex/config.toml`; an install into `~/.claude/skills` registers it in
+`~/.claude/settings.json`. Both point to the installed skill path.
+The adapter recognizes CI Skills calls, reuses their catalog and target
+resolver, and gives the agent a missing-prerequisite or result hint. It does
+not repeat provider calls, rewrite commands, or retry writes. This delivery
+does not change `bless.sh`, `Makefile`, `scripts/check.sh`, or Git hooks.
 
-Claude user hooks belong in `~/.claude/settings.json`; project hooks belong in
-`.claude/settings.json`. Codex also supports hooks at `~/.codex/hooks.json` or
-`<repo>/.codex/hooks.json`, but its documented `SessionStart` output has no
-`reloadSkills` field. Install Codex skills in `~/.codex/skills/ci-skills` or
-`<repo>/.agents/skills/ci-skills` before the session.
+For example, the installer could write this Codex configuration after
+substituting the installed skill path and its Python 3.11+ runtime. This
+adapter does not exist today:
 
-**Benefit:** Claude can refresh a changed local skill for the same session.
-An optional `PreToolUse` rule can steer a known direct API write to the
-agent-facing command. **Cost:** each refresh adds startup work; command-text
-matching can miss equivalent calls, and a missing source can leave a stale
-skill. Keep refresh bounded and report failure; never retry a write from a
-hook. Capability targets remain selected at command runtime, including from
-`~/.ci-skills/target.toml`.
+```toml
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = '"/path/to/python-3.11" "/installed/ci-skills/bin/agent_hook.py" pre'
+statusMessage = "Checking tool call"
 
-See the [Claude Code hooks reference](https://code.claude.com/docs/en/hooks)
-and [Codex hooks reference](https://learn.chatgpt.com/docs/hooks).
+[[hooks.PostToolUse]]
+matcher = "^Bash$"
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = '"/path/to/python-3.11" "/installed/ci-skills/bin/agent_hook.py" post'
+statusMessage = "Reviewing tool output"
+```
+
+`Bash` matches every shell call, so these neutral labels may briefly appear
+for unrelated commands even when the adapter exits immediately. A
+capability-specific hook label needs a named tool matcher; the CI Skills
+command shows progress while gathering a cluster-health report. Claude uses
+its own hook settings and `PostToolUseFailure` for failed tool calls. Its
+`SessionStart` can request `reloadSkills` after a skill update; Codex does not
+document that output field.
+
+Proof for this delivery: in each agent run the installed
+`gitlab_access.py check --json` against the selected target; observe the hook
+label and a `PASS` report naming that target and identity. An unrelated shell
+call must proceed without CI Skills work. References: [Codex hooks](https://learn.chatgpt.com/docs/hooks),
+[Claude Code hooks](https://code.claude.com/docs/en/hooks).
