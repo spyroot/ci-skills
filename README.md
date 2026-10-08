@@ -143,6 +143,8 @@ When `glab` is missing, it installs the declared package with Homebrew on macOS 
 If Homebrew is missing, the installer points to its installation instructions. The package's
 [SKILL.md](ci-skills/SKILL.md) routes agent requests to its tools.
 If `glab` was missing, the first apply installs it and requests a new dry-run fingerprint before installing its skill.
+Agent lifecycle hooks are not installed yet; their short [delivery design](docs/skill-session-hook.md) explains how
+Codex and Claude can show CI Skills activity when an agent calls an installed command.
 
 **3. Authenticate, as yourself.** The skill ships no credentials and grants no access. Provide the identity needed by
 the commands you run: a Kubernetes administrator for cluster diagnostics, a GitLab instance administrator for GitLab
