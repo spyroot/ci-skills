@@ -201,15 +201,30 @@ def _optional_names(table: dict[str, object], key: str) -> tuple[str, ...]:
     return tuple(names)
 
 
-def _optional_file(table: dict[str, object], key: str, skill_root: Path) -> Path | None:
+def _optional_file(
+    table: dict[str, object],
+    key: str,
+    skill_root: Path,
+    *,
+    target_directory: Path | None = None,
+) -> Path | None:
+    """Resolve an optional file, using its target directory when supplied.
+
+    :param table: Parsed authority settings containing the optional path.
+    :param key: File setting to resolve.
+    :param skill_root: Installed skill directory excluded from file selections.
+    :param target_directory: Directory containing the selected target file.
+    :returns: Canonical file path, or None when the setting is absent.
+    :raises TargetError: If the path is empty, invalid, or inside the skill.
+    """
     value = table.get(key)
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
         raise TargetError(f"{key} must be a nonempty path when supplied")
     selected = Path(value).expanduser()
-    if key == "token_file" and not selected.is_absolute():
-        raise TargetError("token_file must be an absolute path")
+    if target_directory is not None and not selected.is_absolute():
+        selected = target_directory / selected
     path = selected.resolve()
     assert_external_path(path, skill_root, key)
     return path
@@ -238,7 +253,17 @@ def _optional_reference(table: dict[str, object], key: str) -> str | None:
     return selected
 
 
-def _parse_gitlab(value: object, skill_root: Path) -> GitLabTarget:
+def _parse_gitlab(
+    value: object, skill_root: Path, *, target_directory: Path
+) -> GitLabTarget:
+    """Parse GitLab settings and resolve their token beside the target file.
+
+    :param value: Parsed GitLab authority table.
+    :param skill_root: Installed skill directory excluded from file selections.
+    :param target_directory: Directory containing the selected target file.
+    :returns: Validated GitLab settings with a canonical token path if supplied.
+    :raises TargetError: If a GitLab setting or token path is invalid.
+    """
     gitlab = _table(value, "gitlab", TARGET_CONTRACT.names("gitlab"))
     url, host = _https_url(_string(gitlab, "url"), "gitlab.url")
     runner_id = gitlab.get("runner_id")
@@ -249,7 +274,9 @@ def _parse_gitlab(value: object, skill_root: Path) -> GitLabTarget:
     return GitLabTarget(
         url=url,
         host=host,
-        token_file=_optional_file(gitlab, "token_file", skill_root),
+        token_file=_optional_file(
+            gitlab, "token_file", skill_root, target_directory=target_directory
+        ),
         project=_optional_reference(gitlab, "project"),
         group=_optional_reference(gitlab, "group"),
         runner_id=runner_id,
@@ -274,7 +301,7 @@ def load_gitlab_target(path: str | Path) -> GitLabOperationTarget:
     data = _read_target_data(source, skill_root)
     if "gitlab" not in data or set(data) - set(AUTHORITIES):
         raise TargetError("GitLab operations need a gitlab table without extra tables")
-    selected = _parse_gitlab(data["gitlab"], skill_root)
+    selected = _parse_gitlab(data["gitlab"], skill_root, target_directory=source.parent)
     return GitLabOperationTarget(selected, source.resolve())
 
 
@@ -383,13 +410,17 @@ def load_target(
         github_target = GitHubTarget(
             host=github_host,
             repository=repository,
-            token_file=_optional_file(github, "token_file", skill_root),
+            token_file=_optional_file(
+                github, "token_file", skill_root, target_directory=source.parent
+            ),
             required_checks=_optional_names(github, "required_checks"),
         )
 
     gitlab_target = None
     if "gitlab" in required_surfaces:
-        gitlab_target = _parse_gitlab(data["gitlab"], skill_root)
+        gitlab_target = _parse_gitlab(
+            data["gitlab"], skill_root, target_directory=source.parent
+        )
 
     kubernetes_target = None
     if "kubernetes" in required_surfaces:
