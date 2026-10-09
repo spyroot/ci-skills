@@ -146,16 +146,22 @@ def _https_url(value: str, key: str) -> tuple[str, str]:
 
 
 def kubernetes_label(target: Target) -> str:
-    """Name a Kubernetes target by context AND server.
+    """Label a Kubernetes target with its context and API server.
 
-    A context name alone does not say which cluster was read, so a report
-    labelled with it cannot be checked against the verified target.
+    :param target: Validated target containing Kubernetes settings.
+    :returns: Context and server identifying the selected cluster.
     """
     return f"{target.kubernetes.context} -> {target.kubernetes.server}"
 
 
 def assert_external_path(path: Path, skill_root: Path, key: str) -> None:
-    """Keep selected credential and target files outside the installed skill."""
+    """Reject a target or credential path inside the installed skill.
+
+    :param path: Selected file path, resolved before checking its location.
+    :param skill_root: Installed skill directory excluded from file selections.
+    :param key: Setting name included in a rejected selection's diagnostic.
+    :raises TargetError: If the canonical path is inside the installed skill.
+    """
     if path.resolve().is_relative_to(skill_root.resolve()):
         raise TargetError(f"{key} must be stored outside the installed skill")
 
@@ -295,7 +301,15 @@ def _read_target_data(source: Path, skill_root: Path) -> dict[str, object]:
 
 
 def load_gitlab_target(path: str | Path) -> GitLabOperationTarget:
-    """Load only GitLab settings, even when other allowed tables are present."""
+    """Load GitLab settings with relative tokens beside the selected target.
+
+    Other declared authority tables are permitted but are not validated here.
+
+    :param path: Selected TOML target file, including an optional home prefix.
+    :returns: GitLab settings and the canonical source-file path.
+    :raises TargetError: If the target is unreadable, invalid, inside the skill,
+        or contains invalid GitLab settings or an internal credential path.
+    """
     source = Path(path).expanduser()
     skill_root = SKILL_ROOT
     data = _read_target_data(source, skill_root)
@@ -311,7 +325,15 @@ def select_gitlab_reference(
     project: str | None = None,
     group: str | None = None,
 ) -> tuple[str, str]:
-    """Select exactly one target kind, with an explicit same-kind override."""
+    """Select one GitLab project or group, applying an explicit override.
+
+    :param target: Loaded GitLab settings with optional default selectors.
+    :param project: Explicit project path or positive numeric ID, if supplied.
+    :param group: Explicit group path or positive numeric ID, if supplied.
+    :returns: Target kind and its selected project or group reference.
+    :raises TargetError: If selectors conflict, are invalid, or do not identify
+        exactly one target kind.
+    """
     if project is not None and group is not None:
         raise TargetError("project_and_group_conflict")
     selected_project = _optional_reference({"project": project}, "project")
@@ -380,7 +402,17 @@ def _absolute_path(value: str, key: str) -> str:
 def load_target(
     path: str | Path, *, required_surfaces: tuple[str, ...] = AUTHORITIES
 ) -> Target:
-    """Validate only the authorities needed by this command's declared contract."""
+    """Load requested authorities with relative tokens beside the target file.
+
+    Only requested authority tables are validated. Token paths may be relative,
+    absolute, or home-relative; other file settings retain their own rules.
+
+    :param path: Selected TOML target file, including an optional home prefix.
+    :param required_surfaces: Distinct declared authorities the command needs.
+    :returns: Validated settings for the requested authorities.
+    :raises TargetError: If the requested authorities or target data are invalid,
+        unreadable, missing, or select a target or credential inside the skill.
+    """
     if (
         not required_surfaces
         or len(set(required_surfaces)) != len(required_surfaces)

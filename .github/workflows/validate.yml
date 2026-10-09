@@ -46,6 +46,10 @@ jobs:
             --arg-type-hints-in-docstring=False --check-return-types=False \
             --allow-init-docstring=True \
             ci-skills/lib/python/core/gitlab_runners.py ci-skills/bin/gitlab_runner.py
+          pydoclint --style=sphinx --skip-checking-short-docstrings=False \
+            --skip-checking-private-functions=True --check-class-attributes=False \
+            --arg-type-hints-in-docstring=False --check-return-types=False \
+            --allow-init-docstring=True ci-skills/lib/python/core/target.py
       - name: Check manifest and runner receipt schema
         run: |
           python tools/render_manifest.py --check
