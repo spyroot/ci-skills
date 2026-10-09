@@ -16,6 +16,7 @@ from jsonschema import Draft202012Validator
 from tests.python.conftest import import_script_module
 
 ACTION = import_script_module("core.gitlab_actions")
+CALLBACKS = import_script_module("core.action")
 PORTABLE = import_script_module("core.portable")
 API = import_script_module("core.gitlab_api")
 MILESTONES = import_script_module("core.gitlab_milestones")
@@ -88,6 +89,36 @@ def _plan(
     )
 
 
+def _live_action_dependencies(monkeypatch, plan):
+    """Bind one selected action to deterministic access without a provider call."""
+    session = SimpleNamespace(
+        origin=plan.origin,
+        target_reference=plan.target_reference,
+        credential_source="env:GITLAB_TOKEN",
+        credential_digest="sha256:unit",
+        skill={"revision": {"value": None, "verified": False}},
+    )
+    access = {
+        "status": "PASS",
+        "identity": {"username": "unit"},
+        "target": {"kind": plan.target_kind, "id": 42},
+    }
+    monkeypatch.setattr(
+        ACTION,
+        "resolve_gitlab_target",
+        lambda _target, _binding, *, dry_run: (object(), "unit"),
+    )
+    monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
+    monkeypatch.setattr(
+        ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+    )
+    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda *, timeout: object())
+    monkeypatch.setattr(
+        ACTION, "check_gitlab_operation_access", lambda *_args, **_kwargs: access
+    )
+    return session, access
+
+
 class FakeAPI:
     def __init__(self, responses):
         self.responses = {key: list(value) for key, value in responses.items()}
@@ -114,6 +145,130 @@ class FakeAPI:
 
     def delete_json(self, session, endpoint):
         return self._next("DELETE", endpoint)
+
+
+@pytest.mark.parametrize(
+    ("kind", "arguments", "operation"),
+    (
+        ("gitlab_issue", ["open-bug"], "open-bug"),
+        ("gitlab_wiki", ["create"], "create"),
+        ("gitlab_milestone", ["create"], "create"),
+    ),
+)
+def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
+    monkeypatch, capsys, kind, arguments, operation
+):
+    """Issue, wiki, and milestone apply paths have no runner-only ``live_plan``."""
+    plan = _plan(kind, operation, {"title": "unit"})
+    _live_action_dependencies(monkeypatch, plan)
+    invoked: list[str] = []
+
+    def complete(*_args):
+        invoked.append(kind)
+        return {"action": "NO_OP", "verified": True, "mutated": False}
+
+    if kind == "gitlab_milestone":
+        monkeypatch.setattr(MILESTONES.CreateMilestone, "run", lambda _self: complete())
+    else:
+        monkeypatch.setattr(ACTION, "apply_plan", complete)
+
+    result = ACTION.run_action_cli(
+        kind,
+        [*arguments, "--apply", "--confirm-plan", plan.digest, "--json"],
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert result == 0
+    assert invoked == [kind]
+    assert report["status"] == "PASS"
+    assert report["operation"] == operation
+
+
+def test_cli_failure_preserves_primary_and_every_cleanup_failure(monkeypatch, capsys):
+    """The structured CLI result retains cleanup evidence without replacing failure."""
+    plan = _plan("gitlab_issue", "open-bug", {"title": "unit"})
+    _live_action_dependencies(monkeypatch, plan)
+    primary = ACTION.ActionError("operation failed")
+
+    class FailingOperation(CALLBACKS.Callback[object]):
+        def run(self) -> object:
+            raise primary
+
+        def cleanup(self) -> None:
+            raise RuntimeError("operation cleanup")
+
+    def fail_auth_cleanup(_self) -> None:
+        raise RuntimeError("authentication cleanup")
+
+    monkeypatch.setattr(
+        ACTION, "operation_callback", lambda _action: FailingOperation()
+    )
+    monkeypatch.setattr(ACTION.GitLabAuth, "cleanup", fail_auth_cleanup)
+
+    result = ACTION.run_action_cli(
+        "gitlab_issue",
+        ["open-bug", "--apply", "--confirm-plan", plan.digest, "--json"],
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert result == 2
+    assert report["status"] == "BLOCKED"
+    assert report["cleanup"]["status"] == "BLOCKED"
+    assert report["errors"] == [
+        {"source": "gitlab_action", "reason": "operation failed"},
+        {"source": "cleanup.FailingOperation", "reason": "operation cleanup"},
+        {"source": "cleanup.GitLabAuth", "reason": "authentication cleanup"},
+    ]
+
+
+def test_cli_cleanup_failure_blocks_a_completed_report_without_losing_records(
+    monkeypatch, capsys
+):
+    """Cleanup after a completed callback converts the existing PASS report to BLOCKED."""
+    plan = _plan("gitlab_issue", "open-bug", {"title": "unit"})
+    _live_action_dependencies(monkeypatch, plan)
+
+    class CompletedOperation(CALLBACKS.Callback[object]):
+        def __init__(self, action) -> None:
+            self.action = action
+
+        def run(self) -> object:
+            return {"action": "NO_OP", "verified": True}
+
+        def update(self) -> None:
+            self.action.report = ACTION._result(
+                plan,
+                "PASS",
+                phase="APPLY",
+                mutated=False,
+                records=[{"id": 42, "action": "NO_OP"}],
+                readback={"verified": True},
+                cleanup={"status": "NOT_APPLICABLE"},
+            )
+            self.context.report = self.action.report
+
+        def cleanup(self) -> None:
+            raise RuntimeError("post-success cleanup")
+
+    monkeypatch.setattr(
+        ACTION, "operation_callback", lambda action: CompletedOperation(action)
+    )
+
+    result = ACTION.run_action_cli(
+        "gitlab_issue",
+        ["open-bug", "--apply", "--confirm-plan", plan.digest, "--json"],
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert result == 2
+    assert report["status"] == "BLOCKED"
+    assert report["records"] == [{"id": 42, "action": "NO_OP"}]
+    assert report["readback"] == {"verified": True}
+    assert report["cleanup"]["status"] == "BLOCKED"
+    assert report["errors"][-1] == {
+        "source": "cleanup.CompletedOperation",
+        "reason": "post-success cleanup",
+    }
 
 
 def _list(endpoint):

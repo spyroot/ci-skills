@@ -82,6 +82,30 @@ staged() {
   [[ "$output" == *"bless: checks: $BLESS_CHECKS"* ]]
 }
 
+@test 'base scope selects only committed files changed through HEAD' {
+  base=$(git -C "$fixture" rev-parse HEAD)
+  printf '{}\n' >"$fixture/changed.json"
+  printf 'working only\n' >"$fixture/untracked.txt"
+  git -C "$fixture" add changed.json
+  git -C "$fixture" commit --quiet -m candidate
+  copy_bless_fixture
+
+  run "$fixture/bless.sh" --base "$base" --dry-run
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"changed.json"* ]]
+  [[ "$output" != *"untracked.txt"* ]]
+  [[ "$output" == *"bless: checks: $BLESS_CHECKS"* ]]
+}
+
+@test 'base scope blocks when the comparison revision is unavailable' {
+  copy_bless_fixture
+  run "$fixture/bless.sh" --base "$(printf '0%.0s' {1..40})" --dry-run
+
+  [ "$status" -eq 69 ]
+  [[ "$output" == *'bless cannot resolve base revision'* ]]
+}
+
 @test 'shell selection includes the tracked hook under .githooks' {
   printf '.githooks/pre-commit\0' >"$list"
   run bash -c 'source "$1"; bless_select_shell "$2" "$3" | tr "\0" "\n"' _ \

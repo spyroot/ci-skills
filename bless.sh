@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The repository's pre-commit hook: checks the staged bytes before every commit.
-# .githooks/pre-commit calls this entrypoint with --staged. The checks live in
-# lib/bash/automation/bless.bash.
+# The repository's lint entrypoint checks staged, changed, or working-tree bytes.
+# .githooks/pre-commit calls it with --staged; CI calls it with --base REF. The
+# checks live in lib/bash/automation/bless.bash.
 #
 # Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
 set -Eeuo pipefail
@@ -24,12 +24,14 @@ source "$BLESS_ROOT/lib/bash/automation/bless.bash"
 # Returns: 0.
 usage() {
   printf '%s\n' \
-    'Summary: Check staged bytes or nonignored working files.' \
+    'Summary: Check staged, committed-delta, or nonignored working files.' \
     'Examples:' \
     '  Check staged files before commit: ./bless.sh --staged' \
+    '  Check files changed from a Git revision: ./bless.sh --base REF' \
     '  Check all working files: ./bless.sh --all' \
     'Options:' \
     '  --staged             Check the index (default).' \
+    '  --base REF           Check committed files changed from REF through HEAD.' \
     '  --all                Check tracked and nonignored untracked working files.' \
     '  --dry-run            List selected paths and checks without running them.' \
     '  --log-format FORMAT  Log as text or json (default: text).' \
@@ -40,7 +42,7 @@ usage() {
     'Output modes:' \
     '  text                 Human-readable check results; text logs by default.' \
     '  json                 JSON Lines logs with --log-format json.' \
-    'Usage: ./bless.sh [--staged|--all] [--dry-run] [logging options]' \
+    'Usage: ./bless.sh [--staged|--base REF|--all] [--dry-run] [logging options]' \
     'Exit: 0 pass, 1 check failed, 64 usage, 69 blocked.'
 }
 
@@ -50,7 +52,7 @@ usage() {
 # Stderr: usage and check failures.
 # Returns: check status or CI_EXIT_USAGE for invalid options.
 main() {
-  local dry_run=false scope=staged selected=false log_enabled=false status=0
+  local dry_run=false scope=staged selected=false log_enabled=false status=0 base=''
   local value
   CI_LOG_FORMAT=${CI_LOG_FORMAT:-text}
   CI_LOG_LEVEL=${CI_LOG_LEVEL:-info}
@@ -65,6 +67,16 @@ main() {
       fi
       scope=${1#--}
       selected=true
+      ;;
+    --base)
+      if [[ $selected == true ]] || (($# < 2)) || [[ -z $2 || $2 == --* ]]; then
+        usage >&2
+        return "$CI_EXIT_USAGE"
+      fi
+      scope=changed
+      base=$2
+      selected=true
+      shift
       ;;
     --dry-run) dry_run=true ;;
     --log-format | --log-level | --log-file | --run-id)
@@ -103,7 +115,7 @@ main() {
       ci_fail "$CI_EXIT_BLOCKED" 'cannot write bless log' 'Check the log path and jq installation.' ||
       return
   fi
-  bless_run "$BLESS_ROOT" "$scope" "$dry_run" || status=$?
+  bless_run "$BLESS_ROOT" "$scope" "$dry_run" "$base" || status=$?
   if [[ $log_enabled == true ]]; then
     ci_log info bless finish "status=$status" ||
       ci_fail "$CI_EXIT_BLOCKED" 'cannot write bless log' 'Check the log path and jq installation.' ||

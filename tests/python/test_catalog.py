@@ -156,6 +156,7 @@ def test_the_manifest_routes_every_command_and_nothing_else():
         set(CATALOG.COMMANDS)
         | set(CATALOG.NODE_LOCAL_COMMANDS)
         | set(CATALOG.BASH_COMMANDS)
+        | set(CATALOG.DISCOVERY_COMMANDS)
     )
     assert set(manifest["commands"]) == declared
     assert set(manifest["routing"].values()) == declared
@@ -164,6 +165,13 @@ def test_the_manifest_routes_every_command_and_nothing_else():
         assert (SCRIPT_ROOT.parent / command).is_file()
         assert contract["options"] and contract["required_tools"]
         assert contract["read_only"] is True
+
+
+def test_discovery_command_options_match_its_parser_without_provider_access():
+    """The offline proposition entrypoint declares every parser option once."""
+    assert _actual_options("reference.py") == set(
+        CATALOG.DISCOVERY_COMMANDS["reference.py"]["options"]
+    )
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.NODE_LOCAL_COMMANDS))

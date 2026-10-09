@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The pre-commit checks bless.sh runs on the staged bytes. bless.sh (repository
-# root) is the thin entry point; .githooks/pre-commit calls it with --staged.
+# The repository checks bless.sh runs on staged, changed, or working-tree bytes.
+# bless.sh (repository root) is the thin entry point; .githooks/pre-commit calls
+# it with --staged and CI calls it with --base REF.
 # Author Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
 
 [[ ${CI_SKILLS_BLESS_LOADED:-0} == 1 ]] && return 0
@@ -253,7 +254,9 @@ bless_check_endpoints() {
 # Stderr: source graph diagnostic.
 # Returns: 0 acyclic, 1 cycle or unresolved selected source.
 bless_check_source_cycle() {
-  (cd "$1" && ci_source_graph_acyclic "$5") || return "$BLESS_FAILED"
+  local scope=$5
+  [[ $scope == changed ]] && scope=all
+  (cd "$1" && ci_source_graph_acyclic "$scope") || return "$BLESS_FAILED"
 }
 
 # Summary: Verify that the packaged runtime matches the root source.
@@ -272,13 +275,13 @@ bless_check_runtime_sync() {
   fi
 }
 
-# Summary: Run every check on the staged bytes, or list them with --dry-run.
-# Arguments: $1 repository root; $2 staged or all; $3 dry run boolean.
+# Summary: Run every check on selected bytes, or list them with --dry-run.
+# Arguments: $1 repository root; $2 staged, changed, or all; $3 dry run; $4 base ref.
 # Stdout: one line per check or a dry-run path list.
 # Stderr: failure diagnostics.
 # Returns: 0 pass, 1 check failure, CI_EXIT_BLOCKED on unavailable inputs.
 bless_run() (
-  local root=$1 scope=$2 dry_run=$3 work status=0
+  local root=$1 scope=$2 dry_run=$3 base=${4:-} work status=0
   git -C "$root" rev-parse --git-dir >/dev/null 2>&1 ||
     ci_fail "$CI_EXIT_BLOCKED" "$root is not a git checkout" 'Run bless.sh inside the repository.' ||
     return
@@ -287,20 +290,28 @@ bless_run() (
     return
   # This subshell owns its snapshot and leaves the caller's EXIT trap intact.
   trap 'rm -rf -- "$work"' EXIT
-  bless_run_in "$root" "$work" "$scope" "$dry_run" || status=$?
+  bless_run_in "$root" "$work" "$scope" "$dry_run" "$base" || status=$?
   return "$status"
 )
 
 # Summary: Build the selected file view and run each registered check.
-# Arguments: $1 root; $2 temporary directory; $3 scope; $4 dry-run boolean.
+# Arguments: $1 root; $2 temporary directory; $3 scope; $4 dry run; $5 base ref.
 # Stdout: selected paths or check results.
 # Stderr: Git, tool, and gate diagnostics.
 # Returns: 0 pass, 1 check failure, CI_EXIT_BLOCKED on unavailable inputs.
 bless_run_in() {
-  local root=$1 work=$2 scope=$3 dry_run=$4 list=$2/selected snap python check path status failed=0
+  local root=$1 work=$2 scope=$3 dry_run=$4 base=${5:-}
+  local list=$2/selected snap python check path status failed=0
   if [[ $scope == staged ]]; then
     (cd "$root" && ci_source_graph_selected_staged_paths) >"$list" ||
       return "$CI_EXIT_BLOCKED"
+  elif [[ $scope == changed ]]; then
+    git -C "$root" cat-file -e "${base}^{commit}" 2>/dev/null ||
+      ci_fail "$CI_EXIT_BLOCKED" "bless cannot resolve base revision $base" \
+        'Fetch the comparison base, then run bless again.' ||
+      return
+    git -C "$root" diff --name-only -z --diff-filter=ACMR \
+      "${base}...HEAD" >"$list" || return "$CI_EXIT_BLOCKED"
   else
     git -C "$root" ls-files --cached --others --exclude-standard -z >"$work/all" ||
       return "$CI_EXIT_BLOCKED"
@@ -319,7 +330,7 @@ bless_run_in() {
     snap=$root
   fi
   if [[ $dry_run == true ]]; then
-    printf 'bless: dry run; the staged paths are:\n'
+    printf 'bless: dry run; the selected paths are:\n'
     tr '\0' '\n' <"$list"
     printf 'bless: checks: %s\n' "$BLESS_CHECKS"
     return 0
