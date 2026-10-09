@@ -22,10 +22,14 @@ jobs:
         run: |
           ruff check ci-skills/bin/gitlab_runner.py ci-skills/lib/python/core/gitlab_runners.py \
             ci-skills/lib/python/core/gitlab_actions.py ci-skills/lib/python/core/catalog.py \
-            ci-skills/lib/python/core/report.py tests/python/test_gitlab_runner_lifecycle.py
+            ci-skills/lib/python/core/report.py ci-skills/lib/python/core/target.py \
+            tests/python/test_gitlab_runner_lifecycle.py tests/python/test_target_runtime.py \
+            tests/python/test_gitlab_access.py
           ruff format --check ci-skills/bin/gitlab_runner.py ci-skills/lib/python/core/gitlab_runners.py \
             ci-skills/lib/python/core/gitlab_actions.py ci-skills/lib/python/core/catalog.py \
-            ci-skills/lib/python/core/report.py tests/python/test_gitlab_runner_lifecycle.py
+            ci-skills/lib/python/core/report.py ci-skills/lib/python/core/target.py \
+            tests/python/test_gitlab_runner_lifecycle.py tests/python/test_target_runtime.py \
+            tests/python/test_gitlab_access.py
       - name: Check reStructuredText API docstrings
         run: |
           pydoclint --style=sphinx --skip-checking-short-docstrings=False \
@@ -64,6 +68,8 @@ jobs:
           fi
       - name: Exercise runner command and contract
         run: |
+          python -m pytest -q tests/python/test_target_runtime.py \
+            tests/python/test_target_resolution.py tests/python/test_gitlab_access.py
           python -m pytest -q tests/python/test_live_acceptance.py
           python -m pytest -q tests/python/test_gitlab_actions.py \
             tests/python/test_gitlab_runner_recovery.py \
