@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from tests.python.conftest import import_script_module
 
 ACCESS = import_script_module("core.access")
@@ -15,7 +16,9 @@ TARGET = import_script_module("core.target")
 SCRIPT = import_script_module("gitlab_access")
 
 
-def _target(tmp_path: Path, *, token_file: Path | None = None, body: str = "") -> Path:
+def _target(
+    tmp_path: Path, *, token_file: str | Path | None = None, body: str = ""
+) -> Path:
     path = tmp_path / "selected.toml"
     token = f'token_file = "{token_file}"\n' if token_file else ""
     path.write_text(
@@ -120,12 +123,17 @@ def test_explicit_project_overrides_a_selected_default_group(tmp_path):
     )
 
 
-def test_file_source_overrides_ambient_tokens_and_reads_exact_project(
+def test_relative_file_source_overrides_ambient_tokens_and_reads_exact_project(
     tmp_path, monkeypatch
 ):
-    token_file = tmp_path / "token"
+    target_parent = tmp_path / "operator-config"
+    target_parent.mkdir()
+    token_file = target_parent / "token"
     token_file.write_text("file-token\n", encoding="utf-8")
-    path = _target(tmp_path, token_file=token_file, body='project = "team/repo"\n')
+    path = _target(target_parent, token_file="token", body='project = "team/repo"\n')
+    unrelated_cwd = tmp_path / "unrelated-cwd"
+    unrelated_cwd.mkdir()
+    monkeypatch.chdir(unrelated_cwd)
     _identity(monkeypatch)
     monkeypatch.setenv("GITLAB_TOKEN", "ambient-token")
     monkeypatch.setenv("GITLAB_ACCESS_TOKEN", "other-token")

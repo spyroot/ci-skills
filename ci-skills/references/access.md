@@ -59,6 +59,10 @@ authority, and uses the same resolved source for its data reads. It records
 source references, not token values, private keys, or raw kubeconfig contents.
 Keep credentials outside this repository and the installed skill.
 
+Relative `github.token_file` and `gitlab.token_file` paths resolve beside the
+selected `target.toml`, independently of the command's working directory.
+Absolute paths and paths starting with `~` remain supported.
+
 Example nonsecret target:
 
 ```toml
