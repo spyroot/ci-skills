@@ -16,8 +16,22 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Install declared Python tools and existing docstring checker
-        run: python -m pip install -r requirements.txt pydoclint==0.10.1
+      - name: Install declared validation tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bats jq shellcheck
+          python -m pip install -r requirements.txt pydoclint==0.10.1 yamllint==1.38.0
+          npm install --global markdownlint-cli2@0.23.2
+      - name: Check changed source with the local pre-commit gate
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base_sha="$BASE_SHA"
+          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
+            base_sha="$(git rev-parse HEAD^)"
+          fi
+          ./bless.sh --base "$base_sha"
       - name: Check runner Python style
         run: |
           ruff check ci-skills/bin/gitlab_runner.py ci-skills/lib/python/core/gitlab_runners.py \
@@ -69,6 +83,7 @@ jobs:
             tests/python/test_gitlab_runner_recovery.py \
             tests/python/test_gitlab_runner_lifecycle.py \
             tests/python/test_catalog.py
+          bats --tap tests/bash/bless.bats
       - name: Check patch whitespace
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}

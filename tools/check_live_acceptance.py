@@ -9,8 +9,9 @@ code.
 
 The candidate check pairs the exact source commit with the skill tree digest.
 The receipt commit cannot contain its own SHA, so acceptance verifies that the
-tested source commit is an ancestor and its skill tree equals the checked-out
-candidate before comparing the recomputed digest.
+tested source commit's skill tree equals the checked-out candidate before
+comparing the recomputed digest. Squash merges may change commit ancestry
+without changing the tested code.
 
 This is plain data: an operator-owned expectations file, receipts as files, and
 one comparison function.
@@ -209,7 +210,7 @@ def check_candidate_identity(
     :param receipt: Live receipt with a verified tested source revision.
     :param repository_root: Git checkout containing the candidate HEAD.
     :param skill_root: Candidate's ``ci-skills`` directory.
-    :returns: Stable reasons when ancestry, tree identity, or digest differs.
+    :returns: Stable reasons when source, tree identity, or digest differs.
     """
     revision = receipt.get("tested_revision")
     skill = _mapping(receipt.get("skill"))
@@ -233,9 +234,9 @@ def check_candidate_identity(
         except OSError:
             return None
 
-    ancestor = git("merge-base", "--is-ancestor", revision, "HEAD")
-    if ancestor is None or ancestor.returncode != 0:
-        return ["candidate_revision_not_ancestor"]
+    source_commit = git("cat-file", "-e", f"{revision}^{{commit}}")
+    if source_commit is None or source_commit.returncode != 0:
+        return ["candidate_revision_unavailable"]
     tested_tree = git("rev-parse", f"{revision}:ci-skills")
     current_tree = git("rev-parse", "HEAD:ci-skills")
     if (

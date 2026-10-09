@@ -13,8 +13,8 @@ import json
 import re
 import subprocess
 import sys
-from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -770,32 +770,123 @@ def test_committed_runner_lifecycle_receipts_match_current_skill():
             ), path.name
 
 
-def test_candidate_identity_rejects_unrelated_and_old_source(tmp_path):
-    path = REPO_ROOT / "tests/acceptance/runner-lifecycle/runner-get.json"
-    receipt = json.loads(path.read_text(encoding="utf-8"))
-    unrelated = deepcopy(receipt)
-    unrelated["tested_revision"] = "0" * 40
-    unrelated["skill"]["revision"]["value"] = "0" * 40
-    assert ACCEPTANCE.check_candidate_identity(unrelated, REPO_ROOT, SKILL_ROOT) == [
-        "candidate_revision_not_ancestor"
+def _commit_current_index(repository: Path, message: str) -> str:
+    """Commit the staged fixture tree without connecting it to another commit."""
+    tree = subprocess.check_output(
+        ["git", "-C", str(repository), "write-tree"], text=True
+    ).strip()
+    return subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit-tree",
+            tree,
+            "-m",
+            message,
+        ],
+        text=True,
+    ).strip()
+
+
+def _candidate_identity_receipt(revision: str, skill_root: Path) -> dict:
+    """Build a verified receipt whose digest belongs to the fixture skill tree."""
+    from core.provenance import tree_digest
+
+    return {
+        "tested_revision": revision,
+        "skill": {
+            **tree_digest(skill_root),
+            "revision": {"value": revision, "verified": True},
+        },
+    }
+
+
+def _sibling_skill_commits(tmp_path) -> tuple[Path, Path, str, str]:
+    """Create two parentless commits that initially contain the same skill tree."""
+    repository = tmp_path / "repository"
+    skill_root = repository / "ci-skills"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text("fixture skill\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "add", "ci-skills/SKILL.md"], check=True
+    )
+    tested = _commit_current_index(repository, "tested skill")
+    candidate = _commit_current_index(repository, "squash candidate")
+    subprocess.run(
+        ["git", "-C", str(repository), "update-ref", "refs/heads/main", candidate],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
+    )
+    return repository, skill_root, tested, candidate
+
+
+def test_candidate_identity_accepts_same_skill_tree_from_nonancestor_commit(tmp_path):
+    repository, skill_root, tested, candidate = _sibling_skill_commits(tmp_path)
+    receipt = _candidate_identity_receipt(tested, skill_root)
+
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "merge-base",
+                "--is-ancestor",
+                tested,
+                candidate,
+            ],
+            check=False,
+        ).returncode
+        == 1
+    )
+    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == []
+    (skill_root / "SKILL.md").write_text(
+        "uncommitted different skill\n", encoding="utf-8"
+    )
+    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
+        "candidate_skill_digest_mismatch"
     ]
 
-    root_commit = subprocess.check_output(
-        ["git", "-C", str(REPO_ROOT), "rev-list", "--max-parents=0", "HEAD"],
-        text=True,
-    ).splitlines()[0]
-    old = deepcopy(receipt)
-    old["tested_revision"] = root_commit
-    old["skill"]["revision"]["value"] = root_commit
-    assert ACCEPTANCE.check_candidate_identity(old, REPO_ROOT, SKILL_ROOT) == [
+
+def test_candidate_identity_rejects_different_tree_and_unavailable_source(tmp_path):
+    repository, skill_root, tested, _candidate = _sibling_skill_commits(tmp_path)
+    receipt = _candidate_identity_receipt(tested, skill_root)
+    (skill_root / "SKILL.md").write_text("different fixture skill\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repository), "add", "ci-skills/SKILL.md"], check=True
+    )
+    different_candidate = _commit_current_index(repository, "different skill")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "update-ref",
+            "refs/heads/main",
+            different_candidate,
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "checkout", "-q", different_candidate],
+        check=True,
+    )
+
+    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
         "candidate_skill_tree_mismatch"
     ]
-
-    different_skill = tmp_path / "ci-skills"
-    different_skill.mkdir()
-    (different_skill / "SKILL.md").write_text("different candidate", encoding="utf-8")
-    assert ACCEPTANCE.check_candidate_identity(receipt, REPO_ROOT, different_skill) == [
-        "candidate_skill_digest_mismatch"
+    receipt["tested_revision"] = "0" * 40
+    receipt["skill"]["revision"]["value"] = "0" * 40
+    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
+        "candidate_revision_unavailable"
     ]
 
 
@@ -827,7 +918,7 @@ def test_acceptance_cli_rejects_wrong_runner_source(monkeypatch, capsys):
     assert ACCEPTANCE.main() == 2
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "BLOCKED"
-    assert "runner-get.json:candidate_revision_not_ancestor" in output["problems"]
+    assert "runner-get.json:candidate_revision_unavailable" in output["problems"]
 
 
 def test_expectations_without_an_executor_block_rather_than_pass(tmp_path):
