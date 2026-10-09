@@ -298,7 +298,14 @@ def log_event(
             stream.write(line)
 
 
-def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> int:
+def _failure(
+    args: argparse.Namespace,
+    kind: str,
+    source: str,
+    reason: str,
+    *,
+    cleanup_errors: list[dict[str, str]] | None = None,
+) -> int:
     """Emit a stable machine-readable failure even when normal rendering fails."""
     data = {
         "schema_version": "1.0",
@@ -310,6 +317,10 @@ def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> i
         "errors": [{"source": source, "reason": sanitize(reason, 240)}],
         "summary": {"record_count": 0, "error_count": 1},
     }
+    if cleanup_errors:
+        data["errors"].extend(cleanup_errors)
+        data["summary"]["error_count"] = len(data["errors"])
+        data["cleanup"] = {"status": BLOCKED}
     try:
         log_event(
             args,

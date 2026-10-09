@@ -48,6 +48,8 @@ jobs:
             --allow-init-docstring=True \
             ci-skills/lib/python/core/gitlab_runners.py \
             ci-skills/lib/python/core/gitlab_actions.py \
+            ci-skills/lib/python/core/action.py \
+            ci-skills/lib/python/core/gitlab_milestones.py \
             ci-skills/lib/python/core/gitlab_api.py \
             ci-skills/lib/python/core/catalog.py \
             ci-skills/lib/python/core/report.py \
@@ -82,7 +84,9 @@ jobs:
           python -m pytest -q tests/python/test_gitlab_actions.py \
             tests/python/test_gitlab_runner_recovery.py \
             tests/python/test_gitlab_runner_lifecycle.py \
-            tests/python/test_catalog.py
+            tests/python/test_catalog.py \
+            tests/python/test_callbacks.py \
+            tests/python/test_propositions.py
           bats --tap tests/bash/bless.bats
       - name: Check patch whitespace
         env:

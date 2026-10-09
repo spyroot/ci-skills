@@ -2,72 +2,102 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/spyroot/ci-skills/schemas/reference-next.schema.json",
   "title": "reference_next",
-  "description": "One answer of ci-skills/bin/reference.py next (CI09-REFERENCE section 3): one level of the resource graph, its summary and a bounded set of typed pointers. Its $defs choice and pointer are the one definition every pointer-carrying record reuses.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "kind",
-    "schema_version",
-    "path",
-    "summary",
-    "choices",
-    "continuation"
-  ],
-  "properties": {
-    "kind": {
-      "const": "reference_next"
-    },
-    "schema_version": {
-      "type": "string",
-      "pattern": "^1\\.[0-9]+$"
-    },
-    "path": {
-      "type": "array",
-      "maxItems": 8,
-      "items": {
-        "type": "string",
-        "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+  "description": "Versioned compact propositions; legacy pointer definitions remain available to result schemas.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "schema_version",
+        "path",
+        "summary",
+        "choices",
+        "continuation"
+      ],
+      "properties": {
+        "kind": {
+          "const": "reference_next"
+        },
+        "schema_version": {
+          "type": "string",
+          "pattern": "^1\\.[0-9]+$"
+        },
+        "path": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+          }
+        },
+        "summary": {
+          "$ref": "#/$defs/summary"
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "capability": {
+          "$ref": "#/$defs/capability"
+        },
+        "choices": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/choice"
+          }
+        },
+        "relations": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "$ref": "#/$defs/relation"
+          }
+        },
+        "continuation": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/pointer"
+            }
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/error"
+        }
       }
     },
-    "summary": {
-      "$ref": "#/$defs/summary"
-    },
-    "query": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 100
-    },
-    "capability": {
-      "$ref": "#/$defs/capability"
-    },
-    "choices": {
-      "type": "array",
-      "maxItems": 12,
-      "items": {
-        "$ref": "#/$defs/choice"
+    {
+      "type": "object",
+      "required": [
+        "schema_version"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "2.0"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/node"
       }
     },
-    "relations": {
-      "type": "array",
-      "maxItems": 12,
-      "items": {
-        "$ref": "#/$defs/relation"
-      }
-    },
-    "continuation": {
-      "oneOf": [
+    {
+      "allOf": [
         {
-          "type": "null"
+          "$ref": "#/$defs/node"
         },
         {
-          "$ref": "#/$defs/pointer"
+          "required": [
+            "schema_version"
+          ]
         }
       ]
-    },
-    "error": {
-      "$ref": "#/$defs/error"
     }
-  },
+  ],
   "$defs": {
     "summary": {
       "type": "string",
@@ -333,6 +363,45 @@
           "minLength": 1
         }
       }
+    },
+    "node": {
+      "type": "object",
+      "required": [
+        "tools",
+        "reference"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "2.0"
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "maxProperties": 0
+          }
+        },
+        "reference": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "summary",
+              "pointer"
+            ],
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "pointer": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

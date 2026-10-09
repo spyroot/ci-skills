@@ -14,7 +14,10 @@ A broad cluster returns little information; a selected smaller cluster can retur
 
 To use the installed commands, go directly to [Install and first run](#install-and-first-run).
 
-## Proposition interface (proposed)
+## Proposition interface
+
+Run `ci-skills/bin/reference.py` for the root, `reference.py glab` for GitLab tools, or
+`reference.py gitlab_job.py` for that command's connections. `--json` and `--yaml` select output; no credentials are needed.
 
 A proposition is a compact offering of the tools and references at one node. The entrypoint proposes the main clusters;
 each selected node proposes its own relevant tools and references. Nodes form a graph: related job, pipeline, runner,
@@ -69,15 +72,17 @@ commands or embedding the referenced documents.
 
 The [proposition schema](docs/phases/CI11-TOOLS.md#proposition-schema) defines a root mapping of cluster names to nodes;
 each node has `tools` (filename → `{}`) and `reference` (name → summary/pointer) mappings. Responses pair
-these payloads with `schema_version`, proposed as `2.0`, omitted from the payload excerpts above. The existing
-[reference-next schema](schemas/reference-next.schema.json) is the owner to extend; its current 1.x `choices` shape
-does not yet accept these propositions.
+these payloads with `schema_version: "2.0"`, omitted from the payload excerpts above. The
+[reference-next schema](schemas/reference-next.schema.json) validates propositions and preserves the legacy 1.x
+response and pointer definitions.
 
-## Callback workflow boilerplate (proposed)
+## Callback workflow boilerplate
 
 The [callback specification in CI11](docs/phases/CI11-TOOLS.md#callback-workflow-boilerplate) owns the following pattern.
 Each workflow parses its own arguments, constructs typed actions and reusable callbacks, connects their results, runs
-one executor, and emits through the existing report machinery. These Python names are the proposed interface:
+one executor, and emits through the existing report machinery. The shared interface is implemented in
+[core/action.py](ci-skills/lib/python/core/action.py); GitLab action mains use it with the migrated runner and milestone
+callbacks. The following toolbox/Harbor combination shows the pattern for the later delivery rows:
 
 ```python
 def main(argv: list[str] | None = None) -> int:
@@ -99,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
 This single combination builds on OpenShift, publishes to Harbor, and configures and verifies the selected runner/CI.
 `AbstractCallback` supplies the lifecycle contract; `GitlabCallback`, `K8SCallback`, and `HarborCallback` own shared
 provider behavior. Concrete callbacks implement only applicable hooks. Existing target resolution, `GlabAPIClient`,
-milestone/runner operations, and report code are the starting implementation; the
+milestone/runner operations, and report code remain the implementation owners; the
 [code-to-abstraction map](docs/phases/CI11-TOOLS.md#ground-the-refactor-in-existing-code) specifies what moves or stays
 shared. New combinations change the callback list rather than duplicate those implementations.
 
@@ -166,7 +171,7 @@ plus issue-to-merge-request-to-QA evidence. The commands below are proposed; the
 [command catalog](ci-skills/lib/python/core/catalog.py).
 
 Every new action needs a concrete script name, arguments, behavior, result, and independent read-back. Its Python entry
-point must follow the [callback workflow pattern](#callback-workflow-boilerplate-proposed) over reusable code in
+point must follow the [callback workflow pattern](#callback-workflow-boilerplate) over reusable code in
 [lib/python/core](ci-skills/lib/python/core/). It must offer `--help` for people,
 `--json` and `--yaml` for machines, and `--describe` for its command contract. [tools.json](ci-skills/tools.json) must
 declare its options and access and target protocols. Each versioned report kind must have a paired formal JSON Schema

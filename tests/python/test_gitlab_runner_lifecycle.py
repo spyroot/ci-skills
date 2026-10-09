@@ -398,9 +398,11 @@ def test_runner_read_cli_writes_portable_live_receipt(
         },
     )
     monkeypatch.setattr(
-        RUNNERS,
-        "read",
-        lambda *a: RUNNERS.RunnerReadResult([RUNNERS._record(_runner())], False, None),
+        RUNNERS.ReadRunner,
+        "run",
+        lambda _self: RUNNERS.RunnerReadResult(
+            [RUNNERS._record(_runner())], False, None
+        ),
     )
     receipt_path = tmp_path / "runner-get.json"
     assert (

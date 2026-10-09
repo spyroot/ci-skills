@@ -811,6 +811,25 @@
       "subcommands": {},
       "use_when": "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; plan the selected nodes, then run the exact confirmed plan."
     },
+    "reference.py": {
+      "execution_surface": "installed catalogue; no provider or credential access",
+      "options": [
+        "--json",
+        "--yaml",
+        "--describe"
+      ],
+      "purpose": "Offer the current node's installed tools and optional reference pointers.",
+      "read_only": true,
+      "report_kind": "reference_next",
+      "required_options": [],
+      "required_tools": [
+        "python3"
+      ],
+      "requires_authorities": [],
+      "returns": "A versioned proposition with tools and reference mappings.",
+      "side_effects": "none",
+      "use_when": "Choose a capability cluster or expand one installed command."
+    },
     "storage_report.py": {
       "capabilities": [
         "filters_records",
@@ -876,6 +895,7 @@
     "GitLab operation access": "gitlab_access.py",
     "a named CI job failed": "gitlab_job.py",
     "a volume or claim is stuck": "storage_report.py",
+    "browse tools and references": "reference.py",
     "check GitLab pipeline progress": "gitlab_pipeline.py",
     "connectivity or CNI health": "cilium_status.py",
     "create or change a GitLab milestone": "gitlab_milestone.py",

@@ -87,8 +87,8 @@ include related tools from other command families when useful; narrowing the sco
 
 ### Proposition schema
 
-The existing [reference-next schema](../../schemas/reference-next.schema.json) is the owner to extend for propositions.
-Its current 1.x `choices` envelope does not accept the grouped shape above. The proposed response revision is `2.0`;
+The [reference-next schema](../../schemas/reference-next.schema.json) owns version `2.0` propositions and retains the
+legacy 1.x `choices` envelope. The proposition response revision is `2.0`;
 a proposition reference's `pointer` is a path string, as shown in the root/jobs examples. Preserve the separate 1.x
 command-pointer definitions (`action`, `entrypoint`, `args`) still used by the
 [reference-section schema](../../schemas/reference-section.schema.json) and existing result schemas. Proposition
@@ -104,9 +104,9 @@ agent must read or require traversal through `run`, `read`, or `describe` before
 | Node payload | `tools` and `reference` mappings, returned directly when that node is selected. |
 | `tools` | Mapping of actual entrypoint filenames to `{}` in this proposition version. |
 | `reference` | Mapping of reference names to a short `summary` and concrete `pointer`. |
-| `schema_version` | Response version, proposed as `2.0` for this shape. |
+| `schema_version` | Response version `2.0` for this shape. |
 
-This proposed schema defines both complete response shapes without an extra payload wrapper. The root carries
+This schema defines both complete response shapes without an extra payload wrapper. The root carries
 `schema_version` beside its named clusters; a selected node carries it beside `tools` and `reference`. Both reuse the
 same node definition:
 
@@ -159,13 +159,17 @@ same node definition:
 ```
 
 This section revises the discovery shape proposed in CI09-REFERENCE; that phase's older forced `run`/`read` traversal
-must be reconciled to this specification when the capability lands. Existing per-command help and result contracts
-remain available. The schema files and installed commands are unchanged by this documentation proposal.
+is superseded by this specification. Existing per-command help and result contracts remain available.
+`ci-skills/bin/reference.py`, the installed discovery entrypoint, accepts a cluster or installed filename and emits this
+node shape without fetching references. For example: `reference.py glab` or `reference.py gitlab_job.py`.
 
 ## Callback workflow boilerplate
 
-Every workflow main follows this composition pattern. The following names describe the proposed Python interface,
-not classes already shipped. `build_parser()` owns this workflow's arguments; the action models map those arguments;
+Every workflow main follows this composition pattern. `core/action.py` implements the shared callback lifecycle,
+provider bases, context, executor, and emitter. Existing GitLab action mains compose `GitLabAuth` and their concrete
+operation callbacks. The toolbox/Harbor atoms in this example remain assigned to their delivery rows below.
+
+`build_parser()` owns this workflow's arguments; the action models map those arguments;
 `ExecutionContext` supplies the selected targets and provider services; `Executor` runs the ordered callbacks;
 `emit_result()` adapts the existing report emitter and exit-code mapping.
 
@@ -227,15 +231,20 @@ read-back remain part of action execution; the lifecycle does not authorize a wr
 The following owners are already in `ci-skills/lib/python/core/`; move operation logic into the appropriate methods
 and reuse these facilities. Do not copy them into parallel implementations.
 
-| Existing owner | Callback implementation mapping |
-| --- | --- |
-| `target.py`, `endpoints.py`, `credentials.py` | Reuse target resolution and the existing `GitLabAuthentication` interface. `GitLabAuth` calls the existing binding/access path. |
-| `gitlab_session.py`, `access.py`, `gitlab_api.py` | Reuse `BoundGitLabSession`, `check_gitlab_operation_access()`, and `GlabAPIClient` as GitLab callback services. |
-| `gitlab_actions.py` | Extract shared plan/apply/report orchestration from `run_action_cli()` into the already-planned `core/action.py`; `Executor` owns sequencing. Keep CLI parsing at the boundary. |
-| `gitlab_milestones.py` | Move `prepare()`, `apply()`, and `_create()` behavior into typed milestone actions and callbacks, preserving exact-match checks and create guards. |
-| `gitlab_runners.py` | Move `_create()`, `_assign()`, `_tag()`, and `read()` into create, attach, tag, and read/verify callbacks. Preserve token handling, scope checks, and recovery. |
-| `runtime.py`, `collect.py`, existing Kubernetes collectors | Reuse bounded subprocess execution and collection logic through Kubernetes callbacks. |
-| `report.py`, `status.py`, `provenance.py` | Reuse output, redaction, status/exit mapping, and evidence identities through the final adapter. |
+- **`target.py`, `endpoints.py`, `credentials.py`**: Reuse target resolution and the existing `GitLabAuthentication`
+  interface. `GitLabAuth` calls the existing binding/access path.
+- **`gitlab_session.py`, `access.py`, `gitlab_api.py`**: Reuse `BoundGitLabSession`, `check_gitlab_operation_access()`,
+  and `GlabAPIClient` as GitLab callback services.
+- **`gitlab_actions.py`**: Extract shared plan/apply/report orchestration from `run_action_cli()` into the
+  already-planned `core/action.py`; `Executor` owns sequencing. Keep CLI parsing at the boundary.
+- **`gitlab_milestones.py`**: Move `prepare()`, `apply()`, and `_create()` behavior into typed milestone actions and
+  callbacks, preserving exact-match checks and create guards.
+- **`gitlab_runners.py`**: Move `_create()`, `_assign()`, `_tag()`, and `read()` into create, attach, tag, and
+  read/verify callbacks. Preserve token handling, scope checks, and recovery.
+- **`runtime.py`, `collect.py`, existing Kubernetes collectors**: Reuse bounded subprocess execution and collection
+  logic through Kubernetes callbacks.
+- **`report.py`, `status.py`, `provenance.py`**: Reuse output, redaction, status/exit mapping, and evidence identities
+  through the final adapter.
 
 Keep guarded operations intact when moving them. For example, milestone `_create()` holds its `create_guard` across
 lookup, mutation, uncertain-write reconciliation, and read-back. It can remain one `run()` implementation rather than
@@ -506,19 +515,20 @@ admin_credential_file = "<0600 file>"    # robots and projects only; no source, 
 Retain the following source inputs as workflow arguments or fields in a caller-selected build/operation specification,
 not as `target.toml` keys. The source defaults below remain proposed inputs for their delivery rows.
 
-| Workflow inputs | Existing source or proposed value |
-| --- | --- |
-| Anonymous read selection; proxy exclusions | `harbor_manager.sh:115-134,148`; `anonymous_read = false`, caller-selected `no_proxy`. |
-| Timeout, attempts, backoff | `rendered_images.bash:47-49`; 30 seconds, 3 attempts, 2 seconds. |
-| Parallel copies; page size | `push_helm.sh:29-30`, `harbor_manager.sh:161,178`; 8 and 100. |
-| Build spec, source repository, context | `toolbox_image.bash:22,182-185`; caller-selected paths. |
-| Containerfile, destination repository and tag | `toolbox.yaml:10,32,36`; caller-selected build inputs. |
-| Build namespace, BuildConfig and push Secret | `toolbox.yaml:34-37`; caller-selected names. |
-| Successful and failed build history | `toolbox.yaml:38-39`; 3 each. |
-| Completion and cleanup deadlines | `toolbox.yaml:40-41`; 1800 and 600 seconds; `--timeout` maps to the build deadlines. |
-| Platform and read-back command | `toolbox.yaml:52`, `toolbox_image.bash:740-743`; selected OS/architecture and image doctor command. |
-| Latest alias and source TLS verification | `toolbox_image.bash:639,680`; both true in the proposed port. |
-| Builder selection | Explicit `openshift` or `podman`, selected by the workflow's declared `--builder` option. |
+- **Anonymous read selection; proxy exclusions**: `harbor_manager.sh:115-134,148`; `anonymous_read = false`,
+  caller-selected `no_proxy`.
+- **Timeout, attempts, backoff**: `rendered_images.bash:47-49`; 30 seconds, 3 attempts, 2 seconds.
+- **Parallel copies; page size**: `push_helm.sh:29-30`, `harbor_manager.sh:161,178`; 8 and 100.
+- **Build spec, source repository, context**: `toolbox_image.bash:22,182-185`; caller-selected paths.
+- **Containerfile, destination repository and tag**: `toolbox.yaml:10,32,36`; caller-selected build inputs.
+- **Build namespace, BuildConfig and push Secret**: `toolbox.yaml:34-37`; caller-selected names.
+- **Successful and failed build history**: `toolbox.yaml:38-39`; 3 each.
+- **Completion and cleanup deadlines**: `toolbox.yaml:40-41`; 1800 and 600 seconds; `--timeout` maps to the build
+  deadlines.
+- **Platform and read-back command**: `toolbox.yaml:52`, `toolbox_image.bash:740-743`; selected OS/architecture and
+  image doctor command.
+- **Latest alias and source TLS verification**: `toolbox_image.bash:639,680`; both true in the proposed port.
+- **Builder selection**: Explicit `openshift` or `podman`, selected by the workflow's declared `--builder` option.
 
 ## One query grammar for every object class
 
