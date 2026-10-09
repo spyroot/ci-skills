@@ -7,6 +7,7 @@ import sys
 import time
 
 import pytest
+
 from tests.python.conftest import REPO_ROOT, import_script_module
 
 
