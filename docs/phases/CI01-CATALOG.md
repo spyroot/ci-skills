@@ -392,9 +392,9 @@ below goes beyond them.
      `glab skills get glab` where `glab` is installed.
 3. *Smoke*. This phase touches no live target: `list`, `get` and `install`
    read the tree and the destination only, so the proof is static read-back
-   on the executor `tests/acceptance/expected.toml` declares (`mac.lan`,
-   D-SMOKE, decided 2026-10-06), after merge, from a clean checkout of
-   `main`:
+   on the selected executor recorded by runtime setup, after merge, from a
+   clean checkout of `main`. Setup follows
+   [CI11-TOOLS, Smoke cases](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back):
    - `bin/ci-skills list --json` reads back exactly one record with
      `name: ci-skills`, `source: local` and `path: ci-skills`, plus `glab`
      and `glab-stack` with `source: glab-bundled`, an empty `errors`, exit 0;
@@ -416,33 +416,27 @@ below goes beyond them.
    - `tools/render_manifest.py --check` reads back `CURRENT` for `tools.json`
      and `agents/openai.yaml`.
 4. *Evidence*. The skill digest changes (part 1 adds files under
-   `ci-skills/`), so the publication receipt is recaptured on `mac.lan`,
-   from the clean checkout of `main` that part 3 names (a dirty checkout
-   gives `verified: false` and fails the revision check), with
+   `ci-skills/`), so the publication receipt is recaptured on the selected
+   executor from the clean checkout of `main` that part 3 names (a dirty
+   checkout gives `verified: false` and fails the revision check), with
    `ci-skills/bin/access_check.py --publication --receipt-out tests/acceptance/receipts/operator-laptop.json`.
-   The checker compares, from that receipt: `kind` (`access_check`),
-   `schema_version`, `status` (`PASS`), `publication` (`true`),
-   `execution_host` against `[[executors]].host`, `skill.digest` against the
-   digest recomputed from `ci-skills/`, `skill.revision` (`verified: true`
-   and equal to `tested_revision`), `captured_at` against
-   `max_receipt_age_days`, the receipt against its own redacted form,
-   `targets` against `[targets]`, the identities in `surfaces` and
-   `credential_sources` against `[executors.identities]`, the `live_checks`
-   named in `required_live_checks` with `job_url` and `ceph_namespace`, and
-   the `required_checks` read-back. `required_checks`
-   still names `validate`, deleted in #27 (1108cca); what the receipt reads
-   back instead is not declared here; decided in CI03-GATES, G0 (D-GATE),
-   and until then a fresh receipt is not `PASS`.
+   The checker validates the setup receipt's `kind`, `schema_version`,
+   `status`, `publication`, targets, API-read identities, credential sources
+   and required live checks, including job, Ceph and required-check read-back.
+   It retains exact candidate revision and skill digest checks, freshness
+   and redaction checks. Subsequent operation receipts must match the setup;
+   [CI11-TOOLS, Smoke cases](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back)
+   owns runtime setup, resource read-back and cleanup requirements.
+   Historical observation (2026-10-06): the declared `validate` workflow had
+   been deleted in #27 (`1108cca`), blocking that publication receipt.
    The offline verbs have no receipt: the static evidence is the
-   `bin/ci-skills list --json` and `--describe` output of part 3. A
-   `[[smoke_cases]]` entry for them needs `--receipt-out` on
-   `bin/ci-skills`, which CI02-CLI declares for every smoke-cased command
-   (item 7).
+   `bin/ci-skills list --json` and `--describe` output of part 3. If they
+   gain smoke receipts, `bin/ci-skills` needs `--receipt-out`, as CI02-CLI
+   declares for every smoke-cased command (item 7).
 5. *Verification*. The checker:
 
    ```text
-   tools/check_live_acceptance.py --root . --expected tests/acceptance/expected.toml \
-     --receipts tests/acceptance/receipts --skill ci-skills --json
+   tools/check_live_acceptance.py --root . --json
    ```
 
    prints `"status": "PASS"` (`Live acceptance: PASS` without `--json`);

@@ -35,7 +35,7 @@ adds the record, or `today` where the record exists in the tree.
 | `tool-operations` | `tool_operations` | `bin/ci-skills tools --json` | `core/tool_operations.py` | missing |
 | `reference-index` | `reference_index` | a reference's `index.json` | `tools/update_reference.py` | missing |
 | `openai-agent-metadata` | none, upstream shape | `agents/openai.yaml` | `tools/render_manifest.py` | missing |
-| `smoke-case` | not named yet | each `[[smoke_cases]]` entry of `expected.toml` | by hand | missing |
+| `smoke-case` | superseded | runtime setup and per-kind receipts (CI11-TOOLS) | smoke commands | superseded |
 | `command-contract` | `command_contract` | each command's `--describe` | `core/catalog.py` | implemented |
 | `command-result` | none, the envelope | the fields every report kind shares | `core/report.py` | missing |
 | `ci_skills_endpoints` | `ci_skills_endpoints` | gate results | `tools/skillkit/endpoint_gate.py` | implemented |
@@ -130,13 +130,12 @@ Notes on the rows:
   `ci-skills/references/vendor/<name>/` (CI09-REFERENCE, Layout).
 - **`openai-agent-metadata`.** The file is `ci-skills/agents/openai.yaml`,
   rendered beside `tools.json`.
-- **`smoke-case`.** The entries are declared by hand in
-  `tests/acceptance/expected.toml` before the smoke (CI11-TOOLS), and
-  `tools/check_live_acceptance.py` verifies them (CI03-GATES, G5; decided
-  2026-10-06, D-SMOKE). `expected.toml` carries no `kind` or
-  `schema_version` today, and its `[[gitlab_receipts]]` entries use `kind`
-  for the receipt they expect; where a `smoke-case` record's identity fields
-  sit is settled by CI03-GATES, G5, which adds the entries.
+- **`smoke-case`.** The separate expectation-record proposal of 2026-10-06
+  is superseded by
+  [CI11-TOOLS, Smoke cases](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back).
+  Setup receipts provide the selected target and API-read identities;
+  operation receipts retain their per-kind schemas, provenance, resource
+  read-back and cleanup evidence. No separate expectation file is created.
 - **`command-contract`.** Today the Python commands describe themselves;
   CI02-CLI adds `--describe` to `bin/ci-*`.
 - **`command-result`.** CI10-PHASES names the file
@@ -146,9 +145,8 @@ Notes on the rows:
   `command-result` schema of `skill_install`" (CI01-CATALOG) is
   `schemas/skill_install.schema.json`.
 - **Kinds not named yet.** No source names the `kind` of
-  `vendor-declarations` (owner: CI05-VENDOR) or `smoke-case` (owner:
-  CI03-GATES, G5); each owner names it when the record is added, and this
-  table takes the string.
+  `vendor-declarations` (owner: CI05-VENDOR); its owner names it when the
+  record is added, and this table takes the string.
 
 The report kinds, one `<kind>.schema.json` each:
 
@@ -246,8 +244,8 @@ CI08-ROUTING consumes them.
     each receipt under `tests/acceptance/receipts/` and, as their phases add
     them, `vendor/vendor.lock.json`, `vendor/vendor.toml` and
     `ci-skills/agents/openai.yaml` (parsed to JSON first), each `index.json`,
-    the `[[smoke_cases]]` entries, and the frontmatter of every `SKILL.md`
-    (extracted first);
+    and the frontmatter of every `SKILL.md` (extracted first); smoke setup
+    and operation receipts are included with the per-kind receipts above;
   - applies the closed world of `uses`, `REFERENCES` and `points_to` (above)
     and of each index file (CI09-REFERENCE, section 5), once those records
     exist;
@@ -427,8 +425,8 @@ changing its version, or bumps MAJOR without adding the new file.
    exist yet. Written with the block; run status UNVERIFIED (CI03-GATES, G0;
    D-GATE, decided 2026-10-06: no gate for now, and the pytest and bats suites
    are never run on the laptop).
-3. *Smoke*: this phase changes no live behaviour and declares no
-   `[[smoke_cases]]` entry. The static read-back is
+3. *Smoke*: this phase changes no live behaviour and adds no live smoke
+   case. The static read-back is
    `tools/check_schemas.py --root . --json` over `ci-skills/tools.json` and
    every receipt under `tests/acceptance/receipts/`: each is listed with its
    schema and `schema_version` `1.0`, and the result is `PASS`.

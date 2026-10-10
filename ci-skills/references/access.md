@@ -116,11 +116,14 @@ prefix would also match `cilium-operator-*` and `cilium-envoy-*`, which carry
 no health endpoint.
 
 The executed code is identified by a content digest of the skill tree, not by a
-commit SHA: a SHA cannot be verified where it is claimed, and an installed copy
-has no Git metadata at all. A revision is reported `verified` only when it came
-from a clean subtree in the repository that tracks this skill; `--revision` is
-recorded as a claim, and the invoking project's `CI_COMMIT_SHA` is kept in its
-own `consuming_project` field so it can never be mistaken for the skill's.
+commit SHA alone. A revision is reported `verified` when it came from a clean
+subtree in the repository that tracks this skill, or when the repository
+installer's `INSTALLATION.json` records that clean source revision and its
+measured digest still matches the installed bytes. `--revision` remains a
+claim, and the invoking project's `CI_COMMIT_SHA` is kept in its own
+`consuming_project` field so it can never be mistaken for the skill's. The
+repository acceptance checker independently resolves the recorded commit and
+compares its tree and digest.
 
 Required status checks are compared against the set declared as
 `github.required_checks` in the target file, by exact equality. Any nonempty

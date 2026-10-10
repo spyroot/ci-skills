@@ -173,8 +173,8 @@ Every command follows the pinned agent-grade checklist, as:
    - `--target`, `--dry-run`;
    - `--apply` with `--confirm-plan DIGEST` on every mutating command
      (item 6, D-CONFIRM);
-   - `--receipt-out PATH` on every command that has a `[[smoke_cases]]`
-     entry (CI06-TESTS, Live smoke); it writes the sanitized receipt
+   - `--receipt-out PATH` on every command with a declared smoke case
+     (CI11-TOOLS, Smoke cases); it writes the sanitized receipt
      (`core/portable.py`). `access_check.py`, `gitlab_access.py` and the
      four mutating GitLab mains have it today (`core/catalog.py:210`,
      `:249`, `:275`, `:300`, `:323`, `:350`);
@@ -292,8 +292,8 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
    `tests/python/conftest.py:18` still points at `skills/ci-skills/scripts`;
    block 0 re-points it (CI10-PHASES, Order 0). Until then no case above can
    find a main.
-3. *Smoke.* This phase changes no live behaviour, so it declares no
-   `[[smoke_cases]]` entry. The read-back is static, on this laptop, for
+3. *Smoke.* This phase changes no live behaviour, so it adds no live
+   smoke case. The read-back is static, on this laptop, for
    every entrypoint the catalog declares:
    - `env -i <python> ci-skills/bin/<main> --help` exits 0, `<python>` being
      the `ci-skills` conda environment's interpreter (CI10-PHASES, "Publish
@@ -317,17 +317,14 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
    byte this phase changes under `ci-skills/` changes the skill digest, so
    the committed receipts, already stale (CI10-PHASES, "Pull request
    status"), need a fresh `access_check.py --publication --receipt-out`
-   from `mac.lan` after the phase's last skill byte; that receipt is
-   CI03-GATES G5's evidence, not this phase's. That refresh cannot pass
-   today: `--publication` reads `main`'s branch protection and its
-   `required_status_checks` (`core/access.py:227`, `:263`;
-   `required_checks_missing` at `:277`), protection on `main` is disabled
-   (CI10-PHASES, "Pull request status"), and `expected.toml:26` declares
-   `required_checks = ["validate"]`, the workflow deleted in #27
-   (`1108cca`), which `tools/check_live_acceptance.py:311-313` compares with
-   the receipt. Whether the expectation changes or the receipt is captured
-   without `--publication` is CI03-GATES G0's decision (D-GATE); until it
-   is made, a fresh publication receipt is not `PASS`.
+   after the phase's last skill byte; that receipt is CI03-GATES G5's
+   evidence, not this phase's. Current capture uses the selected executor
+   and authenticated setup described in
+   [CI11-TOOLS, Smoke cases](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back).
+   Publication still requires branch-protection and required-check read-back.
+   Historical observation (2026-10-06): protection on `main` was disabled
+   and the declared `validate` workflow had been deleted in #27
+   (`1108cca`), so that publication refresh could not pass.
 5. *Verification.*
    - `tools/render_manifest.py --check` prints `CURRENT` and exits 0
      (`render_manifest.py:69-72`). Observed 2026-10-06: `FileNotFoundError:
@@ -336,14 +333,12 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
    - `./scripts/check.sh` with the `cli` gate: one `PASS` per command. The
      line's format is not defined in the tree; CI03-GATES G1 owns it, and
      the route that runs it is D-GATE.
-   - `tools/check_live_acceptance.py --root . --expected tests/acceptance/expected.toml
-     --receipts tests/acceptance/receipts --skill ci-skills --json` prints
-     `"status": "PASS"` and exits 0 (`check_live_acceptance.py:617`, `:684`)
-     once the receipt of part 4 is committed. Observed 2026-10-06:
-     `ModuleNotFoundError: No module named 'core'`
-     (`check_live_acceptance.py:479`; block 0), and with its defaults
-     `expectations_unreadable`, because the default paths (`:630-644`)
-     predate the layout.
+   - `tools/check_live_acceptance.py --root . --json` must print
+     `"status": "PASS"` and exit 0 once the required setup and operation
+     receipts for the exact candidate are committed. Historical observation
+     (2026-10-06): the earlier checker failed to import `core`, then reported
+     `expectations_unreadable` because its default paths predated the layout.
+     Those failures describe the earlier interface, not the current command.
 
 ## Open decisions
 

@@ -14,8 +14,9 @@ So this module separates the claim from the evidence:
   changing those bytes, and an installed copy with no Git metadata still has
   one.
 * `revision` is a label. It is `verified` only when it came from a clean Git
-  subtree in the repository that actually contains this skill. An operator's
-  `--revision` is recorded as a claim, never as evidence.
+  subtree in the repository that actually contains this skill, or from the
+  installer's record whose measured digest still matches the installed bytes.
+  An operator's `--revision` is recorded as a claim, never as evidence.
 * `consuming_project` records the CI commit of whatever repository invoked the
   skill, kept strictly apart from the skill's own revision.
 
@@ -29,6 +30,7 @@ Mustafa Bayramov mbayramo@ciso.com spyroot@gmail.com
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -37,6 +39,10 @@ from typing import Any
 
 SHA_PATTERN = re.compile(r"\A[0-9a-fA-F]{40}\Z")
 DIGEST_ALGORITHM = "sha256-tree-v1"
+INSTALLATION_IDENTITY_NAME = "INSTALLATION.json"
+INSTALLATION_IDENTITY_SCHEMA_VERSION = "1.0"
+INSTALLATION_IDENTITY_KIND = "skill_install"
+INSTALLATION_IDENTITY_STATUS = "PASS"
 
 # Bytecode caches differ between a fresh install and a used one, so including
 # them would make the digest unstable for identical source.
@@ -57,7 +63,10 @@ def _included(root: Path) -> list[Path]:
     for path in root.rglob("*"):
         if not path.is_file() or path.is_symlink():
             continue
-        if any(part in EXCLUDED_DIRECTORIES for part in path.relative_to(root).parts):
+        relative = path.relative_to(root)
+        if relative == Path(INSTALLATION_IDENTITY_NAME):
+            continue
+        if any(part in EXCLUDED_DIRECTORIES for part in relative.parts):
             continue
         if path.suffix in EXCLUDED_SUFFIXES or path.name in EXCLUDED_NAMES:
             continue
@@ -130,6 +139,39 @@ def _git_revision(skill_root: Path) -> dict[str, Any] | None:
     return {"value": head.lower(), "source": "git_head", "verified": True}
 
 
+def _installed_revision(
+    skill_root: Path, digest: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Read installer-recorded source identity for unchanged installed bytes."""
+    path = skill_root / INSTALLATION_IDENTITY_NAME
+    try:
+        if not path.is_file() or path.is_symlink():
+            return None
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    revision = record.get("revision")
+    if (
+        record.get("schema_version") != INSTALLATION_IDENTITY_SCHEMA_VERSION
+        or record.get("kind") != INSTALLATION_IDENTITY_KIND
+        or record.get("status") != INSTALLATION_IDENTITY_STATUS
+        or any(record.get(key) != digest[key] for key in digest)
+        or not isinstance(revision, dict)
+        or revision.get("verified") is not True
+        or revision.get("source") != "git_head"
+        or not isinstance(revision.get("value"), str)
+        or SHA_PATTERN.fullmatch(revision["value"]) is None
+    ):
+        return None
+    return {
+        "value": revision["value"].lower(),
+        "source": "installer_record",
+        "verified": True,
+    }
+
+
 def consuming_project(environ: dict[str, str] | None = None) -> dict[str, Any]:
     """Record the CI commit of the project that invoked the skill, separately."""
     environ = os.environ if environ is None else environ
@@ -147,7 +189,8 @@ def skill_identity(
 ) -> dict[str, Any]:
     """Describe the executed skill: its digest, and the revision claim for it."""
     digest = tree_digest(skill_root)
-    revision = _git_revision(Path(skill_root).resolve())
+    root = Path(skill_root).resolve()
+    revision = _git_revision(root) or _installed_revision(root, digest)
     if revision is None:
         if claimed:
             if not SHA_PATTERN.match(claimed):

@@ -34,7 +34,16 @@ sys.path.insert(0, str(SOURCE / "lib" / "python"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agent_profile import AgentProfile, AgentProfileError, AgentProfileReason
-from core.provenance import _git, _included, skill_identity, tree_digest
+from core.provenance import (
+    INSTALLATION_IDENTITY_KIND,
+    INSTALLATION_IDENTITY_NAME,
+    INSTALLATION_IDENTITY_SCHEMA_VERSION,
+    INSTALLATION_IDENTITY_STATUS,
+    _git,
+    _included,
+    skill_identity,
+    tree_digest,
+)
 from core.signals import recoverable_signals as _recoverable_signals
 
 RECOVERY = {
@@ -123,6 +132,51 @@ def package_files(source: Path) -> list[Path]:
         if path.is_symlink():
             raise ValueError("skill_symlink_unexpected")
     return [path.relative_to(source) for path in _included(source)]
+
+
+def _write_installation_identity(
+    staging: Path, digest: dict[str, Any], revision: dict[str, Any]
+) -> None:
+    """Record the verified source identity beside the installed bytes."""
+    if revision.get("verified") is not True:
+        return
+    record = {
+        "schema_version": INSTALLATION_IDENTITY_SCHEMA_VERSION,
+        "kind": INSTALLATION_IDENTITY_KIND,
+        "status": INSTALLATION_IDENTITY_STATUS,
+        **digest,
+        "revision": revision,
+    }
+    path = staging / INSTALLATION_IDENTITY_NAME
+    descriptor = os.open(
+        path,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(record, handle, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _installed_matches(
+    destination: Path,
+    expected_digest: dict[str, Any],
+    expected_revision: dict[str, Any],
+) -> bool:
+    """Accept an idempotent install only when bytes and source identity match."""
+    if tree_digest(destination) != expected_digest:
+        return False
+    if expected_revision.get("verified") is not True:
+        return True
+    installed = skill_identity(destination, environ={})
+    revision = installed.get("revision")
+    return (
+        isinstance(revision, dict)
+        and revision.get("verified") is True
+        and revision.get("value") == expected_revision.get("value")
+    )
 
 
 def _journal_path(skills_dir: Path) -> Path:
@@ -350,7 +404,7 @@ def _install_unlocked(
             upgrade
             and not destination.is_symlink()
             and destination.is_dir()
-            and tree_digest(destination) == expected_digest
+            and _installed_matches(destination, expected_digest, identity["revision"])
         ):
             result.update(
                 status="DRY_RUN" if dry_run else "PASS", already_installed=True
@@ -384,6 +438,9 @@ def _install_unlocked(
                     target = staging / relative
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source / relative, target)
+                _write_installation_identity(
+                    staging, expected_digest, identity["revision"]
+                )
                 if tree_digest(staging) != expected_digest:
                     raise ValueError("installed_digest_mismatch")
                 if expected_fingerprint is not None:

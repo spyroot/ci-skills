@@ -8,6 +8,7 @@ dirty subtree must never silently claim the commit that does not contain it.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,66 @@ def test_an_operator_claim_is_recorded_as_a_claim_not_as_evidence(installed):
 
     assert identity["revision"] == {
         "value": "c" * 40,
+        "source": "argv:--revision",
+        "verified": False,
+    }
+
+
+def test_matching_installer_record_verifies_an_installed_copy(installed):
+    provenance = _provenance()
+    digest = provenance.tree_digest(installed)
+    (installed / provenance.INSTALLATION_IDENTITY_NAME).write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "kind": "skill_install",
+                "status": "PASS",
+                **digest,
+                "revision": {
+                    "value": "a" * 40,
+                    "source": "git_head",
+                    "verified": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    identity = provenance.skill_identity(installed, None)
+
+    assert identity["digest"] == digest["digest"]
+    assert identity["revision"] == {
+        "value": "a" * 40,
+        "source": "installer_record",
+        "verified": True,
+    }
+
+
+def test_installer_record_with_different_bytes_fails_closed(installed):
+    provenance = _provenance()
+    digest = provenance.tree_digest(installed)
+    record = {
+        "schema_version": "1.0",
+        "kind": "skill_install",
+        "status": "PASS",
+        **digest,
+        "revision": {
+            "value": "a" * 40,
+            "source": "git_head",
+            "verified": True,
+        },
+    }
+    (installed / provenance.INSTALLATION_IDENTITY_NAME).write_text(
+        json.dumps(record), encoding="utf-8"
+    )
+    (installed / "scripts" / "core" / "thing.py").write_text(
+        "value = 2\n", encoding="utf-8"
+    )
+
+    identity = provenance.skill_identity(installed, "b" * 40)
+
+    assert identity["revision"] == {
+        "value": "b" * 40,
         "source": "argv:--revision",
         "verified": False,
     }
@@ -141,6 +202,19 @@ def test_the_digest_ignores_bytecode_caches(installed):
     (cache / "thing.cpython-311.pyc").write_bytes(b"\x00\x01")
 
     assert provenance.tree_digest(installed) == before
+
+
+def test_only_the_root_installer_record_is_excluded_from_the_digest(installed):
+    provenance = _provenance()
+    before = provenance.tree_digest(installed)
+    (installed / provenance.INSTALLATION_IDENTITY_NAME).write_text(
+        "root record\n", encoding="utf-8"
+    )
+    assert provenance.tree_digest(installed) == before
+
+    nested = installed / "scripts" / provenance.INSTALLATION_IDENTITY_NAME
+    nested.write_text("ordinary nested payload\n", encoding="utf-8")
+    assert provenance.tree_digest(installed) != before
 
 
 def test_the_digest_covers_the_path_not_only_the_content(installed):

@@ -248,7 +248,9 @@ FINGERPRINT="$("$CI_SKILLS_INSTALLER" --dry-run | jq -r '.fingerprint')"
 
 `install.sh` forwards to [the copy installer](tools/install_ci_skills.py). It installs at
 `$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The installed copy is
-independent of the checkout. It also installs the bundled `glab-stack` skill under `$REPO_ROOT/.agents/skills` in the
+independent of the checkout. The staged copy includes `INSTALLATION.json`, an installer-owned record of the clean
+source revision and measured skill digest; installed commands accept it only while the current bytes still match.
+It also installs the bundled `glab-stack` skill under `$REPO_ROOT/.agents/skills` in the
 repository where you run the installer.
 When `glab` is missing, it installs the declared package with Homebrew on macOS or `apt-get`, `dnf`, or `yum` on Linux.
 If Homebrew is missing, the installer points to its installation instructions. The package's
