@@ -7,11 +7,10 @@ import json
 import os
 import re
 import shutil
+import tomllib
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
-
-import tomllib
+from typing import Any, Final
 
 from .catalog import AUTHORITIES, PROJECT_DIR, TARGET_FILENAME
 from .runtime import error_class, run_command_tail
@@ -19,6 +18,8 @@ from .target import Target, TargetError, load_target
 
 BINDING_ENV = "K8S_ADMIN_DIAGNOSTICS_BINDING"
 TARGET_ENV = "CI_SKILLS_TARGET"
+SMOKE_ENV: Final = "ci-skills-smoke"
+SMOKE_TARGET_FILENAME: Final = "ci-skills-smoke.toml"
 DEFAULT_TARGET = Path(PROJECT_DIR) / TARGET_FILENAME
 ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
@@ -31,8 +32,10 @@ def target_candidates() -> list[tuple[str, Path]]:
     configured = (os.environ.get(TARGET_ENV) or "").strip()
     if configured:
         candidates.append((f"env:{TARGET_ENV}", Path(configured).expanduser()))
-    candidates.append(("project", Path.cwd() / DEFAULT_TARGET))
-    candidates.append(("user", Path.home() / DEFAULT_TARGET))
+    filename = SMOKE_TARGET_FILENAME if os.getenv(SMOKE_ENV) else TARGET_FILENAME
+    relative = Path(PROJECT_DIR) / filename
+    candidates.append(("project", Path.cwd() / relative))
+    candidates.append(("user", Path.home() / relative))
     return candidates
 
 

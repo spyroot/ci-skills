@@ -9,6 +9,11 @@ in `target_selection`:
 3. `./.ci-skills/target.toml` in the working directory: `project:`.
 4. `~/.ci-skills/target.toml` for the current user: `user:`.
 
+For smoke testing, `env ci-skills-smoke=1 <command>` changes only the basename
+in the project and user tiers to `ci-skills-smoke.toml`. It takes no path or
+filename argument; directory precedence and relative credential resolution stay
+unchanged. Without the switch, both tiers use `target.toml`.
+
 Each receipt reference includes the resolved absolute path. Portable receipts
 replace that path with a stable digest token.
 

@@ -29,6 +29,8 @@ from .catalog import (
     missing_required_options,
 )
 from .credentials import bind_gitlab_session, bind_sources
+from .gitlab_api import GlabAPIClient
+from .gitlab_session import BoundGitLabSession
 from .portable import portable
 from .project_binding import BINDING_ENV, resolve_target_file
 from .project_binding import resolve_target as resolve_project_target
@@ -43,7 +45,7 @@ from .status import (
     PROFILE_FULL,
     exit_code,
 )
-from .target import GitLabOperationTarget, Target, TargetError
+from .target import GitLabOperationTarget, Target, TargetError, select_gitlab_reference
 
 # The documented per-host location. Keeping it here rather than in each script
 # means one answer to "where does the target live", and the script-interface
@@ -97,6 +99,51 @@ def resolve_gitlab_target(
     )
 
 
+def setup_gitlab_operation(
+    explicit_target: str | None,
+    explicit_binding: str | None,
+    *,
+    project: str | None,
+    group: str | None,
+    revision: str | None,
+    api_client: GlabAPIClient | None = None,
+) -> tuple[BoundGitLabSession, dict[str, Any]]:
+    """Bind a live GitLab target and return its existing access read-back.
+
+    :param explicit_target: Operator-selected target file, or normal resolution.
+    :param explicit_binding: Operator-selected project binding, or normal resolution.
+    :param project: Optional project path or numeric ID override.
+    :param group: Optional group path or numeric ID override.
+    :param revision: Optional claimed source revision of the installed skill.
+    :param api_client: Existing API client, or the access check's default client.
+    :returns: The same bound session used for access and its receipt, including
+        a BLOCKED receipt when provider read-back does not prove access.
+    :raises Exception: The original setup failure, carrying its target,
+        credential or access stage in ``gitlab_setup_source``.
+    """  # noqa: DOC503 - retain the original setup exception and type
+    source = "target"
+    try:
+        target, target_source = resolve_gitlab_target(
+            explicit_target, explicit_binding, dry_run=False
+        )
+        target_kind, reference = select_gitlab_reference(
+            target, project=project, group=group
+        )
+        source = "credential"
+        session = bind_gitlab_session(
+            target,
+            target_kind=target_kind,
+            target_reference=reference,
+            target_source=target_source,
+            revision=revision,
+        )
+        source = "access"
+        return session, check_gitlab_operation_access(session, api_client=api_client)
+    except Exception as exc:
+        exc.gitlab_setup_source = source
+        raise
+
+
 def output_mode(args: argparse.Namespace) -> str:
     """Choose the output format, defaulting to JSON for a non-terminal reader.
 
@@ -124,11 +171,47 @@ class MachineArgumentParser(argparse.ArgumentParser):
     """Keep parser failures in the selected machine-readable result shape."""
 
     def __init__(
-        self, *args: Any, report_kind: str | None = None, **kwargs: Any
+        self,
+        *args: Any,
+        report_kind: str | None = None,
+        help_contract: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
+        kwargs["allow_abbrev"] = False
         super().__init__(*args, **kwargs)
         self.report_kind = report_kind
+        self.help_contract = help_contract
         self._raw_argv: tuple[str, ...] = ()
+
+    def format_help(self) -> str:
+        """Render ordered help from a command contract when one is supplied.
+
+        :returns: Human help, with argparse rendering every accepted option.
+        """
+        contract = self.help_contract
+        if contract is None:
+            return super().format_help()
+        formatter = self._get_formatter()
+        for heading, key in (("Summary", "summary"), ("Description", "description")):
+            formatter.start_section(heading)
+            formatter.add_text(contract[key])
+            formatter.end_section()
+        formatter.start_section("Examples")
+        for example in contract["examples"]:
+            formatter.add_text(f"{example['description']}: {example['command']}")
+        formatter.end_section()
+        formatter.start_section("Options")
+        formatter.add_arguments(self._actions)
+        formatter.end_section()
+        formatter.start_section("Output modes")
+        for mode, meaning in contract["output_modes"].items():
+            formatter.add_text(f"{mode}: {meaning}")
+        formatter.end_section()
+        formatter.start_section("Usage")
+        formatter.add_text(contract["usage"])
+        formatter.add_text("Exit 0: success; exit 2: invalid node or arguments.")
+        formatter.end_section()
+        return formatter.format_help()
 
     def parse_args(
         self, args: list[str] | None = None, namespace: argparse.Namespace | None = None
@@ -215,6 +298,19 @@ def parser(
         metavar="SHA",
         help="exact source commit SHA (required for live installed copies without Git metadata)",
     )
+    add_log_arguments(result)
+    if output_dir:
+        result.add_argument(
+            "--output-dir", metavar="PATH", help="write paired JSON and human reports"
+        )
+    return result
+
+
+def add_log_arguments(result: argparse.ArgumentParser) -> None:
+    """Add the shared diagnostic controls without adding provider arguments.
+
+    :param result: Parser receiving the common diagnostic options.
+    """
     result.add_argument(
         "--log-format",
         choices=("text", "json"),
@@ -237,11 +333,6 @@ def parser(
         metavar="ID",
         help="stable identifier for diagnostic logs",
     )
-    if output_dir:
-        result.add_argument(
-            "--output-dir", metavar="PATH", help="write paired JSON and human reports"
-        )
-    return result
 
 
 def log_event(
@@ -298,7 +389,14 @@ def log_event(
             stream.write(line)
 
 
-def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> int:
+def _failure(
+    args: argparse.Namespace,
+    kind: str,
+    source: str,
+    reason: str,
+    *,
+    cleanup_errors: list[dict[str, str]] | None = None,
+) -> int:
     """Emit a stable machine-readable failure even when normal rendering fails."""
     data = {
         "schema_version": "1.0",
@@ -310,6 +408,10 @@ def _failure(args: argparse.Namespace, kind: str, source: str, reason: str) -> i
         "errors": [{"source": source, "reason": sanitize(reason, 240)}],
         "summary": {"record_count": 0, "error_count": 1},
     }
+    if cleanup_errors:
+        data["errors"].extend(cleanup_errors)
+        data["summary"]["error_count"] = len(data["errors"])
+        data["cleanup"] = {"status": BLOCKED}
     try:
         log_event(
             args,

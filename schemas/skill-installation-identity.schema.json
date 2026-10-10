@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/skill-installation-identity.schema.json",
+  "title": "Installed CI skill source identity",
+  "description": "Installer evidence that an installed skill payload matches a clean repository revision.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "algorithm",
+    "digest",
+    "file_count",
+    "revision"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "skill_install"},
+    "status": {"const": "PASS"},
+    "algorithm": {"const": "sha256-tree-v1"},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "file_count": {"type": "integer", "minimum": 1},
+    "revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "source", "verified"],
+      "properties": {
+        "value": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "source": {"const": "git_head"},
+        "verified": {"const": true}
+      }
+    }
+  }
+}

@@ -1,0 +1,94 @@
+schemaVersion: "1.0"
+jobs:
+  - job: validate
+    class: wiring
+    command: scripts/ci/static.sh --base REF
+    requiredTools:
+      - actionlint
+      - bash
+      - bats
+      - check-jsonschema
+      - curl
+      - git
+      - gitleaks
+      - go
+      - jq
+      - markdownlint-cli2
+      - node
+      - npm
+      - pydoclint
+      - python
+      - ruff
+      - shellcheck
+      - shfmt
+      - yamllint
+      - yq
+    artifactUnderTest: repository
+    mutation: none
+    timeoutSeconds: 1200
+    evidencePath: reports/smoke/validate.json
+    cleanupPolicy: test-directory-only
+    releaseBlocking: true
+    requiredSteps: [tools, static, style, schema, unit, bats, acceptance, whitespace]
+    smokeChecks:
+      startup: tools
+      tools: tools
+      entrypoint: static
+      negative_path: unit
+      read_back: acceptance
+      cleanup: acceptance
+  - job: gate-ci-skills-endpoints
+    class: wiring
+    command: python gates/gate-ci-skills-endpoints.py --base REF --json
+    requiredTools: [check-jsonschema, curl, jq, python]
+    artifactUnderTest: repository
+    mutation: none
+    timeoutSeconds: 600
+    evidencePath: reports/smoke/gate-ci-skills-endpoints.json
+    cleanupPolicy: test-directory-only
+    releaseBlocking: true
+    requiredSteps: [tools, schema, endpoint_unit, endpoint_gate]
+    smokeChecks:
+      startup: tools
+      tools: tools
+      entrypoint: endpoint_gate
+      negative_path: endpoint_unit
+      read_back: endpoint_gate
+      cleanup: endpoint_gate
+  - job: test-install
+    class: offline-component
+    command: python -m pytest -q tests/python/test_installed_package.py
+    requiredTools: [bash, bats, check-jsonschema, curl, jq, pydoclint, python]
+    artifactUnderTest: installed-package
+    mutation: test-directory-only
+    timeoutSeconds: 1200
+    evidencePath: reports/smoke/test-install.json
+    cleanupPolicy: test-directory-only
+    releaseBlocking: true
+    requiredSteps: [tools, schema, tests, docs]
+    smokeChecks:
+      startup: tools
+      tools: tools
+      entrypoint: tests
+      negative_path: tests
+      read_back: tests
+      cleanup: tests
+  - job: required-result
+    aggregationJob: true
+    class: wiring
+    command: python tools/ci_required_result.py aggregate --job required-result
+    requiredTools: [curl, jq, python]
+    artifactUnderTest: required-ci-evidence
+    mutation: github-commit-status
+    timeoutSeconds: 300
+    evidencePath: reports/smoke/required-result.json
+    cleanupPolicy: no-temporary-external-resources
+    releaseBlocking: true
+    requiredSteps: [aggregate, status]
+    smokeChecks:
+      startup: aggregate
+      tools: aggregate
+      entrypoint: aggregate
+      negative_path: aggregate
+      read_back: status
+      cleanup: aggregate

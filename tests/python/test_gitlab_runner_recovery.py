@@ -13,6 +13,7 @@ from tests.python.conftest import import_script_module
 ACTION = import_script_module("core.gitlab_actions")
 API = import_script_module("core.gitlab_api")
 RUNNERS = import_script_module("core.gitlab_runners")
+RUNNER = import_script_module("gitlab_runner")
 
 
 def _list(endpoint):
@@ -153,8 +154,7 @@ def test_live_plan_cli_binds_group_ids_without_post(monkeypatch, tmp_path, capsy
     )
 
     assert (
-        ACTION.run_action_cli(
-            "gitlab_runner",
+        RUNNER.main(
             [
                 "assign",
                 "--group",

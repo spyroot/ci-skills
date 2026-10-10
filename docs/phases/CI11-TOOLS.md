@@ -3,12 +3,263 @@
 Status: proposed. Order and dependencies: CI10-PHASES, Phases. Delivered one
 tool per pull request, in the order of the catalogue.
 
+## Motivation
+
+An agent can already perform these operations through `glab`, `oc`, and the other existing clients. ci-skills packages
+recurring operations into deterministic, tested combinations: construct the request, call the existing API, parse its
+JSON, normalize and reduce the result when useful, and perform the operation's required read-back. This avoids repeated
+`jq` construction, missed response keys, and corrective reads caused by parsing mistakes. The same approach applies to
+GET, PUT, and POST; normalization preserves the provider's result and error meaning.
+
+The other benefit is less context. Offer the actions available at the current node and small pointers to relevant
+references. A broad cluster needs little output; selecting a smaller cluster permits more detail about that narrower
+scope. The agent chooses a command, requests its native `--help`, or follows a reference when needed. Do not return the
+whole catalogue or provider response and make the agent search it.
+
+This work consumes existing APIs; it does not implement GitLab or repair its concurrency semantics. Two agents updating
+the same milestone at the same instant is not, by itself, a reason to add coordination code or another test family.
+Additional handling needs an existing requirement or a demonstrated defect in behavior ci-skills owns. Preserve the
+existing safeguards while refactoring and keep tests focused on actual parsing, execution, and failure paths.
+
+## Proposition interface
+
+A **proposition** is a compact, machine-readable offering of the tools and references available at one node. The
+entrypoint proposes the main clusters; each selected node proposes its own relevant tools and references using the
+same node shape. Derive these offerings from `ci-skills/lib/python/core/catalog.py`, the existing command catalogue,
+rather than maintaining a second inventory. The proposition interface handles discovery; the callback list handles
+execution order.
+
+This is a graph: a node may offer a related pipeline, job, or milestone tool as well as its own combinations. The same
+command or reference can be reachable from several nodes without duplicating its implementation or document. Return
+the current node's relevant connections, not every descendant. Reference links are optional reading, not prerequisites
+or automatically fetched content.
+
+The following payload examples specify the proposed interface, not installed commands. Their short family names and
+reference paths are illustrative; existing `gitlab_runner.py`, `gitlab_pipeline.py`, `gitlab_milestone.py`, and
+`gitlab_job.py` remain the installed entrypoints until a capability explicitly introduces another name. A live offering
+must use its actual installed filename and must not advertise a proposed command as executable.
+
+### Root example
+
+The `glab` part of the root offers command families and one relevant reference:
+
+```json
+{
+  "glab": {
+    "tools": {
+      "runner.py": {},
+      "pipeline.py": {},
+      "milestone.py": {},
+      "jobs.py": {}
+    },
+    "reference": {
+      "mcp": {
+        "summary": "GitLab MCP configuration and toolsets.",
+        "pointer": "references/mcp.md"
+      }
+    }
+  }
+}
+```
+
+### Jobs example
+
+Selecting `jobs.py` returns its own proposition directly, including a combination and a task-specific reference:
+
+```json
+{
+  "tools": {
+    "watch.py": {},
+    "create_tagged_protected_job.py": {}
+  },
+  "reference": {
+    "pipeline variables": {
+      "summary": "Predefined CI/CD variables reference",
+      "pointer": "references/predefine.md"
+    }
+  }
+}
+```
+
+An entrypoint's descriptive filename already tells the agent what it does. Its empty object does not need a
+repeated summary, entrypoint, or `args: ["--describe"]` wrapper. The agent can use `--help` for arguments. A node can
+include related tools from other command families when useful; narrowing the scope does not require removing them.
+
+### Proposition schema
+
+The [reference-next schema](../../schemas/reference-next.schema.json) owns version `2.0` propositions and retains the
+legacy 1.x `choices` envelope. The proposition response revision is `2.0`;
+a proposition reference's `pointer` is a path string, as shown in the root/jobs examples. Preserve the separate 1.x
+command-pointer definitions (`action`, `entrypoint`, `args`) still used by the
+[reference-section schema](../../schemas/reference-section.schema.json) and existing result schemas. Proposition
+reference paths do not reuse that command-pointer object.
+
+Every response carries `schema_version` alongside its payload members. The examples above omit only that response
+metadata to show the root and node shapes. The schema describes structure; it does not prescribe which reference an
+agent must read or require traversal through `run`, `read`, or `describe` before invoking a command.
+
+| Element | Shape |
+| --- | --- |
+| Root payload | Mapping of cluster names to proposition nodes. |
+| Node payload | `tools` and `reference` mappings, returned directly when that node is selected. |
+| `tools` | Mapping of actual entrypoint filenames to `{}` in this proposition version. |
+| `reference` | Mapping of reference names to a short `summary` and concrete `pointer`. |
+| `schema_version` | Response version `2.0` for this shape. |
+
+This schema defines both complete response shapes without an extra payload wrapper. The root carries
+`schema_version` beside its named clusters; a selected node carries it beside `tools` and `reference`. Both reuse the
+same node definition:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["schema_version"],
+      "properties": {
+        "schema_version": {"const": "2.0"}
+      },
+      "additionalProperties": {"$ref": "#/$defs/node"}
+    },
+    {
+      "allOf": [
+        {"$ref": "#/$defs/node"},
+        {"required": ["schema_version"]}
+      ]
+    }
+  ],
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["tools", "reference"],
+      "properties": {
+        "schema_version": {"const": "2.0"},
+        "tools": {
+          "type": "object",
+          "additionalProperties": {"type": "object", "maxProperties": 0}
+        },
+        "reference": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["summary", "pointer"],
+            "properties": {
+              "summary": {"type": "string"},
+              "pointer": {"type": "string"}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
+```
+
+This section revises the discovery shape proposed in CI09-REFERENCE; that phase's older forced `run`/`read` traversal
+is superseded by this specification. Existing per-command help and result contracts remain available.
+`ci-skills/bin/reference.py`, the installed discovery entrypoint, accepts a cluster or installed filename and emits this
+node shape without fetching references. For example: `reference.py glab` or `reference.py gitlab_job.py`.
+
+## Callback workflow boilerplate
+
+Every workflow main follows this composition pattern. `core/action.py` implements the shared callback lifecycle,
+provider bases, context, executor, and emitter. Existing GitLab action mains compose `GitLabAuth` and their concrete
+operation callbacks. The toolbox/Harbor atoms in this example remain assigned to their delivery rows below.
+
+`build_parser()` owns this workflow's arguments; the action models map those arguments;
+`ExecutionContext` supplies the selected targets and provider services; `Executor` runs the ordered callbacks;
+`emit_result()` adapts the existing report emitter and exit-code mapping.
+
+```python
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    build = BuildToolbox(action=BuildAction.from_args(args))
+    publish = PublishToolbox(action=PublishAction.from_args(args), build=build)
+    runner = configure_runner(action=RunnerAction.from_args(args), image=publish)
+    result = Executor(
+        context=ExecutionContext.from_args(args),
+        callbacks=[
+            K8SAuth(), build,
+            HarborAuth(), publish,
+            GitLabAuth(), runner, VerifyRunner(runner=runner),
+        ],
+    ).run()
+    return emit_result(result, args)
+```
+
+This is one combo: build the toolbox on OpenShift, publish its image to Harbor, configure the selected runner/CI to use
+it, and verify the result. Dependencies are explicit: build result → published image → runner configuration. The
+`configure_runner()` factory selects a callback for the requested runner type; execution stays in that callback.
+Different mains expose different arguments and combinations. Adding a combo should mostly change this short list;
+introduce a new atom only when an operation is missing. Moving all orchestration into a bespoke workflow function does
+not satisfy the pattern.
+
+### Callback ownership and lifecycle
+
+```text
+AbstractCallback
+├── GitlabCallback
+├── K8SCallback
+└── HarborCallback
+
+AbstractCallbacks = list[AbstractCallback]
+```
+
+`AbstractCallback` declares `collect()`, `run()`, `update()`, and `cleanup()` with `abc.abstractmethod`. One shared
+optional-hook implementation supplies no-op defaults through the provider bases, so an atomic callback can implement
+one, two, or all four hooks. `listify()` accepts one callback or a callback sequence and produces the ordered
+`AbstractCallbacks` list. Provider bases own shared client/session access; concrete callbacks own operation state and
+behavior. The generic executor must not dispatch on concrete provider names.
+
+For live execution, finish a callback's applicable `collect()`, `run()`, and `update()` hooks before entering the next
+callback. Collect reads required inputs; run performs the atomic operation; update performs its declared post-run work.
+On completion or failure, invoke cleanup for entered callbacks in reverse order, retaining the primary failure and
+cleanup evidence. `core/signals.py`, shared with the installer, routes SIGINT, SIGTERM, and SIGHUP through this
+cleanup path and restores the previous signal handlers. A failed or incomplete step stops dependent work. Cleanup
+respects existing resource ownership and
+recovery behavior; it does not remove a successfully requested persistent runner, milestone, or image.
+
+Authentication callbacks establish the provider services used by later callbacks. Typed results carry created IDs and
+image identities to explicit consumers. `target.toml`, owned by `core/endpoints.py` and resolved by `core/target.py`,
+selects endpoints and credential sources. Build settings, tags, requested changes, and other operation inputs come
+from that main's arguments or its selected workflow specification. Existing plan/apply confirmation and independent
+read-back remain part of action execution; the lifecycle does not authorize a write.
+
+### Ground the refactor in existing code
+
+The following owners are already in `ci-skills/lib/python/core/`; move operation logic into the appropriate methods
+and reuse these facilities. Do not copy them into parallel implementations.
+
+- **`target.py`, `endpoints.py`, `credentials.py`**: Reuse target resolution and the existing `GitLabAuthentication`
+  interface. `GitLabAuth` calls the existing binding/access path.
+- **`gitlab_session.py`, `access.py`, `gitlab_api.py`**: Reuse `BoundGitLabSession`, `check_gitlab_operation_access()`,
+  and `GlabAPIClient` as GitLab callback services.
+- **`gitlab_actions.py`**: Extract shared plan/apply/report orchestration from `run_action_cli()` into the
+  already-planned `core/action.py`; `Executor` owns sequencing. Keep CLI parsing at the boundary.
+- **`gitlab_milestones.py`**: Move `prepare()`, `apply()`, and `_create()` behavior into typed milestone actions and
+  callbacks, preserving exact-match checks and create guards.
+- **`gitlab_runners.py`**: Move `_create()`, `_assign()`, `_tag()`, and `read()` into create, attach, tag, and
+  read/verify callbacks. Preserve token handling, scope checks, and recovery.
+- **`runtime.py`, `collect.py`, existing Kubernetes collectors**: Reuse bounded subprocess execution and collection
+  logic through Kubernetes callbacks.
+- **`report.py`, `status.py`, `provenance.py`**: Reuse output, redaction, status/exit mapping, and evidence identities
+  through the final adapter.
+
+Keep guarded operations intact when moving them. For example, milestone `_create()` holds its `create_guard` across
+lookup, mutation, uncertain-write reconciliation, and read-back. It can remain one `run()` implementation rather than
+splitting that guard incorrectly across hooks. Existing commands keep their arguments and result behavior during the
+refactor. Harbor/toolbox and other missing atoms follow their delivery rows below; their absence is not a reason to
+rebuild the transports or collectors already present.
+
 ## Goal
 
 Every tool does one task we named, with a machine-readable spec, and nothing
 more. No open-ended implementation, no invented behaviour: a tool exists only
 when a sentence we recorded or a source script stands behind it. The port
-recipe below owns the rules; the four source-row sections name each source
+recipe below applies the proposition and callback specification above; the four source-row sections name each source
 script by path relative to the source repo root at the inventory commit,
 both recorded in the private source inventory. That project's name never
 enters a tracked file: the neutrality gate forbids it.
@@ -119,20 +370,20 @@ with config keys and concurrency:
 - `ci_failure_trace.py`: `--project`, `--pipeline-id`, `--margin S` (default
   60); `[gitlab]`, `[kubernetes]`; the job read, then the event reads over the
   window in parallel.
-- `ocp_route.py`: `--namespace`, `--search`, `--probe`; `[openshift.routes]`;
+- `ocp_route.py`: `--namespace`, `--search`, `--probe`; `[kubernetes]`;
   per-route probes in parallel.
 - `ocp_ha.py`: `--search`; `[kubernetes]`; nodes, etcd, cluster operators and
   machine config pools read in parallel.
-- `ocp_machine.py`: `--node-spec PATH`, `--search`; `[openshift] node_spec`;
+- `ocp_machine.py`: `--node-spec PATH`, `--search`; `[kubernetes]`;
   per-machine reads in parallel.
 - `ocp_iso.py rhcos-report|rhcos-download|rhcos-serve|node-build|node-serve|delete`:
   `--node NAME` (repeatable), `--output-dir`; the apply flags on every verb
-  but `rhcos-report`; `[openshift.iso]`; the plan's reads in parallel, builds
+  but `rhcos-report`; `[kubernetes]`, caller-selected ISO inputs; the plan's reads in parallel, builds
   inside the Pod serial.
 - `ocp_csr.py`: `--search` over names and signers; the apply flags (approve
   only the planned names and signers); `[kubernetes]`; one CSR list.
 - `k8s_verify_mtu_consistency.py` (extended): the MachineConfig rendering in the plan
-  and the fingerprinted apply behind the apply flags; `[openshift.nic_mtu]`;
+  and the fingerprinted apply behind the apply flags; `[kubernetes]`, caller-selected NIC MTU inputs;
   `butane` is a required tool.
 - `k8s_state.py`: `--namespace`, `--node`, `--search`, the `time_ranged`
   tier; `[kubernetes]`; every independent list read in parallel.
@@ -145,7 +396,7 @@ with config keys and concurrency:
   `ceph_nfs.py`: `--ceph-namespace`; read-only by default, the write test
   behind the apply flags; `[kubernetes]`.
 - `toolbox_build.py plan|apply`: `--tag`, `--builder openshift|podman`;
-  `[toolbox]`, `[harbor]`; one build.
+  caller-selected build inputs, `[kubernetes]` and `[harbor]` access; one build.
 - `harbor_push.py plan|apply`: `--image`, `--tag`, `--authfile PATH`;
   `[harbor]`; one copy per image, a bounded pool across images.
 - `harbor_robot.py create`: `--name` (the robot's exact name), `--permission`
@@ -174,8 +425,9 @@ The same ten steps for every row; the row repeats them with the real paths.
 
 2. **Bound the task.** One tool does one task we named.
 
-3. **Library first.** Put the logic in `ci-skills/lib/python/core/<module>.py` as
-   functions over the existing transports: `core.gitlab_api.GlabAPIClient`
+3. **Library first.** Move atomic operation logic into the callback methods described in
+   [Callback workflow boilerplate](#callback-workflow-boilerplate), under `ci-skills/lib/python/core/`.
+   Reuse pure helpers and the existing transports: `core.gitlab_api.GlabAPIClient`
    for GitLab, `core.runtime.run_command_bounded` for `oc`, `kubectl`,
    `podman` and `skopeo`, and one bounded standard-library HTTP helper
    `core/http.py` shared by the Harbor API and the reference fetch. Never a
@@ -212,14 +464,16 @@ The same ten steps for every row; the row repeats them with the real paths.
    `tools/render_manifest.py` turns it into the `tools.json` entry: it adds the universal options, renames
    `requires` to `requires_authorities` and `kind` to `report_kind`, and writes `mutates` as `read_only`,
    inverted. `schemas/skill-manifest.schema.json` must accept the new `tools.json` and
-   `schemas/command-contract.schema.json` the new `--describe` output. Add the tool's `NAV_PLACEMENT` row, and a
-   `NAV_NODES` row if its node is new (CI09-REFERENCE section 3, Declarations); the navigator derives the rest.
+   `schemas/command-contract.schema.json` the new `--describe` output. Extend the catalogue's placement declarations
+   for the relevant proposition nodes; the [proposition interface](#proposition-interface) defines their output.
 
-5. **Thin main.** `ci-skills/bin/<name>.py`: `build_parser()` plus one
-   `execute` call, with the shared locator import.
+5. **Thin main.** `ci-skills/bin/<name>.py` follows the exact
+   [callback boilerplate](#callback-workflow-boilerplate): parse its arguments, construct actions and callbacks,
+   connect their results, run `Executor`, and emit through the shared adapter, with the shared locator import.
 
-6. **Strip the project.** Every host, project, group, namespace, image name,
-   robot name, path and timeout moves to a `target.toml` key or a flag.
+6. **Strip the project.** Resolve endpoints and credential sources through the existing target contract.
+   Pass operation inputs such as namespace, image name, robot name, build paths, and timeouts through the workflow's
+   arguments or selected specification. Read observable resource state from the provider.
 
 7. **Mutations.** Plan by default with `plan_digest`, `--apply --confirm-plan
    DIGEST`, read before and after, independent read-back, cleanup on every
@@ -238,20 +492,18 @@ The same ten steps for every row; the row repeats them with the real paths.
    Contracts"); no such tool exists in this catalogue.
 
 9. **Tests.** Mocked external commands through the `conftest.py` fixtures;
-   the pinned mutating matrix for every `apply`; a receipt kind in
-   `tests/acceptance/expected.toml` once the live target is declared there.
+   the pinned mutating matrix for every `apply`; initial runtime access proof
+   followed by the tool's operation and read-back receipts.
 
 10. **Docs.** The catalog entry renders `tools.json`; one routing row in
     `SKILL.md`; the row here carries source, destination, adaptation and
     receipt kind. The source repo is not edited.
 
-## Config entries this phase adds to `target.toml.template`
+## Target access and workflow inputs
 
-Nonsecret values only; credentials by file reference, mode 0600, never in a
-report. This block is the one owner of the keys; each comment names the
-source line that reads the value (paths relative to the source repo root).
-Values in angle brackets are the consuming project's; nothing here is a
-default the tool invents.
+`core/endpoints.py` owns target keys; new target entries contain endpoint and access information only. The proposed
+Harbor entries below use nonsecret values and credential file references, mode 0600, never credential values in a
+report. Comments identify the existing source inventory. Values in angle brackets are selected by the caller.
 
 ```toml
 [harbor]
@@ -260,34 +512,25 @@ project = "<project>"                    # harbor_manager.sh:20; toolbox.yaml:10
 credential_file = "<0600 file>"          # {username, password} JSON or dockerconfigjson; replaces the
                                          # env pair harbor_manager.sh:64,131 and bindings.bash:63-64
 admin_credential_file = "<0600 file>"    # robots and projects only; no source, built to the sentence
-anonymous_read = false                   # harbor_manager.sh:115-134
-no_proxy = "<hosts>"                     # harbor_manager.sh:132,148
-timeout_seconds = 30                     # rendered_images.bash:47-49
-attempts = 3                             # rendered_images.bash:47-49
-backoff_seconds = 2                      # rendered_images.bash:47-49
-parallel = 8                             # push_helm.sh:29-30
-page_size = 100                          # harbor_manager.sh:161,178
-
-[toolbox]
-spec = "<path>"                          # toolbox_image.bash:22
-source_repo = "<path>"                   # toolbox_image.bash:182-185
-context = "<path>"                       # toolbox_image.bash:182-185
-dockerfile = "<path to Containerfile>"   # toolbox.yaml:36
-repository = "<repository>"              # toolbox.yaml:10,32
-tag = "<tag>"                            # toolbox.yaml:10,32
-namespace = "<build namespace>"          # toolbox.yaml:34
-build_config = "<name>"                  # toolbox.yaml:35
-push_secret = "<name>"                   # toolbox.yaml:37
-successful_history = 3                   # toolbox.yaml:38-39
-failed_history = 3                       # toolbox.yaml:38-39
-completion_deadline_seconds = 1800       # toolbox.yaml:40; `--timeout` maps here
-cleanup_timeout_seconds = 600            # toolbox.yaml:41
-platform = "<os/arch>"                   # toolbox.yaml:52
-readback_command = ["<doctor command>"]  # toolbox_image.bash:740-743
-latest_alias = true                      # toolbox_image.bash:639
-source_tls_verify = true                 # new; replaces toolbox_image.bash:680
-builder = "openshift"                    # or "podman"; no source, built to the sentence
 ```
+
+Retain the following source inputs as workflow arguments or fields in a caller-selected build/operation specification,
+not as `target.toml` keys. The source defaults below remain proposed inputs for their delivery rows.
+
+- **Anonymous read selection; proxy exclusions**: `harbor_manager.sh:115-134,148`; `anonymous_read = false`,
+  caller-selected `no_proxy`.
+- **Timeout, attempts, backoff**: `rendered_images.bash:47-49`; 30 seconds, 3 attempts, 2 seconds.
+- **Parallel copies; page size**: `push_helm.sh:29-30`, `harbor_manager.sh:161,178`; 8 and 100.
+- **Build spec, source repository, context**: `toolbox_image.bash:22,182-185`; caller-selected paths.
+- **Containerfile, destination repository and tag**: `toolbox.yaml:10,32,36`; caller-selected build inputs.
+- **Build namespace, BuildConfig and push Secret**: `toolbox.yaml:34-37`; caller-selected names.
+- **Successful and failed build history**: `toolbox.yaml:38-39`; 3 each.
+- **Completion and cleanup deadlines**: `toolbox.yaml:40-41`; 1800 and 600 seconds; `--timeout` maps to the build
+  deadlines.
+- **Platform and read-back command**: `toolbox.yaml:52`, `toolbox_image.bash:740-743`; selected OS/architecture and
+  image doctor command.
+- **Latest alias and source TLS verification**: `toolbox_image.bash:639,680`; both true in the proposed port.
+- **Builder selection**: Explicit `openshift` or `podman`, selected by the workflow's declared `--builder` option.
 
 ## One query grammar for every object class
 
@@ -323,11 +566,11 @@ view; fields and the executor read are in its interface bullet).
 
 ## Combos
 
-A combo is a set of existing tools wired as a workflow, in sequence or in
-parallel; it never re-implements a step another tool owns, and each step
-keeps its own plan, apply and read-back. The `Pattern` column of the
+A combo is one workflow main composing reusable atomic callbacks through the
+[callback boilerplate](#callback-workflow-boilerplate). It calls shared Python operations rather than subprocesses
+of other entrypoints, and each step keeps its own plan, apply and read-back. The `Pattern` column of the
 catalogue names each tool's README grouping ("Tool grouping"); the
-concurrency rule is step 8 of the recipe.
+concurrency rule in step 8 applies to independent reads inside those operations.
 
 ### Concrete combinations: proposed delivery entries
 
@@ -343,11 +586,11 @@ component reports, never the reports inline.
     overall wait are bounded.
   - Completion evidence: every pipeline in scope is accounted for; incomplete reads remain explicit; completion
     and success are reported separately.
-- **Toolbox build, publish and watch.**
-  - Operations combined: start the declared GitLab build/publish workflow; reuse pipeline watch; obtain the
-    produced image identity; verify the published artifact in Harbor.
-  - Completion evidence: selected source revision, pipeline/job identities, produced image digest, and Harbor
-    read-back agree. A successful pipeline alone is insufficient.
+- **Toolbox build, publish and configure a runner.**
+  - Operations combined: authenticate to OpenShift, build the toolbox, authenticate to Harbor and publish the image,
+    authenticate to GitLab, configure the selected runner/CI to use the image, and verify; use the callback chain above.
+  - Completion evidence: selected source revision, build identity, published image digest, Harbor read-back, and
+    runner/CI use of that image agree. Reuse pipeline/job readers and watch when that verification needs them.
 - **Milestone create, tag and MR check.**
   - Operations combined: create or resolve the milestone; apply the specified associations and labels to the
     selected work items; inspect the related MRs; verify their expected milestone/label associations.
@@ -748,13 +991,23 @@ Results
   status, interval, runner), the window, the events in it, and the
   correlated subset. This is the README's "CI Combo" in one command.
 
-## Smoke cases: fixed arguments and the read-back that proves each tool
+## Smoke cases: runtime setup and read-back
 
-One `[[smoke_cases]]` entry per tool in `tests/acceptance/expected.toml`
-(CI06-TESTS, "Live smoke"); `<declared ...>` values are written there before
-the smoke, never chosen by a tool; each case runs with
-`--receipt-out tests/acceptance/receipts/<tool>-<case>.json` (CI02-CLI, item 7)
-and every receipt is committed.
+Shared setup resolves the selected target and verifies authentication and target
+identity through API read-back before any mutation. Its returned dictionary supplies
+endpoint, username, project ID/path and credential source to subsequent checks;
+these values are not copied into an expectations file. Expected resource fields
+come from the values submitted by that smoke. `<declared ...>` inputs below remain
+operator-selected; setup resolves their live identities. Smoke reports use the
+pinned JSON evidence contract, with operation receipts captured through
+`--receipt-out tests/acceptance/receipts/<tool>-<case>.json` (CI02-CLI, item 7).
+
+The target-resolution smoke keeps cwd, home and candidate code unchanged. The
+`ci-skills-smoke` environment switch selects the fixed `ci-skills-smoke.toml`
+basename; otherwise it uses `target.toml`. The existing project `.ci-skills` then
+home `~/.ci-skills` directory precedence remains unchanged. A deliberately invalid
+project smoke configuration must fail without falling back to the working home
+configuration. Relative credential filenames resolve beside the selected file.
 
 - `gitlab_job.py get --job-url <declared job>`: read-back `records[0].id`
   equals the declared id, plus `pipeline.id`, `runner.id`, the trace tail.
@@ -811,9 +1064,9 @@ and every receipt is committed.
 - `ocp_csr.py`: the pending CSR list as `PLANNED`; apply on a CSR created for
   the smoke reads back `Approved`.
 - `k8s_verify_mtu_consistency.py` extended: the rendered MachineConfig's
-  digest in the plan. Its apply needs a node pool declared for it in
-  `tests/acceptance/expected.toml`; until one is declared, this row is not
-  delivered (rule below).
+  digest in the plan. Its apply needs an operator-selected node pool as a
+  smoke input, resolved through live setup; until one is selected, this row
+  is not delivered (rule below).
 - `k8s_state.py`: node and pod counts per declared namespace; per-read
   durations and wall time.
 - `cluster_health.py --ceph-namespace <declared namespace>`: one line per
@@ -821,8 +1074,8 @@ and every receipt is committed.
   list, Ceph health string, pending claim count, warning event count) and a
   duration per component; `status` matches the live cluster on the day.
 - `ceph_nfs.py`: the export list read back. `ceph_bench.py`: the plan; its
-  apply writes and needs a pool declared for it in `expected.toml`, and until
-  one is declared, this row is not delivered (rule below).
+  apply writes and needs an operator-selected pool as a smoke input, resolved
+  through live setup; until one is selected, this row is not delivered (rule below).
 - `toolbox_build.py apply --tag <declared>`: the image digest reported by the
   build equals the digest read back from Harbor; second apply `NO_OP`.
 - `harbor_push.py apply --image <declared> --tag <declared>`: artifact digest
@@ -885,7 +1138,7 @@ that no source script performs; it is built to the sentence and nothing more.
   `externalCertificate` (`:720,727-743`); the handshake uses Python `ssl`,
   not the conda wrapper at `:165`. The `apply`, `delete` and `absent` steps
   (`:264,451,424`) are not part of a view and stay out.
-- Config: the `[openshift.routes]` keys of the config block.
+- Inputs: namespace, search and probe arguments above; route state is read live through the selected Kubernetes target.
 - Concurrency: one `get routes -A` and one `get endpointslices -A` instead of
   the per-Route loop (`:600-654`); Secret reads, handshakes (`:710-801`) and
   public probes (`:827-853`) in parallel with a bounded pool.
@@ -923,7 +1176,7 @@ that no source script performs; it is built to the sentence and nothing more.
   BareMetalHosts are **new** reads (the cluster is bare metal,
   `scripts/ocp/README.md:4-5`); the live-versus-reference comparator is
   **new**; the reference spec is supplied by the consuming project as
-  `[openshift] node_spec`, never shipped.
+  `--node-spec PATH`, never shipped.
 - Concurrency: per-node Pod reads in parallel.
 
 ### `ocp_iso.py`
@@ -950,7 +1203,7 @@ that no source script performs; it is built to the sentence and nothing more.
   (`automation/lib/core/k8s_lifecycle.bash:25,280`) plus the joiner read-back
   (`node_iso.bash:187`), and drops `serve-iso.sh:80-90`'s requirement that
   delete needs a Ready node.
-- Config: the `[openshift.iso]` keys of the config block.
+- Inputs: caller-selected ISO workflow arguments or specification; cluster endpoint and access come from the target.
 - Concurrency: in the plan, the serving node, the API URL (read three times
   in the source, `serve-node-iso.sh:506-531`), the version, the bootimage
   ConfigMap (read twice, `serve-iso.sh:80-81`), the release image and the
@@ -991,7 +1244,7 @@ that no source script performs; it is built to the sentence and nothing more.
 - `scripts/ocp/nic-mtu.sh:157`, `scripts/ocp/nic_mtu.bash:494,749` and
   `scripts/ocp/templates/nic-mtu/*`: extend `core/mtu_consistency.py`; the
   MachineConfig rendering and the fingerprinted `oc create -f` apply become
-  `core/nic_mtu_config.py`; `[openshift.nic_mtu]` replaces
+  `core/nic_mtu_config.py`; a caller-selected NIC MTU specification replaces
   `inventory/clusters/<id>/nic-mtu.yaml` (`nic_mtu.bash:48`); `butane` is a
   required tool. Node links are already parallel (`nic_mtu.bash:260-291`).
 - `scripts/storage/sanity_check_ceph.sh:265,512` (RADOS and fio benchmarks,
@@ -1184,7 +1437,8 @@ argv). Pushes go through `skopeo` and `helm` over the OCI transport.
   (a `DockerImage` output needs none); `podman` builder: no source,
   built to the sentence; `--timeout` maps to `completionDeadlineSeconds` and
   `cleanupTimeoutSeconds` (`toolbox.yaml:40-41`).
-- Config: the `[toolbox]` keys of the config block, each with its source line.
+- Inputs: the toolbox workflow inputs under [Target access and workflow inputs](#target-access-and-workflow-inputs),
+  each with its source; endpoint and credential resolution stays in the target contract.
 - Concurrency: the two preflight reads (`:1077-1080`) and the context copy
   beside the BuildConfig calls (`:1083-1090`); build, push, read-back stay
   serial (`:1091-1106`); version then `:latest` stays serial (`:685-693`).
@@ -1250,8 +1504,9 @@ argv). Pushes go through `skopeo` and `helm` over the OCI transport.
 
 ### `[harbor]` keys
 
-The keys and their source lines are in the config block above; the target
-file stays nonsecret: file paths only, like `token_file` today.
+The endpoint and credential-source keys and their source lines are under
+[Target access and workflow inputs](#target-access-and-workflow-inputs). Operation settings remain workflow inputs;
+credential values stay out of the target, as with `token_file` today.
 
 ### Not ported from the toolbox and Harbor side, with the reason
 
@@ -1276,8 +1531,8 @@ file stays nonsecret: file paths only, like `token_file` today.
 
 ## Read-back
 
-After each pull request: `ci-skills/bin/reference.py next <node> run` lists
-the new tool and `next <node> run <id>` describes it; `<tool> --describe` validates against `command-contract`;
+After each capability lands: its relevant proposition lists the installed tool and scoped reference pointers;
+the tool's native `--help` exposes its arguments and `<tool> --describe` validates against `command-contract`;
 `tools/render_manifest.py --check` reports CURRENT; the neutrality checker
 reports PASS.
 
@@ -1285,8 +1540,8 @@ reports PASS.
 
 1. *Delivery*, per tool: `ci-skills/bin/<tool>.py`, the Library module cell
    under `ci-skills/lib/python/core/`, the catalog entry and the regenerated
-   `tools.json`, the `target.toml.template` keys of its row, its
-   `[[smoke_cases]]` entry; the command that runs is the tool's smoke line.
+   `tools.json`, any endpoint/access additions to `target.toml.template` and its workflow inputs, its
+   smoke case; the command that runs is the tool's smoke line.
 
 2. *Tests*: `tests/python/test_<module>.py` per Library module (mocked `gh`,
    `glab`, `kubectl`, `oc`, `skopeo` and `podman` through the `conftest.py`
@@ -1299,10 +1554,9 @@ reports PASS.
    `status`, `records`, `plan_digest` and `readback` (mutations),
    `result_action` (`APPLIED` then `NO_OP`), `execution_host`, `captured_at`.
 
-5. *Verification*: `tools/check_live_acceptance.py --root . --expected
-   tests/acceptance/expected.toml --receipts tests/acceptance/receipts
-   --skill ci-skills --json`, with the row's `[[smoke_cases]]` entry
-   declared, prints `"status": "PASS"` and exits 0.
+5. *Verification*: `tools/check_live_acceptance.py --root . --skill ci-skills --json`
+   validates initial access proofs and subsequent operation receipts for the
+   candidate, prints `"status": "PASS"` and exits 0.
 
 ## Open decisions
 

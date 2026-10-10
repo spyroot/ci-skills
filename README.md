@@ -3,6 +3,111 @@
 CI Skills provides project-neutral commands for GitLab, GitHub, and Kubernetes/OpenShift. Each command selects its
 target from caller input or the configured binding and returns evidence that an operator or agent can inspect.
 
+An agent can perform these operations through existing clients such as `glab` and `oc`. The value of CI Skills is
+deterministic, tested execution: construct requests, parse JSON, normalize and reduce the result, and perform the
+required read-back. This avoids repeated `jq` construction, missed response keys, and corrective reads. It consumes
+existing APIs rather than reimplementing their behavior; hypothetical simultaneous milestone updates alone do not
+justify another coordination layer or test family.
+
+The discovery design reduces context too: offer the actions available here and small pointers to relevant references.
+A broad cluster returns little information; a selected smaller cluster can return more detail within that scope.
+
+To use the installed commands, go directly to [Install and first run](#install-and-first-run).
+
+## Proposition interface
+
+Run `ci-skills/bin/reference.py` for the root, `reference.py glab` for GitLab tools, or
+`reference.py gitlab_job.py` for that command's connections. `--json` and `--yaml` select output; no credentials are needed.
+
+A proposition is a compact offering of the tools and references at one node. The entrypoint proposes the main clusters;
+each selected node proposes its own relevant tools and references. Nodes form a graph: related job, pipeline, runner,
+and milestone tools can appear together, and multiple nodes can point to the same command or document.
+
+The following root/jobs payloads are design examples from the existing
+[CI11 plan](docs/phases/CI11-TOOLS.md#proposition-interface), not commands already installed. Short filenames and
+reference paths illustrate the proposed offerings; the [current capabilities](#current-capabilities) below name the
+shipped commands.
+
+Root, showing the `glab` cluster:
+
+```json
+{
+  "glab": {
+    "tools": {
+      "runner.py": {},
+      "pipeline.py": {},
+      "milestone.py": {},
+      "jobs.py": {}
+    },
+    "reference": {
+      "mcp": {
+        "summary": "GitLab MCP configuration and toolsets.",
+        "pointer": "references/mcp.md"
+      }
+    }
+  }
+}
+```
+
+Selecting `jobs.py` returns that node's proposition directly:
+
+```json
+{
+  "tools": {
+    "watch.py": {},
+    "create_tagged_protected_job.py": {}
+  },
+  "reference": {
+    "pipeline variables": {
+      "summary": "Predefined CI/CD variables reference",
+      "pointer": "references/predefine.md"
+    }
+  }
+}
+```
+
+A descriptive filename identifies the action; the agent can request its native `--help` for arguments. Reference
+pointers are optional reading. A proposition returns the useful connections for that node without expanding all
+commands or embedding the referenced documents.
+
+The [proposition schema](docs/phases/CI11-TOOLS.md#proposition-schema) defines a root mapping of cluster names to nodes;
+each node has `tools` (filename → `{}`) and `reference` (name → summary/pointer) mappings. Responses pair
+these payloads with `schema_version: "2.0"`, omitted from the payload excerpts above. The
+[reference-next schema](schemas/reference-next.schema.json) validates propositions and preserves the legacy 1.x
+response and pointer definitions.
+
+## Callback workflow boilerplate
+
+The [callback specification in CI11](docs/phases/CI11-TOOLS.md#callback-workflow-boilerplate) owns the following pattern.
+Each workflow parses its own arguments, constructs typed actions and reusable callbacks, connects their results, runs
+one executor, and emits through the existing report machinery. The shared interface is implemented in
+[core/action.py](ci-skills/lib/python/core/action.py); GitLab action mains use it with the migrated runner and milestone
+callbacks. The following toolbox/Harbor combination shows the pattern for the later delivery rows:
+
+```python
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    build = BuildToolbox(action=BuildAction.from_args(args))
+    publish = PublishToolbox(action=PublishAction.from_args(args), build=build)
+    runner = configure_runner(action=RunnerAction.from_args(args), image=publish)
+    result = Executor(
+        context=ExecutionContext.from_args(args),
+        callbacks=[
+            K8SAuth(), build,
+            HarborAuth(), publish,
+            GitLabAuth(), runner, VerifyRunner(runner=runner),
+        ],
+    ).run()
+    return emit_result(result, args)
+```
+
+This single combination builds on OpenShift, publishes to Harbor, and configures and verifies the selected runner/CI.
+`AbstractCallback` supplies the lifecycle contract; `GitlabCallback`, `K8SCallback`, and `HarborCallback` own shared
+provider behavior. Concrete callbacks implement only applicable hooks. Existing target resolution, `GlabAPIClient`,
+milestone/runner operations, and report code remain the implementation owners; the
+[code-to-abstraction map](docs/phases/CI11-TOOLS.md#ground-the-refactor-in-existing-code) specifies what moves or stays
+shared. New combinations change the callback list rather than duplicate those implementations.
+
 ## Current capabilities
 
 - [Check GitLab access](ci-skills/bin/gitlab_access.py): identify the effective credential source and read back the
@@ -21,10 +126,15 @@ target from caller input or the configured binding and returns evidence that an 
 - Use [ci-api](ci-skills/bin/ci-api) for bounded Git API reads and [ci-binary-build](ci-skills/bin/ci-binary-build) for
   exact-commit OpenShift build planning.
 
-The Python commands use small entry points over reusable code in [lib/core](ci-skills/lib/core/). Their `--help` output
-serves people, while `--json`, `--yaml`, and `--describe` expose versioned reports and command contracts. The generated
+The Python commands use small entry points over reusable code in [lib/python/core](ci-skills/lib/python/core/).
+Their `--help` output serves people, while `--json`, `--yaml`, and `--describe` expose versioned reports and command
+contracts. The generated
 [tools.json](ci-skills/tools.json) records options, access protocols, and target protocols. GitLab writes start with a
-dry-run plan and require a confirmed plan digest to apply.
+dry-run plan and require a confirmed plan digest to apply. Their subcommand contracts point to the applicable
+[result schema](schemas/results/). Parser-to-catalog checks reject undeclared arguments and abbreviated flag names;
+authentication continues through the shared target and credential resolvers.
+Live validation uses the runtime setup and read-back described in the
+[smoke cases](docs/phases/CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back).
 
 Cilium and Ceph node diagnostics use non-TTY `kubectl exec` in existing Pods. The OpenShift MTU command creates
 temporary debug Pods only with `--apply` and its matching plan digest.
@@ -62,10 +172,11 @@ Four patterns describe what a tool does. They can overlap: a combined report may
 
 This `CI_SKILL` specification adds GitLab issue, milestone, board, label, pipeline, job, schedule, and wiki workflows,
 plus issue-to-merge-request-to-QA evidence. The commands below are proposed; they are not yet present in the
-[command catalog](ci-skills/lib/core/catalog.py).
+[command catalog](ci-skills/lib/python/core/catalog.py).
 
 Every new action needs a concrete script name, arguments, behavior, result, and independent read-back. Its Python entry
-point must stay small and call reusable code in [lib/core](ci-skills/lib/core/). It must offer `--help` for people,
+point must follow the [callback workflow pattern](#callback-workflow-boilerplate) over reusable code in
+[lib/python/core](ci-skills/lib/python/core/). It must offer `--help` for people,
 `--json` and `--yaml` for machines, and `--describe` for its command contract. [tools.json](ci-skills/tools.json) must
 declare its options and access and target protocols. Each versioned report kind must have a paired formal JSON Schema
 under `schemas/`, declared in the manifest and checked by validation. Project, group, board, runner, and label values
@@ -137,7 +248,9 @@ FINGERPRINT="$("$CI_SKILLS_INSTALLER" --dry-run | jq -r '.fingerprint')"
 
 `install.sh` forwards to [the copy installer](tools/install_ci_skills.py). It installs at
 `$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The installed copy is
-independent of the checkout. It also installs the bundled `glab-stack` skill under `$REPO_ROOT/.agents/skills` in the
+independent of the checkout. The staged copy includes `INSTALLATION.json`, an installer-owned record of the clean
+source revision and measured skill digest; installed commands accept it only while the current bytes still match.
+It also installs the bundled `glab-stack` skill under `$REPO_ROOT/.agents/skills` in the
 repository where you run the installer.
 When `glab` is missing, it installs the declared package with Homebrew on macOS or `apt-get`, `dnf`, or `yum` on Linux.
 If Homebrew is missing, the installer points to its installation instructions. The package's

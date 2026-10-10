@@ -11,6 +11,7 @@ from typing import Any, Final, TypedDict
 from .gitlab_actions import (
     ActionError,
     ActionPlan,
+    GitLabOperation,
     _fields,
     _id,
     _object,
@@ -20,11 +21,13 @@ from .gitlab_actions import (
 )
 from .gitlab_api import (
     GitLabAPIError,
+    GlabAPIClient,
     create_guard,
     runner_update_guard,
     uncertain_write,
     unverified_write,
 )
+from .gitlab_session import BoundGitLabSession
 from .target import GitLabOperationTarget
 
 MAX_TAG_UPDATE_ATTEMPTS: Final[int] = 2
@@ -421,80 +424,94 @@ def _rollback_assignments(
     }
 
 
-def _assign(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
-    runner_id = _positive(plan.resource_id, "runner_id")
-    _direct_projects(api, session, runner_id)
-    if plan.target_kind == "project":
-        identifiers = (target_id,)
-    else:
-        identifiers = project_ids(api, session, target_id)
-        if plan.project_ids is None:
-            raise ActionError("group_assignment_requires_live_plan")
-        if identifiers != plan.project_ids:
-            raise ActionError("group_projects_changed_rerun_live_plan")
-    baseline = _membership_snapshot(api, session, runner_id, identifiers)
-    results: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
-    attempted: list[int] = []
-    for project_id in identifiers:
-        if baseline[project_id]:
-            results.append(
-                {"project_id": project_id, "action": "NO_OP", "verified": True}
-            )
-            continue
-        attempted.append(project_id)
-        try:
-            api.post_json(
-                session, f"projects/{project_id}/runners", {"runner_id": runner_id}
-            )
-            if not _assigned(api, session, runner_id, project_id):
-                raise ActionError("runner_assignment_readback_mismatch")
-            results.append(
-                {"project_id": project_id, "action": "APPLIED", "verified": True}
-            )
-        except (ActionError, GitLabAPIError) as exc:
-            errors.append({"project_id": project_id, "reason": str(exc)})
-            break
-    if not errors:
-        try:
-            final = _membership_snapshot(api, session, runner_id, identifiers)
-            if not all(final.values()):
-                errors.append(
-                    {
-                        "project_id": target_id,
-                        "reason": "runner_final_readback_mismatch",
-                    }
+class AttachToProject(GitLabOperation):
+    """AttachToProject using the existing GitLab operation and read-back."""
+
+    def run(self) -> dict[str, Any]:
+        """Execute the selected action.
+
+        :returns: Provider record with independent read-back evidence.
+        :raises ActionError: If runner identity or project scope is invalid.
+        """
+        api, session = self.gitlab.api, self.gitlab.session
+        plan, target_id = self.plan, self.gitlab.target_id
+        runner_id = _positive(plan.resource_id, "runner_id")
+        _direct_projects(api, session, runner_id)
+        if plan.target_kind == "project":
+            identifiers = (target_id,)
+        else:
+            identifiers = project_ids(api, session, target_id)
+            if plan.project_ids is None:
+                raise ActionError("group_assignment_requires_live_plan")
+            if identifiers != plan.project_ids:
+                raise ActionError("group_projects_changed_rerun_live_plan")
+        baseline = _membership_snapshot(api, session, runner_id, identifiers)
+        results: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        attempted: list[int] = []
+        for project_id in identifiers:
+            if baseline[project_id]:
+                results.append(
+                    {"project_id": project_id, "action": "NO_OP", "verified": True}
                 )
-        except (ActionError, GitLabAPIError) as exc:
-            errors.append({"project_id": target_id, "reason": str(exc)})
-    cleanup = (
-        _rollback_assignments(api, session, runner_id, attempted, baseline)
-        if errors
-        else {
-            "status": "NOT_APPLICABLE",
-            "reason": "persistent_assignment_requested" if attempted else "no_mutation",
-        }
-    )
-    if errors:
-        for result in results:
-            if result["action"] == "APPLIED":
-                result["action"] = "ROLLED_BACK" if cleanup["restored"] else "UNCERTAIN"
-                result["verified"] = cleanup["restored"]
-    return {
-        "action": ("PARTIAL" if errors else "APPLIED" if attempted else "NO_OP"),
-        "id": runner_id,
-        "verified": not errors,
-        "mutated": (
-            None
-            if errors and not cleanup["restored"]
-            else False
+                continue
+            attempted.append(project_id)
+            try:
+                api.post_json(
+                    session, f"projects/{project_id}/runners", {"runner_id": runner_id}
+                )
+                if not _assigned(api, session, runner_id, project_id):
+                    raise ActionError("runner_assignment_readback_mismatch")
+                results.append(
+                    {"project_id": project_id, "action": "APPLIED", "verified": True}
+                )
+            except (ActionError, GitLabAPIError) as exc:
+                errors.append({"project_id": project_id, "reason": str(exc)})
+                break
+        if not errors:
+            try:
+                final = _membership_snapshot(api, session, runner_id, identifiers)
+                if not all(final.values()):
+                    errors.append(
+                        {
+                            "project_id": target_id,
+                            "reason": "runner_final_readback_mismatch",
+                        }
+                    )
+            except (ActionError, GitLabAPIError) as exc:
+                errors.append({"project_id": target_id, "reason": str(exc)})
+        cleanup = (
+            _rollback_assignments(api, session, runner_id, attempted, baseline)
             if errors
-            else bool(attempted)
-        ),
-        "projects": results,
-        "errors": errors,
-        "cleanup": cleanup,
-    }
+            else {
+                "status": "NOT_APPLICABLE",
+                "reason": "persistent_assignment_requested"
+                if attempted
+                else "no_mutation",
+            }
+        )
+        if errors:
+            for result in results:
+                if result["action"] == "APPLIED":
+                    result["action"] = (
+                        "ROLLED_BACK" if cleanup["restored"] else "UNCERTAIN"
+                    )
+                    result["verified"] = cleanup["restored"]
+        return {
+            "action": ("PARTIAL" if errors else "APPLIED" if attempted else "NO_OP"),
+            "id": runner_id,
+            "verified": not errors,
+            "mutated": (
+                None
+                if errors and not cleanup["restored"]
+                else False
+                if errors
+                else bool(attempted)
+            ),
+            "projects": results,
+            "errors": errors,
+            "cleanup": cleanup,
+        }
 
 
 def _runner_matches(
@@ -605,60 +622,76 @@ def _matches_filters(record: RunnerRecord, filters: list[str]) -> bool:
     return all(states[selector] for selector in filters)
 
 
-def read(api: Any, session: Any, plan: ActionPlan, target_id: int) -> RunnerReadResult:
-    """Read scoped runners through the same bound session as runner actions.
+class ReadRunner(GitLabOperation):
+    """Read scoped runner records through the bound provider service."""
 
-    :param api: Bound GitLab API client.
-    :param session: Authenticated session for the selected target.
-    :param plan: Validated get or list request.
-    :param target_id: Access-verified project or group ID.
-    :returns: Public runner records, truncation, and selected job relation.
-    :raises ActionError: If the selected runner is absent, ambiguous, or malformed.
-    :raises GitLabAPIError: If a provider read fails.
-    """  # noqa: DOC502,DOC503 - provider failures propagate from API calls
-    scope = f"{plan.target_kind}s/{target_id}/runners"
-    description = plan.body.get("description")
-    if plan.operation == "get":
-        related_job = None
-        if "job_id" in plan.body:
-            related_job = _related_job(api, session, target_id, plan.body["job_id"])
-            identifier = related_job["runner_id"]
+    def run(self) -> RunnerReadResult:
+        """Collect the selected runner records and optional job relation.
+
+        :returns: Public runner records, truncation, and selected job relation.
+        :raises ActionError: If a selected runner is absent or malformed.
+        """
+        api, session = self.gitlab.api, self.gitlab.session
+        plan, target_id = self.plan, self.gitlab.target_id
+        scope = f"{plan.target_kind}s/{target_id}/runners"
+        description = plan.body.get("description")
+        if plan.operation == "get":
+            related_job = None
+            if "job_id" in plan.body:
+                related_job = _related_job(api, session, target_id, plan.body["job_id"])
+                identifier = related_job["runner_id"]
+                if identifier is None:
+                    return RunnerReadResult([], False, related_job)
+            else:
+                identifier = plan.resource_id or _unique_runner_id(
+                    api, session, scope, description
+                )
             if identifier is None:
-                return RunnerReadResult([], False, related_job)
-        else:
-            identifier = plan.resource_id or _unique_runner_id(
-                api, session, scope, description
-            )
-        if identifier is None:
-            raise ActionError("runner_not_found_in_selected_scope")
-        observed = _runner_readback(api, session, scope, identifier, description)
-        return RunnerReadResult([_record(observed)], False, related_job)
-    if plan.operation != "list":
-        raise ActionError("unsupported_runner_read")
-    listed = _fields(_pages(api, session, scope), "runner_list", "id", "description")
-    selected = [
-        item
-        for item in listed
-        if description is None or item["description"] == description
-    ]
-    limit = plan.body["limit"]
-    records: list[RunnerRecord] = []
-    for item in selected:
-        identifier = _id(item["id"], "runner")
-        observed = _object(
-            api.get_json(session, f"runners/{identifier}"),
-            "runner_readback",
-            "id",
-            "description",
+                raise ActionError("runner_not_found_in_selected_scope")
+            observed = _runner_readback(api, session, scope, identifier, description)
+            return RunnerReadResult([_record(observed)], False, related_job)
+        if plan.operation != "list":
+            raise ActionError("unsupported_runner_read")
+        listed = _fields(
+            _pages(api, session, scope), "runner_list", "id", "description"
         )
-        if observed["id"] != identifier:
-            raise ActionError("runner_readback_mismatch")
-        record = _record(observed)
-        if _matches_filters(record, plan.body["filters"]):
-            records.append(record)
-        if len(records) > limit:
-            return RunnerReadResult(records[:limit], True, None)
-    return RunnerReadResult(records, False, None)
+        selected = [
+            item
+            for item in listed
+            if description is None or item["description"] == description
+        ]
+        limit = plan.body["limit"]
+        records: list[RunnerRecord] = []
+        for item in selected:
+            identifier = _id(item["id"], "runner")
+            observed = _object(
+                api.get_json(session, f"runners/{identifier}"),
+                "runner_readback",
+                "id",
+                "description",
+            )
+            if observed["id"] != identifier:
+                raise ActionError("runner_readback_mismatch")
+            record = _record(observed)
+            if _matches_filters(record, plan.body["filters"]):
+                records.append(record)
+            if len(records) > limit:
+                return RunnerReadResult(records[:limit], True, None)
+        return RunnerReadResult(records, False, None)
+
+
+def read(
+    api: GlabAPIClient, session: BoundGitLabSession, plan: ActionPlan, target_id: int
+) -> RunnerReadResult:
+    """Preserve existing callers through the shared callback path.
+
+    :param api: Existing API client.
+    :param session: Bound GitLab session.
+    :param plan: Validated read action.
+    :param target_id: Verified scope identifier.
+    :returns: Scoped runner records and related job evidence.
+    """
+    return ReadRunner(action=plan).execute(api, session, target_id)
 
 
 def _related_job(api: Any, session: Any, project_id: int, job_id: int) -> RelatedJob:
@@ -744,112 +777,113 @@ def _runner_readback(
     return observed
 
 
-def _tag(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
-    """Add requested tags to one scoped runner and verify a fresh GET.
+class SetTag(GitLabOperation):
+    """SetTag using the existing GitLab operation and read-back."""
 
-    :param api: Bound GitLab API client.
-    :param session: Authenticated session for the selected target.
-    :param plan: Confirmed tag-addition plan.
-    :param target_id: Access-verified project or group ID.
-    :returns: Before/after tags and verified action status.
-    :raises ActionError: If the runner is outside the selected target or malformed.
-    :raises GitLabAPIError: If a pre-write provider read or terminal write fails.
-    """
-    runner_id = _positive(plan.resource_id, "runner_id")
-    scope = f"{plan.target_kind}s/{target_id}/runners"
-    requested = _observed_tags(plan.body["tag_list"])
-    with runner_update_guard(plan.origin, runner_id):
-        current = _runner_readback(api, session, scope, runner_id)
-        if current.get("runner_type") != f"{plan.target_kind}_type":
-            raise ActionError("runner_scope_type_mismatch")
-        before = _observed_tags(current.get("tag_list"))
-        observed_tags = before
-        reconciled = False
-        for attempt in range(MAX_TAG_UPDATE_ATTEMPTS):
-            desired = observed_tags + [
-                tag for tag in before + requested if tag not in observed_tags
-            ]
-            if desired == observed_tags:
-                return {
-                    "action": "NO_OP",
-                    "id": runner_id,
-                    "verified": True,
-                    "mutated": False,
-                    "before_tags": before,
-                    "after_tags": before,
-                    "added_tags": [],
-                }
-            put_confirmed = False
-            try:
-                api.put_json(session, f"runners/{runner_id}", {"tag_list": desired})
-                put_confirmed = True
-            except GitLabAPIError as exc:
-                if not uncertain_write(exc):
-                    raise
-                reconciled = True
-            try:
-                observed = _runner_readback(api, session, scope, runner_id)
-                observed_tags = _observed_tags(observed.get("tag_list"))
-            except (ActionError, GitLabAPIError):
-                if put_confirmed:
-                    return unverified_write(
-                        target_id,
-                        {
-                            "id": runner_id,
-                            "before_tags": before,
-                            "expected_tags": desired,
+    def run(self) -> dict[str, Any]:
+        """Execute the selected action.
+
+        :returns: Provider record with independent read-back evidence.
+        :raises ActionError: If runner tags or identity cannot be verified.
+        :raises GitLabAPIError: If a terminal provider update fails.
+        """
+        api, session = self.gitlab.api, self.gitlab.session
+        plan, target_id = self.plan, self.gitlab.target_id
+        runner_id = _positive(plan.resource_id, "runner_id")
+        scope = f"{plan.target_kind}s/{target_id}/runners"
+        requested = _observed_tags(plan.body["tag_list"])
+        with runner_update_guard(plan.origin, runner_id):
+            current = _runner_readback(api, session, scope, runner_id)
+            if current.get("runner_type") != f"{plan.target_kind}_type":
+                raise ActionError("runner_scope_type_mismatch")
+            before = _observed_tags(current.get("tag_list"))
+            observed_tags = before
+            reconciled = False
+            for attempt in range(MAX_TAG_UPDATE_ATTEMPTS):
+                desired = observed_tags + [
+                    tag for tag in before + requested if tag not in observed_tags
+                ]
+                if desired == observed_tags:
+                    return {
+                        "action": "NO_OP",
+                        "id": runner_id,
+                        "verified": True,
+                        "mutated": False,
+                        "before_tags": before,
+                        "after_tags": before,
+                        "added_tags": [],
+                    }
+                put_confirmed = False
+                try:
+                    api.put_json(session, f"runners/{runner_id}", {"tag_list": desired})
+                    put_confirmed = True
+                except GitLabAPIError as exc:
+                    if not uncertain_write(exc):
+                        raise
+                    reconciled = True
+                try:
+                    observed = _runner_readback(api, session, scope, runner_id)
+                    observed_tags = _observed_tags(observed.get("tag_list"))
+                except (ActionError, GitLabAPIError):
+                    if put_confirmed:
+                        return unverified_write(
+                            target_id,
+                            {
+                                "id": runner_id,
+                                "before_tags": before,
+                                "expected_tags": desired,
+                            },
+                            "runner_tag_readback_unavailable",
+                        )
+                    return {
+                        "action": "UNVERIFIED",
+                        "id": runner_id,
+                        "verified": False,
+                        "mutated": None,
+                        "uncertain": True,
+                        "before_tags": before,
+                        "expected_tags": desired,
+                        "errors": [
+                            {
+                                "project_id": target_id,
+                                "reason": "runner_tag_readback_unavailable",
+                            }
+                        ],
+                        "cleanup": {
+                            "status": "NOT_PERFORMED",
+                            "reason": "post_write_readback_unverified",
                         },
-                        "runner_tag_readback_unavailable",
-                    )
-                return {
-                    "action": "UNVERIFIED",
-                    "id": runner_id,
-                    "verified": False,
-                    "mutated": None,
-                    "uncertain": True,
-                    "before_tags": before,
-                    "expected_tags": desired,
-                    "errors": [
-                        {
-                            "project_id": target_id,
-                            "reason": "runner_tag_readback_unavailable",
-                        }
-                    ],
-                    "cleanup": {
-                        "status": "NOT_PERFORMED",
-                        "reason": "post_write_readback_unverified",
-                    },
-                }
-            if set(before + requested).issubset(observed_tags):
-                result = {
-                    "action": "APPLIED",
-                    "id": runner_id,
-                    "verified": True,
-                    "mutated": True,
-                    "before_tags": before,
-                    "after_tags": observed_tags,
-                    "added_tags": [tag for tag in requested if tag not in before],
-                }
-                if reconciled or attempt:
-                    result["reconciled"] = True
-                return result
-        return {
-            "action": "UNVERIFIED",
-            "id": runner_id,
-            "verified": False,
-            "mutated": None,
-            "uncertain": True,
-            "before_tags": before,
-            "after_tags": observed_tags,
-            "expected_tags": desired,
-            "errors": [
-                {"project_id": target_id, "reason": "runner_tag_readback_mismatch"}
-            ],
-            "cleanup": {
-                "status": "NOT_PERFORMED",
-                "reason": "post_write_readback_mismatch",
-            },
-        }
+                    }
+                if set(before + requested).issubset(observed_tags):
+                    result = {
+                        "action": "APPLIED",
+                        "id": runner_id,
+                        "verified": True,
+                        "mutated": True,
+                        "before_tags": before,
+                        "after_tags": observed_tags,
+                        "added_tags": [tag for tag in requested if tag not in before],
+                    }
+                    if reconciled or attempt:
+                        result["reconciled"] = True
+                    return result
+            return {
+                "action": "UNVERIFIED",
+                "id": runner_id,
+                "verified": False,
+                "mutated": None,
+                "uncertain": True,
+                "before_tags": before,
+                "after_tags": observed_tags,
+                "expected_tags": desired,
+                "errors": [
+                    {"project_id": target_id, "reason": "runner_tag_readback_mismatch"}
+                ],
+                "cleanup": {
+                    "status": "NOT_PERFORMED",
+                    "reason": "post_write_readback_mismatch",
+                },
+            }
 
 
 def _rollback_created_runner(
@@ -984,233 +1018,244 @@ def delete_snapshot(
     return _delete_observation(api, session, plan, target_id)[0]
 
 
-def _delete(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
-    """Delete only the runner identified in the confirmed selected scope.
+class DeleteRunner(GitLabOperation):
+    """DeleteRunner using the existing GitLab operation and read-back."""
 
-    :param api: Bound GitLab API client.
-    :param session: Authenticated session for the selected target.
-    :param plan: Confirmed runner deletion plan.
-    :param target_id: Access-verified project or group ID.
-    :returns: Before state, write outcome, and independent absence read-back.
-    :raises ActionError: If the selected runner identity or scope differs.
-    :raises GitLabAPIError: If a terminal provider request fails.
-    """  # noqa: DOC502,DOC503 - provider failures propagate from the shared client
-    if plan.runner_snapshot is None:
-        raise ActionError("runner_delete_requires_live_plan")
-    scope = f"{plan.target_kind}s/{target_id}/runners"
-    identifier = _positive(plan.resource_id, "runner_id")
-    with runner_update_guard(plan.origin, identifier):
-        current, before = _delete_observation(api, session, plan, target_id)
-        if current != plan.runner_snapshot:
-            raise ActionError("runner_changed_rerun_live_plan")
-        if before is None:
+    def run(self) -> dict[str, Any]:
+        """Execute the selected action.
+
+        :returns: Provider record with independent read-back evidence.
+        :raises ActionError: If the confirmed runner identity changed.
+        """
+        api, session = self.gitlab.api, self.gitlab.session
+        plan, target_id = self.plan, self.gitlab.target_id
+        if plan.runner_snapshot is None:
+            raise ActionError("runner_delete_requires_live_plan")
+        scope = f"{plan.target_kind}s/{target_id}/runners"
+        identifier = _positive(plan.resource_id, "runner_id")
+        with runner_update_guard(plan.origin, identifier):
+            current, before = _delete_observation(api, session, plan, target_id)
+            if current != plan.runner_snapshot:
+                raise ActionError("runner_changed_rerun_live_plan")
+            if before is None:
+                return {
+                    "action": "NO_OP",
+                    "id": identifier,
+                    "verified": True,
+                    "mutated": False,
+                    "before": None,
+                    "after": {"scoped_absent": True, "global_get_status": 404},
+                }
+            after = _delete_and_read_absence(api, session, scope, identifier)
+            if after["verified"]:
+                return {
+                    "action": "APPLIED",
+                    "id": identifier,
+                    "verified": True,
+                    "mutated": True,
+                    "before": before,
+                    "after": after,
+                }
             return {
-                "action": "NO_OP",
+                "action": "UNVERIFIED",
                 "id": identifier,
-                "verified": True,
-                "mutated": False,
-                "before": None,
-                "after": {"scoped_absent": True, "global_get_status": 404},
-            }
-        after = _delete_and_read_absence(api, session, scope, identifier)
-        if after["verified"]:
-            return {
-                "action": "APPLIED",
-                "id": identifier,
-                "verified": True,
-                "mutated": True,
+                "verified": False,
+                "mutated": None if after["write_error"] else True,
                 "before": before,
                 "after": after,
-            }
-        return {
-            "action": "UNVERIFIED",
-            "id": identifier,
-            "verified": False,
-            "mutated": None if after["write_error"] else True,
-            "before": before,
-            "after": after,
-            "errors": [
-                {"project_id": target_id, "reason": "runner_delete_readback_mismatch"}
-            ],
-            "cleanup": {
-                "status": "NOT_PERFORMED",
-                "reason": "runner_delete_outcome_unverified",
-            },
-        }
-
-
-def _create(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
-    """Create one scoped runner record and save its one-time token.
-
-    :param api: Bound GitLab API client.
-    :param session: Authenticated GitLab session.
-    :param plan: Confirmed creation plan.
-    :param target_id: Access-verified project or group ID.
-    :returns: Verified runner ID, observed tags, and token-sink status.
-    :raises ActionError: If the token sink or recovery state is invalid.
-    :raises GitLabAPIError: If a terminal provider operation fails.
-    """
-    if not plan.token_out:
-        raise ActionError("token_out_required_for_runner_create_plan")
-    scope = f"{plan.target_kind}s/{target_id}/runners"
-    destination = Path(plan.token_out)
-    description = plan.body["description"]
-    try:
-        descriptor = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except OSError as exc:
-        raise ActionError("token_out_unavailable") from exc
-    token_saved = False
-    runner_id: int | None = None
-    try:
-        with create_guard(
-            plan.origin, plan.target_kind, target_id, "runner", description
-        ) as guard:
-            matching = _runner_matches(api, session, scope, description)
-            if matching:
-                raise ActionError(
-                    "runner_description_exists_verify_and_remove_record_before_retry"
-                )
-            guard.reconcile_absent()
-            body = dict(plan.body)
-            body[f"{plan.target_kind}_id"] = target_id
-            guard.mark_pending()
-            try:
-                created = _object(
-                    api.post_json(session, "user/runners", body),
-                    "runner_create",
-                    "id",
-                )
-            except GitLabAPIError as exc:
-                if not uncertain_write(exc):
-                    guard.clear()
-                    raise
-                return {
-                    "action": "PARTIAL",
-                    "id": None,
-                    "verified": False,
-                    "mutated": None,
-                    "sink_persisted": False,
-                    "errors": [
-                        {
-                            "project_id": target_id,
-                            "reason": "runner_create_outcome_uncertain_reconcile_before_retry",
-                        }
-                    ],
-                    "cleanup": {"status": "BLOCKED", "reason": exc.reason},
-                }
-            except ActionError:
-                return {
-                    "action": "PARTIAL",
-                    "id": None,
-                    "verified": False,
-                    "mutated": None,
-                    "sink_persisted": False,
-                    "errors": [
-                        {
-                            "project_id": target_id,
-                            "reason": "runner_create_malformed_response_reconcile_before_retry",
-                        }
-                    ],
-                    "cleanup": {
-                        "status": "BLOCKED",
-                        "reason": "runner_create_identity_unresolved",
-                    },
-                }
-            try:
-                runner_id = _id(created["id"], "runner")
-            except ActionError:
-                return {
-                    "action": "PARTIAL",
-                    "id": None,
-                    "verified": False,
-                    "mutated": None,
-                    "sink_persisted": False,
-                    "errors": [
-                        {
-                            "project_id": target_id,
-                            "reason": "runner_create_id_invalid_reconcile_before_retry",
-                        }
-                    ],
-                    "cleanup": {"status": "BLOCKED", "reason": "runner_id_unresolved"},
-                }
-            token = created.get("token")
-            if not isinstance(token, str) or not token or "\n" in token:
-                reason = "runner_create_missing_one_time_token"
-            else:
-                try:
-                    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                        descriptor = -1
-                        handle.write(token + "\n")
-                        handle.flush()
-                        os.fsync(handle.fileno())
-                    token_saved = (
-                        destination.read_text(encoding="utf-8") == token + "\n"
-                    )
-                    if not token_saved:
-                        reason = "runner_token_file_readback_mismatch"
-                except (OSError, UnicodeError):
-                    reason = "runner_token_file_write_or_readback_failed"
-            if not token_saved:
-                cleanup = _rollback_created_runner(
-                    api, session, scope, runner_id, description
-                )
-                if cleanup["status"] == "PASS":
-                    guard.clear()
-                return {
-                    "action": "PARTIAL",
-                    "id": runner_id,
-                    "verified": False,
-                    "errors": [{"project_id": target_id, "reason": reason}],
-                    "cleanup": cleanup,
-                    "sink_persisted": False,
-                    "mutated": None if cleanup["status"] != "PASS" else False,
-                }
-            try:
-                expected_tags = (
-                    plan.body["tag_list"].split(",")
-                    if "tag_list" in plan.body
-                    else None
-                )
-                observed = _runner_readback(
-                    api, session, scope, runner_id, description, expected_tags
-                )
-            except (ActionError, GitLabAPIError) as exc:
-                cleanup = _rollback_created_runner(
-                    api, session, scope, runner_id, description
-                )
-                if cleanup["status"] == "PASS":
-                    token_saved = False
-                    guard.clear()
-                return {
-                    "action": "PARTIAL",
-                    "id": runner_id,
-                    "verified": False,
-                    "errors": [{"project_id": target_id, "reason": str(exc)}],
-                    "cleanup": cleanup,
-                    "sink_persisted": token_saved,
-                    "mutated": None if cleanup["status"] != "PASS" else False,
-                }
-            guard.clear()
-            return {
-                "action": "APPLIED",
-                "id": runner_id,
-                "verified": True,
-                "after_tags": observed["tag_list"],
-                "sink_persisted": True,
-                "mutated": True,
+                "errors": [
+                    {
+                        "project_id": target_id,
+                        "reason": "runner_delete_readback_mismatch",
+                    }
+                ],
                 "cleanup": {
-                    "status": "NOT_APPLICABLE",
-                    "reason": "persistent_runner_requested",
+                    "status": "NOT_PERFORMED",
+                    "reason": "runner_delete_outcome_unverified",
                 },
             }
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        if not token_saved:
-            destination.unlink(missing_ok=True)
 
 
-def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
+class CreateRunner(GitLabOperation):
+    """CreateRunner using the existing GitLab operation and read-back."""
+
+    def run(self) -> dict[str, Any]:
+        """Execute the selected action.
+
+        :returns: Provider record with independent read-back evidence.
+        :raises ActionError: If creation inputs or the token destination are invalid.
+        :raises GitLabAPIError: If a terminal provider operation fails.
+        """
+        api, session = self.gitlab.api, self.gitlab.session
+        plan, target_id = self.plan, self.gitlab.target_id
+        if not plan.token_out:
+            raise ActionError("token_out_required_for_runner_create_plan")
+        scope = f"{plan.target_kind}s/{target_id}/runners"
+        destination = Path(plan.token_out)
+        description = plan.body["description"]
+        try:
+            descriptor = os.open(
+                destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
+            )
+        except OSError as exc:
+            raise ActionError("token_out_unavailable") from exc
+        token_saved = False
+        runner_id: int | None = None
+        try:
+            with create_guard(
+                plan.origin, plan.target_kind, target_id, "runner", description
+            ) as guard:
+                matching = _runner_matches(api, session, scope, description)
+                if matching:
+                    raise ActionError(
+                        "runner_description_exists_verify_and_remove_record_before_retry"
+                    )
+                guard.reconcile_absent()
+                body = dict(plan.body)
+                body[f"{plan.target_kind}_id"] = target_id
+                guard.mark_pending()
+                try:
+                    created = _object(
+                        api.post_json(session, "user/runners", body),
+                        "runner_create",
+                        "id",
+                    )
+                except GitLabAPIError as exc:
+                    if not uncertain_write(exc):
+                        guard.clear()
+                        raise
+                    return {
+                        "action": "PARTIAL",
+                        "id": None,
+                        "verified": False,
+                        "mutated": None,
+                        "sink_persisted": False,
+                        "errors": [
+                            {
+                                "project_id": target_id,
+                                "reason": "runner_create_outcome_uncertain_reconcile_before_retry",
+                            }
+                        ],
+                        "cleanup": {"status": "BLOCKED", "reason": exc.reason},
+                    }
+                except ActionError:
+                    return {
+                        "action": "PARTIAL",
+                        "id": None,
+                        "verified": False,
+                        "mutated": None,
+                        "sink_persisted": False,
+                        "errors": [
+                            {
+                                "project_id": target_id,
+                                "reason": "runner_create_malformed_response_reconcile_before_retry",
+                            }
+                        ],
+                        "cleanup": {
+                            "status": "BLOCKED",
+                            "reason": "runner_create_identity_unresolved",
+                        },
+                    }
+                try:
+                    runner_id = _id(created["id"], "runner")
+                except ActionError:
+                    return {
+                        "action": "PARTIAL",
+                        "id": None,
+                        "verified": False,
+                        "mutated": None,
+                        "sink_persisted": False,
+                        "errors": [
+                            {
+                                "project_id": target_id,
+                                "reason": "runner_create_id_invalid_reconcile_before_retry",
+                            }
+                        ],
+                        "cleanup": {
+                            "status": "BLOCKED",
+                            "reason": "runner_id_unresolved",
+                        },
+                    }
+                token = created.get("token")
+                if not isinstance(token, str) or not token or "\n" in token:
+                    reason = "runner_create_missing_one_time_token"
+                else:
+                    try:
+                        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                            descriptor = -1
+                            handle.write(token + "\n")
+                            handle.flush()
+                            os.fsync(handle.fileno())
+                        token_saved = (
+                            destination.read_text(encoding="utf-8") == token + "\n"
+                        )
+                        if not token_saved:
+                            reason = "runner_token_file_readback_mismatch"
+                    except (OSError, UnicodeError):
+                        reason = "runner_token_file_write_or_readback_failed"
+                if not token_saved:
+                    cleanup = _rollback_created_runner(
+                        api, session, scope, runner_id, description
+                    )
+                    if cleanup["status"] == "PASS":
+                        guard.clear()
+                    return {
+                        "action": "PARTIAL",
+                        "id": runner_id,
+                        "verified": False,
+                        "errors": [{"project_id": target_id, "reason": reason}],
+                        "cleanup": cleanup,
+                        "sink_persisted": False,
+                        "mutated": None if cleanup["status"] != "PASS" else False,
+                    }
+                try:
+                    expected_tags = (
+                        plan.body["tag_list"].split(",")
+                        if "tag_list" in plan.body
+                        else None
+                    )
+                    observed = _runner_readback(
+                        api, session, scope, runner_id, description, expected_tags
+                    )
+                except (ActionError, GitLabAPIError) as exc:
+                    cleanup = _rollback_created_runner(
+                        api, session, scope, runner_id, description
+                    )
+                    if cleanup["status"] == "PASS":
+                        token_saved = False
+                        guard.clear()
+                    return {
+                        "action": "PARTIAL",
+                        "id": runner_id,
+                        "verified": False,
+                        "errors": [{"project_id": target_id, "reason": str(exc)}],
+                        "cleanup": cleanup,
+                        "sink_persisted": token_saved,
+                        "mutated": None if cleanup["status"] != "PASS" else False,
+                    }
+                guard.clear()
+                return {
+                    "action": "APPLIED",
+                    "id": runner_id,
+                    "verified": True,
+                    "after_tags": observed["tag_list"],
+                    "sink_persisted": True,
+                    "mutated": True,
+                    "cleanup": {
+                        "status": "NOT_APPLICABLE",
+                        "reason": "persistent_runner_requested",
+                    },
+                }
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            if not token_saved:
+                destination.unlink(missing_ok=True)
+
+
+def apply(
+    api: GlabAPIClient, session: BoundGitLabSession, plan: ActionPlan, target_id: int
+) -> dict[str, Any]:
     """Dispatch one confirmed runner action to the existing shared adapter.
 
     :param api: Bound GitLab API client.
@@ -1222,11 +1267,11 @@ def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str,
     :raises GitLabAPIError: If a terminal provider operation fails.
     """  # noqa: DOC502,DOC503 - exceptions propagate from dispatched actions
     if plan.operation == "assign":
-        return _assign(api, session, plan, target_id)
+        return AttachToProject(action=plan).execute(api, session, target_id)
     if plan.operation == "tag":
-        return _tag(api, session, plan, target_id)
+        return SetTag(action=plan).execute(api, session, target_id)
     if plan.operation == "delete":
-        return _delete(api, session, plan, target_id)
+        return DeleteRunner(action=plan).execute(api, session, target_id)
     if plan.operation != "create":
         raise ActionError("unsupported_runner_action")
-    return _create(api, session, plan, target_id)
+    return CreateRunner(action=plan).execute(api, session, target_id)

@@ -43,11 +43,11 @@ HELP
 # Returns: 0 or invalid-data class.
 ci_binary_manifest_fields() {
   local manifest=$1 label=$2 commit=$3
-  jq -ce --arg label "$label" --arg commit "$commit" '
+  jq -ce --arg label_key "$label" --arg commit "$commit" '
     select(.apiVersion == "build.openshift.io/v1" and .kind == "BuildConfig")
     | select(.spec.source.type == "Binary" and .spec.strategy.type == "Docker")
     | select(.spec.output.to.kind == "DockerImage")
-    | select(.metadata.labels[$label] == $commit)
+    | select(.metadata.labels[$label_key] == $commit)
     | {
         name: .metadata.name,
         namespace: .metadata.namespace,

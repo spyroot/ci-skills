@@ -4,29 +4,96 @@ name: validate
   pull_request:
   push:
     branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+  statuses: write
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CI_RUNNER_IMAGE: &ci_runner_image >-
+    python:3.11-bookworm@sha256:5887f265d8d44d8b4734d3658b21d668edf5aaf92e4945bc0c984afbfab105d3
+  CI_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   validate:
+    name: validate
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    container:
+      image: *ci_runner_image
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-      - name: Install declared Python tools and existing docstring checker
-        run: python -m pip install -r requirements.txt pydoclint==0.10.1
-      - name: Check runner Python style
+          ref: ${{ env.CI_SOURCE_SHA }}
+      - &trust_workspace
+        name: Trust and read back the exact GitHub workspace
         run: |
-          ruff check ci-skills/bin/gitlab_runner.py ci-skills/lib/python/core/gitlab_runners.py \
-            ci-skills/lib/python/core/gitlab_actions.py ci-skills/lib/python/core/catalog.py \
-            ci-skills/lib/python/core/report.py tests/python/test_gitlab_runner_lifecycle.py
-          ruff format --check ci-skills/bin/gitlab_runner.py ci-skills/lib/python/core/gitlab_runners.py \
-            ci-skills/lib/python/core/gitlab_actions.py ci-skills/lib/python/core/catalog.py \
-            ci-skills/lib/python/core/report.py tests/python/test_gitlab_runner_lifecycle.py
+          git config --global --replace-all safe.directory "$GITHUB_WORKSPACE"
+          [[ $(git config --global --get-all safe.directory) == "$GITHUB_WORKSPACE" ]]
+          [[ $(git -C "$GITHUB_WORKSPACE" rev-parse --is-inside-work-tree) == true ]]
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Install declared validation tools
+        id: tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq bats curl git jq shellcheck
+          python -m pip install -r requirements.txt pydoclint==0.10.1 yamllint==1.38.0
+          npm install --global markdownlint-cli2@0.23.2
+          mkdir -p "$RUNNER_TEMP/ci-tools"
+          GOBIN="$RUNNER_TEMP/ci-tools" go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
+          GOBIN="$RUNNER_TEMP/ci-tools" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          GOBIN="$RUNNER_TEMP/ci-tools" go install \
+            github.com/zricethezav/gitleaks/v8@v8.30.1
+          GOBIN="$RUNNER_TEMP/ci-tools" go install \
+            github.com/mikefarah/yq/v4@v4.47.2
+          printf '%s\n' "$RUNNER_TEMP/ci-tools" >>"$GITHUB_PATH"
+      - &pending_status
+        name: Publish and read back pending required status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS_CONTEXT: ci-skills/required
+        run: |
+          target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body=$(jq -n --arg state pending --arg context "$STATUS_CONTEXT" \
+            --arg description 'Required CI is running' --arg target_url "$target_url" \
+            '{state: $state, context: $context, description: $description, target_url: $target_url}')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -d "$body" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${CI_SOURCE_SHA}" >/dev/null
+          curl -fsS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CI_SOURCE_SHA}/status" \
+            | jq -e --arg context "$STATUS_CONTEXT" --arg sha "$CI_SOURCE_SHA" \
+              --arg target_url "$target_url" \
+              '.sha == $sha and (.statuses | map(select(.context == $context))[0] |
+               .state == "pending" and .target_url == $target_url)' >/dev/null
+      - name: Check committed candidate with the GitHub static gate
+        id: static
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base_sha="$BASE_SHA"
+          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
+            base_sha="$(git rev-parse HEAD^)"
+          fi
+          scripts/ci/static.sh --base "$base_sha"
       - name: Check reStructuredText API docstrings
+        id: style
         run: |
           pydoclint --style=sphinx --skip-checking-short-docstrings=False \
             --skip-checking-private-functions=True \
@@ -34,6 +101,8 @@ jobs:
             --allow-init-docstring=True \
             ci-skills/lib/python/core/gitlab_runners.py \
             ci-skills/lib/python/core/gitlab_actions.py \
+            ci-skills/lib/python/core/action.py \
+            ci-skills/lib/python/core/gitlab_milestones.py \
             ci-skills/lib/python/core/gitlab_api.py \
             ci-skills/lib/python/core/catalog.py \
             ci-skills/lib/python/core/report.py \
@@ -42,34 +111,326 @@ jobs:
             --arg-type-hints-in-docstring=False --check-return-types=False \
             --allow-init-docstring=True \
             ci-skills/lib/python/core/gitlab_runners.py ci-skills/bin/gitlab_runner.py
-      - name: Check manifest and runner receipt schema
+          pydoclint --style=sphinx --skip-checking-short-docstrings=False \
+            --skip-checking-private-functions=True --check-class-attributes=False \
+            --arg-type-hints-in-docstring=False --check-return-types=False \
+            --allow-init-docstring=True ci-skills/lib/python/core/target.py
+      - name: Check manifests and schemas
+        id: schema
         run: |
           python tools/render_manifest.py --check
-          check-jsonschema --check-metaschema schemas/results/gitlab-runner-tag.schema.json
-          check-jsonschema --check-metaschema schemas/results/gitlab-runner-read.schema.json
-          check-jsonschema --check-metaschema schemas/results/gitlab-runner-delete.schema.json
+          check-jsonschema --check-metaschema \
+            schemas/ci-result.schema.json \
+            schemas/smoke-result.schema.json \
+            schemas/results/gitlab-action.schema.json \
+            schemas/results/gitlab-runner-tag.schema.json \
+            schemas/results/gitlab-runner-read.schema.json \
+            schemas/results/gitlab-runner-delete.schema.json
           check-jsonschema --schemafile schemas/results/gitlab-runner-tag.schema.json \
             tests/acceptance/runner-tag/*.json
-          if compgen -G 'tests/acceptance/runner-lifecycle/*-get.json' > /dev/null; then
+          if compgen -G 'tests/acceptance/runner-lifecycle/*-get.json' >/dev/null; then
             check-jsonschema --schemafile schemas/results/gitlab-runner-read.schema.json \
               tests/acceptance/runner-lifecycle/*-get.json
           fi
-          if compgen -G 'tests/acceptance/runner-lifecycle/*-list.json' > /dev/null; then
+          if compgen -G 'tests/acceptance/runner-lifecycle/*-list.json' >/dev/null; then
             check-jsonschema --schemafile schemas/results/gitlab-runner-read.schema.json \
               tests/acceptance/runner-lifecycle/*-list.json
           fi
-          if compgen -G 'tests/acceptance/runner-lifecycle/*-delete-*.json' > /dev/null; then
+          if compgen -G 'tests/acceptance/runner-lifecycle/*-delete-*.json' >/dev/null; then
             check-jsonschema --schemafile schemas/results/gitlab-runner-delete.schema.json \
               tests/acceptance/runner-lifecycle/*-delete-*.json
           fi
-      - name: Exercise runner command and contract
+      - name: Exercise callback, target, install, and command contracts
+        id: unit
         run: |
-          python -m pytest -q tests/python/test_live_acceptance.py
-          python -m pytest -q tests/python/test_gitlab_actions.py \
+          mkdir -p reports/raw
+          python -W error -m pytest -q --junitxml=reports/raw/validate-pytest.xml \
+            tests/python/test_target_runtime.py \
+            tests/python/test_target_resolution.py \
+            tests/python/test_gitlab_access.py \
+            tests/python/test_installed_package.py \
+            tests/python/test_gitlab_actions.py \
             tests/python/test_gitlab_runner_recovery.py \
             tests/python/test_gitlab_runner_lifecycle.py \
-            tests/python/test_catalog.py
+            tests/python/test_catalog.py \
+            tests/python/test_callbacks.py \
+            tests/python/test_propositions.py \
+            tests/python/test_ci_required_result.py
+      - name: Exercise static-gate negative paths
+        id: bats
+        run: |
+          mkdir -p reports/raw
+          bats --tap tests/bash/bless.bats | tee reports/raw/validate-bats.tap
+      - name: Verify committed live acceptance receipts
+        id: acceptance
+        run: |
+          python -W error -m pytest -q tests/python/test_live_acceptance.py
+          python tools/check_live_acceptance.py --root . --json
       - name: Check patch whitespace
+        id: whitespace
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: git diff --check "$BASE_SHA" HEAD
+      - name: Emit validate evidence
+        if: always()
+        env:
+          STEP_RESULTS: >-
+            {"tools":"${{ steps.tools.outcome }}","static":"${{ steps.static.outcome }}",
+            "style":"${{ steps.style.outcome }}","schema":"${{ steps.schema.outcome }}",
+            "unit":"${{ steps.unit.outcome }}","bats":"${{ steps.bats.outcome }}",
+            "acceptance":"${{ steps.acceptance.outcome }}",
+            "whitespace":"${{ steps.whitespace.outcome }}"}
+        run: |
+          runner_digest=${CI_RUNNER_IMAGE##*@}
+          python tools/ci_required_result.py emit \
+            --inventory inventory/ci/smoke-tests.yaml \
+            --binding standards-binding.yaml \
+            --job validate \
+            --commit "$CI_SOURCE_SHA" \
+            --pipeline-id "$GITHUB_RUN_ID" \
+            --runner-digest "$runner_digest" \
+            --step-results "$STEP_RESULTS" \
+            --junit reports/raw/validate-pytest.xml \
+            --tap reports/raw/validate-bats.tap \
+            --output-dir reports
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-evidence-validate
+          path: reports
+
+  gate-ci-skills-endpoints:
+    name: gate-ci-skills-endpoints
+    runs-on: ubuntu-latest
+    container:
+      image: *ci_runner_image
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ env.CI_SOURCE_SHA }}
+      - *trust_workspace
+      - name: Install endpoint gate tools
+        id: tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq curl jq
+          python -m pip install -r requirements.txt
+      - *pending_status
+      - name: Check endpoint result schema
+        id: schema
+        run: check-jsonschema --check-metaschema schemas/ci_skills_endpoints.schema.json
+      - name: Exercise endpoint gate negative paths
+        id: endpoint_unit
+        run: |
+          mkdir -p reports/raw
+          python -W error -m pytest -q --junitxml=reports/raw/endpoints-pytest.xml \
+            tests/python/test_endpoints.py
+      - name: Gate changed endpoint declarations
+        id: endpoint_gate
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          base_sha="$BASE_SHA"
+          if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
+            base_sha="$(git rev-parse HEAD^)"
+          fi
+          status=0
+          python gates/gate-ci-skills-endpoints.py --base "$base_sha" --json \
+            >endpoints.json || status=$?
+          check-jsonschema --schemafile schemas/ci_skills_endpoints.schema.json endpoints.json
+          exit "$status"
+      - name: Emit endpoint evidence
+        if: always()
+        env:
+          STEP_RESULTS: >-
+            {"tools":"${{ steps.tools.outcome }}","schema":"${{ steps.schema.outcome }}",
+            "endpoint_unit":"${{ steps.endpoint_unit.outcome }}",
+            "endpoint_gate":"${{ steps.endpoint_gate.outcome }}"}
+        run: |
+          runner_digest=${CI_RUNNER_IMAGE##*@}
+          python tools/ci_required_result.py emit \
+            --inventory inventory/ci/smoke-tests.yaml \
+            --binding standards-binding.yaml \
+            --job gate-ci-skills-endpoints \
+            --commit "$CI_SOURCE_SHA" \
+            --pipeline-id "$GITHUB_RUN_ID" \
+            --runner-digest "$runner_digest" \
+            --step-results "$STEP_RESULTS" \
+            --junit reports/raw/endpoints-pytest.xml \
+            --output-dir reports
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-evidence-gate-ci-skills-endpoints
+          path: reports
+
+  test-install:
+    name: test-install
+    runs-on: ubuntu-latest
+    container:
+      image: *ci_runner_image
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ env.CI_SOURCE_SHA }}
+      - *trust_workspace
+      - name: Install fixture and documentation check tools
+        id: tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq bats curl jq
+          python -m pip install -r requirements.txt pydoclint==0.10.1
+      - *pending_status
+      - name: Validate toolchain schema and manifest
+        id: schema
+        run: |
+          check-jsonschema --check-metaschema schemas/configuration/toolchain-dependencies.schema.json
+          check-jsonschema \
+            --schemafile schemas/configuration/toolchain-dependencies.schema.json \
+            toolchain-dependencies.json
+      - name: Verify installer behavior with isolated host fixtures
+        id: tests
+        run: |
+          mkdir -p reports/raw
+          python -W error -m pytest -q --junitxml=reports/raw/install-pytest.xml \
+            tests/python/test_agent_profile.py tests/python/test_installer.py
+          bats --tap tests/bash/install.bats | tee reports/raw/install-bats.tap
+      - name: Check reStructuredText API documentation
+        id: docs
+        run: >-
+          pydoclint --style=sphinx --skip-checking-short-docstrings=False
+          --arg-type-hints-in-docstring=False --check-return-types=False
+          --allow-init-docstring=True tools/agent_profile.py
+      - name: Emit install evidence
+        if: always()
+        env:
+          STEP_RESULTS: >-
+            {"tools":"${{ steps.tools.outcome }}","schema":"${{ steps.schema.outcome }}",
+            "tests":"${{ steps.tests.outcome }}","docs":"${{ steps.docs.outcome }}"}
+        run: |
+          runner_digest=${CI_RUNNER_IMAGE##*@}
+          python tools/ci_required_result.py emit \
+            --inventory inventory/ci/smoke-tests.yaml \
+            --binding standards-binding.yaml \
+            --job test-install \
+            --commit "$CI_SOURCE_SHA" \
+            --pipeline-id "$GITHUB_RUN_ID" \
+            --runner-digest "$runner_digest" \
+            --step-results "$STEP_RESULTS" \
+            --junit reports/raw/install-pytest.xml \
+            --tap reports/raw/install-bats.tap \
+            --output-dir reports
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-evidence-test-install
+          path: reports
+
+  required-result:
+    name: required-result
+    if: always()
+    needs: [validate, gate-ci-skills-endpoints, test-install]
+    runs-on: ubuntu-latest
+    container:
+      image: *ci_runner_image
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ env.CI_SOURCE_SHA }}
+      - *trust_workspace
+      - name: Install aggregation tools
+        if: always()
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq curl jq
+          python -m pip install -r requirements.txt
+      - uses: actions/download-artifact@v5
+        if: always()
+        with:
+          pattern: ci-evidence-*
+          path: reports
+          merge-multiple: true
+      - name: Aggregate, publish, and read back the exact result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS_CONTEXT: ci-skills/required
+        run: |
+          runner_digest=${CI_RUNNER_IMAGE##*@}
+          aggregate_status=0
+          python tools/ci_required_result.py aggregate \
+            --inventory inventory/ci/smoke-tests.yaml \
+            --binding standards-binding.yaml \
+            --job required-result \
+            --workflow .github/workflows/validate.yml \
+            --commit "$CI_SOURCE_SHA" \
+            --pipeline-id "$GITHUB_RUN_ID" \
+            --runner-digest "$runner_digest" \
+            --input-dir reports || aggregate_status=$?
+          case $aggregate_status in
+            0) state=success; description='Required CI passed' ;;
+            1) state=failure; description='Required CI failed' ;;
+            *) state=error; description='Required CI evidence is invalid' ;;
+          esac
+          target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          status_status=0
+          body=$(jq -n --arg state "$state" --arg context "$STATUS_CONTEXT" \
+            --arg description "$description" --arg target_url "$target_url" \
+            '{state: $state, context: $context, description: $description, target_url: $target_url}') || \
+            status_status=$?
+          if ((status_status == 0)); then
+            curl -fsS -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              -d "$body" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${CI_SOURCE_SHA}" \
+              >/dev/null || status_status=$?
+          fi
+          if ((status_status == 0)); then
+            curl -fsS \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CI_SOURCE_SHA}/status" \
+              | jq -e --arg context "$STATUS_CONTEXT" --arg state "$state" --arg sha "$CI_SOURCE_SHA" \
+                --arg target_url "$target_url" \
+                '.sha == $sha and (.statuses | map(select(.context == $context))[0] |
+                 .state == $state and .target_url == $target_url)' \
+                >/dev/null || status_status=$?
+          fi
+          aggregate_outcome=failure
+          status_outcome=failure
+          if ((aggregate_status == 0)); then
+            aggregate_outcome=success
+          fi
+          if ((status_status == 0)); then
+            status_outcome=success
+          fi
+          step_results=$(jq -nc \
+            --arg aggregate "$aggregate_outcome" \
+            --arg status "$status_outcome" \
+            '{aggregate: $aggregate, status: $status}')
+          emit_status=0
+          python tools/ci_required_result.py emit \
+            --inventory inventory/ci/smoke-tests.yaml \
+            --binding standards-binding.yaml \
+            --job required-result \
+            --commit "$CI_SOURCE_SHA" \
+            --pipeline-id "$GITHUB_RUN_ID" \
+            --runner-digest "$runner_digest" \
+            --step-results "$step_results" \
+            --output-dir reports || emit_status=$?
+          if ((aggregate_status != 0 || status_status != 0 || emit_status != 0)); then
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-evidence-required-result
+          path: |
+            reports/ci/required-result.json
+            reports/smoke/required-result.json

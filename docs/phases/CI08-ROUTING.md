@@ -140,12 +140,12 @@ How `ci-skills` comes to sit on top of `glab`:
    work no command declares to the `glab` skill.
 5. Declare the skill's tags, so that `bin/ci-skills list` (planned,
    CI01-CATALOG) shows them with the derived dependency on `glab`.
-6. After the last skill edit, capture a new receipt on the D-SMOKE executor
-   (`mac.lan`, `tests/acceptance/expected.toml`) with
+6. After the last skill edit, capture a new receipt on the selected executor
+   using [CI11-TOOLS runtime setup](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back):
    `ci-skills/bin/access_check.py --publication --receipt-out
    tests/acceptance/receipts/operator-laptop.json`, replacing the committed
-   receipt. Commit it. It stays non-`PASS` until CI03-GATES G0 settles the
-   `required_checks` read-back (D-GATE).
+   receipt. Commit it. Publication requires the selected target's
+   `required_checks` read-back.
 7. Open one pull request; merge per CI10-PHASES, How a phase lands.
 
 ## Live receipt
@@ -221,11 +221,10 @@ request's final package bytes.
    the `reference.py next gitlab --json` output and the `wc -l` count. This
    phase changes skill bytes, so it also needs a fresh receipt from the
    D-SMOKE executor: `tests/acceptance/receipts/operator-laptop.json`,
-   captured in step 6. The checker compares its `execution_host` and
-   identities with the declared executor, `skill.digest` with the tree
-   digest of `ci-skills`, `status`, `kind`, `publication`, `targets`, the
-   `live_checks` named in `required_live_checks`, and `captured_at` against
-   `max_receipt_age_days`.
-5. *Verification*: `tools/check_live_acceptance.py --root . --expected
-   tests/acceptance/expected.toml --receipts tests/acceptance/receipts
-   --skill ci-skills --json` reports `"status": "PASS"` and exits 0.
+   captured in step 6. The checker validates the setup receipt's execution
+   host, API-read identities, targets, credential sources and live read-back.
+   Subsequent operation receipts must match that setup. Exact candidate
+   revision, skill digest, freshness, redaction and applicable cleanup checks
+   remain required under CI11-TOOLS, Smoke cases.
+5. *Verification*: `tools/check_live_acceptance.py --root . --json`
+   reports `"status": "PASS"` and exits 0 for the required candidate receipts.

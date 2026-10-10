@@ -36,7 +36,8 @@ host = "github.com"
 repository = "owner/repository"
 
 # Optional: a private token file, if you do not want the `gh` credential store
-# used. Absolute path, outside this repository and outside the installed skill.
+# used. Absolute or relative to this target file; keep it outside this
+# repository and the installed skill.
 # token_file = "/home/operator/.ci-skills/credentials/github.token"
 
 # Required for `access_check.py --publication`: the status checks that branch
@@ -58,6 +59,7 @@ url = "https://gitlab.example.com"
 # runner_id = 123
 
 # Optional: a private token file instead of the `glab` credential store.
+# Relative paths resolve beside this target file.
 # The full diagnostics access check needs an instance administrator identity.
 # The GitLab-only check proves identity and target read access; an action's
 # apply and read-back establish whether that action is authorized.
