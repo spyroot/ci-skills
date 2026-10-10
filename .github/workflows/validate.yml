@@ -30,6 +30,12 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ env.CI_SOURCE_SHA }}
+      - &trust_workspace
+        name: Trust and read back the exact GitHub workspace
+        run: |
+          git config --global --replace-all safe.directory "$GITHUB_WORKSPACE"
+          [[ $(git config --global --get-all safe.directory) == "$GITHUB_WORKSPACE" ]]
+          [[ $(git -C "$GITHUB_WORKSPACE" rev-parse --is-inside-work-tree) == true ]]
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
@@ -201,6 +207,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ env.CI_SOURCE_SHA }}
+      - *trust_workspace
       - name: Install endpoint gate tools
         id: tools
         run: |
@@ -266,6 +273,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ env.CI_SOURCE_SHA }}
+      - *trust_workspace
       - name: Install fixture and documentation check tools
         id: tools
         run: |
@@ -330,6 +338,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ env.CI_SOURCE_SHA }}
+      - *trust_workspace
       - name: Install aggregation tools
         if: always()
         run: |
