@@ -97,42 +97,6 @@ def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def setup_gitlab(args: argparse.Namespace) -> dict[str, Any]:
-    """Resolve the selected target and prove access before smoke mutations.
-
-    :param args: Existing CLI arguments for target, binding, project or group,
-        and optional revision.
-    :returns: The existing GitLab access receipt containing API-read identity
-        and target fields, reusable throughout the smoke.
-    :raises AcceptanceError: If the shared access check does not pass.
-    """
-    _redactor()
-    from core.access import check_gitlab_operation_access
-    from core.cli import resolve_gitlab_target
-    from core.credentials import bind_gitlab_session
-    from core.target import select_gitlab_reference
-
-    target, target_source = resolve_gitlab_target(
-        getattr(args, "target", None), getattr(args, "binding", None)
-    )
-    target_kind, reference = select_gitlab_reference(
-        target,
-        project=getattr(args, "project", None),
-        group=getattr(args, "group", None),
-    )
-    session = bind_gitlab_session(
-        target,
-        target_kind=target_kind,
-        target_reference=reference,
-        target_source=target_source,
-        revision=getattr(args, "revision", None),
-    )
-    result = check_gitlab_operation_access(session)
-    if result.get("status") != "PASS":
-        raise AcceptanceError("gitlab_setup_not_pass")
-    return result
-
-
 def _load_receipts(directory: Path) -> dict[str, Any]:
     if not directory.is_dir():
         raise AcceptanceError(f"receipt_directory_missing:{directory}")

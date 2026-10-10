@@ -19,6 +19,7 @@ ACTION = import_script_module("core.gitlab_actions")
 API = import_script_module("core.gitlab_api")
 RUNNERS = import_script_module("core.gitlab_runners")
 REPORT = import_script_module("core.report")
+RUNNER = import_script_module("gitlab_runner")
 ROOT = Path(__file__).parents[2]
 VERIFIED_SKILL = {
     "algorithm": "sha256-tree-v1",
@@ -367,7 +368,7 @@ def test_runner_live_operation_refuses_unverified_skill_before_api(
     monkeypatch.setattr(
         ACTION, "GlabAPIClient", lambda **kw: pytest.fail("API client must not run")
     )
-    assert ACTION.run_action_cli("gitlab_runner", arguments) == 2
+    assert RUNNER.main(arguments) == 2
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "BLOCKED"
     assert output["errors"][0]["reason"] == "skill_revision_unverified"
@@ -406,8 +407,7 @@ def test_runner_read_cli_writes_portable_live_receipt(
     )
     receipt_path = tmp_path / "runner-get.json"
     assert (
-        ACTION.run_action_cli(
-            "gitlab_runner",
+        RUNNER.main(
             ["get", "--runner-id", "23", "--receipt-out", str(receipt_path), "--json"],
         )
         == 0

@@ -322,6 +322,13 @@ def aggregate(args: argparse.Namespace) -> int:
                 failures.append(f"{kind}:{job}:identity_mismatch")
             if value.get("status") != "passed":
                 failures.append(f"{kind}:{job}:not_passed")
+            cleanup_status = (
+                value["cleanup"]["status"]
+                if kind == "ci"
+                else value["checks"]["cleanup"]
+            )
+            if cleanup_status != "passed":
+                failures.append(f"{kind}:{job}:cleanup_not_passed")
             if value.get("warnings") or value.get("skipped_required_tests"):
                 failures.append(f"{kind}:{job}:warnings_or_skips")
     for failure in failures:

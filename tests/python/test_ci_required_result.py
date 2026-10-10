@@ -97,6 +97,27 @@ def test_aggregate_rejects_warning_or_skipped_evidence(tmp_path):
     assert GATE.aggregate(_aggregate_args(tmp_path)) == 1
 
 
+@pytest.mark.parametrize(
+    ("kind", "path", "field"),
+    (
+        ("ci", "cleanup", "status"),
+        ("smoke", "checks", "cleanup"),
+    ),
+)
+def test_aggregate_rejects_failed_cleanup_despite_passed_top_status(
+    tmp_path, kind, path, field
+):
+    """A nested cleanup failure blocks otherwise successful evidence."""
+    _complete_predecessors(tmp_path)
+    record = json.loads((tmp_path / kind / "validate.json").read_text(encoding="utf-8"))
+    record[path][field] = "failed"
+    (tmp_path / kind / "validate.json").write_text(
+        json.dumps(record, sort_keys=True), encoding="utf-8"
+    )
+
+    assert GATE.aggregate(_aggregate_args(tmp_path)) == 1
+
+
 def test_aggregate_rejects_wrong_runtime_identity(tmp_path):
     _complete_predecessors(tmp_path)
 

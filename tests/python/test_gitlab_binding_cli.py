@@ -6,11 +6,12 @@ import json
 from pathlib import Path
 
 import pytest
+
 from tests.python.conftest import import_script_module
 
 ACCESS = import_script_module("gitlab_access")
-ACTION = import_script_module("core.gitlab_actions")
 CLI = import_script_module("core.cli")
+ISSUE = import_script_module("gitlab_issue")
 JOB = import_script_module("gitlab_job")
 PIPELINE = import_script_module("gitlab_pipeline")
 
@@ -45,9 +46,7 @@ def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _invoke(kind: str, selector: list[str]) -> int:
     if kind == "action":
-        return ACTION.run_action_cli(
-            "gitlab_issue", ["open-bug", "--title", "test", "--json", *selector]
-        )
+        return ISSUE.main(["open-bug", "--title", "test", "--json", *selector])
     if kind == "access":
         return ACCESS.main(["check", "--dry-run", "--json", *selector])
     if kind == "pipeline":

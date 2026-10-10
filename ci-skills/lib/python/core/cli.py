@@ -29,6 +29,8 @@ from .catalog import (
     missing_required_options,
 )
 from .credentials import bind_gitlab_session, bind_sources
+from .gitlab_api import GlabAPIClient
+from .gitlab_session import BoundGitLabSession
 from .portable import portable
 from .project_binding import BINDING_ENV, resolve_target_file
 from .project_binding import resolve_target as resolve_project_target
@@ -43,7 +45,7 @@ from .status import (
     PROFILE_FULL,
     exit_code,
 )
-from .target import GitLabOperationTarget, Target, TargetError
+from .target import GitLabOperationTarget, Target, TargetError, select_gitlab_reference
 
 # The documented per-host location. Keeping it here rather than in each script
 # means one answer to "where does the target live", and the script-interface
@@ -95,6 +97,51 @@ def resolve_gitlab_target(
         GitLabOperationTarget(selected.gitlab, selected.source_file.resolve()),
         source,
     )
+
+
+def setup_gitlab_operation(
+    explicit_target: str | None,
+    explicit_binding: str | None,
+    *,
+    project: str | None,
+    group: str | None,
+    revision: str | None,
+    api_client: GlabAPIClient | None = None,
+) -> tuple[BoundGitLabSession, dict[str, Any]]:
+    """Bind a live GitLab target and return its existing access read-back.
+
+    :param explicit_target: Operator-selected target file, or normal resolution.
+    :param explicit_binding: Operator-selected project binding, or normal resolution.
+    :param project: Optional project path or numeric ID override.
+    :param group: Optional group path or numeric ID override.
+    :param revision: Optional claimed source revision of the installed skill.
+    :param api_client: Existing API client, or the access check's default client.
+    :returns: The same bound session used for access and its receipt, including
+        a BLOCKED receipt when provider read-back does not prove access.
+    :raises Exception: The original setup failure, carrying its target,
+        credential or access stage in ``gitlab_setup_source``.
+    """  # noqa: DOC503 - retain the original setup exception and type
+    source = "target"
+    try:
+        target, target_source = resolve_gitlab_target(
+            explicit_target, explicit_binding, dry_run=False
+        )
+        target_kind, reference = select_gitlab_reference(
+            target, project=project, group=group
+        )
+        source = "credential"
+        session = bind_gitlab_session(
+            target,
+            target_kind=target_kind,
+            target_reference=reference,
+            target_source=target_source,
+            revision=revision,
+        )
+        source = "access"
+        return session, check_gitlab_operation_access(session, api_client=api_client)
+    except Exception as exc:
+        exc.gitlab_setup_source = source
+        raise
 
 
 def output_mode(args: argparse.Namespace) -> str:

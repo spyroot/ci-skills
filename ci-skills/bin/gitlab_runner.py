@@ -2,7 +2,7 @@
 """Read scoped GitLab runners and plan, apply, or verify record changes."""
 
 import _bootstrap  # noqa: F401
-from core.action import ExecutionContext, Executor, emit_result
+from core.action import ExecutionContext, Executor
 from core.gitlab_actions import (
     GitLabAction,
     GitLabAuth,
@@ -27,14 +27,12 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = build_parser().parse_args(argv)
     action = GitLabAction.from_args(args)
-    try:
-        result = Executor(
+    return action.execute(
+        lambda: Executor(
             context=ExecutionContext.from_args(args),
             callbacks=[GitLabAuth(action=action), operation_callback(action)],
-        ).run()
-        return emit_result(result, args)
-    except Exception as exc:  # noqa: BLE001 - structured command boundary
-        return action.failure(exc)
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ import re
 import socket
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from .access import check_gitlab_operation_access
-from .action import ExecutionContext, Executor, GitlabCallback, emit_result
+from .action import Executor, GitlabCallback, emit_result
 from .cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
 from .credentials import bind_gitlab_session
 from .gitlab_api import GitLabAPIError, GlabAPIClient
@@ -960,6 +961,17 @@ class GitLabAction:
             started=self.started,
         )
 
+    def execute(self, workflow: Callable[[], Executor]) -> int:
+        """Run the composed workflow through the shared structured CLI boundary.
+
+        :param workflow: Build the callback composition declared by this command.
+        :returns: Existing report or structured failure exit code.
+        """
+        try:
+            return emit_result(workflow().run(), self.args)
+        except Exception as exc:  # noqa: BLE001 - structured command boundary
+            return self.failure(exc)
+
 
 class GitLabAuth(GitlabCallback[GitLabAction, GitLabService]):
     """Prepare an action and establish its existing authenticated service."""
@@ -1071,22 +1083,3 @@ def operation_callback(action: GitLabAction) -> GitLabOperation:
         action.args.action, GitLabOperation
     )
     return callback(action=action)
-
-
-def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
-    """Keep the existing callable CLI adapter on the same callback workflow.
-
-    :param kind: Registered GitLab action command.
-    :param argv: Optional argument vector; defaults to process arguments.
-    :returns: Exit code for the existing structured report.
-    """
-    args = action_parser(kind).parse_args(argv)
-    action = GitLabAction.from_args(args)
-    try:
-        result = Executor(
-            context=ExecutionContext.from_args(args),
-            callbacks=[GitLabAuth(action=action), operation_callback(action)],
-        ).run()
-        return emit_result(result, args)
-    except Exception as exc:  # noqa: BLE001 - preserve the existing structured CLI boundary
-        return action.failure(exc)
