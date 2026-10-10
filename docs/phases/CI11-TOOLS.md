@@ -217,7 +217,9 @@ behavior. The generic executor must not dispatch on concrete provider names.
 For live execution, finish a callback's applicable `collect()`, `run()`, and `update()` hooks before entering the next
 callback. Collect reads required inputs; run performs the atomic operation; update performs its declared post-run work.
 On completion or failure, invoke cleanup for entered callbacks in reverse order, retaining the primary failure and
-cleanup evidence. A failed or incomplete step stops dependent work. Cleanup respects existing resource ownership and
+cleanup evidence. `core/signals.py`, shared with the installer, routes SIGINT, SIGTERM, and SIGHUP through this
+cleanup path and restores the previous signal handlers. A failed or incomplete step stops dependent work. Cleanup
+respects existing resource ownership and
 recovery behavior; it does not remove a successfully requested persistent runner, milestone, or image.
 
 Authentication callbacks establish the provider services used by later callbacks. Typed results carry created IDs and
@@ -490,8 +492,8 @@ The same ten steps for every row; the row repeats them with the real paths.
    Contracts"); no such tool exists in this catalogue.
 
 9. **Tests.** Mocked external commands through the `conftest.py` fixtures;
-   the pinned mutating matrix for every `apply`; a receipt kind in
-   `tests/acceptance/expected.toml` once the live target is declared there.
+   the pinned mutating matrix for every `apply`; initial runtime access proof
+   followed by the tool's operation and read-back receipts.
 
 10. **Docs.** The catalog entry renders `tools.json`; one routing row in
     `SKILL.md`; the row here carries source, destination, adaptation and
@@ -989,13 +991,23 @@ Results
   status, interval, runner), the window, the events in it, and the
   correlated subset. This is the README's "CI Combo" in one command.
 
-## Smoke cases: fixed arguments and the read-back that proves each tool
+## Smoke cases: runtime setup and read-back
 
-One `[[smoke_cases]]` entry per tool in `tests/acceptance/expected.toml`
-(CI06-TESTS, "Live smoke"); `<declared ...>` values are written there before
-the smoke, never chosen by a tool; each case runs with
-`--receipt-out tests/acceptance/receipts/<tool>-<case>.json` (CI02-CLI, item 7)
-and every receipt is committed.
+Shared setup resolves the selected target and verifies authentication and target
+identity through API read-back before any mutation. Its returned dictionary supplies
+endpoint, username, project ID/path and credential source to subsequent checks;
+these values are not copied into an expectations file. Expected resource fields
+come from the values submitted by that smoke. `<declared ...>` inputs below remain
+operator-selected; setup resolves their live identities. Smoke reports use the
+pinned JSON evidence contract, with operation receipts captured through
+`--receipt-out tests/acceptance/receipts/<tool>-<case>.json` (CI02-CLI, item 7).
+
+The target-resolution smoke keeps cwd, home and candidate code unchanged. The
+`ci-skills-smoke` environment switch selects the fixed `ci-skills-smoke.toml`
+basename; otherwise it uses `target.toml`. The existing project `.ci-skills` then
+home `~/.ci-skills` directory precedence remains unchanged. A deliberately invalid
+project smoke configuration must fail without falling back to the working home
+configuration. Relative credential filenames resolve beside the selected file.
 
 - `gitlab_job.py get --job-url <declared job>`: read-back `records[0].id`
   equals the declared id, plus `pipeline.id`, `runner.id`, the trace tail.
@@ -1052,9 +1064,9 @@ and every receipt is committed.
 - `ocp_csr.py`: the pending CSR list as `PLANNED`; apply on a CSR created for
   the smoke reads back `Approved`.
 - `k8s_verify_mtu_consistency.py` extended: the rendered MachineConfig's
-  digest in the plan. Its apply needs a node pool declared for it in
-  `tests/acceptance/expected.toml`; until one is declared, this row is not
-  delivered (rule below).
+  digest in the plan. Its apply needs an operator-selected node pool as a
+  smoke input, resolved through live setup; until one is selected, this row
+  is not delivered (rule below).
 - `k8s_state.py`: node and pod counts per declared namespace; per-read
   durations and wall time.
 - `cluster_health.py --ceph-namespace <declared namespace>`: one line per
@@ -1062,8 +1074,8 @@ and every receipt is committed.
   list, Ceph health string, pending claim count, warning event count) and a
   duration per component; `status` matches the live cluster on the day.
 - `ceph_nfs.py`: the export list read back. `ceph_bench.py`: the plan; its
-  apply writes and needs a pool declared for it in `expected.toml`, and until
-  one is declared, this row is not delivered (rule below).
+  apply writes and needs an operator-selected pool as a smoke input, resolved
+  through live setup; until one is selected, this row is not delivered (rule below).
 - `toolbox_build.py apply --tag <declared>`: the image digest reported by the
   build equals the digest read back from Harbor; second apply `NO_OP`.
 - `harbor_push.py apply --image <declared> --tag <declared>`: artifact digest
@@ -1529,7 +1541,7 @@ reports PASS.
 1. *Delivery*, per tool: `ci-skills/bin/<tool>.py`, the Library module cell
    under `ci-skills/lib/python/core/`, the catalog entry and the regenerated
    `tools.json`, any endpoint/access additions to `target.toml.template` and its workflow inputs, its
-   `[[smoke_cases]]` entry; the command that runs is the tool's smoke line.
+   smoke case; the command that runs is the tool's smoke line.
 
 2. *Tests*: `tests/python/test_<module>.py` per Library module (mocked `gh`,
    `glab`, `kubectl`, `oc`, `skopeo` and `podman` through the `conftest.py`
@@ -1542,10 +1554,9 @@ reports PASS.
    `status`, `records`, `plan_digest` and `readback` (mutations),
    `result_action` (`APPLIED` then `NO_OP`), `execution_host`, `captured_at`.
 
-5. *Verification*: `tools/check_live_acceptance.py --root . --expected
-   tests/acceptance/expected.toml --receipts tests/acceptance/receipts
-   --skill ci-skills --json`, with the row's `[[smoke_cases]]` entry
-   declared, prints `"status": "PASS"` and exits 0.
+5. *Verification*: `tools/check_live_acceptance.py --root . --skill ci-skills --json`
+   validates initial access proofs and subsequent operation receipts for the
+   candidate, prints `"status": "PASS"` and exits 0.
 
 ## Open decisions
 

@@ -39,6 +39,10 @@ def test_committed_runner_tag_receipts_match_live_contract():
     receipts = root / "tests/acceptance/runner-tag"
     applied = json.loads((receipts / "runner-tag-applied.json").read_text())
     repeated = json.loads((receipts / "runner-tag-no_op.json").read_text())
+    setup = json.loads(
+        (root / "tests/acceptance/receipts/gitlab-access.json").read_text()
+    )
+    target = setup["target"]
     digest = PROVENANCE.tree_digest(root / "ci-skills")["digest"]
 
     for result in (applied, repeated):
@@ -46,7 +50,12 @@ def test_committed_runner_tag_receipts_match_live_contract():
         assert result["skill"]["digest"] == digest
         assert result["skill"]["revision"]["verified"] is True
         assert result["tested_revision"] == result["skill"]["revision"]["value"]
-        assert result["verified_target"]["full_path"] == "hott/test"
+        assert {
+            field: result["verified_target"][field]
+            for field in ("kind", "id", "full_path")
+        } == {field: target[field] for field in ("kind", "id", "full_path")}
+        assert result["plan"]["target_kind"] == target["kind"]
+        assert result["plan"]["target_reference"] == target["full_path"]
         assert result["readback"]["verified"] is True
 
     added = applied["plan"]["requested_tags"]
@@ -190,7 +199,7 @@ def test_cli_failure_preserves_primary_and_every_cleanup_failure(monkeypatch, ca
     _live_action_dependencies(monkeypatch, plan)
     primary = ACTION.ActionError("operation failed")
 
-    class FailingOperation(CALLBACKS.Callback[object]):
+    class FailingOperation(CALLBACKS.Callback[object, object]):
         def run(self) -> object:
             raise primary
 
@@ -228,7 +237,7 @@ def test_cli_cleanup_failure_blocks_a_completed_report_without_losing_records(
     plan = _plan("gitlab_issue", "open-bug", {"title": "unit"})
     _live_action_dependencies(monkeypatch, plan)
 
-    class CompletedOperation(CALLBACKS.Callback[object]):
+    class CompletedOperation(CALLBACKS.Callback[object, object]):
         def __init__(self, action) -> None:
             self.action = action
 

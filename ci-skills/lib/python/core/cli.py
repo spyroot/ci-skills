@@ -124,11 +124,47 @@ class MachineArgumentParser(argparse.ArgumentParser):
     """Keep parser failures in the selected machine-readable result shape."""
 
     def __init__(
-        self, *args: Any, report_kind: str | None = None, **kwargs: Any
+        self,
+        *args: Any,
+        report_kind: str | None = None,
+        help_contract: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
+        kwargs["allow_abbrev"] = False
         super().__init__(*args, **kwargs)
         self.report_kind = report_kind
+        self.help_contract = help_contract
         self._raw_argv: tuple[str, ...] = ()
+
+    def format_help(self) -> str:
+        """Render ordered help from a command contract when one is supplied.
+
+        :returns: Human help, with argparse rendering every accepted option.
+        """
+        contract = self.help_contract
+        if contract is None:
+            return super().format_help()
+        formatter = self._get_formatter()
+        for heading, key in (("Summary", "summary"), ("Description", "description")):
+            formatter.start_section(heading)
+            formatter.add_text(contract[key])
+            formatter.end_section()
+        formatter.start_section("Examples")
+        for example in contract["examples"]:
+            formatter.add_text(f"{example['description']}: {example['command']}")
+        formatter.end_section()
+        formatter.start_section("Options")
+        formatter.add_arguments(self._actions)
+        formatter.end_section()
+        formatter.start_section("Output modes")
+        for mode, meaning in contract["output_modes"].items():
+            formatter.add_text(f"{mode}: {meaning}")
+        formatter.end_section()
+        formatter.start_section("Usage")
+        formatter.add_text(contract["usage"])
+        formatter.add_text("Exit 0: success; exit 2: invalid node or arguments.")
+        formatter.end_section()
+        return formatter.format_help()
 
     def parse_args(
         self, args: list[str] | None = None, namespace: argparse.Namespace | None = None
@@ -215,6 +251,19 @@ def parser(
         metavar="SHA",
         help="exact source commit SHA (required for live installed copies without Git metadata)",
     )
+    add_log_arguments(result)
+    if output_dir:
+        result.add_argument(
+            "--output-dir", metavar="PATH", help="write paired JSON and human reports"
+        )
+    return result
+
+
+def add_log_arguments(result: argparse.ArgumentParser) -> None:
+    """Add the shared diagnostic controls without adding provider arguments.
+
+    :param result: Parser receiving the common diagnostic options.
+    """
     result.add_argument(
         "--log-format",
         choices=("text", "json"),
@@ -237,11 +286,6 @@ def parser(
         metavar="ID",
         help="stable identifier for diagnostic logs",
     )
-    if output_dir:
-        result.add_argument(
-            "--output-dir", metavar="PATH", help="write paired JSON and human reports"
-        )
-    return result
 
 
 def log_event(

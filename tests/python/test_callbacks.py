@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import os
+import signal
+import subprocess
+import sys
+
 import pytest
 
-from tests.python.conftest import import_script_module
+from tests.python.conftest import LIB_ROOT, import_script_module
 
 ACTION = import_script_module("core.gitlab_actions")
 CALLBACKS = import_script_module("core.action")
 RUNNERS = import_script_module("core.gitlab_runners")
 
 
-class Recorded(CALLBACKS.Callback[object]):
+class Recorded(CALLBACKS.Callback[object, object]):
     """Record lifecycle calls and optionally return, stop, or fail."""
 
     def __init__(
@@ -119,7 +124,7 @@ def test_incomplete_gitlab_result_stops_later_callbacks(record):
     """Verified provider records with errors or blocked cleanup are incomplete."""
     events: list[str] = []
 
-    class ResultCallback(CALLBACKS.GitlabCallback[dict]):
+    class ResultCallback(CALLBACKS.GitlabCallback[object, dict]):
         def run(self) -> dict:
             events.append("result.run")
             return record
@@ -172,6 +177,46 @@ def test_failure_stops_callbacks_and_retains_all_reverse_cleanup_evidence():
     assert "cleanup Recorded: cleanup first" in raised.value.__notes__
     assert tuple(executor.cleanup_failures) == raised.value.cleanup_failures
     assert "later.collect" not in events
+
+
+@pytest.mark.parametrize("signal_name", ("SIGINT", "SIGTERM", "SIGHUP"))
+def test_executor_cleans_up_before_exiting_for_each_recoverable_signal(signal_name):
+    """A real process signal reaches callback cleanup before its standard exit."""
+    script = """
+import os
+import signal
+import sys
+from core.action import Callback, Executor
+
+class Interrupting(Callback[object, object]):
+    def run(self):
+        os.kill(os.getpid(), getattr(signal, sys.argv[1]))
+
+    def cleanup(self):
+        print("cleanup", flush=True)
+
+try:
+    Executor(callbacks=Interrupting()).run()
+except SystemExit as exc:
+    print(f"exit:{exc.code}", flush=True)
+    raise
+"""
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join(
+        filter(None, (str(LIB_ROOT), environment.get("PYTHONPATH")))
+    )
+    signum = getattr(signal, signal_name)
+    result = subprocess.run(
+        [sys.executable, "-c", script, signal_name],
+        capture_output=True,
+        check=False,
+        env=environment,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 128 + signum
+    assert result.stdout.splitlines() == ["cleanup", f"exit:{128 + signum}"]
 
 
 def test_read_runner_uses_the_real_composed_callback_operation():

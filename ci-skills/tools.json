@@ -450,12 +450,14 @@
         "create-bug": {
           "required_options": [
             "--title"
-          ]
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json"
         },
         "open-bug": {
           "required_options": [
             "--title"
-          ]
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json"
         }
       },
       "use_when": "A selected project needs a requested bug issue."
@@ -566,17 +568,20 @@
         "adjust-time": {
           "required_options": [
             "--milestone-id"
-          ]
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json"
         },
         "create": {
           "required_options": [
             "--title"
-          ]
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json"
         },
         "update": {
           "required_options": [
             "--milestone-id"
-          ]
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json"
         }
       },
       "use_when": "A selected project or group milestone needs a requested change."
@@ -667,6 +672,7 @@
           "required_options": [
             "--runner-id"
           ],
+          "result_schema": "schemas/results/gitlab-action.schema.json",
           "side_effects": "Apply may attach a runner to selected projects."
         },
         "create": {
@@ -678,6 +684,7 @@
             "--description",
             "--token-out"
           ],
+          "result_schema": "schemas/results/gitlab-action.schema.json",
           "side_effects": "Apply may create a runner record and write the token file."
         },
         "delete": {
@@ -759,13 +766,15 @@
           "required_options": [
             "--title",
             "--content-file"
-          ]
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json"
         },
         "update": {
           "required_options": [
             "--slug",
             "--content-file"
-          ]
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json"
         }
       },
       "use_when": "A selected project wiki page needs requested content."
@@ -812,12 +821,36 @@
       "use_when": "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; plan the selected nodes, then run the exact confirmed plan."
     },
     "reference.py": {
+      "description": "Expand one node; optional references remain pointers until requested.",
+      "examples": [
+        {
+          "command": "reference.py",
+          "description": "Show available clusters"
+        },
+        {
+          "command": "reference.py glab",
+          "description": "Expand GitLab tools"
+        },
+        {
+          "command": "reference.py gitlab_runner.py",
+          "description": "Expand a command node"
+        }
+      ],
       "execution_surface": "installed catalogue; no provider or credential access",
       "options": [
         "--json",
         "--yaml",
-        "--describe"
+        "--describe",
+        "--dry-run",
+        "--log-format",
+        "--log-level",
+        "--log-file",
+        "--run-id"
       ],
+      "output_modes": {
+        "json": "Versioned JSON (default)",
+        "yaml": "Versioned YAML"
+      },
       "purpose": "Offer the current node's installed tools and optional reference pointers.",
       "read_only": true,
       "report_kind": "reference_next",
@@ -827,7 +860,8 @@
       ],
       "requires_authorities": [],
       "returns": "A versioned proposition with tools and reference mappings.",
-      "side_effects": "none",
+      "side_effects": "Only an explicit log file is written; dry-run and describe do not write.",
+      "usage": "reference.py [node] [options]",
       "use_when": "Choose a capability cluster or expand one installed command."
     },
     "storage_report.py": {

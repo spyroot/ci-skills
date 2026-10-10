@@ -21,12 +21,14 @@ the real one is a test failure rather than a surprise at runtime.
 
 from __future__ import annotations
 
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Final
 
 from .endpoints import TARGET_CONTRACT
 
 SCHEMA_VERSION = "1.0"
 SKILL_NAME = "ci-skills"
+GITLAB_ACTION_SCHEMA: Final = "schemas/results/gitlab-action.schema.json"
 
 # Every API command accepts these. Node diagnostics share the target protocol.
 UNIVERSAL_OPTIONS: dict[str, str] = {
@@ -309,9 +311,18 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "--receipt-out": "write a sanitized, shareable operation receipt",
         },
         "subcommands": {
-            "create": {"required_options": ["--title"]},
-            "update": {"required_options": ["--milestone-id"]},
-            "adjust-time": {"required_options": ["--milestone-id"]},
+            "create": {
+                "required_options": ["--title"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
+            "update": {
+                "required_options": ["--milestone-id"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
+            "adjust-time": {
+                "required_options": ["--milestone-id"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
         },
         "returns": "A sanitized plan or verified milestone record and independent GET evidence.",
     },
@@ -334,8 +345,14 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "--receipt-out": "write a sanitized, shareable operation receipt",
         },
         "subcommands": {
-            "open-bug": {"required_options": ["--title"]},
-            "create-bug": {"required_options": ["--title"]},
+            "open-bug": {
+                "required_options": ["--title"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
+            "create-bug": {
+                "required_options": ["--title"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
         },
         "returns": "A sanitized plan or verified issue IID and independent GET evidence.",
     },
@@ -357,8 +374,14 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "--receipt-out": "write a sanitized, shareable operation receipt",
         },
         "subcommands": {
-            "create": {"required_options": ["--title", "--content-file"]},
-            "update": {"required_options": ["--slug", "--content-file"]},
+            "create": {
+                "required_options": ["--title", "--content-file"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
+            "update": {
+                "required_options": ["--slug", "--content-file"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
         },
         "returns": "A sanitized plan or verified wiki slug and independent GET evidence.",
     },
@@ -405,6 +428,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
             },
             "assign": {
                 "required_options": ["--runner-id"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
                 "purpose": "Assign an existing runner to the selected project or group.",
                 "mutates": True,
                 "side_effects": "Apply may attach a runner to selected projects.",
@@ -412,6 +436,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
             },
             "create": {
                 "required_options": ["--runner-type", "--description", "--token-out"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
                 "purpose": "Create a runner record and save its one-time token.",
                 "mutates": True,
                 "side_effects": "Apply may create a runner record and write the token file.",
@@ -617,27 +642,31 @@ BASH_COMMANDS: dict[str, dict[str, Any]] = {
     },
 }
 
-PROPOSITION_VERSION = "2.0"
-PROPOSITION_CLUSTERS = {
-    "glab": "gitlab",
-    "kubernetes": "kubernetes",
-    "github": "github",
-}
-PROPOSITION_REFERENCES = {
-    "access": {
-        "summary": "Selected authority and credential sources.",
-        "pointer": "references/access.md",
-    },
-    "project binding": {
-        "summary": "Project target and credential binding.",
-        "pointer": "references/project-binding.md",
-    },
-    "mcp": {
-        "summary": "GitLab MCP configuration and toolsets.",
-        "pointer": "references/mcp.md",
-    },
-}
-DISCOVERY_COMMANDS = {
+PROPOSITION_VERSION: Final = "2.0"
+PROPOSITION_CLUSTERS: Final = MappingProxyType(
+    {
+        "glab": "gitlab",
+        "kubernetes": "kubernetes",
+        "github": "github",
+    }
+)
+PROPOSITION_REFERENCES: Final = MappingProxyType(
+    {
+        "access": {
+            "summary": "Selected authority and credential sources.",
+            "pointer": "references/access.md",
+        },
+        "project binding": {
+            "summary": "Project target and credential binding.",
+            "pointer": "references/project-binding.md",
+        },
+        "mcp": {
+            "summary": "GitLab MCP configuration and toolsets.",
+            "pointer": "references/mcp.md",
+        },
+    }
+)
+DISCOVERY_COMMANDS: Final = {
     "reference.py": {
         "report_kind": "reference_next",
         "purpose": "Offer the current node's installed tools and optional reference pointers.",
@@ -645,10 +674,30 @@ DISCOVERY_COMMANDS = {
         "requires_authorities": [],
         "required_tools": ["python3"],
         "required_options": [],
-        "options": ["--json", "--yaml", "--describe"],
+        "options": [
+            "--json",
+            "--yaml",
+            "--describe",
+            "--dry-run",
+            "--log-format",
+            "--log-level",
+            "--log-file",
+            "--run-id",
+        ],
+        "description": "Expand one node; optional references remain pointers until requested.",
+        "examples": [
+            {"description": "Show available clusters", "command": "reference.py"},
+            {"description": "Expand GitLab tools", "command": "reference.py glab"},
+            {
+                "description": "Expand a command node",
+                "command": "reference.py gitlab_runner.py",
+            },
+        ],
+        "output_modes": {"json": "Versioned JSON (default)", "yaml": "Versioned YAML"},
+        "usage": "reference.py [node] [options]",
         "returns": "A versioned proposition with tools and reference mappings.",
         "read_only": True,
-        "side_effects": "none",
+        "side_effects": "Only an explicit log file is written; dry-run and describe do not write.",
         "execution_surface": "installed catalogue; no provider or credential access",
     },
 }
@@ -789,6 +838,17 @@ def describe(script: str) -> dict[str, Any]:
             else "json when stdout is not a terminal, human when it is"
         ),
         "target_protocol": [] if discovery else TARGET_PROTOCOL,
+        **(
+            {
+                "summary": entry["purpose"],
+                "description": entry["description"],
+                "examples": entry["examples"],
+                "output_modes": entry["output_modes"],
+                "usage": entry["usage"],
+            }
+            if discovery
+            else {}
+        ),
     }
 
 

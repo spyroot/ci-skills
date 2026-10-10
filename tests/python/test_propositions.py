@@ -78,7 +78,7 @@ def test_selected_cluster_and_command_are_small_schema_valid_propositions():
 
 
 def test_reference_cli_expands_nodes_without_fetching_optional_references(
-    fake_bin, call_journal
+    fake_bin, call_journal, tmp_path
 ):
     """The navigator returns pointers and never invokes a provider or fetch tool."""
     body = '#!/bin/sh\nprintf \'{"tool": "%s"}\\n\' "$0" >> "$FAKE_JOURNAL"\nexit 99\n'
@@ -99,6 +99,15 @@ def test_reference_cli_expands_nodes_without_fetching_optional_references(
         env={"FAKE_JOURNAL": str(call_journal)},
     )
     help_result = run_script("reference.py", "--help", fake_bin=fake_bin)
+    log_path = tmp_path / "reference.log"
+    dry_run = run_script(
+        "reference.py",
+        "--dry-run",
+        "--log-file",
+        log_path,
+        fake_bin=fake_bin,
+        env={"FAKE_JOURNAL": str(call_journal)},
+    )
 
     assert root.returncode == 0
     assert parse_json_output(root) == CATALOG.proposition()
@@ -106,8 +115,21 @@ def test_reference_cli_expands_nodes_without_fetching_optional_references(
     assert yaml.safe_load(selected.stdout) == CATALOG.proposition("gitlab_runner.py")
     assert help_result.returncode == 0
     assert "node" in help_result.stdout
-    assert "--json" in help_result.stdout
-    assert "--yaml" in help_result.stdout
+    for option in CATALOG.describe("reference.py")["options"]:
+        assert option in help_result.stdout
+    headings = (
+        "Summary:",
+        "Description:",
+        "Examples:",
+        "Options:",
+        "Output modes:",
+        "Usage:",
+    )
+    assert [help_result.stdout.index(heading) for heading in headings] == sorted(
+        help_result.stdout.index(heading) for heading in headings
+    )
+    assert dry_run.returncode == 0
+    assert not log_path.exists()
     assert read_journal(call_journal) == []
 
 

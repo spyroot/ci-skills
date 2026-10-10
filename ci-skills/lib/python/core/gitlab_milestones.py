@@ -22,10 +22,12 @@ from .gitlab_actions import (
 )
 from .gitlab_api import (
     GitLabAPIError,
+    GlabAPIClient,
     create_guard,
     uncertain_write,
     unverified_write,
 )
+from .gitlab_session import BoundGitLabSession
 
 
 def prepare(args: Namespace) -> tuple[dict[str, Any], int | None, None]:
@@ -141,7 +143,9 @@ class UpdateMilestone(GitLabOperation):
         }
 
 
-def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
+def apply(
+    api: GlabAPIClient, session: BoundGitLabSession, plan: ActionPlan, target_id: int
+) -> dict[str, Any]:
     """Dispatch an existing milestone caller through its concrete callback.
 
     :param api: Existing API client.

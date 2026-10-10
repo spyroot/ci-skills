@@ -13,19 +13,22 @@ from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .access import check_gitlab_operation_access
 from .action import ExecutionContext, Executor, GitlabCallback, emit_result
 from .cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
 from .credentials import bind_gitlab_session
 from .gitlab_api import GitLabAPIError, GlabAPIClient
-from .gitlab_session import GitLabService
+from .gitlab_session import BoundGitLabSession, GitLabService
 from .portable import write_portable_receipt
 from .report import emit
 from .runtime import sanitize
 from .status import BLOCKED, DRY_RUN, PARTIAL, PASS, PLANNED, exit_code
 from .target import GitLabOperationTarget, TargetError
+
+if TYPE_CHECKING:
+    from .gitlab_runners import RunnerReadResult
 
 
 class ActionError(ValueError):
@@ -70,7 +73,9 @@ class ActionPlan:
         encoded = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
 
-    def verified_target_id(self, session: Any, access: dict[str, Any]) -> int:
+    def verified_target_id(
+        self, session: BoundGitLabSession, access: dict[str, Any]
+    ) -> int:
         """Resolve the numeric target while preserving existing binding checks.
 
         :param session: Bound GitLab identity.
@@ -290,7 +295,9 @@ def _array(payload: Any, name: str) -> list[dict[str, Any]]:
     return payload
 
 
-def _pages(api: Any, session: Any, endpoint: str) -> list[dict[str, Any]]:
+def _pages(
+    api: GlabAPIClient, session: BoundGitLabSession, endpoint: str
+) -> list[dict[str, Any]]:
     """Search a bounded complete result set or refuse an unsafe duplicate guess."""
     records: list[dict[str, Any]] = []
     separator = "&" if "?" in endpoint else "?"
@@ -351,7 +358,10 @@ def _same(current: dict[str, Any], body: dict[str, Any]) -> bool:
 
 
 def apply_plan(
-    api: Any, session: Any, access: dict[str, Any], plan: ActionPlan
+    api: GlabAPIClient,
+    session: BoundGitLabSession,
+    access: dict[str, Any],
+    plan: ActionPlan,
 ) -> dict[str, Any]:
     """Apply a plan using its verified target and bound credential.
 
@@ -562,7 +572,7 @@ def _planned_failure(
     *,
     phase: str,
     mutated: bool | None,
-    session: Any = None,
+    session: BoundGitLabSession | None = None,
     access: dict[str, Any] | None = None,
     result: dict[str, Any] | None = None,
     cleanup_errors: list[dict[str, str]] | None = None,
@@ -664,7 +674,7 @@ class GitLabAction:
 
     args: argparse.Namespace
     plan: ActionPlan | None = None
-    session: Any = None
+    session: BoundGitLabSession | None = None
     access: dict[str, Any] | None = None
     report: dict[str, Any] | None = None
     phase: str = "OFFLINE_PLAN"
@@ -846,14 +856,14 @@ class GitLabAction:
         self.phase, self.mutated = "APPLY", None
         plan.verified_target_id(self.session, self.access)
 
-    def finish(self, record: Any) -> None:
+    def finish(self, record: dict[str, Any] | RunnerReadResult | None) -> None:
         """Use the existing result contract for a read or mutation.
 
         :param record: Typed observation or provider action record.
         """
         plan, session, access = self.plan, self.session, self.access
         if self.phase == "READ":
-            observation = record
+            observation = cast("RunnerReadResult", record)
             data = _result(
                 plan,
                 PASS,
@@ -875,6 +885,7 @@ class GitLabAction:
         else:
             if isinstance(record, dict):
                 self.mutated = record.get("mutated", record.get("action") == "APPLIED")
+            record = cast(dict[str, Any], record)
             errors = [
                 {
                     "source": f"project:{error['project_id']}",
@@ -950,8 +961,16 @@ class GitLabAction:
         )
 
 
-class GitLabAuth(GitlabCallback[GitLabService]):
+class GitLabAuth(GitlabCallback[GitLabAction, GitLabService]):
     """Prepare an action and establish its existing authenticated service."""
+
+    def __init__(self, *, action: GitLabAction) -> None:
+        """Require the concrete workflow inputs before authentication.
+
+        :param action: Parsed action state owned by this workflow.
+        """
+        super().__init__(action=action)
+        self.action: GitLabAction = action
 
     def collect(self) -> None:
         """Validate arguments before provider access."""
@@ -979,7 +998,9 @@ class GitLabAuth(GitlabCallback[GitLabService]):
         return self.action.report is None
 
 
-class GitLabOperation(GitlabCallback[Any]):
+class GitLabOperation(
+    GitlabCallback[ActionPlan | GitLabAction, "dict[str, Any] | RunnerReadResult"]
+):
     """Shared plan and report hooks for concrete GitLab operations."""
 
     @property
@@ -987,10 +1008,14 @@ class GitLabOperation(GitlabCallback[Any]):
         """Resolve typed CLI inputs or an existing direct-call plan.
 
         :returns: The operation's prepared plan.
+        :raises ActionError: If no action has been prepared.
         """
-        return (
+        plan = (
             self.action.plan if isinstance(self.action, GitLabAction) else self.action
         )
+        if plan is None:
+            raise ActionError("action_required")
+        return plan
 
     def collect(self) -> None:
         """Apply the existing workflow guards at the operation boundary."""
@@ -1003,7 +1028,7 @@ class GitLabOperation(GitlabCallback[Any]):
             self.action.finish(self.result)
             self.context.report = self.action.report
 
-    def run(self) -> dict[str, Any]:
+    def run(self) -> dict[str, Any] | RunnerReadResult:
         """Dispatch operations not yet moved from the existing adapter.
 
         :returns: Existing provider action record.

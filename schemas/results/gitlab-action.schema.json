@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/gitlab-action.schema.json",
+  "title": "GitLab milestone, issue, wiki and runner create or assign result",
+  "description": "Existing action envelopes. PASS requires independent read-back; runner tag, read and delete retain their dedicated schemas.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "status", "captured_at", "errors", "summary"],
+  "properties": {
+    "schema_version": {"$ref": "gitlab-runner-tag.schema.json#/properties/schema_version"},
+    "kind": {"enum": ["gitlab_milestone", "gitlab_issue", "gitlab_wiki", "gitlab_runner"]},
+    "status": {"$ref": "gitlab-runner-delete.schema.json#/properties/status"},
+    "captured_at": {"$ref": "gitlab-runner-tag.schema.json#/properties/captured_at"},
+    "execution_host": {"$ref": "gitlab-runner-tag.schema.json#/properties/execution_host"},
+    "tested_revision": {"$ref": "gitlab-runner-tag.schema.json#/properties/tested_revision"},
+    "origin": {"$ref": "gitlab-runner-tag.schema.json#/properties/origin"},
+    "target": {"$ref": "gitlab-runner-tag.schema.json#/properties/target"},
+    "target_file": {"$ref": "gitlab-runner-tag.schema.json#/properties/target_file"},
+    "target_source": {"$ref": "gitlab-runner-tag.schema.json#/properties/target_source"},
+    "phase": {"$ref": "gitlab-runner-delete.schema.json#/properties/phase"},
+    "operation": {"enum": ["create", "update", "adjust-time", "open-bug", "create-bug", "assign"]},
+    "plan_digest": {"$ref": "gitlab-runner-tag.schema.json#/properties/plan_digest"},
+    "plan": {"$ref": "#/$defs/plan"},
+    "mutated": {"$ref": "gitlab-runner-tag.schema.json#/properties/mutated"},
+    "records": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/record"}},
+    "readback": {"anyOf": [{"$ref": "#/$defs/record"}, {"$ref": "gitlab-runner-tag.schema.json#/$defs/failed_readback"}, {"$ref": "#/$defs/planned_readback"}]},
+    "result_action": {"$ref": "#/$defs/record/properties/action"},
+    "identity": {"$ref": "gitlab-runner-tag.schema.json#/$defs/identity"},
+    "verified_target": {"$ref": "gitlab-runner-tag.schema.json#/$defs/verified_target"},
+    "credential_source": {"$ref": "gitlab-runner-tag.schema.json#/properties/credential_source"},
+    "credential_digest": {"$ref": "gitlab-runner-tag.schema.json#/properties/credential_digest"},
+    "skill": {"$ref": "gitlab-runner-tag.schema.json#/$defs/skill"},
+    "cleanup": {"$ref": "#/$defs/cleanup"},
+    "report_files": {"$ref": "gitlab-runner-tag.schema.json#/$defs/report_files"},
+    "errors": {"$ref": "gitlab-runner-tag.schema.json#/properties/errors"},
+    "summary": {"$ref": "gitlab-runner-tag.schema.json#/properties/summary"},
+    "smoke_cleanup": {"type": "object", "description": "Independent cleanup evidence attached by existing acceptance captures."}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "gitlab_milestone"}}}, "then": {"properties": {"operation": {"enum": ["create", "update", "adjust-time"]}}}},
+    {"if": {"properties": {"kind": {"const": "gitlab_issue"}}}, "then": {"properties": {"operation": {"enum": ["open-bug", "create-bug"]}}}},
+    {"if": {"properties": {"kind": {"const": "gitlab_wiki"}}}, "then": {"properties": {"operation": {"enum": ["create", "update"]}}}},
+    {"if": {"properties": {"kind": {"const": "gitlab_runner"}}}, "then": {"properties": {"operation": {"enum": ["create", "assign"]}}}},
+    {
+      "if": {"required": ["operation"]},
+      "then": {"required": ["phase", "plan", "plan_digest", "origin", "target", "target_file", "target_source", "records", "mutated"]}
+    },
+    {
+      "if": {"properties": {"status": {"enum": ["PASS", "PARTIAL", "PLANNED"]}}},
+      "then": {"required": ["operation", "readback", "identity", "verified_target", "credential_source", "credential_digest", "skill", "tested_revision"]}
+    },
+    {
+      "if": {"properties": {"status": {"enum": ["PASS", "PARTIAL"]}}},
+      "then": {"required": ["result_action", "cleanup"], "properties": {"phase": {"const": "APPLY"}, "records": {"minItems": 1}, "summary": {"properties": {"record_count": {"const": 1}}}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}},
+      "then": {
+        "properties": {
+          "result_action": {"enum": ["APPLIED", "NO_OP"]},
+          "records": {"items": {"$ref": "#/$defs/verified_record"}},
+          "readback": {"$ref": "#/$defs/verified_record"},
+          "cleanup": {"properties": {"status": {"not": {"enum": ["BLOCKED", "PARTIAL"]}}}},
+          "errors": {"maxItems": 0}, "summary": {"properties": {"error_count": {"const": 0}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "DRY_RUN"}}},
+      "then": {"required": ["operation"], "properties": {"phase": {"const": "OFFLINE_PLAN"}, "mutated": {"const": false}, "records": {"maxItems": 0}, "errors": {"maxItems": 0}, "summary": {"properties": {"record_count": {"const": 0}, "error_count": {"const": 0}}}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "PLANNED"}}},
+      "then": {"properties": {"kind": {"const": "gitlab_runner"}, "operation": {"const": "assign"}, "phase": {"const": "LIVE_PLAN"}, "mutated": {"const": false}, "records": {"maxItems": 0}, "readback": {"$ref": "#/$defs/planned_readback"}, "errors": {"maxItems": 0}, "summary": {"properties": {"record_count": {"const": 0}, "error_count": {"const": 0}}}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "BLOCKED"}}},
+      "then": {"properties": {"errors": {"minItems": 1}, "summary": {"properties": {"error_count": {"minimum": 1}}}}}
+    }
+  ],
+  "$defs": {
+    "plan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["operation", "target_kind", "target_reference", "resource_id", "project_ids", "confirmation_ready", "fields", "body_sha256", "plan_digest", "one_time_sink_required"],
+      "properties": {
+        "operation": {"$ref": "#/properties/operation"},
+        "target_kind": {"$ref": "gitlab-runner-tag.schema.json#/properties/plan/properties/target_kind"},
+        "target_reference": {"$ref": "gitlab-runner-tag.schema.json#/properties/plan/properties/target_reference"},
+        "resource_id": {"type": ["integer", "string", "null"], "minimum": 1, "minLength": 1},
+        "project_ids": {"type": ["array", "null"], "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+        "confirmation_ready": {"$ref": "gitlab-runner-delete.schema.json#/properties/plan/properties/confirmation_ready"},
+        "fields": {"$ref": "gitlab-runner-delete.schema.json#/properties/plan/properties/fields"},
+        "body_sha256": {"$ref": "gitlab-runner-tag.schema.json#/properties/plan/properties/body_sha256"},
+        "plan_digest": {"$ref": "#/properties/plan_digest"},
+        "one_time_sink_required": {"type": "boolean"},
+        "requested_tags": {"$ref": "gitlab-runner-tag.schema.json#/$defs/tags"}
+      }
+    },
+    "record": {
+      "type": "object", "required": ["action", "verified"],
+      "properties": {
+        "action": {"enum": ["APPLIED", "NO_OP", "PARTIAL", "UNVERIFIED"]}, "verified": {"type": "boolean"},
+        "id": {"type": ["integer", "null"], "minimum": 1}, "iid": {"type": "integer", "minimum": 1}, "slug": {"type": "string", "minLength": 1},
+        "mutated": {"$ref": "#/properties/mutated"}, "cleanup": {"$ref": "#/$defs/cleanup"},
+        "errors": {"type": "array", "items": {"$ref": "gitlab-runner-tag.schema.json#/$defs/project_error"}}
+      }
+    },
+    "verified_record": {
+      "allOf": [
+        {"$ref": "#/$defs/record"},
+        {"anyOf": [{"required": ["id"], "properties": {"id": {"type": "integer"}}}, {"required": ["iid"]}, {"required": ["slug"]}]},
+        {"properties": {"verified": {"const": true}, "action": {"enum": ["APPLIED", "NO_OP"]}, "errors": {"maxItems": 0}, "cleanup": {"properties": {"status": {"not": {"enum": ["BLOCKED", "PARTIAL"]}}}}}}
+      ]
+    },
+    "planned_readback": {
+      "type": "object", "additionalProperties": false, "required": ["verified", "project_ids"],
+      "properties": {"verified": {"const": true}, "project_ids": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}}}
+    },
+    "cleanup": {
+      "anyOf": [
+        {"$ref": "gitlab-runner-tag.schema.json#/$defs/cleanup"},
+        {
+          "type": "object", "additionalProperties": false, "required": ["status"],
+          "properties": {
+            "status": {"enum": ["PASS", "BLOCKED"]}, "reason": {"type": "string", "minLength": 1},
+            "restored": {"type": "boolean"}, "records": {"type": "array", "items": {"type": "object"}},
+            "deleted_runner_id": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    }
+  }
+}

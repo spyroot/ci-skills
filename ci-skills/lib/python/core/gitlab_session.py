@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .gitlab_api import GlabAPIClient
+
 
 @dataclass(frozen=True)
 class BoundGitLabSession:
@@ -36,7 +38,7 @@ class BoundGitLabSession:
 class GitLabService:
     """Existing client and verified session shared by GitLab callbacks."""
 
-    api: Any = field(repr=False)
+    api: GlabAPIClient = field(repr=False)
     session: BoundGitLabSession = field(repr=False)
     target_id: int
     access: dict[str, Any] = field(default_factory=dict)

@@ -1,4 +1,9 @@
-"""Compose provider operations through one ordered callback lifecycle."""
+"""Compose provider operations through one ordered callback lifecycle.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -6,10 +11,14 @@ from abc import ABC, abstractmethod
 from argparse import Namespace
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
 
+from .gitlab_api import GlabAPIClient
+from .gitlab_session import BoundGitLabSession, GitLabService
 from .runtime import sanitize
+from .signals import recoverable_signals
 
+Action = TypeVar("Action")
 Result = TypeVar("Result")
 
 
@@ -32,7 +41,7 @@ class ExecutionContext:
     """
 
     args: Namespace = field(default_factory=Namespace)
-    services: dict[str, Any] = field(default_factory=dict, repr=False)
+    services: dict[str, object] = field(default_factory=dict, repr=False)
     report: dict[str, Any] | None = None
 
     @classmethod
@@ -95,15 +104,15 @@ class AbstractCallback(ABC, Generic[Result]):
         """Release temporary resources owned by this operation."""
 
 
-class Callback(AbstractCallback[Result]):
+class Callback(AbstractCallback[Result], Generic[Action, Result]):
     """Shared defaults let concrete operations implement only needed hooks."""
 
-    def __init__(self, *, action: Any = None) -> None:
+    def __init__(self, *, action: Action | None = None) -> None:
         """Keep the typed action selected by the workflow.
 
         :param action: Operation inputs or an existing confirmed action plan.
         """
-        self.action = action
+        self.action: Action | None = action
 
     def collect(self) -> None:
         """Leave input collection to callbacks that need it."""
@@ -122,16 +131,16 @@ class Callback(AbstractCallback[Result]):
         """Leave resource cleanup to callbacks that own resources."""
 
 
-class GitlabCallback(Callback[Result]):
+class GitlabCallback(Callback[Action, Result]):
     """Base for operations using the workflow's bound GitLab service."""
 
     @property
-    def gitlab(self) -> Any:
+    def gitlab(self) -> GitLabService:
         """Return the service established by GitLabAuth.
 
         :returns: Bound GitLab session, client, and verified access state.
         """
-        return self.context.services["gitlab"]
+        return cast(GitLabService, self.context.services["gitlab"])
 
     @property
     def complete(self) -> bool:
@@ -146,7 +155,9 @@ class GitlabCallback(Callback[Result]):
             not in {"BLOCKED", "PARTIAL"}
         )
 
-    def execute(self, api: Any, session: Any, target_id: int) -> Result:
+    def execute(
+        self, api: GlabAPIClient, session: BoundGitLabSession, target_id: int
+    ) -> Result | None:
         """Adapt existing callers to the same callback executor.
 
         :param api: Existing GitLab API client.
@@ -154,19 +165,18 @@ class GitlabCallback(Callback[Result]):
         :param target_id: Verified project or group identifier.
         :returns: The operation result.
         """
-        from .gitlab_session import GitLabService
-
         context = ExecutionContext(
             services={"gitlab": GitLabService(api, session, target_id)}
         )
-        return Executor(context=context, callbacks=self).run().value
+        Executor(context=context, callbacks=self).run()
+        return self.result
 
 
-class K8SCallback(Callback[Result]):
+class K8SCallback(Callback[Action, Result]):
     """Base for operations using the selected Kubernetes access state."""
 
     @property
-    def kubernetes(self) -> Any:
+    def kubernetes(self) -> object:
         """Return the service established by K8SAuth.
 
         :returns: Bound Kubernetes target and access state.
@@ -174,11 +184,11 @@ class K8SCallback(Callback[Result]):
         return self.context.services["kubernetes"]
 
 
-class HarborCallback(Callback[Result]):
+class HarborCallback(Callback[Action, Result]):
     """Base for operations using the selected Harbor access state."""
 
     @property
-    def harbor(self) -> Any:
+    def harbor(self) -> object:
         """Return the service established by HarborAuth.
 
         :returns: Bound Harbor endpoint and credential service.
@@ -186,6 +196,7 @@ class HarborCallback(Callback[Result]):
         return self.context.services["harbor"]
 
 
+# The executor accepts heterogeneous result types; each callback keeps its type.
 AbstractCallbacks = list[AbstractCallback[Any]]
 
 
@@ -232,7 +243,7 @@ class ExecutionResult:
 
     """
 
-    value: Any
+    value: object
     report: dict[str, Any] | None
 
 
@@ -261,6 +272,8 @@ class Executor:
         A failed hook stops subsequent callbacks. All entered callbacks get
         cleanup, including one whose collect hook fails. A primary exception
         is re-raised with cleanup evidence; cleanup alone cannot hide failure.
+        On the main thread, signal handlers are owned only for this run and
+        restored afterward; worker threads retain the caller's handlers.
 
         :returns: Last callback value and the report selected by the workflow.
         :raises BaseException: The primary hook or cleanup failure.
@@ -268,42 +281,43 @@ class Executor:
 
         entered: AbstractCallbacks = []
         primary: BaseException | None = None
-        output: Any = None
+        output: object = None
         self.cleanup_failures = []
-        try:
-            for callback in self.callbacks:
-                callback.bind(self.context)
-                entered.append(callback)
-                callback.collect()
-                callback.result = callback.run()
-                callback.update()
-                output = callback.result
-                if not callback.complete:
-                    break
-        except BaseException as exc:  # noqa: BLE001 - re-raised after all cleanup
-            primary = exc
-        finally:
-            for callback in reversed(entered):
-                try:
-                    callback.cleanup()
-                except BaseException as exc:  # noqa: BLE001 - finish cleanup, then re-raise
-                    failure = CleanupFailure(
-                        type(callback).__name__, sanitize(str(exc), 240)
-                    )
-                    self.cleanup_failures.append(failure)
-                    if primary is None:
-                        primary = exc
-                    else:
-                        primary.add_note(
-                            f"cleanup {failure.callback}: {failure.reason}"
+        with recoverable_signals():
+            try:
+                for callback in self.callbacks:
+                    callback.bind(self.context)
+                    entered.append(callback)
+                    callback.collect()
+                    callback.result = callback.run()
+                    callback.update()
+                    output = callback.result
+                    if not callback.complete:
+                        break
+            except BaseException as exc:  # noqa: BLE001 - re-raised after all cleanup
+                primary = exc
+            finally:
+                for callback in reversed(entered):
+                    try:
+                        callback.cleanup()
+                    except BaseException as exc:  # noqa: BLE001 - finish cleanup, then re-raise
+                        failure = CleanupFailure(
+                            type(callback).__name__, sanitize(str(exc), 240)
                         )
-        if primary is not None:
-            primary.cleanup_failures = (
-                *getattr(primary, "cleanup_failures", ()),
-                *self.cleanup_failures,
-            )
-            raise primary
-        return ExecutionResult(output, self.context.report)
+                        self.cleanup_failures.append(failure)
+                        if primary is None:
+                            primary = exc
+                        else:
+                            primary.add_note(
+                                f"cleanup {failure.callback}: {failure.reason}"
+                            )
+            if primary is not None:
+                primary.cleanup_failures = (
+                    *getattr(primary, "cleanup_failures", ()),
+                    *self.cleanup_failures,
+                )
+                raise primary
+            return ExecutionResult(output, self.context.report)
 
 
 def emit_result(result: ExecutionResult, args: Namespace) -> int:

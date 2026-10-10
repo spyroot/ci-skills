@@ -1,70 +1,57 @@
 #!/usr/bin/env bash
-# The repository's pre-commit hook checks staged bytes before every commit.
-# .githooks/pre-commit calls this entrypoint with --staged. The checks live in
-# lib/bash/automation/bless.bash.
-#
-# Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
+# GitHub static checks for committed candidate bytes. The local pre-commit
+# entrypoint remains bless.sh; both callers reuse lib/bash/automation/bless.bash.
+# Author Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
 set -Eeuo pipefail
 
-BLESS_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-readonly BLESS_ROOT
+CI_STATIC_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+readonly CI_STATIC_ROOT
 
 # shellcheck source=lib/bash/core/bash_runtime.bash
-source "$BLESS_ROOT/lib/bash/core/bash_runtime.bash"
+source "$CI_STATIC_ROOT/lib/bash/core/bash_runtime.bash"
 if ((BASH_VERSINFO[0] < 5)); then
-  BLESS_BASH5=$(ci_bash5_resolve) || exit "$CI_EXIT_BLOCKED"
-  exec "$BLESS_BASH5" "$0" "$@"
+  CI_STATIC_BASH5=$(ci_bash5_resolve) || exit "$CI_EXIT_BLOCKED"
+  exec "$CI_STATIC_BASH5" "$0" "$@"
 fi
 
 # shellcheck source=lib/bash/automation/bless.bash
-source "$BLESS_ROOT/lib/bash/automation/bless.bash"
+source "$CI_STATIC_ROOT/lib/bash/automation/bless.bash"
 
-# Summary: Print the command's accepted scopes, options, and exit classes.
-# Stdout: human-readable help.
-# Returns: 0.
 usage() {
   printf '%s\n' \
-    'Summary: Check staged or nonignored working files.' \
+    'Summary: Run required GitHub static checks against a committed candidate.' \
     'Examples:' \
-    '  Check staged files before commit: ./bless.sh --staged' \
-    '  Check all working files: ./bless.sh --all' \
+    '  Run candidate checks: scripts/ci/static.sh --base origin/main' \
+    '  Show selected paths: scripts/ci/static.sh --base origin/main --dry-run' \
     'Options:' \
-    '  --staged             Check the index (default).' \
-    '  --all                Check tracked and nonignored untracked working files.' \
+    '  --base REF           Compare REF through HEAD.' \
     '  --dry-run            List selected paths and checks without running them.' \
     '  --log-format FORMAT  Log as text or json (default: text).' \
     '  --log-level LEVEL    Minimum log level: debug, info, warning, error.' \
     '  --log-file PATH      Also write log lines to a file.' \
-    '  --run-id ID          Include this identifier in JSON logs.' \
+    '  --run-id ID          Include this identifier in diagnostic logs.' \
     '  --help               Show this help.' \
     'Output modes:' \
     '  text                 Human-readable check results; text logs by default.' \
     '  json                 JSON Lines logs with --log-format json.' \
-    'Usage: ./bless.sh [--staged|--all] [--dry-run] [logging options]' \
     'Exit: 0 pass, 1 check failed, 64 usage, 69 blocked.'
 }
 
-# Summary: Select one check scope and dispatch the repository blessing.
-# Arguments: $@: scope, dry run, logging options, or help.
-# Stdout: help, plan, or check results.
-# Stderr: usage and check failures.
-# Returns: check status or CI_EXIT_USAGE for invalid options.
 main() {
-  local dry_run=false scope=staged selected=false log_enabled=false status=0
-  local value
+  local base='' dry_run=false log_enabled=false value status=0
   CI_LOG_FORMAT=${CI_LOG_FORMAT:-text}
   CI_LOG_LEVEL=${CI_LOG_LEVEL:-info}
   CI_LOG_FILE=${CI_LOG_FILE:-}
   CI_RUN_ID=${CI_RUN_ID:-}
   while (($# > 0)); do
     case $1 in
-    --staged | --all)
-      if [[ $selected == true ]]; then
+    --base)
+      if (($# < 2)) || [[ -z $2 || $2 == --* ]]; then
         usage >&2
         return "$CI_EXIT_USAGE"
       fi
-      scope=${1#--}
-      selected=true
+      base=$2
+      shift
       ;;
     --dry-run) dry_run=true ;;
     --log-format | --log-level | --log-file | --run-id)
@@ -93,20 +80,27 @@ main() {
     esac
     shift
   done
+  [[ -n $base ]] || {
+    usage >&2
+    return "$CI_EXIT_USAGE"
+  }
   if [[ $CI_LOG_FORMAT != text && $CI_LOG_FORMAT != json ]] ||
     [[ ! $CI_LOG_LEVEL =~ ^(debug|info|warning|error)$ ]]; then
     usage >&2
     return "$CI_EXIT_USAGE"
   fi
+
   if [[ $log_enabled == true ]]; then
-    ci_log info bless start "$scope" ||
-      ci_fail "$CI_EXIT_BLOCKED" 'cannot write bless log' 'Check the log path and jq installation.' ||
+    ci_log info ci-static start "base=$base" ||
+      ci_fail "$CI_EXIT_BLOCKED" 'cannot write static-check log' \
+        'Check the log path and jq installation.' ||
       return
   fi
-  bless_run "$BLESS_ROOT" "$scope" "$dry_run" || status=$?
+  bless_run "$CI_STATIC_ROOT" changed "$dry_run" "$base" || status=$?
   if [[ $log_enabled == true ]]; then
-    ci_log info bless finish "status=$status" ||
-      ci_fail "$CI_EXIT_BLOCKED" 'cannot write bless log' 'Check the log path and jq installation.' ||
+    ci_log info ci-static finish "status=$status" ||
+      ci_fail "$CI_EXIT_BLOCKED" 'cannot write static-check log' \
+        'Check the log path and jq installation.' ||
       return
   fi
   return "$status"

@@ -21,11 +21,13 @@ from .gitlab_actions import (
 )
 from .gitlab_api import (
     GitLabAPIError,
+    GlabAPIClient,
     create_guard,
     runner_update_guard,
     uncertain_write,
     unverified_write,
 )
+from .gitlab_session import BoundGitLabSession
 from .target import GitLabOperationTarget
 
 MAX_TAG_UPDATE_ATTEMPTS: Final[int] = 2
@@ -678,7 +680,9 @@ class ReadRunner(GitLabOperation):
         return RunnerReadResult(records, False, None)
 
 
-def read(api: Any, session: Any, plan: ActionPlan, target_id: int) -> RunnerReadResult:
+def read(
+    api: GlabAPIClient, session: BoundGitLabSession, plan: ActionPlan, target_id: int
+) -> RunnerReadResult:
     """Preserve existing callers through the shared callback path.
 
     :param api: Existing API client.
@@ -1249,7 +1253,9 @@ class CreateRunner(GitLabOperation):
                 destination.unlink(missing_ok=True)
 
 
-def apply(api: Any, session: Any, plan: ActionPlan, target_id: int) -> dict[str, Any]:
+def apply(
+    api: GlabAPIClient, session: BoundGitLabSession, plan: ActionPlan, target_id: int
+) -> dict[str, Any]:
     """Dispatch one confirmed runner action to the existing shared adapter.
 
     :param api: Bound GitLab API client.

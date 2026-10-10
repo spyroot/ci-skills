@@ -130,7 +130,11 @@ The Python commands use small entry points over reusable code in [lib/python/cor
 Their `--help` output serves people, while `--json`, `--yaml`, and `--describe` expose versioned reports and command
 contracts. The generated
 [tools.json](ci-skills/tools.json) records options, access protocols, and target protocols. GitLab writes start with a
-dry-run plan and require a confirmed plan digest to apply.
+dry-run plan and require a confirmed plan digest to apply. Their subcommand contracts point to the applicable
+[result schema](schemas/results/). Parser-to-catalog checks reject undeclared arguments and abbreviated flag names;
+authentication continues through the shared target and credential resolvers.
+Live validation uses the runtime setup and read-back described in the
+[smoke cases](docs/phases/CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back).
 
 Cilium and Ceph node diagnostics use non-TTY `kubectl exec` in existing Pods. The OpenShift MTU command creates
 temporary debug Pods only with `--apply` and its matching plan digest.

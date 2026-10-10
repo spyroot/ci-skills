@@ -16,11 +16,9 @@ import json
 import os
 import re
 import shutil
-import signal
 import stat
 import sys
 import tempfile
-import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -37,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agent_profile import AgentProfile, AgentProfileError, AgentProfileReason
 from core.provenance import _git, _included, skill_identity, tree_digest
+from core.signals import recoverable_signals as _recoverable_signals
 
 RECOVERY = {
     "skill_manifest_missing": "Use a checkout containing ci-skills/SKILL.md.",
@@ -177,28 +176,6 @@ def _write_journal(skills_dir: Path, data: dict[str, Any]) -> None:
         os.link(temporary, _journal_path(skills_dir))
     finally:
         temporary.unlink(missing_ok=True)
-
-
-@contextmanager
-def _recoverable_signals():
-    """Turn process interrupts into exceptions while an install can recover."""
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-    previous = {
-        signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)
-    }
-
-    def interrupt(signum: int, _frame: Any) -> None:
-        raise SystemExit(128 + signum)
-
-    try:
-        for signum in previous:
-            signal.signal(signum, interrupt)
-        yield
-    finally:
-        for signum, handler in previous.items():
-            signal.signal(signum, handler)
 
 
 def _read_journal(skills_dir: Path) -> tuple[dict[str, Any], Path, Path]:

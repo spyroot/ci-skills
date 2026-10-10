@@ -82,28 +82,60 @@ staged() {
   [[ "$output" == *"bless: checks: $BLESS_CHECKS"* ]]
 }
 
-@test 'base scope selects only committed files changed through HEAD' {
+@test 'shared changed-path selection excludes uncommitted working files' {
   base=$(git -C "$fixture" rev-parse HEAD)
   printf '{}\n' >"$fixture/changed.json"
   printf 'working only\n' >"$fixture/untracked.txt"
   git -C "$fixture" add changed.json
   git -C "$fixture" commit --quiet -m candidate
-  copy_bless_fixture
 
-  run "$fixture/bless.sh" --base "$base" --dry-run
+  run bless_changed_paths "$fixture" "$base" "$list"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"changed.json"* ]]
-  [[ "$output" != *"untracked.txt"* ]]
-  [[ "$output" == *"bless: checks: $BLESS_CHECKS"* ]]
+  [ "$(tr '\0' '\n' <"$list")" = changed.json ]
 }
 
-@test 'base scope blocks when the comparison revision is unavailable' {
-  copy_bless_fixture
-  run "$fixture/bless.sh" --base "$(printf '0%.0s' {1..40})" --dry-run
+@test 'shared changed-path selection blocks on an unavailable revision' {
+  run bless_changed_paths "$fixture" "$(printf '0%.0s' {1..40})" "$list"
 
   [ "$status" -eq 69 ]
-  [[ "$output" == *'bless cannot resolve base revision'* ]]
+  [[ "$output" == *'static checks cannot resolve base revision'* ]]
+}
+
+@test 'the local pre-commit entrypoint rejects CI comparison options' {
+  run "$repo_root/bless.sh" --base HEAD
+
+  [ "$status" -eq 64 ]
+}
+
+@test 'the shared registry includes every required static linter' {
+  for check in bash_syntax shell shfmt actionlint gitleaks python json markdown; do
+    [[ " $BLESS_CHECKS " == *" $check "* ]]
+  done
+}
+
+@test 'actionlint validates a no-git snapshot and rejects an unselected workflow' {
+  snapshot="${BATS_TEST_TMPDIR}/workflow-snapshot"
+  mkdir -p "$snapshot/.github/workflows"
+  cat >"$snapshot/.github/workflows/selected.yml" <<'YAML'
+name: selected
+on: push
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: true
+YAML
+  printf '.github/workflows/selected.yml\0' >"$list"
+  [ ! -e "$snapshot/.git" ]
+
+  run bless_check_actionlint "$fixture" "$snapshot" "$list" '' staged
+  [ "$status" -eq 0 ]
+
+  printf 'name: broken\non: [push\n' >"$snapshot/.github/workflows/unselected.yml"
+  run bless_check_actionlint "$fixture" "$snapshot" "$list" '' staged
+  [ "$status" -eq 1 ]
+  [[ "$output" == *unselected.yml* ]]
 }
 
 @test 'shell selection includes the tracked hook under .githooks' {

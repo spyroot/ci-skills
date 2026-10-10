@@ -4,8 +4,7 @@
 Mocked CI proves code behavior. It cannot prove access, because the fake `gh`,
 `glab` and `kubectl` answer whatever the fixtures say. So acceptance consumes
 the receipt a real host produced and refuses it when it is missing, stale, from
-an undeclared executor, aimed at different targets, or produced by different
-code.
+a different authenticated setup, or produced by different code.
 
 The candidate check pairs the exact source commit with the skill tree digest.
 The receipt commit cannot contain its own SHA, so acceptance verifies that the
@@ -13,8 +12,9 @@ tested source commit's skill tree equals the checked-out candidate before
 comparing the recomputed digest. Squash merges may change commit ancestry
 without changing the tested code.
 
-This is plain data: an operator-owned expectations file, receipts as files, and
-one comparison function.
+The initial access receipts hold the selected targets and API-read identities.
+Later operation receipts are compared with that setup; no checked-in environment
+or identity values are a second authority.
 
 Mustafa Byarmov mbayramo@ciso.com / spyroot@gmail.com
 """
@@ -26,11 +26,10 @@ import json
 import re
 import subprocess
 import sys
-import tomllib
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 SCHEMA_VERSION = "1.0"
 RECEIPT_KIND = "access_check"
@@ -41,13 +40,16 @@ GITLAB_RECEIPT_KINDS = {
     "gitlab_wiki",
     "gitlab_runner",
 }
-REQUIRED_EXPECTATIONS = (
-    "targets",
-    "required_live_checks",
-    "required_checks",
-    "max_receipt_age_days",
-    "gitlab_receipts",
+# Preserve the existing acceptance window and operation coverage in one place.
+MAX_RECEIPT_AGE_DAYS: Final = 30
+REQUIRED_LIVE_CHECKS: Final = (
+    "storage_report",
+    "event_trace",
+    "cilium_status",
+    "ceph_cluster",
+    "gitlab_job",
 )
+SETUP_RECEIPT_KINDS: Final = {RECEIPT_KIND, "gitlab_access"}
 REPEATABLE_GITLAB_OPERATIONS = (
     ("gitlab_milestone", "create"),
     ("gitlab_milestone", "update"),
@@ -56,6 +58,7 @@ REPEATABLE_GITLAB_OPERATIONS = (
     ("gitlab_wiki", "create"),
     ("gitlab_wiki", "update"),
     ("gitlab_runner", "assign"),
+    ("gitlab_runner", "tag"),
 )
 READ_ONLY_GITLAB_OPERATIONS = (
     ("gitlab_runner", "get"),
@@ -78,6 +81,11 @@ REQUIRED_GITLAB_OPERATIONS = (
     }
     | {(kind, operation, None) for kind, operation in READ_ONLY_GITLAB_OPERATIONS}
 )
+DEFAULT_RECEIPT_DIRECTORIES = (
+    "receipts",
+    "runner-tag",
+    "runner-lifecycle",
+)
 
 
 class AcceptanceError(RuntimeError):
@@ -89,77 +97,40 @@ def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _load_expected(path: Path) -> dict[str, Any]:
-    try:
-        with path.open("rb") as handle:
-            data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise AcceptanceError(f"expectations_unreadable:{path}") from exc
-    executors = data.get("executors") or []
-    if not isinstance(executors, list) or not executors:
-        raise AcceptanceError("no_executors_declared")
-    # Every guarantee is mandatory. Left optional, the gate stays green while
-    # dropping one key from this file silently stops it checking that any live
-    # check ran -- the gate would exist and prove nothing.
-    for key in REQUIRED_EXPECTATIONS:
-        if not data.get(key):
-            raise AcceptanceError(f"expectation_not_declared:{key}")
-    window = data["max_receipt_age_days"]
-    if isinstance(window, bool) or not isinstance(window, int) or window <= 0:
-        raise AcceptanceError("max_receipt_age_days_invalid")
-    operations = data.get("gitlab_receipts", [])
-    if not isinstance(operations, list) or any(
-        not isinstance(item, dict)
-        or item.get("kind") not in GITLAB_RECEIPT_KINDS
-        or any(
-            not item.get(field)
-            for field in (
-                "execution_host",
-                "origin",
-                "username",
-                "target_kind",
-                "target_id",
-                "target_path",
-            )
-        )
-        or not _expected_gitlab_operation_valid(item)
-        for item in operations
-    ):
-        raise AcceptanceError("gitlab_receipt_expectation_invalid")
-    declared = {
-        (item["kind"], item.get("operation"), item.get("result_action"))
-        for item in operations
-    }
-    for kind, operation, action in sorted(
-        REQUIRED_GITLAB_OPERATIONS - declared,
-        key=lambda entry: tuple(str(value) for value in entry),
-    ):
-        raise AcceptanceError(
-            f"gitlab_receipt_expectation_missing:{kind}:{operation or 'check'}:{action or 'check'}"
-        )
-    ceph_namespace = data.get("ceph_namespace")
-    if "ceph_cluster" in data["required_live_checks"] and (
-        not isinstance(ceph_namespace, str) or not ceph_namespace
-    ):
-        raise AcceptanceError("expectation_not_declared:ceph_namespace")
-    if "gitlab_job" in data["required_live_checks"] and not data.get("job_url"):
-        raise AcceptanceError("expectation_not_declared:job_url")
-    return data
+def setup_gitlab(args: argparse.Namespace) -> dict[str, Any]:
+    """Resolve the selected target and prove access before smoke mutations.
 
-
-def _expected_gitlab_operation_valid(item: dict[str, Any]) -> bool:
-    """Validate one declared GitLab live receipt expectation.
-
-    :param item: Parsed expectation entry from ``expected.toml``.
-    :returns: ``True`` when operation fields match the declared receipt kind.
+    :param args: Existing CLI arguments for target, binding, project or group,
+        and optional revision.
+    :returns: The existing GitLab access receipt containing API-read identity
+        and target fields, reusable throughout the smoke.
+    :raises AcceptanceError: If the shared access check does not pass.
     """
-    kind = item.get("kind")
-    if kind == "gitlab_access":
-        return True
-    operation = item.get("operation")
-    if (kind, operation) in READ_ONLY_GITLAB_OPERATIONS:
-        return item.get("result_action") is None
-    return bool(operation) and item.get("result_action") in {"APPLIED", "NO_OP"}
+    _redactor()
+    from core.access import check_gitlab_operation_access
+    from core.cli import resolve_gitlab_target
+    from core.credentials import bind_gitlab_session
+    from core.target import select_gitlab_reference
+
+    target, target_source = resolve_gitlab_target(
+        getattr(args, "target", None), getattr(args, "binding", None)
+    )
+    target_kind, reference = select_gitlab_reference(
+        target,
+        project=getattr(args, "project", None),
+        group=getattr(args, "group", None),
+    )
+    session = bind_gitlab_session(
+        target,
+        target_kind=target_kind,
+        target_reference=reference,
+        target_source=target_source,
+        revision=getattr(args, "revision", None),
+    )
+    result = check_gitlab_operation_access(session)
+    if result.get("status") != "PASS":
+        raise AcceptanceError("gitlab_setup_not_pass")
+    return result
 
 
 def _load_receipts(directory: Path) -> dict[str, Any]:
@@ -212,9 +183,12 @@ def check_candidate_identity(
     :param skill_root: Candidate's ``ci-skills`` directory.
     :returns: Stable reasons when source, tree identity, or digest differs.
     """
-    revision = receipt.get("tested_revision")
     skill = _mapping(receipt.get("skill"))
     source = _mapping(skill.get("revision"))
+    revision = receipt.get("tested_revision")
+    if receipt.get("kind") == "gitlab_access" and revision is None:
+        # Access receipts carry the same verified source under skill.revision.
+        revision = source.get("value")
     if (
         not isinstance(revision, str)
         or re.fullmatch(r"[0-9a-f]{40}", revision) is None
@@ -308,24 +282,17 @@ def _check_common(
 def _check_receipt(
     name: str,
     receipt: dict[str, Any],
-    executor: dict[str, Any],
-    expected: dict[str, Any],
     digest: str,
     now: datetime,
 ) -> list[str]:
-    """Return every reason this receipt does not accept the current skill."""
-    problems = _check_common(
-        name, receipt, digest, now, expected["max_receipt_age_days"]
-    )
+    """Validate the publication setup's own live access and read-back evidence."""
+    from core.catalog import AUTHORITIES
+
+    problems = _check_common(name, receipt, digest, now, MAX_RECEIPT_AGE_DAYS)
     if receipt.get("kind") != RECEIPT_KIND:
         problems.append(f"{name}:kind_unexpected")
     if receipt.get("publication") is not True:
         problems.append(f"{name}:not_a_publication_receipt")
-
-    # Wrong executor: the host and every identity are declared, and compared by
-    # exact string equality.
-    if receipt.get("execution_host") != executor.get("host"):
-        problems.append(f"{name}:execution_host_not_declared")
     revision = _mapping(_mapping(receipt.get("skill")).get("revision"))
     tested_revision = receipt.get("tested_revision")
     if (
@@ -336,46 +303,31 @@ def _check_receipt(
         or revision.get("value") != tested_revision
     ):
         problems.append(f"{name}:tested_revision_unverified")
-    surfaces = receipt.get("surfaces")
-    if not isinstance(surfaces, dict):
-        problems.append(f"{name}:surfaces_invalid")
-        surfaces = {}
-    sources = receipt.get("credential_sources")
-    if not isinstance(sources, dict):
-        problems.append(f"{name}:credential_sources_unresolved")
-        sources = {}
-    for surface, identity in _mapping(executor.get("identities")).items():
-        observed_surface = surfaces.get(surface)
-        if not isinstance(observed_surface, dict):
-            problems.append(f"{name}:surface_missing:{surface}")
-            continue
-        if observed_surface.get("identity") != identity:
-            problems.append(f"{name}:identity_mismatch:{surface}")
-        if observed_surface.get("status") != "PASS":
+    if not receipt.get("execution_host"):
+        problems.append(f"{name}:execution_host_missing")
+    surfaces = _mapping(receipt.get("surfaces"))
+    sources = _mapping(receipt.get("credential_sources"))
+    targets = _mapping(receipt.get("targets"))
+    for surface in AUTHORITIES:
+        observed = _mapping(surfaces.get(surface))
+        if not observed.get("identity"):
+            problems.append(f"{name}:identity_missing:{surface}")
+        if observed.get("status") != "PASS":
             problems.append(f"{name}:surface_not_pass:{surface}")
         source = sources.get(surface)
-        if (
-            not isinstance(source, str)
-            or not source
-            or observed_surface.get("credential_source") != source
-        ):
+        if not source or observed.get("credential_source") != source:
             problems.append(f"{name}:credential_source_mismatch:{surface}")
-        target = expected["targets"].get(surface)
+        target = targets.get(surface)
         if surface == "kubernetes":
-            target = f"{target['context']} -> {target['server']}"
-        if observed_surface.get("target") != target:
+            cluster = _mapping(target)
+            if not cluster.get("context") or not cluster.get("server"):
+                problems.append(f"{name}:surface_target_missing:{surface}")
+            target = f"{cluster.get('context')} -> {cluster.get('server')}"
+        if not target or observed.get("target") != target:
             problems.append(f"{name}:surface_target_mismatch:{surface}")
 
-    # Wrong target: deep equality, so an extra or missing authority is caught.
-    if "targets" in expected and receipt.get("targets") != expected["targets"]:
-        problems.append(f"{name}:targets_mismatch")
-
-    # Required results: every declared live check present, proven, none blocking.
-    live = receipt.get("live_checks")
-    if not isinstance(live, dict):
-        problems.append(f"{name}:live_checks_invalid")
-        live = {}
-    for required in expected.get("required_live_checks") or []:
+    live = _mapping(receipt.get("live_checks"))
+    for required in REQUIRED_LIVE_CHECKS:
         check = live.get(required)
         if check is None:
             problems.append(f"{name}:live_check_missing:{required}")
@@ -389,54 +341,72 @@ def _check_receipt(
             or re.fullmatch(r"[0-9a-f]{64}", check["readback_sha256"]) is None
         ):
             problems.append(f"{name}:live_readback_missing:{required}")
-    if "gitlab_job" in expected.get("required_live_checks", ()):
-        job = _mapping(live.get("gitlab_job"))
-        readback = job.get("job_readback")
-        if job.get("job_url") != expected.get("job_url"):
-            problems.append(f"{name}:job_target_mismatch")
-        if (
-            not isinstance(readback, dict)
-            or any(
-                type(readback.get(field)) is not int or readback[field] <= 0
-                for field in ("job_id", "pipeline_id", "runner_id")
-            )
-            or (
-                type(_mapping(readback).get("trace_line_count")) is not int
-                or readback["trace_line_count"] < 0
-            )
-        ):
-            problems.append(f"{name}:job_readback_missing")
-    if "ceph_cluster" in expected.get("required_live_checks", ()):
-        ceph = _mapping(live.get("ceph_cluster"))
-        if ceph.get("namespace") != expected.get("ceph_namespace"):
-            problems.append(f"{name}:ceph_namespace_mismatch")
+    job = _mapping(live.get("gitlab_job"))
+    readback = job.get("job_readback")
+    if not job.get("job_url"):
+        problems.append(f"{name}:job_target_missing")
+    if (
+        not isinstance(readback, dict)
+        or any(
+            type(readback.get(field)) is not int or readback[field] <= 0
+            for field in ("job_id", "pipeline_id", "runner_id")
+        )
+        or (
+            type(_mapping(readback).get("trace_line_count")) is not int
+            or readback["trace_line_count"] < 0
+        )
+    ):
+        problems.append(f"{name}:job_readback_missing")
+    if not _mapping(live.get("ceph_cluster")).get("namespace"):
+        problems.append(f"{name}:ceph_namespace_missing")
     if receipt.get("blocking_live_checks"):
         problems.append(f"{name}:live_checks_blocking")
-
-    # The required GitHub checks the publication gate read back.
-    declared = set(expected.get("required_checks") or [])
-    observed_checks = set(
-        _mapping(_mapping(surfaces.get("github")).get("details")).get("required_checks")
-        or []
-    )
-    for missing in sorted(declared - observed_checks):
-        problems.append(f"{name}:required_check_absent:{missing}")
-
+    github = _mapping(surfaces.get("github"))
+    if "required_checks_read" not in (
+        github.get("observed_capability") or []
+    ) or not _mapping(github.get("details")).get("required_checks"):
+        problems.append(f"{name}:required_checks_readback_missing")
     return problems
+
+
+def _gitlab_context(receipt: dict[str, Any]) -> dict[str, Any]:
+    """Extract runtime expectations from an initial GitLab access receipt."""
+    target = _mapping(receipt.get("target"))
+    identity = _mapping(receipt.get("identity"))
+    return {
+        "execution_host": receipt.get("execution_host"),
+        "origin": receipt.get("origin"),
+        "username": identity.get("username"),
+        "identity_id": identity.get("id"),
+        "target_kind": target.get("kind"),
+        "target_id": target.get("id"),
+        "target_path": target.get("full_path"),
+        "credential_source": receipt.get("credential_source"),
+        "credential_digest": receipt.get("credential_digest"),
+    }
+
+
+def _matches_context(receipt: dict[str, Any], context: dict[str, Any]) -> bool:
+    """Locate the initial access proof for this exact host, origin and target."""
+    target = _mapping(receipt.get("verified_target"))
+    return (
+        receipt.get("execution_host") == context.get("execution_host")
+        and receipt.get("origin") == context.get("origin")
+        and target.get("kind") == context.get("target_kind")
+        and target.get("id") == context.get("target_id")
+        and target.get("full_path") == context.get("target_path")
+    )
 
 
 def _check_gitlab_receipt(
     name: str,
     receipt: dict[str, Any],
     required: dict[str, Any],
-    expected: dict[str, Any],
     digest: str,
     now: datetime,
 ) -> list[str]:
     """Accept one exact-host, exact-target GitLab access or action read-back."""
-    problems = _check_common(
-        name, receipt, digest, now, expected["max_receipt_age_days"]
-    )
+    problems = _check_common(name, receipt, digest, now, MAX_RECEIPT_AGE_DAYS)
     kind = required["kind"]
     if kind not in GITLAB_RECEIPT_KINDS or receipt.get("kind") != kind:
         problems.append(f"{name}:kind_unexpected")
@@ -444,8 +414,15 @@ def _check_gitlab_receipt(
         if receipt.get(field) != required.get(field):
             problems.append(f"{name}:{field}_mismatch")
     identity = receipt.get("identity") or {}
-    if identity.get("username") != required.get("username"):
+    if identity.get("username") != required.get("username") or identity.get(
+        "id"
+    ) != required.get("identity_id"):
         problems.append(f"{name}:identity_mismatch")
+    if any(
+        receipt.get(field) != required.get(field)
+        for field in ("credential_source", "credential_digest")
+    ):
+        problems.append(f"{name}:credential_context_mismatch")
     if not receipt.get("credential_source") or not receipt.get("credential_digest"):
         problems.append(f"{name}:credential_source_unresolved")
     if not receipt.get("target_source"):
@@ -484,7 +461,7 @@ def _check_gitlab_receipt(
         kind == "gitlab_runner"
         and required.get("operation") == "create"
         and required.get("result_action") == "APPLIED"
-        and not _runner_smoke_cleanup_verified(receipt, required, digest, now, expected)
+        and not _runner_smoke_cleanup_verified(receipt, required, digest, now)
     ):
         problems.append(f"{name}:runner_smoke_cleanup_unproven")
     if (
@@ -594,7 +571,6 @@ def _runner_smoke_cleanup_verified(
     required: dict[str, Any],
     digest: str,
     now: datetime,
-    expected: dict[str, Any],
 ) -> bool:
     """Require independent absence read-back for a disposable created runner."""
     cleanup = receipt.get("smoke_cleanup")
@@ -625,7 +601,7 @@ def _runner_smoke_cleanup_verified(
         or captured is None
         or created is None
         or not created <= captured <= now
-        or (now - captured).days > expected["max_receipt_age_days"]
+        or (now - captured).days > MAX_RECEIPT_AGE_DAYS
         or not isinstance(before, dict)
         or before.get("id") != runner_id
         or not isinstance(deletion, dict)
@@ -677,17 +653,17 @@ def _resource_identity(receipt: dict[str, Any]) -> Any:
 
 
 def evaluate(
-    expected: dict[str, Any],
+    setup: dict[str, Any],
     receipts: dict[str, Any],
     skill_root: Path,
     *,
     now: datetime | None = None,
     repository_root: Path | None = None,
 ) -> dict[str, Any]:
-    """Compare committed receipts against the operator's expectations.
+    """Compare action receipts with the initial authenticated runtime setup.
 
-    :param expected: Required live observations and selected targets.
-    :param receipts: Parsed receipt data keyed by file name.
+    :param setup: Existing access receipts keyed by name, captured before writes.
+    :param receipts: Parsed operation and setup receipts keyed by file name.
     :param skill_root: Candidate skill tree used for digest comparison.
     :param now: Optional reference time for receipt freshness.
     :param repository_root: Git checkout for exact source commit verification.
@@ -697,92 +673,39 @@ def evaluate(
 
     now = now or datetime.now(UTC)
     digest = tree_digest(skill_root)["digest"]
-    by_host: dict[str, list[tuple[str, dict[str, Any]]]] = {}
-    for name, receipt in receipts.items():
-        by_host.setdefault(receipt.get("execution_host") or "", []).append(
-            (name, receipt)
-        )
     problems: list[str] = []
     accepted: list[str] = []
-    consumed: set[str] = set()
+    contexts: list[dict[str, Any]] = []
+    publication_hosts: set[str] = set()
+    observed_operations: set[tuple[str, str | None, str | None]] = set()
     matched_operations: dict[
         tuple[Any, ...], dict[str, tuple[str, dict[str, Any]]]
     ] = {}
-    for executor in expected["executors"]:
-        host = executor.get("host")
-        host_receipts = by_host.get(host, [])
-        candidates = [
-            item for item in host_receipts if item[1].get("kind") == RECEIPT_KIND
-        ]
-        if not candidates and len(host_receipts) == 1:
-            # Preserve a precise kind error for a lone malformed diagnostic.
-            candidates = host_receipts
-        if not candidates:
-            problems.append(f"{executor.get('label', host)}:receipt_missing")
-            continue
-        if len(candidates) != 1:
-            problems.append(f"{executor.get('label', host)}:receipt_ambiguous")
-            consumed.update(name for name, _receipt in candidates)
-            continue
-        name, receipt = candidates[0]
-        consumed.add(name)
+    for name, receipt in setup.items():
+        kind = receipt.get("kind")
         try:
-            found = _check_receipt(name, receipt, executor, expected, digest, now)
-        except (AttributeError, KeyError, TypeError, ValueError):
-            found = [f"{name}:receipt_invalid_shape"]
-        problems.extend(found)
-        if not found:
-            accepted.append(name)
-
-    for required in expected.get("gitlab_receipts", []):
-        kind = required["kind"]
-        operation = required.get("operation") if kind != "gitlab_access" else None
-        label = required.get("label") or f"{kind}:{operation or 'check'}"
-        candidates = [
-            (name, receipt)
-            for name, receipt in by_host.get(required["execution_host"], [])
-            if receipt.get("kind") == kind
-            and receipt.get("operation") == operation
-            and (
-                kind == "gitlab_access"
-                or receipt.get("result_action") == required.get("result_action")
-            )
-        ]
-        if len(candidates) > 1:
-            # The same operation may be required on several targets. Match the
-            # exact selected target before calling the remaining evidence
-            # ambiguous. A lone wrong-target receipt stays a precise mismatch.
-            candidates = [
-                (name, receipt)
-                for name, receipt in candidates
-                if (receipt.get("origin") == required.get("origin"))
-                and (
-                    (
-                        receipt.get("target")
-                        if kind == "gitlab_access"
-                        else receipt.get("verified_target")
-                    )
-                    or {}
+            if kind == RECEIPT_KIND:
+                found = _check_receipt(name, receipt, digest, now)
+                host = receipt.get("execution_host")
+                if host in publication_hosts:
+                    found.append(f"{name}:receipt_ambiguous")
+                publication_hosts.add(host)
+            elif kind == "gitlab_access":
+                context = _gitlab_context(receipt)
+                found = _check_gitlab_receipt(
+                    name, receipt, {**context, "kind": kind}, digest, now
                 )
-                == {
-                    "kind": required.get("target_kind"),
-                    "id": required.get("target_id"),
-                    "full_path": required.get("target_path"),
-                }
-            ]
-        if not candidates:
-            problems.append(f"{label}:receipt_missing")
-            continue
-        if len(candidates) != 1:
-            problems.append(f"{label}:receipt_ambiguous")
-            consumed.update(name for name, _receipt in candidates)
-            continue
-        name, receipt = candidates[0]
-        consumed.add(name)
-        try:
-            found = _check_gitlab_receipt(
-                name, receipt, required, expected, digest, now
-            )
+                if (
+                    any(not value for value in context.values())
+                    or type(context["identity_id"]) is not int
+                    or context["identity_id"] <= 0
+                    or type(context["target_id"]) is not int
+                    or context["target_id"] <= 0
+                    or receipt.get("errors")
+                ):
+                    found.append(f"{name}:setup_context_incomplete")
+            else:
+                found = [f"{name}:setup_kind_unexpected"]
             if repository_root is not None:
                 found.extend(
                     f"{name}:{reason}"
@@ -795,6 +718,51 @@ def evaluate(
         problems.extend(found)
         if not found:
             accepted.append(name)
+            if kind == "gitlab_access":
+                contexts.append(context)
+                observed_operations.add((kind, None, None))
+    if not any(setup[name].get("kind") == RECEIPT_KIND for name in accepted):
+        problems.append("access_check:setup_missing")
+
+    for name, receipt in receipts.items():
+        if name in setup:
+            if receipt != setup[name]:
+                problems.append(f"{name}:setup_receipt_mismatch")
+            continue
+        kind = receipt.get("kind")
+        operation = receipt.get("operation")
+        result_action = receipt.get("result_action")
+        operation_key = (kind, operation, result_action)
+        if operation_key not in REQUIRED_GITLAB_OPERATIONS:
+            problems.append(f"{name}:receipt_not_declared")
+            continue
+        candidates = [
+            context for context in contexts if _matches_context(receipt, context)
+        ]
+        if len(candidates) != 1:
+            problems.append(f"{name}:setup_context_missing_or_ambiguous")
+            continue
+        required = {
+            **candidates[0],
+            "kind": kind,
+            "operation": operation,
+            "result_action": result_action,
+        }
+        try:
+            found = _check_gitlab_receipt(name, receipt, required, digest, now)
+            if repository_root is not None:
+                found.extend(
+                    f"{name}:{reason}"
+                    for reason in check_candidate_identity(
+                        receipt, repository_root, skill_root
+                    )
+                )
+        except (AttributeError, KeyError, TypeError, ValueError):
+            found = [f"{name}:receipt_invalid_shape"]
+        problems.extend(found)
+        if not found:
+            accepted.append(name)
+            observed_operations.add(operation_key)
             if (kind, operation) in REPEATABLE_GITLAB_OPERATIONS:
                 pair = (
                     required["execution_host"],
@@ -805,11 +773,18 @@ def evaluate(
                     required["target_id"],
                     required["target_path"],
                 )
-                matched_operations.setdefault(pair, {})[required["result_action"]] = (
-                    name,
-                    receipt,
-                )
+                actions = matched_operations.setdefault(pair, {})
+                if result_action in actions:
+                    problems.append(f"{name}:receipt_ambiguous")
+                actions[result_action] = (name, receipt)
 
+    for kind, operation, action in sorted(
+        REQUIRED_GITLAB_OPERATIONS - observed_operations,
+        key=lambda entry: tuple(str(value) for value in entry),
+    ):
+        problems.append(
+            f"{kind}:{operation or 'check'}:{action or 'check'}:receipt_missing"
+        )
     for pair, actions in matched_operations.items():
         if set(actions) != {"APPLIED", "NO_OP"}:
             problems.append(f"{pair[2]}:{pair[3]}:repeat_readback_missing")
@@ -826,17 +801,8 @@ def evaluate(
         ):
             problems.append(f"{applied_name}:{noop_name}:repeat_readback_mismatch")
 
-    declared_hosts = {executor.get("host") for executor in expected["executors"]}
-    for name, receipt in receipts.items():
-        if name in consumed:
-            continue
-        if (receipt.get("execution_host") or "") not in declared_hosts:
-            problems.append(f"{name}:executor_not_declared")
-        else:
-            problems.append(f"{name}:receipt_not_declared")
-
     return {
-        "schema_version": "1.0",
+        "schema_version": SCHEMA_VERSION,
         "kind": "live_acceptance",
         "status": "PASS" if not problems else "BLOCKED",
         "skill_digest": digest,
@@ -852,14 +818,9 @@ def main() -> int:
     )
     cli.add_argument("--root", required=True, metavar="PATH", help="repository root")
     cli.add_argument(
-        "--expected",
-        metavar="PATH",
-        help="expectations file (default: <root>/tests/acceptance/expected.toml)",
-    )
-    cli.add_argument(
         "--receipts",
         metavar="PATH",
-        help="receipt directory (default: <root>/tests/acceptance/receipts)",
+        help="one receipt directory (default: all configured acceptance directories)",
     )
     cli.add_argument(
         "--skill",
@@ -872,24 +833,26 @@ def main() -> int:
     args = cli.parse_args()
 
     root = Path(args.root).resolve()
-    expected_path = (
-        Path(args.expected)
-        if args.expected
-        else root / "tests" / "acceptance" / "expected.toml"
-    )
-    receipts_paths = [
-        Path(args.receipts)
+    receipts_paths = (
+        [Path(args.receipts)]
         if args.receipts
-        else root / "tests" / "acceptance" / "receipts"
-    ]
-    if not args.receipts:
-        receipts_paths.append(root / "tests" / "acceptance" / "runner-lifecycle")
+        else [
+            root / "tests" / "acceptance" / directory
+            for directory in DEFAULT_RECEIPT_DIRECTORIES
+        ]
+    )
     skill_path = Path(args.skill) if args.skill else root / "ci-skills"
     _redactor()
     try:
+        receipts = _load_receipt_dirs(receipts_paths)
+        setup = {
+            name: receipt
+            for name, receipt in receipts.items()
+            if receipt.get("kind") in SETUP_RECEIPT_KINDS
+        }
         data = evaluate(
-            _load_expected(expected_path),
-            _load_receipt_dirs(receipts_paths),
+            setup,
+            receipts,
             skill_path,
             repository_root=root,
         )

@@ -7,19 +7,28 @@ import json
 from pathlib import Path
 
 import pytest
+
 from tests.python.conftest import import_script_module
 
 ACCESS = import_script_module("core.access")
 CREDENTIALS = import_script_module("core.credentials")
 TARGET = import_script_module("core.target")
 SCRIPT = import_script_module("gitlab_access")
+PROJECT_BINDING = import_script_module("core.project_binding")
 
 
-def _target(tmp_path: Path, *, token_file: Path | None = None, body: str = "") -> Path:
-    path = tmp_path / "selected.toml"
+def _target(
+    tmp_path: Path,
+    *,
+    filename: str = "selected.toml",
+    url: str = "https://gitlab.example.test",
+    token_file: str | Path | None = None,
+    body: str = "",
+) -> Path:
+    path = tmp_path / filename
     token = f'token_file = "{token_file}"\n' if token_file else ""
     path.write_text(
-        f'[gitlab]\nurl = "https://gitlab.example.test"\n{token}{body}',
+        f'[gitlab]\nurl = "{url}"\n{token}{body}',
         encoding="utf-8",
     )
     return path
@@ -120,12 +129,17 @@ def test_explicit_project_overrides_a_selected_default_group(tmp_path):
     )
 
 
-def test_file_source_overrides_ambient_tokens_and_reads_exact_project(
+def test_relative_file_source_overrides_ambient_tokens_and_reads_exact_project(
     tmp_path, monkeypatch
 ):
-    token_file = tmp_path / "token"
+    target_parent = tmp_path / "operator-config"
+    target_parent.mkdir()
+    token_file = target_parent / "token"
     token_file.write_text("file-token\n", encoding="utf-8")
-    path = _target(tmp_path, token_file=token_file, body='project = "team/repo"\n')
+    path = _target(target_parent, token_file="token", body='project = "team/repo"\n')
+    unrelated_cwd = tmp_path / "unrelated-cwd"
+    unrelated_cwd.mkdir()
+    monkeypatch.chdir(unrelated_cwd)
     _identity(monkeypatch)
     monkeypatch.setenv("GITLAB_TOKEN", "ambient-token")
     monkeypatch.setenv("GITLAB_ACCESS_TOKEN", "other-token")
@@ -370,6 +384,116 @@ def test_cli_dry_run_never_binds_credentials_or_calls_api(
     assert data["status"] == "DRY_RUN"
     assert data["target"] == {"kind": "project", "reference": "team/repo"}
     assert data["credential_source"] is None
+
+
+def _smoke_target_layout(tmp_path: Path) -> dict[str, object]:
+    """Build one project/home layout for both normal and smoke selections."""
+    project = tmp_path / "project"
+    project_target_dir = project / ".ci-skills"
+    project_target_dir.mkdir(parents=True)
+    selected_token = project_target_dir / "selected.token"
+    selected_token.write_text("selected-token\n", encoding="utf-8")
+    selected = _target(
+        project_target_dir,
+        filename="target.toml",
+        token_file="selected.token",
+        body='project = "selected/repo"\n',
+    )
+    _target(
+        project_target_dir,
+        filename=PROJECT_BINDING.SMOKE_TARGET_FILENAME,
+        token_file="missing.token",
+        body='project = "smoke/repo"\n',
+    )
+    home_target_dir = tmp_path / "home" / ".ci-skills"
+    home_target_dir.mkdir(parents=True)
+    _target(
+        home_target_dir,
+        filename="target.toml",
+        url="https://user.example.test",
+        body='project = "user/default"\n',
+    )
+    _target(
+        home_target_dir,
+        filename=PROJECT_BINDING.SMOKE_TARGET_FILENAME,
+        url="https://user-selected.example.test",
+        body='project = "user/selected"\n',
+    )
+    return {
+        "project": project,
+        "home": tmp_path / "home",
+        "selected": selected,
+        "selected_token": selected_token,
+        "identity": {
+            "id": 17,
+            "username": "operator",
+            "web_url": "https://gitlab.example.test/operator",
+        },
+        "target": {
+            "id": 42,
+            "path_with_namespace": "selected/repo",
+            "web_url": "https://gitlab.example.test/selected/repo",
+        },
+    }
+
+
+@pytest.mark.parametrize("smoke", (False, True), ids=("default", "smoke"))
+def test_smoke_environment_switches_filename_without_fallback_or_provider_drift(
+    tmp_path, monkeypatch, capsys, smoke
+):
+    """The same project chooses target.toml or smoke.toml only by smoke mode."""
+    layout = _smoke_target_layout(tmp_path)
+    _identity(monkeypatch)
+    monkeypatch.chdir(layout["project"])
+    monkeypatch.setenv("HOME", str(layout["home"]))
+    monkeypatch.delenv("CI_SKILLS_TARGET", raising=False)
+    monkeypatch.setenv("GITLAB_TOKEN", "ambient-token")
+    if smoke:
+        monkeypatch.setenv(PROJECT_BINDING.SMOKE_ENV, "1")
+        monkeypatch.setattr(
+            SCRIPT,
+            "check_gitlab_operation_access",
+            lambda _session: pytest.fail("selected credential failure called provider"),
+        )
+    else:
+        monkeypatch.delenv(PROJECT_BINDING.SMOKE_ENV, raising=False)
+        responses = {
+            "user": layout["identity"],
+            "projects/selected%2Frepo": layout["target"],
+        }
+        api = FakeAPI(responses)
+        monkeypatch.setattr(
+            SCRIPT,
+            "check_gitlab_operation_access",
+            lambda session: ACCESS.check_gitlab_operation_access(
+                session, api_client=api
+            ),
+        )
+
+    result = SCRIPT.main(["check", "--json"])
+    data = json.loads(capsys.readouterr().out)
+
+    if smoke:
+        assert result == 2
+        assert data["status"] == "BLOCKED"
+        assert data["errors"] == [
+            {"source": "credential", "reason": "credential_file_unavailable"}
+        ]
+    else:
+        assert result == 0
+        assert data["status"] == "PASS"
+        assert data["target_source"] == "project"
+        assert data["target_file"] == str(layout["selected"].resolve())
+        assert data["identity"]["id"] == layout["identity"]["id"]
+        assert data["identity"]["username"] == layout["identity"]["username"]
+        assert data["target"]["id"] == layout["target"]["id"]
+        assert data["target"]["full_path"] == layout["target"]["path_with_namespace"]
+        assert data["target"]["web_url"] == layout["target"]["web_url"]
+        assert data["credential_source"] == f"file:{layout['selected_token'].resolve()}"
+        assert [endpoint for _session, endpoint in api.calls] == [
+            "user",
+            "projects/selected%2Frepo",
+        ]
 
 
 def test_access_check_uses_user_gitlab_target_without_selector(
