@@ -10,7 +10,7 @@ set -euo pipefail
 : "${RUNNER_NAME:?}"
 : "${RUNNER_LABELS:?}"
 
-cp -a --no-preserve=ownership "${RUNNER_SOURCE_ROOT}/." "${RUNNER_RUNTIME_ROOT}/"
+cp -R -- "${RUNNER_SOURCE_ROOT}/." "${RUNNER_RUNTIME_ROOT}/"
 cd -- "${RUNNER_RUNTIME_ROOT}"
 registration_token=$(gh api --hostname "${RUNNER_HOST}" \
   --method POST "repos/${RUNNER_REPOSITORY}/actions/runners/registration-token" \
