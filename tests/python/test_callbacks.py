@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import sys
+from copy import deepcopy
 
 import pytest
 
@@ -14,6 +15,7 @@ from tests.python.conftest import LIB_ROOT, import_script_module
 ACTION = import_script_module("core.gitlab_actions")
 CALLBACKS = import_script_module("core.action")
 REGISTRY = import_script_module("core.registry_mirror")
+RESOURCES = import_script_module("core.resources")
 RUNNERS = import_script_module("core.gitlab_runners")
 
 
@@ -57,6 +59,77 @@ class Recorded(CALLBACKS.Callback[object, object]):
         self.events.append(f"{self.name}.cleanup")
         if self.cleanup_error is not None:
             raise self.cleanup_error
+
+
+class OpenShiftReadBack:
+    """Minimal native API double that can omit ``omitempty`` BuildConfig fields."""
+
+    def __init__(self, observed_spec: dict[str, object] | None = None) -> None:
+        self.applies = 0
+        self.observed_spec = observed_spec
+        self.resource: dict[str, object] | None = None
+
+    def read(self, _kind: str, _name: str, _namespace: str) -> dict[str, object] | None:
+        return deepcopy(self.resource)
+
+    def apply(self, document: dict[str, object]) -> None:
+        self.applies += 1
+        observed = deepcopy(document)
+        metadata = observed["metadata"]
+        assert isinstance(metadata, dict)
+        metadata["uid"] = "buildconfig-uid"
+        spec = observed["spec"]
+        assert isinstance(spec, dict)
+        if self.observed_spec is None:
+            spec.pop("triggers", None)
+        else:
+            observed["spec"] = deepcopy(self.observed_spec)
+        self.resource = observed
+
+
+def _build_config(spec: dict[str, object]) -> dict[str, object]:
+    """Return a generated BuildConfig shape suitable for resource read-back."""
+    return {
+        "apiVersion": "build.openshift.io/v1",
+        "kind": "BuildConfig",
+        "metadata": {"name": "toolbox"},
+        "spec": spec,
+    }
+
+
+def test_resource_set_omitted_empty_buildconfig_triggers_is_applied_then_no_op():
+    """OpenShift omits an empty BuildConfig ``spec.triggers`` on read-back."""
+    service = OpenShiftReadBack()
+    resources = RESOURCES.ResourceSet(service, "toolbox-ns", "toolbox-build")
+    spec = {"runPolicy": "Serial", "triggers": []}
+
+    applied = resources.apply(_build_config(spec))
+    repeated = resources.apply(_build_config(spec))
+
+    assert applied["action"] == "APPLIED"
+    assert repeated["action"] == "NO_OP"
+    assert service.applies == 1
+
+
+@pytest.mark.parametrize(
+    ("spec", "observed_spec"),
+    (
+        ({"triggers": [{"type": "ConfigChange"}]}, {}),
+        ({"triggers": []}, {"triggers": {}}),
+        ({"runPolicy": "Serial"}, {}),
+    ),
+    ids=("missing-nonempty-list", "wrong-present-list-type", "missing-scalar"),
+)
+def test_resource_set_rejects_nonempty_or_wrong_buildconfig_readback(
+    spec, observed_spec
+):
+    """Only an absent empty optional list is accepted as an OpenShift omission."""
+    resources = RESOURCES.ResourceSet(
+        OpenShiftReadBack(observed_spec), "toolbox-ns", "toolbox-build"
+    )
+
+    with pytest.raises(RESOURCES.KubernetesError, match="resource_readback_mismatch"):
+        resources.apply(_build_config(spec))
 
 
 def test_abstract_hooks_are_required_but_callback_defaults_are_optional():

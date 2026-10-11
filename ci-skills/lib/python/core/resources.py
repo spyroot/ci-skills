@@ -26,8 +26,9 @@ def matches(expected: Any, observed: Any) -> bool:
     :returns: Whether every requested field equals its observed value.
     """
     if isinstance(expected, Mapping):
+        # Native Kubernetes APIs may omit empty optional lists in JSON read-back.
         return isinstance(observed, Mapping) and all(
-            key in observed and matches(value, observed[key])
+            matches(value, observed[key]) if key in observed else value == []
             for key, value in expected.items()
         )
     if isinstance(expected, list):
