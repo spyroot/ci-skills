@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Final, cast
+from urllib.parse import urlsplit
 
 from .action import K8SCallback
 from .kubernetes import KubernetesError, KubernetesService
@@ -102,6 +103,8 @@ class LinuxInstall:
     def _operation(self, index: int) -> str:
         if self.method in {"archive", "deb", "installer", "download"}:
             suffix = ".deb" if self.method == "deb" else ""
+            if self.method == "installer":
+                suffix = PurePosixPath(urlsplit(cast(str, self.url)).path).suffix
             artifact = f"/tmp/ci-skills-dependency-{index}{suffix}"
             prefix = (
                 f"curl --fail --location --silent --show-error "

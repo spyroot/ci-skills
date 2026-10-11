@@ -16,7 +16,9 @@ ACTION = import_script_module("core.gitlab_actions")
 CALLBACKS = import_script_module("core.action")
 REGISTRY = import_script_module("core.registry_mirror")
 RESOURCES = import_script_module("core.resources")
+RUNTIME = import_script_module("core.runtime")
 RUNNERS = import_script_module("core.gitlab_runners")
+TOOLBOX = import_script_module("core.toolbox")
 
 
 class Recorded(CALLBACKS.Callback[object, object]):
@@ -130,6 +132,120 @@ def test_resource_set_rejects_nonempty_or_wrong_buildconfig_readback(
 
     with pytest.raises(RESOURCES.KubernetesError, match="resource_readback_mismatch"):
         resources.apply(_build_config(spec))
+
+
+@pytest.mark.parametrize(
+    ("url", "suffix"),
+    (
+        (
+            "https://repo.example.test/Miniconda3-py311_26.7.1-1-Linux-x86_64.sh?download=1",
+            ".sh",
+        ),
+        ("https://repo.example.test/installers/toolbox.run?signature=unit", ".run"),
+    ),
+    ids=("miniconda-query", "generic-installer-query"),
+)
+def test_linux_installer_preserves_url_path_suffix(url, suffix):
+    """Installer artifacts retain the URL path suffix, excluding its query."""
+    install = TOOLBOX.LinuxInstall.from_document(
+        {
+            "method": "installer",
+            "url": url,
+            "sha256": "a" * 64,
+            "interpreter": "bash",
+            "args": ["-b", "-p", "/opt/conda"],
+        }
+    )
+
+    operation = install._operation(7)
+    artifact = f"/tmp/ci-skills-dependency-7{suffix}"
+
+    assert operation.count(artifact) == 4
+    assert f"--output {artifact} " in operation
+    assert f"bash {artifact} -b -p /opt/conda" in operation
+    assert f"{artifact}?" not in operation
+    assert url in operation
+
+
+def test_toolbox_build_starts_by_name_then_reads_build_as_json():
+    """The native build command returns a name that is read back independently."""
+    events: list[object] = []
+    digest = "sha256:" + "b" * 64
+    reference = "build.build.openshift.io/toolbox-1"
+
+    class Spec:
+        namespace = "toolbox-ns"
+        app = "toolbox"
+        fingerprint = "a" * 64
+
+        def render(self, directory, resolved_base_image):
+            events.append(("render", directory.is_dir(), resolved_base_image))
+
+        def _node_selector(self):
+            return None
+
+    class KubernetesService:
+        def read(self, kind, name, namespace):
+            events.append(("read", kind, name, namespace))
+
+        def command(self, *args, openshift=False):
+            events.append(("command", args, openshift))
+            return RUNTIME.CommandResult(tuple(args), 0, reference + "\n", "")
+
+        def json(self, *args, openshift=False):
+            events.append(("json", args, openshift))
+            return {"metadata": {"name": "toolbox-1"}}
+
+        def wait_build(self, name, namespace):
+            events.append(("wait_build", name, namespace))
+            return {"status": {"output": {"to": {"imageDigest": digest}}}}
+
+    class Resources:
+        def apply(self, document):
+            events.append(("apply", document["kind"]))
+            return document
+
+    spec = Spec()
+    service = KubernetesService()
+    action = TOOLBOX.BuildAction(
+        spec=spec,
+        resolved_base_image="registry.example.test/base@sha256:" + "c" * 64,
+        candidate_repository="image-registry.example.test/unit/toolbox",
+        candidate_reference="candidate",
+        dockerconfig=b'{"auths":{"registry.example.test":{}}}',
+        digest_lookup=lambda _repository, _reference: digest,
+    )
+    callback = TOOLBOX.BuildToolbox(action=action)
+    callback.bind(CALLBACKS.ExecutionContext(services={"kubernetes": service}))
+    callback._resource_set = Resources()
+
+    result = callback.run()
+
+    start = next(item for item in events if item[0] == "command")
+    readback = next(item for item in events if item[0] == "json")
+    assert start == (
+        "command",
+        (
+            "--namespace",
+            "toolbox-ns",
+            "start-build",
+            "buildconfig/toolbox",
+            start[1][4],
+            "-o",
+            "name",
+        ),
+        True,
+    )
+    assert start[1][4].startswith("--from-dir=")
+    assert readback == (
+        "json",
+        ("--namespace", "toolbox-ns", "get", reference, "-o", "json"),
+        False,
+    )
+    assert events.index(start) < events.index(readback)
+    assert result.build_name == "toolbox-1"
+    assert result.digest == digest
+    assert result.verified is True
 
 
 def test_abstract_hooks_are_required_but_callback_defaults_are_optional():
