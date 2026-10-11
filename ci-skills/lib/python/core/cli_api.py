@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .runtime import CommandResult, error_class, run_command_bounded
+from .runtime import CommandResult, error_class, run_command_bounded, trace_event
 
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 READ_ATTEMPTS = 3
@@ -79,11 +79,15 @@ def _split_response(stdout: str) -> tuple[str, str]:
     return headers, remaining
 
 
+def _status_code(headers: str) -> int | None:
+    status = re.match(r"HTTP/\S+\s+(\d{3})\b", headers)
+    return int(status.group(1)) if status else None
+
+
 def _failure(result: CommandResult, headers: str) -> str:
     """Classify retryable provider HTTP failures without reporting response text."""
-    status = re.match(r"HTTP/\S+\s+(\d{3})\b", headers)
-    if status:
-        code = int(status.group(1))
+    code = _status_code(headers)
+    if code is not None:
         if code == 401:
             return "authentication"
         if code == 403:
@@ -272,6 +276,17 @@ class CLIAPIClient:
                     headers, payload_text = "", ""
                 else:
                     headers, payload_text = _split_response(result.stdout)
+                trace_event(
+                    "http.completed",
+                    {
+                        "method": method,
+                        "host": session.host,
+                        "path": selected,
+                        "attempt": attempt + 1,
+                        "status_code": _status_code(headers),
+                        "returncode": result.returncode,
+                    },
+                )
                 if result.returncode == 0:
                     break
                 reason = _failure(result, headers)

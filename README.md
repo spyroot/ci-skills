@@ -114,6 +114,9 @@ The runner workflow is `create_selfhosted_runner.py create|update|delete`. Start
 command's `--help` interface. The default invocation returns a plan; repeat it with `--apply --confirm-plan DIGEST`.
 The combo builds on OpenShift, publishes to Harbor, verifies the pulled toolbox, and registers the deployed GitHub
 runner. GitHub Actions runs tests and linting on that image. Runtime access comes from the selected `target.toml`.
+For a compact execution trace, use `--log-level debug --log-format json --log-file PATH`. These shared diagnostic
+options record callback outcomes, API methods/status codes, and command exit codes without provider payloads or secrets.
+The result's `trace_artifact` points to that file; smoke reports link the artifact alongside verified read-back results.
 
 ## Current capabilities
 

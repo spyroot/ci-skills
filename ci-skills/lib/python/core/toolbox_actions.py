@@ -32,6 +32,7 @@ from .registry_mirror import HarborService
 from .report import report
 from .resources import ResourceSet
 from .runner import RunnerAction
+from .schema import SCHEMA_DIRECTORY, TOOLBOX_SCHEMA
 from .status import BLOCKED, DRY_RUN, PASS, PLANNED
 from .target import Target
 from .toolbox import (
@@ -57,6 +58,10 @@ def workflow_parser(kind: str) -> argparse.ArgumentParser:
     entry = COMMANDS[COMMAND_BY_KIND[kind]]
     result = parser(entry["purpose"], kind=kind)
     result.set_defaults(kind=kind)
+    if "--spec" in entry["options"]:
+        result.epilog = (result.epilog or "") + (
+            f" Toolbox input schema: {SCHEMA_DIRECTORY / TOOLBOX_SCHEMA}"
+        )
     result.add_argument("action", nargs="?", choices=tuple(entry["subcommands"]))
     for option, help_text in entry["options"].items():
         settings: dict[str, Any] = {"help": help_text}
@@ -205,10 +210,15 @@ class WorkflowAction:
                 ExecutionResult(None, describe(COMMAND_BY_KIND[args.kind])), args
             )
         output = report(args.kind, "", {}, [], [])
+        if args.log_level == "debug" and args.log_file:
+            output["trace_artifact"] = str(args.log_file)
         executor: Executor | None = None
         try:
             self.prepare()
             output["target"] = str(self.target.source_file)
+            if self.target.skill is not None:
+                output["skill"] = self.target.skill
+                output["tested_revision"] = self.target.tested_revision
             if args.dry_run:
                 self.digest = self.fingerprint()
                 output["status"] = DRY_RUN

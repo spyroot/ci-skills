@@ -14,6 +14,7 @@ import json
 import os
 import stat
 import tempfile
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,13 +23,24 @@ from typing import Any, Final
 from .access import kubectl_argv, kubernetes_env, oc_argv
 from .action import K8SCallback
 from .credentials import Sources, bind_sources
-from .runtime import CommandResult, error_class, run_command_bounded
+from .runtime import (
+    CommandResult,
+    error_class,
+    run_command_bounded,
+    run_command_tail,
+    sanitize,
+    trace_enabled,
+    trace_event,
+)
 from .target import Target, TargetError
 
 DEFAULT_COMMAND_TIMEOUT: Final = 30
 KUBERNETES_SERVICE_KEY: Final = "kubernetes"
 BUILD_COMPLETE_PHASE: Final = "Complete"
-BUILD_PHASE_WAIT: Final = "--for=jsonpath={.status.phase}=Complete"
+BUILD_FAILED_PHASES: Final = frozenset({"Failed", "Error", "Cancelled"})
+BUILD_POLL_SECONDS: Final = 5
+BUILD_LOG_BYTES: Final = 4096
+BUILD_LOG_LINES: Final = 40
 
 JsonValue = dict[str, Any] | list[Any]
 
@@ -247,20 +259,55 @@ class KubernetesService:
         :raises KubernetesError: If the wait fails, Build is absent, or phase differs.
         :raises TargetError: If the bound kubeconfig changed before execution.
         """  # noqa: DOC502,DOC503 - helpers propagate their declared errors
-        result = self.command(
-            *self._namespace_args(namespace),
-            "wait",
-            BUILD_PHASE_WAIT,
-            f"build/{name}",
-            f"--timeout={self._native_timeout()}s",
-            openshift=True,
-        )
-        build = self._waited_object(result, "build", name, namespace)
-        status = build.get("status")
-        phase = status.get("phase") if isinstance(status, dict) else None
-        if phase != BUILD_COMPLETE_PHASE:
-            raise KubernetesError("build_phase_incomplete")
-        return build
+        deadline = time.monotonic() + self.timeout
+        observed_phase = None
+        try:
+            while True:
+                build = self.read("build", name, namespace)
+                if build is None:
+                    raise KubernetesError("build_missing")
+                status = build.get("status", {})
+                phase = status.get("phase") if isinstance(status, dict) else None
+                if phase != observed_phase:
+                    trace_event(
+                        "build.phase",
+                        {"name": name, "namespace": namespace, "phase": phase},
+                    )
+                    observed_phase = phase
+                if phase == BUILD_COMPLETE_PHASE:
+                    return build
+                if phase in BUILD_FAILED_PHASES:
+                    raise KubernetesError("build_phase_" + phase.lower())
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise KubernetesError("build_wait_timeout")
+                time.sleep(min(BUILD_POLL_SECONDS, remaining))
+        finally:
+            if trace_enabled() and observed_phase != BUILD_COMPLETE_PHASE:
+                result = run_command_tail(
+                    oc_argv(
+                        self.target,
+                        "--namespace",
+                        namespace,
+                        "logs",
+                        f"build/{name}",
+                        "--timestamps",
+                    ),
+                    timeout=DEFAULT_COMMAND_TIMEOUT,
+                    env=kubernetes_env(self.target),
+                    max_bytes=BUILD_LOG_BYTES,
+                    max_lines=BUILD_LOG_LINES,
+                )
+                trace_event(
+                    "build.output",
+                    {
+                        "name": name,
+                        "namespace": namespace,
+                        "returncode": result.returncode,
+                        "stdout": sanitize(result.stdout, BUILD_LOG_BYTES),
+                        "stderr": sanitize(result.stderr),
+                    },
+                )
 
     def verify(self) -> str:
         """Verify the selected context, API server, and native identity.

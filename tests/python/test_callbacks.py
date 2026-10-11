@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
+from argparse import Namespace
 from copy import deepcopy
 
 import pytest
@@ -14,10 +17,12 @@ from tests.python.conftest import LIB_ROOT, import_script_module
 
 ACTION = import_script_module("core.gitlab_actions")
 CALLBACKS = import_script_module("core.action")
+KUBERNETES = import_script_module("core.kubernetes")
 REGISTRY = import_script_module("core.registry_mirror")
 RESOURCES = import_script_module("core.resources")
 RUNTIME = import_script_module("core.runtime")
 RUNNERS = import_script_module("core.gitlab_runners")
+TARGET = import_script_module("core.target")
 TOOLBOX = import_script_module("core.toolbox")
 
 
@@ -165,6 +170,35 @@ def test_linux_installer_preserves_url_path_suffix(url, suffix):
     assert f"bash {artifact} -b -p /opt/conda" in operation
     assert f"{artifact}?" not in operation
     assert url in operation
+
+
+def test_conda_render_scopes_channels_without_unsupported_create_options():
+    """Conda channels use its supported process environment, not create args."""
+    prefix = "/opt/conda/envs/ci-skills"
+    conda = TOOLBOX.CondaInput(
+        content=b"name: unit\n",
+        prefix=prefix,
+        channels=("conda-forge", "pytorch"),
+    )
+
+    _, instruction = conda._render()
+    channels_environment, defaults_environment, *argv = shlex.split(
+        instruction.splitlines()[-1].strip()
+    )
+
+    assert channels_environment == (f"{TOOLBOX.CONDA_CHANNELS_ENV}=conda-forge,pytorch")
+    assert defaults_environment == (
+        f"{TOOLBOX.CONDA_DEFAULT_CHANNELS_ENV}=conda-forge,pytorch"
+    )
+    assert argv == [
+        "conda",
+        "env",
+        "create",
+        "--file",
+        TOOLBOX.CONDA_PATH,
+        "--prefix",
+        prefix,
+    ]
 
 
 def test_toolbox_build_starts_by_name_then_reads_build_as_json():
@@ -367,6 +401,205 @@ def test_failure_stops_callbacks_and_retains_all_reverse_cleanup_evidence():
     assert "cleanup Recorded: cleanup first" in raised.value.__notes__
     assert tuple(executor.cleanup_failures) == raised.value.cleanup_failures
     assert "later.collect" not in events
+
+
+def test_debug_trace_records_failure_and_reverse_cleanup(tmp_path):
+    """Debug traces retain compact outcomes while failed workflows clean up."""
+    lifecycle: list[str] = []
+    trace_file = tmp_path / "trace.jsonl"
+    first = Recorded(lifecycle, "first", value={"status": "PASS"})
+    failing = Recorded(
+        lifecycle,
+        "failing",
+        collect_error=RuntimeError("collect failed"),
+    )
+    context = CALLBACKS.ExecutionContext(
+        args=Namespace(
+            action="run",
+            apply=True,
+            kind="unit-workflow",
+            log_file=str(trace_file),
+            log_format="json",
+            log_level="debug",
+            run_id="unit-trace",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="collect failed"):
+        CALLBACKS.Executor(context=context, callbacks=[first, failing]).run()
+
+    records = [json.loads(line) for line in trace_file.read_text().splitlines()]
+    details = [(record["event"], record["details"]) for record in records]
+    run_completed = next(
+        detail
+        for event, detail in details
+        if event == "callback.completed" and detail["hook"] == "run"
+    )
+    failure = next(detail for event, detail in details if event == "callback.failed")
+
+    assert lifecycle[-2:] == ["failing.cleanup", "first.cleanup"]
+    assert failure == {
+        "callback": "Recorded",
+        "hook": "collect",
+        "reason": "collect failed",
+        "status": "BLOCKED",
+    }
+    assert 0 <= run_completed["elapsed_time_ms"]
+    assert set(run_completed) == {
+        "callback",
+        "elapsed_time_ms",
+        "hook",
+        "status",
+    }
+    assert RUNTIME.trace_enabled() is False
+
+
+def test_executor_disables_default_trace_and_restores_the_caller_context():
+    """A normal workflow is quiet and restores an outer trace after it exits."""
+    observed: list[tuple[str, dict[str, object]]] = []
+    lifecycle: list[str] = []
+
+    with RUNTIME.execution_trace(
+        lambda event, details: observed.append((event, details))
+    ):
+        CALLBACKS.Executor(callbacks=Recorded(lifecycle, "quiet")).run()
+        RUNTIME.trace_event("after.workflow", {"status": "PASS"})
+
+    assert observed == [("after.workflow", {"status": "PASS"})]
+    assert RUNTIME.trace_enabled() is False
+
+
+def test_command_trace_redacts_secret_argument_and_omits_provider_stdout(monkeypatch):
+    """Command traces expose status and size without provider output or secrets."""
+    monkeypatch.setattr(
+        RUNTIME.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 23, "provider-output", "token=hidden"
+        ),
+    )
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    with RUNTIME.execution_trace(
+        lambda event, details: observed.append((event, details))
+    ):
+        result = RUNTIME.run_command(
+            ["provider", "--password", "raw-secret", "--name", "unit"]
+        )
+
+    assert result.returncode == 23
+    assert observed == [
+        (
+            "command.complete",
+            {
+                "argv": [
+                    "provider",
+                    "--password",
+                    "[REDACTED]",
+                    "--name",
+                    "unit",
+                ],
+                "returncode": 23,
+                "stdout_bytes": len(b"provider-output"),
+                "stderr": "token=[REDACTED]",
+            },
+        )
+    ]
+
+
+def test_wait_build_fails_terminal_phase_without_sleep_and_traces_logs(monkeypatch):
+    """A terminal Build failure captures bounded logs without waiting to time out."""
+    target = TARGET.Target(
+        github=None,
+        gitlab=None,
+        kubernetes=TARGET.KubernetesTarget(
+            context="unit-context",
+            server="https://api.example.test:6443",
+            kubeconfig=None,
+        ),
+    )
+    service = KUBERNETES.KubernetesService(target=target, timeout=30)
+    monkeypatch.setattr(
+        service,
+        "read",
+        lambda _kind, _name, _namespace: {"status": {"phase": "Failed"}},
+    )
+    monkeypatch.setattr(
+        KUBERNETES.time,
+        "sleep",
+        lambda _seconds: pytest.fail("terminal Build phase must not sleep"),
+    )
+    log_limits: dict[str, int] = {}
+
+    def capture_logs(*args, **kwargs):
+        log_limits.update(max_bytes=kwargs["max_bytes"], max_lines=kwargs["max_lines"])
+        return RUNTIME.CommandResult(tuple(args[0]), 0, "compile failed\n", "")
+
+    monkeypatch.setattr(KUBERNETES, "run_command_tail", capture_logs)
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    with (
+        RUNTIME.execution_trace(
+            lambda event, details: observed.append((event, details))
+        ),
+        pytest.raises(KUBERNETES.KubernetesError, match="build_phase_failed"),
+    ):
+        service.wait_build("toolbox-1", "toolbox-ns")
+
+    assert observed[0] == (
+        "build.phase",
+        {"name": "toolbox-1", "namespace": "toolbox-ns", "phase": "Failed"},
+    )
+    assert observed[-1] == (
+        "build.output",
+        {
+            "name": "toolbox-1",
+            "namespace": "toolbox-ns",
+            "returncode": 0,
+            "stdout": "compile failed\n",
+            "stderr": "",
+        },
+    )
+    assert log_limits == {"max_bytes": 4096, "max_lines": 40}
+
+
+def test_wait_build_complete_does_not_capture_logs(monkeypatch):
+    """A successful Build returns its read-back without collecting failure logs."""
+    target = TARGET.Target(
+        github=None,
+        gitlab=None,
+        kubernetes=TARGET.KubernetesTarget(
+            context="unit-context",
+            server="https://api.example.test:6443",
+            kubeconfig=None,
+        ),
+    )
+    service = KUBERNETES.KubernetesService(target=target, timeout=30)
+    build = {"status": {"phase": "Complete"}}
+    monkeypatch.setattr(
+        service,
+        "read",
+        lambda _kind, _name, _namespace: build,
+    )
+    monkeypatch.setattr(
+        KUBERNETES,
+        "run_command_tail",
+        lambda *args, **kwargs: pytest.fail("successful Build must not read logs"),
+    )
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    with RUNTIME.execution_trace(
+        lambda event, details: observed.append((event, details))
+    ):
+        result = service.wait_build("toolbox-1", "toolbox-ns")
+
+    assert result is build
+    assert observed == [
+        (
+            "build.phase",
+            {"name": "toolbox-1", "namespace": "toolbox-ns", "phase": "Complete"},
+        )
+    ]
 
 
 @pytest.mark.parametrize(

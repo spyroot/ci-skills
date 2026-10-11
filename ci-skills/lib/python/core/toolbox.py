@@ -33,6 +33,8 @@ BUILD_API_VERSION: Final = "build.openshift.io/v1"
 BUILD_DOCKERFILE: Final = "Containerfile"
 DOCTOR_NAME: Final = "toolbox-doctor"
 SPEC_NAME: Final = "toolbox-spec.json"
+CONDA_CHANNELS_ENV: Final = "CONDA_CHANNELS"
+CONDA_DEFAULT_CHANNELS_ENV: Final = "CONDA_DEFAULT_CHANNELS"
 CONDA_NAME: Final = "conda-environment.yml"
 DOCTOR_PATH: Final = "/usr/local/bin/toolbox-doctor"
 SPEC_PATH: Final = "/opt/ci-skills/toolbox-spec.json"
@@ -254,11 +256,8 @@ class CondaInput:
         )
 
     def _render(self) -> tuple[str, str]:
-        options = [
-            item
-            for channel in self.channels
-            for item in ("--channel", shlex.quote(channel))
-        ]
+        channels = shlex.quote(",".join(self.channels))
+        options: list[str] = []
         if self.prefix is not None:
             options[:0] = ("--prefix", shlex.quote(self.prefix))
         arguments = " ".join(options)
@@ -266,7 +265,9 @@ class CondaInput:
             f"COPY {CONDA_NAME} {CONDA_PATH}",
             "RUN set -eu; \\\n"
             "    command -v conda >/dev/null 2>&1; \\\n"
-            f"    conda env create --file {shlex.quote(CONDA_PATH)} {arguments}".rstrip(),
+            f"    {CONDA_CHANNELS_ENV}={channels} "
+            f"{CONDA_DEFAULT_CHANNELS_ENV}={channels} "
+            f"conda env create --file {shlex.quote(CONDA_PATH)} {arguments}".rstrip(),
         )
 
 

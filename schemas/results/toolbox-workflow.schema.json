@@ -152,6 +152,16 @@
         }
       },
       "additionalProperties": false
+    },
+    "skill": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/skill"
+    },
+    "tested_revision": {
+      "$ref": "gitlab-runner-tag.schema.json#/properties/tested_revision"
+    },
+    "trace_artifact": {
+      "type": "string",
+      "description": "Caller-selected diagnostic artifact path; read-back results remain in records."
     }
   }
 }

@@ -530,6 +530,9 @@ adds `.deb`, downloaded files, and installer argument vectors. Schema validation
 specification and selected runtime targets enter the existing plan fingerprint. `create` and `update` reconcile the
 same named resources and return `NO_OP` when unchanged. `delete` removes the selected runner and verifies absence.
 Temporary builds, pull checks, and credential helpers use callback cleanup; successful persistent outputs remain.
+The shared logging interface remains `--log-level`, `--log-format`, and `--log-file`, without alternate spellings.
+Debug traces record compact callback and provider outcomes; smoke reports point to the artifact rather than embed or
+parse it. Existing read-back checks prove the resulting state.
 
 Retain the following source inputs as workflow arguments or fields in a caller-selected build/operation specification,
 not as `target.toml` keys. The source defaults below remain proposed inputs for their delivery rows.

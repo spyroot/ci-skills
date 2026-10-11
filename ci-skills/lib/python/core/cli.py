@@ -344,9 +344,11 @@ def log_event(
     elapsed: float = 0.0,
     error_class: str | None = None,
     persist: bool = True,
+    level: str | None = None,
+    details: dict[str, Any] | None = None,
 ) -> None:
     """Emit one bounded, secret-free diagnostic line to stderr and an optional file."""
-    level = "error" if status in {BLOCKED, "PARTIAL"} else "info"
+    level = level or ("error" if status in {BLOCKED, "PARTIAL"} else "info")
     thresholds = {"debug": 0, "info": 1, "warning": 2, "error": 3}
     if thresholds[level] < thresholds[getattr(args, "log_level", "info")]:
         return
@@ -372,6 +374,8 @@ def log_event(
         "elapsed_time_ms": max(0, round(elapsed * 1000)),
         "error_class": error_class,
     }
+    if details is not None:
+        record["details"] = redact_tree(details)
     if getattr(args, "log_format", "text") == "json":
         line = json.dumps(record, sort_keys=True) + "\n"
     else:
@@ -379,6 +383,13 @@ def log_event(
             f"{record['timestamp']} {level.upper()} {kind} "
             f"{record['operation']} {event} result={status} "
             f"run_id={record['run_id']}\n"
+        )
+    if details is not None and getattr(args, "log_format", "text") != "json":
+        line = (
+            line.rstrip("\n")
+            + " "
+            + json.dumps(record["details"], sort_keys=True)
+            + "\n"
         )
     sys.stderr.write(line)
     destination = getattr(args, "log_file", None)

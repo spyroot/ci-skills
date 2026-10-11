@@ -100,6 +100,16 @@ def test_every_command_accepts_the_universal_tier(script):
     assert missing == [], f"{script} is missing universal options {missing}"
 
 
+def test_logging_options_have_one_canonical_spelling():
+    """The catalog owns exactly the three supported diagnostic option names."""
+    logging = {
+        option for option in CATALOG.UNIVERSAL_OPTIONS if option.startswith("--log-")
+    }
+
+    assert logging == {"--log-file", "--log-format", "--log-level"}
+    assert "--logging-level" not in CATALOG.UNIVERSAL_OPTIONS
+
+
 @pytest.mark.parametrize("script", PYTHON_COMMANDS)
 def test_every_python_command_parser_and_manifest_match_its_catalog_contract(script):
     """Every installed Python entrypoint has one catalog-owned option contract."""

@@ -14,6 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .cli_api import MAX_RESPONSE_BYTES, APIError, _endpoint
+from .runtime import trace_event
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -70,12 +71,24 @@ class HTTPClient:
                 "Content-Type": "application/json",
             },
         )
+        detail = {"method": method, "origin": self.origin, "path": path}
+        trace_event("http.started", detail)
         try:
             with self._opener.open(request, timeout=self.timeout) as response:
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
+                trace_event(
+                    "http.completed",
+                    {
+                        **detail,
+                        "status_code": getattr(response, "status", None),
+                        "response_bytes": len(raw),
+                    },
+                )
         except HTTPError as exc:
+            trace_event("http.failed", {**detail, "status_code": exc.code})
             raise APIError(f"provider_{exc.code}") from None
         except (URLError, TimeoutError, OSError):
+            trace_event("http.failed", {**detail, "reason": "transport"})
             raise APIError("transport") from None
         if len(raw) > MAX_RESPONSE_BYTES:
             raise APIError("response_too_large")

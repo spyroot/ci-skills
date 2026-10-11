@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
+import time
 from abc import ABC, abstractmethod
 from argparse import Namespace
 from collections.abc import Mapping, Sequence
@@ -17,7 +19,11 @@ from typing import Any, Generic, TypeVar, cast
 
 from .gitlab_api import GlabAPIClient
 from .gitlab_session import BoundGitLabSession, GitLabService
-from .runtime import sanitize
+from .runtime import (
+    execution_trace,
+    sanitize,
+    trace_event,
+)
 from .signals import recoverable_signals
 
 Action = TypeVar("Action")
@@ -283,6 +289,42 @@ class Executor:
         self.context = context if context is not None else ExecutionContext()
         self.cleanup_failures: list[CleanupFailure] = []
 
+    def _trace(self, event: str, details: dict[str, Any]) -> None:
+        from .cli import log_event
+
+        try:
+            log_event(
+                self.context.args,
+                getattr(self.context.args, "kind", "workflow"),
+                event,
+                str(details.get("status", "OBSERVED")),
+                level="debug",
+                details=details,
+            )
+        except OSError:
+            # A diagnostic destination must never prevent owned-resource cleanup.
+            sys.stderr.write("workflow trace_output_unavailable\n")
+
+    def _invoke(self, callback: AbstractCallback[Any], hook: str) -> Any:
+        detail = {"callback": type(callback).__name__, "hook": hook}
+        started = time.monotonic()
+        trace_event("callback.started", {**detail, "status": "STARTED"})
+        try:
+            result = getattr(callback, hook)()
+        except BaseException as exc:
+            trace_event(
+                "callback.failed",
+                {**detail, "status": "BLOCKED", "reason": sanitize(str(exc))},
+            )
+            raise
+        complete = {
+            **detail,
+            "status": "PASS",
+            "elapsed_time_ms": round((time.monotonic() - started) * 1000),
+        }
+        trace_event("callback.completed", complete)
+        return result
+
     def run(self) -> ExecutionResult:
         """Execute hooks in order and retain the last operation result.
 
@@ -302,14 +344,19 @@ class Executor:
         output: object = None
         self.cleanup_failures = []
         self.context.failed = False
-        with recoverable_signals():
+        sink = (
+            self._trace
+            if getattr(self.context.args, "log_level", None) == "debug"
+            else None
+        )
+        with recoverable_signals(), execution_trace(sink):
             try:
                 for callback in self.callbacks:
                     callback.bind(self.context)
                     entered.append(callback)
-                    callback.collect()
-                    callback.result = callback.run()
-                    callback.update()
+                    self._invoke(callback, "collect")
+                    callback.result = self._invoke(callback, "run")
+                    self._invoke(callback, "update")
                     output = callback.result
                     if not callback.complete:
                         self.context.failed = True
@@ -320,7 +367,7 @@ class Executor:
             finally:
                 for callback in reversed(entered):
                     try:
-                        callback.cleanup()
+                        self._invoke(callback, "cleanup")
                     except BaseException as exc:  # noqa: BLE001 - finish cleanup, then re-raise
                         failure = CleanupFailure(
                             type(callback).__name__, sanitize(str(exc), 240)
