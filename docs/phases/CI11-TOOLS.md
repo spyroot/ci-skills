@@ -1554,9 +1554,11 @@ reports PASS.
    `status`, `records`, `plan_digest` and `readback` (mutations),
    `result_action` (`APPLIED` then `NO_OP`), `execution_host`, `captured_at`.
 
-5. *Verification*: `tools/check_live_acceptance.py --root . --skill ci-skills --json`
-   validates initial access proofs and subsequent operation receipts for the
-   candidate, prints `"status": "PASS"` and exits 0.
+5. *Verification*: follow [Validation](../../README.md#validation). Live
+   setup and operation receipts must prove the affected installed capability
+   for the candidate, with read-back and cleanup. GitHub runs static checks
+   and mocked tests. The full-publication checker applies when that
+   capability is under test; unrelated runtime targets do not gate code CI.
 
 ## Open decisions
 

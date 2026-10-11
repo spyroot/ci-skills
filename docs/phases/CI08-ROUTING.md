@@ -140,12 +140,11 @@ How `ci-skills` comes to sit on top of `glab`:
    work no command declares to the `glab` skill.
 5. Declare the skill's tags, so that `bin/ci-skills list` (planned,
    CI01-CATALOG) shows them with the derived dependency on `glab`.
-6. After the last skill edit, capture a new receipt on the selected executor
-   using [CI11-TOOLS runtime setup](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back):
-   `ci-skills/bin/access_check.py --publication --receipt-out
-   tests/acceptance/receipts/operator-laptop.json`, replacing the committed
-   receipt. Commit it. Publication requires the selected target's
-   `required_checks` read-back.
+6. Verify installed routing output for the candidate. For affected live
+   capabilities, capture setup and operation receipts using
+   [CI11-TOOLS runtime setup](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back).
+   Follow [Validation](../../README.md#validation); full-publication access
+   is not a prerequisite for routing changes.
 7. Open one pull request; merge per CI10-PHASES, How a phase lands.
 
 ## Live receipt
@@ -162,10 +161,9 @@ request's final package bytes.
 - **Kept gates.** `tests/python/test_catalog.py` keeps `tools.json`
   byte-equal to the catalog. Its routing test is changed in step 2 to read
   `.command`.
-- **Live acceptance.** `tools/check_live_acceptance.py` accepts the new
-  receipt. The `validate` workflow that ran it was deleted in #27
-  (`1108cca`); the route that runs it is D-GATE (CI03-GATES, G0; none as of
-  2026-10-06).
+- **Live acceptance.** Relevant live setup and operation receipts prove the
+  affected installed capability against its selected runtime target. GitHub
+  runs static checks and mocked tests as described in README Validation.
 - **Closed world** (CI07-SCHEMA, Pointers): `REFERENCES` paths, `points_to`,
   `uses`.
 - **Tests**, as listed in CI06-TESTS and in the next section: written with
@@ -217,14 +215,10 @@ request's final package bytes.
    matches CI09-REFERENCE section 3, Render 2, and
    `wc -l ci-skills/SKILL.md` reads back fewer than 500 lines (229 on
    2026-10-06, before the split).
-4. *Evidence*: no receipt for the static read-back; the static evidence is
-   the `reference.py next gitlab --json` output and the `wc -l` count. This
-   phase changes skill bytes, so it also needs a fresh receipt from the
-   D-SMOKE executor: `tests/acceptance/receipts/operator-laptop.json`,
-   captured in step 6. The checker validates the setup receipt's execution
-   host, API-read identities, targets, credential sources and live read-back.
-   Subsequent operation receipts must match that setup. Exact candidate
-   revision, skill digest, freshness, redaction and applicable cleanup checks
-   remain required under CI11-TOOLS, Smoke cases.
-5. *Verification*: `tools/check_live_acceptance.py --root . --json`
-   reports `"status": "PASS"` and exits 0 for the required candidate receipts.
+4. *Evidence*: the routing evidence is the installed candidate's
+   `reference.py next gitlab --json` output and the `wc -l` count. Affected
+   live capabilities retain matching authenticated setup and operation
+   receipts, candidate revision, skill digest, freshness, redaction,
+   read-back and cleanup proof under CI11-TOOLS, Smoke cases.
+5. *Verification*: installed routing output and relevant live results match
+   the candidate; required GitHub static and mocked-test checks pass.

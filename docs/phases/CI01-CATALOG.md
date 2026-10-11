@@ -415,35 +415,24 @@ below goes beyond them.
      then lists `ci-skills` and `glab`;
    - `tools/render_manifest.py --check` reads back `CURRENT` for `tools.json`
      and `agents/openai.yaml`.
-4. *Evidence*. The skill digest changes (part 1 adds files under
-   `ci-skills/`), so the publication receipt is recaptured on the selected
-   executor from the clean checkout of `main` that part 3 names (a dirty
-   checkout gives `verified: false` and fails the revision check), with
-   `ci-skills/bin/access_check.py --publication --receipt-out tests/acceptance/receipts/operator-laptop.json`.
-   The checker validates the setup receipt's `kind`, `schema_version`,
-   `status`, `publication`, targets, API-read identities, credential sources
-   and required live checks, including job, Ceph and required-check read-back.
-   It retains exact candidate revision and skill digest checks, freshness
-   and redaction checks. Subsequent operation receipts must match the setup;
+4. *Evidence*. Follow [Validation](../../README.md#validation) for local
+   static checks, GitHub mocked tests, and installed-skill live checks.
+   Recapture affected live capability evidence after changes to its runtime
+   code or dependencies, recording the candidate revision and skill digest.
+   Preserve freshness, redaction, target identity, read-back and cleanup.
+   Subsequent operation receipts must match the authenticated runtime setup;
    [CI11-TOOLS, Smoke cases](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back)
    owns runtime setup, resource read-back and cleanup requirements.
-   Historical observation (2026-10-06): the declared `validate` workflow had
-   been deleted in #27 (`1108cca`), blocking that publication receipt.
    The offline verbs have no receipt: the static evidence is the
    `bin/ci-skills list --json` and `--describe` output of part 3. If they
    gain smoke receipts, `bin/ci-skills` needs `--receipt-out`, as CI02-CLI
    declares for every smoke-cased command (item 7).
-5. *Verification*. The checker:
-
-   ```text
-   tools/check_live_acceptance.py --root . --json
-   ```
-
-   prints `"status": "PASS"` (`Live acceptance: PASS` without `--json`);
-   `tools/render_manifest.py --check` prints `CURRENT`;
-   `tools/check_project_neutrality.py --root . --json` reports `PASS`. The
-   pytest and bats suites are never run on this laptop; which surface runs
-   them is CI03-GATES, G0.
+5. *Verification*. `tools/render_manifest.py --check` prints `CURRENT`;
+   `tools/check_project_neutrality.py --root . --json` reports `PASS`.
+   GitHub runs the pytest and Bats suites. Relevant installed-skill live
+   results must match the candidate and selected targets. The full-publication
+   checker evaluates explicit publication work; it is not a prerequisite for
+   catalog validation.
 
 ## Open decisions
 

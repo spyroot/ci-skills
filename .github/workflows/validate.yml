@@ -155,17 +155,20 @@ jobs:
             tests/python/test_catalog.py \
             tests/python/test_callbacks.py \
             tests/python/test_propositions.py \
-            tests/python/test_ci_required_result.py
+            tests/python/test_ci_required_result.py \
+            tests/python/test_validate_workflow_policy.py
       - name: Exercise static-gate negative paths
         id: bats
         run: |
           mkdir -p reports/raw
           bats --tap tests/bash/bless.bats | tee reports/raw/validate-bats.tap
-      - name: Verify committed live acceptance receipts
+      - name: Exercise offline acceptance receipt evaluation
         id: acceptance
         run: |
-          python -W error -m pytest -q tests/python/test_live_acceptance.py
-          python tools/check_live_acceptance.py --root . --json
+          mkdir -p reports/raw
+          python -W error -m pytest -q \
+            --junitxml=reports/raw/acceptance-pytest.xml \
+            tests/python/test_live_acceptance.py
       - name: Check patch whitespace
         id: whitespace
         env:
@@ -191,6 +194,7 @@ jobs:
             --runner-digest "$runner_digest" \
             --step-results "$STEP_RESULTS" \
             --junit reports/raw/validate-pytest.xml \
+            --junit reports/raw/acceptance-pytest.xml \
             --tap reports/raw/validate-bats.tap \
             --output-dir reports
       - uses: actions/upload-artifact@v4

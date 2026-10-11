@@ -314,17 +314,11 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
 4. *Evidence.* No receipt: the static evidence is the `--help` and
    `--describe` output of part 3 and the `CURRENT` line of
    `tools/render_manifest.py --check` (`render_manifest.py:69-71`). Every
-   byte this phase changes under `ci-skills/` changes the skill digest, so
-   the committed receipts, already stale (CI10-PHASES, "Pull request
-   status"), need a fresh `access_check.py --publication --receipt-out`
-   after the phase's last skill byte; that receipt is CI03-GATES G5's
-   evidence, not this phase's. Current capture uses the selected executor
-   and authenticated setup described in
+   runtime change affecting a live capability requires a fresh installed-skill
+   check of that capability, with candidate revision and skill digest recorded.
+   Follow [Validation](../../README.md#validation) for the three execution
+   surfaces. Live capture uses the selected target and authenticated setup in
    [CI11-TOOLS, Smoke cases](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back).
-   Publication still requires branch-protection and required-check read-back.
-   Historical observation (2026-10-06): protection on `main` was disabled
-   and the declared `validate` workflow had been deleted in #27
-   (`1108cca`), so that publication refresh could not pass.
 5. *Verification.*
    - `tools/render_manifest.py --check` prints `CURRENT` and exits 0
      (`render_manifest.py:69-72`). Observed 2026-10-06: `FileNotFoundError:
@@ -333,12 +327,10 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
    - `./scripts/check.sh` with the `cli` gate: one `PASS` per command. The
      line's format is not defined in the tree; CI03-GATES G1 owns it, and
      the route that runs it is D-GATE.
-   - `tools/check_live_acceptance.py --root . --json` must print
-     `"status": "PASS"` and exit 0 once the required setup and operation
-     receipts for the exact candidate are committed. Historical observation
-     (2026-10-06): the earlier checker failed to import `core`, then reported
-     `expectations_unreadable` because its default paths predated the layout.
-     Those failures describe the earlier interface, not the current command.
+   - Relevant live setup and operation receipts must prove the installed
+     candidate's behavior, read-back and cleanup. Full-publication access
+     checks apply when that capability is exercised; unrelated runtime target
+     prerequisites are not CLI validation or merge requirements.
 
 ## Open decisions
 

@@ -296,7 +296,7 @@ conda run -n ci-skills python \
   ci-skills/bin/gitlab_access.py check --json
 ```
 
-When all three authorities are configured, run the full publication check:
+When testing publication access against the selected runtime target, run the full publication check:
 
 ```bash
 conda run -n ci-skills python \
@@ -441,7 +441,7 @@ paired JSON and text files; without that option no report file is written.
 - `access_check.py` checks the three selected authorities and runs the declared live collector reads. `--publication`
   also requires repository admin permission and read-back of required branch checks. `--job-url URL` also checks that
   job, pipeline, runner, and trace. `--ceph-namespace NAME` adds Ceph health, OSD, PG, and Pod reads to that receipt;
-  this repository requires it in `tests/acceptance`.
+  use those options when testing the corresponding live capabilities.
 - `gitlab_job.py --job-url URL` reads a selected job, pipeline, runner, and bounded trace using GitLab-only access. It
   accepts `--search TEXT`.
 - `gitlab_pipeline.py --pipeline-id ID` reads pipeline progress and bounded job results for the selected GitLab project.
@@ -502,7 +502,18 @@ its own `status`.
 
 ## Validation
 
-The `validate` workflow checks workflow/YAML and Markdown syntax, diff hygiene, secrets, Ruff lint and format, package
-behavior, and mocked denial paths. Its package smoke runs every installed entrypoint from outside the source tree.
-Mocked CI is code evidence; the live access receipt must come from each intended execution host. Use the exact target
-and tested revision there, and retain the sanitized receipt only after all required checks pass.
+Local `bless.sh` runs static checks before commit. GitHub runs the same shared lint checks, including ShellCheck,
+workflow/YAML and Markdown checks, schemas, diff hygiene, secrets, and Ruff lint/format. Existing GitHub jobs also
+exercise Python mocks, edge cases, and package behavior on the current runner. These test suites run on GitHub;
+GitHub does not need private GitLab or Kubernetes access.
+
+Live functional checks install the candidate skill and execute its affected commands against real configured targets.
+Verify results through read-back and clean up created test resources. Dry-run and mocked results do not replace this
+proof. Fix observed code defects in the shared implementation, reinstall, and repeat the affected live check; added
+mocked regressions run on GitHub.
+
+`target.toml` selects runtime targets and credentials for the installed skill, including GitHub capabilities and
+cross-provider workflows. It is not this repository's CI or delivery configuration. Changing a runtime target does
+not change repository merge requirements. Full publication checks apply when testing that capability; unrelated
+branch-protection, Kubernetes TLS, or other target prerequisites do not gate ordinary code validation. Preserve
+candidate identity, relevant live evidence, and the required GitHub result as distinct proof.
