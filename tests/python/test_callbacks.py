@@ -13,6 +13,7 @@ from tests.python.conftest import LIB_ROOT, import_script_module
 
 ACTION = import_script_module("core.gitlab_actions")
 CALLBACKS = import_script_module("core.action")
+REGISTRY = import_script_module("core.registry_mirror")
 RUNNERS = import_script_module("core.gitlab_runners")
 
 
@@ -177,6 +178,62 @@ def test_failure_stops_callbacks_and_retains_all_reverse_cleanup_evidence():
     assert "cleanup Recorded: cleanup first" in raised.value.__notes__
     assert tuple(executor.cleanup_failures) == raised.value.cleanup_failures
     assert "later.collect" not in events
+
+
+@pytest.mark.parametrize(
+    ("existing_digest", "expected_deletes"),
+    (
+        (None, [("toolbox", "smoke")]),
+        ("sha256:preexisting", []),
+    ),
+)
+def test_harbor_push_failure_cleanup_deletes_only_a_new_tag(
+    existing_digest, expected_deletes
+):
+    """A downstream failure removes a new tag without deleting an existing one."""
+    published_digest = "sha256:published"
+
+    class HarborService:
+        def __init__(self) -> None:
+            self.current = existing_digest
+            self.deleted: list[tuple[str, str]] = []
+
+        def inspect(self, _image: str) -> str:
+            return published_digest
+
+        def digest(self, _repository: str, _tag: str) -> str | None:
+            return self.current
+
+        def image(self, repository: str, reference: str) -> str:
+            separator = "@" if reference.startswith("sha256:") else ":"
+            return f"registry.example.test/unit/{repository}{separator}{reference}"
+
+        def copy(self, _source: str, _destination: str) -> str:
+            self.current = published_digest
+            return published_digest
+
+        def delete_tag(self, repository: str, tag: str) -> bool:
+            self.deleted.append((repository, tag))
+            self.current = None
+            return True
+
+    events: list[str] = []
+    service = HarborService()
+    context = CALLBACKS.ExecutionContext(services={"harbor": service})
+    push = REGISTRY.HarborPush(
+        action=REGISTRY.PushAction("toolbox", "smoke", "source.example/image:tag")
+    )
+    downstream = Recorded(
+        events, "downstream", collect_error=RuntimeError("downstream failed")
+    )
+
+    with pytest.raises(RuntimeError, match="downstream failed"):
+        CALLBACKS.Executor(context=context, callbacks=[push, downstream]).run()
+
+    assert context.failed is True
+    assert service.deleted == expected_deletes
+    assert service.current == (None if existing_digest is None else published_digest)
+    assert events == ["downstream.collect", "downstream.cleanup"]
 
 
 @pytest.mark.parametrize("signal_name", ("SIGINT", "SIGTERM", "SIGHUP"))

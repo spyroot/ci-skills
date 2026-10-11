@@ -33,6 +33,7 @@
         "enum": [
           "github",
           "gitlab",
+          "harbor",
           "kubernetes"
         ]
       },
@@ -137,6 +138,7 @@
         "enum": [
           "github",
           "gitlab",
+          "harbor",
           "kubernetes"
         ]
       }

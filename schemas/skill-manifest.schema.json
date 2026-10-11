@@ -29,6 +29,7 @@
         "enum": [
           "github",
           "gitlab",
+          "harbor",
           "kubernetes",
           "no_search",
           "rule",
@@ -72,6 +73,7 @@
         "enum": [
           "github",
           "gitlab",
+          "harbor",
           "kubernetes"
         ]
       }
@@ -174,6 +176,7 @@
               "enum": [
                 "github",
                 "gitlab",
+                "harbor",
                 "kubernetes",
                 "one caller-selected GitHub or GitLab host"
               ]

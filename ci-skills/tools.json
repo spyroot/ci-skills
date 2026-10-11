@@ -32,6 +32,16 @@
         "when": "glab holds a credential for the exact FQDN"
       }
     ],
+    "harbor": [
+      {
+        "source": "target:harbor.credential_file",
+        "when": "combined native credential file is selected"
+      },
+      {
+        "source": "target:harbor.username_file + harbor.password_file",
+        "when": "paired existing files are selected"
+      }
+    ],
     "kubernetes": [
       {
         "source": "target:kubernetes.kubeconfigs",
@@ -61,6 +71,7 @@
   "authorities": [
     "github",
     "gitlab",
+    "harbor",
     "kubernetes"
   ],
   "capability_options": {
@@ -327,6 +338,81 @@
       "side_effects": "none",
       "subcommands": {},
       "use_when": "Connectivity is suspect, or a node's CNI may differ from its Ready condition."
+    },
+    "create_selfhosted_runner.py": {
+      "capabilities": [
+        "namespaced"
+      ],
+      "execution_surface": "installed skill and configured provider APIs; GitHub Actions runs tests and lint only",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--label",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--name",
+        "--namespace",
+        "--output-dir",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--runner-root",
+        "--spec",
+        "--target",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Build, publish, deploy and register a toolbox-backed GitHub runner.",
+      "read_only": false,
+      "report_kind": "create_selfhosted_runner",
+      "required_options": [],
+      "required_tools": [
+        "gh",
+        "kubectl",
+        "oc",
+        "skopeo"
+      ],
+      "requires_authorities": [
+        "github",
+        "kubernetes",
+        "harbor"
+      ],
+      "returns": "Versioned operation plan or independently verified callback results, with cleanup evidence.",
+      "side_effects": "Only confirmed operations mutate selected resources; temporary helpers are cleaned on exit.",
+      "subcommands": {
+        "create": {
+          "required_options": [
+            "--spec",
+            "--name",
+            "--runner-root",
+            "--label"
+          ],
+          "result_schema": "schemas/results/toolbox-workflow.schema.json"
+        },
+        "delete": {
+          "required_options": [
+            "--namespace",
+            "--name"
+          ],
+          "result_schema": "schemas/results/toolbox-workflow.schema.json"
+        },
+        "update": {
+          "required_options": [
+            "--spec",
+            "--name",
+            "--runner-root",
+            "--label"
+          ],
+          "result_schema": "schemas/results/toolbox-workflow.schema.json"
+        }
+      },
+      "use_when": "Create, update or delete a GitHub runner using the configured cluster and Harbor."
     },
     "event_trace.py": {
       "capabilities": [
@@ -779,6 +865,107 @@
       },
       "use_when": "A selected project wiki page needs requested content."
     },
+    "harbor_pull.py": {
+      "capabilities": [
+        "namespaced"
+      ],
+      "execution_surface": "installed skill and configured provider APIs; GitHub Actions runs tests and lint only",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--image",
+        "--json",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--name",
+        "--namespace",
+        "--output-dir",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--target",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Pull a Harbor toolbox in Kubernetes and execute its doctor.",
+      "read_only": false,
+      "report_kind": "harbor_pull",
+      "required_options": [],
+      "required_tools": [
+        "kubectl"
+      ],
+      "requires_authorities": [
+        "kubernetes",
+        "harbor"
+      ],
+      "returns": "Versioned operation plan or independently verified callback results, with cleanup evidence.",
+      "side_effects": "Only confirmed operations mutate selected resources; temporary helpers are cleaned on exit.",
+      "subcommands": {
+        "pull": {
+          "required_options": [
+            "--image",
+            "--namespace",
+            "--name"
+          ],
+          "result_schema": "schemas/results/toolbox-workflow.schema.json"
+        }
+      },
+      "use_when": "Prove a published toolbox image works, with temporary Job cleanup."
+    },
+    "harbor_push.py": {
+      "capabilities": [],
+      "execution_surface": "installed skill and configured provider APIs; GitHub Actions runs tests and lint only",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--output-dir",
+        "--receipt-out",
+        "--repository",
+        "--revision",
+        "--run-id",
+        "--source-image",
+        "--tag",
+        "--target",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Copy a selected image to Harbor and verify the immutable digest.",
+      "read_only": false,
+      "report_kind": "harbor_push",
+      "required_options": [],
+      "required_tools": [
+        "skopeo"
+      ],
+      "requires_authorities": [
+        "harbor"
+      ],
+      "returns": "Versioned operation plan or independently verified callback results, with cleanup evidence.",
+      "side_effects": "Only confirmed operations mutate selected resources; temporary helpers are cleaned on exit.",
+      "subcommands": {
+        "push": {
+          "required_options": [
+            "--source-image",
+            "--repository",
+            "--tag"
+          ],
+          "result_schema": "schemas/results/toolbox-workflow.schema.json"
+        }
+      },
+      "use_when": "Publish an existing image without building or creating a runner."
+    },
     "k8s_verify_mtu_consistency.py": {
       "capabilities": [
         "node_scoped"
@@ -903,6 +1090,66 @@
       "side_effects": "none",
       "subcommands": {},
       "use_when": "A workload will not start or a volume looks stuck, and you need the chain."
+    },
+    "toolbox.py": {
+      "capabilities": [],
+      "execution_surface": "installed skill and configured provider APIs; GitHub Actions runs tests and lint only",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--output-dir",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--spec",
+        "--target",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Build or delete a toolbox using the configured OpenShift and Harbor.",
+      "read_only": false,
+      "report_kind": "toolbox",
+      "required_options": [],
+      "required_tools": [
+        "oc",
+        "kubectl",
+        "skopeo"
+      ],
+      "requires_authorities": [
+        "kubernetes",
+        "harbor"
+      ],
+      "returns": "Versioned operation plan or independently verified callback results, with cleanup evidence.",
+      "side_effects": "Only confirmed operations mutate selected resources; temporary helpers are cleaned on exit.",
+      "subcommands": {
+        "create": {
+          "required_options": [
+            "--spec"
+          ],
+          "result_schema": "schemas/results/toolbox-workflow.schema.json"
+        },
+        "delete": {
+          "required_options": [
+            "--spec"
+          ],
+          "result_schema": "schemas/results/toolbox-workflow.schema.json"
+        },
+        "update": {
+          "required_options": [
+            "--spec"
+          ],
+          "result_schema": "schemas/results/toolbox-workflow.schema.json"
+        }
+      },
+      "use_when": "Build one validated toolbox specification independently of a runner."
     }
   },
   "default_output": "json when stdout is not a terminal, human when it is",
@@ -930,17 +1177,21 @@
     "a named CI job failed": "gitlab_job.py",
     "a volume or claim is stuck": "storage_report.py",
     "browse tools and references": "reference.py",
+    "build or delete a toolbox": "toolbox.py",
     "check GitLab pipeline progress": "gitlab_pipeline.py",
     "connectivity or CNI health": "cilium_status.py",
     "create or change a GitLab milestone": "gitlab_milestone.py",
     "create or change a GitLab wiki page": "gitlab_wiki.py",
+    "create or delete a GitHub runner": "create_selfhosted_runner.py",
     "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
     "open a GitLab bug": "gitlab_issue.py",
     "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
     "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
     "prove all three authorities": "access_check.py",
+    "publish an image to Harbor": "harbor_push.py",
     "read a caller-selected Git API resource": "bin/ci-api",
     "read or manage a GitLab runner": "gitlab_runner.py",
+    "verify a Harbor toolbox pull": "harbor_pull.py",
     "what the cluster said during an interval": "event_trace.py"
   },
   "schema_version": "1.0",

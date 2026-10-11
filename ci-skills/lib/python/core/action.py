@@ -7,9 +7,11 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import hashlib
+import json
 from abc import ABC, abstractmethod
 from argparse import Namespace
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar, cast
 
@@ -38,11 +40,15 @@ class ExecutionContext:
     .. attribute :: report
         Existing output report supplied by the workflow.
 
+    .. attribute :: failed
+        Whether execution failed before reverse-order cleanup.
+
     """
 
     args: Namespace = field(default_factory=Namespace)
     services: dict[str, object] = field(default_factory=dict, repr=False)
     report: dict[str, Any] | None = None
+    failed: bool = False
 
     @classmethod
     def from_args(cls, args: Namespace) -> ExecutionContext:
@@ -172,6 +178,18 @@ class GitlabCallback(Callback[Action, Result]):
         return self.result
 
 
+class GitHubCallback(Callback[Action, Result]):
+    """Base for operations using the workflow's bound GitHub service."""
+
+    @property
+    def github(self) -> object:
+        """Return the service established by GitHubAuth.
+
+        :returns: Bound GitHub endpoint, credentials, and native API client.
+        """
+        return self.context.services["github"]
+
+
 class K8SCallback(Callback[Action, Result]):
     """Base for operations using the selected Kubernetes access state."""
 
@@ -283,6 +301,7 @@ class Executor:
         primary: BaseException | None = None
         output: object = None
         self.cleanup_failures = []
+        self.context.failed = False
         with recoverable_signals():
             try:
                 for callback in self.callbacks:
@@ -293,9 +312,11 @@ class Executor:
                     callback.update()
                     output = callback.result
                     if not callback.complete:
+                        self.context.failed = True
                         break
             except BaseException as exc:  # noqa: BLE001 - re-raised after all cleanup
                 primary = exc
+                self.context.failed = True
             finally:
                 for callback in reversed(entered):
                     try:
@@ -348,3 +369,13 @@ def emit_result(result: ExecutionResult, args: Namespace) -> int:
     log_event(args, data["kind"], "result", data["status"])
     sys.stdout.write(rendered)
     return exit_code(data["status"])
+
+
+def plan_digest(document: Mapping[str, Any]) -> str:
+    """Fingerprint normalized nonsecret operation inputs.
+
+    :param document: Inputs and target identities bound by the owning action.
+    :returns: SHA-256 of canonical JSON, shared by provider workflows.
+    """
+    encoded = json.dumps(dict(document), sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()

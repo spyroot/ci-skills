@@ -20,9 +20,9 @@ from .access import (
     dry_run_access,
 )
 from .catalog import (
-    AUTHORITIES,
     COMMAND_BY_KIND,
     COMMANDS,
+    DEFAULT_AUTHORITIES,
     PROJECT_DIR,
     TARGET_FILENAME,
     describe,
@@ -483,7 +483,7 @@ def execute(
     source = "target"
     try:
         required_surfaces = (
-            tuple(COMMANDS[script]["requires"]) if script else AUTHORITIES
+            tuple(COMMANDS[script]["requires"]) if script else DEFAULT_AUTHORITIES
         )
         target = resolve_project_target(
             args.target,

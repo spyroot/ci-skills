@@ -108,6 +108,13 @@ milestone/runner operations, and report code remain the implementation owners; t
 [code-to-abstraction map](docs/phases/CI11-TOOLS.md#ground-the-refactor-in-existing-code) specifies what moves or stays
 shared. New combinations change the callback list rather than duplicate those implementations.
 
+The runner workflow is `create_selfhosted_runner.py create|update|delete`. Start with
+`reference.py harbor` to find the installed toolbox schema and the independent `toolbox.py`, `harbor_push.py`, and
+`harbor_pull.py` operations. Supply the toolbox specification, runner name, runtime directory, and labels through the
+command's `--help` interface. The default invocation returns a plan; repeat it with `--apply --confirm-plan DIGEST`.
+The combo builds on OpenShift, publishes to Harbor, verifies the pulled toolbox, and registers the deployed GitHub
+runner. GitHub Actions runs tests and linting on that image. Runtime access comes from the selected `target.toml`.
+
 ## Current capabilities
 
 - [Check GitLab access](ci-skills/bin/gitlab_access.py): identify the effective credential source and read back the

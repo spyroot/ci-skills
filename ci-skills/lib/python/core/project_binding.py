@@ -12,7 +12,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Final
 
-from .catalog import AUTHORITIES, PROJECT_DIR, TARGET_FILENAME
+from .catalog import DEFAULT_AUTHORITIES, PROJECT_DIR, TARGET_FILENAME
 from .runtime import error_class, run_command_tail
 from .target import Target, TargetError, load_target
 
@@ -153,7 +153,7 @@ def load_project_binding(
     path: str | Path,
     *,
     dry_run: bool = False,
-    required_surfaces: tuple[str, ...] = AUTHORITIES,
+    required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES,
 ) -> Target:
     """Use only declared sources; advance solely when one is absent.
     :param path:
@@ -226,7 +226,7 @@ def resolve_target(
     explicit_binding: str | None,
     *,
     dry_run: bool = False,
-    required_surfaces: tuple[str, ...] = AUTHORITIES,
+    required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES,
 ) -> Target:
     """Resolve explicit, environment, project, then user target without crossover."""
     if explicit_target and explicit_binding:
