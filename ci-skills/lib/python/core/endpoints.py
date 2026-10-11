@@ -132,6 +132,13 @@ TARGET_CONTRACT = TargetContract(
             + Field.of(Role.VALUE, "runner_id"),
         ),
         Table(
+            "harbor",
+            Field.of(Role.ENDPOINT, "url", "project")
+            + Field.of(
+                Role.ACCESS, "credential_file", "username_file", "password_file"
+            ),
+        ),
+        Table(
             "kubernetes",
             Field.of(Role.ENDPOINT, "context", "server")
             + Field.of(Role.ACCESS, "kubeconfig", "kubeconfigs"),

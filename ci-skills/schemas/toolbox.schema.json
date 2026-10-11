@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/ci-skills/schemas/toolbox.schema.json",
+  "title": "Toolbox specification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "properties": {
+    "apiVersion": {
+      "const": "ci-skills/v1"
+    },
+    "kind": {
+      "const": "ToolboxSpec"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseImage",
+        "image",
+        "build",
+        "dependencies",
+        "requiredCommands"
+      ],
+      "properties": {
+        "baseImage": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Base image resolved to an immutable digest in the live plan."
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repository",
+            "tag"
+          ],
+          "properties": {
+            "repository": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Destination repository at the configured Harbor endpoint and project."
+            },
+            "tag": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "build": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "namespace",
+            "app"
+          ],
+          "properties": {
+            "namespace": {
+              "type": "string",
+              "minLength": 1
+            },
+            "app": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "$ref": "https://github.com/spyroot/ci-skills/schemas/configuration/toolchain-dependencies.schema.json#/$defs/dependency",
+            "properties": {
+              "linux": {
+                "allOf": [
+                  {
+                    "if": {"properties": {"method": {"const": "archive"}}},
+                    "then": {"required": ["url", "sha256", "destination"]}
+                  },
+                  {
+                    "if": {"properties": {"method": {"const": "download"}}},
+                    "then": {"required": ["destination"]}
+                  },
+                  {
+                    "if": {"properties": {"method": {"const": "go"}}},
+                    "then": {"required": ["module"]}
+                  },
+                  {
+                    "if": {"properties": {"method": {"enum": ["npm", "uv"]}}},
+                    "then": {"required": ["package"]}
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "requiredCommands": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "conda": {
+          "$ref": "https://github.com/spyroot/ci-skills/schemas/configuration/toolchain-dependencies.schema.json#/$defs/conda"
+        },
+        "environment": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional platform; otherwise use the selected build cluster architecture."
+        }
+      }
+    }
+  }
+}

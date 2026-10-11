@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/toolbox-workflow.schema.json",
+  "title": "Toolbox workflow result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "captured_at",
+    "target",
+    "filters",
+    "records",
+    "errors",
+    "status",
+    "summary",
+    "operation",
+    "plan_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "enum": [
+        "create_selfhosted_runner",
+        "toolbox",
+        "harbor_push",
+        "harbor_pull"
+      ]
+    },
+    "captured_at": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    },
+    "filters": {
+      "type": "object"
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "callback",
+          "verified"
+        ],
+        "properties": {
+          "callback": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "action": {
+            "enum": ["APPLIED", "NO_OP", "VERIFIED"]
+          }
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "BLOCKED",
+        "PARTIAL",
+        "DRY_RUN",
+        "PLANNED"
+      ]
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "record_count",
+        "error_count"
+      ],
+      "properties": {
+        "record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "operation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "plan_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "access": {
+      "type": "object"
+    },
+    "cleanup": {
+      "type": "object",
+      "required": [
+        "status",
+        "failures"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "PASS",
+            "BLOCKED"
+          ]
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "callback",
+              "reason"
+            ],
+            "properties": {
+              "callback": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "skill": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/skill"
+    },
+    "tested_revision": {
+      "$ref": "gitlab-runner-tag.schema.json#/properties/tested_revision"
+    },
+    "trace_artifact": {
+      "type": "string",
+      "description": "Caller-selected diagnostic artifact path; read-back results remain in records."
+    }
+  }
+}

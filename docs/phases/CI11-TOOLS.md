@@ -507,12 +507,32 @@ report. Comments identify the existing source inventory. Values in angle bracket
 
 ```toml
 [harbor]
-url = "https://harbor.example.test"      # harbor_manager.sh:19,93; constant.bash:71; toolbox.yaml:10
-project = "<project>"                    # harbor_manager.sh:20; toolbox.yaml:10
-credential_file = "<0600 file>"          # {username, password} JSON or dockerconfigjson; replaces the
-                                         # env pair harbor_manager.sh:64,131 and bindings.bash:63-64
+url = "https://harbor.example.test"
+project = "<project>"
+credential_file = "<credential file>"   # username:password, {username, password} JSON, or dockerconfigjson
+# Alternatively, select the existing separate identity and secret files:
+# username_file = "<identity file>"
+# password_file = "<secret file>"
 admin_credential_file = "<0600 file>"    # robots and projects only; no source, built to the sentence
 ```
+
+Harbor credential paths use the existing target-relative resolution. Select either `credential_file` or the paired
+`username_file` and `password_file`; preserve the selected files without converting, relocating, or printing them.
+The resolver reads their existing formats. No command adds a password or token argument.
+
+The runner combo is `create_selfhosted_runner.py create|update|delete`: its thin `main()` composes provider callbacks
+through `Executor`. OpenShift builds the toolbox/runner image, Harbor publishes and verifies its digest, and GitHub
+registers the deployed runner. Each atom remains independently callable. GitHub Actions runs tests and linting;
+provisioning, builds, publication, updates, and deletion run through the installed skill.
+
+The installed `schemas/toolbox.schema.json` reuses the existing toolchain dependency definitions. The shared schema
+adds `.deb`, downloaded files, and installer argument vectors. Schema validation precedes mutation; the normalized
+specification and selected runtime targets enter the existing plan fingerprint. `create` and `update` reconcile the
+same named resources and return `NO_OP` when unchanged. `delete` removes the selected runner and verifies absence.
+Temporary builds, pull checks, and credential helpers use callback cleanup; successful persistent outputs remain.
+The shared logging interface remains `--log-level`, `--log-format`, and `--log-file`, without alternate spellings.
+Debug traces record compact callback and provider outcomes; smoke reports point to the artifact rather than embed or
+parse it. Existing read-back checks prove the resulting state.
 
 Retain the following source inputs as workflow arguments or fields in a caller-selected build/operation specification,
 not as `target.toml` keys. The source defaults below remain proposed inputs for their delivery rows.

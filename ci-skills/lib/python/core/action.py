@@ -7,15 +7,23 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import hashlib
+import json
+import sys
+import time
 from abc import ABC, abstractmethod
 from argparse import Namespace
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar, cast
 
 from .gitlab_api import GlabAPIClient
 from .gitlab_session import BoundGitLabSession, GitLabService
-from .runtime import sanitize
+from .runtime import (
+    execution_trace,
+    sanitize,
+    trace_event,
+)
 from .signals import recoverable_signals
 
 Action = TypeVar("Action")
@@ -38,11 +46,15 @@ class ExecutionContext:
     .. attribute :: report
         Existing output report supplied by the workflow.
 
+    .. attribute :: failed
+        Whether execution failed before reverse-order cleanup.
+
     """
 
     args: Namespace = field(default_factory=Namespace)
     services: dict[str, object] = field(default_factory=dict, repr=False)
     report: dict[str, Any] | None = None
+    failed: bool = False
 
     @classmethod
     def from_args(cls, args: Namespace) -> ExecutionContext:
@@ -172,6 +184,18 @@ class GitlabCallback(Callback[Action, Result]):
         return self.result
 
 
+class GitHubCallback(Callback[Action, Result]):
+    """Base for operations using the workflow's bound GitHub service."""
+
+    @property
+    def github(self) -> object:
+        """Return the service established by GitHubAuth.
+
+        :returns: Bound GitHub endpoint, credentials, and native API client.
+        """
+        return self.context.services["github"]
+
+
 class K8SCallback(Callback[Action, Result]):
     """Base for operations using the selected Kubernetes access state."""
 
@@ -265,6 +289,42 @@ class Executor:
         self.context = context if context is not None else ExecutionContext()
         self.cleanup_failures: list[CleanupFailure] = []
 
+    def _trace(self, event: str, details: dict[str, Any]) -> None:
+        from .cli import log_event
+
+        try:
+            log_event(
+                self.context.args,
+                getattr(self.context.args, "kind", "workflow"),
+                event,
+                str(details.get("status", "OBSERVED")),
+                level="debug",
+                details=details,
+            )
+        except OSError:
+            # A diagnostic destination must never prevent owned-resource cleanup.
+            sys.stderr.write("workflow trace_output_unavailable\n")
+
+    def _invoke(self, callback: AbstractCallback[Any], hook: str) -> Any:
+        detail = {"callback": type(callback).__name__, "hook": hook}
+        started = time.monotonic()
+        trace_event("callback.started", {**detail, "status": "STARTED"})
+        try:
+            result = getattr(callback, hook)()
+        except BaseException as exc:
+            trace_event(
+                "callback.failed",
+                {**detail, "status": "BLOCKED", "reason": sanitize(str(exc))},
+            )
+            raise
+        complete = {
+            **detail,
+            "status": "PASS",
+            "elapsed_time_ms": round((time.monotonic() - started) * 1000),
+        }
+        trace_event("callback.completed", complete)
+        return result
+
     def run(self) -> ExecutionResult:
         """Execute hooks in order and retain the last operation result.
 
@@ -283,23 +343,31 @@ class Executor:
         primary: BaseException | None = None
         output: object = None
         self.cleanup_failures = []
-        with recoverable_signals():
+        self.context.failed = False
+        sink = (
+            self._trace
+            if getattr(self.context.args, "log_level", None) == "debug"
+            else None
+        )
+        with recoverable_signals(), execution_trace(sink):
             try:
                 for callback in self.callbacks:
                     callback.bind(self.context)
                     entered.append(callback)
-                    callback.collect()
-                    callback.result = callback.run()
-                    callback.update()
+                    self._invoke(callback, "collect")
+                    callback.result = self._invoke(callback, "run")
+                    self._invoke(callback, "update")
                     output = callback.result
                     if not callback.complete:
+                        self.context.failed = True
                         break
             except BaseException as exc:  # noqa: BLE001 - re-raised after all cleanup
                 primary = exc
+                self.context.failed = True
             finally:
                 for callback in reversed(entered):
                     try:
-                        callback.cleanup()
+                        self._invoke(callback, "cleanup")
                     except BaseException as exc:  # noqa: BLE001 - finish cleanup, then re-raise
                         failure = CleanupFailure(
                             type(callback).__name__, sanitize(str(exc), 240)
@@ -348,3 +416,13 @@ def emit_result(result: ExecutionResult, args: Namespace) -> int:
     log_event(args, data["kind"], "result", data["status"])
     sys.stdout.write(rendered)
     return exit_code(data["status"])
+
+
+def plan_digest(document: Mapping[str, Any]) -> str:
+    """Fingerprint normalized nonsecret operation inputs.
+
+    :param document: Inputs and target identities bound by the owning action.
+    :returns: SHA-256 of canonical JSON, shared by provider workflows.
+    """
+    encoded = json.dumps(dict(document), sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()

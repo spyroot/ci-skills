@@ -250,7 +250,7 @@ def _check_receipt(
     now: datetime,
 ) -> list[str]:
     """Validate the publication setup's own live access and read-back evidence."""
-    from core.catalog import AUTHORITIES
+    from core.catalog import DEFAULT_AUTHORITIES
 
     problems = _check_common(name, receipt, digest, now, MAX_RECEIPT_AGE_DAYS)
     if receipt.get("kind") != RECEIPT_KIND:
@@ -272,7 +272,7 @@ def _check_receipt(
     surfaces = _mapping(receipt.get("surfaces"))
     sources = _mapping(receipt.get("credential_sources"))
     targets = _mapping(receipt.get("targets"))
-    for surface in AUTHORITIES:
+    for surface in DEFAULT_AUTHORITIES:
         observed = _mapping(surfaces.get(surface))
         if not observed.get("identity"):
             problems.append(f"{name}:identity_missing:{surface}")

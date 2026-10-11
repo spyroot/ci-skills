@@ -11,6 +11,41 @@ import pytest
 from tests.python.conftest import REPO_ROOT, import_script_module
 
 
+@pytest.fixture(params=("combined", "pair"))
+def harbor_target_case(tmp_path, monkeypatch, request):
+    """Create one target-relative Harbor credential selection per supported form."""
+    target_parent = tmp_path / "operator-config"
+    target_parent.mkdir()
+    combined = target_parent / "harbor.credential"
+    username = target_parent / "harbor.username"
+    password = target_parent / "harbor.password"
+    combined.write_text("unit-robot:unit-secret\n", encoding="utf-8")
+    username.write_text("unit-robot\n", encoding="utf-8")
+    password.write_text("unit-secret\n", encoding="utf-8")
+    selected = (combined,)
+    declaration = 'credential_file = "harbor.credential"\n'
+    if request.param == "pair":
+        selected = (username, password)
+        declaration = (
+            'username_file = "harbor.username"\npassword_file = "harbor.password"\n'
+        )
+    before = {path: (path.read_bytes(), path.stat().st_mode) for path in selected}
+    target_path = target_parent / "target.toml"
+    target_path.write_text(
+        (
+            "[harbor]\n"
+            'url = "https://harbor.example.test"\n'
+            'project = "unit"\n'
+            f"{declaration}"
+        ),
+        encoding="utf-8",
+    )
+    unrelated_cwd = tmp_path / "unrelated-cwd"
+    unrelated_cwd.mkdir()
+    monkeypatch.chdir(unrelated_cwd)
+    return target_path, selected, before
+
+
 def test_load_target_accepts_exact_nonsecret_authorities(target_file):
     """A target file supplies all live authorities without secret material."""
     target = import_script_module("core.target").load_target(target_file)
@@ -77,6 +112,27 @@ def test_load_target_resolves_token_files_from_declared_location(
     assert target.github.token_file == github_token_file.resolve()
     assert target.gitlab.token_file == gitlab_token_file.resolve()
     assert not hasattr(target.gitlab, "token")
+
+
+def test_harbor_credentials_resolve_beside_target_without_altering_files(
+    harbor_target_case,
+):
+    """Combined and paired Harbor files are resolved and consumed read-only."""
+    target_path, selected, before = harbor_target_case
+    target_mod = import_script_module("core.target")
+    credentials = import_script_module("core.credentials")
+
+    target = target_mod.load_target(target_path, required_surfaces=("harbor",))
+    credential = credentials.resolve_harbor_credential(target.harbor)
+
+    assert credential.username == "unit-robot"
+    assert credential.password == "unit-secret"
+    assert credential.source == " -> ".join(
+        f"file:{path.resolve()}" for path in selected
+    )
+    assert {
+        path: (path.read_bytes(), path.stat().st_mode) for path in selected
+    } == before
 
 
 def test_load_target_rejects_relative_token_file_resolved_inside_installed_skill(

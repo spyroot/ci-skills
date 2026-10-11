@@ -67,6 +67,7 @@ CAPABILITY_OPTIONS: dict[str, dict[str, str]] = {
 
 # The authorities a target file declares; `core/endpoints.py` owns the list.
 AUTHORITIES = TARGET_CONTRACT.authorities
+DEFAULT_AUTHORITIES: Final = ("github", "gitlab", "kubernetes")
 
 # The token variables each client honours, most preferred first. Declared here
 # because three places need the same answer -- source binding, the unbound
@@ -140,6 +141,16 @@ ACCESS_PROTOCOL: dict[str, Any] = {
             "when": "glab holds a credential for the exact FQDN",
         },
     ],
+    "harbor": [
+        {
+            "source": "target:harbor.credential_file",
+            "when": "combined native credential file is selected",
+        },
+        {
+            "source": "target:harbor.username_file + harbor.password_file",
+            "when": "paired existing files are selected",
+        },
+    ],
     "kubernetes": [
         {
             "source": "target:kubernetes.kubeconfigs",
@@ -203,6 +214,149 @@ TARGET_FILENAME = "target.toml"
 PROJECT_DIR = ".ci-skills"
 
 COMMANDS: dict[str, dict[str, Any]] = {
+    "create_selfhosted_runner.py": {
+        "kind": "create_selfhosted_runner",
+        "purpose": "Build, publish, deploy and register a toolbox-backed GitHub runner.",
+        "use_when": "Create, update or delete a GitHub runner using the configured cluster and "
+        "Harbor.",
+        "requires": ("github", "kubernetes", "harbor"),
+        "capabilities": ("namespaced",),
+        "mutates": True,
+        "options": {
+            "--spec": "toolbox JSON following schemas/toolbox.schema.json",
+            "--name": "exact runner name",
+            "--runner-root": "runner runtime directory inside the toolbox image",
+            "--label": "GitHub runner label; repeatable",
+            "--namespace": "runner namespace; defaults to the selected toolbox build "
+            "namespace",
+            "--apply": "perform the confirmed operation",
+            "--confirm-plan": "exact fingerprint from the preceding plan",
+            "--timeout": "operation timeout in seconds",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "create": {
+                "required_options": ["--spec", "--name", "--runner-root", "--label"],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+            },
+            "update": {
+                "required_options": ["--spec", "--name", "--runner-root", "--label"],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+            },
+            "delete": {
+                "required_options": ["--namespace", "--name"],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+            },
+        },
+        "related": ("toolbox.py", "harbor_push.py", "harbor_pull.py"),
+        "required_tools": ("gh", "kubectl", "oc", "skopeo"),
+        "returns": "Versioned operation plan or independently verified callback results, with "
+        "cleanup evidence.",
+        "execution_surface": "installed skill and configured provider APIs; GitHub Actions runs "
+        "tests and lint only",
+        "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
+        "are cleaned on exit.",
+    },
+    "toolbox.py": {
+        "kind": "toolbox",
+        "purpose": "Build or delete a toolbox using the configured OpenShift and Harbor.",
+        "use_when": "Build one validated toolbox specification independently of a runner.",
+        "requires": ("kubernetes", "harbor"),
+        "capabilities": (),
+        "mutates": True,
+        "options": {
+            "--spec": "toolbox JSON following schemas/toolbox.schema.json",
+            "--apply": "perform the confirmed operation",
+            "--confirm-plan": "exact fingerprint from the preceding plan",
+            "--timeout": "operation timeout in seconds",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "create": {
+                "required_options": ["--spec"],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+            },
+            "update": {
+                "required_options": ["--spec"],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+            },
+            "delete": {
+                "required_options": ["--spec"],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+            },
+        },
+        "related": ("harbor_push.py", "harbor_pull.py", "create_selfhosted_runner.py"),
+        "required_tools": ("oc", "kubectl", "skopeo"),
+        "returns": "Versioned operation plan or independently verified callback results, with "
+        "cleanup evidence.",
+        "execution_surface": "installed skill and configured provider APIs; GitHub Actions runs "
+        "tests and lint only",
+        "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
+        "are cleaned on exit.",
+    },
+    "harbor_push.py": {
+        "kind": "harbor_push",
+        "purpose": "Copy a selected image to Harbor and verify the immutable digest.",
+        "use_when": "Publish an existing image without building or creating a runner.",
+        "requires": ("harbor",),
+        "capabilities": (),
+        "mutates": True,
+        "options": {
+            "--source-image": "exact source registry image",
+            "--repository": "destination repository within the configured Harbor "
+            "project",
+            "--tag": "destination tag",
+            "--apply": "perform the confirmed operation",
+            "--confirm-plan": "exact fingerprint from the preceding plan",
+            "--timeout": "operation timeout in seconds",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "push": {
+                "required_options": ["--source-image", "--repository", "--tag"],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+            }
+        },
+        "related": ("toolbox.py", "harbor_pull.py"),
+        "required_tools": ("skopeo",),
+        "returns": "Versioned operation plan or independently verified callback results, with "
+        "cleanup evidence.",
+        "execution_surface": "installed skill and configured provider APIs; GitHub Actions runs "
+        "tests and lint only",
+        "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
+        "are cleaned on exit.",
+    },
+    "harbor_pull.py": {
+        "kind": "harbor_pull",
+        "purpose": "Pull a Harbor toolbox in Kubernetes and execute its doctor.",
+        "use_when": "Prove a published toolbox image works, with temporary Job cleanup.",
+        "requires": ("kubernetes", "harbor"),
+        "capabilities": ("namespaced",),
+        "mutates": True,
+        "options": {
+            "--image": "digest-pinned image at the configured Harbor",
+            "--namespace": "namespace for the temporary pull verification Job",
+            "--name": "operation name for temporary verification resources",
+            "--apply": "perform the confirmed operation",
+            "--confirm-plan": "exact fingerprint from the preceding plan",
+            "--timeout": "operation timeout in seconds",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "pull": {
+                "required_options": ["--image", "--namespace", "--name"],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+            }
+        },
+        "related": ("toolbox.py", "harbor_push.py"),
+        "required_tools": ("kubectl",),
+        "returns": "Versioned operation plan or independently verified callback results, with "
+        "cleanup evidence.",
+        "execution_surface": "installed skill and configured provider APIs; GitHub Actions runs "
+        "tests and lint only",
+        "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
+        "are cleaned on exit.",
+    },
     "access_check.py": {
         "kind": "access_check",
         "purpose": "Prove access to every selected authority and emit one receipt.",
@@ -210,7 +364,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "When you need one live receipt proving GitHub, GitLab, and "
             "Kubernetes access on the execution host."
         ),
-        "requires": ("github", "gitlab", "kubernetes"),
+        "requires": DEFAULT_AUTHORITIES,
         "capabilities": (),
         "options": {
             "--publication": "also require repository administration and the declared required checks",
@@ -648,6 +802,7 @@ PROPOSITION_CLUSTERS: Final = MappingProxyType(
         "glab": "gitlab",
         "kubernetes": "kubernetes",
         "github": "github",
+        "harbor": "harbor",
     }
 )
 PROPOSITION_REFERENCES: Final = MappingProxyType(
@@ -659,6 +814,10 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         "project binding": {
             "summary": "Project target and credential binding.",
             "pointer": "references/project-binding.md",
+        },
+        "toolbox specification": {
+            "summary": "Toolbox dependencies, installation methods and build inputs.",
+            "pointer": "schemas/toolbox.schema.json",
         },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",
@@ -716,6 +875,10 @@ def proposition(node: str | None = None) -> dict[str, Any]:
         names = ["access", "project binding"]
         if authority == "gitlab":
             names.append("mcp")
+        if authority == "harbor" or any(
+            "harbor" in commands[script]["requires"] for script in scripts
+        ):
+            names.append("toolbox specification")
         return {
             "tools": {script: {} for script in sorted(scripts)},
             "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
@@ -945,6 +1108,10 @@ def manifest() -> dict[str, Any]:
             **DISCOVERY_COMMANDS,
         },
         "routing": {
+            "build or delete a toolbox": "toolbox.py",
+            "publish an image to Harbor": "harbor_push.py",
+            "verify a Harbor toolbox pull": "harbor_pull.py",
+            "create or delete a GitHub runner": "create_selfhosted_runner.py",
             "browse tools and references": "reference.py",
             "prove all three authorities": "access_check.py",
             "a named CI job failed": "gitlab_job.py",

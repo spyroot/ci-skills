@@ -78,6 +78,9 @@ Routing, in short:
 
 | You need | Command |
 | --- | --- |
+| Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
+| Build a schema-declared toolbox | `bin/toolbox.py` |
+| Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | proof of access across all three authorities | `access_check.py` |
 | a named CI job's own facts | `gitlab_job.py --job-url URL` |
 | pipeline progress | `gitlab_pipeline.py --project PATH --pipeline-id ID` |
@@ -243,3 +246,16 @@ For a Ceph network or RBD timeout, start with `ceph_cluster.py` and
 `event_trace.py`, then run the MTU command when physical network consistency
 matters. For Cilium, run `cilium_status.py` first and `cilium_node.py` for an
 affected node. `tools.json` describes every command and its filters.
+
+## Toolbox and runner workflows
+
+`bin/reference.py harbor` points to the installed `schemas/toolbox.schema.json`. Read that schema before producing a
+specification. `target.toml` supplies the Harbor endpoint/project and either its existing combined `credential_file`
+or paired `username_file` and `password_file`. Paths resolve beside the selected target file; commands do not accept
+credential values as arguments. GitHub and Kubernetes retain their existing access resolution.
+
+Use `--help` for the selected operation. Planning reads current provider identity and resolves image references;
+`--dry-run` stays offline. Mutation requires `--apply --confirm-plan` with the exact returned digest. Runner deletion
+removes its workload, registration and owned Secrets. Toolbox deletion is a separate explicit operation; it removes
+the selected build record and image tags; shared image content remains in Harbor. GitHub Actions supplies no
+provisioning prerequisite.

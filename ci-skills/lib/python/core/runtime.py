@@ -7,7 +7,9 @@ import re
 import selectors
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -125,6 +127,68 @@ def sanitize(value: str, limit: int = 1000) -> str:
     return redact(value)[:limit]
 
 
+TraceSink = Callable[[str, dict[str, Any]], None]
+_TRACE_SINK: ContextVar[TraceSink | None] = ContextVar("execution_trace", default=None)
+TRACE_TEXT_LIMIT = 4096
+
+
+@contextmanager
+def execution_trace(sink: TraceSink | None) -> Iterator[None]:
+    """Bind diagnostics to one workflow and restore the caller's trace afterward.
+
+    :param sink: Workflow diagnostic writer, or None to disable tracing.
+    :yields: Control with the selected diagnostic writer bound.
+    """
+    token = _TRACE_SINK.set(sink)
+    try:
+        yield
+    finally:
+        _TRACE_SINK.reset(token)
+
+
+def trace_event(event: str, details: dict[str, Any]) -> None:
+    """Send a workflow event through the selected shared diagnostic writer.
+
+    :param event: Stable operation event name.
+    :param details: Bounded, noncredential evidence selected by the caller.
+    """
+    sink = _TRACE_SINK.get()
+    if sink is not None:
+        sink(event, redact_tree(details))
+
+
+def trace_enabled() -> bool:
+    """Report whether this invocation requested execution diagnostics.
+
+    :returns: Whether a workflow trace writer is bound.
+    """
+    return _TRACE_SINK.get() is not None
+
+
+def _traced_result(
+    argv: tuple[str, ...], returncode: int, stdout: str, stderr: str
+) -> CommandResult:
+    result = CommandResult(argv, returncode, stdout, stderr)
+    if trace_enabled():
+        safe_argv = []
+        secret_next = False
+        for item in argv:
+            safe_argv.append("[REDACTED]" if secret_next else sanitize(item))
+            secret_next = (
+                item.startswith("--") and "=" not in item and is_secret_name(item[2:])
+            )
+        trace_event(
+            "command.complete",
+            {
+                "argv": safe_argv,
+                "returncode": returncode,
+                "stdout_bytes": len(stdout.encode()),
+                "stderr": sanitize(stderr, TRACE_TEXT_LIMIT),
+            },
+        )
+    return result
+
+
 def run_command(
     argv: Sequence[str],
     *,
@@ -145,10 +209,10 @@ def run_command(
             stdin=subprocess.DEVNULL,
         )
     except FileNotFoundError:
-        return CommandResult(command, 127, "", "command unavailable")
+        return _traced_result(command, 127, "", "command unavailable")
     except subprocess.TimeoutExpired:
-        return CommandResult(command, 124, "", "command timed out")
-    return CommandResult(command, result.returncode, result.stdout, result.stderr)
+        return _traced_result(command, 124, "", "command timed out")
+    return _traced_result(command, result.returncode, result.stdout, result.stderr)
 
 
 def run_command_bounded(
@@ -176,7 +240,7 @@ def run_command_bounded(
             env=_environment(env),
         )
     except FileNotFoundError:
-        return CommandResult(command, 127, "", "command unavailable")
+        return _traced_result(command, 127, "", "command unavailable")
     stdout = bytearray()
     stderr = bytearray()
     deadline = time.monotonic() + timeout
@@ -222,7 +286,7 @@ def run_command_bounded(
             process.stdout.close()
         if process.stderr is not None:
             process.stderr.close()
-    return CommandResult(
+    return _traced_result(
         command,
         failure if failure is not None else process.returncode,
         stdout.decode("utf-8", errors="replace")
@@ -284,7 +348,7 @@ def run_command_tail(
             cwd=cwd,
         )
     except FileNotFoundError:
-        return CommandResult(command, 127, "", "command unavailable")
+        return _traced_result(command, 127, "", "command unavailable")
     stdout_tail = bytearray()
     stderr_tail = bytearray()
     deadline = time.monotonic() + timeout
@@ -324,7 +388,7 @@ def run_command_tail(
             pass
     stdout = stdout_tail.decode("utf-8", errors="replace")
     stderr = stderr_tail.decode("utf-8", errors="replace")
-    return CommandResult(
+    return _traced_result(
         command,
         124 if expired else process.returncode,
         "\n".join(stdout.splitlines()[-max_lines:]),

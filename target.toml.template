@@ -106,3 +106,12 @@ server = "https://api.cluster.example.com:6443"
 # host_path = "/var/log/journal"
 # The selected Pod must mount host_path at directory in this container and
 # provide journalctl. A missing or ambiguous Pod/mount produces BLOCKED.
+
+# Optional: used by toolbox, registry and runner workflows.
+[harbor]
+url = "https://harbor.example.test"
+project = "example"
+credential_file = "harbor.credentials"
+# Or replace credential_file with both existing file references:
+# username_file = "harbor.identity"
+# password_file = "harbor.secret"

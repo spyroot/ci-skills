@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .catalog import AUTHORITIES
+from .catalog import AUTHORITIES, DEFAULT_AUTHORITIES
 from .endpoints import TARGET_CONTRACT
 from .paths import SKILL_ROOT
 
@@ -26,6 +26,18 @@ class GitHubTarget:
     # because the expected check name is project-specific and this skill is
     # deliberately project-neutral.
     required_checks: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class HarborTarget:
+    """Configured registry endpoint and existing credential file references."""
+
+    url: str
+    host: str
+    project: str
+    credential_file: Path | None = None
+    username_file: Path | None = None
+    password_file: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -92,7 +104,7 @@ class Target:
     github: GitHubTarget | None
     gitlab: GitLabTarget | None
     kubernetes: KubernetesTarget | None
-    active_surfaces: tuple[str, ...] = AUTHORITIES
+    active_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES
     sources: object | None = field(default=None, repr=False, compare=False)
     tested_revision: str | None = None
     # Which declared source supplied this target, so a report can say where it
@@ -102,6 +114,7 @@ class Target:
     skill: dict[str, Any] | None = None
     kubernetes_source_reference: str | None = None
     target_reference: str | None = None
+    harbor: HarborTarget | None = None
 
 
 def _table(value: object, name: str, keys: frozenset[str]) -> dict[str, object]:
@@ -400,7 +413,7 @@ def _absolute_path(value: str, key: str) -> str:
 
 
 def load_target(
-    path: str | Path, *, required_surfaces: tuple[str, ...] = AUTHORITIES
+    path: str | Path, *, required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES
 ) -> Target:
     """Load requested authorities with relative tokens beside the target file.
 
@@ -454,6 +467,24 @@ def load_target(
             data["gitlab"], skill_root, target_directory=source.parent
         )
 
+    harbor_target = None
+    if "harbor" in required_surfaces:
+        harbor = _table(data["harbor"], "harbor", TARGET_CONTRACT.names("harbor"))
+        url, host = _https_url(_string(harbor, "url"), "harbor.url")
+        files = {
+            key: _optional_file(harbor, key, skill_root, target_directory=source.parent)
+            for key in ("credential_file", "username_file", "password_file")
+        }
+        combined = files["credential_file"] is not None
+        paired = (
+            files["username_file"] is not None and files["password_file"] is not None
+        )
+        if combined == paired or (
+            combined and any(files[key] for key in ("username_file", "password_file"))
+        ):
+            raise TargetError("harbor_credential_selection_invalid")
+        harbor_target = HarborTarget(url, host, _string(harbor, "project"), **files)
+
     kubernetes_target = None
     if "kubernetes" in required_surfaces:
         kubernetes = _table(
@@ -476,4 +507,5 @@ def load_target(
         gitlab=gitlab_target,
         kubernetes=kubernetes_target,
         active_surfaces=required_surfaces,
+        harbor=harbor_target,
     )

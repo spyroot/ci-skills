@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
+from argparse import Namespace
+from copy import deepcopy
 
 import pytest
 
@@ -13,7 +17,17 @@ from tests.python.conftest import LIB_ROOT, import_script_module
 
 ACTION = import_script_module("core.gitlab_actions")
 CALLBACKS = import_script_module("core.action")
+GITHUB_RUNNER = import_script_module("core.github_runner")
+KUBERNETES = import_script_module("core.kubernetes")
+REGISTRY = import_script_module("core.registry_mirror")
+RESOURCES = import_script_module("core.resources")
+RUNTIME = import_script_module("core.runtime")
+RUNNER_CORE = import_script_module("core.runner")
 RUNNERS = import_script_module("core.gitlab_runners")
+STATUS = import_script_module("core.status")
+TARGET = import_script_module("core.target")
+TOOLBOX = import_script_module("core.toolbox")
+TOOLBOX_ACTIONS = import_script_module("core.toolbox_actions")
 
 
 class Recorded(CALLBACKS.Callback[object, object]):
@@ -56,6 +70,220 @@ class Recorded(CALLBACKS.Callback[object, object]):
         self.events.append(f"{self.name}.cleanup")
         if self.cleanup_error is not None:
             raise self.cleanup_error
+
+
+class OpenShiftReadBack:
+    """Minimal native API double that can omit ``omitempty`` BuildConfig fields."""
+
+    def __init__(self, observed_spec: dict[str, object] | None = None) -> None:
+        self.applies = 0
+        self.observed_spec = observed_spec
+        self.resource: dict[str, object] | None = None
+
+    def read(self, _kind: str, _name: str, _namespace: str) -> dict[str, object] | None:
+        return deepcopy(self.resource)
+
+    def apply(self, document: dict[str, object]) -> None:
+        self.applies += 1
+        observed = deepcopy(document)
+        metadata = observed["metadata"]
+        assert isinstance(metadata, dict)
+        metadata["uid"] = "buildconfig-uid"
+        spec = observed["spec"]
+        assert isinstance(spec, dict)
+        if self.observed_spec is None:
+            spec.pop("triggers", None)
+        else:
+            observed["spec"] = deepcopy(self.observed_spec)
+        self.resource = observed
+
+
+def _build_config(spec: dict[str, object]) -> dict[str, object]:
+    """Return a generated BuildConfig shape suitable for resource read-back."""
+    return {
+        "apiVersion": "build.openshift.io/v1",
+        "kind": "BuildConfig",
+        "metadata": {"name": "toolbox"},
+        "spec": spec,
+    }
+
+
+def test_resource_set_omitted_empty_buildconfig_triggers_is_applied_then_no_op():
+    """OpenShift omits an empty BuildConfig ``spec.triggers`` on read-back."""
+    service = OpenShiftReadBack()
+    resources = RESOURCES.ResourceSet(service, "toolbox-ns", "toolbox-build")
+    spec = {"runPolicy": "Serial", "triggers": []}
+
+    applied = resources.apply(_build_config(spec))
+    repeated = resources.apply(_build_config(spec))
+
+    assert applied["action"] == STATUS.APPLIED
+    assert repeated["action"] == STATUS.NO_OP
+    assert service.applies == 1
+
+
+@pytest.mark.parametrize(
+    ("spec", "observed_spec"),
+    (
+        ({"triggers": [{"type": "ConfigChange"}]}, {}),
+        ({"triggers": []}, {"triggers": {}}),
+        ({"runPolicy": "Serial"}, {}),
+    ),
+    ids=("missing-nonempty-list", "wrong-present-list-type", "missing-scalar"),
+)
+def test_resource_set_rejects_nonempty_or_wrong_buildconfig_readback(
+    spec, observed_spec
+):
+    """Only an absent empty optional list is accepted as an OpenShift omission."""
+    resources = RESOURCES.ResourceSet(
+        OpenShiftReadBack(observed_spec), "toolbox-ns", "toolbox-build"
+    )
+
+    with pytest.raises(RESOURCES.KubernetesError, match="resource_readback_mismatch"):
+        resources.apply(_build_config(spec))
+
+
+@pytest.mark.parametrize(
+    ("url", "suffix"),
+    (
+        (
+            "https://repo.example.test/Miniconda3-py311_26.7.1-1-Linux-x86_64.sh?download=1",
+            ".sh",
+        ),
+        ("https://repo.example.test/installers/toolbox.run?signature=unit", ".run"),
+    ),
+    ids=("miniconda-query", "generic-installer-query"),
+)
+def test_linux_installer_preserves_url_path_suffix(url, suffix):
+    """Installer artifacts retain the URL path suffix, excluding its query."""
+    install = TOOLBOX.LinuxInstall.from_document(
+        {
+            "method": "installer",
+            "url": url,
+            "sha256": "a" * 64,
+            "interpreter": "bash",
+            "args": ["-b", "-p", "/opt/conda"],
+        }
+    )
+
+    operation = install._operation(7)
+    artifact = f"/tmp/ci-skills-dependency-7{suffix}"
+
+    assert operation.count(artifact) == 4
+    assert f"--output {artifact} " in operation
+    assert f"bash {artifact} -b -p /opt/conda" in operation
+    assert f"{artifact}?" not in operation
+    assert url in operation
+
+
+def test_conda_render_scopes_channels_without_unsupported_create_options():
+    """Conda channels use its supported process environment, not create args."""
+    prefix = "/opt/conda/envs/ci-skills"
+    conda = TOOLBOX.CondaInput(
+        content=b"name: unit\n",
+        prefix=prefix,
+        channels=("conda-forge", "pytorch"),
+    )
+
+    _, instruction = conda._render()
+    channels_environment, defaults_environment, *argv = shlex.split(
+        instruction.splitlines()[-1].strip()
+    )
+
+    assert channels_environment == (f"{TOOLBOX.CONDA_CHANNELS_ENV}=conda-forge,pytorch")
+    assert defaults_environment == (
+        f"{TOOLBOX.CONDA_DEFAULT_CHANNELS_ENV}=conda-forge,pytorch"
+    )
+    assert argv == [
+        "conda",
+        "env",
+        "create",
+        "--file",
+        TOOLBOX.CONDA_PATH,
+        "--prefix",
+        prefix,
+    ]
+
+
+def test_toolbox_build_starts_by_name_then_reads_build_as_json():
+    """The native build command returns a name that is read back independently."""
+    events: list[object] = []
+    digest = "sha256:" + "b" * 64
+    reference = "build.build.openshift.io/toolbox-1"
+
+    class Spec:
+        namespace = "toolbox-ns"
+        app = "toolbox"
+        fingerprint = "a" * 64
+
+        def render(self, directory, resolved_base_image):
+            events.append(("render", directory.is_dir(), resolved_base_image))
+
+        def _node_selector(self):
+            return None
+
+    class KubernetesService:
+        def read(self, kind, name, namespace):
+            events.append(("read", kind, name, namespace))
+
+        def command(self, *args, openshift=False):
+            events.append(("command", args, openshift))
+            return RUNTIME.CommandResult(tuple(args), 0, reference + "\n", "")
+
+        def json(self, *args, openshift=False):
+            events.append(("json", args, openshift))
+            return {"metadata": {"name": "toolbox-1"}}
+
+        def wait_build(self, name, namespace):
+            events.append(("wait_build", name, namespace))
+            return {"status": {"output": {"to": {"imageDigest": digest}}}}
+
+    class Resources:
+        def apply(self, document):
+            events.append(("apply", document["kind"]))
+            return document
+
+    spec = Spec()
+    service = KubernetesService()
+    action = TOOLBOX.BuildAction(
+        spec=spec,
+        resolved_base_image="registry.example.test/base@sha256:" + "c" * 64,
+        candidate_repository="image-registry.example.test/unit/toolbox",
+        candidate_reference="candidate",
+        dockerconfig=b'{"auths":{"registry.example.test":{}}}',
+        digest_lookup=lambda _repository, _reference: digest,
+    )
+    callback = TOOLBOX.BuildToolbox(action=action)
+    callback.bind(CALLBACKS.ExecutionContext(services={"kubernetes": service}))
+    callback._resource_set = Resources()
+
+    result = callback.run()
+
+    start = next(item for item in events if item[0] == "command")
+    readback = next(item for item in events if item[0] == "json")
+    assert start == (
+        "command",
+        (
+            "--namespace",
+            "toolbox-ns",
+            "start-build",
+            "buildconfig/toolbox",
+            start[1][4],
+            "-o",
+            "name",
+        ),
+        True,
+    )
+    assert start[1][4].startswith("--from-dir=")
+    assert readback == (
+        "json",
+        ("--namespace", "toolbox-ns", "get", reference, "-o", "json"),
+        False,
+    )
+    assert events.index(start) < events.index(readback)
+    assert result.build_name == "toolbox-1"
+    assert result.digest == digest
+    assert result.verified is True
 
 
 def test_abstract_hooks_are_required_but_callback_defaults_are_optional():
@@ -177,6 +405,491 @@ def test_failure_stops_callbacks_and_retains_all_reverse_cleanup_evidence():
     assert "cleanup Recorded: cleanup first" in raised.value.__notes__
     assert tuple(executor.cleanup_failures) == raised.value.cleanup_failures
     assert "later.collect" not in events
+
+
+def test_debug_trace_records_failure_and_reverse_cleanup(tmp_path):
+    """Debug traces retain compact outcomes while failed workflows clean up."""
+    lifecycle: list[str] = []
+    trace_file = tmp_path / "trace.jsonl"
+    first = Recorded(lifecycle, "first", value={"status": "PASS"})
+    failing = Recorded(
+        lifecycle,
+        "failing",
+        collect_error=RuntimeError("collect failed"),
+    )
+    context = CALLBACKS.ExecutionContext(
+        args=Namespace(
+            action="run",
+            apply=True,
+            kind="unit-workflow",
+            log_file=str(trace_file),
+            log_format="json",
+            log_level="debug",
+            run_id="unit-trace",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="collect failed"):
+        CALLBACKS.Executor(context=context, callbacks=[first, failing]).run()
+
+    records = [json.loads(line) for line in trace_file.read_text().splitlines()]
+    details = [(record["event"], record["details"]) for record in records]
+    run_completed = next(
+        detail
+        for event, detail in details
+        if event == "callback.completed" and detail["hook"] == "run"
+    )
+    failure = next(detail for event, detail in details if event == "callback.failed")
+
+    assert lifecycle[-2:] == ["failing.cleanup", "first.cleanup"]
+    assert failure == {
+        "callback": "Recorded",
+        "hook": "collect",
+        "reason": "collect failed",
+        "status": "BLOCKED",
+    }
+    assert 0 <= run_completed["elapsed_time_ms"]
+    assert set(run_completed) == {
+        "callback",
+        "elapsed_time_ms",
+        "hook",
+        "status",
+    }
+    assert RUNTIME.trace_enabled() is False
+
+
+def test_executor_disables_default_trace_and_restores_the_caller_context():
+    """A normal workflow is quiet and restores an outer trace after it exits."""
+    observed: list[tuple[str, dict[str, object]]] = []
+    lifecycle: list[str] = []
+
+    with RUNTIME.execution_trace(
+        lambda event, details: observed.append((event, details))
+    ):
+        CALLBACKS.Executor(callbacks=Recorded(lifecycle, "quiet")).run()
+        RUNTIME.trace_event("after.workflow", {"status": "PASS"})
+
+    assert observed == [("after.workflow", {"status": "PASS"})]
+    assert RUNTIME.trace_enabled() is False
+
+
+def test_command_trace_redacts_secret_argument_and_omits_provider_stdout(monkeypatch):
+    """Command traces expose status and size without provider output or secrets."""
+    monkeypatch.setattr(
+        RUNTIME.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0], 23, "provider-output", "token=hidden"
+        ),
+    )
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    with RUNTIME.execution_trace(
+        lambda event, details: observed.append((event, details))
+    ):
+        result = RUNTIME.run_command(
+            ["provider", "--password", "raw-secret", "--name", "unit"]
+        )
+
+    assert result.returncode == 23
+    assert observed == [
+        (
+            "command.complete",
+            {
+                "argv": [
+                    "provider",
+                    "--password",
+                    "[REDACTED]",
+                    "--name",
+                    "unit",
+                ],
+                "returncode": 23,
+                "stdout_bytes": len(b"provider-output"),
+                "stderr": "token=[REDACTED]",
+            },
+        )
+    ]
+
+
+def test_wait_build_fails_terminal_phase_without_sleep_and_traces_logs(monkeypatch):
+    """A terminal Build failure captures bounded logs without waiting to time out."""
+    target = TARGET.Target(
+        github=None,
+        gitlab=None,
+        kubernetes=TARGET.KubernetesTarget(
+            context="unit-context",
+            server="https://api.example.test:6443",
+            kubeconfig=None,
+        ),
+    )
+    service = KUBERNETES.KubernetesService(target=target, timeout=30)
+    monkeypatch.setattr(
+        service,
+        "read",
+        lambda _kind, _name, _namespace: {"status": {"phase": "Failed"}},
+    )
+    monkeypatch.setattr(
+        KUBERNETES.time,
+        "sleep",
+        lambda _seconds: pytest.fail("terminal Build phase must not sleep"),
+    )
+    log_limits: dict[str, int] = {}
+
+    def capture_logs(*args, **kwargs):
+        log_limits.update(max_bytes=kwargs["max_bytes"], max_lines=kwargs["max_lines"])
+        return RUNTIME.CommandResult(tuple(args[0]), 0, "compile failed\n", "")
+
+    monkeypatch.setattr(KUBERNETES, "run_command_tail", capture_logs)
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    with (
+        RUNTIME.execution_trace(
+            lambda event, details: observed.append((event, details))
+        ),
+        pytest.raises(KUBERNETES.KubernetesError, match="build_phase_failed"),
+    ):
+        service.wait_build("toolbox-1", "toolbox-ns")
+
+    assert observed[0] == (
+        "build.phase",
+        {"name": "toolbox-1", "namespace": "toolbox-ns", "phase": "Failed"},
+    )
+    assert observed[-1] == (
+        "build.output",
+        {
+            "name": "toolbox-1",
+            "namespace": "toolbox-ns",
+            "returncode": 0,
+            "stdout": "compile failed\n",
+            "stderr": "",
+        },
+    )
+    assert log_limits == {"max_bytes": 4096, "max_lines": 40}
+
+
+def test_wait_build_complete_does_not_capture_logs(monkeypatch):
+    """A successful Build returns its read-back without collecting failure logs."""
+    target = TARGET.Target(
+        github=None,
+        gitlab=None,
+        kubernetes=TARGET.KubernetesTarget(
+            context="unit-context",
+            server="https://api.example.test:6443",
+            kubeconfig=None,
+        ),
+    )
+    service = KUBERNETES.KubernetesService(target=target, timeout=30)
+    build = {"status": {"phase": "Complete"}}
+    monkeypatch.setattr(
+        service,
+        "read",
+        lambda _kind, _name, _namespace: build,
+    )
+    monkeypatch.setattr(
+        KUBERNETES,
+        "run_command_tail",
+        lambda *args, **kwargs: pytest.fail("successful Build must not read logs"),
+    )
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    with RUNTIME.execution_trace(
+        lambda event, details: observed.append((event, details))
+    ):
+        result = service.wait_build("toolbox-1", "toolbox-ns")
+
+    assert result is build
+    assert observed == [
+        (
+            "build.phase",
+            {"name": "toolbox-1", "namespace": "toolbox-ns", "phase": "Complete"},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("existing_digest", "expected_deletes", "expected_copies"),
+    (
+        (None, [("toolbox", "smoke")], 1),
+        ("sha256:preexisting", [], 2),
+    ),
+)
+def test_harbor_push_failure_cleanup_restores_prior_tag_or_removes_new_tag(
+    existing_digest, expected_deletes, expected_copies
+):
+    """A downstream failure restores a prior tag or removes a newly created tag."""
+    published_digest = "sha256:published"
+
+    class HarborService:
+        def __init__(self) -> None:
+            self.current = existing_digest
+            self.deleted: list[tuple[str, str]] = []
+            self.copies: list[tuple[str, str]] = []
+
+        def inspect(self, image: str) -> str:
+            return image.rsplit("@", 1)[-1] if "@" in image else published_digest
+
+        def digest(self, _repository: str, _tag: str) -> str | None:
+            return self.current
+
+        def image(self, repository: str, reference: str) -> str:
+            separator = "@" if reference.startswith("sha256:") else ":"
+            return f"registry.example.test/unit/{repository}{separator}{reference}"
+
+        def copy(self, source: str, destination: str) -> str:
+            self.copies.append((source, destination))
+            self.current = self.inspect(source)
+            return self.current
+
+        def delete_tag(self, repository: str, tag: str) -> bool:
+            self.deleted.append((repository, tag))
+            self.current = None
+            return True
+
+    events: list[str] = []
+    service = HarborService()
+    context = CALLBACKS.ExecutionContext(services={"harbor": service})
+    push = REGISTRY.HarborPush(
+        action=REGISTRY.PushAction("toolbox", "smoke", "source.example/image:tag")
+    )
+    downstream = Recorded(
+        events, "downstream", collect_error=RuntimeError("downstream failed")
+    )
+
+    with pytest.raises(RuntimeError, match="downstream failed"):
+        CALLBACKS.Executor(context=context, callbacks=[push, downstream]).run()
+
+    assert context.failed is True
+    assert service.deleted == expected_deletes
+    assert service.current == existing_digest
+    assert len(service.copies) == expected_copies
+    assert events == ["downstream.collect", "downstream.cleanup"]
+
+
+@pytest.mark.parametrize(
+    ("prior_digest", "expected_copies", "expected_deletes"),
+    (
+        ("sha256:" + "c" * 64, 1, []),
+        (None, 0, [("toolbox", "ci-skills-build-" + "a" * 24)]),
+    ),
+    ids=("restore-existing-candidate", "delete-new-candidate"),
+)
+def test_harbor_build_failure_cleanup_restores_candidate_tag(
+    prior_digest, expected_copies, expected_deletes
+):
+    """A failed build restores an overwritten candidate tag or removes a new one."""
+    produced_digest = "sha256:" + "d" * 64
+
+    class Spec:
+        namespace = "toolbox-ns"
+        app = "toolbox"
+        fingerprint = "a" * 64
+        image_repository = "toolbox"
+
+        def render(self, _directory, _resolved_base_image):
+            return None
+
+        def _node_selector(self):
+            return None
+
+    class HarborService:
+        dockerconfig = b'{"auths":{"registry.example.test":{}}}'
+        target = Namespace(host="registry.example.test", project="unit")
+
+        def __init__(self) -> None:
+            self.current = prior_digest
+            self.copies: list[tuple[str, str]] = []
+            self.deleted: list[tuple[str, str]] = []
+            self.lookups: list[tuple[str, str]] = []
+
+        def digest(self, repository: str, reference: str) -> str | None:
+            self.lookups.append((repository, reference))
+            return self.current
+
+        def image(self, repository: str, reference: str) -> str:
+            separator = "@" if reference.startswith("sha256:") else ":"
+            return f"registry.example.test/unit/{repository}{separator}{reference}"
+
+        def copy(self, source: str, destination: str) -> str:
+            self.copies.append((source, destination))
+            self.current = source.rsplit("@", 1)[-1]
+            return self.current
+
+        def delete_tag(self, repository: str, reference: str) -> bool:
+            self.deleted.append((repository, reference))
+            self.current = None
+            return True
+
+    harbor = HarborService()
+
+    class KubernetesService:
+        def read(self, _kind: str, _name: str, _namespace: str):
+            return None
+
+        def command(self, *_args, openshift=False):
+            assert openshift is True
+            return RUNTIME.CommandResult(
+                (), 0, "build.build.openshift.io/toolbox-1\n", ""
+            )
+
+        def json(self, *_args, openshift=False):
+            assert openshift is False
+            return {"metadata": {"name": "toolbox-1"}}
+
+        def wait_build(self, _name: str, _namespace: str):
+            harbor.current = produced_digest
+            return {"status": {"output": {"to": {"imageDigest": produced_digest}}}}
+
+        def delete(self, *_args):
+            return None
+
+    class Resources:
+        def apply(self, document):
+            return document
+
+        def recover(self):
+            return None
+
+        def delete(self, _kind, _name):
+            return None
+
+    workflow = TOOLBOX_ACTIONS.WorkflowAction(Namespace())
+    workflow.spec = Spec()
+    workflow.resolved_base = "registry.example.test/base@sha256:" + "b" * 64
+    context = CALLBACKS.ExecutionContext(
+        services={"harbor": harbor, "kubernetes": KubernetesService()}
+    )
+    build = TOOLBOX_ACTIONS.HarborBuild(workflow=workflow)
+    build._resource_set = Resources()
+    downstream = Recorded(
+        [], "downstream", collect_error=RuntimeError("downstream failed")
+    )
+
+    with pytest.raises(RuntimeError, match="downstream failed"):
+        CALLBACKS.Executor(context=context, callbacks=[build, downstream]).run()
+
+    candidate_tag = (
+        TOOLBOX_ACTIONS.BUILD_TAG_PREFIX
+        + Spec.fingerprint[: TOOLBOX_ACTIONS.FINGERPRINT_TAG_LENGTH]
+    )
+    assert harbor.current == prior_digest
+    assert harbor.deleted == expected_deletes
+    assert len(harbor.copies) == expected_copies
+    assert harbor.lookups[-1] == (Spec.image_repository, candidate_tag)
+
+
+def test_resource_set_recovers_prior_owned_state_after_downstream_failure():
+    """Recovery reapplies the first owned state after a later callback fails."""
+    previous = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": "runner",
+            "namespace": "unit",
+            "uid": "prior-uid",
+            "labels": {
+                RESOURCES.MANAGER_LABEL: RESOURCES.MANAGER_VALUE,
+                RESOURCES.OPERATION_LABEL: "unit-runner",
+            },
+        },
+        "spec": {"replicas": 1},
+        "status": {"readyReplicas": 1},
+    }
+
+    class KubernetesService:
+        def __init__(self) -> None:
+            self.current = deepcopy(previous)
+            self.applied: list[dict[str, object]] = []
+            self.deleted: list[tuple[str, str, str]] = []
+
+        def read(self, _kind: str, _name: str, _namespace: str):
+            return deepcopy(self.current)
+
+        def apply(self, document: dict[str, object]) -> None:
+            self.applied.append(deepcopy(document))
+            self.current = deepcopy(document)
+            metadata = self.current["metadata"]
+            assert isinstance(metadata, dict)
+            metadata.setdefault("uid", "prior-uid")
+
+        def delete(self, kind: str, name: str, namespace: str) -> None:
+            self.deleted.append((kind, name, namespace))
+            self.current = None
+
+    service = KubernetesService()
+    resources = RESOURCES.ResourceSet(service, "unit", "unit-runner")
+    resources.apply(
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": "runner"},
+            "spec": {"replicas": 2},
+        }
+    )
+
+    resources.recover()
+
+    assert service.current["spec"] == previous["spec"]
+    assert service.current["metadata"]["labels"] == previous["metadata"]["labels"]
+    assert len(service.applied) == 2
+
+    applied_before = list(service.applied)
+    deleted_before = list(service.deleted)
+    resources.recover()
+
+    assert service.applied == applied_before
+    assert service.deleted == deleted_before
+
+
+@pytest.mark.parametrize(
+    ("recovered", "raises"),
+    (
+        (
+            {"id": 42, "labels": [{"name": "self-hosted"}, {"name": "Linux"}]},
+            False,
+        ),
+        ({"id": 43, "labels": [{"name": "self-hosted"}]}, True),
+    ),
+)
+def test_github_runtime_cleanup_requires_the_original_runner_identity_and_labels(
+    recovered, raises
+):
+    """Failed replacement preserves the original GitHub runner or reports recovery failure."""
+    previous = {
+        "id": 42,
+        "labels": [{"name": "self-hosted"}, {"name": "Linux"}],
+    }
+
+    class GitHubService:
+        def __init__(self) -> None:
+            self.deleted: list[str] = []
+
+        def runner(self, name: str):
+            assert name == "runner"
+            return previous
+
+        def wait_online(self, name: str, timeout: int):
+            assert (name, timeout) == ("runner", 30)
+            return recovered
+
+        def delete_runner(self, name: str) -> bool:
+            self.deleted.append(name)
+            return True
+
+    service = GitHubService()
+    runtime = GITHUB_RUNNER.GitHubRunnerRuntime(
+        action=RUNNER_CORE.RunnerAction("unit", "runner", "/runner", (), 30)
+    )
+    context = CALLBACKS.ExecutionContext(services={"github": service}, failed=True)
+    runtime.bind(context)
+    runtime.collect()
+
+    if raises:
+        with pytest.raises(GITHUB_RUNNER.APIError, match="runner_recovery_incomplete"):
+            runtime.cleanup()
+    else:
+        runtime.cleanup()
+
+    assert service.deleted == []
 
 
 @pytest.mark.parametrize("signal_name", ("SIGINT", "SIGTERM", "SIGHUP"))

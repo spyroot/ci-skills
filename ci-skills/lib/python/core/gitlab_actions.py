@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from .access import check_gitlab_operation_access
-from .action import Executor, GitlabCallback, emit_result
+from .action import Executor, GitlabCallback, emit_result, plan_digest
 from .cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
 from .credentials import bind_gitlab_session
 from .gitlab_api import GitLabAPIError, GlabAPIClient
@@ -71,8 +71,7 @@ class ActionPlan:
         }
         if self.kind == "gitlab_runner" and self.operation == "delete":
             data["runner_snapshot"] = self.runner_snapshot
-        encoded = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
-        return hashlib.sha256(encoded).hexdigest()
+        return plan_digest(data)
 
     def verified_target_id(
         self, session: BoundGitLabSession, access: dict[str, Any]

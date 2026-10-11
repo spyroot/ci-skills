@@ -6,6 +6,9 @@ PARTIAL = "PARTIAL"
 DRY_RUN = "DRY_RUN"
 PLANNED = "PLANNED"
 UNKNOWN = "UNKNOWN"
+APPLIED = "APPLIED"
+NO_OP = "NO_OP"
+VERIFIED = "VERIFIED"
 
 
 def exit_code(status: str) -> int:
