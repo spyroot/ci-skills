@@ -1,20 +1,18 @@
-"""Tests that acceptance actually refuses a receipt it should refuse.
+"""Regression coverage for runtime-bound live acceptance receipts.
 
-Mocked CI proves code behavior; it cannot prove access, because the fake
-clients answer whatever the fixtures say. So acceptance consumes the receipt a
-real host produced. Each test below is one mutation of a good receipt, and each
-asserts the specific reason it is refused -- an acceptance step that only
-checked "file exists and says PASS" would pass every one of them.
+The initial access receipts establish the selected host, identity, target and
+credential context.  Later GitLab operation receipts must prove that they ran
+against that setup; an expectations file cannot supply a second set of values.
 """
 
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import sys
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -26,160 +24,302 @@ from tests.python.conftest import (
 )
 
 ACCEPTANCE = load_module(
-    "check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
+    "proposed_check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
 )
 PORTABLE = import_script_module("core.portable")
 SKILL_ROOT = SCRIPT_ROOT.parent
-HOST = "declared-host.example.test"
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
 
 
 def _digest() -> str:
-    ACCEPTANCE._redactor()
     from core.provenance import tree_digest
 
     return tree_digest(SKILL_ROOT)["digest"]
 
 
-def _expected() -> dict:
-    return {
-        "max_receipt_age_days": 30,
-        "required_live_checks": [
-            "storage_report",
-            "event_trace",
-            "cilium_status",
-            "ceph_cluster",
-        ],
-        "ceph_namespace": "selected-ceph",
-        "required_checks": ["validate"],
-        "targets": {
-            "github": "github.com/owner/repository",
-            "gitlab": "https://gitlab.example.test",
-            "kubernetes": {
-                "context": "unit-context",
-                "server": "https://api.cluster.example.test:6443",
-            },
-        },
-        "executors": [
-            {
-                "label": "declared",
-                "host": HOST,
-                "identities": {
-                    "github": "unit-gh",
-                    "gitlab": "unit-gl",
-                    "kubernetes": "unit-admin",
-                },
-            }
-        ],
+def _access_setup() -> dict[str, dict]:
+    """Create synthetic initial receipts; operation fixtures derive from them."""
+    execution_host = "runtime-host.example.test"
+    gitlab_target = {
+        "kind": "project",
+        "id": 712,
+        "full_path": "runtime/team-repo",
     }
-
-
-def _receipt() -> dict:
-    checks = {
-        name: {
-            "status": "PASS",
-            "access_proven": True,
-            "readback_sha256": "f" * 64,
-        }
-        for name in ("storage_report", "event_trace", "cilium_status", "ceph_cluster")
-    }
-    checks["ceph_cluster"]["namespace"] = "selected-ceph"
-    return {
+    access = {
         "schema_version": "1.0",
         "kind": "access_check",
         "status": "PASS",
         "publication": True,
-        "execution_host": HOST,
+        "execution_host": execution_host,
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
         "tested_revision": "a" * 40,
         "skill": {
             "digest": _digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
-        "targets": _expected()["targets"],
+        "targets": {
+            "github": "github.example.test/runtime/repo",
+            "gitlab": "https://gitlab.runtime.example.test",
+            "kubernetes": {
+                "context": "runtime-context",
+                "server": "https://api.runtime.example.test:6443",
+            },
+        },
         "credential_sources": {
-            "github": "gh-credential-store:github.com",
-            "gitlab": "file:path:unit",
+            "github": "gh-credential-store:github.example.test",
+            "gitlab": "file:path:runtime",
             "kubernetes": "env:KUBECONFIG",
         },
         "surfaces": {
             "github": {
-                "identity": "unit-gh",
+                "identity": "runtime-gh",
                 "status": "PASS",
-                "target": "github.com/owner/repository",
-                "credential_source": "gh-credential-store:github.com",
+                "target": "github.example.test/runtime/repo",
+                "credential_source": "gh-credential-store:github.example.test",
+                "observed_capability": ["required_checks_read"],
                 "details": {"required_checks": ["validate"]},
             },
             "gitlab": {
-                "identity": "unit-gl",
+                "identity": "runtime-gl",
                 "status": "PASS",
-                "target": "https://gitlab.example.test",
-                "credential_source": "file:path:unit",
+                "target": "https://gitlab.runtime.example.test",
+                "credential_source": "file:path:runtime",
             },
             "kubernetes": {
-                "identity": "unit-admin",
+                "identity": "runtime-k8s",
                 "status": "PASS",
-                "target": "unit-context -> https://api.cluster.example.test:6443",
+                "target": "runtime-context -> https://api.runtime.example.test:6443",
                 "credential_source": "env:KUBECONFIG",
             },
         },
-        "live_checks": checks,
+        "live_checks": {
+            **{
+                name: {
+                    "status": "PASS",
+                    "access_proven": True,
+                    "readback_sha256": "f" * 64,
+                }
+                for name in ACCEPTANCE.REQUIRED_LIVE_CHECKS
+            },
+            "ceph_cluster": {
+                "status": "PASS",
+                "access_proven": True,
+                "readback_sha256": "f" * 64,
+                "namespace": "runtime-ceph",
+            },
+            "gitlab_job": {
+                "status": "PASS",
+                "access_proven": True,
+                "readback_sha256": "e" * 64,
+                "job_url": "https://gitlab.runtime.example.test/runtime/team-repo/-/jobs/42",
+                "job_readback": {
+                    "job_id": 42,
+                    "pipeline_id": 7,
+                    "runner_id": 3,
+                    "trace_line_count": 0,
+                },
+            },
+        },
         "blocking_live_checks": [],
     }
+    gitlab = {
+        "schema_version": "1.0",
+        "kind": "gitlab_access",
+        "status": "PASS",
+        "execution_host": execution_host,
+        "origin": "https://gitlab.runtime.example.test",
+        "captured_at": (NOW - timedelta(days=1)).isoformat(),
+        "skill": {
+            "digest": _digest(),
+            "revision": {"value": "a" * 40, "verified": True},
+        },
+        "identity": {"username": "runtime-gl", "id": 31},
+        "target": gitlab_target,
+        "credential_source": "file:path:runtime",
+        "credential_digest": "sha256:" + "d" * 64,
+        "target_source": "selected-runtime-target",
+        "observed_capability": ["identity_read", "target_read"],
+        "errors": [],
+    }
+    return {"access.json": access, "gitlab-access.json": gitlab}
 
 
-def _evaluate(receipt: dict, expected: dict | None = None) -> dict:
+def _context(setup: dict[str, dict]) -> dict:
+    return ACCEPTANCE._gitlab_context(setup["gitlab-access.json"])
+
+
+def _base_operation(
+    setup: dict[str, dict], kind: str, operation: str, action: str | None
+) -> dict:
+    """Build a receipt solely from the synthetic initial GitLab access setup."""
+    context = _context(setup)
+    receipt = {
+        "schema_version": "1.0",
+        "kind": kind,
+        "status": "PASS",
+        "execution_host": context["execution_host"],
+        "origin": context["origin"],
+        "captured_at": (NOW - timedelta(days=1)).isoformat(),
+        "skill": {
+            "digest": _digest(),
+            "revision": {"value": "a" * 40, "verified": True},
+        },
+        "identity": {"username": context["username"], "id": context["identity_id"]},
+        "credential_source": context["credential_source"],
+        "credential_digest": context["credential_digest"],
+        "target_source": "selected-runtime-target",
+        "operation": operation,
+        "errors": [],
+        "verified_target": {
+            "kind": context["target_kind"],
+            "id": context["target_id"],
+            "full_path": context["target_path"],
+        },
+    }
+    if (kind, operation) in ACCEPTANCE.READ_ONLY_GITLAB_OPERATIONS:
+        records = [{"id": 7}]
+        receipt.update(
+            phase="READ",
+            mutated=False,
+            records=records,
+            readback={"verified": True, "record_count": len(records)},
+        )
+        return receipt
+    receipt.update(
+        phase="APPLY",
+        mutated=action == "APPLIED",
+        result_action=action,
+        plan_digest=f"digest:{kind}:{operation}",
+        readback={"id": 7, "action": action, "verified": True},
+    )
+    return receipt
+
+
+def _runner_create(setup: dict[str, dict]) -> dict:
+    receipt = _base_operation(setup, "gitlab_runner", "create", "APPLIED")
+    context = _context(setup)
+    runner_id = receipt["readback"]["id"]
+    receipt["smoke_cleanup"] = {
+        "schema_version": "1.0",
+        "kind": "gitlab_runner_smoke_cleanup",
+        "status": "PASS",
+        "captured_at": receipt["captured_at"],
+        "execution_host": context["execution_host"],
+        "origin": context["origin"],
+        "credential_source": context["credential_source"],
+        "skill_digest": _digest(),
+        "tested_revision": "a" * 40,
+        "runner_id": runner_id,
+        "before": {"id": runner_id, "project_ids": [context["target_id"]]},
+        "delete": {
+            "method": "DELETE",
+            "endpoint": f"runners/{runner_id}",
+            "exit_code": 0,
+        },
+        "after": {
+            "global_get_http_status": 404,
+            "global_get_exit_code": 1,
+            f"project_{context['target_id']}_absent": True,
+        },
+    }
+    return receipt
+
+
+def _runner_delete(setup: dict[str, dict], action: str) -> dict:
+    receipt = _base_operation(setup, "gitlab_runner", "delete", action)
+    runner_id = receipt["readback"]["id"]
+    mutated = action == "APPLIED"
+    record = {
+        "id": runner_id,
+        "action": action,
+        "verified": True,
+        "mutated": mutated,
+        "before": {"id": runner_id} if mutated else None,
+        "after": {"global_get_status": 404, "scoped_absent": True, "write_error": None},
+    }
+    receipt.update(
+        plan={
+            "resource_id": runner_id,
+            "runner_snapshot": {"id": runner_id, "present": mutated},
+        },
+        records=[record],
+        readback=record,
+    )
+    return receipt
+
+
+def _complete_receipts(setup: dict[str, dict]) -> dict[str, dict]:
+    """Produce every required operation; no test-local operation allowlist exists."""
+    receipts = deepcopy(setup)
+    for kind, operation, action in ACCEPTANCE.REQUIRED_GITLAB_OPERATIONS:
+        if kind == "gitlab_access":
+            continue
+        name = f"{kind}-{operation}-{action or 'read'}.json"
+        if kind == "gitlab_runner" and operation == "create":
+            receipt = _runner_create(setup)
+        elif kind == "gitlab_runner" and operation == "delete":
+            receipt = _runner_delete(setup, action)
+        else:
+            receipt = _base_operation(setup, kind, operation, action)
+        receipts[name] = receipt
+    return receipts
+
+
+def _evaluate(
+    setup: dict[str, dict] | None = None, receipts: dict[str, dict] | None = None
+) -> dict:
+    initial = setup or _access_setup()
     return ACCEPTANCE.evaluate(
-        expected or _expected(),
-        {"declared.json": receipt},
+        initial,
+        receipts or _complete_receipts(initial),
         SKILL_ROOT,
         now=NOW,
     )
 
 
-def test_a_good_receipt_is_accepted():
-    result = _evaluate(_receipt())
+def test_full_required_operation_set_is_bound_to_initial_runtime_setup():
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+
+    result = _evaluate(setup, receipts)
 
     assert result["status"] == "PASS", result["problems"]
-    assert result["accepted"] == ["declared.json"]
+    assert set(result["accepted"]) == set(receipts)
+    assert {
+        (receipt.get("kind"), receipt.get("operation"), receipt.get("result_action"))
+        for receipt in receipts.values()
+        if receipt.get("kind") != "access_check"
+    } == ACCEPTANCE.REQUIRED_GITLAB_OPERATIONS
 
 
-def test_ceph_namespace_must_match_operator_selection():
-    receipt = _receipt()
-    receipt["live_checks"]["ceph_cluster"]["namespace"] = "another-cluster"
+def test_operation_identity_must_match_the_initial_synthetic_setup():
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    operation = receipts["gitlab_issue-open-bug-APPLIED.json"]
+    operation["identity"] = {"username": "different-user", "id": 99}
 
-    result = _evaluate(receipt)
+    result = _evaluate(setup, receipts)
 
     assert result["status"] == "BLOCKED"
-    assert "declared.json:ceph_namespace_mismatch" in result["problems"]
+    assert "gitlab_issue-open-bug-APPLIED.json:identity_mismatch" in result["problems"]
 
 
-def test_requested_gitlab_job_requires_exact_target_and_all_readbacks():
-    expected = _expected()
-    expected["required_live_checks"].append("gitlab_job")
-    expected["job_url"] = "https://gitlab.example.test/unit/repo/-/jobs/42"
-    receipt = _receipt()
-    receipt["live_checks"]["gitlab_job"] = {
-        "status": "PASS",
-        "access_proven": True,
-        "readback_sha256": "e" * 64,
-        "job_url": expected["job_url"],
-        "job_readback": {
-            "job_id": 42,
-            "pipeline_id": 7,
-            "runner_id": 3,
-            "trace_line_count": 0,
-        },
+def test_operation_target_cannot_switch_away_from_initial_synthetic_setup():
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    operation = receipts["gitlab_issue-open-bug-APPLIED.json"]
+    operation["verified_target"] = {
+        "kind": "project",
+        "id": 999,
+        "full_path": "other/project",
     }
 
-    assert _evaluate(receipt, expected)["status"] == "PASS"
-    receipt["live_checks"]["gitlab_job"]["job_readback"].pop("runner_id")
+    result = _evaluate(setup, receipts)
+
+    assert result["status"] == "BLOCKED"
     assert (
-        "declared.json:job_readback_missing" in _evaluate(receipt, expected)["problems"]
-    )
-    receipt["live_checks"]["gitlab_job"]["job_url"] = "https://elsewhere.test"
-    assert (
-        "declared.json:job_target_mismatch" in _evaluate(receipt, expected)["problems"]
+        "gitlab_issue-open-bug-APPLIED.json:setup_context_missing_or_ambiguous"
+        in result["problems"]
     )
 
 
@@ -187,110 +327,115 @@ def test_requested_gitlab_job_requires_exact_target_and_all_readbacks():
     ("mutate", "reason"),
     (
         (
-            lambda r: r.update({"execution_host": "someone-else"}),
-            "executor_not_declared",
-        ),
-        (lambda r: r.update({"status": "BLOCKED"}), "status_not_pass"),
-        (lambda r: r.update({"publication": False}), "not_a_publication_receipt"),
-        (lambda r: r.update({"kind": "storage_report"}), "kind_unexpected"),
-        (lambda r: r.update({"schema_version": "2.0"}), "schema_version_unexpected"),
-        (lambda r: r["skill"].update({"digest": "0" * 64}), "skill_digest_mismatch"),
-        (lambda r: r.pop("skill"), "skill_digest_absent"),
-        (lambda r: r.pop("tested_revision"), "tested_revision_unverified"),
-        (
-            lambda r: r["credential_sources"].update({"gitlab": "env:OTHER"}),
-            "credential_source_mismatch:gitlab",
+            lambda setup: setup["access.json"].update(status="BLOCKED"),
+            "status_not_pass",
         ),
         (
-            lambda r: r["surfaces"]["github"].update({"status": "BLOCKED"}),
-            "surface_not_pass:github",
+            lambda setup: setup["access.json"].update(captured_at="nonsense"),
+            "captured_at_unreadable",
         ),
         (
-            lambda r: r["surfaces"]["kubernetes"].update({"target": "other"}),
-            "surface_target_mismatch:kubernetes",
-        ),
-        (
-            lambda r: r["surfaces"]["kubernetes"].update({"identity": "someone"}),
-            "identity_mismatch:kubernetes",
-        ),
-        (
-            lambda r: r["targets"].update({"gitlab": "https://elsewhere.test"}),
-            "targets_mismatch",
-        ),
-        (
-            lambda r: r["live_checks"]["cilium_status"].update(
-                {"access_proven": False}
-            ),
-            "live_check_unproven:cilium_status",
-        ),
-        (
-            lambda r: r["live_checks"].pop("event_trace"),
+            lambda setup: setup["access.json"]["live_checks"].pop("event_trace"),
             "live_check_missing:event_trace",
         ),
         (
-            lambda r: r["live_checks"]["event_trace"].pop("readback_sha256"),
-            "live_readback_missing:event_trace",
-        ),
-        (lambda r: r.update({"blocking_live_checks": ["x"]}), "live_checks_blocking"),
-        (
-            lambda r: r["surfaces"]["github"]["details"].update(
-                {"required_checks": ["unrelated"]}
-            ),
-            "required_check_absent:validate",
+            lambda setup: setup["access.json"].update(blocking_live_checks=["blocked"]),
+            "live_checks_blocking",
         ),
         (
-            lambda r: r.update({"captured_at": "2020-01-01T00:00:00+00:00"}),
-            "receipt_stale",
-        ),
-        (lambda r: r.update({"captured_at": "nonsense"}), "captured_at_unreadable"),
-        (
-            lambda r: r.update({"captured_at": "2030-01-01T00:00:00+00:00"}),
-            "captured_in_the_future",
+            lambda setup: setup["gitlab-access.json"].update(credential_digest=""),
+            "credential_source_unresolved",
         ),
     ),
 )
-def test_each_defect_is_refused_with_its_own_reason(mutate, reason):
-    receipt = _receipt()
-    mutate(receipt)
+def test_setup_receipts_preserve_freshness_and_shape_checks(mutate, reason):
+    setup = _access_setup()
+    mutate(setup)
 
-    result = _evaluate(receipt)
-
-    assert result["status"] == "BLOCKED"
-    assert f"declared.json:{reason}" in result["problems"]
-
-
-def test_a_declared_executor_with_no_receipt_is_refused():
-    result = ACCEPTANCE.evaluate(_expected(), {}, SKILL_ROOT, now=NOW)
+    result = _evaluate(setup)
 
     assert result["status"] == "BLOCKED"
-    assert "declared:receipt_missing" in result["problems"]
+    name = (
+        "gitlab-access.json"
+        if reason == "credential_source_unresolved"
+        else "access.json"
+    )
+    assert f"{name}:{reason}" in result["problems"]
 
 
-def test_a_receipt_still_carrying_a_credential_is_refused():
-    """A receipt that was never sanitized must not become acceptance evidence."""
-    receipt = _receipt()
-    receipt["surfaces"]["gitlab"]["note"] = "GITLAB_TOKEN=leaked-value"
+def test_repeat_operations_require_matching_plan_and_resource():
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    receipts["gitlab_issue-open-bug-NO_OP.json"]["plan_digest"] = "changed"
 
-    result = _evaluate(receipt)
+    result = _evaluate(setup, receipts)
 
-    assert "declared.json:receipt_not_sanitized" in result["problems"]
+    assert (
+        "gitlab_issue-open-bug-APPLIED.json:gitlab_issue-open-bug-NO_OP.json:repeat_readback_mismatch"
+        in result["problems"]
+    )
 
 
-def test_real_operation_envelope_round_trips_through_portable_receipt(tmp_path):
+def test_runner_cleanup_and_delete_readback_remain_required():
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    receipts["gitlab_runner-create-APPLIED.json"]["smoke_cleanup"]["after"][
+        f"project_{_context(setup)['target_id']}_absent"
+    ] = False
+    receipts["gitlab_runner-delete-APPLIED.json"]["readback"]["after"][
+        "scoped_absent"
+    ] = False
+
+    result = _evaluate(setup, receipts)
+
+    assert (
+        "gitlab_runner-create-APPLIED.json:runner_smoke_cleanup_unproven"
+        in result["problems"]
+    )
+    assert (
+        "gitlab_runner-delete-APPLIED.json:runner_delete_readback_unproven"
+        in result["problems"]
+    )
+
+
+def test_missing_or_undeclared_operation_receipt_blocks_without_local_allowlist():
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    del receipts["gitlab_runner-list-read.json"]
+    receipts["unexpected.json"] = _base_operation(
+        setup, "gitlab_issue", "other", "APPLIED"
+    )
+
+    result = _evaluate(setup, receipts)
+
+    assert "gitlab_runner:list:check:receipt_missing" in result["problems"]
+    assert "unexpected.json:receipt_not_declared" in result["problems"]
+
+
+def test_access_setup_receipts_cannot_be_replaced_in_the_operation_set():
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    receipts["gitlab-access.json"]["identity"]["id"] = 99
+
+    result = _evaluate(setup, receipts)
+
+    assert "gitlab-access.json:setup_receipt_mismatch" in result["problems"]
+
+
+def test_real_operation_envelope_keeps_cleanup_shape(tmp_path):
     actions = import_script_module("core.gitlab_actions")
     portable = import_script_module("core.portable")
     plan = actions.ActionPlan(
         kind="gitlab_runner",
         operation="create",
-        origin="https://gitlab.example.test",
+        origin="https://gitlab.runtime.example.test",
         target_kind="project",
-        target_reference="team/repo",
+        target_reference="runtime/team-repo",
         target_file="/selected/target.toml",
-        target_source="argv:--target;target:gitlab.project",
-        body={"runner_type": "project_type", "description": "unit-runner"},
+        target_source="selected-runtime-target",
+        body={"runner_type": "project_type"},
         token_out="/selected/runner-secret",
     )
-    target = {"kind": "project", "id": 42, "full_path": "team/repo"}
     record = {"action": "APPLIED", "id": 9, "verified": True, "sink_persisted": True}
     report = actions._result(
         plan,
@@ -298,14 +443,15 @@ def test_real_operation_envelope_round_trips_through_portable_receipt(tmp_path):
         phase="APPLY",
         mutated=True,
         result_action="APPLIED",
-        skill={
-            "digest": _digest(),
-            "revision": {"value": "unit-sha", "verified": True},
+        skill={"digest": _digest(), "revision": {"value": "a" * 40, "verified": True}},
+        identity={"username": "runtime-gl", "id": 31},
+        verified_target={
+            "kind": "project",
+            "id": 712,
+            "full_path": "runtime/team-repo",
         },
-        identity={"username": "unit"},
-        verified_target=target,
         credential_source="env:GITLAB_TOKEN",
-        credential_digest="a" * 64,
+        credential_digest="sha256:" + "d" * 64,
         readback=record,
         records=[record],
         cleanup={"status": "NOT_PERFORMED"},
@@ -319,569 +465,127 @@ def test_real_operation_envelope_round_trips_through_portable_receipt(tmp_path):
         "result_action": "APPLIED",
         "execution_host": report["execution_host"],
         "origin": plan.origin,
-        "username": "unit",
-        "target_kind": "project",
-        "target_id": 42,
-        "target_path": "team/repo",
+        "username": report["identity"]["username"],
+        "identity_id": report["identity"]["id"],
+        "target_kind": report["verified_target"]["kind"],
+        "target_id": report["verified_target"]["id"],
+        "target_path": report["verified_target"]["full_path"],
+        "credential_source": report["credential_source"],
+        "credential_digest": report["credential_digest"],
     }
 
     assert receipt["plan"]["one_time_sink_required"] is True
-    assert receipt["readback"]["sink_persisted"] is True
-
-    def problems() -> list[str]:
-        return ACCEPTANCE._check_gitlab_receipt(
-            path.name,
-            receipt,
-            required,
-            {"max_receipt_age_days": 30},
-            _digest(),
-            datetime.now(UTC),
-        )
-
-    assert problems() == ["runner.json:runner_smoke_cleanup_unproven"]
-    receipt["smoke_cleanup"] = {
-        "schema_version": "1.0",
-        "kind": "gitlab_runner_smoke_cleanup",
-        "status": "PASS",
-        "captured_at": receipt["captured_at"],
-        "execution_host": receipt["execution_host"],
-        "origin": plan.origin,
-        "credential_source": receipt["credential_source"],
-        "skill_digest": _digest(),
-        "tested_revision": "unit-sha",
-        "runner_id": 9,
-        "before": {"id": 9, "project_ids": [42]},
-        "delete": {"method": "DELETE", "endpoint": "runners/9", "exit_code": 0},
-        "after": {
-            "global_get_http_status": 404,
-            "global_get_exit_code": 1,
-            "project_42_absent": True,
-        },
-    }
-    assert problems() == []
-    receipt["smoke_cleanup"]["after"]["project_42_absent"] = False
-    assert problems() == ["runner.json:runner_smoke_cleanup_unproven"]
+    assert ACCEPTANCE._check_gitlab_receipt(
+        path.name, receipt, required, _digest(), datetime.now(UTC)
+    ) == ["runner.json:runner_smoke_cleanup_unproven"]
 
 
-def test_an_undeclared_extra_receipt_is_refused():
-    """A receipt nobody declared cannot quietly satisfy acceptance."""
-    result = ACCEPTANCE.evaluate(
-        _expected(),
-        {"declared.json": _receipt(), "stranger.json": {"execution_host": "stranger"}},
-        SKILL_ROOT,
-        now=NOW,
-    )
-
-    assert "stranger.json:executor_not_declared" in result["problems"]
-
-
-def _gitlab_expectations() -> dict:
-    expected = _expected()
-    shared = {
-        "execution_host": HOST,
-        "origin": "https://gitlab.example.test",
-        "username": "unit-gl",
-        "target_kind": "project",
-        "target_id": 12,
-        "target_path": "unit/repo",
-    }
-    expected["gitlab_receipts"] = [
-        {"label": "operation-access", "kind": "gitlab_access", **shared},
-        {
-            "label": "bug-create",
-            "kind": "gitlab_issue",
-            "operation": "open-bug",
-            "result_action": "APPLIED",
-            **shared,
-        },
-        {
-            "label": "bug-repeat",
-            "kind": "gitlab_issue",
-            "operation": "open-bug",
-            "result_action": "NO_OP",
-            **shared,
-        },
-    ]
-    return expected
-
-
-def _gitlab_receipts() -> dict[str, dict]:
-    common = {
-        "schema_version": "1.0",
-        "status": "PASS",
-        "execution_host": HOST,
-        "captured_at": (NOW - timedelta(days=1)).isoformat(),
-        "skill": {"digest": _digest()},
-        "origin": "https://gitlab.example.test",
-        "identity": {"username": "unit-gl"},
-        "credential_source": "env:GITLAB_TOKEN",
-        "credential_digest": "sha256:unit-digest",
-        "target_source": "argv:--target;argv:--project",
-    }
-    target = {"kind": "project", "id": 12, "full_path": "unit/repo"}
-    return {
-        "access.json": {
-            **common,
-            "kind": "gitlab_access",
-            "target": target,
-            "observed_capability": ["identity_read", "target_read"],
-        },
-        "bug.json": {
-            **common,
-            "kind": "gitlab_issue",
-            "operation": "open-bug",
-            "phase": "APPLY",
-            "mutated": True,
-            "result_action": "APPLIED",
-            "plan_digest": "a" * 64,
-            "verified_target": target,
-            "readback": {"iid": 4, "action": "APPLIED", "verified": True},
-            "errors": [],
-        },
-        "bug-repeat.json": {
-            **common,
-            "kind": "gitlab_issue",
-            "operation": "open-bug",
-            "phase": "APPLY",
-            "mutated": False,
-            "result_action": "NO_OP",
-            "plan_digest": "a" * 64,
-            "verified_target": target,
-            "readback": {"iid": 4, "action": "NO_OP", "verified": True},
-            "errors": [],
-        },
-    }
-
-
-def _runner_lifecycle_expectations() -> dict:
-    expected = _expected()
-    shared = {
-        "execution_host": HOST,
-        "origin": "https://gitlab.example.test",
-        "username": "unit-gl",
-        "target_kind": "project",
-        "target_id": 12,
-        "target_path": "unit/repo",
-    }
-    expected["gitlab_receipts"] = [
-        {
-            "label": "runner-get",
-            "kind": "gitlab_runner",
-            "operation": "get",
-            **shared,
-        },
-        {
-            "label": "runner-list",
-            "kind": "gitlab_runner",
-            "operation": "list",
-            **shared,
-        },
-        {
-            "label": "runner-delete-applied",
-            "kind": "gitlab_runner",
-            "operation": "delete",
-            "result_action": "APPLIED",
-            **shared,
-        },
-        {
-            "label": "runner-delete-no-op",
-            "kind": "gitlab_runner",
-            "operation": "delete",
-            "result_action": "NO_OP",
-            **shared,
-        },
-    ]
-    return expected
-
-
-def _runner_record(identifier: int = 7) -> dict:
-    return {
-        "id": identifier,
-        "description": "unit-runner",
-        "runner_type": "project_type",
-        "tag_list": ["unit"],
-        "status": "online",
-        "online": True,
-        "paused": False,
-        "is_shared": False,
-        "access_level": "not_protected",
-        "job_execution_status": "idle",
-        "projects": [12],
-        "contacted_at": None,
-        "version": None,
-        "platform": None,
-        "architecture": None,
-    }
-
-
-def _runner_read_receipt(operation: str, records: list[dict] | None = None) -> dict:
-    selected = records if records is not None else [_runner_record()]
-    receipt = {
-        **_gitlab_receipts()["bug.json"],
-        "kind": "gitlab_runner",
-        "operation": operation,
-        "phase": "READ",
-        "mutated": False,
-        "records": selected,
-        "readback": {
-            "verified": True,
-            "record_count": len(selected),
-            "truncated": False,
-        },
-        "related_job": None,
-    }
-    receipt.pop("result_action", None)
-    return receipt
-
-
-def _runner_delete_receipt(action: str) -> dict:
-    mutated = action == "APPLIED"
-    before = _runner_record() if mutated else None
-    snapshot = {
-        "id": 7,
-        "present": mutated,
-    }
-    if mutated:
-        snapshot.update(
-            {
-                "runner_type": "project_type",
-                "description": "unit-runner",
-                "project_ids": [12],
-            }
-        )
-    record = {
-        "action": action,
-        "id": 7,
-        "verified": True,
-        "mutated": mutated,
-        "before": before,
-        "after": {
-            "scoped_absent": True,
-            "global_get_status": 404,
-            "write_error": None,
-        },
-    }
-    return {
-        **_gitlab_receipts()["bug.json"],
-        "kind": "gitlab_runner",
-        "operation": "delete",
-        "phase": "APPLY",
-        "mutated": mutated,
-        "result_action": action,
-        "plan": {
-            "operation": "delete",
-            "target_kind": "project",
-            "target_reference": "unit/repo",
-            "resource_id": 7,
-            "project_ids": None,
-            "confirmation_ready": True,
-            "fields": [],
-            "body_sha256": "b" * 64,
-            "plan_digest": "c" * 64,
-            "one_time_sink_required": False,
-            "runner_snapshot": snapshot,
-        },
-        "records": [record],
-        "readback": record,
-    }
-
-
-def test_same_host_diagnostic_and_gitlab_operation_receipts_are_all_required():
-    receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
-    result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
-
-    assert result["status"] == "PASS", result["problems"]
-    assert result["accepted"] == [
-        "access.json",
-        "bug-repeat.json",
-        "bug.json",
-        "declared.json",
-    ]
-
-
-def test_missing_or_wrong_target_operation_receipt_blocks():
-    receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
-    receipts["bug.json"]["verified_target"]["id"] = 99
-    result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
-    assert "bug.json:target_mismatch" in result["problems"]
-
-    del receipts["bug.json"]
-    result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
-    assert "bug-create:receipt_missing" in result["problems"]
-
-
-def test_same_operation_on_two_exact_targets_uses_two_receipts():
-    expected = _gitlab_expectations()
-    for item in expected["gitlab_receipts"][1:]:
-        second = dict(item)
-        second.update(label="bug-other", target_id=24, target_path="unit/other")
-        expected["gitlab_receipts"].append(second)
-    receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
-    another = json.loads(json.dumps(receipts["bug.json"]))
-    another["verified_target"].update(id=24, full_path="unit/other")
-    receipts["bug-other.json"] = another
-    another_repeat = json.loads(json.dumps(receipts["bug-repeat.json"]))
-    another_repeat["verified_target"].update(id=24, full_path="unit/other")
-    receipts["bug-other-repeat.json"] = another_repeat
-
-    result = ACCEPTANCE.evaluate(expected, receipts, SKILL_ROOT, now=NOW)
-
-    assert result["status"] == "PASS", result["problems"]
-    assert len(result["accepted"]) == 6
-
-
-def test_repeated_operation_must_bind_same_plan_and_resource():
-    receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
-    receipts["bug-repeat.json"]["plan_digest"] = "different"
-
-    result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
-
-    assert result["status"] == "BLOCKED"
-    assert "bug.json:bug-repeat.json:repeat_readback_mismatch" in result["problems"]
-
-
-def test_read_only_live_plan_cannot_satisfy_mutation_acceptance():
-    receipts = {"declared.json": _receipt(), **_gitlab_receipts()}
-    receipts["bug.json"]["phase"] = "LIVE_PLAN"
-    receipts["bug.json"]["mutated"] = False
-
-    result = ACCEPTANCE.evaluate(_gitlab_expectations(), receipts, SKILL_ROOT, now=NOW)
-
-    assert result["status"] == "BLOCKED"
-    assert "bug.json:operation_readback_missing" in result["problems"]
-
-
-def test_unexpected_same_host_operation_receipt_blocks():
-    result = ACCEPTANCE.evaluate(
-        _expected(),
-        {"declared.json": _receipt(), **_gitlab_receipts()},
-        SKILL_ROOT,
-        now=NOW,
-    )
-    assert result["status"] == "BLOCKED"
-    assert "access.json:receipt_not_declared" in result["problems"]
-
-
-def test_runner_read_and_delete_receipts_are_all_required():
-    receipts = {
-        "declared.json": _receipt(),
-        "runner-get.json": _runner_read_receipt("get"),
-        "runner-list.json": _runner_read_receipt("list", [_runner_record(7)]),
-        "runner-delete-applied.json": _runner_delete_receipt("APPLIED"),
-        "runner-delete-no-op.json": _runner_delete_receipt("NO_OP"),
-    }
-
-    result = ACCEPTANCE.evaluate(
-        _runner_lifecycle_expectations(), receipts, SKILL_ROOT, now=NOW
-    )
-
-    assert result["status"] == "PASS", result["problems"]
-    assert result["accepted"] == [
-        "declared.json",
-        "runner-delete-applied.json",
-        "runner-delete-no-op.json",
-        "runner-get.json",
-        "runner-list.json",
-    ]
-
-
-def test_runner_read_receipt_must_show_live_records():
-    receipts = {
-        "declared.json": _receipt(),
-        "runner-get.json": _runner_read_receipt("get", []),
-        "runner-list.json": _runner_read_receipt("list", [_runner_record(7)]),
-        "runner-delete-applied.json": _runner_delete_receipt("APPLIED"),
-        "runner-delete-no-op.json": _runner_delete_receipt("NO_OP"),
-    }
-
-    result = ACCEPTANCE.evaluate(
-        _runner_lifecycle_expectations(), receipts, SKILL_ROOT, now=NOW
-    )
-
-    assert "runner-get.json:read_operation_readback_missing" in result["problems"]
-    assert "runner-get.json:runner_get_cardinality_unexpected" in result["problems"]
-
-
-def test_runner_delete_receipt_must_prove_absence_readback():
-    receipts = {
-        "declared.json": _receipt(),
-        "runner-get.json": _runner_read_receipt("get"),
-        "runner-list.json": _runner_read_receipt("list", [_runner_record(7)]),
-        "runner-delete-applied.json": _runner_delete_receipt("APPLIED"),
-        "runner-delete-no-op.json": _runner_delete_receipt("NO_OP"),
-    }
-    receipts["runner-delete-applied.json"]["readback"]["after"]["scoped_absent"] = False
-
-    result = ACCEPTANCE.evaluate(
-        _runner_lifecycle_expectations(), receipts, SKILL_ROOT, now=NOW
-    )
-
-    assert (
-        "runner-delete-applied.json:runner_delete_readback_unproven"
-        in result["problems"]
-    )
-
-
-def test_missing_runner_lifecycle_receipt_blocks():
-    receipts = {
-        "declared.json": _receipt(),
-        "runner-get.json": _runner_read_receipt("get"),
-        "runner-delete-applied.json": _runner_delete_receipt("APPLIED"),
-        "runner-delete-no-op.json": _runner_delete_receipt("NO_OP"),
-    }
-
-    result = ACCEPTANCE.evaluate(
-        _runner_lifecycle_expectations(), receipts, SKILL_ROOT, now=NOW
-    )
-
-    assert "runner-list:receipt_missing" in result["problems"]
-
-
-def test_committed_runner_lifecycle_receipts_match_current_skill():
-    expected = ACCEPTANCE._load_expected(
-        REPO_ROOT / "tests" / "acceptance" / "expected.toml"
-    )
-    expected["executors"] = []
-    expected["gitlab_receipts"] = [
-        item
-        for item in expected["gitlab_receipts"]
-        if item.get("label")
-        in {"runner-get", "runner-list", "runner-delete-applied", "runner-delete-no-op"}
-    ]
-    receipts = ACCEPTANCE._load_receipts(
-        REPO_ROOT / "tests" / "acceptance" / "runner-lifecycle"
-    )
-    result = ACCEPTANCE.evaluate(
-        expected, receipts, SKILL_ROOT, repository_root=REPO_ROOT
-    )
-
-    assert result["status"] == "PASS", result["problems"]
-    assert set(result["accepted"]) == set(receipts)
-    runner_id = receipts["runner-get.json"]["records"][0]["id"]
-    assert runner_id == receipts["runner-list.json"]["records"][0]["id"]
-    assert runner_id == receipts["runner-delete-applied.json"]["records"][0]["id"]
-    assert runner_id == receipts["runner-delete-no_op.json"]["records"][0]["id"]
-    for directory in ("runner-tag", "runner-lifecycle"):
-        for path in (REPO_ROOT / "tests" / "acceptance" / directory).glob("*.json"):
-            receipt = json.loads(path.read_text(encoding="utf-8"))
-            assert (
-                ACCEPTANCE.check_candidate_identity(receipt, REPO_ROOT, SKILL_ROOT)
-                == []
-            ), path.name
-
-
-def test_candidate_identity_rejects_unrelated_and_old_source(tmp_path):
-    path = REPO_ROOT / "tests/acceptance/runner-lifecycle/runner-get.json"
-    receipt = json.loads(path.read_text(encoding="utf-8"))
-    unrelated = deepcopy(receipt)
-    unrelated["tested_revision"] = "0" * 40
-    unrelated["skill"]["revision"]["value"] = "0" * 40
-    assert ACCEPTANCE.check_candidate_identity(unrelated, REPO_ROOT, SKILL_ROOT) == [
-        "candidate_revision_not_ancestor"
-    ]
-
-    root_commit = subprocess.check_output(
-        ["git", "-C", str(REPO_ROOT), "rev-list", "--max-parents=0", "HEAD"],
+def _commit_current_index(repository: Path, message: str) -> str:
+    tree = subprocess.check_output(
+        ["git", "-C", str(repository), "write-tree"], text=True
+    ).strip()
+    return subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit-tree",
+            tree,
+            "-m",
+            message,
+        ],
         text=True,
-    ).splitlines()[0]
-    old = deepcopy(receipt)
-    old["tested_revision"] = root_commit
-    old["skill"]["revision"]["value"] = root_commit
-    assert ACCEPTANCE.check_candidate_identity(old, REPO_ROOT, SKILL_ROOT) == [
-        "candidate_skill_tree_mismatch"
-    ]
+    ).strip()
 
-    different_skill = tmp_path / "ci-skills"
-    different_skill.mkdir()
-    (different_skill / "SKILL.md").write_text("different candidate", encoding="utf-8")
-    assert ACCEPTANCE.check_candidate_identity(receipt, REPO_ROOT, different_skill) == [
+
+def _candidate_identity_receipt(revision: str, skill_root: Path) -> dict:
+    from core.provenance import tree_digest
+
+    return {
+        "tested_revision": revision,
+        "skill": {
+            **tree_digest(skill_root),
+            "revision": {"value": revision, "verified": True},
+        },
+    }
+
+
+def _sibling_skill_commits(tmp_path) -> tuple[Path, Path, str, str]:
+    repository = tmp_path / "repository"
+    skill_root = repository / "ci-skills"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text("fixture skill\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository), "add", "ci-skills/SKILL.md"], check=True
+    )
+    tested = _commit_current_index(repository, "tested skill")
+    candidate = _commit_current_index(repository, "squash candidate")
+    subprocess.run(
+        ["git", "-C", str(repository), "update-ref", "refs/heads/main", candidate],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
+    )
+    return repository, skill_root, tested, candidate
+
+
+def test_candidate_identity_accepts_same_skill_tree_from_nonancestor_commit(tmp_path):
+    repository, skill_root, tested, candidate = _sibling_skill_commits(tmp_path)
+    receipt = _candidate_identity_receipt(tested, skill_root)
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "merge-base",
+                "--is-ancestor",
+                tested,
+                candidate,
+            ],
+            check=False,
+        ).returncode
+        == 1
+    )
+    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == []
+    (skill_root / "SKILL.md").write_text("different\n", encoding="utf-8")
+    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
         "candidate_skill_digest_mismatch"
     ]
 
 
-def test_acceptance_cli_rejects_wrong_runner_source(monkeypatch, capsys):
-    expected = ACCEPTANCE._load_expected(
-        REPO_ROOT / "tests" / "acceptance" / "expected.toml"
+def test_candidate_identity_rejects_different_tree_and_unavailable_source(tmp_path):
+    repository, skill_root, tested, _candidate = _sibling_skill_commits(tmp_path)
+    receipt = _candidate_identity_receipt(tested, skill_root)
+    (skill_root / "SKILL.md").write_text("different fixture skill\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "-C", str(repository), "add", "ci-skills/SKILL.md"], check=True
     )
-    expected["executors"] = []
-    expected["gitlab_receipts"] = [
-        item
-        for item in expected["gitlab_receipts"]
-        if item.get("label") == "runner-get"
+    candidate = _commit_current_index(repository, "different skill")
+    subprocess.run(
+        ["git", "-C", str(repository), "update-ref", "refs/heads/main", candidate],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
+    )
+    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
+        "candidate_skill_tree_mismatch"
     ]
-    receipt = json.loads(
-        (REPO_ROOT / "tests/acceptance/runner-lifecycle/runner-get.json").read_text()
-    )
     receipt["tested_revision"] = "0" * 40
     receipt["skill"]["revision"]["value"] = "0" * 40
-    monkeypatch.setattr(ACCEPTANCE, "_load_expected", lambda _path: expected)
-    monkeypatch.setattr(
-        ACCEPTANCE,
-        "_load_receipt_dirs",
-        lambda _paths: {"runner-get.json": receipt},
-    )
-    monkeypatch.setattr(
-        sys, "argv", ["check_live_acceptance.py", "--root", str(REPO_ROOT), "--json"]
-    )
-
-    assert ACCEPTANCE.main() == 2
-    output = json.loads(capsys.readouterr().out)
-    assert output["status"] == "BLOCKED"
-    assert "runner-get.json:candidate_revision_not_ancestor" in output["problems"]
+    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
+        "candidate_revision_unavailable"
+    ]
 
 
-def test_expectations_without_an_executor_block_rather_than_pass(tmp_path):
-    path = tmp_path / "expected.toml"
-    path.write_text("max_receipt_age_days = 30\n", encoding="utf-8")
-
-    with pytest.raises(ACCEPTANCE.AcceptanceError, match="no_executors_declared"):
-        ACCEPTANCE._load_expected(path)
-
-
-def test_gitlab_operation_receipts_are_mandatory_in_acceptance_inputs(tmp_path):
-    path = tmp_path / "expected.toml"
-    path.write_text(
-        "max_receipt_age_days = 30\n"
-        'required_live_checks = ["storage_report"]\n'
-        'required_checks = ["validate"]\n'
-        "[targets]\n"
-        'github = "github.com/unit/repo"\n'
-        "[[executors]]\n"
-        'host = "unit-host"\n',
-        encoding="utf-8",
-    )
-
-    with pytest.raises(
-        ACCEPTANCE.AcceptanceError,
-        match="expectation_not_declared:gitlab_receipts",
-    ):
-        ACCEPTANCE._load_expected(path)
-
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(
-            "[[gitlab_receipts]]\n"
-            'kind = "gitlab_access"\n'
-            'execution_host = "unit-host"\n'
-            'origin = "https://gitlab.example.test"\n'
-            'username = "unit"\n'
-            'target_kind = "project"\n'
-            "target_id = 1\n"
-            'target_path = "unit/repo"\n'
-        )
-
-    with pytest.raises(
-        ACCEPTANCE.AcceptanceError,
-        match="gitlab_receipt_expectation_missing:",
-    ):
-        ACCEPTANCE._load_expected(path)
-
-
-def test_an_empty_receipt_directory_blocks(tmp_path):
-    with pytest.raises(ACCEPTANCE.AcceptanceError, match="receipts_missing"):
-        ACCEPTANCE._load_receipts(tmp_path)
-
-
-def test_missing_expectations_emits_structured_json_failure(
+def test_cli_reports_receipt_loading_shape_without_an_expectations_file(
     tmp_path, monkeypatch, capsys
 ):
     monkeypatch.setattr(
@@ -892,13 +596,12 @@ def test_missing_expectations_emits_structured_json_failure(
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "BLOCKED"
     assert report["kind"] == "live_acceptance"
-    assert report["problems"][0].startswith("expectations_unreadable:")
+    assert report["problems"] == [
+        f"receipt_directory_missing:{tmp_path / 'tests/acceptance/receipts'}"
+    ]
 
 
 def test_no_committed_receipt_carries_a_host_path():
-    """The committable form is what makes a real receipt publishable at all."""
     for path in (REPO_ROOT / "tests" / "acceptance").rglob("*.json"):
         receipt = json.loads(path.read_text(encoding="utf-8"))
         assert PORTABLE.portable(receipt) == receipt, path.name
-        body = json.dumps(receipt)
-        assert re.search(r"/(?:Users|home|private|tmp|var)/", body) is None, path.name

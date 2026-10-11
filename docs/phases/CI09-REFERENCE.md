@@ -1864,7 +1864,8 @@ its reason tokens, defined here once.
    (177 files), `vendor/vendor.toml`, `vendor/vendor.lock.json`, the
    regenerated `tools.json`, the `ignores` entry in `.markdownlint-cli2.yaml`
    and the `-whitespace` line in `.gitattributes` (Layout), and the five
-   `[[smoke_cases]]` entries in `tests/acceptance/expected.toml` (part 3).
+   smoke receipts of parts 3 and 4. Runtime setup follows
+   [CI11-TOOLS, Smoke cases](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back).
 2. *Tests*: section 5, by file; written with the block, run status
    UNVERIFIED (CI03-GATES, G0).
 3. *Smoke*, fixed arguments, on the D-SMOKE executor, each run with
@@ -1887,10 +1888,12 @@ its reason tokens, defined here once.
    `reference-update-dry-run.json`, `tool-operations-glab.json`; fields:
    `kind`, `status`, `records`, `readback`, `skill.digest`, `execution_host`,
    `captured_at`.
-5. *Verification*: `tools/check_live_acceptance.py --root . --expected
-   tests/acceptance/expected.toml --receipts tests/acceptance/receipts
-   --skill ci-skills --json`, with the five `[[smoke_cases]]` of this phase
-   declared, prints `"status": "PASS"` and exits 0.
+5. *Verification*: once this phase's receipt support is implemented,
+   `tools/check_live_acceptance.py --root . --json` must accept the five
+   receipts, print `"status": "PASS"` and exit 0. Their read-back remains
+   defined in part 3; selected target and identity values come from runtime
+   setup receipts, as CI11-TOOLS specifies. Provenance and applicable cleanup
+   evidence remain required.
 
 ## Open decisions
 

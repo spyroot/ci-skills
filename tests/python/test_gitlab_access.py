@@ -5,21 +5,34 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Final
 
 import pytest
+
 from tests.python.conftest import import_script_module
 
 ACCESS = import_script_module("core.access")
+CLI = import_script_module("core.cli")
 CREDENTIALS = import_script_module("core.credentials")
 TARGET = import_script_module("core.target")
 SCRIPT = import_script_module("gitlab_access")
+PROJECT_BINDING = import_script_module("core.project_binding")
+
+REVISION: Final = "a" * 40
 
 
-def _target(tmp_path: Path, *, token_file: Path | None = None, body: str = "") -> Path:
-    path = tmp_path / "selected.toml"
+def _target(
+    tmp_path: Path,
+    *,
+    filename: str = "selected.toml",
+    url: str = "https://gitlab.example.test",
+    token_file: str | Path | None = None,
+    body: str = "",
+) -> Path:
+    path = tmp_path / filename
     token = f'token_file = "{token_file}"\n' if token_file else ""
     path.write_text(
-        f'[gitlab]\nurl = "https://gitlab.example.test"\n{token}{body}',
+        f'[gitlab]\nurl = "{url}"\n{token}{body}',
         encoding="utf-8",
     )
     return path
@@ -49,6 +62,112 @@ class FakeAPI:
     def get_json(self, session, endpoint: str):
         self.calls.append((session, endpoint))
         return self.responses[endpoint]
+
+
+def test_shared_setup_resolves_binds_and_reads_access_once(monkeypatch) -> None:
+    """One shared setup reuses its exact session for the access read-back."""
+    target = object()
+    session = object()
+    api = object()
+    receipt = {
+        "status": "PASS",
+        "identity": {"id": 17, "username": "operator"},
+        "target": {"id": 42, "full_path": "team/repo"},
+    }
+    observed: list[tuple[object, ...]] = []
+
+    def resolve(explicit_target, explicit_binding, *, dry_run):
+        observed.append(("resolve", explicit_target, explicit_binding, dry_run))
+        return target, "project"
+
+    def select(selected, *, project, group):
+        observed.append(("select", selected, project, group))
+        return "project", "team/repo"
+
+    def bind(selected, **kwargs):
+        observed.append(("bind", selected, kwargs))
+        return session
+
+    def check(bound_session, *, api_client):
+        observed.append(("access", bound_session, api_client))
+        return receipt
+
+    monkeypatch.setattr(CLI, "resolve_gitlab_target", resolve)
+    monkeypatch.setattr(CLI, "select_gitlab_reference", select, raising=False)
+    monkeypatch.setattr(CLI, "bind_gitlab_session", bind)
+    monkeypatch.setattr(CLI, "check_gitlab_operation_access", check)
+
+    actual_session, actual_receipt = CLI.setup_gitlab_operation(
+        "selected.toml",
+        "binding.toml",
+        project="team/repo",
+        group=None,
+        revision=REVISION,
+        api_client=api,
+    )
+
+    assert actual_session is session
+    assert actual_receipt is receipt
+    assert actual_receipt["identity"] == {"id": 17, "username": "operator"}
+    assert observed == [
+        ("resolve", "selected.toml", "binding.toml", False),
+        ("select", target, "team/repo", None),
+        (
+            "bind",
+            target,
+            {
+                "target_kind": "project",
+                "target_reference": "team/repo",
+                "target_source": "project",
+                "revision": REVISION,
+            },
+        ),
+        ("access", session, api),
+    ]
+
+
+def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
+    monkeypatch, capsys
+) -> None:
+    """The installed access command delegates live setup without altering receipt data."""
+    session = object()
+    receipt = {
+        "status": "PASS",
+        "identity": {"id": 17, "username": "operator"},
+        "target": {"id": 42, "full_path": "team/repo"},
+        "errors": [],
+    }
+    observed: list[tuple[object, ...]] = []
+
+    def setup(explicit_target, explicit_binding, **kwargs):
+        observed.append((explicit_target, explicit_binding, kwargs))
+        return session, receipt
+
+    monkeypatch.setattr(SCRIPT, "setup_gitlab_operation", setup)
+
+    result = SCRIPT.main(
+        [
+            "check",
+            "--target",
+            "selected.toml",
+            "--project",
+            "team/repo",
+            "--revision",
+            REVISION,
+            "--json",
+        ]
+    )
+    data = json.loads(capsys.readouterr().out)
+
+    assert result == 0
+    assert data == receipt
+    assert observed == [
+        (
+            "selected.toml",
+            None,
+            {"project": "team/repo", "group": None, "revision": REVISION},
+        )
+    ]
 
 
 def _bound_project(tmp_path, monkeypatch, *, reference: str = "team/repo"):
@@ -120,12 +239,17 @@ def test_explicit_project_overrides_a_selected_default_group(tmp_path):
     )
 
 
-def test_file_source_overrides_ambient_tokens_and_reads_exact_project(
+def test_relative_file_source_overrides_ambient_tokens_and_reads_exact_project(
     tmp_path, monkeypatch
 ):
-    token_file = tmp_path / "token"
+    target_parent = tmp_path / "operator-config"
+    target_parent.mkdir()
+    token_file = target_parent / "token"
     token_file.write_text("file-token\n", encoding="utf-8")
-    path = _target(tmp_path, token_file=token_file, body='project = "team/repo"\n')
+    path = _target(target_parent, token_file="token", body='project = "team/repo"\n')
+    unrelated_cwd = tmp_path / "unrelated-cwd"
+    unrelated_cwd.mkdir()
+    monkeypatch.chdir(unrelated_cwd)
     _identity(monkeypatch)
     monkeypatch.setenv("GITLAB_TOKEN", "ambient-token")
     monkeypatch.setenv("GITLAB_ACCESS_TOKEN", "other-token")
@@ -361,8 +485,8 @@ def test_cli_dry_run_never_binds_credentials_or_calls_api(
     path = _target(tmp_path, body='project = "team/repo"\n')
     monkeypatch.setattr(
         SCRIPT,
-        "bind_gitlab_session",
-        lambda *_args, **_kwargs: pytest.fail("dry-run bound credentials"),
+        "setup_gitlab_operation",
+        lambda *_args, **_kwargs: pytest.fail("dry-run called shared live setup"),
     )
     result = SCRIPT.main(["check", "--target", str(path), "--dry-run", "--json"])
     data = json.loads(capsys.readouterr().out)
@@ -370,6 +494,118 @@ def test_cli_dry_run_never_binds_credentials_or_calls_api(
     assert data["status"] == "DRY_RUN"
     assert data["target"] == {"kind": "project", "reference": "team/repo"}
     assert data["credential_source"] is None
+
+
+def _smoke_target_layout(tmp_path: Path) -> dict[str, object]:
+    """Build one project/home layout for both normal and smoke selections."""
+    project = tmp_path / "project"
+    project_target_dir = project / ".ci-skills"
+    project_target_dir.mkdir(parents=True)
+    selected_token = project_target_dir / "selected.token"
+    selected_token.write_text("selected-token\n", encoding="utf-8")
+    selected = _target(
+        project_target_dir,
+        filename="target.toml",
+        token_file="selected.token",
+        body='project = "selected/repo"\n',
+    )
+    _target(
+        project_target_dir,
+        filename=PROJECT_BINDING.SMOKE_TARGET_FILENAME,
+        token_file="missing.token",
+        body='project = "smoke/repo"\n',
+    )
+    home_target_dir = tmp_path / "home" / ".ci-skills"
+    home_target_dir.mkdir(parents=True)
+    _target(
+        home_target_dir,
+        filename="target.toml",
+        url="https://user.example.test",
+        body='project = "user/default"\n',
+    )
+    _target(
+        home_target_dir,
+        filename=PROJECT_BINDING.SMOKE_TARGET_FILENAME,
+        url="https://user-selected.example.test",
+        body='project = "user/selected"\n',
+    )
+    return {
+        "project": project,
+        "home": tmp_path / "home",
+        "selected": selected,
+        "selected_token": selected_token,
+        "identity": {
+            "id": 17,
+            "username": "operator",
+            "web_url": "https://gitlab.example.test/operator",
+        },
+        "target": {
+            "id": 42,
+            "path_with_namespace": "selected/repo",
+            "web_url": "https://gitlab.example.test/selected/repo",
+        },
+    }
+
+
+@pytest.mark.parametrize("smoke", (False, True), ids=("default", "smoke"))
+def test_smoke_environment_switches_filename_without_fallback_or_provider_drift(
+    tmp_path, monkeypatch, capsys, smoke
+):
+    """The same project chooses target.toml or smoke.toml only by smoke mode."""
+    layout = _smoke_target_layout(tmp_path)
+    _identity(monkeypatch)
+    monkeypatch.chdir(layout["project"])
+    monkeypatch.setenv("HOME", str(layout["home"]))
+    monkeypatch.delenv("CI_SKILLS_TARGET", raising=False)
+    monkeypatch.setenv("GITLAB_TOKEN", "ambient-token")
+    if smoke:
+        monkeypatch.setenv(PROJECT_BINDING.SMOKE_ENV, "1")
+        monkeypatch.setattr(
+            CLI,
+            "check_gitlab_operation_access",
+            lambda *_args, **_kwargs: pytest.fail(
+                "selected credential failure called provider"
+            ),
+        )
+    else:
+        monkeypatch.delenv(PROJECT_BINDING.SMOKE_ENV, raising=False)
+        responses = {
+            "user": layout["identity"],
+            "projects/selected%2Frepo": layout["target"],
+        }
+        api = FakeAPI(responses)
+        monkeypatch.setattr(
+            CLI,
+            "check_gitlab_operation_access",
+            lambda session, *, api_client: ACCESS.check_gitlab_operation_access(
+                session, api_client=api_client or api
+            ),
+        )
+
+    result = SCRIPT.main(["check", "--json"])
+    data = json.loads(capsys.readouterr().out)
+
+    if smoke:
+        assert result == 2
+        assert data["status"] == "BLOCKED"
+        assert data["errors"] == [
+            {"source": "credential", "reason": "credential_file_unavailable"}
+        ]
+    else:
+        assert result == 0
+        assert data["status"] == "PASS"
+        assert data["target_source"] == "project"
+        assert data["target_file"] == str(layout["selected"].resolve())
+        assert data["identity"]["id"] == layout["identity"]["id"]
+        assert data["identity"]["username"] == layout["identity"]["username"]
+        assert data["target"]["id"] == layout["target"]["id"]
+        assert data["target"]["full_path"] == layout["target"]["path_with_namespace"]
+        assert data["target"]["web_url"] == layout["target"]["web_url"]
+        assert data["credential_source"] == f"file:{layout['selected_token'].resolve()}"
+        assert [endpoint for _session, endpoint in api.calls] == [
+            "user",
+            "projects/selected%2Frepo",
+        ]
 
 
 def test_access_check_uses_user_gitlab_target_without_selector(
@@ -387,8 +623,8 @@ def test_access_check_uses_user_gitlab_target_without_selector(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         SCRIPT,
-        "bind_gitlab_session",
-        lambda *_args, **_kwargs: pytest.fail("dry run bound credentials"),
+        "setup_gitlab_operation",
+        lambda *_args, **_kwargs: pytest.fail("dry-run called shared live setup"),
     )
 
     result = SCRIPT.main(["check", "--dry-run", "--json"])
@@ -424,9 +660,11 @@ def test_live_receipt_is_portable_redacted_and_parseable(tmp_path, monkeypatch, 
         }
     )
     monkeypatch.setattr(
-        SCRIPT,
+        CLI,
         "check_gitlab_operation_access",
-        lambda session: ACCESS.check_gitlab_operation_access(session, api_client=api),
+        lambda session, *, api_client: ACCESS.check_gitlab_operation_access(
+            session, api_client=api_client or api
+        ),
     )
     result = SCRIPT.main(
         [

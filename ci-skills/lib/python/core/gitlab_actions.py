@@ -9,20 +9,27 @@ import re
 import socket
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .access import check_gitlab_operation_access
+from .action import Executor, GitlabCallback, emit_result
 from .cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
 from .credentials import bind_gitlab_session
 from .gitlab_api import GitLabAPIError, GlabAPIClient
+from .gitlab_session import BoundGitLabSession, GitLabService
 from .portable import write_portable_receipt
 from .report import emit
 from .runtime import sanitize
 from .status import BLOCKED, DRY_RUN, PARTIAL, PASS, PLANNED, exit_code
 from .target import GitLabOperationTarget, TargetError
+
+if TYPE_CHECKING:
+    from .gitlab_runners import RunnerReadResult
 
 
 class ActionError(ValueError):
@@ -66,6 +73,29 @@ class ActionPlan:
             data["runner_snapshot"] = self.runner_snapshot
         encoded = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
         return hashlib.sha256(encoded).hexdigest()
+
+    def verified_target_id(
+        self, session: BoundGitLabSession, access: dict[str, Any]
+    ) -> int:
+        """Resolve the numeric target while preserving existing binding checks.
+
+        :param session: Bound GitLab identity.
+        :param access: Existing access-check result.
+        :returns: Verified numeric project or group ID.
+        :raises ActionError: If access or the selected target does not match.
+        """
+        if access.get("status") != PASS:
+            raise ActionError("gitlab_access_not_pass")
+        target = _object(access.get("target"), "access_target", "kind", "id")
+        if target["kind"] != self.target_kind:
+            raise ActionError("access_target_kind_mismatch")
+        target_id = _id(target["id"], "target")
+        if (
+            session.origin != self.origin
+            or session.target_reference != self.target_reference
+        ):
+            raise ActionError("bound_target_mismatch")
+        return target_id
 
     def public(self) -> dict[str, Any]:
         """Describe the plan without publishing issue/wiki text or a token.
@@ -266,7 +296,9 @@ def _array(payload: Any, name: str) -> list[dict[str, Any]]:
     return payload
 
 
-def _pages(api: Any, session: Any, endpoint: str) -> list[dict[str, Any]]:
+def _pages(
+    api: GlabAPIClient, session: BoundGitLabSession, endpoint: str
+) -> list[dict[str, Any]]:
     """Search a bounded complete result set or refuse an unsafe duplicate guess."""
     records: list[dict[str, Any]] = []
     separator = "&" if "?" in endpoint else "?"
@@ -327,7 +359,10 @@ def _same(current: dict[str, Any], body: dict[str, Any]) -> bool:
 
 
 def apply_plan(
-    api: Any, session: Any, access: dict[str, Any], plan: ActionPlan
+    api: GlabAPIClient,
+    session: BoundGitLabSession,
+    access: dict[str, Any],
+    plan: ActionPlan,
 ) -> dict[str, Any]:
     """Apply a plan using its verified target and bound credential.
 
@@ -338,17 +373,7 @@ def apply_plan(
     :returns: Provider action record and read-back evidence.
     :raises ActionError: If target access or the action kind is invalid.
     """
-    if access.get("status") != PASS:
-        raise ActionError("gitlab_access_not_pass")
-    target = _object(access.get("target"), "access_target", "kind", "id")
-    if target["kind"] != plan.target_kind:
-        raise ActionError("access_target_kind_mismatch")
-    target_id = _id(target["id"], "target")
-    if (
-        session.origin != plan.origin
-        or session.target_reference != plan.target_reference
-    ):
-        raise ActionError("bound_target_mismatch")
+    target_id = plan.verified_target_id(session, access)
     if plan.kind == "gitlab_milestone":
         from .gitlab_milestones import apply
 
@@ -384,6 +409,7 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
         "gitlab_wiki": ("create", "update"),
         "gitlab_runner": ("assign", "create", "delete", "get", "list", "tag"),
     }
+    result.set_defaults(kind=kind)
     result.add_argument(
         "action", nargs="?", choices=choices[kind], help="operation to plan or apply"
     )
@@ -547,9 +573,10 @@ def _planned_failure(
     *,
     phase: str,
     mutated: bool | None,
-    session: Any = None,
+    session: BoundGitLabSession | None = None,
     access: dict[str, Any] | None = None,
     result: dict[str, Any] | None = None,
+    cleanup_errors: list[dict[str, str]] | None = None,
     started: float,
 ) -> int:
     """Keep plan and known write state in every failure after planning."""
@@ -569,6 +596,9 @@ def _planned_failure(
     )
     data["status"] = BLOCKED
     data.setdefault("errors", []).append(error)
+    if cleanup_errors:
+        data["errors"].extend(cleanup_errors)
+        data["cleanup"] = {**data.get("cleanup", {}), "status": BLOCKED}
     data["summary"]["error_count"] = len(data["errors"])
     if session is not None:
         data["tested_revision"] = _verified_skill_revision(session)
@@ -610,56 +640,96 @@ def _planned_failure(
     return exit_code(BLOCKED)
 
 
-def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
-    """Run a GitLab action through the shared plan and apply adapter.
+@dataclass
+class GitLabAction:
+    """Parsed workflow inputs and the existing plan/report state.
 
-    :param kind: Registered GitLab action command.
-    :param argv: Optional argument vector; defaults to process arguments.
-    :returns: Exit code for the emitted result; action errors become structured
-        blocked or partial output.
-    """  # noqa: DOC501, DOC503 - raised actions are caught and rendered below
-    started = time.monotonic()
-    args = action_parser(kind).parse_args(argv)
-    if args.describe:
-        from .catalog import COMMAND_BY_KIND, describe
+    .. attribute :: args
+        This workflow's parsed arguments.
 
-        sys.stdout.write(
-            json.dumps(describe(COMMAND_BY_KIND[kind]), indent=2, sort_keys=True) + "\n"
-        )
-        return 0
-    if not args.action:
-        return _failure(args, kind, "arguments", "action_required")
-    runner_read = kind == "gitlab_runner" and args.action in {"get", "list"}
-    runner_delete = kind == "gitlab_runner" and args.action == "delete"
-    if runner_read and (args.apply or args.confirm_plan or args.live_plan):
-        return _failure(args, kind, "arguments", "runner_read_rejects_apply_options")
-    if runner_read and args.dry_run and (args.output_dir or args.log_file):
-        return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
-    if args.apply and args.dry_run:
-        return _failure(args, kind, "arguments", "apply_and_dry_run_conflict")
-    live_plan = getattr(args, "live_plan", False)
-    if live_plan and (args.apply or args.dry_run):
-        return _failure(args, kind, "arguments", "live_plan_mode_conflict")
-    if args.timeout <= 0 or args.timeout > 300:
-        return _failure(args, kind, "arguments", "timeout_out_of_range")
-    if args.confirm_plan and not args.apply:
-        return _failure(args, kind, "arguments", "confirm_plan_requires_apply")
-    if args.receipt_out and not (args.apply or (runner_read and not args.dry_run)):
-        return _failure(args, kind, "arguments", "receipt_out_requires_live_run")
-    if (
-        not args.apply
-        and not live_plan
-        and not runner_read
-        and (args.output_dir or args.log_file)
-    ):
-        return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
+    .. attribute :: plan
+        Prepared provider operation.
+
+    .. attribute :: session
+        Bound credential and target identity.
+
+    .. attribute :: access
+        Existing access-check evidence.
+
+    .. attribute :: report
+        Existing operation report.
+
+    .. attribute :: phase
+        Last entered operation phase.
+
+    .. attribute :: mutated
+        Known write state, or None for an uncertain outcome.
+
+    .. attribute :: failure_source
+        Existing failure classification.
+
+    .. attribute :: started
+        Monotonic start time for diagnostics.
+
+    """
+
+    args: argparse.Namespace
     plan: ActionPlan | None = None
-    session: Any = None
+    session: BoundGitLabSession | None = None
     access: dict[str, Any] | None = None
-    data: dict[str, Any] | None = None
-    phase = "OFFLINE_PLAN"
+    report: dict[str, Any] | None = None
+    phase: str = "OFFLINE_PLAN"
     mutated: bool | None = False
-    try:
+    failure_source: str = "arguments"
+    started: float = dataclass_field(default_factory=time.monotonic)
+
+    @classmethod
+    def from_args(cls, args: argparse.Namespace) -> GitLabAction:
+        """Bind a workflow's own arguments without provider access.
+
+        :param args: Arguments from the existing action parser.
+        :returns: Unexecuted action state.
+        """
+        return cls(args=args)
+
+    def prepare(self) -> None:
+        """Validate and plan using the existing target and operation adapters.
+
+        :raises ActionError: If arguments or the selected operation are invalid.
+        """
+        args, kind = self.args, self.args.kind
+        if args.describe:
+            from .catalog import COMMAND_BY_KIND, describe
+
+            self.report = describe(COMMAND_BY_KIND[kind])
+            return
+        if not args.action:
+            raise ActionError("action_required")
+        runner_read = kind == "gitlab_runner" and args.action in {"get", "list"}
+        if runner_read and (args.apply or args.confirm_plan or args.live_plan):
+            raise ActionError("runner_read_rejects_apply_options")
+        if runner_read and args.dry_run and (args.output_dir or args.log_file):
+            raise ActionError("dry_run_cannot_write_output")
+        if args.apply and args.dry_run:
+            raise ActionError("apply_and_dry_run_conflict")
+        live_plan = getattr(args, "live_plan", False)
+        if live_plan and (args.apply or args.dry_run):
+            raise ActionError("live_plan_mode_conflict")
+        if args.timeout <= 0 or args.timeout > 300:
+            raise ActionError("timeout_out_of_range")
+        if args.confirm_plan and not args.apply:
+            raise ActionError("confirm_plan_requires_apply")
+        if args.receipt_out and not (args.apply or (runner_read and not args.dry_run)):
+            raise ActionError("receipt_out_requires_live_run")
+        if (
+            not args.apply
+            and not live_plan
+            and not runner_read
+            and (args.output_dir or args.log_file)
+        ):
+            raise ActionError("dry_run_cannot_write_output")
+        self.failure_source = "gitlab_action"
+        runner_delete = kind == "gitlab_runner" and args.action == "delete"
         target, target_source = resolve_gitlab_target(
             args.target,
             args.binding,
@@ -668,6 +738,7 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
             and (not runner_read or args.dry_run),
         )
         plan = make_plan(kind, args, target, target_source)
+        self.plan = plan
         group_assignment = (
             plan.kind == "gitlab_runner"
             and plan.operation == "assign"
@@ -675,177 +746,340 @@ def run_action_cli(kind: str, argv: list[str] | None = None) -> int:
         )
         if live_plan and not (group_assignment or runner_delete):
             raise ActionError("live_plan_requires_group_assignment_or_runner_delete")
+        self.plan = plan
+        self.target = target
         if (runner_read and args.dry_run) or (
             not args.apply and not live_plan and not runner_read
         ):
-            data = _result(plan, DRY_RUN, phase="OFFLINE_PLAN", mutated=False)
-        else:
-            phase = "ACCESS"
-            if (
-                args.apply
-                and not (group_assignment or runner_delete)
-                and (not args.confirm_plan or args.confirm_plan != plan.digest)
-            ):
-                raise ActionError("confirm_plan_mismatch_rerun_dry_run")
-            session = bind_gitlab_session(
-                target,
-                target_kind=plan.target_kind,
-                target_reference=plan.target_reference,
-                target_source=plan.target_source,
-                revision=args.revision,
-            )
-            if (
-                plan.kind == "gitlab_runner"
-                and plan.operation in {"tag", "get", "list", "delete"}
-                and _verified_skill_revision(session) is None
-            ):
-                raise ActionError("skill_revision_unverified")
-            api = GlabAPIClient(timeout=args.timeout)
-            access = check_gitlab_operation_access(session, api_client=api)
-            if access.get("status") != PASS:
-                source, reason = _access_failure(access)
-                return _planned_failure(
-                    args,
-                    kind,
-                    plan,
-                    source,
-                    reason,
-                    phase=phase,
-                    mutated=False,
-                    session=session,
-                    started=started,
-                )
-            if group_assignment:
-                from .gitlab_runners import project_ids
+            self.report = _result(plan, DRY_RUN, phase="OFFLINE_PLAN", mutated=False)
 
-                selected = _object(access.get("target"), "access_target", "kind", "id")
-                if selected["kind"] != "group":
-                    raise ActionError("access_target_kind_mismatch")
-                plan = replace(
-                    plan,
-                    project_ids=project_ids(
-                        api, session, _id(selected["id"], "target")
-                    ),
-                )
-            if runner_delete:
-                from .gitlab_runners import delete_snapshot
+    def authenticate(self) -> GitLabService | None:
+        """Bind credentials and verify the target using the existing access path.
 
-                selected = _object(access.get("target"), "access_target", "kind", "id")
-                plan = replace(
-                    plan,
-                    runner_snapshot=delete_snapshot(
-                        api, session, plan, _id(selected["id"], "target")
-                    ),
-                )
-            if runner_read:
-                from .gitlab_runners import read
-
-                phase = "READ"
-                selected = _object(access.get("target"), "access_target", "kind", "id")
-                observation = read(api, session, plan, _id(selected["id"], "target"))
-                data = _result(
-                    plan,
-                    PASS,
-                    phase="READ",
-                    mutated=False,
-                    records=observation.records,
-                    identity=access.get("identity"),
-                    verified_target=access.get("target"),
-                    credential_source=session.credential_source,
-                    credential_digest=session.credential_digest,
-                    skill=session.skill,
-                    readback={
-                        "verified": True,
-                        "record_count": len(observation.records),
-                        "truncated": observation.truncated,
-                    },
-                    related_job=observation.related_job,
-                )
-            elif live_plan:
-                phase = "LIVE_PLAN"
-                data = _result(
-                    plan,
-                    PLANNED,
-                    phase="LIVE_PLAN",
-                    mutated=False,
-                    identity=access.get("identity"),
-                    verified_target=access.get("target"),
-                    credential_source=session.credential_source,
-                    credential_digest=session.credential_digest,
-                    skill=session.skill,
-                    readback={
-                        "verified": True,
-                        **(
-                            {"runner_snapshot": plan.runner_snapshot}
-                            if runner_delete
-                            else {"project_ids": list(plan.project_ids or ())}
-                        ),
-                    },
-                )
-            else:
-                if not args.confirm_plan or args.confirm_plan != plan.digest:
-                    raise ActionError("confirm_plan_mismatch_rerun_live_plan")
-                phase = "APPLY"
-                mutated = None
-                record = apply_plan(api, session, access, plan)
-                if isinstance(record, dict):
-                    mutated = record.get("mutated", record.get("action") == "APPLIED")
-                errors = [
-                    {
-                        "source": f"project:{error['project_id']}",
-                        "reason": error["reason"],
-                    }
-                    for error in record.get("errors", [])
-                ]
-                cleanup = record.get("cleanup", {"status": "NOT_APPLICABLE"})
-                complete = (
-                    record.get("verified") is True
-                    and not errors
-                    and cleanup.get("status") not in {"BLOCKED", "PARTIAL"}
-                )
-                data = _result(
-                    plan,
-                    PASS if complete else PARTIAL,
-                    phase="APPLY",
-                    mutated=record.get("mutated", record.get("action") == "APPLIED"),
-                    result_action=record.get("action"),
-                    records=[record],
-                    errors=errors,
-                    identity=access.get("identity"),
-                    verified_target=access.get("target"),
-                    readback=record,
-                    credential_source=session.credential_source,
-                    credential_digest=session.credential_digest,
-                    skill=session.skill,
-                    cleanup=cleanup,
-                )
-                mutated = data["mutated"]
-        if session is not None:
-            data["tested_revision"] = _verified_skill_revision(session)
-        if args.receipt_out:
-            write_portable_receipt(data, args.receipt_out)
-        rendered = emit(data, output_mode(args), args.output_dir)
-        log_event(
-            args, kind, "result", data["status"], elapsed=time.monotonic() - started
+        :returns: Verified provider service, or None for offline modes.
+        :raises ActionError: If confirmation, identity, or access is invalid.
+        """
+        if self.report is not None:
+            return None
+        args, plan, target = self.args, self.plan, self.target
+        group_assignment = (
+            plan.kind == "gitlab_runner"
+            and plan.operation == "assign"
+            and plan.target_kind == "group"
         )
-        sys.stdout.write(rendered)
-        return exit_code(data["status"])
-    except (ActionError, TargetError, GitLabAPIError, OSError, RuntimeError) as exc:
-        reason = sanitize(str(exc), 240)
-    except Exception:  # noqa: BLE001 - keep malformed provider failures structured
-        reason = "unexpected_runtime_failure"
-    if plan is None:
-        return _failure(args, kind, "gitlab_action", reason)
-    return _planned_failure(
-        args,
-        kind,
-        plan,
-        "gitlab_action",
-        reason,
-        phase=phase,
-        mutated=mutated,
-        session=session,
-        access=access,
-        result=data,
-        started=started,
+        runner_delete = plan.kind == "gitlab_runner" and plan.operation == "delete"
+        self.phase = "ACCESS"
+        if (
+            args.apply
+            and not (group_assignment or runner_delete)
+            and (not args.confirm_plan or args.confirm_plan != plan.digest)
+        ):
+            raise ActionError("confirm_plan_mismatch_rerun_dry_run")
+        session = bind_gitlab_session(
+            target,
+            target_kind=plan.target_kind,
+            target_reference=plan.target_reference,
+            target_source=plan.target_source,
+            revision=args.revision,
+        )
+        self.session = session
+        if (
+            plan.kind == "gitlab_runner"
+            and plan.operation in {"tag", "get", "list", "delete"}
+            and _verified_skill_revision(session) is None
+        ):
+            raise ActionError("skill_revision_unverified")
+        api = GlabAPIClient(timeout=args.timeout)
+        access = check_gitlab_operation_access(session, api_client=api)
+        self.access = access
+        if access.get("status") != PASS:
+            self.failure_source, reason = _access_failure(access)
+            self.session = session
+            raise ActionError(reason)
+        if group_assignment:
+            from .gitlab_runners import project_ids
+
+            selected = _object(access.get("target"), "access_target", "kind", "id")
+            if selected["kind"] != "group":
+                raise ActionError("access_target_kind_mismatch")
+            plan = replace(
+                plan,
+                project_ids=project_ids(api, session, _id(selected["id"], "target")),
+            )
+        if runner_delete:
+            from .gitlab_runners import delete_snapshot
+
+            selected = _object(access.get("target"), "access_target", "kind", "id")
+            plan = replace(
+                plan,
+                runner_snapshot=delete_snapshot(
+                    api, session, plan, _id(selected["id"], "target")
+                ),
+            )
+        self.session, self.access, self.plan = session, access, plan
+        if getattr(args, "live_plan", False):
+            self.phase = "LIVE_PLAN"
+            data = _result(
+                plan,
+                PLANNED,
+                phase="LIVE_PLAN",
+                mutated=False,
+                identity=access.get("identity"),
+                verified_target=access.get("target"),
+                credential_source=session.credential_source,
+                credential_digest=session.credential_digest,
+                skill=session.skill,
+                readback={
+                    "verified": True,
+                    **(
+                        {"runner_snapshot": plan.runner_snapshot}
+                        if runner_delete
+                        else {"project_ids": list(plan.project_ids or ())}
+                    ),
+                },
+            )
+            self.report = data
+            self.report["tested_revision"] = _verified_skill_revision(session)
+        selected = _object(access.get("target"), "access_target", "kind", "id")
+        return GitLabService(api, session, _id(selected["id"], "target"), access)
+
+    def begin(self) -> None:
+        """Preserve confirmation and bound-target guards before an operation.
+
+        :raises ActionError: If confirmation or bound target does not match.
+        """
+        plan, args = self.plan, self.args
+        if plan.kind == "gitlab_runner" and plan.operation in {"get", "list"}:
+            self.phase = "READ"
+            return
+        if not args.confirm_plan or args.confirm_plan != plan.digest:
+            raise ActionError("confirm_plan_mismatch_rerun_live_plan")
+        self.phase, self.mutated = "APPLY", None
+        plan.verified_target_id(self.session, self.access)
+
+    def finish(self, record: dict[str, Any] | RunnerReadResult | None) -> None:
+        """Use the existing result contract for a read or mutation.
+
+        :param record: Typed observation or provider action record.
+        """
+        plan, session, access = self.plan, self.session, self.access
+        if self.phase == "READ":
+            observation = cast("RunnerReadResult", record)
+            data = _result(
+                plan,
+                PASS,
+                phase="READ",
+                mutated=False,
+                records=observation.records,
+                identity=access.get("identity"),
+                verified_target=access.get("target"),
+                credential_source=session.credential_source,
+                credential_digest=session.credential_digest,
+                skill=session.skill,
+                readback={
+                    "verified": True,
+                    "record_count": len(observation.records),
+                    "truncated": observation.truncated,
+                },
+                related_job=observation.related_job,
+            )
+        else:
+            if isinstance(record, dict):
+                self.mutated = record.get("mutated", record.get("action") == "APPLIED")
+            record = cast(dict[str, Any], record)
+            errors = [
+                {
+                    "source": f"project:{error['project_id']}",
+                    "reason": error["reason"],
+                }
+                for error in record.get("errors", [])
+            ]
+            cleanup = record.get("cleanup", {"status": "NOT_APPLICABLE"})
+            complete = (
+                record.get("verified") is True
+                and not errors
+                and cleanup.get("status") not in {"BLOCKED", "PARTIAL"}
+            )
+            data = _result(
+                plan,
+                PASS if complete else PARTIAL,
+                phase="APPLY",
+                mutated=record.get("mutated", record.get("action") == "APPLIED"),
+                result_action=record.get("action"),
+                records=[record],
+                errors=errors,
+                identity=access.get("identity"),
+                verified_target=access.get("target"),
+                readback=record,
+                credential_source=session.credential_source,
+                credential_digest=session.credential_digest,
+                skill=session.skill,
+                cleanup=cleanup,
+            )
+            mutated = data["mutated"]
+            self.mutated = mutated
+        data["tested_revision"] = _verified_skill_revision(session)
+        self.report = data
+
+    def failure(self, exc: Exception) -> int:
+        """Retain the existing structured CLI failure and unknown-write evidence.
+
+        :param exc: Failure raised by execution or output handling.
+        :returns: Existing blocked exit code after emitting the failure report.
+        """
+        reason = (
+            sanitize(str(exc), 240)
+            if isinstance(
+                exc, (ActionError, TargetError, GitLabAPIError, OSError, RuntimeError)
+            )
+            else "unexpected_runtime_failure"
+        )
+        cleanup_errors = [
+            {"source": f"cleanup.{failure.callback}", "reason": failure.reason}
+            for failure in getattr(exc, "cleanup_failures", ())
+        ]
+        if self.plan is None:
+            return _failure(
+                self.args,
+                self.args.kind,
+                self.failure_source,
+                reason,
+                cleanup_errors=cleanup_errors,
+            )
+        return _planned_failure(
+            self.args,
+            self.args.kind,
+            self.plan,
+            self.failure_source,
+            reason,
+            phase=self.phase,
+            mutated=self.mutated,
+            session=self.session,
+            access=self.access,
+            result=self.report,
+            cleanup_errors=cleanup_errors,
+            started=self.started,
+        )
+
+    def execute(self, workflow: Callable[[], Executor]) -> int:
+        """Run the composed workflow through the shared structured CLI boundary.
+
+        :param workflow: Build the callback composition declared by this command.
+        :returns: Existing report or structured failure exit code.
+        """
+        try:
+            return emit_result(workflow().run(), self.args)
+        except Exception as exc:  # noqa: BLE001 - structured command boundary
+            return self.failure(exc)
+
+
+class GitLabAuth(GitlabCallback[GitLabAction, GitLabService]):
+    """Prepare an action and establish its existing authenticated service."""
+
+    def __init__(self, *, action: GitLabAction) -> None:
+        """Require the concrete workflow inputs before authentication.
+
+        :param action: Parsed action state owned by this workflow.
+        """
+        super().__init__(action=action)
+        self.action: GitLabAction = action
+
+    def collect(self) -> None:
+        """Validate arguments before provider access."""
+        self.action.prepare()
+
+    def run(self) -> GitLabService | None:
+        """Bind the requested service or produce the offline response.
+
+        :returns: Verified service when live execution was selected.
+        """
+        return self.action.authenticate()
+
+    def update(self) -> None:
+        """Share authentication and any completed offline report."""
+        if self.result is not None:
+            self.context.services["gitlab"] = self.result
+        self.context.report = self.action.report
+
+    @property
+    def complete(self) -> bool:
+        """Continue only when the action needs a live operation.
+
+        :returns: False for describe, offline plan, or completed live plan.
+        """
+        return self.action.report is None
+
+
+class GitLabOperation(
+    GitlabCallback[ActionPlan | GitLabAction, "dict[str, Any] | RunnerReadResult"]
+):
+    """Shared plan and report hooks for concrete GitLab operations."""
+
+    @property
+    def plan(self) -> ActionPlan:
+        """Resolve typed CLI inputs or an existing direct-call plan.
+
+        :returns: The operation's prepared plan.
+        :raises ActionError: If no action has been prepared.
+        """
+        plan = (
+            self.action.plan if isinstance(self.action, GitLabAction) else self.action
+        )
+        if plan is None:
+            raise ActionError("action_required")
+        return plan
+
+    def collect(self) -> None:
+        """Apply the existing workflow guards at the operation boundary."""
+        if isinstance(self.action, GitLabAction):
+            self.action.begin()
+
+    def update(self) -> None:
+        """Adapt typed results to the existing CLI output contract."""
+        if isinstance(self.action, GitLabAction):
+            self.action.finish(self.result)
+            self.context.report = self.action.report
+
+    def run(self) -> dict[str, Any] | RunnerReadResult:
+        """Dispatch operations not yet moved from the existing adapter.
+
+        :returns: Existing provider action record.
+        """
+        service = self.gitlab
+        return apply_plan(service.api, service.session, service.access, self.plan)
+
+
+def operation_callback(action: GitLabAction) -> GitLabOperation:
+    """Choose a concrete existing operation without executing it.
+
+    :param action: Arguments and plan state owned by this workflow.
+    :returns: The selected operation callback.
+    """
+    from .gitlab_milestones import CreateMilestone, UpdateMilestone
+    from .gitlab_runners import (
+        AttachToProject,
+        CreateRunner,
+        DeleteRunner,
+        ReadRunner,
+        SetTag,
     )
+
+    callbacks = {
+        "gitlab_runner": {
+            "assign": AttachToProject,
+            "create": CreateRunner,
+            "delete": DeleteRunner,
+            "get": ReadRunner,
+            "list": ReadRunner,
+            "tag": SetTag,
+        },
+        "gitlab_milestone": {
+            "create": CreateMilestone,
+            "update": UpdateMilestone,
+            "adjust-time": UpdateMilestone,
+        },
+    }
+    callback = callbacks.get(action.args.kind, {}).get(
+        action.args.action, GitLabOperation
+    )
+    return callback(action=action)

@@ -120,8 +120,8 @@ TARGET_CONTRACT = TargetContract(
             "github",
             Field.of(Role.ENDPOINT, "host", "repository")
             + Field.of(Role.ACCESS, "token_file")
-            # The checks branch protection must require; also declared by
-            # `tests/acceptance/expected.toml`.
+            # The selected target declares which checks branch protection
+            # must require; publication setup verifies their live read-back.
             + Field.of(Role.VALUE, "required_checks"),
         ),
         Table(

@@ -1,9 +1,9 @@
 {
-  "captured_at": "2026-10-08T10:41:02.619388+00:00",
+  "captured_at": "2026-10-11T00:40:11.362985+00:00",
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
-  "credential_source": "file:path:1059fb954a18",
+  "credential_source": "file:path:29f247d18d3c",
   "errors": [],
-  "execution_host": "mac.lan",
+  "execution_host": "spyroots-macbook-pro.local",
   "identity": {
     "id": 6,
     "username": "spyroot",
@@ -22,13 +22,13 @@
     ],
     "one_time_sink_required": false,
     "operation": "get",
-    "plan_digest": "188e022993bf89692fcfbf6f88ebc810fb3478cc753a4fa21d77b93473d9a03c",
+    "plan_digest": "2b4e7ce6473f58eeec5fc40c9c54090e82d06d1116f06f1cc50dd9a929d24144",
     "project_ids": null,
-    "resource_id": 55,
+    "resource_id": 58,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "188e022993bf89692fcfbf6f88ebc810fb3478cc753a4fa21d77b93473d9a03c",
+  "plan_digest": "2b4e7ce6473f58eeec5fc40c9c54090e82d06d1116f06f1cc50dd9a929d24144",
   "readback": {
     "record_count": 1,
     "truncated": false,
@@ -39,8 +39,8 @@
       "access_level": "not_protected",
       "architecture": null,
       "contacted_at": null,
-      "description": "ci-skills-runner-live-055b4f5-20261008T104039Z",
-      "id": 55,
+      "description": "ci-skills-pr63-db88be6-5fb8ca3035c4",
+      "id": 58,
       "is_shared": false,
       "job_execution_status": "idle",
       "online": null,
@@ -52,7 +52,7 @@
       "runner_type": "project_type",
       "status": "never_contacted",
       "tag_list": [
-        "ci-skills-runner-live-055b4f5-20261008T104039Z-initial"
+        "ci-skills-pr63-db88be6-5fb8ca3035c4-initial"
       ],
       "version": null
     }
@@ -65,11 +65,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "3fe1ae7f3eac9d2e93ceb7684411bf8d47c76bc689685c74c1fd70ef23b7aefa",
-    "file_count": 66,
+    "digest": "8c46a5f57d78b48ed234595eb822cfc181a2b092a243b8ada55508ed0b635cac",
+    "file_count": 70,
     "revision": {
-      "source": "git_head",
-      "value": "055b4f559c79c41063c7228c98c991065b4c98b7",
+      "source": "installer_record",
+      "value": "db88be6e1a1397c72a15cbf493e9ac913b64cb89",
       "verified": true
     }
   },
@@ -84,7 +84,7 @@
   },
   "target_file": "path:5e5380df1eda",
   "target_source": "user;argv:--project",
-  "tested_revision": "055b4f559c79c41063c7228c98c991065b4c98b7",
+  "tested_revision": "db88be6e1a1397c72a15cbf493e9ac913b64cb89",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

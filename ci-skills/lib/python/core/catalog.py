@@ -21,12 +21,14 @@ the real one is a test failure rather than a surprise at runtime.
 
 from __future__ import annotations
 
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Final
 
 from .endpoints import TARGET_CONTRACT
 
 SCHEMA_VERSION = "1.0"
 SKILL_NAME = "ci-skills"
+GITLAB_ACTION_SCHEMA: Final = "schemas/results/gitlab-action.schema.json"
 
 # Every API command accepts these. Node diagnostics share the target protocol.
 UNIVERSAL_OPTIONS: dict[str, str] = {
@@ -219,6 +221,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
     },
     "gitlab_job.py": {
+        "related": ("gitlab_pipeline.py", "gitlab_runner.py"),
         "kind": "gitlab_job",
         "purpose": "Get one CI job or list bounded jobs from one GitLab project.",
         "use_when": "You need exact job facts or a filtered view of recent jobs.",
@@ -254,6 +257,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         ),
     },
     "gitlab_pipeline.py": {
+        "related": ("gitlab_job.py", "gitlab_milestone.py"),
         "kind": "gitlab_pipeline",
         "purpose": "Read one CI pipeline and bounded job progress by stage.",
         "use_when": "You need the status and progress of an exact GitLab pipeline.",
@@ -307,9 +311,18 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "--receipt-out": "write a sanitized, shareable operation receipt",
         },
         "subcommands": {
-            "create": {"required_options": ["--title"]},
-            "update": {"required_options": ["--milestone-id"]},
-            "adjust-time": {"required_options": ["--milestone-id"]},
+            "create": {
+                "required_options": ["--title"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
+            "update": {
+                "required_options": ["--milestone-id"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
+            "adjust-time": {
+                "required_options": ["--milestone-id"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
         },
         "returns": "A sanitized plan or verified milestone record and independent GET evidence.",
     },
@@ -332,8 +345,14 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "--receipt-out": "write a sanitized, shareable operation receipt",
         },
         "subcommands": {
-            "open-bug": {"required_options": ["--title"]},
-            "create-bug": {"required_options": ["--title"]},
+            "open-bug": {
+                "required_options": ["--title"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
+            "create-bug": {
+                "required_options": ["--title"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
         },
         "returns": "A sanitized plan or verified issue IID and independent GET evidence.",
     },
@@ -355,12 +374,19 @@ COMMANDS: dict[str, dict[str, Any]] = {
             "--receipt-out": "write a sanitized, shareable operation receipt",
         },
         "subcommands": {
-            "create": {"required_options": ["--title", "--content-file"]},
-            "update": {"required_options": ["--slug", "--content-file"]},
+            "create": {
+                "required_options": ["--title", "--content-file"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
+            "update": {
+                "required_options": ["--slug", "--content-file"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+            },
         },
         "returns": "A sanitized plan or verified wiki slug and independent GET evidence.",
     },
     "gitlab_runner.py": {
+        "related": ("gitlab_job.py", "gitlab_pipeline.py"),
         "kind": "gitlab_runner",
         "purpose": "Read and manage a selected GitLab runner record with verified actions.",
         "use_when": "A job names a runner to inspect, or a project needs runner record management.",
@@ -402,6 +428,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
             },
             "assign": {
                 "required_options": ["--runner-id"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
                 "purpose": "Assign an existing runner to the selected project or group.",
                 "mutates": True,
                 "side_effects": "Apply may attach a runner to selected projects.",
@@ -409,6 +436,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
             },
             "create": {
                 "required_options": ["--runner-type", "--description", "--token-out"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
                 "purpose": "Create a runner record and save its one-time token.",
                 "mutates": True,
                 "side_effects": "Apply may create a runner record and write the token file.",
@@ -614,6 +642,108 @@ BASH_COMMANDS: dict[str, dict[str, Any]] = {
     },
 }
 
+PROPOSITION_VERSION: Final = "2.0"
+PROPOSITION_CLUSTERS: Final = MappingProxyType(
+    {
+        "glab": "gitlab",
+        "kubernetes": "kubernetes",
+        "github": "github",
+    }
+)
+PROPOSITION_REFERENCES: Final = MappingProxyType(
+    {
+        "access": {
+            "summary": "Selected authority and credential sources.",
+            "pointer": "references/access.md",
+        },
+        "project binding": {
+            "summary": "Project target and credential binding.",
+            "pointer": "references/project-binding.md",
+        },
+        "mcp": {
+            "summary": "GitLab MCP configuration and toolsets.",
+            "pointer": "references/mcp.md",
+        },
+    }
+)
+DISCOVERY_COMMANDS: Final = {
+    "reference.py": {
+        "report_kind": "reference_next",
+        "purpose": "Offer the current node's installed tools and optional reference pointers.",
+        "use_when": "Choose a capability cluster or expand one installed command.",
+        "requires_authorities": [],
+        "required_tools": ["python3"],
+        "required_options": [],
+        "options": [
+            "--json",
+            "--yaml",
+            "--describe",
+            "--dry-run",
+            "--log-format",
+            "--log-level",
+            "--log-file",
+            "--run-id",
+        ],
+        "description": "Expand one node; optional references remain pointers until requested.",
+        "examples": [
+            {"description": "Show available clusters", "command": "reference.py"},
+            {"description": "Expand GitLab tools", "command": "reference.py glab"},
+            {
+                "description": "Expand a command node",
+                "command": "reference.py gitlab_runner.py",
+            },
+        ],
+        "output_modes": {"json": "Versioned JSON (default)", "yaml": "Versioned YAML"},
+        "usage": "reference.py [node] [options]",
+        "returns": "A versioned proposition with tools and reference mappings.",
+        "read_only": True,
+        "side_effects": "Only an explicit log file is written; dry-run and describe do not write.",
+        "execution_surface": "installed catalogue; no provider or credential access",
+    },
+}
+
+
+def proposition(node: str | None = None) -> dict[str, Any]:
+    """Offer one graph node from the existing installed-command catalogue.
+
+    :param node: Cluster name or installed filename; None selects the root.
+    :returns: Versioned root or selected tools/reference node.
+    :raises ValueError: If the selected node is not in the catalogue.
+    """
+    commands = {**COMMANDS, **NODE_LOCAL_COMMANDS}
+
+    def offering(scripts: list[str], authority: str | None) -> dict[str, Any]:
+        names = ["access", "project binding"]
+        if authority == "gitlab":
+            names.append("mcp")
+        return {
+            "tools": {script: {} for script in sorted(scripts)},
+            "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
+        }
+
+    clusters = {
+        cluster: offering(
+            [
+                script
+                for script, entry in commands.items()
+                if authority in entry["requires"]
+            ],
+            authority,
+        )
+        for cluster, authority in PROPOSITION_CLUSTERS.items()
+    }
+    if node is None:
+        return {"schema_version": PROPOSITION_VERSION, **clusters}
+    if node in clusters:
+        return {"schema_version": PROPOSITION_VERSION, **clusters[node]}
+    if node not in commands:
+        raise ValueError("path_unknown")
+    entry = commands[node]
+    scripts = [node, *entry.get("related", ())]
+    authority = "gitlab" if "gitlab" in entry["requires"] else None
+    return {"schema_version": PROPOSITION_VERSION, **offering(scripts, authority)}
+
+
 STATUS_MEANING = {
     "PASS": "every selected authority and live check passed",
     "PARTIAL": "the read completed and a component is unhealthy; see access_proven",
@@ -674,20 +804,26 @@ def describe(script: str) -> dict[str, Any]:
     :param script: Command filename registered in the catalog.
     :returns: Machine-readable command contract.
     """
-    entry = COMMANDS[script]
+    discovery = script in DISCOVERY_COMMANDS
+    entry = DISCOVERY_COMMANDS[script] if discovery else COMMANDS[script]
+    authorities = entry.get("requires", entry.get("requires_authorities", ()))
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "command_contract",
         "skill": SKILL_NAME,
         "command": script,
-        "report_kind": entry["kind"],
+        "report_kind": entry["report_kind"] if discovery else entry["kind"],
         "purpose": entry["purpose"],
         "use_when": entry["use_when"],
-        "requires_authorities": list(entry["requires"]),
-        "access_protocol": {name: ACCESS_PROTOCOL[name] for name in entry["requires"]},
-        "capabilities": list(entry["capabilities"]),
+        "requires_authorities": list(authorities),
+        "access_protocol": {name: ACCESS_PROTOCOL[name] for name in authorities},
+        "capabilities": list(entry.get("capabilities", ())),
         "required_options": list(entry.get("required_options", ())),
-        "options": options_for(script),
+        "options": (
+            {option: UNIVERSAL_OPTIONS[option] for option in entry["options"]}
+            if discovery
+            else options_for(script)
+        ),
         "returns": entry["returns"],
         "mutates": entry.get("mutates", False),
         "subcommands": entry.get("subcommands", {}),
@@ -696,8 +832,23 @@ def describe(script: str) -> dict[str, Any]:
         "required_tools": list(entry.get("required_tools", ())),
         "status_values": STATUS_MEANING,
         "exit_codes": EXIT_CODES,
-        "default_output": "json when stdout is not a terminal, human when it is",
-        "target_protocol": TARGET_PROTOCOL,
+        "default_output": (
+            "json"
+            if discovery
+            else "json when stdout is not a terminal, human when it is"
+        ),
+        "target_protocol": [] if discovery else TARGET_PROTOCOL,
+        **(
+            {
+                "summary": entry["purpose"],
+                "description": entry["description"],
+                "examples": entry["examples"],
+                "output_modes": entry["output_modes"],
+                "usage": entry["usage"],
+            }
+            if discovery
+            else {}
+        ),
     }
 
 
@@ -791,8 +942,10 @@ def manifest() -> dict[str, Any]:
                 for script, entry in NODE_LOCAL_COMMANDS.items()
             },
             **BASH_COMMANDS,
+            **DISCOVERY_COMMANDS,
         },
         "routing": {
+            "browse tools and references": "reference.py",
             "prove all three authorities": "access_check.py",
             "a named CI job failed": "gitlab_job.py",
             "check GitLab pipeline progress": "gitlab_pipeline.py",

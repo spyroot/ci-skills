@@ -7,6 +7,7 @@ import sys
 import time
 
 import pytest
+
 from tests.python.conftest import REPO_ROOT, import_script_module
 
 
@@ -23,21 +24,46 @@ def test_load_target_accepts_exact_nonsecret_authorities(target_file):
     assert target.kubernetes.kubeconfig is None
 
 
-def test_load_target_accepts_optional_gitlab_token_file_path(tmp_path):
-    """The target may point at a host-local token file without storing a token."""
-    token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
-    token_file.parent.mkdir(parents=True)
-    token_file.write_text("unit-token-value\n", encoding="utf-8")
-    target_path = tmp_path / "target.toml"
+@pytest.mark.parametrize("declaration", ("relative", "absolute", "tilde"))
+def test_load_target_resolves_token_files_from_declared_location(
+    tmp_path, monkeypatch, declaration
+):
+    """Credential paths retain relative, absolute, and tilde resolution semantics."""
+    target_parent = tmp_path / "operator-config"
+    target_parent.mkdir()
+    github_token_file = target_parent / "github.token"
+    gitlab_token_file = target_parent / "gitlab.token"
+    github_token_file.write_text("github-unit-token\n", encoding="utf-8")
+    gitlab_token_file.write_text("gitlab-unit-token\n", encoding="utf-8")
+    github_declaration = str(github_token_file)
+    gitlab_declaration = str(gitlab_token_file)
+    if declaration == "relative":
+        github_declaration = github_token_file.name
+        gitlab_declaration = gitlab_token_file.name
+    elif declaration == "tilde":
+        home = tmp_path / "home"
+        home.mkdir()
+        github_token_file = home / github_token_file.name
+        gitlab_token_file = home / gitlab_token_file.name
+        github_token_file.write_text("github-unit-token\n", encoding="utf-8")
+        gitlab_token_file.write_text("gitlab-unit-token\n", encoding="utf-8")
+        monkeypatch.setenv("HOME", str(home))
+        github_declaration = f"~/{github_token_file.name}"
+        gitlab_declaration = f"~/{gitlab_token_file.name}"
+    unrelated_cwd = tmp_path / "unrelated-cwd"
+    unrelated_cwd.mkdir()
+    monkeypatch.chdir(unrelated_cwd)
+    target_path = target_parent / "target.toml"
     target_path.write_text(
         (
             "[github]\n"
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
+            f'token_file = "{github_declaration}"\n'
             "\n"
             "[gitlab]\n"
             'url = "https://gitlab.example.test"\n'
-            f'token_file = "{token_file}"\n'
+            f'token_file = "{gitlab_declaration}"\n'
             "\n"
             "[kubernetes]\n"
             'context = "unit-context"\n'
@@ -48,8 +74,42 @@ def test_load_target_accepts_optional_gitlab_token_file_path(tmp_path):
 
     target = import_script_module("core.target").load_target(target_path)
 
-    assert target.gitlab.token_file == token_file
+    assert target.github.token_file == github_token_file.resolve()
+    assert target.gitlab.token_file == gitlab_token_file.resolve()
     assert not hasattr(target.gitlab, "token")
+
+
+def test_load_target_rejects_relative_token_file_resolved_inside_installed_skill(
+    tmp_path, monkeypatch
+):
+    """Target-relative credential paths retain the installed-skill exclusion."""
+    target_mod = import_script_module("core.target")
+    skill_root = tmp_path / "installed-skill"
+    skill_root.mkdir()
+    (skill_root / "credential").write_text("unit-token\n", encoding="utf-8")
+    target_parent = tmp_path / "operator-config"
+    target_parent.mkdir()
+    target_path = target_parent / "target.toml"
+    target_path.write_text(
+        (
+            "[github]\n"
+            'host = "github.example.test"\n'
+            'repository = "unit/repo"\n'
+            'token_file = "../installed-skill/credential"\n'
+            "\n"
+            "[gitlab]\n"
+            'url = "https://gitlab.example.test"\n'
+            "\n"
+            "[kubernetes]\n"
+            'context = "unit-context"\n'
+            'server = "https://api.cluster.example.test:6443"\n'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(target_mod, "SKILL_ROOT", skill_root)
+
+    with pytest.raises(target_mod.TargetError, match="stored outside"):
+        target_mod.load_target(target_path)
 
 
 def test_skill_root_is_the_folder_that_holds_skill_md():
@@ -147,22 +207,6 @@ def test_default_kubeconfig_cannot_point_into_installed_skill(monkeypatch, targe
                 'server = "https://api.cluster.example.test:6443"\n'
             ),
             "unsupported fields",
-        ),
-        (
-            (
-                "[github]\n"
-                'host = "github.example.test"\n'
-                'repository = "unit/repo"\n'
-                "\n"
-                "[gitlab]\n"
-                'url = "https://gitlab.example.test"\n'
-                'token_file = "inline-token-value"\n'
-                "\n"
-                "[kubernetes]\n"
-                'context = "unit-context"\n'
-                'server = "https://api.cluster.example.test:6443"\n'
-            ),
-            "token_file",
         ),
     ),
 )

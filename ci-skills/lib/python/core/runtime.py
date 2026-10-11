@@ -289,8 +289,8 @@ def run_command_tail(
     stderr_tail = bytearray()
     deadline = time.monotonic() + timeout
     expired = False
-    with selectors.DefaultSelector() as selector:
-        assert process.stdout is not None and process.stderr is not None
+    assert process.stdout is not None and process.stderr is not None
+    with selectors.DefaultSelector() as selector, process.stdout, process.stderr:
         selector.register(process.stdout, selectors.EVENT_READ, stdout_tail)
         selector.register(process.stderr, selectors.EVENT_READ, stderr_tail)
         while selector.get_map():

@@ -7,6 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import json
 import signal
 import subprocess
 import sys
@@ -14,6 +15,14 @@ from pathlib import Path
 
 import pytest
 from conftest import REPO_ROOT, load_module
+from jsonschema import Draft202012Validator
+
+INSTALLATION_IDENTITY_SCHEMA = json.loads(
+    (REPO_ROOT / "schemas" / "skill-installation-identity.schema.json").read_text(
+        encoding="utf-8"
+    )
+)
+Draft202012Validator.check_schema(INSTALLATION_IDENTITY_SCHEMA)
 
 
 def _installer():
@@ -46,6 +55,53 @@ def test_install_copies_all_package_files_and_reads_back_digest(tmp_path):
         source / "scripts" / "check.py"
     ).read_bytes()
     assert result["digest"] == installer.tree_digest(destination)["digest"]
+
+
+def test_verified_install_records_source_identity(monkeypatch, tmp_path):
+    installer = _installer()
+    source = _source(tmp_path)
+    skills_dir = tmp_path / "skills"
+    revision = {"value": "a" * 40, "source": "git_head", "verified": True}
+    original_identity = installer.skill_identity
+
+    def verified_identity(root, claimed=None, environ=None):
+        identity = original_identity(root, claimed, environ)
+        if Path(root) == source:
+            identity["revision"] = revision
+        return identity
+
+    monkeypatch.setattr(installer, "skill_identity", verified_identity)
+
+    result = installer.install(source, skills_dir, dry_run=False)
+
+    destination = skills_dir / installer.SKILL_NAME
+    record = json.loads(
+        (destination / installer.INSTALLATION_IDENTITY_NAME).read_text(encoding="utf-8")
+    )
+    assert record == {
+        "schema_version": "1.0",
+        "kind": "skill_install",
+        "status": "PASS",
+        "algorithm": result["algorithm"],
+        "digest": result["digest"],
+        "file_count": result["file_count"],
+        "revision": revision,
+    }
+    Draft202012Validator(INSTALLATION_IDENTITY_SCHEMA).validate(record)
+    assert installer.skill_identity(destination, environ={})["revision"] == {
+        "value": "a" * 40,
+        "source": "installer_record",
+        "verified": True,
+    }
+
+    again = installer.install(source, skills_dir, dry_run=False, upgrade=True)
+    assert again["status"] == "PASS"
+    assert again["already_installed"] is True
+
+    (destination / installer.INSTALLATION_IDENTITY_NAME).unlink()
+    without_record = installer.install(source, skills_dir, dry_run=True, upgrade=True)
+    assert without_record["status"] == "DRY_RUN"
+    assert "already_installed" not in without_record
 
 
 def test_package_files_ignores_generated_and_platform_noise(tmp_path):

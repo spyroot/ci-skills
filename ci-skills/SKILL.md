@@ -179,9 +179,12 @@ That digest is identical across every report from one installed copy, and each
 carries a `receipt_sha256` tying it to its gate — cross-check and cite them,
 and several reports become one audit trail.
 
-`skill.revision.verified` is `false` for an installed copy, because a commit
-SHA cannot be verified where it is claimed. Treat it as a claim; the digest is
-the provenance.
+`skill.revision.verified` is true for an installed copy only when
+`INSTALLATION.json`, written by the repository installer during its staged
+copy, records a clean source revision and the current installed digest still
+matches that record. Otherwise a supplied commit SHA remains an unverified
+claim. The repository acceptance checker independently resolves that revision
+and compares its skill tree and digest.
 
 ## 6. Persisting evidence
 

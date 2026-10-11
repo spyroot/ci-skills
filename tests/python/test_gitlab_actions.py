@@ -9,6 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Event, Lock
 from types import SimpleNamespace
+from typing import Final
 
 import pytest
 from jsonschema import Draft202012Validator
@@ -16,6 +17,7 @@ from jsonschema import Draft202012Validator
 from tests.python.conftest import import_script_module
 
 ACTION = import_script_module("core.gitlab_actions")
+CALLBACKS = import_script_module("core.action")
 PORTABLE = import_script_module("core.portable")
 API = import_script_module("core.gitlab_api")
 MILESTONES = import_script_module("core.gitlab_milestones")
@@ -24,6 +26,16 @@ WIKIS = import_script_module("core.gitlab_wikis")
 RUNNERS = import_script_module("core.gitlab_runners")
 REPORT = import_script_module("core.report")
 PROVENANCE = import_script_module("core.provenance")
+ISSUE = import_script_module("gitlab_issue")
+MILESTONE = import_script_module("gitlab_milestone")
+RUNNER = import_script_module("gitlab_runner")
+WIKI = import_script_module("gitlab_wiki")
+
+ENTRYPOINTS = {
+    "gitlab_issue": ISSUE,
+    "gitlab_milestone": MILESTONE,
+    "gitlab_wiki": WIKI,
+}
 
 TAG_SCHEMA = json.loads(
     (
@@ -31,6 +43,7 @@ TAG_SCHEMA = json.loads(
     ).read_text(encoding="utf-8")
 )
 TAG_VALIDATOR = Draft202012Validator(TAG_SCHEMA)
+FACTORY_FAILURE: Final = "factory failed"
 
 
 def test_committed_runner_tag_receipts_match_live_contract():
@@ -38,6 +51,10 @@ def test_committed_runner_tag_receipts_match_live_contract():
     receipts = root / "tests/acceptance/runner-tag"
     applied = json.loads((receipts / "runner-tag-applied.json").read_text())
     repeated = json.loads((receipts / "runner-tag-no_op.json").read_text())
+    setup = json.loads(
+        (root / "tests/acceptance/receipts/gitlab-access.json").read_text()
+    )
+    target = setup["target"]
     digest = PROVENANCE.tree_digest(root / "ci-skills")["digest"]
 
     for result in (applied, repeated):
@@ -45,7 +62,12 @@ def test_committed_runner_tag_receipts_match_live_contract():
         assert result["skill"]["digest"] == digest
         assert result["skill"]["revision"]["verified"] is True
         assert result["tested_revision"] == result["skill"]["revision"]["value"]
-        assert result["verified_target"]["full_path"] == "hott/test"
+        assert {
+            field: result["verified_target"][field]
+            for field in ("kind", "id", "full_path")
+        } == {field: target[field] for field in ("kind", "id", "full_path")}
+        assert result["plan"]["target_kind"] == target["kind"]
+        assert result["plan"]["target_reference"] == target["full_path"]
         assert result["readback"]["verified"] is True
 
     added = applied["plan"]["requested_tags"]
@@ -88,6 +110,36 @@ def _plan(
     )
 
 
+def _live_action_dependencies(monkeypatch, plan):
+    """Bind one selected action to deterministic access without a provider call."""
+    session = SimpleNamespace(
+        origin=plan.origin,
+        target_reference=plan.target_reference,
+        credential_source="env:GITLAB_TOKEN",
+        credential_digest="sha256:unit",
+        skill={"revision": {"value": None, "verified": False}},
+    )
+    access = {
+        "status": "PASS",
+        "identity": {"username": "unit"},
+        "target": {"kind": plan.target_kind, "id": 42},
+    }
+    monkeypatch.setattr(
+        ACTION,
+        "resolve_gitlab_target",
+        lambda _target, _binding, *, dry_run: (object(), "unit"),
+    )
+    monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
+    monkeypatch.setattr(
+        ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+    )
+    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda *, timeout: object())
+    monkeypatch.setattr(
+        ACTION, "check_gitlab_operation_access", lambda *_args, **_kwargs: access
+    )
+    return session, access
+
+
 class FakeAPI:
     def __init__(self, responses):
         self.responses = {key: list(value) for key, value in responses.items()}
@@ -114,6 +166,141 @@ class FakeAPI:
 
     def delete_json(self, session, endpoint):
         return self._next("DELETE", endpoint)
+
+
+@pytest.mark.parametrize(
+    ("kind", "arguments", "operation"),
+    (
+        ("gitlab_issue", ["open-bug"], "open-bug"),
+        ("gitlab_wiki", ["create"], "create"),
+        ("gitlab_milestone", ["create"], "create"),
+    ),
+)
+def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
+    monkeypatch, capsys, kind, arguments, operation
+):
+    """Issue, wiki, and milestone apply paths have no runner-only ``live_plan``."""
+    plan = _plan(kind, operation, {"title": "unit"})
+    _live_action_dependencies(monkeypatch, plan)
+    invoked: list[str] = []
+
+    def complete(*_args):
+        invoked.append(kind)
+        return {"action": "NO_OP", "verified": True, "mutated": False}
+
+    if kind == "gitlab_milestone":
+        monkeypatch.setattr(MILESTONES.CreateMilestone, "run", lambda _self: complete())
+    else:
+        monkeypatch.setattr(ACTION, "apply_plan", complete)
+
+    result = ENTRYPOINTS[kind].main(
+        [*arguments, "--apply", "--confirm-plan", plan.digest, "--json"]
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert result == 0
+    assert invoked == [kind]
+    assert report["status"] == "PASS"
+    assert report["operation"] == operation
+
+
+def test_cli_failure_preserves_primary_and_every_cleanup_failure(monkeypatch, capsys):
+    """The structured CLI result retains cleanup evidence without replacing failure."""
+    plan = _plan("gitlab_issue", "open-bug", {"title": "unit"})
+    _live_action_dependencies(monkeypatch, plan)
+    primary = ACTION.ActionError("operation failed")
+
+    class FailingOperation(CALLBACKS.Callback[object, object]):
+        def run(self) -> object:
+            raise primary
+
+        def cleanup(self) -> None:
+            raise RuntimeError("operation cleanup")
+
+    def fail_auth_cleanup(_self) -> None:
+        raise RuntimeError("authentication cleanup")
+
+    monkeypatch.setattr(ISSUE, "operation_callback", lambda _action: FailingOperation())
+    monkeypatch.setattr(ACTION.GitLabAuth, "cleanup", fail_auth_cleanup)
+
+    result = ISSUE.main(
+        ["open-bug", "--apply", "--confirm-plan", plan.digest, "--json"]
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert result == 2
+    assert report["status"] == "BLOCKED"
+    assert report["cleanup"]["status"] == "BLOCKED"
+    assert report["errors"] == [
+        {"source": "gitlab_action", "reason": "operation failed"},
+        {"source": "cleanup.FailingOperation", "reason": "operation cleanup"},
+        {"source": "cleanup.GitLabAuth", "reason": "authentication cleanup"},
+    ]
+
+
+def test_entrypoint_reports_operation_factory_failure(monkeypatch, capsys):
+    """A callback-construction error keeps the command's structured result."""
+    monkeypatch.setattr(
+        ISSUE,
+        "operation_callback",
+        lambda _action: (_ for _ in ()).throw(ACTION.ActionError(FACTORY_FAILURE)),
+    )
+
+    result = ISSUE.main(["open-bug", "--title", "unit", "--json"])
+    report = json.loads(capsys.readouterr().out)
+
+    assert result == 2
+    assert report["status"] == "BLOCKED"
+    assert report["errors"] == [{"source": "arguments", "reason": FACTORY_FAILURE}]
+
+
+def test_cli_cleanup_failure_blocks_a_completed_report_without_losing_records(
+    monkeypatch, capsys
+):
+    """Cleanup after a completed callback converts the existing PASS report to BLOCKED."""
+    plan = _plan("gitlab_issue", "open-bug", {"title": "unit"})
+    _live_action_dependencies(monkeypatch, plan)
+
+    class CompletedOperation(CALLBACKS.Callback[object, object]):
+        def __init__(self, action) -> None:
+            self.action = action
+
+        def run(self) -> object:
+            return {"action": "NO_OP", "verified": True}
+
+        def update(self) -> None:
+            self.action.report = ACTION._result(
+                plan,
+                "PASS",
+                phase="APPLY",
+                mutated=False,
+                records=[{"id": 42, "action": "NO_OP"}],
+                readback={"verified": True},
+                cleanup={"status": "NOT_APPLICABLE"},
+            )
+            self.context.report = self.action.report
+
+        def cleanup(self) -> None:
+            raise RuntimeError("post-success cleanup")
+
+    monkeypatch.setattr(
+        ISSUE, "operation_callback", lambda action: CompletedOperation(action)
+    )
+
+    result = ISSUE.main(
+        ["open-bug", "--apply", "--confirm-plan", plan.digest, "--json"]
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert result == 2
+    assert report["status"] == "BLOCKED"
+    assert report["records"] == [{"id": 42, "action": "NO_OP"}]
+    assert report["readback"] == {"verified": True}
+    assert report["cleanup"]["status"] == "BLOCKED"
+    assert report["errors"][-1] == {
+        "source": "cleanup.CompletedOperation",
+        "reason": "post-success cleanup",
+    }
 
 
 def _list(endpoint):
@@ -202,18 +389,14 @@ def test_action_uses_project_target_before_user_target_without_selector(
     monkeypatch.delenv("CI_SKILLS_TARGET", raising=False)
     monkeypatch.chdir(project)
 
-    result = ACTION.run_action_cli(
-        "gitlab_issue", ["open-bug", "--title", "selected", "--json"]
-    )
+    result = ISSUE.main(["open-bug", "--title", "selected", "--json"])
     project_plan = json.loads(capsys.readouterr().out)
     assert result == 0
     assert project_plan["target"]["reference"] == "project/repo"
     assert project_plan["target_source"] == "project;target:gitlab.project"
 
     project_target.unlink()
-    result = ACTION.run_action_cli(
-        "gitlab_issue", ["open-bug", "--title", "selected", "--json"]
-    )
+    result = ISSUE.main(["open-bug", "--title", "selected", "--json"])
     user_plan = json.loads(capsys.readouterr().out)
     assert result == 0
     assert user_plan["target"]["reference"] == "user/repo"
@@ -235,9 +418,7 @@ def test_group_action_uses_selected_target_without_group_flag(
     monkeypatch.delenv("CI_SKILLS_TARGET", raising=False)
     monkeypatch.chdir(tmp_path)
 
-    result = ACTION.run_action_cli(
-        "gitlab_runner", ["assign", "--runner-id", "9", "--json"]
-    )
+    result = RUNNER.main(["assign", "--runner-id", "9", "--json"])
     plan = json.loads(capsys.readouterr().out)
 
     assert result == 0
@@ -254,8 +435,7 @@ def test_declared_project_override_replaces_selected_target_for_one_action(
         encoding="utf-8",
     )
 
-    result = ACTION.run_action_cli(
-        "gitlab_issue",
+    result = ISSUE.main(
         [
             "open-bug",
             "--title",
@@ -750,12 +930,12 @@ def test_runner_tag_dry_run_and_refusal_match_schema(tmp_path, capsys):
         encoding="utf-8",
     )
     common = ["tag", "--target", str(target), "--runner-id", "23", "--json"]
-    assert ACTION.run_action_cli("gitlab_runner", [*common, "--tag", "new"]) == 0
+    assert RUNNER.main([*common, "--tag", "new"]) == 0
     dry_run = json.loads(capsys.readouterr().out)
     TAG_VALIDATOR.validate(dry_run)
     assert dry_run["status"] == "DRY_RUN"
 
-    assert ACTION.run_action_cli("gitlab_runner", common) != 0
+    assert RUNNER.main(common) != 0
     blocked = json.loads(capsys.readouterr().out)
     TAG_VALIDATOR.validate(blocked)
     assert blocked["errors"][0]["reason"] == "tag_requires_tag"
@@ -872,8 +1052,7 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
             "target": {"kind": "project", "id": 42},
         },
     )
-    result = ACTION.run_action_cli(
-        "gitlab_issue",
+    result = ISSUE.main(
         [
             "open-bug",
             "--title",
@@ -927,8 +1106,7 @@ def test_action_access_failure_preserves_the_failed_subcheck(
         lambda *_args: pytest.fail("apply ran after access failure"),
     )
 
-    result = ACTION.run_action_cli(
-        "gitlab_issue",
+    result = ISSUE.main(
         [
             "open-bug",
             "--title",
@@ -989,8 +1167,7 @@ def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
 
     monkeypatch.setattr(ACTION, "apply_plan", fail_after_write)
 
-    result = ACTION.run_action_cli(
-        "gitlab_issue",
+    result = ISSUE.main(
         [
             "open-bug",
             "--title",
@@ -1030,8 +1207,7 @@ def test_action_plan_rejects_output_paths_without_creating_files(
     tmp_path: Path, capsys, dry_run_flag
 ):
     output = tmp_path / "reports"
-    result = ACTION.run_action_cli(
-        "gitlab_issue",
+    result = ISSUE.main(
         [
             "open-bug",
             "--project",
@@ -1053,8 +1229,7 @@ def test_action_plan_rejects_output_paths_without_creating_files(
 
 def test_action_plan_rejects_log_file_without_creating_it(tmp_path: Path, capsys):
     output = tmp_path / "audit.jsonl"
-    result = ACTION.run_action_cli(
-        "gitlab_issue",
+    result = ISSUE.main(
         [
             "open-bug",
             "--project",
@@ -1082,8 +1257,7 @@ def test_action_plan_json_diagnostic_is_separate_from_machine_result(
         '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
         encoding="utf-8",
     )
-    result = ACTION.run_action_cli(
-        "gitlab_issue",
+    result = ISSUE.main(
         [
             "open-bug",
             "--title",

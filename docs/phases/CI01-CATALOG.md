@@ -278,10 +278,9 @@ below goes beyond them.
 4. Add the `openai.yaml` render to `tools/render_manifest.py` and the two
    icon files under `ci-skills/assets/`, then render once (Codex metadata
    and install scopes).
-5. After the last skill edit, capture a fresh publication receipt on the
-   declared executor (Delivery, test and proof, part 4); it stays
-   non-`PASS` until CI03-GATES G0 settles the `required_checks` read-back
-   (D-GATE).
+5. Verify the candidate and capture affected live capability evidence as
+   described in Delivery, test and proof, part 4, following
+   [Validation](../../README.md#validation).
 6. Add the tests (Delivery, test and proof, part 2), and open one pull
    request; merge per CI10-PHASES, How a phase lands.
 7. Read back: `bin/ci-skills list` shows exactly one `ci-skills` record,
@@ -295,11 +294,9 @@ below goes beyond them.
 - **Tests.** Written with the block (Delivery, test and proof, part 2); run
   status UNVERIFIED until a gate route exists (CI03-GATES, G0; decided
   2026-10-06, D-GATE).
-- **Receipt.** This phase adds `ci-skills/agents/openai.yaml` and
-  `ci-skills/assets/` inside the skill tree, so the skill digest changes and
-  the committed publication receipt no longer matches; capture a fresh one
-  after the last skill edit (Delivery, test and proof, part 4; CI03-GATES,
-  G5).
+- **Evidence.** Follow Delivery, test and proof, part 4 for candidate identity
+  and affected live capability evidence; catalog validation does not require
+  a full-publication receipt.
 
 ## Delivery, test and proof
 
@@ -314,8 +311,8 @@ below goes beyond them.
    (the metadata fields the frontmatter does not carry),
    `tests/python/test_catalog.py`, `tests/python/test_render_manifest.py`,
    `tests/python/test_installer.py`, `tests/python/test_installed_package.py`,
-   `tests/bash/install.bats` and `tests/acceptance/receipts/operator-laptop.json`
-   (recaptured). The commands that run: `bin/ci-skills list --json`;
+   `tests/bash/install.bats`. Live evidence follows part 4.
+   The commands that run: `bin/ci-skills list --json`;
    `bin/ci-skills get glab`;
    `bin/ci-skills install glab --skills-dir DIR --apply --confirm-plan DIGEST --json`;
    `tools/render_manifest.py`;
@@ -392,9 +389,9 @@ below goes beyond them.
      `glab skills get glab` where `glab` is installed.
 3. *Smoke*. This phase touches no live target: `list`, `get` and `install`
    read the tree and the destination only, so the proof is static read-back
-   on the executor `tests/acceptance/expected.toml` declares (`mac.lan`,
-   D-SMOKE, decided 2026-10-06), after merge, from a clean checkout of
-   `main`:
+   on the selected executor recorded by runtime setup, after merge, from a
+   clean checkout of `main`. Setup follows
+   [CI11-TOOLS, Smoke cases](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back):
    - `bin/ci-skills list --json` reads back exactly one record with
      `name: ci-skills`, `source: local` and `path: ci-skills`, plus `glab`
      and `glab-stack` with `source: glab-bundled`, an empty `errors`, exit 0;
@@ -415,41 +412,24 @@ below goes beyond them.
      then lists `ci-skills` and `glab`;
    - `tools/render_manifest.py --check` reads back `CURRENT` for `tools.json`
      and `agents/openai.yaml`.
-4. *Evidence*. The skill digest changes (part 1 adds files under
-   `ci-skills/`), so the publication receipt is recaptured on `mac.lan`,
-   from the clean checkout of `main` that part 3 names (a dirty checkout
-   gives `verified: false` and fails the revision check), with
-   `ci-skills/bin/access_check.py --publication --receipt-out tests/acceptance/receipts/operator-laptop.json`.
-   The checker compares, from that receipt: `kind` (`access_check`),
-   `schema_version`, `status` (`PASS`), `publication` (`true`),
-   `execution_host` against `[[executors]].host`, `skill.digest` against the
-   digest recomputed from `ci-skills/`, `skill.revision` (`verified: true`
-   and equal to `tested_revision`), `captured_at` against
-   `max_receipt_age_days`, the receipt against its own redacted form,
-   `targets` against `[targets]`, the identities in `surfaces` and
-   `credential_sources` against `[executors.identities]`, the `live_checks`
-   named in `required_live_checks` with `job_url` and `ceph_namespace`, and
-   the `required_checks` read-back. `required_checks`
-   still names `validate`, deleted in #27 (1108cca); what the receipt reads
-   back instead is not declared here; decided in CI03-GATES, G0 (D-GATE),
-   and until then a fresh receipt is not `PASS`.
+4. *Evidence*. Follow [Validation](../../README.md#validation) for local
+   static checks, GitHub mocked tests, and installed-skill live checks.
+   Recapture affected live capability evidence after changes to its runtime
+   code or dependencies, recording the candidate revision and skill digest.
+   Preserve freshness, redaction, target identity, read-back and cleanup.
+   Subsequent operation receipts must match the authenticated runtime setup;
+   [CI11-TOOLS, Smoke cases](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back)
+   owns runtime setup, resource read-back and cleanup requirements.
    The offline verbs have no receipt: the static evidence is the
-   `bin/ci-skills list --json` and `--describe` output of part 3. A
-   `[[smoke_cases]]` entry for them needs `--receipt-out` on
-   `bin/ci-skills`, which CI02-CLI declares for every smoke-cased command
-   (item 7).
-5. *Verification*. The checker:
-
-   ```text
-   tools/check_live_acceptance.py --root . --expected tests/acceptance/expected.toml \
-     --receipts tests/acceptance/receipts --skill ci-skills --json
-   ```
-
-   prints `"status": "PASS"` (`Live acceptance: PASS` without `--json`);
-   `tools/render_manifest.py --check` prints `CURRENT`;
-   `tools/check_project_neutrality.py --root . --json` reports `PASS`. The
-   pytest and bats suites are never run on this laptop; which surface runs
-   them is CI03-GATES, G0.
+   `bin/ci-skills list --json` and `--describe` output of part 3. If they
+   gain smoke receipts, `bin/ci-skills` needs `--receipt-out`, as CI02-CLI
+   declares for every smoke-cased command (item 7).
+5. *Verification*. `tools/render_manifest.py --check` prints `CURRENT`;
+   `tools/check_project_neutrality.py --root . --json` reports `PASS`.
+   GitHub runs the pytest and Bats suites. Relevant installed-skill live
+   results must match the candidate and selected targets. The full-publication
+   checker evaluates explicit publication work; it is not a prerequisite for
+   catalog validation.
 
 ## Open decisions
 

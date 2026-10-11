@@ -20,11 +20,13 @@ import sys
 from pathlib import Path
 
 import pytest
+
 from tests.python.conftest import SCRIPT_ROOT, import_script_module
 
 CLI = import_script_module("core.cli")
 CATALOG = import_script_module("core.catalog")
 TARGET = import_script_module("core.target")
+PROJECT_BINDING = import_script_module("core.project_binding")
 
 TARGET_BODY = (
     "[github]\n"
@@ -114,6 +116,21 @@ def test_an_absent_env_target_is_an_error_not_a_fallback(tiers, monkeypatch):
 
     with pytest.raises(TARGET.TargetError, match="target_file_missing"):
         CLI.resolve_target(None)
+
+
+def test_smoke_environment_selects_the_fixed_project_then_user_filename(
+    tiers, monkeypatch
+):
+    """Smoke mode changes the shared basename while preserving directory order."""
+    project = tiers["project"].with_name(PROJECT_BINDING.SMOKE_TARGET_FILENAME)
+    user = tiers["user"].with_name(PROJECT_BINDING.SMOKE_TARGET_FILENAME)
+    _write_target(project)
+    _write_target(user)
+    monkeypatch.setenv(PROJECT_BINDING.SMOKE_ENV, "1")
+
+    assert CLI.resolve_target(None) == (project, "project")
+    project.unlink()
+    assert CLI.resolve_target(None) == (user, "user")
 
 
 def test_node_diagnostic_routes_are_optional_but_strict(tmp_path):

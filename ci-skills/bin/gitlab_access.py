@@ -8,14 +8,19 @@ import json
 import socket
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import _bootstrap  # noqa: F401
-from core.access import check_gitlab_operation_access
 from core.catalog import describe
-from core.cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
-from core.credentials import bind_gitlab_session
+from core.cli import (
+    _failure,
+    log_event,
+    output_mode,
+    parser,
+    resolve_gitlab_target,
+    setup_gitlab_operation,
+)
 from core.portable import write_portable_receipt
 from core.report import emit
 from core.status import DRY_RUN, exit_code
@@ -52,7 +57,7 @@ def _dry_run(
         "schema_version": "1.0",
         "kind": "gitlab_access",
         "status": DRY_RUN,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": datetime.now(UTC).isoformat(),
         "execution_host": socket.getfqdn(),
         "target_file": target_file,
         "target_source": target_source,
@@ -79,13 +84,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     source = "target"
     try:
-        target, target_source = resolve_gitlab_target(
-            args.target, args.binding, dry_run=args.dry_run
-        )
-        target_kind, reference = select_gitlab_reference(
-            target, project=args.project, group=args.group
-        )
         if args.dry_run:
+            target, target_source = resolve_gitlab_target(
+                args.target, args.binding, dry_run=True
+            )
+            target_kind, reference = select_gitlab_reference(
+                target, project=args.project, group=args.group
+            )
             result = _dry_run(
                 target_file=str(target.source_file),
                 target_source=target_source,
@@ -93,16 +98,14 @@ def main(argv: list[str] | None = None) -> int:
                 reference=reference,
             )
         else:
-            source = "credential"
-            session = bind_gitlab_session(
-                target,
-                target_kind=target_kind,
-                target_reference=reference,
-                target_source=target_source,
+            _session, result = setup_gitlab_operation(
+                args.target,
+                args.binding,
+                project=args.project,
+                group=args.group,
                 revision=args.revision,
             )
             source = "access"
-            result = check_gitlab_operation_access(session)
         if args.receipt_out:
             source = "receipt"
             write_portable_receipt(result, args.receipt_out)
@@ -117,8 +120,10 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(rendered)
         return exit_code(result["status"])
     except (TargetError, OSError, RuntimeError, ValueError, TypeError) as exc:
+        source = getattr(exc, "gitlab_setup_source", source)
         return _failure(args, "gitlab_access", source, str(exc))
-    except Exception:  # noqa: BLE001 - keep unexpected failures machine-readable
+    except Exception as exc:  # noqa: BLE001 - keep unexpected failures machine-readable
+        source = getattr(exc, "gitlab_setup_source", source)
         return _failure(args, "gitlab_access", source, "unexpected_runtime_failure")
 
 

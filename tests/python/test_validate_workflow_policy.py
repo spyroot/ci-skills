@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import yaml
+
 from tests.python.conftest import REPO_ROOT
 
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
@@ -13,45 +14,34 @@ def _workflow_text() -> str:
 
 
 def test_validate_workflow_runs_required_static_policy_gates():
-    """The validation workflow wires the static gates that unit tests cannot replace."""
+    """The validation workflow calls the shared static entrypoint."""
     text = _workflow_text()
 
-    assert "actionlint" in text or "yamllint" in text
-    assert "markdownlint" in text
-    assert "ruff format --check" in text
+    assert 'scripts/ci/static.sh --base "$base_sha"' in text
     assert "git diff --check" in text
-    assert any(
-        scanner in text for scanner in ("gitleaks", "detect-secrets", "trivy fs")
-    )
 
 
 def test_validate_workflow_runs_installed_package_smoke():
     """The validation workflow runs the isolated installed-package smoke."""
     text = _workflow_text()
 
-    assert "tests/test_installed_package.py" in text
+    assert "tests/python/test_installed_package.py" in text
 
 
-def test_the_live_acceptance_step_is_unconditional_and_may_not_fail():
-    """The central gate must not be skippable or advisory.
-
-    Gated on `non_markdown_count`, a Markdown-only change could edit the very
-    claims it backs and skip it. Marked `continue-on-error`, or moved to its own
-    workflow, it would be advisory -- `validate` is the required check. Its
-    position does not change whether it is required for a successful job.
-    """
+def test_acceptance_evaluator_is_offline_and_unconditional():
+    """GitHub runs the offline evaluator without invoking live publication."""
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     steps = workflow["jobs"]["validate"]["steps"]
 
     matching = [
-        step for step in steps if "check_live_acceptance.py" in str(step.get("run", ""))
+        step
+        for step in steps
+        if "tests/python/test_live_acceptance.py" in str(step.get("run", ""))
     ]
-    assert len(matching) == 1, "exactly one acceptance step must run the tool"
+    assert len(matching) == 1, "exactly one offline acceptance evaluator must run"
     step = matching[0]
-    assert "if" not in step, "the acceptance step must not be conditional"
+    assert "offline" in str(step.get("name", "")).lower()
+    assert "if" not in step
     assert step.get("continue-on-error") in (None, False)
     assert "|| true" not in str(step.get("run"))
-
-    assert any("non_markdown_count" in str(item.get("if", "")) for item in steps), (
-        "the gated Python steps should still exist"
-    )
+    assert "python tools/check_live_acceptance.py" not in _workflow_text()

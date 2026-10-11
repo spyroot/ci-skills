@@ -1,9 +1,9 @@
 {
-  "captured_at": "2026-10-04T03:48:02.521238+00:00",
+  "captured_at": "2026-10-11T00:39:36.672848+00:00",
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
-  "credential_source": "file:path:2ccda27d0866",
+  "credential_source": "file:path:29f247d18d3c",
   "errors": [],
-  "execution_host": "mac.lan",
+  "execution_host": "spyroots-macbook-pro.local",
   "identity": {
     "id": 6,
     "username": "spyroot",
@@ -22,11 +22,11 @@
       "commit": null,
       "source": null
     },
-    "digest": "62c951b711062cde43875008e26d55504ff67e6f689778554b4a5ea4adfc6148",
-    "file_count": 53,
+    "digest": "8c46a5f57d78b48ed234595eb822cfc181a2b092a243b8ada55508ed0b635cac",
+    "file_count": 70,
     "revision": {
-      "source": "git_head",
-      "value": "d10c7c2c1a1d92371076d0a936d469ba82b92790",
+      "source": "installer_record",
+      "value": "db88be6e1a1397c72a15cbf493e9ac913b64cb89",
       "verified": true
     }
   },
@@ -38,5 +38,5 @@
     "web_url": "https://gitlab.dcloud.run/hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "argv:--target"
+  "target_source": "user"
 }

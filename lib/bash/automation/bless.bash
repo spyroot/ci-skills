@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The pre-commit checks bless.sh runs on the staged bytes. bless.sh (repository
-# root) is the thin entry point; .githooks/pre-commit calls it with --staged.
+# Shared static-check functions for the local pre-commit hook and CI.
+# bless.sh is the local staged/worktree entrypoint. scripts/ci/static.sh selects
+# the committed comparison range for GitHub Actions.
 # Author Mustafa Bayramov mbayramo@cisco.com / spyroot@gmail.com
 
 [[ ${CI_SKILLS_BLESS_LOADED:-0} == 1 ]] && return 0
@@ -15,7 +16,7 @@ source "${BASH_SOURCE[0]%/*}/../core/source_graph.bash"
 # the repository root, the index snapshot and the staged-path list
 # (NUL-separated, relative paths). It returns 0 when it passes or has nothing
 # to check, 1 when it fails, and CI_EXIT_BLOCKED when a tool it needs is missing.
-BLESS_CHECKS='whitespace json schemas yaml markdown shell python endpoints source_cycle runtime_sync'
+BLESS_CHECKS='whitespace json schemas yaml markdown bash_syntax shell shfmt actionlint gitleaks python endpoints source_cycle runtime_sync'
 BLESS_FAILED=1
 # yamllint settings, inline as in the standards repository's bless.sh.
 BLESS_YAML_CONFIG='{extends: default, rules: {document-start: disable, line-length: {max: 120}, truthy: disable}}'
@@ -122,6 +123,21 @@ bless_read_files() {
   done
 }
 
+# Summary: Write committed ACMR paths after a comparison revision.
+# Arguments: $1 repository root; $2 comparison revision; $3 output path.
+# Stdout: none.
+# Stderr: a blocker when the comparison revision is unavailable.
+# Returns: 0 or CI_EXIT_BLOCKED.
+bless_changed_paths() {
+  local root=$1 base=$2 output=$3
+  git -C "$root" cat-file -e "${base}^{commit}" 2>/dev/null ||
+    ci_fail "$CI_EXIT_BLOCKED" "static checks cannot resolve base revision $base" \
+      'Fetch the comparison base, then run the checks again.' ||
+    return
+  git -C "$root" diff --name-only -z --diff-filter=ACMR \
+    "${base}...HEAD" >"$output" || return "$CI_EXIT_BLOCKED"
+}
+
 # Summary: Refuse whitespace errors in the selected Git view.
 # Arguments: $1 repository root; $2 snapshot; $3 path inventory; $4 interpreter; $5 scope.
 # Stderr: paths containing trailing horizontal whitespace.
@@ -159,6 +175,20 @@ bless_check_markdown() {
     return "$BLESS_FAILED"
 }
 
+# Summary: Parse selected Bash and POSIX shell files without executing them.
+# Arguments: $1 root; $2 snapshot; $3 path list; $4 interpreter; $5 scope.
+# Stderr: Bash parser diagnostics.
+# Returns: 0 or 1 for a syntax failure.
+bless_check_bash_syntax() {
+  local snap=$2 list=$3 path failed=0
+  bless_read_files < <(bless_select_shell "$snap" "$list")
+  for path in "${BLESS_FILES[@]}"; do
+    [[ $path == *.bats ]] && continue
+    bash -n "$snap/$path" || failed=$BLESS_FAILED
+  done
+  return "$failed"
+}
+
 # Summary: Lint selected shell files with ShellCheck.
 # Arguments: $1 root; $2 snapshot; $3 path list; $4 interpreter; $5 scope.
 # Stdout: ShellCheck output.
@@ -169,7 +199,66 @@ bless_check_shell() {
   bless_read_files < <(bless_select_shell "$snap" "$list")
   ((${#BLESS_FILES[@]})) || return 0
   shellcheck=$(bless_tool shellcheck) || return
-  (cd "$snap" && "$shellcheck" -x "${BLESS_FILES[@]}") || return "$BLESS_FAILED"
+  (cd "$snap" && "$shellcheck" -x -S style "${BLESS_FILES[@]}") || return "$BLESS_FAILED"
+}
+
+# Summary: Verify selected shell formatting with the repository's two-space style.
+# Arguments: $1 root; $2 snapshot; $3 path list; $4 interpreter; $5 scope.
+# Stdout: shfmt differences.
+# Stderr: tool diagnostics.
+# Returns: 0, 1 for formatting differences, or CI_EXIT_BLOCKED when shfmt is absent.
+bless_check_shfmt() {
+  local snap=$2 list=$3 path shfmt
+  local -a files=()
+  bless_read_files < <(bless_select_shell "$snap" "$list")
+  for path in "${BLESS_FILES[@]}"; do
+    [[ $path == *.bats ]] || files+=("$path")
+  done
+  ((${#files[@]})) || return 0
+  shfmt=$(bless_tool shfmt) || return
+  (cd "$snap" && "$shfmt" -d -i 2 "${files[@]}") || return "$BLESS_FAILED"
+}
+
+# Summary: Validate GitHub workflow syntax when a workflow is selected.
+# Arguments: $1 root; $2 snapshot; $3 path list; $4 interpreter; $5 scope.
+# Stdout: actionlint diagnostics.
+# Stderr: tool diagnostics.
+# Returns: 0, 1 for invalid workflow syntax, or CI_EXIT_BLOCKED when actionlint is absent.
+bless_check_actionlint() (
+  local snap=$2 list=$3 actionlint path
+  local -a workflows=()
+  bless_read_files < <(bless_select "$list" '.github/workflows/*.yml' '.github/workflows/*.yaml')
+  ((${#BLESS_FILES[@]})) || return 0
+  shopt -s nullglob
+  for path in "$snap"/.github/workflows/*.yml "$snap"/.github/workflows/*.yaml; do
+    workflows+=("${path#"$snap"/}")
+  done
+  ((${#workflows[@]})) || return 0
+  actionlint=$(bless_tool actionlint) || return
+  (cd "$snap" && "$actionlint" "${workflows[@]}") || return "$BLESS_FAILED"
+)
+
+# Summary: Scan selected Git content for committed secrets without printing values.
+# Arguments: $1 root; $2 snapshot; $3 path list; $4 interpreter; $5 scope; $6 comparison ref.
+# Stdout: sanitized gitleaks summary.
+# Stderr: tool diagnostics.
+# Returns: 0, 1 when a leak is found, or CI_EXIT_BLOCKED when gitleaks is absent.
+bless_check_gitleaks() {
+  local root=$1 scope=$5 base=${6:-} gitleaks
+  gitleaks=$(bless_tool gitleaks) || return
+  case $scope in
+  staged)
+    (cd "$root" && "$gitleaks" git --redact --no-banner --pre-commit --staged .) ||
+      return "$BLESS_FAILED"
+    ;;
+  changed)
+    (cd "$root" && "$gitleaks" git --redact --no-banner --log-opts="${base}...HEAD" .) ||
+      return "$BLESS_FAILED"
+    ;;
+  *)
+    "$gitleaks" dir --redact --no-banner "$root" || return "$BLESS_FAILED"
+    ;;
+  esac
 }
 
 # Summary: Lint and format-check selected Python with Ruff.
@@ -253,7 +342,9 @@ bless_check_endpoints() {
 # Stderr: source graph diagnostic.
 # Returns: 0 acyclic, 1 cycle or unresolved selected source.
 bless_check_source_cycle() {
-  (cd "$1" && ci_source_graph_acyclic "$5") || return "$BLESS_FAILED"
+  local scope=$5
+  [[ $scope == changed ]] && scope=all
+  (cd "$1" && ci_source_graph_acyclic "$scope") || return "$BLESS_FAILED"
 }
 
 # Summary: Verify that the packaged runtime matches the root source.
@@ -272,13 +363,13 @@ bless_check_runtime_sync() {
   fi
 }
 
-# Summary: Run every check on the staged bytes, or list them with --dry-run.
-# Arguments: $1 repository root; $2 staged or all; $3 dry run boolean.
+# Summary: Run every check on selected bytes, or list them with --dry-run.
+# Arguments: $1 repository root; $2 staged, changed, or all; $3 dry run; $4 base ref.
 # Stdout: one line per check or a dry-run path list.
 # Stderr: failure diagnostics.
 # Returns: 0 pass, 1 check failure, CI_EXIT_BLOCKED on unavailable inputs.
 bless_run() (
-  local root=$1 scope=$2 dry_run=$3 work status=0
+  local root=$1 scope=$2 dry_run=$3 base=${4:-} work status=0
   git -C "$root" rev-parse --git-dir >/dev/null 2>&1 ||
     ci_fail "$CI_EXIT_BLOCKED" "$root is not a git checkout" 'Run bless.sh inside the repository.' ||
     return
@@ -287,20 +378,23 @@ bless_run() (
     return
   # This subshell owns its snapshot and leaves the caller's EXIT trap intact.
   trap 'rm -rf -- "$work"' EXIT
-  bless_run_in "$root" "$work" "$scope" "$dry_run" || status=$?
+  bless_run_in "$root" "$work" "$scope" "$dry_run" "$base" || status=$?
   return "$status"
 )
 
 # Summary: Build the selected file view and run each registered check.
-# Arguments: $1 root; $2 temporary directory; $3 scope; $4 dry-run boolean.
+# Arguments: $1 root; $2 temporary directory; $3 scope; $4 dry run; $5 base ref.
 # Stdout: selected paths or check results.
 # Stderr: Git, tool, and gate diagnostics.
 # Returns: 0 pass, 1 check failure, CI_EXIT_BLOCKED on unavailable inputs.
 bless_run_in() {
-  local root=$1 work=$2 scope=$3 dry_run=$4 list=$2/selected snap python check path status failed=0
+  local root=$1 work=$2 scope=$3 dry_run=$4 base=${5:-}
+  local list=$2/selected snap python check path status failed=0
   if [[ $scope == staged ]]; then
     (cd "$root" && ci_source_graph_selected_staged_paths) >"$list" ||
       return "$CI_EXIT_BLOCKED"
+  elif [[ $scope == changed ]]; then
+    bless_changed_paths "$root" "$base" "$list" || return
   else
     git -C "$root" ls-files --cached --others --exclude-standard -z >"$work/all" ||
       return "$CI_EXIT_BLOCKED"
@@ -319,7 +413,7 @@ bless_run_in() {
     snap=$root
   fi
   if [[ $dry_run == true ]]; then
-    printf 'bless: dry run; the staged paths are:\n'
+    printf 'bless: dry run; the selected paths are:\n'
     tr '\0' '\n' <"$list"
     printf 'bless: checks: %s\n' "$BLESS_CHECKS"
     return 0
@@ -327,7 +421,7 @@ bless_run_in() {
   python=$(bless_python "$snap") || return
   for check in $BLESS_CHECKS; do
     status=0
-    "bless_check_$check" "$root" "$snap" "$list" "$python" "$scope" || status=$?
+    "bless_check_$check" "$root" "$snap" "$list" "$python" "$scope" "$base" || status=$?
     case $status in
     0) printf 'bless: %s ok\n' "$check" ;;
     "$CI_EXIT_BLOCKED") return "$status" ;;

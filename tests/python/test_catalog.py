@@ -26,6 +26,15 @@ CLI = import_script_module("core.cli")
 PROJECT_BINDING = import_script_module("core.project_binding")
 RENDER = load_module("render_manifest", REPO_ROOT / "tools" / "render_manifest.py")
 MANIFEST_PATH = SCRIPT_ROOT.parent / "tools.json"
+PYTHON_COMMANDS = tuple(
+    sorted(
+        {
+            *CATALOG.COMMANDS,
+            *CATALOG.NODE_LOCAL_COMMANDS,
+            *CATALOG.DISCOVERY_COMMANDS,
+        }
+    )
+)
 
 
 def test_runner_actions_declare_mutation_and_readback():
@@ -46,6 +55,17 @@ def test_runner_actions_declare_mutation_and_readback():
         assert verb["result_schema"] == "schemas/results/gitlab-runner-read.schema.json"
 
 
+def _parser_for(script: str) -> argparse.ArgumentParser:
+    """Return the parser behind one catalogued Python command."""
+    if script in CATALOG.NODE_LOCAL_COMMANDS:
+        node_cli = import_script_module("core.node_local_cli")
+        return node_cli.parser(script.removesuffix(".py"))
+    module = load_module(
+        f"entrypoint_{script.removesuffix('.py')}", SCRIPT_ROOT / script
+    )
+    return module.build_parser()
+
+
 def _actual_options(script: str) -> set[str]:
     """Read the options a command really accepts, from its own parser.
 
@@ -55,9 +75,6 @@ def _actual_options(script: str) -> set[str]:
     argparse defined them or not -- five of the eight universal options were
     exempt from this gate. A parser object carries no prose.
     """
-    module = load_module(
-        f"entrypoint_{script.removesuffix('.py')}", SCRIPT_ROOT / script
-    )
     found: set[str] = set()
 
     def visit(parser: argparse.ArgumentParser) -> None:
@@ -69,7 +86,7 @@ def _actual_options(script: str) -> set[str]:
                 for subparser in action.choices.values():
                     visit(subparser)
 
-    visit(module.build_parser())
+    visit(_parser_for(script))
     return found - {"--help"}
 
 
@@ -83,14 +100,21 @@ def test_every_command_accepts_the_universal_tier(script):
     assert missing == [], f"{script} is missing universal options {missing}"
 
 
-@pytest.mark.parametrize("script", sorted(CATALOG.COMMANDS))
-def test_declared_options_are_the_options_the_command_accepts(script):
-    """The catalog is the interface, so it may not drift from argparse."""
-    declared = set(CATALOG.options_for(script))
+@pytest.mark.parametrize("script", PYTHON_COMMANDS)
+def test_every_python_command_parser_and_manifest_match_its_catalog_contract(script):
+    """Every installed Python entrypoint has one catalog-owned option contract."""
+    if script in CATALOG.COMMANDS:
+        contract = CATALOG.describe(script)
+    elif script in CATALOG.NODE_LOCAL_COMMANDS:
+        contract = CATALOG.describe_node(script)
+    else:
+        contract = CATALOG.describe(script)
+    declared = set(contract["options"])
     actual = _actual_options(script)
 
     assert sorted(declared - actual) == [], f"{script} declares options it lacks"
     assert sorted(actual - declared) == [], f"{script} accepts undeclared options"
+    assert set(CATALOG.manifest()["commands"][script]["options"]) == declared
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.COMMANDS))
@@ -156,6 +180,7 @@ def test_the_manifest_routes_every_command_and_nothing_else():
         set(CATALOG.COMMANDS)
         | set(CATALOG.NODE_LOCAL_COMMANDS)
         | set(CATALOG.BASH_COMMANDS)
+        | set(CATALOG.DISCOVERY_COMMANDS)
     )
     assert set(manifest["commands"]) == declared
     assert set(manifest["routing"].values()) == declared
@@ -164,6 +189,18 @@ def test_the_manifest_routes_every_command_and_nothing_else():
         assert (SCRIPT_ROOT.parent / command).is_file()
         assert contract["options"] and contract["required_tools"]
         assert contract["read_only"] is True
+
+
+@pytest.mark.parametrize("script", PYTHON_COMMANDS)
+@pytest.mark.parametrize("secret_option", ("--token", "--password"))
+def test_python_parsers_reject_direct_credential_values_before_resolution(
+    script, secret_option
+):
+    """Only target-selected credential sources reach a provider binding."""
+    with pytest.raises(SystemExit) as rejected:
+        _parser_for(script).parse_args([secret_option, "private-value"])
+
+    assert rejected.value.code == 2
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.NODE_LOCAL_COMMANDS))

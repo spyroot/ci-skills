@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The repository's pre-commit hook: checks the staged bytes before every commit.
+# The repository's pre-commit hook checks staged bytes before every commit.
 # .githooks/pre-commit calls this entrypoint with --staged. The checks live in
 # lib/bash/automation/bless.bash.
 #
@@ -24,7 +24,7 @@ source "$BLESS_ROOT/lib/bash/automation/bless.bash"
 # Returns: 0.
 usage() {
   printf '%s\n' \
-    'Summary: Check staged bytes or nonignored working files.' \
+    'Summary: Check staged or nonignored working files.' \
     'Examples:' \
     '  Check staged files before commit: ./bless.sh --staged' \
     '  Check all working files: ./bless.sh --all' \
