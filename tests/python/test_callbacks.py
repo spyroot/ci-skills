@@ -686,6 +686,7 @@ def test_resource_set_recovers_prior_owned_state_after_downstream_failure():
         def __init__(self) -> None:
             self.current = deepcopy(previous)
             self.applied: list[dict[str, object]] = []
+            self.deleted: list[tuple[str, str, str]] = []
 
         def read(self, _kind: str, _name: str, _namespace: str):
             return deepcopy(self.current)
@@ -697,7 +698,8 @@ def test_resource_set_recovers_prior_owned_state_after_downstream_failure():
             assert isinstance(metadata, dict)
             metadata.setdefault("uid", "prior-uid")
 
-        def delete(self, _kind: str, _name: str, _namespace: str) -> None:
+        def delete(self, kind: str, name: str, namespace: str) -> None:
+            self.deleted.append((kind, name, namespace))
             self.current = None
 
     service = KubernetesService()
@@ -716,7 +718,13 @@ def test_resource_set_recovers_prior_owned_state_after_downstream_failure():
     assert service.current["spec"] == previous["spec"]
     assert service.current["metadata"]["labels"] == previous["metadata"]["labels"]
     assert len(service.applied) == 2
-    assert resources.mutations == []
+
+    applied_before = list(service.applied)
+    deleted_before = list(service.deleted)
+    resources.recover()
+
+    assert service.applied == applied_before
+    assert service.deleted == deleted_before
 
 
 @pytest.mark.parametrize(
