@@ -17,11 +17,14 @@ from tests.python.conftest import LIB_ROOT, import_script_module
 
 ACTION = import_script_module("core.gitlab_actions")
 CALLBACKS = import_script_module("core.action")
+GITHUB_RUNNER = import_script_module("core.github_runner")
 KUBERNETES = import_script_module("core.kubernetes")
 REGISTRY = import_script_module("core.registry_mirror")
 RESOURCES = import_script_module("core.resources")
 RUNTIME = import_script_module("core.runtime")
+RUNNER_CORE = import_script_module("core.runner")
 RUNNERS = import_script_module("core.gitlab_runners")
+STATUS = import_script_module("core.status")
 TARGET = import_script_module("core.target")
 TOOLBOX = import_script_module("core.toolbox")
 
@@ -113,8 +116,8 @@ def test_resource_set_omitted_empty_buildconfig_triggers_is_applied_then_no_op()
     applied = resources.apply(_build_config(spec))
     repeated = resources.apply(_build_config(spec))
 
-    assert applied["action"] == "APPLIED"
-    assert repeated["action"] == "NO_OP"
+    assert applied["action"] == STATUS.APPLIED
+    assert repeated["action"] == STATUS.NO_OP
     assert service.applies == 1
 
 
@@ -603,25 +606,26 @@ def test_wait_build_complete_does_not_capture_logs(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("existing_digest", "expected_deletes"),
+    ("existing_digest", "expected_deletes", "expected_copies"),
     (
-        (None, [("toolbox", "smoke")]),
-        ("sha256:preexisting", []),
+        (None, [("toolbox", "smoke")], 1),
+        ("sha256:preexisting", [], 2),
     ),
 )
-def test_harbor_push_failure_cleanup_deletes_only_a_new_tag(
-    existing_digest, expected_deletes
+def test_harbor_push_failure_cleanup_restores_prior_tag_or_removes_new_tag(
+    existing_digest, expected_deletes, expected_copies
 ):
-    """A downstream failure removes a new tag without deleting an existing one."""
+    """A downstream failure restores a prior tag or removes a newly created tag."""
     published_digest = "sha256:published"
 
     class HarborService:
         def __init__(self) -> None:
             self.current = existing_digest
             self.deleted: list[tuple[str, str]] = []
+            self.copies: list[tuple[str, str]] = []
 
-        def inspect(self, _image: str) -> str:
-            return published_digest
+        def inspect(self, image: str) -> str:
+            return image.rsplit("@", 1)[-1] if "@" in image else published_digest
 
         def digest(self, _repository: str, _tag: str) -> str | None:
             return self.current
@@ -630,9 +634,10 @@ def test_harbor_push_failure_cleanup_deletes_only_a_new_tag(
             separator = "@" if reference.startswith("sha256:") else ":"
             return f"registry.example.test/unit/{repository}{separator}{reference}"
 
-        def copy(self, _source: str, _destination: str) -> str:
-            self.current = published_digest
-            return published_digest
+        def copy(self, source: str, destination: str) -> str:
+            self.copies.append((source, destination))
+            self.current = self.inspect(source)
+            return self.current
 
         def delete_tag(self, repository: str, tag: str) -> bool:
             self.deleted.append((repository, tag))
@@ -654,8 +659,116 @@ def test_harbor_push_failure_cleanup_deletes_only_a_new_tag(
 
     assert context.failed is True
     assert service.deleted == expected_deletes
-    assert service.current == (None if existing_digest is None else published_digest)
+    assert service.current == existing_digest
+    assert len(service.copies) == expected_copies
     assert events == ["downstream.collect", "downstream.cleanup"]
+
+
+def test_resource_set_recovers_prior_owned_state_after_downstream_failure():
+    """Recovery reapplies the first owned state after a later callback fails."""
+    previous = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": "runner",
+            "namespace": "unit",
+            "uid": "prior-uid",
+            "labels": {
+                RESOURCES.MANAGER_LABEL: RESOURCES.MANAGER_VALUE,
+                RESOURCES.OPERATION_LABEL: "unit-runner",
+            },
+        },
+        "spec": {"replicas": 1},
+        "status": {"readyReplicas": 1},
+    }
+
+    class KubernetesService:
+        def __init__(self) -> None:
+            self.current = deepcopy(previous)
+            self.applied: list[dict[str, object]] = []
+
+        def read(self, _kind: str, _name: str, _namespace: str):
+            return deepcopy(self.current)
+
+        def apply(self, document: dict[str, object]) -> None:
+            self.applied.append(deepcopy(document))
+            self.current = deepcopy(document)
+            metadata = self.current["metadata"]
+            assert isinstance(metadata, dict)
+            metadata.setdefault("uid", "prior-uid")
+
+        def delete(self, _kind: str, _name: str, _namespace: str) -> None:
+            self.current = None
+
+    service = KubernetesService()
+    resources = RESOURCES.ResourceSet(service, "unit", "unit-runner")
+    resources.apply(
+        {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {"name": "runner"},
+            "spec": {"replicas": 2},
+        }
+    )
+
+    resources.recover()
+
+    assert service.current["spec"] == previous["spec"]
+    assert service.current["metadata"]["labels"] == previous["metadata"]["labels"]
+    assert len(service.applied) == 2
+    assert resources.mutations == []
+
+
+@pytest.mark.parametrize(
+    ("recovered", "raises"),
+    (
+        (
+            {"id": 42, "labels": [{"name": "self-hosted"}, {"name": "Linux"}]},
+            False,
+        ),
+        ({"id": 43, "labels": [{"name": "self-hosted"}]}, True),
+    ),
+)
+def test_github_runtime_cleanup_requires_the_original_runner_identity_and_labels(
+    recovered, raises
+):
+    """Failed replacement preserves the original GitHub runner or reports recovery failure."""
+    previous = {
+        "id": 42,
+        "labels": [{"name": "self-hosted"}, {"name": "Linux"}],
+    }
+
+    class GitHubService:
+        def __init__(self) -> None:
+            self.deleted: list[str] = []
+
+        def runner(self, name: str):
+            assert name == "runner"
+            return previous
+
+        def wait_online(self, name: str, timeout: int):
+            assert (name, timeout) == ("runner", 30)
+            return recovered
+
+        def delete_runner(self, name: str) -> bool:
+            self.deleted.append(name)
+            return True
+
+    service = GitHubService()
+    runtime = GITHUB_RUNNER.GitHubRunnerRuntime(
+        action=RUNNER_CORE.RunnerAction("unit", "runner", "/runner", (), 30)
+    )
+    context = CALLBACKS.ExecutionContext(services={"github": service}, failed=True)
+    runtime.bind(context)
+    runtime.collect()
+
+    if raises:
+        with pytest.raises(GITHUB_RUNNER.APIError, match="runner_recovery_incomplete"):
+            runtime.cleanup()
+    else:
+        runtime.cleanup()
+
+    assert service.deleted == []
 
 
 @pytest.mark.parametrize("signal_name", ("SIGINT", "SIGTERM", "SIGHUP"))

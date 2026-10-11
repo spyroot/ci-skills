@@ -28,6 +28,7 @@ def workflow(action: WorkflowAction) -> Executor:
     :param action: Prepared operation inputs.
     :returns: The existing callback executor.
     """
+    confirmation = ConfirmWorkflow(action=action)
     callbacks = [
         HarborAuth(
             target=action.target,
@@ -35,12 +36,8 @@ def workflow(action: WorkflowAction) -> Executor:
             actions=("pull", "push"),
             timeout=action.args.timeout,
         ),
-        ConfirmWorkflow(action=action),
-        HarborPush(
-            action=PushAction(
-                action.repository, action.args.tag, action.args.source_image
-            )
-        ),
+        confirmation,
+        HarborPush(action=PushAction(action.repository, action.args.tag, confirmation)),
     ]
     return Executor(context=action.context, callbacks=callbacks)
 

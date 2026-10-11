@@ -14,6 +14,7 @@ from typing import Any, Final, cast
 from .action import AbstractCallback, K8SCallback
 from .kubernetes import KubernetesError, KubernetesService
 from .resources import ResourceSet
+from .status import APPLIED, NO_OP, VERIFIED
 from .toolbox import DOCTOR_PATH
 
 POD_API: Final = "v1"
@@ -161,9 +162,9 @@ class DeployRunner(K8SCallback[RunnerAction, dict[str, Any]]):
             "json",
         )
         evidence = running_images(pods, image)
-        changed = any(item["action"] == "APPLIED" for item in self.resources.evidence)
+        changed = any(item["action"] == APPLIED for item in self.resources.evidence)
         return {
-            "action": "APPLIED" if changed else "NO_OP",
+            "action": APPLIED if changed else NO_OP,
             "verified": True,
             "namespace": action.namespace,
             "name": action.name,
@@ -178,7 +179,7 @@ class DeployRunner(K8SCallback[RunnerAction, dict[str, Any]]):
         :raises KubernetesError: If owned resource cleanup fails.
         """
         if self.resources is not None and (self.context.failed or self.result is None):
-            self.resources.cleanup_created()
+            self.resources.recover()
 
 
 class DeleteRunner(K8SCallback[RunnerAction, dict[str, Any]]):
@@ -201,7 +202,7 @@ class DeleteRunner(K8SCallback[RunnerAction, dict[str, Any]]):
         for suffix in (REGISTRATION_SECRET_SUFFIX, REGISTRY_SECRET_SUFFIX):
             changed = resources.delete("Secret", action.name + suffix) or changed
         return {
-            "action": "APPLIED" if changed else "NO_OP",
+            "action": APPLIED if changed else NO_OP,
             "verified": True,
             "namespace": action.namespace,
             "name": action.name,
@@ -284,7 +285,7 @@ class PullImage(K8SCallback[RunnerAction, dict[str, Any]]):
             "json",
         )
         return {
-            "action": "VERIFIED",
+            "action": VERIFIED,
             "verified": True,
             "image": image,
             "pods": running_images(pods, image, completed=True),

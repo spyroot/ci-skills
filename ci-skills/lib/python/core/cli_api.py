@@ -84,22 +84,34 @@ def _status_code(headers: str) -> int | None:
     return int(status.group(1)) if status else None
 
 
+def http_failure(code: int | None) -> str | None:
+    """Classify an HTTP status for the shared provider retry policy.
+
+    :param code: Provider status, or None when transport failed before a response.
+    :returns: Classified HTTP failure, or None for a non-error response.
+    """
+    if code is None:
+        return None
+    if code == 401:
+        return "authentication"
+    if code == 403:
+        return "authorization"
+    if code == 408:
+        return "provider_408"
+    if code == 429:
+        return "rate_limited"
+    if 400 <= code <= 499:
+        return f"provider_{code}"
+    if 500 <= code <= 599:
+        return "provider_5xx"
+    return None
+
+
 def _failure(result: CommandResult, headers: str) -> str:
     """Classify retryable provider HTTP failures without reporting response text."""
-    code = _status_code(headers)
-    if code is not None:
-        if code == 401:
-            return "authentication"
-        if code == 403:
-            return "authorization"
-        if code == 408:
-            return "provider_408"
-        if code == 429:
-            return "rate_limited"
-        if 400 <= code <= 499:
-            return f"provider_{code}"
-        if 500 <= code <= 599:
-            return "provider_5xx"
+    reason = http_failure(_status_code(headers))
+    if reason is not None:
+        return reason
     known = error_class(result)
     if known != "command_failed":
         return known
@@ -135,6 +147,24 @@ def _delay(stderr: str, endpoint: str, attempt: int) -> float:
     base = 0.2 * 2**attempt
     digest = hashlib.sha256(f"{endpoint}:{attempt}".encode()).digest()
     return base + (digest[0] / 255) * base * 0.2
+
+
+def read_retry_delay(
+    method: str, reason: str, headers: str, endpoint: str, attempt: int
+) -> float:
+    """Apply one shared bounded-read policy to CLI and direct HTTP transports.
+
+    :param method: Requested HTTP method.
+    :param reason: Sanitized transport or HTTP classification.
+    :param headers: Response headers containing any Retry-After value.
+    :param endpoint: Selected relative endpoint, used for bounded jitter.
+    :param attempt: Zero-based failed attempt.
+    :returns: Delay before the next permitted GET attempt.
+    :raises APIError: If the failure is terminal, exhausted, or exceeds the delay budget.
+    """
+    if method != "GET" or reason not in _RETRYABLE or attempt + 1 >= READ_ATTEMPTS:
+        raise APIError(reason, attempts=attempt + 1)
+    return _delay(headers, endpoint, attempt)
 
 
 class CLIAPIClient:
@@ -290,11 +320,11 @@ class CLIAPIClient:
                 if result.returncode == 0:
                     break
                 reason = _failure(result, headers)
-                if method != "GET" or reason not in _RETRYABLE:
-                    raise APIError(reason, attempts=attempt + 1)
-                if attempt + 1 == READ_ATTEMPTS:
-                    raise APIError(reason, attempts=READ_ATTEMPTS)
-                self._sleep(_delay(headers or result.stderr, selected, attempt))
+                self._sleep(
+                    read_retry_delay(
+                        method, reason, headers or result.stderr, selected, attempt
+                    )
+                )
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)

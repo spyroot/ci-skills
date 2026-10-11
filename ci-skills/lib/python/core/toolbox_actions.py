@@ -33,7 +33,7 @@ from .report import report
 from .resources import ResourceSet
 from .runner import RunnerAction
 from .schema import SCHEMA_DIRECTORY, TOOLBOX_SCHEMA
-from .status import BLOCKED, DRY_RUN, PASS, PLANNED
+from .status import APPLIED, BLOCKED, DRY_RUN, NO_OP, PASS, PLANNED
 from .target import Target
 from .toolbox import (
     BuildAction,
@@ -84,6 +84,7 @@ class WorkflowAction:
     spec: ToolboxSpec | None = None
     runner: RunnerAction | None = None
     resolved_base: str | None = None
+    resolved_source: str | None = None
     digest: str | None = None
     context: ExecutionContext = field(default_factory=ExecutionContext)
 
@@ -151,6 +152,8 @@ class WorkflowAction:
         data = {
             "kind": self.args.kind,
             "operation": self.args.action,
+            "skill": self.target.skill,
+            "tested_revision": self.target.tested_revision,
             "target_file": str(self.target.source_file),
             "target_source": self.target.source_kind,
             "github": asdict(self.target.github) if self.target.github else None,
@@ -172,6 +175,7 @@ class WorkflowAction:
             },
             "specification": self.spec.fingerprint if self.spec else None,
             "base_image": self.resolved_base,
+            "source_image": self.resolved_source,
             "runner": asdict(self.runner) if self.runner else None,
         }
         if data["github"] and data["github"]["token_file"] is not None:
@@ -268,7 +272,7 @@ class WorkflowAction:
         }
         if executor is not None:
             output["cleanup"] = {
-                "status": "PASS" if not executor.cleanup_failures else BLOCKED,
+                "status": PASS if not executor.cleanup_failures else BLOCKED,
                 "failures": [asdict(item) for item in executor.cleanup_failures],
             }
         return emit_result(ExecutionResult(None, output), args)
@@ -300,10 +304,18 @@ class ConfirmWorkflow(Callback[WorkflowAction, dict[str, Any]]):
             digest = harbor.inspect(workflow.spec.base_image)
             image = workflow.spec.base_image.rsplit("@", 1)[0]
             workflow.resolved_base = image + "@" + digest
+        source = getattr(workflow.args, "source_image", None)
+        if source:
+            harbor = cast(HarborService, self.context.services["harbor"])
+            digest = harbor.inspect(source)
+            workflow.resolved_source = source.rsplit("@", 1)[0] + "@" + digest
         workflow.digest = workflow.fingerprint()
         if workflow.args.apply and workflow.args.confirm_plan != workflow.digest:
             raise ValueError("confirm_plan_mismatch_rerun_plan")
-        return {"plan_digest": workflow.digest}
+        result = {"plan_digest": workflow.digest}
+        if workflow.resolved_source is not None:
+            result["image"] = workflow.resolved_source
+        return result
 
 
 class EnsureNamespace(Callback[WorkflowAction, dict[str, Any]]):
@@ -356,7 +368,7 @@ class EnsureNamespace(Callback[WorkflowAction, dict[str, Any]]):
                     {
                         "name": name,
                         "uid": observed["metadata"]["uid"],
-                        "action": "NO_OP",
+                        "action": NO_OP,
                     }
                 )
         return {"verified": True, "namespaces": records}
@@ -447,7 +459,7 @@ class DeleteToolbox(Callback[WorkflowAction, dict[str, Any]]):
             changed = harbor.delete_tag(spec.image_repository, reference) or changed
         return {
             "verified": True,
-            "action": "APPLIED" if changed else "NO_OP",
+            "action": APPLIED if changed else NO_OP,
             "repository": spec.image_repository,
             "tag": spec.image_tag,
             "namespace": spec.namespace,

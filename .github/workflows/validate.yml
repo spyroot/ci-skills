@@ -154,6 +154,7 @@ jobs:
             tests/python/test_gitlab_runner_lifecycle.py \
             tests/python/test_catalog.py \
             tests/python/test_callbacks.py \
+            tests/python/test_toolbox_workflows.py \
             tests/python/test_propositions.py \
             tests/python/test_ci_required_result.py \
             tests/python/test_validate_workflow_policy.py

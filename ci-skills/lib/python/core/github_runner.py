@@ -20,6 +20,7 @@ from .runner import (
     RunnerAction,
     RunnerRuntime,
 )
+from .status import APPLIED, NO_OP
 
 GITHUB_INIT_SCRIPT: Final = SKILL_ROOT / "lib/bash/runner/github-init.bash"
 REGISTRATION_KEY: Final = "github-token"
@@ -34,26 +35,57 @@ class GitHubRunnerRuntime(GitHubCallback[RunnerAction, RunnerRuntime]):
     """Prepare native registration inputs for the shared deployment callback."""
 
     def collect(self) -> None:
-        """Remember whether registration existed before this workflow.
+        """Snapshot registration identity before this workflow can replace it.
 
         :raises ValueError: If runner inputs are missing.
         :raises APIError: If native registration read-back fails.
         """
         if self.action is None:
             raise ValueError("runner_action_missing")
-        self._absent = cast(GitHubService, self.github).runner(self.action.name) is None
+        self._previous_runner_collected = False
+        self._previous_runner = cast(GitHubService, self.github).runner(
+            self.action.name
+        )
+        self._previous_runner_collected = True
 
     def cleanup(self) -> None:
-        """Remove newly created registration if a later workflow step failed.
+        """Remove a new registration or verify the prior runner recovered.
 
-        :raises APIError: If exact registration cleanup or read-back fails.
+        :raises ValueError: If runner inputs are unavailable during recovery.
+        :raises APIError: If exact registration cleanup or recovery is incomplete.
         """
+        if not self.context.failed:
+            return
+        action = self.action
+        if action is None:
+            raise ValueError("runner_action_missing")
+        service = cast(GitHubService, self.github)
+        if not getattr(self, "_previous_runner_collected", False):
+            raise APIError("runner_recovery_incomplete")
+        previous = getattr(self, "_previous_runner", None)
+        if previous is None:
+            service.delete_runner(action.name)
+            return
+        try:
+            recovered = service.wait_online(action.name, action.timeout)
+        except APIError as exc:
+            raise APIError("runner_recovery_incomplete") from exc
+        expected_labels = {
+            str(label.get("name", "")).casefold()
+            for label in previous.get("labels", [])
+            if isinstance(label, dict)
+        }
+        observed_labels = {
+            str(label.get("name", "")).casefold()
+            for label in recovered.get("labels", [])
+            if isinstance(label, dict)
+        }
         if (
-            self.context.failed
-            and getattr(self, "_absent", False)
-            and self.action is not None
+            not isinstance(previous.get("id"), int)
+            or recovered.get("id") != previous["id"]
+            or observed_labels != expected_labels
         ):
-            cast(GitHubService, self.github).delete_runner(self.action.name)
+            raise APIError("runner_recovery_incomplete")
 
     def run(self) -> RunnerRuntime:
         """Bind registration to the authenticated repository and selected name.
@@ -157,7 +189,7 @@ class DeleteGitHubRunner(GitHubCallback[RunnerAction, dict[str, Any]]):
         service = cast(GitHubService, self.github)
         changed = service.delete_runner(self.action.name)
         return {
-            "action": "APPLIED" if changed else "NO_OP",
+            "action": APPLIED if changed else NO_OP,
             "verified": True,
             "name": self.action.name,
             "repository": service.repository,

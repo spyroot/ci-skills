@@ -86,7 +86,29 @@
         "dependencies": {
           "type": "array",
           "items": {
-            "$ref": "https://github.com/spyroot/ci-skills/schemas/configuration/toolchain-dependencies.schema.json#/$defs/dependency"
+            "$ref": "https://github.com/spyroot/ci-skills/schemas/configuration/toolchain-dependencies.schema.json#/$defs/dependency",
+            "properties": {
+              "linux": {
+                "allOf": [
+                  {
+                    "if": {"properties": {"method": {"const": "archive"}}},
+                    "then": {"required": ["url", "sha256", "destination"]}
+                  },
+                  {
+                    "if": {"properties": {"method": {"const": "download"}}},
+                    "then": {"required": ["destination"]}
+                  },
+                  {
+                    "if": {"properties": {"method": {"const": "go"}}},
+                    "then": {"required": ["module"]}
+                  },
+                  {
+                    "if": {"properties": {"method": {"enum": ["npm", "uv"]}}},
+                    "then": {"required": ["package"]}
+                  }
+                ]
+              }
+            }
           }
         },
         "requiredCommands": {

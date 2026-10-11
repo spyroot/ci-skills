@@ -52,6 +52,9 @@
           },
           "verified": {
             "type": "boolean"
+          },
+          "action": {
+            "enum": ["APPLIED", "NO_OP", "VERIFIED"]
           }
         }
       }

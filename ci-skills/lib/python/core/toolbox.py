@@ -625,9 +625,9 @@ class BuildToolbox(K8SCallback[BuildAction, ToolboxBuildResult]):
         return self._result(digest, name, reused=False)
 
     def cleanup(self) -> None:
-        """Delete the generated Build and owned temporary push Secret.
+        """Recover durable state and delete temporary build resources.
 
-        :raises KubernetesError: If an owned resource remains present.
+        :raises KubernetesError: If recovery or temporary cleanup is incomplete.
         """
         errors: list[BaseException] = []
         action = self._action()
@@ -636,15 +636,15 @@ class BuildToolbox(K8SCallback[BuildAction, ToolboxBuildResult]):
                 self._service().delete("build", self._build_name, action.spec.namespace)
             except BaseException as exc:  # noqa: BLE001 - finish owned cleanup
                 errors.append(exc)
+        if self.context.failed and self._resource_set is not None:
+            try:
+                self._resource_set.recover()
+            except BaseException as exc:  # noqa: BLE001 - retain every recovery result
+                errors.append(exc)
         if self._secret_name is not None:
             try:
                 self._resources().delete("secret", self._secret_name)
             except BaseException as exc:  # noqa: BLE001 - finish owned cleanup
-                errors.append(exc)
-        if self.context.failed and self._resource_set is not None:
-            try:
-                self._resource_set.cleanup_created()
-            except BaseException as exc:  # noqa: BLE001 - retain every cleanup result
                 errors.append(exc)
         if errors:
             raise KubernetesError("toolbox_cleanup_incomplete") from errors[0]
