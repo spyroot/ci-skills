@@ -668,7 +668,7 @@ def test_harbor_push_failure_cleanup_restores_prior_tag_or_removes_new_tag(
 @pytest.mark.parametrize(
     ("prior_digest", "expected_copies", "expected_deletes"),
     (
-        ("sha256:prior-candidate", 1, []),
+        ("sha256:" + "c" * 64, 1, []),
         (None, 0, [("toolbox", "ci-skills-build-" + "a" * 24)]),
     ),
     ids=("restore-existing-candidate", "delete-new-candidate"),
@@ -677,7 +677,7 @@ def test_harbor_build_failure_cleanup_restores_candidate_tag(
     prior_digest, expected_copies, expected_deletes
 ):
     """A failed build restores an overwritten candidate tag or removes a new one."""
-    produced_digest = "sha256:produced-candidate"
+    produced_digest = "sha256:" + "d" * 64
 
     class Spec:
         namespace = "toolbox-ns"
