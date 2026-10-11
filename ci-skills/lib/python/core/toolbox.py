@@ -20,6 +20,7 @@ from typing import Any, Final, cast
 from .action import K8SCallback
 from .kubernetes import KubernetesError, KubernetesService
 from .resources import ResourceSet
+from .runtime import error_class
 from .schema import TOOLBOX_SCHEMA, SpecificationError, validate_specification
 
 MANAGED_ANNOTATION: Final = "ci-skills.spyroot.dev/managed-by"
@@ -584,16 +585,24 @@ class BuildToolbox(K8SCallback[BuildAction, ToolboxBuildResult]):
         self._resources().apply(self._build_config(secret_name, None))
         with tempfile.TemporaryDirectory(prefix="ci-skills-toolbox-") as directory:
             action.spec.render(Path(directory), action.resolved_base_image)
-            started = self._service().json(
+            result = self._service().command(
                 "--namespace",
                 action.spec.namespace,
                 "start-build",
                 f"buildconfig/{action.spec.app}",
                 f"--from-dir={directory}",
                 "-o",
-                "json",
+                "name",
                 openshift=True,
             )
+        if result.returncode:
+            raise ToolboxError("build_start_failed:" + error_class(result))
+        reference = result.stdout.strip()
+        if not reference:
+            raise ToolboxError("build_reference_missing")
+        started = self._service().json(
+            "--namespace", action.spec.namespace, "get", reference, "-o", "json"
+        )
         if not isinstance(started, dict):
             raise ToolboxError("build_start_invalid")
         metadata = started.get("metadata")

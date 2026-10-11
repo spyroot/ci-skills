@@ -31,6 +31,7 @@ SCHEMA = json.loads(
     (REPO_ROOT / "schemas" / "ci_skills_endpoints.schema.json").read_text()
 )
 TEMPLATE = "target.toml.template"
+UNKNOWN_AUTHORITY = "unregistered_authority"
 # Commits in throwaway repositories must not depend on the caller's git config.
 IDENTITY = (
     "-c",
@@ -135,7 +136,7 @@ def test_the_contract_accepts_exactly_the_keys_the_parser_accepted() -> None:
 
 def test_the_authorities_come_from_the_contract() -> None:
     assert CATALOG.AUTHORITIES == ENDPOINTS.TARGET_CONTRACT.authorities
-    assert CATALOG.AUTHORITIES == ("github", "gitlab", "kubernetes")
+    assert CATALOG.AUTHORITIES == ("github", "gitlab", "harbor", "kubernetes")
 
 
 def test_every_declared_key_is_a_pointer_or_a_listed_value() -> None:
@@ -150,7 +151,7 @@ def test_every_declared_key_is_a_pointer_or_a_listed_value() -> None:
 
 def test_an_unknown_table_path_is_refused_by_the_contract() -> None:
     with pytest.raises(KeyError):
-        ENDPOINTS.TARGET_CONTRACT.names("harbor")
+        ENDPOINTS.TARGET_CONTRACT.names(UNKNOWN_AUTHORITY)
 
 
 def test_the_parser_rejects_a_key_the_contract_does_not_declare(
@@ -306,11 +307,11 @@ def test_a_commented_random_key_fails(repo: Path) -> None:
 
 
 def test_a_new_authority_without_a_declaration_fails(repo: Path) -> None:
-    _append(repo / TEMPLATE, '\n# [harbor]  # a registry\n# url = "x"\n')
+    _append(repo / TEMPLATE, f'\n# [{UNKNOWN_AUTHORITY}]\n# url = "x"\n')
     code, record = _gate(repo)
     assert code == 1
-    assert ("undeclared", "harbor") in _rules(record)
-    assert ("undeclared", "harbor.url") in _rules(record)
+    assert ("undeclared", UNKNOWN_AUTHORITY) in _rules(record)
+    assert ("undeclared", f"{UNKNOWN_AUTHORITY}.url") in _rules(record)
 
 
 def test_a_random_key_in_a_documented_example_fails(repo: Path) -> None:
