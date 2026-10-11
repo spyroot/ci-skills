@@ -278,10 +278,9 @@ below goes beyond them.
 4. Add the `openai.yaml` render to `tools/render_manifest.py` and the two
    icon files under `ci-skills/assets/`, then render once (Codex metadata
    and install scopes).
-5. After the last skill edit, capture a fresh publication receipt on the
-   declared executor (Delivery, test and proof, part 4); it stays
-   non-`PASS` until CI03-GATES G0 settles the `required_checks` read-back
-   (D-GATE).
+5. Verify the candidate and capture affected live capability evidence as
+   described in Delivery, test and proof, part 4, following
+   [Validation](../../README.md#validation).
 6. Add the tests (Delivery, test and proof, part 2), and open one pull
    request; merge per CI10-PHASES, How a phase lands.
 7. Read back: `bin/ci-skills list` shows exactly one `ci-skills` record,
@@ -295,11 +294,9 @@ below goes beyond them.
 - **Tests.** Written with the block (Delivery, test and proof, part 2); run
   status UNVERIFIED until a gate route exists (CI03-GATES, G0; decided
   2026-10-06, D-GATE).
-- **Receipt.** This phase adds `ci-skills/agents/openai.yaml` and
-  `ci-skills/assets/` inside the skill tree, so the skill digest changes and
-  the committed publication receipt no longer matches; capture a fresh one
-  after the last skill edit (Delivery, test and proof, part 4; CI03-GATES,
-  G5).
+- **Evidence.** Follow Delivery, test and proof, part 4 for candidate identity
+  and affected live capability evidence; catalog validation does not require
+  a full-publication receipt.
 
 ## Delivery, test and proof
 
@@ -314,8 +311,8 @@ below goes beyond them.
    (the metadata fields the frontmatter does not carry),
    `tests/python/test_catalog.py`, `tests/python/test_render_manifest.py`,
    `tests/python/test_installer.py`, `tests/python/test_installed_package.py`,
-   `tests/bash/install.bats` and `tests/acceptance/receipts/operator-laptop.json`
-   (recaptured). The commands that run: `bin/ci-skills list --json`;
+   `tests/bash/install.bats`. Live evidence follows part 4.
+   The commands that run: `bin/ci-skills list --json`;
    `bin/ci-skills get glab`;
    `bin/ci-skills install glab --skills-dir DIR --apply --confirm-plan DIGEST --json`;
    `tools/render_manifest.py`;
