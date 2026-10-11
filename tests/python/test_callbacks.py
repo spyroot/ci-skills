@@ -693,6 +693,7 @@ def test_harbor_build_failure_cleanup_restores_candidate_tag(
 
     class HarborService:
         dockerconfig = b'{"auths":{"registry.example.test":{}}}'
+        target = Namespace(host="registry.example.test", project="unit")
 
         def __init__(self) -> None:
             self.current = prior_digest
