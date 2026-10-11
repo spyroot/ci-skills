@@ -277,8 +277,9 @@ YAML
 }
 
 @test 'shared logging flags produce JSON Lines with the selected run ID' {
+  copy_bless_fixture
   log_file="${BATS_TEST_TMPDIR}/bless.jsonl"
-  run "$repo_root/bless.sh" --dry-run --log-format json --log-level info \
+  run "$fixture/bless.sh" --dry-run --log-format json --log-level info \
     --log-file "$log_file" --run-id fixture-run
   [ "$status" -eq 0 ]
   [ "$(jq -r 'select(.runId == "fixture-run") | .event' "$log_file" | wc -l | tr -d ' ')" -eq 2 ]
