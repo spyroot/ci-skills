@@ -218,6 +218,50 @@ class HarborService:
         }
 
 
+@dataclass(frozen=True)
+class TagSnapshot:
+    """Registry tag state captured before a workflow may mutate it."""
+
+    service: HarborService = field(repr=False)
+    repository: str
+    tag: str
+    prior_digest: str | None
+
+    @classmethod
+    def capture(cls, service: HarborService, repository: str, tag: str) -> TagSnapshot:
+        """Read and retain the exact current state of one registry tag.
+
+        :param service: Authenticated registry service.
+        :param repository: Project-relative repository selected by the caller.
+        :param tag: Exact mutable tag that a later operation may change.
+        :returns: Snapshot that can restore the observed digest or absence.
+        :raises APIError: If the current registry state cannot be read.
+        """
+        return cls(service, repository, tag, service.digest(repository, tag))
+
+    def restore(self) -> bool:
+        """Restore the captured digest or absence with independent read-back.
+
+        :returns: Whether provider state required a write.
+        :raises APIError: If restoration or its independent read-back fails.
+        """
+        current = self.service.digest(self.repository, self.tag)
+        if current == self.prior_digest:
+            return False
+        if self.prior_digest is None:
+            self.service.delete_tag(self.repository, self.tag)
+        else:
+            restored = self.service.copy(
+                self.service.image(self.repository, self.prior_digest),
+                self.service.image(self.repository, self.tag),
+            )
+            if restored != self.prior_digest:
+                raise APIError("tag_recovery_digest_mismatch")
+        if self.service.digest(self.repository, self.tag) != self.prior_digest:
+            raise APIError("tag_recovery_readback_mismatch")
+        return True
+
+
 class HarborAuth(HarborCallback[None, HarborService]):
     """Resolve existing Harbor credentials once and prove requested access."""
 
@@ -286,9 +330,13 @@ class HarborPush(HarborCallback[PushAction, dict[str, Any]]):
 
     def collect(self) -> None:
         """Initialize destination recovery before publication can change a tag."""
-        self._created_tag = False
-        self._changed_tag = False
-        self._prior_digest: str | None = None
+        self._tag_snapshot: TagSnapshot | None = None
+        if self.action is None:
+            raise ValueError("push_action_required")
+        service = cast(HarborService, self.harbor)
+        self._tag_snapshot = TagSnapshot.capture(
+            service, self.action.repository, self.action.tag
+        )
 
     def cleanup(self) -> None:
         """Restore or remove the destination tag when this workflow fails.
@@ -298,27 +346,9 @@ class HarborPush(HarborCallback[PushAction, dict[str, Any]]):
 
         :raises APIError: If prior tag state cannot be restored and read back.
         """
-        if not self.context.failed or not self._changed_tag or self.action is None:
+        if not self.context.failed or self._tag_snapshot is None:
             return
-        service = cast(HarborService, self.harbor)
-        if self._created_tag:
-            service.delete_tag(self.action.repository, self.action.tag)
-            return
-        if self._prior_digest is None:
-            raise APIError("prior_tag_digest_missing")
-        current = service.digest(self.action.repository, self.action.tag)
-        if current != self._prior_digest:
-            restored = service.copy(
-                service.image(self.action.repository, self._prior_digest),
-                service.image(self.action.repository, self.action.tag),
-            )
-            if restored != self._prior_digest:
-                raise APIError("tag_recovery_digest_mismatch")
-        if (
-            service.digest(self.action.repository, self.action.tag)
-            != self._prior_digest
-        ):
-            raise APIError("tag_recovery_readback_mismatch")
+        self._tag_snapshot.restore()
 
     def run(self) -> dict[str, Any]:
         """Skip an identical tag or copy and verify the requested image.
@@ -344,9 +374,6 @@ class HarborPush(HarborCallback[PushAction, dict[str, Any]]):
         current = service.digest(action.repository, action.tag)
         destination = service.image(action.repository, action.tag)
         changed = current != expected
-        self._prior_digest = current
-        self._created_tag = current is None
-        self._changed_tag = changed
         digest = service.copy(source, destination) if changed else expected
         if service.digest(action.repository, action.tag) != digest:
             raise APIError("published_digest_mismatch")

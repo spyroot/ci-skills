@@ -28,7 +28,7 @@ from .credentials import bind_sources
 from .github import GitHubService
 from .kubernetes import KubernetesError, KubernetesService
 from .project_binding import resolve_target
-from .registry_mirror import HarborService
+from .registry_mirror import HarborService, TagSnapshot
 from .report import report
 from .resources import ResourceSet
 from .runner import RunnerAction
@@ -384,7 +384,7 @@ class HarborBuild(BuildToolbox):
         """
         super().__init__(action=None)
         self.workflow = workflow
-        self._candidate_absent = False
+        self._candidate_snapshot: TagSnapshot | None = None
 
     def collect(self) -> None:
         """Resolve native build inputs from the preceding Harbor callback.
@@ -409,26 +409,21 @@ class HarborBuild(BuildToolbox):
             ),
         )
         super().collect()
-        self._candidate_absent = harbor.digest(spec.image_repository, reference) is None
+        self._candidate_snapshot = TagSnapshot.capture(
+            harbor, spec.image_repository, reference
+        )
 
     def cleanup(self) -> None:
-        """Clean build helpers and remove only a newly created tag after failure.
+        """Clean build helpers and restore the prior candidate tag after failure.
 
         :raises KubernetesError: If build resource cleanup is incomplete.
-        :raises APIError: If removal of the new candidate tag fails.
+        :raises APIError: If candidate tag recovery or read-back fails.
         """
         try:
             super().cleanup()
         finally:
-            if (
-                self.context.failed
-                and self._candidate_absent
-                and self.action is not None
-            ):
-                harbor = cast(HarborService, self.context.services["harbor"])
-                harbor.delete_tag(
-                    self.action.spec.image_repository, self.action.candidate_reference
-                )
+            if self.context.failed and self._candidate_snapshot is not None:
+                self._candidate_snapshot.restore()
 
 
 class DeleteToolbox(Callback[WorkflowAction, dict[str, Any]]):

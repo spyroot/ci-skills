@@ -27,6 +27,7 @@ RUNNERS = import_script_module("core.gitlab_runners")
 STATUS = import_script_module("core.status")
 TARGET = import_script_module("core.target")
 TOOLBOX = import_script_module("core.toolbox")
+TOOLBOX_ACTIONS = import_script_module("core.toolbox_actions")
 
 
 class Recorded(CALLBACKS.Callback[object, object]):
@@ -662,6 +663,117 @@ def test_harbor_push_failure_cleanup_restores_prior_tag_or_removes_new_tag(
     assert service.current == existing_digest
     assert len(service.copies) == expected_copies
     assert events == ["downstream.collect", "downstream.cleanup"]
+
+
+@pytest.mark.parametrize(
+    ("prior_digest", "expected_copies", "expected_deletes"),
+    (
+        ("sha256:prior-candidate", 1, []),
+        (None, 0, [("toolbox", "ci-skills-build-" + "a" * 24)]),
+    ),
+    ids=("restore-existing-candidate", "delete-new-candidate"),
+)
+def test_harbor_build_failure_cleanup_restores_candidate_tag(
+    prior_digest, expected_copies, expected_deletes
+):
+    """A failed build restores an overwritten candidate tag or removes a new one."""
+    produced_digest = "sha256:produced-candidate"
+
+    class Spec:
+        namespace = "toolbox-ns"
+        app = "toolbox"
+        fingerprint = "a" * 64
+        image_repository = "toolbox"
+
+        def render(self, _directory, _resolved_base_image):
+            return None
+
+        def _node_selector(self):
+            return None
+
+    class HarborService:
+        dockerconfig = b'{"auths":{"registry.example.test":{}}}'
+
+        def __init__(self) -> None:
+            self.current = prior_digest
+            self.copies: list[tuple[str, str]] = []
+            self.deleted: list[tuple[str, str]] = []
+            self.lookups: list[tuple[str, str]] = []
+
+        def digest(self, repository: str, reference: str) -> str | None:
+            self.lookups.append((repository, reference))
+            return self.current
+
+        def image(self, repository: str, reference: str) -> str:
+            separator = "@" if reference.startswith("sha256:") else ":"
+            return f"registry.example.test/unit/{repository}{separator}{reference}"
+
+        def copy(self, source: str, destination: str) -> str:
+            self.copies.append((source, destination))
+            self.current = source.rsplit("@", 1)[-1]
+            return self.current
+
+        def delete_tag(self, repository: str, reference: str) -> bool:
+            self.deleted.append((repository, reference))
+            self.current = None
+            return True
+
+    harbor = HarborService()
+
+    class KubernetesService:
+        def read(self, _kind: str, _name: str, _namespace: str):
+            return None
+
+        def command(self, *_args, openshift=False):
+            assert openshift is True
+            return RUNTIME.CommandResult(
+                (), 0, "build.build.openshift.io/toolbox-1\n", ""
+            )
+
+        def json(self, *_args, openshift=False):
+            assert openshift is False
+            return {"metadata": {"name": "toolbox-1"}}
+
+        def wait_build(self, _name: str, _namespace: str):
+            harbor.current = produced_digest
+            return {"status": {"output": {"to": {"imageDigest": produced_digest}}}}
+
+        def delete(self, *_args):
+            return None
+
+    class Resources:
+        def apply(self, document):
+            return document
+
+        def recover(self):
+            return None
+
+        def delete(self, _kind, _name):
+            return None
+
+    workflow = TOOLBOX_ACTIONS.WorkflowAction(Namespace())
+    workflow.spec = Spec()
+    workflow.resolved_base = "registry.example.test/base@sha256:" + "b" * 64
+    context = CALLBACKS.ExecutionContext(
+        services={"harbor": harbor, "kubernetes": KubernetesService()}
+    )
+    build = TOOLBOX_ACTIONS.HarborBuild(workflow=workflow)
+    build._resource_set = Resources()
+    downstream = Recorded(
+        [], "downstream", collect_error=RuntimeError("downstream failed")
+    )
+
+    with pytest.raises(RuntimeError, match="downstream failed"):
+        CALLBACKS.Executor(context=context, callbacks=[build, downstream]).run()
+
+    candidate_tag = (
+        TOOLBOX_ACTIONS.BUILD_TAG_PREFIX
+        + Spec.fingerprint[: TOOLBOX_ACTIONS.FINGERPRINT_TAG_LENGTH]
+    )
+    assert harbor.current == prior_digest
+    assert harbor.deleted == expected_deletes
+    assert len(harbor.copies) == expected_copies
+    assert harbor.lookups[-1] == (Spec.image_repository, candidate_tag)
 
 
 def test_resource_set_recovers_prior_owned_state_after_downstream_failure():
