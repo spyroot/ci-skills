@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from typing import Generic
 
 from lib.python.core.abstract.skill_action import ActionT_co, SkillAction
+from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.abstract.skill_result import SkillResult
 from lib.python.core.abstract.skill_state import SkillState, StateT
 
@@ -33,6 +34,34 @@ class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
         if not isinstance(action, SkillAction):
             raise TypeError("skill_action must implement SkillAction")
         self._action: ActionT_co = action
+
+    @property
+    @abstractmethod
+    def plugin_type(self) -> SkillPluginType:
+        """Identify the plugin that owns this callback's configuration.
+
+        :returns: Enum key shared by callbacks using the same plugin.
+        :raises NotImplementedError: A concrete callback omits its plugin identity.
+        """
+        raise NotImplementedError("callbacks must declare their plugin type")
+
+    @abstractmethod
+    def read_config(self) -> SkillResult:
+        """Read required plugin inputs once and retain them in shared state.
+
+        :returns: Safe setup evidence, including an empty mapping when appropriate.
+        :raises NotImplementedError: A concrete plugin omits its configuration reader.
+        """
+        raise NotImplementedError("callbacks must implement read_config")
+
+    @abstractmethod
+    def is_configured(self) -> bool:
+        """Validate the plugin configuration retained in shared state.
+
+        :returns: Whether this callback's required configuration is available.
+        :raises NotImplementedError: A concrete plugin omits its readiness check.
+        """
+        raise NotImplementedError("callbacks must implement is_configured")
 
     @property
     def action(self) -> ActionT_co:
@@ -200,3 +229,28 @@ class Callback(AbstractCallback[StateT, ActionT_co]):
         :raises AttributeError: The executor has not bound this callback to a state.
         """  # noqa: DOC502 - state access requires an existing binding.
         return self.state.result
+
+
+class LocalCallback(Callback[StateT, ActionT_co]):
+    """Declare that an action uses no external provider configuration.
+
+    .. attribute :: plugin_type
+
+        SkillPluginType cache key for local configuration.
+    """
+
+    plugin_type = SkillPluginType.LOCAL
+
+    def read_config(self) -> SkillResult:
+        """Keep all local action inputs in the supplied action and shared state.
+
+        :returns: Empty evidence because no provider configuration is read.
+        """
+        return {}
+
+    def is_configured(self) -> bool:
+        """Accept a local callback whose required action was already constructed.
+
+        :returns: True because this plugin has no external configuration.
+        """
+        return True

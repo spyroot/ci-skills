@@ -21,6 +21,7 @@ CALLBACKS = import_script_module("lib.python.core.abstract.callbacks")
 CONTEXT = import_script_module("lib.python.core.abstract.context")
 EXECUTOR = import_script_module("lib.python.core.abstract.skill_exector")
 SKILL_ACTION = import_script_module("lib.python.core.abstract.skill_action")
+SKILL_PLUGIN_TYPE = import_script_module("lib.python.core.abstract.skill_plugin_type")
 SKILL_STATE = import_script_module("lib.python.core.abstract.skill_state")
 
 
@@ -85,7 +86,7 @@ class CounterExecutor(EXECUTOR.SkillExecutor[CounterState]):
         return CounterState()
 
 
-class EventCallback(CALLBACK.Callback[CONTEXT.ExecutionContext, UnitAction]):
+class EventCallback(CALLBACK.LocalCallback[CONTEXT.ExecutionContext, UnitAction]):
     """Record the standard lifecycle and optionally fail its run or cleanup."""
 
     def __init__(
@@ -148,7 +149,7 @@ class EventCallback(CALLBACK.Callback[CONTEXT.ExecutionContext, UnitAction]):
         return self.state.result
 
 
-class Increment(CALLBACK.Callback[CounterState, UnitAction]):
+class Increment(CALLBACK.LocalCallback[CounterState, UnitAction]):
     """Read the prior result and publish one state-derived result."""
 
     def __init__(self, action: UnitAction, observed: MutableSequence[JSONObject]):
@@ -169,6 +170,70 @@ class Increment(CALLBACK.Callback[CounterState, UnitAction]):
         self.observed.append(dict(self.state.result))
         self.state.x += self.action.delta
         return {"name": self.action.name, "x": self.state.x}
+
+
+class ProviderConfigurationCallback(CALLBACK.Callback[CounterState, UnitAction]):
+    """Record provider setup and lifecycle calls without using a real provider."""
+
+    def __init__(
+        self,
+        action: UnitAction,
+        events: MutableSequence[str],
+        plugin_type: SKILL_PLUGIN_TYPE.SkillPluginType,
+        *,
+        configured: bool = True,
+        read_error: Optional[BaseException] = None,
+    ):
+        """Configure one deterministic provider callback test double.
+
+        :param action: Named action retained by the callback.
+        :param events: Ordered event journal owned by the test.
+        :param plugin_type: Provider identity used for setup cache behavior.
+        :param configured: Configuration readiness returned after a successful read.
+        :param read_error: Failure raised while reading configuration, when supplied.
+        """
+        super().__init__(action)
+        self.events = events
+        self._plugin_type = plugin_type
+        self.configured = configured
+        self.read_error = read_error
+
+    @property
+    def plugin_type(self) -> SKILL_PLUGIN_TYPE.SkillPluginType:
+        """Return the provider identity selected for this test callback."""
+        return self._plugin_type
+
+    def read_config(self) -> JSONObject:
+        """Record one provider configuration read and optionally fail."""
+        self.events.append(f"{self.action.name}.read_config")
+        if self.read_error is not None:
+            raise self.read_error
+        return {}
+
+    def is_configured(self) -> bool:
+        """Record one readiness check and return the configured outcome."""
+        self.events.append(f"{self.action.name}.is_configured")
+        return self.configured
+
+    def collect(self) -> JSONObject:
+        """Record lifecycle collection after successful configuration."""
+        self.events.append(f"{self.action.name}.collect")
+        return {}
+
+    def run(self) -> JSONObject:
+        """Record lifecycle execution after successful configuration."""
+        self.events.append(f"{self.action.name}.run")
+        return {"name": self.action.name}
+
+    def update(self) -> JSONObject:
+        """Record lifecycle update after successful configuration."""
+        self.events.append(f"{self.action.name}.update")
+        return self.result
+
+    def cleanup(self) -> JSONObject:
+        """Record lifecycle cleanup after successful configuration."""
+        self.events.append(f"{self.action.name}.cleanup")
+        return self.state.result
 
 
 def test_executor_creates_one_state_and_binds_every_callback_before_collect(
@@ -209,13 +274,13 @@ def test_callback_requires_a_skill_action_and_listify_preserves_order() -> None:
     """Callbacks require actions while collections retain single and iterable order.
     :returns: None; assertions in the body validate the regression.
     """
-    with pytest.raises(TypeError):
-        CALLBACK.Callback()
+    with pytest.raises(TypeError, match="abstract"):
+        CALLBACK.Callback(UnitAction("abstract"))
     with pytest.raises(TypeError, match="SkillAction"):
-        CALLBACK.Callback(None)
+        CALLBACK.LocalCallback(None)
 
-    first = CALLBACK.Callback(UnitAction("first"))
-    second = CALLBACK.Callback(UnitAction("second"))
+    first = CALLBACK.LocalCallback(UnitAction("first"))
+    second = CALLBACK.LocalCallback(UnitAction("second"))
 
     assert CALLBACKS.listify(first) == [first]
     assert CALLBACKS.listify(item for item in (first, second)) == [first, second]
@@ -229,7 +294,7 @@ def test_default_callback_returns_the_shared_empty_json_result() -> None:
     """Unused hooks return the executor-owned empty JSON dictionary.
     :returns: None; assertions in the body validate the regression.
     """
-    callback = CALLBACK.Callback(UnitAction("empty"))
+    callback = CALLBACK.LocalCallback(UnitAction("empty"))
     executor = EXECUTOR.Executor(callbacks=CALLBACKS.Callbacks(callback))
 
     result = executor.run()
@@ -238,6 +303,8 @@ def test_default_callback_returns_the_shared_empty_json_result() -> None:
     assert result is executor.state.result
     assert result is callback.result
     assert executor.state.results[callback] is callback.result
+    assert callback.plugin_type is SKILL_PLUGIN_TYPE.SkillPluginType.LOCAL
+    assert executor.state.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.LOCAL)
 
 
 def test_callbacks_share_state_and_publish_one_state_owned_result() -> None:
@@ -268,8 +335,8 @@ def test_empty_run_results_are_owned_by_each_callback() -> None:
     """Store independent empty run mappings for every callback instance.
     :returns: None; assertions in the body validate the regression.
     """
-    first = CALLBACK.Callback(UnitAction("first"))
-    second = CALLBACK.Callback(UnitAction("second"))
+    first = CALLBACK.LocalCallback(UnitAction("first"))
+    second = CALLBACK.LocalCallback(UnitAction("second"))
     executor = EXECUTOR.Executor(callbacks=CALLBACKS.Callbacks([first, second]))
 
     result = executor.run()
@@ -354,7 +421,7 @@ class ReadAction(SKILL_ACTION.SkillAction):
     label: str
 
 
-class ReadCounter(CALLBACK.Callback[CounterState, ReadAction]):
+class ReadCounter(CALLBACK.LocalCallback[CounterState, ReadAction]):
     """Read shared state through a distinct concrete action type."""
 
     def run(self) -> JSONObject:
@@ -390,7 +457,7 @@ def test_callback_binding_cannot_transfer_an_executors_state() -> None:
     """Rebinding the same state is harmless; another owner is rejected.
     :returns: None; assertions in the body validate the regression.
     """
-    callback = CALLBACK.Callback(UnitAction("owned"))
+    callback = CALLBACK.LocalCallback(UnitAction("owned"))
     callbacks = CALLBACKS.Callbacks(callback)
     first = EXECUTOR.Executor(callbacks)
 
@@ -407,7 +474,9 @@ def test_every_hook_result_is_retained_in_the_shared_sequence() -> None:
     :returns: None; assertions in the body validate the regression.
     """
 
-    class EvidenceCallback(CALLBACK.Callback[CONTEXT.ExecutionContext, UnitAction]):
+    class EvidenceCallback(
+        CALLBACK.LocalCallback[CONTEXT.ExecutionContext, UnitAction]
+    ):
         """Emit distinct evidence for each hook to expose their execution order."""
 
         def collect(self) -> JSONObject:
@@ -465,3 +534,201 @@ def test_state_reports_unsupported_values_at_serialization() -> None:
 
     with pytest.raises(TypeError, match="not JSON serializable"):
         state.to_json()
+
+
+def test_callbacks_configure_one_plugin_once_before_lifecycle_and_keep_json_stable() -> (
+    None
+):
+    """Configure a shared provider once before either callback enters its lifecycle.
+
+    :returns: None; assertions prove setup caching and report serialization.
+    """
+    events: MutableSequence[str] = []
+    first = ProviderConfigurationCallback(
+        UnitAction("first"),
+        events,
+        SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
+    )
+    second = ProviderConfigurationCallback(
+        UnitAction("second"),
+        events,
+        SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
+    )
+    expected_json = json.loads(CounterState().to_json())
+
+    executor = CounterExecutor(CALLBACKS.Callbacks([first, second]))
+
+    assert events == [
+        "first.read_config",
+        "first.is_configured",
+        "second.is_configured",
+    ]
+    assert executor.state.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB)
+    assert json.loads(executor.state.to_json()) == expected_json
+
+    executor.run()
+
+    assert events == [
+        "first.read_config",
+        "first.is_configured",
+        "second.is_configured",
+        "first.collect",
+        "first.run",
+        "first.update",
+        "second.collect",
+        "second.run",
+        "second.update",
+        "second.cleanup",
+        "first.cleanup",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("configured", "read_error", "expected_events", "error"),
+    (
+        (
+            False,
+            None,
+            [
+                "x.read_config",
+                "x.is_configured",
+                "y.read_config",
+                "y.is_configured",
+            ],
+            ValueError,
+        ),
+        (
+            True,
+            RuntimeError("y read failed"),
+            ["x.read_config", "x.is_configured", "y.read_config"],
+            RuntimeError,
+        ),
+    ),
+)
+def test_callback_configuration_failure_stops_later_provider_and_is_not_cached(
+    configured: bool,
+    read_error: Optional[BaseException],
+    expected_events: MutableSequence[str],
+    error: type[BaseException],
+) -> None:
+    """Reject missing or unreadable setup before lifecycle work and later setup.
+
+    :param configured: Readiness value for the failing Kubernetes callback.
+    :param read_error: Read failure injected into that callback, if any.
+    :param expected_events: Configuration-only journal expected before the failure.
+    :param error: Exception type expected from configuration binding.
+    :returns: None; assertions prove failed setup is never cached.
+    """
+    events: MutableSequence[str] = []
+    state = CounterState()
+    callbacks = CALLBACKS.Callbacks(
+        [
+            ProviderConfigurationCallback(
+                UnitAction("x"), events, SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB
+            ),
+            ProviderConfigurationCallback(
+                UnitAction("y"),
+                events,
+                SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES,
+                configured=configured,
+                read_error=read_error,
+            ),
+            ProviderConfigurationCallback(
+                UnitAction("z"), events, SKILL_PLUGIN_TYPE.SkillPluginType.HARBOR
+            ),
+        ]
+    )
+
+    with pytest.raises(error):
+        callbacks.bind(state)
+
+    assert events == expected_events
+    assert state.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB)
+    assert not state.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES)
+    assert not state.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.HARBOR)
+    assert all(
+        not event.endswith((".collect", ".run", ".update", ".cleanup"))
+        for event in events
+    )
+
+
+def test_cached_plugin_rechecks_later_callback_before_lifecycle_or_later_config() -> (
+    None
+):
+    """Reject a later unconfigured callback even when its plugin was read already.
+
+    :returns: None; assertions prove every selected callback is checked.
+    """
+    events: MutableSequence[str] = []
+    state = CounterState()
+    callbacks = CALLBACKS.Callbacks(
+        [
+            ProviderConfigurationCallback(
+                UnitAction("first"),
+                events,
+                SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
+            ),
+            ProviderConfigurationCallback(
+                UnitAction("second"),
+                events,
+                SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
+                configured=False,
+            ),
+            ProviderConfigurationCallback(
+                UnitAction("later"),
+                events,
+                SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES,
+            ),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="gitlab_configuration_missing"):
+        callbacks.bind(state)
+
+    assert events == [
+        "first.read_config",
+        "first.is_configured",
+        "second.is_configured",
+    ]
+    assert state.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB)
+    assert not state.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES)
+    assert all(
+        not event.endswith((".collect", ".run", ".update", ".cleanup"))
+        for event in events
+    )
+
+
+def test_plugin_configuration_cache_is_per_executor_and_state_rejects_strings() -> None:
+    """Cache successful setup per state and require enum identities.
+
+    :returns: None; assertions prove executor isolation and key validation.
+    """
+    events: MutableSequence[str] = []
+    first = CounterExecutor(
+        CALLBACKS.Callbacks(
+            ProviderConfigurationCallback(
+                UnitAction("first"),
+                events,
+                SKILL_PLUGIN_TYPE.SkillPluginType.GITHUB,
+            )
+        )
+    )
+    second = CounterExecutor(
+        CALLBACKS.Callbacks(
+            ProviderConfigurationCallback(
+                UnitAction("second"),
+                events,
+                SKILL_PLUGIN_TYPE.SkillPluginType.GITHUB,
+            )
+        )
+    )
+
+    assert events == [
+        "first.read_config",
+        "first.is_configured",
+        "second.read_config",
+        "second.is_configured",
+    ]
+    assert first.state is not second.state
+    with pytest.raises(TypeError, match="SkillPluginType"):
+        first.state.is_config_checked("github")

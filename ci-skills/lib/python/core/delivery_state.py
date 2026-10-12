@@ -16,10 +16,13 @@ from lib.python.core.abstract.skill_action import AuthAction
 from lib.python.core.json_types import JSONObject
 
 if TYPE_CHECKING:
+    from lib.python.access.credentials import RegistryCredential
+    from lib.python.core.cli_api import ReadSession
     from lib.python.core.gitlab.github import GitHubService
     from lib.python.core.gitlab.gitlab_runner import RunnerRuntime
     from lib.python.core.harbor.registry_mirror import HarborService
     from lib.python.core.kubernetes.kubernetes import KubernetesService
+    from lib.python.core.target import GitHubTarget, HarborTarget, Target
     from lib.python.core.toolbox import ToolboxBuildResult
 
 
@@ -50,6 +53,11 @@ class DeliveryState(ExecutionContext):
     ExecutionContext documents inherited argument/report fields; SkillState
     documents shared invocation settings, results, and cleanup evidence.
 
+    :ivar kubernetes_target: Credential-bound target retained during configuration.
+    :ivar harbor_target: Concrete Harbor selection retained during configuration.
+    :ivar harbor_credential: Private registry credential read once per invocation.
+    :ivar github_target: Concrete GitHub selection retained during configuration.
+    :ivar github_session: Private native session read once per invocation.
     :ivar kubernetes: Verified Kubernetes service assigned by K8SAuth.
     :ivar harbor: Private registry service assigned by HarborAuth.
     :ivar github: Verified GitHub service assigned by GitHubAuth.
@@ -59,6 +67,31 @@ class DeliveryState(ExecutionContext):
     :ivar runner_runtime: Private registration inputs assigned by provider setup.
     :ivar deployment_result: Safe workload read-back assigned by DeployRunner.
     :param access_evidence: Safe provider identity records, populated by authentication.
+
+    .. attribute :: kubernetes_target
+        :type: Target
+
+        Credential-bound Kubernetes target retained before execution.
+
+    .. attribute :: harbor_target
+        :type: HarborTarget
+
+        Concrete Harbor selection retained before execution.
+
+    .. attribute :: harbor_credential
+        :type: RegistryCredential
+
+        Private registry credential retained before execution.
+
+    .. attribute :: github_target
+        :type: GitHubTarget
+
+        Concrete GitHub selection retained before execution.
+
+    .. attribute :: github_session
+        :type: ReadSession
+
+        Private native credential session retained before execution.
 
     .. attribute :: kubernetes
         :type: KubernetesService
@@ -106,6 +139,11 @@ class DeliveryState(ExecutionContext):
         Safe provider identity records, populated by authentication.
     """
 
+    kubernetes_target: Target = field(init=False, repr=False)
+    harbor_target: HarborTarget = field(init=False, repr=False)
+    harbor_credential: RegistryCredential = field(init=False, repr=False)
+    github_target: GitHubTarget = field(init=False, repr=False)
+    github_session: ReadSession = field(init=False, repr=False)
     kubernetes: KubernetesService = field(init=False, repr=False)
     harbor: HarborService = field(init=False, repr=False)
     github: GitHubService = field(init=False, repr=False)

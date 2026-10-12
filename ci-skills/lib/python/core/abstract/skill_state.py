@@ -13,6 +13,7 @@ from collections.abc import MutableMapping, MutableSequence
 from dataclasses import dataclass, field
 from typing import ClassVar, Self, TypedDict, TypeVar
 
+from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.abstract.skill_result import SkillResult
 
 
@@ -53,6 +54,7 @@ class SkillState:
     :param debug: Caller-selected diagnostic detail setting.
     :param verbose: Caller-selected verbose output setting.
     :param environment: Caller-supplied invocation environment values.
+    :param plugin_ready: Successful configuration checks for this invocation only.
 
     .. attribute :: result
         :type: SkillResult
@@ -99,6 +101,11 @@ class SkillState:
 
         Caller-supplied invocation environment values.
 
+    .. attribute :: plugin_ready
+        :type: MutableMapping[SkillPluginType, bool]
+
+        Configuration readiness keyed by plugin identity, initially empty.
+
     .. attribute :: json_encoder
         :type: ClassVar[type[json.JSONEncoder]]
 
@@ -116,7 +123,21 @@ class SkillState:
     debug: bool = False
     verbose: bool = False
     environment: MutableMapping[str, str] = field(default_factory=dict)
+    plugin_ready: MutableMapping[SkillPluginType, bool] = field(
+        default_factory=dict, repr=False
+    )
     json_encoder: ClassVar[type[json.JSONEncoder]] = json.JSONEncoder
+
+    def is_config_checked(self, plugin_type: SkillPluginType) -> bool:
+        """Read whether this invocation validated a plugin's configuration.
+
+        :param plugin_type: Enum identity declared by the callback's plugin.
+        :returns: True only after successful configuration validation.
+        :raises TypeError: If the caller supplies a string instead of the enum.
+        """
+        if not isinstance(plugin_type, SkillPluginType):
+            raise TypeError("plugin_type must be SkillPluginType")
+        return self.plugin_ready.get(plugin_type, False)
 
     def state_dict(self) -> SkillResult:
         """Select the common reportable values without serializing provider services.

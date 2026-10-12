@@ -16,6 +16,7 @@ from lib.python.access.access import github_env
 from lib.python.access.credentials import Sources, bind_sources
 from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.skill_action import ActionT_co
+from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import github_variables
 from lib.python.core.cli_api import APIError, CLIAPIClient, ReadSession
 from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
@@ -26,9 +27,9 @@ from lib.python.core.json_types import (
     json_objects,
 )
 from lib.python.core.runtime import run_command_bounded
-from lib.python.core.target import Target, TargetError
+from lib.python.core.target import GitHubTarget, Target, TargetError
 
-GITHUB_SERVICE_KEY: Final = "github"
+GITHUB_SERVICE_KEY: Final = SkillPluginType.GITHUB.value
 GITHUB_PAGE_SIZE: Final = 100
 RUNNER_POLL_SECONDS: Final = 2
 RUNNER_ONLINE: Final = "online"
@@ -231,7 +232,38 @@ class GitHubService:
 
 
 class GitHubCallback(Callback[DeliveryState, ActionT_co]):
-    """Use the GitHub service established in this delivery state."""
+    """Use the GitHub service established in this delivery state.
+
+    .. attribute :: plugin_type
+
+        SkillPluginType cache key for GitHub configuration.
+    """
+
+    plugin_type = SkillPluginType.GITHUB
+
+    def read_config(self) -> JSONObject:
+        """Reuse a caller-bound GitHub service for direct library operations.
+
+        :returns: Empty setup evidence after retaining the existing private session.
+        :raises TargetError: Authentication or the caller supplied no service.
+        """  # noqa: DOC502 - Direct library callers provide the existing service.
+        if not hasattr(self.state, "github"):
+            raise TargetError(f"{SkillPluginType.GITHUB.value}_configuration_missing")
+        service = self.github
+        self.state.github_target = GitHubTarget(service.host, service.repository)
+        self.state.github_session = ReadSession(
+            service.host, service.environment, service.credential_source
+        )
+        return {}
+
+    def is_configured(self) -> bool:
+        """Check that repository and credential selection completed in shared state.
+
+        :returns: Whether the invocation holds this plugin's concrete configuration.
+        """
+        return hasattr(self.state, "github_target") and hasattr(
+            self.state, "github_session"
+        )
 
     @property
     def github(self) -> GitHubService:
@@ -265,9 +297,7 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
         :raises TargetError: GitHub is unselected or its native credential is unusable.
         :raises OSError: If the native credential command cannot be launched.
         """  # noqa: DOC503 - credential resolution and native command launch propagate failures
-        github = target.github
-        if github is None:
-            raise TargetError("github_target_missing")
+        github = self.state.github_target
         environment: MutableMapping[str, Optional[str]] = dict(github_env(target) or {})
         if reference.startswith("gh-credential-store:"):
             result = run_command_bounded(
@@ -281,25 +311,17 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
             environment[github_variables(github.host)[0]] = token
         return environment
 
-    def _service(self, target: Target, sources: Sources) -> GitHubService:
+    def _service(self) -> GitHubService:
         """Verify user and repository fields before constructing a usable service.
 
-        :param target: Bound target with a selected GitHub repository.
-        :param sources: Frozen credential sources for this invocation.
         :returns: GitHub service carrying actual provider identity values.
         :raises TargetError: GitHub is unselected or its bound credential is unavailable.
         :raises APIError: If authenticated identity or repository read-back is invalid.
         :raises OSError: If a native provider command cannot be launched.
         """  # noqa: DOC503 - native credential and transport calls propagate OSError
-        github = target.github
-        if github is None:
-            raise TargetError("github_target_missing")
-        if sources.github is None:
-            raise TargetError("github_credential_unresolved")
-        reference = sources.github.reference
-        environment = self._environment(target, reference)
+        github = self.state.github_target
+        session = self.state.github_session
         api = GitHubAPIClient(timeout=self.action.timeout)
-        session = ReadSession(github.host, environment, reference)
         user = api._request(session, "GET", "user")
         identity = user.get("login") if isinstance(user, Mapping) else None
         if not isinstance(identity, str) or not identity.strip():
@@ -320,33 +342,46 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
         return GitHubService(
             github.host,
             github.repository,
-            environment,
+            session.environment,
             api,
             identity,
             repository_id,
-            reference,
+            session.credential_source,
         )
 
-    def run(self) -> JSONObject:
-        """Bind private access once and report only verified public identity fields.
+    def read_config(self) -> JSONObject:
+        """Resolve this plugin's repository and private credential before execution.
 
-        :returns: Safe repository, login, and credential-source evidence.
-        :raises TargetError: If target or selected credential binding is invalid.
-        :raises APIError: If identity, repository, or runner access read-back fails.
-        :raises OSError: If configured credentials or native tools cannot be read.
-        """  # noqa: DOC503 - authentication and provider reads propagate API and file failures
+        :returns: Empty setup evidence; the private session remains in shared state.
+        :raises TargetError: The GitHub target or selected credential is unavailable.
+        :raises OSError: The existing native credential store cannot be read.
+        """  # noqa: DOC503 - Existing binding and native credential readers propagate errors.
         selected = self.action.target
         target = (
             selected
             if isinstance(selected.sources, Sources)
             else bind_sources(selected)
         )
-        if target.github is None:
+        github, sources = target.github, target.sources
+        if github is None:
             raise TargetError("github_target_missing")
-        sources = target.sources
-        if not isinstance(sources, Sources):
-            raise TargetError("credential_sources_unbound")
-        service = self._service(target, sources)
+        if not isinstance(sources, Sources) or sources.github is None:
+            raise TargetError("github_credential_unresolved")
+        self.state.github_target = github
+        reference = sources.github.reference
+        self.state.github_session = ReadSession(
+            github.host, self._environment(target, reference), reference
+        )
+        return {}
+
+    def run(self) -> JSONObject:
+        """Verify live access using the configuration retained during construction.
+
+        :returns: Safe repository, login, and credential-source evidence.
+        :raises APIError: Identity, repository, or runner access read-back fails.
+        :raises OSError: A native provider command cannot be launched.
+        """  # noqa: DOC502 - Provider transport and response validation propagate errors.
+        service = self._service()
         service.runners()
         self.state.github = service
         evidence = {

@@ -15,8 +15,10 @@ from typing import TYPE_CHECKING, Optional
 from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import ActionT_co
+from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession, GitLabService
 from lib.python.core.json_types import JSONObject
+from lib.python.core.target import TargetError
 
 if TYPE_CHECKING:
     from lib.python.core.gitlab.gitlab_actions import ActionPlan
@@ -49,6 +51,11 @@ class GitLabState(ExecutionContext):
         :type: GitLabService
 
         Private authenticated service established before provider operations.
+
+    .. attribute :: configured_session
+        :type: BoundGitLabSession
+
+        Concrete private session retained by the constructor's configuration pass.
 
     .. attribute :: session
         :type: Optional[BoundGitLabSession]
@@ -98,6 +105,7 @@ class GitLabState(ExecutionContext):
 
     plan: ActionPlan = field(init=False, repr=False)
     gitlab: GitLabService = field(init=False, repr=False)
+    configured_session: BoundGitLabSession = field(init=False, repr=False)
     session: Optional[BoundGitLabSession] = field(default=None, repr=False)
     access: JSONObject = field(default_factory=dict)
     phase: str = "OFFLINE_PLAN"
@@ -110,7 +118,32 @@ class GitLabState(ExecutionContext):
 
 
 class GitlabCallback(Callback[GitLabState, ActionT_co]):
-    """Use the typed GitLab service established in shared invocation state."""
+    """Use the typed GitLab service established in shared invocation state.
+
+    .. attribute :: plugin_type
+
+        SkillPluginType cache key for GitLab configuration.
+    """
+
+    plugin_type = SkillPluginType.GITLAB
+
+    def read_config(self) -> JSONObject:
+        """Reuse a caller-bound GitLab service for direct library operations.
+
+        :returns: Empty setup evidence; the private session stays in shared state.
+        :raises TargetError: Neither authentication nor a caller supplied a service.
+        """  # noqa: DOC502 - Direct callers must supply the existing service.
+        if not hasattr(self.state, "gitlab"):
+            raise TargetError(f"{SkillPluginType.GITLAB.value}_configuration_missing")
+        self.state.configured_session = self.gitlab.session
+        return {}
+
+    def is_configured(self) -> bool:
+        """Check that the shared state holds this plugin's concrete session.
+
+        :returns: Whether credential selection has completed for this invocation.
+        """
+        return hasattr(self.state, "configured_session")
 
     @property
     def gitlab(self) -> GitLabService:

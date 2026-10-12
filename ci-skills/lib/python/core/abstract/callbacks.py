@@ -54,15 +54,23 @@ class Callbacks(Generic[StateT]):
         self.callbacks: AbstractCallbacks[StateT, SkillAction] = listify(callbacks)
 
     def bind(self, state: StateT) -> Self:
-        """Bind every callback to the supplied shared state in declaration order.
+        """Bind and configure callbacks before any lifecycle hook can run.
+
+        Read each plugin once, then check every callback against retained state.
 
         :param state: Concrete state created and owned by the workflow executor.
         :returns: This collection with the same callback instances and order.
         :raises TypeError: The supplied state does not implement SkillState.
-        :raises ValueError: A callback already belongs to another state.
-        """  # noqa: DOC502 - each callback validates its state binding.
+        :raises ValueError: A callback belongs to another state or its plugin is unconfigured.
+        """  # noqa: DOC503 - each callback validates its state binding and configuration.
         for callback in self.callbacks:
             callback.bind(state)
+            plugin_type = callback.plugin_type
+            if not state.is_config_checked(plugin_type):
+                callback.read_config()
+            if not callback.is_configured():
+                raise ValueError(f"{plugin_type.value}_configuration_missing")
+            state.plugin_ready[plugin_type] = True
 
         return self
 

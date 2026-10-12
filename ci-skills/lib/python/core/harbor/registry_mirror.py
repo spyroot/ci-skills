@@ -20,6 +20,7 @@ from urllib.parse import quote, urlencode
 from lib.python.access.credentials import RegistryCredential, resolve_harbor_credential
 from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.skill_action import ActionT_co, SkillAction
+from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.cli_api import APIError, response_decoder
 from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
 from lib.python.core.json_types import JSONObject
@@ -28,7 +29,7 @@ from lib.python.core.target import HarborTarget, Target, TargetError
 from lib.python.protocol.http import HTTPClient
 from lib.python.sys.status import APPLIED, NO_OP
 
-HARBOR_SERVICE_KEY: Final = "harbor"
+HARBOR_SERVICE_KEY: Final = SkillPluginType.HARBOR.value
 REGISTRY_SCHEME: Final = "docker://"
 DIGEST_PREFIX: Final = "sha256:"
 HARBOR_API: Final = "api/v2.0"
@@ -338,7 +339,35 @@ class TagSnapshot:
 
 
 class HarborCallback(Callback[DeliveryState, ActionT_co]):
-    """Read the private registry service assigned by authentication."""
+    """Read the private registry service assigned by authentication.
+
+    .. attribute :: plugin_type
+
+        SkillPluginType cache key for Harbor configuration.
+    """
+
+    plugin_type = SkillPluginType.HARBOR
+
+    def read_config(self) -> JSONObject:
+        """Reuse a caller-bound registry service for direct library operations.
+
+        :returns: Empty evidence after retaining the existing private configuration.
+        :raises TargetError: Authentication or the caller supplied no registry service.
+        """  # noqa: DOC502 - Direct library callers provide the existing service.
+        if not hasattr(self.state, "harbor"):
+            raise TargetError(f"{SkillPluginType.HARBOR.value}_configuration_missing")
+        self.state.harbor_target = self.harbor.target
+        self.state.harbor_credential = self.harbor.credential
+        return {}
+
+    def is_configured(self) -> bool:
+        """Check that target and credential selection completed in shared state.
+
+        :returns: Whether the invocation has concrete registry configuration.
+        """
+        return hasattr(self.state, "harbor_target") and hasattr(
+            self.state, "harbor_credential"
+        )
 
     @property
     def harbor(self) -> HarborService:
@@ -390,6 +419,20 @@ class HarborAuth(HarborCallback[HarborAuthAction]):
         super().__init__(HarborAuthAction(target, timeout, repository, actions))
         self._path: Optional[Path] = None
 
+    def read_config(self) -> JSONObject:
+        """Read this plugin's declared credential through the shared resolver once.
+
+        :returns: Empty setup evidence; credential material remains private.
+        :raises TargetError: The selected Harbor target or credentials are unavailable.
+        """  # noqa: DOC503 - The existing credential reader validates its input files.
+        target = self.action.target.harbor
+        if target is None:
+            raise TargetError("harbor_target_missing")
+        credential = resolve_harbor_credential(target)
+        self.state.harbor_target = target
+        self.state.harbor_credential = credential
+        return {}
+
     def run(self) -> JSONObject:
         """Create private native credentials and retain the verified service.
 
@@ -397,12 +440,10 @@ class HarborAuth(HarborCallback[HarborAuthAction]):
         :raises TargetError: If Harbor target or credentials are unavailable.
         :raises APIError: If the registry does not grant the required capabilities.
         :raises OSError: If the private credential file cannot be created or written.
-        """  # noqa: DOC503 - Registry authorization and private-file writes can fail.
+        """  # noqa: DOC502 - Registry authorization and private-file writes can fail.
         action = self.action
-        target = action.target.harbor
-        if target is None:
-            raise TargetError("harbor_target_missing")
-        credential = resolve_harbor_credential(target)
+        target = self.state.harbor_target
+        credential = self.state.harbor_credential
         descriptor, name = tempfile.mkstemp(
             prefix="ci-skills-registry-", suffix=".json"
         )

@@ -174,6 +174,16 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
             raise ActionError("skill_revision_unverified")
         return session
 
+    def read_config(self) -> JSONObject:
+        """Resolve credentials once before any workflow lifecycle hook runs.
+
+        :returns: Empty setup evidence; private credentials remain in shared state.
+        :raises TargetError: The selected credential or target cannot be resolved.
+        :raises ActionError: Required skill revision evidence is unavailable.
+        """  # noqa: DOC502 - _bind validates credentials and revision provenance.
+        self.state.configured_session = self._bind()
+        return {}
+
     def _snapshot(self, service: GitLabService) -> ActionPlan:
         """Add live target membership or runner before-state to the plan.
 
@@ -211,7 +221,7 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
         :raises ActionError: Revision, access, target binding, or snapshot checks fail.
         :raises GitLabAPIError: Live preflight cannot read selected provider resources.
         """  # noqa: DOC503 - binding and snapshot reads propagate their domain errors.
-        session = self._bind()
+        session = self.state.configured_session
         api = GlabAPIClient(timeout=self.action.timeout)
         access = check_gitlab_operation_access(session, api_client=api)
         self.state.access = access

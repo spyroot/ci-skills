@@ -16,7 +16,7 @@ from typing import Optional
 
 import yaml
 
-from lib.python.core.abstract.callback import Callback
+from lib.python.core.abstract.callback import LocalCallback
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.cli_api import CommandRunner
@@ -350,7 +350,7 @@ class BinaryBuildState(ExecutionContext):
     build_plan: BinaryBuildPlan = field(init=False)
 
 
-class PlanBinaryBuild(Callback[BinaryBuildState, BinaryBuildAction]):
+class PlanBinaryBuild(LocalCallback[BinaryBuildState, BinaryBuildAction]):
     """Publish one validated build plan to shared state without executing a build."""
 
     def __init__(

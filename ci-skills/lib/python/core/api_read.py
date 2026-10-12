@@ -17,12 +17,13 @@ from collections.abc import Mapping, MutableSequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TypeVar
 
 from lib.python.access.credentials import _token_source
-from lib.python.core.abstract.callback import Callback
+from lib.python.core.abstract.callback import LocalCallback
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import (
     GITHUB_DOTCOM_HOST,
     GITHUB_TOKEN_VARIABLES,
@@ -62,8 +63,8 @@ class GitProvider(StrEnum):
         Select the authenticated ``glab api`` transport.
     """
 
-    GITHUB = "github"
-    GITLAB = "gitlab"
+    GITHUB = SkillPluginType.GITHUB.value
+    GITLAB = SkillPluginType.GITLAB.value
 
 
 class ApiOutput(StrEnum):
@@ -640,7 +641,67 @@ class ApiReadState(ExecutionContext):
     payload: JSONValue = field(default_factory=dict)
 
 
-class SelectAPI(Callback[ApiReadState, ApiProviderAction]):
+ApiActionT_co = TypeVar("ApiActionT_co", bound=ApiProviderAction, covariant=True)
+
+
+class ApiSelectionCallback(LocalCallback[ApiReadState, ApiActionT_co]):
+    """Share validated host selection with planning and native API callbacks."""
+
+    def read_config(self) -> JSONObject:
+        """Resolve the action's target once without reading credentials.
+
+        :returns: Empty setup evidence; the selected host remains in shared state.
+        :raises ReadToolError: The action or provider host is invalid.
+        :raises TargetError: The selected runtime target is unavailable or invalid.
+        """  # noqa: DOC502 - Shared action and target readers validate their inputs.
+        self.action.validate()
+        if not hasattr(self.state, "selection"):
+            self.state.selection = ApiProviderSelection.from_action(self.action)
+        return {}
+
+    def is_configured(self) -> bool:
+        """Check that the retained selection belongs to this action's provider.
+
+        :returns: Whether the action has a concrete, matching provider selection.
+        """
+        return (
+            hasattr(self.state, "selection")
+            and self.state.selection.provider == self.action.provider
+        )
+
+
+class ApiProviderCallback(ApiSelectionCallback[ApiActionT_co]):
+    """Share credential binding across reads using the same native provider."""
+
+    @property
+    def plugin_type(self) -> SkillPluginType:
+        """Use the provider enum as the invocation's configuration cache key.
+
+        :returns: GitHub or GitLab plugin identity selected by this action.
+        """
+        return SkillPluginType(self.action.provider.value)
+
+    def read_config(self) -> JSONObject:
+        """Bind one native service or retain the caller's already bound service.
+
+        :returns: Empty setup evidence; credentials remain in private shared state.
+        :raises ReadToolError: The action or provider host is invalid.
+        :raises TargetError: The selected target or credential source is unavailable.
+        """  # noqa: DOC502 - Shared selection and credential readers propagate failures.
+        if not hasattr(self.state, "service"):
+            super().read_config()
+            self.state.service = ApiReadService.bind(self.state.selection)
+        return {}
+
+    def is_configured(self) -> bool:
+        """Check the concrete service retained before any read starts.
+
+        :returns: Whether this invocation has a credential-bound native transport.
+        """
+        return hasattr(self.state, "service")
+
+
+class SelectAPI(ApiSelectionCallback[ApiProviderAction]):
     """Validate read inputs and resolve their host before credential binding."""
 
     def run(self) -> JSONObject:
@@ -651,15 +712,13 @@ class SelectAPI(Callback[ApiReadState, ApiProviderAction]):
         :raises TargetError: If selected runtime configuration is unavailable or invalid.
         :raises AttributeError: If the executor has not bound shared state.
         """  # noqa: DOC502 - Action validation and target selection can fail.
-        self.action.validate()
-        self.state.selection = ApiProviderSelection.from_action(self.action)
         return {
             "provider": self.state.selection.provider.value,
             "host": self.state.selection.host,
         }
 
 
-class BindAPI(Callback[ApiReadState, ApiProviderAction]):
+class BindAPI(ApiProviderCallback[ApiProviderAction]):
     """Bind the selected provider's existing credentials before its read callback."""
 
     def run(self) -> JSONObject:
@@ -669,14 +728,13 @@ class BindAPI(Callback[ApiReadState, ApiProviderAction]):
         :raises TargetError: If the selected credential source is invalid.
         :raises AttributeError: If shared state or its preceding selection is absent.
         """  # noqa: DOC502 - Credential binding and unassigned state can fail.
-        self.state.service = ApiReadService.bind(self.state.selection)
         return {
             "host": self.state.service.session.host,
             "credential_source": self.state.service.session.credential_source,
         }
 
 
-class ReadAPI(Callback[ApiReadState, ApiReadAction]):
+class ReadAPI(ApiProviderCallback[ApiReadAction]):
     """Read through the already bound service and retain one native selected value."""
 
     def run(self) -> JSONObject:
@@ -694,7 +752,7 @@ class ReadAPI(Callback[ApiReadState, ApiReadAction]):
         return {"value": self.state.payload}
 
 
-class CheckAPI(Callback[ApiReadState, ApiCheckAction]):
+class CheckAPI(ApiProviderCallback[ApiCheckAction]):
     """Read one authenticated identity through the already bound provider service."""
 
     def run(self) -> JSONObject:
@@ -710,7 +768,7 @@ class CheckAPI(Callback[ApiReadState, ApiCheckAction]):
         return {"value": self.state.payload}
 
 
-class PlanAPI(Callback[ApiReadState, ApiReadAction]):
+class PlanAPI(ApiSelectionCallback[ApiReadAction]):
     """Describe a resolved request without constructing credential-bound access."""
 
     def run(self) -> JSONObject:
@@ -736,7 +794,7 @@ class PlanAPI(Callback[ApiReadState, ApiReadAction]):
         return plan
 
 
-class PlanAPICheck(Callback[ApiReadState, ApiCheckAction]):
+class PlanAPICheck(ApiSelectionCallback[ApiCheckAction]):
     """Describe the identity request without reading credentials or provider data."""
 
     def run(self) -> JSONObject:
