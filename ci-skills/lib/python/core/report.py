@@ -13,7 +13,7 @@ from argparse import Namespace
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import cast, MutableMapping
 
 from lib.python.core.runtime import redact_tree, sanitize
 from lib.python.sys.status import PARTIAL, PASS
@@ -171,7 +171,9 @@ def _runner_record(item: Mapping[str, object], operation: str) -> list[str]:
     return lines
 
 
-def _job_list_record(item: Mapping[str, object]) -> list[str]:
+def _job_list_record(
+        item: Mapping[str, object]
+) -> Sequence[str]:
     """Render the bounded fields of one listed job."""
     lines = [
         (
@@ -188,7 +190,7 @@ def _job_list_record(item: Mapping[str, object]) -> list[str]:
     return lines
 
 
-def _job_details(item: Mapping[str, object], search: str | None) -> list[str]:
+def _job_details(item: Mapping[str, object], search: str | None) -> Sequence[str]:
     """Render job context and the matching tail of its trace."""
     lines = [f"    failure_reason={item.get('failure_reason')}"]
     for label in ("pipeline", "runner"):
@@ -251,16 +253,22 @@ def _cilium_details(
 
 
 def _record_renderer(
-    data: Mapping[str, object],
+    data: MutableMapping[str, str],
 ) -> Callable[[Mapping[str, object]], list[str]]:
-    """Select record formatting once before traversing the report's records."""
+    """
+    Select record formatting once before traversing the report's records.
+    :param data:
+    :return:
+    """
     kind = str(data.get("kind", ""))
     operation = str(data.get("operation", ""))
     search = cast(str | None, _mapping(data.get("filters") or {}).get("search"))
+
     if kind == "gitlab_runner":
         return lambda item: _runner_record(item, operation)
     if kind == "gitlab_job" and operation == "list":
         return _job_list_record
+
     details: Callable[[Mapping[str, object]], list[str]]
     if kind == "gitlab_job":
         details = lambda item: _job_details(item, search)

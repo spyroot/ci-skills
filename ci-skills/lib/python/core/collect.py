@@ -38,10 +38,10 @@ DEFAULT_WINDOW = timedelta(hours=1)
 
 
 def _read_json(
-    command: list[str],
-    *,
-    env: dict[str, str | None] | None = None,
-    timeout: int = LIST_TIMEOUT_SECONDS,
+        command: list[str],
+        *,
+        env: dict[str, str | None] | None = None,
+        timeout: int = LIST_TIMEOUT_SECONDS,
 ) -> tuple[Any | None, str | None]:
     """
 
@@ -70,18 +70,18 @@ def _items(value: Any) -> Sequence[Mapping[str, Any]]:
 
     items = value["items"]
     if any(
-        not isinstance(item, dict)
-        or not isinstance(item.get("metadata"), dict)
-        or not isinstance(item["metadata"].get("name"), str)
-        or not item["metadata"]["name"]
-        for item in items
+            not isinstance(item, dict)
+            or not isinstance(item.get("metadata"), dict)
+            or not isinstance(item["metadata"].get("name"), str)
+            or not item["metadata"]["name"]
+            for item in items
     ):
         raise TypeError("invalid_list_response")
 
     if any(
-        key in item and not isinstance(item[key], dict)
-        for item in items
-        for key in ("spec", "status")
+            key in item and not isinstance(item[key], dict)
+            for item in items
+            for key in ("spec", "status")
     ):
         raise TypeError("invalid_item_response")
     return items
@@ -93,19 +93,18 @@ def _meta(item: dict[str, Any]) -> Mapping[str, Any]:
 
 def _search(value: dict[str, Any], needle: str | None) -> bool:
     return (
-        not needle
-        or needle.casefold() in json.dumps(value, ensure_ascii=False).casefold()
+            not needle
+            or needle.casefold() in json.dumps(value, ensure_ascii=False).casefold()
     )
 
 
 def _batch(
-    target: Target,
+        target: Target,
         resources: Mapping[str, tuple[str, bool]]
 ) -> tuple[
     Mapping[str,
     Sequence[Mapping[str, Any]]],
     Sequence[Mapping[str, str]]]:
-
     data: MutableMapping[str, Sequence[Mapping[str, Any]]] = {}
     errors: MutableSequence[Mapping[str, str]] = []
 
@@ -140,7 +139,7 @@ def _batch(
 
 
 def _controller_counts(
-    kind: str, item: Mapping[str, Any]
+        kind: str, item: Mapping[str, Any]
 ) -> tuple[int | None, int | None]:
     """Read the replica counters from the selected controller's API shape.
     :param kind:
@@ -156,7 +155,7 @@ def _controller_counts(
 
 
 def _controller_record(
-    key: tuple[str, str, str], item: Mapping[str, Any]
+        key: tuple[str, str, str], item: Mapping[str, Any]
 ) -> Mapping[str, Any]:
     """
 
@@ -173,7 +172,6 @@ def collect_storage(
         target: Target,
         args: Any
 ) -> Mapping[str, Any]:
-
     resources = {
         "nodes": ("nodes", False),
         "pods": ("pods", True),
@@ -220,9 +218,9 @@ def collect_storage(
             ref.get("name")
             for ref in (_meta(item).get("ownerReferences") or [])
             if isinstance(ref, dict)
-            and ref.get("kind") == "Deployment"
-            and isinstance(ref.get("name"), str)
-            and ref.get("name")
+               and ref.get("kind") == "Deployment"
+               and isinstance(ref.get("name"), str)
+               and ref.get("name")
         ]
         for item in data.get("replicasets", [])
     }
@@ -237,9 +235,9 @@ def collect_storage(
             (ref.get("kind"), namespace, ref.get("name"))
             for ref in owners
             if isinstance(ref, dict)
-            and ref.get("kind") in controller_kinds.values()
-            and isinstance(ref.get("name"), str)
-            and ref.get("name")
+               and ref.get("kind") in controller_kinds.values()
+               and isinstance(ref.get("name"), str)
+               and ref.get("name")
         }
         for ref in owners:
             if isinstance(ref, dict) and ref.get("kind") == "ReplicaSet":
@@ -421,7 +419,7 @@ def _timestamp(value: str) -> datetime:
 
 
 def _event_data(
-    target: Target,
+        target: Target,
 ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]], str | None]:
     """Read the stable Event API once, with core/v1 as compatibility fallback."""
     preferred_key = "events_v1"
@@ -466,7 +464,7 @@ def _event_data(
 
 
 def _event_parts(
-    event: dict[str, Any],
+        event: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Validate nested Event fields before filtering or rendering them."""
     meta = _meta(event)
@@ -475,41 +473,41 @@ def _event_parts(
     if series is None:
         series = {}
     if (
-        not isinstance(obj, dict)
-        or not isinstance(series, dict)
-        or not isinstance(obj.get("name"), str)
-        or not obj["name"]
+            not isinstance(obj, dict)
+            or not isinstance(series, dict)
+            or not isinstance(obj.get("name"), str)
+            or not obj["name"]
     ):
         raise TypeError("invalid_event_record")
     # ObjectReference.kind is optional in the Kubernetes Event API. A name
     # still identifies the record for the filters and report below.
     for container, fields in (
-        (meta, ("namespace", "creationTimestamp")),
-        (obj, ("kind", "namespace", "name", "uid")),
-        (series, ("lastObservedTime",)),
-        (
-            event,
+            (meta, ("namespace", "creationTimestamp")),
+            (obj, ("kind", "namespace", "name", "uid")),
+            (series, ("lastObservedTime",)),
             (
-                "eventTime",
-                "firstTimestamp",
-                "lastTimestamp",
-                "deprecatedLastTimestamp",
-                "reason",
-                "type",
-                "note",
-                "message",
+                    event,
+                    (
+                            "eventTime",
+                            "firstTimestamp",
+                            "lastTimestamp",
+                            "deprecatedLastTimestamp",
+                            "reason",
+                            "type",
+                            "note",
+                            "message",
+                    ),
             ),
-        ),
     ):
         if any(
-            container.get(field) is not None and not isinstance(container[field], str)
-            for field in fields
+                container.get(field) is not None and not isinstance(container[field], str)
+                for field in fields
         ):
             raise TypeError("invalid_event_record")
     for container, field in (
-        (series, "count"),
-        (event, "deprecatedCount"),
-        (event, "count"),
+            (series, "count"),
+            (event, "deprecatedCount"),
+            (event, "count"),
     ):
         value = container.get(field)
         if value is not None and (type(value) is not int or value < 0):
@@ -544,15 +542,15 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
                 errors.append({"source": source, "reason": str(exc)})
                 continue
             first_source = (
-                event.get("eventTime")
-                or event.get("firstTimestamp")
-                or meta.get("creationTimestamp")
+                    event.get("eventTime")
+                    or event.get("firstTimestamp")
+                    or meta.get("creationTimestamp")
             )
             last_source = (
-                series.get("lastObservedTime")
-                or event.get("lastTimestamp")
-                or event.get("deprecatedLastTimestamp")
-                or first_source
+                    series.get("lastObservedTime")
+                    or event.get("lastTimestamp")
+                    or event.get("deprecatedLastTimestamp")
+                    or first_source
             )
             if not last_source:
                 errors.append({"source": source, "reason": "invalid_event_timestamp"})
@@ -596,10 +594,10 @@ def collect_events(target: Target, args: Any) -> dict[str, Any]:
                     event.get("note") or event.get("message") or "", 1000
                 ),
                 "count": (
-                    series.get("count")
-                    or event.get("deprecatedCount")
-                    or event.get("count")
-                    or 1
+                        series.get("count")
+                        or event.get("deprecatedCount")
+                        or event.get("count")
+                        or 1
                 ),
                 "source": source,
             }
@@ -673,7 +671,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
         item
         for item in daemonsets
         if _meta(item).get("namespace") == namespace
-        and _meta(item).get("name") == AGENT_DAEMONSET
+           and _meta(item).get("name") == AGENT_DAEMONSET
     ]
     if len(selected) != 1:
         errors.append({"source": "daemonsets", "reason": "cilium_daemonset_missing"})
@@ -684,8 +682,8 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
         item
         for item in data.get("pods", [])
         if _meta(item).get("namespace") == namespace
-        and matches_selector(_meta(item).get("labels") or {}, selector)
-        and (not args.node or item.get("spec", {}).get("nodeName") == args.node)
+           and matches_selector(_meta(item).get("labels") or {}, selector)
+           and (not args.node or item.get("spec", {}).get("nodeName") == args.node)
     ]
     rows: list[dict[str, Any]] = []
     if not agent_pods:
@@ -794,7 +792,7 @@ def collect_cilium(target: Target, args: Any) -> dict[str, Any]:
         }
         for item in data.get("operators", [])
         if _meta(item).get("namespace") == namespace
-        and "cilium" in (_meta(item).get("name") or "")
+           and "cilium" in (_meta(item).get("name") or "")
     ]
     result["ciliumnodes"] = [
         {"name": _meta(item).get("name"), "status": item.get("status", {})}
@@ -807,10 +805,10 @@ def gitlab_job_reference(job_url: str, host: str) -> tuple[str, str]:
     """Resolve the exact project and numeric job selected by one GitLab URL."""
     parsed = urlsplit(job_url)
     if (
-        parsed.scheme != "https"
-        or parsed.netloc.lower() != host
-        or parsed.query
-        or parsed.fragment
+            parsed.scheme != "https"
+            or parsed.netloc.lower() != host
+            or parsed.query
+            or parsed.fragment
     ):
         raise ValueError("job URL must use the exact selected GitLab FQDN")
     prefix, marker, job_id = parsed.path.rpartition("/-/jobs/")
@@ -820,10 +818,10 @@ def gitlab_job_reference(job_url: str, host: str) -> tuple[str, str]:
 
 
 def collect_gitlab_job(
-    target: Target | GitLabOperationTarget,
-    args: Any,
-    *,
-    credential: dict[str, str | None] | None = None,
+        target: Target | GitLabOperationTarget,
+        args: Any,
+        *,
+        credential: dict[str, str | None] | None = None,
 ) -> dict[str, Any]:
     if not getattr(args, "job_url", None):
         raise ValueError("--job-url is required; see --describe for the contract")
@@ -867,7 +865,7 @@ def collect_gitlab_job(
             if problem:
                 errors.append({"source": futures[future], "reason": problem})
             elif not isinstance(value, dict) or str(value.get("id")) != str(
-                pipeline_id if futures[future] == "pipeline" else runner_id
+                    pipeline_id if futures[future] == "pipeline" else runner_id
             ):
                 errors.append({"source": futures[future], "reason": "invalid_response"})
             else:
