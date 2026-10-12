@@ -137,6 +137,8 @@ class SkillState:
         """
         if not isinstance(plugin_type, SkillPluginType):
             raise TypeError("plugin_type must be SkillPluginType")
+        if not hasattr(self, "plugin_ready"):
+            self.plugin_ready = {}
         return self.plugin_ready.get(plugin_type, False)
 
     def state_dict(self) -> SkillResult:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import MutableSequence
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Optional
 
@@ -536,6 +537,60 @@ def test_state_reports_unsupported_values_at_serialization() -> None:
         state.to_json()
 
 
+def test_legacy_state_pickle_initializes_plugin_cache_before_callback_binding(
+    tmp_path: Path,
+) -> None:
+    """Restore pre-cache state and configure its shared provider once.
+
+    :param tmp_path: Isolated pickle destination for the legacy state shape.
+    :returns: None; assertions prove state preservation and configuration setup.
+    """
+    persisted = CounterState(
+        x=7,
+        name="legacy",
+        environment={"scope": "unit"},
+        result={"phase": "persisted"},
+        records=[{"phase": "persisted"}],
+    )
+    del persisted.plugin_ready
+    state_path = tmp_path / "legacy-state.pkl"
+    persisted.save_state_to_file(str(state_path))
+    restored = CounterState.load_state_from_file(str(state_path))
+    events: MutableSequence[str] = []
+    callbacks = CALLBACKS.Callbacks(
+        [
+            ProviderConfigurationCallback(
+                UnitAction("first"),
+                events,
+                SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
+            ),
+            ProviderConfigurationCallback(
+                UnitAction("second"),
+                events,
+                SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
+            ),
+        ]
+    )
+
+    executor = EXECUTOR.WorkflowExecutor(restored, callbacks)
+
+    assert restored.x == 7
+    assert restored.name == "legacy"
+    assert restored.environment == {"scope": "unit"}
+    assert restored.result == {"phase": "persisted"}
+    assert restored.records == [{"phase": "persisted"}]
+    assert events == [
+        "first.read_config",
+        "first.is_configured",
+        "second.is_configured",
+    ]
+    assert restored.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB)
+
+    assert executor.run() == {"name": "second"}
+    assert restored.records[0] == {"phase": "persisted"}
+    assert events[-2:] == ["second.cleanup", "first.cleanup"]
+
+
 def test_callbacks_configure_one_plugin_once_before_lifecycle_and_keep_json_stable() -> (
     None
 ):
@@ -581,6 +636,41 @@ def test_callbacks_configure_one_plugin_once_before_lifecycle_and_keep_json_stab
         "second.cleanup",
         "first.cleanup",
     ]
+
+
+def test_callback_configuration_requires_mapping_before_cache_or_later_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject invalid configuration output before marking a provider ready.
+
+    :param monkeypatch: Pytest fixture replacing only the test callback output.
+    :returns: None; assertions prove no cache, hooks, or later setup follows.
+    """
+    events: MutableSequence[str] = []
+    state = CounterState()
+    first = ProviderConfigurationCallback(
+        UnitAction("first"),
+        events,
+        SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
+    )
+    later = ProviderConfigurationCallback(
+        UnitAction("later"),
+        events,
+        SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES,
+    )
+
+    def invalid_read_config() -> None:
+        """Record the configuration read while returning an invalid result."""
+        events.append("first.read_config")
+
+    monkeypatch.setattr(first, "read_config", invalid_read_config)
+
+    with pytest.raises(TypeError, match="mapping"):
+        CALLBACKS.Callbacks([first, later]).bind(state)
+
+    assert events == ["first.read_config"]
+    assert not state.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB)
+    assert not state.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES)
 
 
 @pytest.mark.parametrize(

@@ -17,7 +17,7 @@ from lib.python.core.abstract.callback import AbstractCallback
 from lib.python.core.abstract.callbacks import AbstractCallbacks, Callbacks
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import SkillAction
-from lib.python.core.abstract.skill_result import SkillResult
+from lib.python.core.abstract.skill_result import SkillResult, require_result
 from lib.python.core.abstract.skill_state import SkillState, StateT
 from lib.python.core.runtime import execution_trace, sanitize, trace_event
 from lib.python.sys.signals import recoverable_signals
@@ -32,7 +32,8 @@ class SkillExecutor(ABC, Generic[StateT]):
         """Create and bind shared state before any lifecycle hook runs.
 
         :param callbacks: Ordered callback collection owned by this workflow.
-        :raises TypeError: If create_state does not return a concrete SkillState.
+        :raises TypeError: If create_state does not return a concrete SkillState,
+            or a configuration hook returns a non-mapping value.
         :raises ValueError: If a callback already belongs to a different state.
         """  # noqa: DOC503 - callback binding can reject existing ownership.
         state = self.create_state()
@@ -95,9 +96,7 @@ class SkillExecutor(ABC, Generic[StateT]):
         started = time.monotonic()
         trace_event("callback.started", {**detail, "status": "STARTED"})
         try:
-            result = operations[hook]()
-            if not isinstance(result, Mapping):
-                raise TypeError("callback hooks must return a result mapping")
+            result = require_result(operations[hook]())
         except BaseException as exc:
             trace_event(
                 "callback.failed",
@@ -209,7 +208,8 @@ class WorkflowExecutor(SkillExecutor[StateT]):
 
         :param context: Concrete state owned by this workflow invocation.
         :param callbacks: Ordered callbacks sharing this exact state instance.
-        :raises TypeError: The supplied context does not implement SkillState.
+        :raises TypeError: The supplied context does not implement SkillState,
+            or a configuration hook returns a non-mapping value.
         :raises ValueError: A callback already belongs to another state.
         """  # noqa: DOC502 - SkillExecutor validates state and callback ownership.
         self._context = context
