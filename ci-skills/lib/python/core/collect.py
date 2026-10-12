@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Sequence, MutableMapping, MutableSequence
 from urllib.parse import quote, urlsplit
 
 from .access import gitlab_env, glab_argv, kubectl_argv, kubernetes_env
@@ -42,6 +43,13 @@ def _read_json(
     env: dict[str, str | None] | None = None,
     timeout: int = LIST_TIMEOUT_SECONDS,
 ) -> tuple[Any | None, str | None]:
+    """
+
+    :param command:
+    :param env:
+    :param timeout:
+    :return:
+    """
     result = run_command(command, env=env, timeout=timeout)
     if result.returncode:
         return None, error_class(result)
@@ -51,10 +59,15 @@ def _read_json(
         return None, "invalid_json"
 
 
-def _items(value: Any) -> list[dict[str, Any]]:
-    """Reject malformed Kubernetes List envelopes rather than hiding data loss."""
+def _items(value: Any) -> Sequence[Mapping[str, Any]]:
+    """Reject malformed Kubernetes List envelopes rather than hiding data loss
+    :param value:
+    :return:
+    :raise TypeError:
+    """
     if not isinstance(value, dict) or not isinstance(value.get("items"), list):
         raise TypeError("invalid_list_response")
+
     items = value["items"]
     if any(
         not isinstance(item, dict)
@@ -64,6 +77,7 @@ def _items(value: Any) -> list[dict[str, Any]]:
         for item in items
     ):
         raise TypeError("invalid_list_response")
+
     if any(
         key in item and not isinstance(item[key], dict)
         for item in items
@@ -73,7 +87,7 @@ def _items(value: Any) -> list[dict[str, Any]]:
     return items
 
 
-def _meta(item: dict[str, Any]) -> dict[str, Any]:
+def _meta(item: dict[str, Any]) -> Mapping[str, Any]:
     return item.get("metadata") or {}
 
 
@@ -85,10 +99,16 @@ def _search(value: dict[str, Any], needle: str | None) -> bool:
 
 
 def _batch(
-    target: Target, resources: dict[str, tuple[str, bool]]
-) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, str]]]:
-    data: dict[str, list[dict[str, Any]]] = {}
-    errors: list[dict[str, str]] = []
+    target: Target,
+        resources: Mapping[str, tuple[str, bool]]
+) -> tuple[
+    Mapping[str,
+    Sequence[Mapping[str, Any]]],
+    Sequence[Mapping[str, str]]]:
+
+    data: MutableMapping[str, Sequence[Mapping[str, Any]]] = {}
+    errors: MutableSequence[Mapping[str, str]] = []
+
     with ThreadPoolExecutor(max_workers=min(10, len(resources))) as pool:
         futures = {
             pool.submit(
@@ -115,13 +135,18 @@ def _batch(
                 error = str(exc)
             if error:
                 errors.append({"source": key, "reason": error})
+
     return data, errors
 
 
 def _controller_counts(
-    kind: str, item: dict[str, Any]
+    kind: str, item: Mapping[str, Any]
 ) -> tuple[int | None, int | None]:
-    """Read the replica counters from the selected controller's API shape."""
+    """Read the replica counters from the selected controller's API shape.
+    :param kind:
+    :param item:
+    :return:
+    """
     if kind == "DaemonSet":
         status = item.get("status", {})
         return status.get("desiredNumberScheduled"), status.get("numberReady")
@@ -131,14 +156,24 @@ def _controller_counts(
 
 
 def _controller_record(
-    key: tuple[str, str, str], item: dict[str, Any]
-) -> dict[str, Any]:
+    key: tuple[str, str, str], item: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """
+
+    :param key:
+    :param item:
+    :return:
+    """
     kind, _namespace, name = key
     desired, ready = _controller_counts(kind, item)
     return {"kind": kind, "name": name, "desired": desired, "ready": ready}
 
 
-def collect_storage(target: Target, args: Any) -> dict[str, Any]:
+def collect_storage(
+        target: Target,
+        args: Any
+) -> Mapping[str, Any]:
+
     resources = {
         "nodes": ("nodes", False),
         "pods": ("pods", True),
@@ -153,6 +188,7 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
         "daemonsets": ("daemonsets", True),
         "replicasets": ("replicasets", True),
     }
+
     data, errors = _batch(target, resources)
     pv_by_name = {_meta(item).get("name"): item for item in data.get("pvs", [])}
     attachments: dict[str, list[dict[str, Any]]] = {}
@@ -166,16 +202,19 @@ def collect_storage(target: Target, args: Any) -> dict[str, Any]:
                     "attached": item.get("status", {}).get("attached"),
                 }
             )
+
     controller_kinds = {
         "deployments": "Deployment",
         "statefulsets": "StatefulSet",
         "daemonsets": "DaemonSet",
     }
+
     controller_items = {
         (kind, _meta(item).get("namespace"), _meta(item).get("name")): item
         for resource, kind in controller_kinds.items()
         for item in data.get(resource, [])
     }
+
     replica_owners = {
         (_meta(item).get("namespace"), _meta(item).get("name")): [
             ref.get("name")
