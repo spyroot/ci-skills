@@ -24,8 +24,6 @@ ci-skills/                     # the one installable skill (Agent Skills layout)
 bin/                           # repository-root adapters to ci-skills/bin/
 tools/                         # repository maintenance mains; tools/skillkit/ planned
 scripts/                       # development and build executables
-├── check.sh                   # its CI library was deleted on purpose; not runnable
-└── toolchain/                 # install.sh, conda.sh; their lib/bash/toolchain/ library is not in the tree
 tests/{python,bash,acceptance} # pytest, bats, the live receipt contract and sanitized receipts
 schemas/                       # record schemas (CI07-SCHEMA)
 vendor/                        # vendored skills and the one lock, planned (CI05-VENDOR)

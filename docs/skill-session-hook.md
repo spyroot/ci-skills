@@ -15,7 +15,7 @@ adapter beside the installed skill. A default Codex install registers it in
 The adapter recognizes CI Skills calls, reuses their catalog and target
 resolver, and gives the agent a missing-prerequisite or result hint. It does
 not repeat provider calls, rewrite commands, or retry writes. This delivery
-does not change `bless.sh`, `Makefile`, `scripts/check.sh`, or Git hooks.
+does not change `bless.sh`, `Makefile`, or Git hooks.
 
 For example, the installer could write this Codex configuration after
 substituting the installed skill path and its Python 3.11+ runtime. This

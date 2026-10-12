@@ -18,8 +18,6 @@ or project binding. Do not reconstruct the same API read with one-off `gh api`,
   BuildConfig and print a plan tied to an exact Git commit. It does not apply
   the BuildConfig or start a build.
 - `install.sh --help`: install this directory as a Codex skill symlink.
-- `scripts/check.sh --help`: inspect or run the repository validation gate.
-  Live validation requires the project-approved Kubernetes job.
 
 If a needed action is missing, report it or extend the shared tool in this
 repository when the current request authorizes that change. Do not disguise a

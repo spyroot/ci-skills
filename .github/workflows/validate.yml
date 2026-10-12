@@ -162,7 +162,6 @@ jobs:
             tests/bash/api.bats \
             tests/bash/binary_build.bats \
             tests/bash/bless.bats \
-            tests/bash/check.bats \
             | tee reports/raw/validate-bats.tap
       - name: Exercise offline acceptance receipt evaluation
         id: acceptance

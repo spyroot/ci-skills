@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -61,6 +62,21 @@ def import_script_module(module_name: str) -> ModuleType:
         sys.path.insert(0, str(SCRIPT_ROOT))
     import_module("_bootstrap")
     return import_module(module_name)
+
+
+def pytest_selectors(command: str) -> tuple[str, ...]:
+    """Return positional ``tests/python`` selectors from one shell command.
+
+    :param command: Workflow ``run`` script containing a pytest invocation.
+    :returns: Test directory or paths selected for execution, excluding ignores.
+    """
+    tokens = shlex.split(command)
+    return tuple(
+        token
+        for index, token in enumerate(tokens)
+        if (token == "tests/python" or token.startswith("tests/python/"))
+        and (index == 0 or tokens[index - 1] != "--ignore")
+    )
 
 
 @pytest.fixture
