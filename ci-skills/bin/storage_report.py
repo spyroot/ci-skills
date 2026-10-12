@@ -10,7 +10,7 @@ import argparse
 
 import _bootstrap  # noqa: F401
 from lib.python.core.cli import execute, parser
-from lib.python.core.collect import collect_storage
+from lib.python.core.kubernetes.storage import collect_storage
 
 
 # The parser is built by its own function so the declared interface can be

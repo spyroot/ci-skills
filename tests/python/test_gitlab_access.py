@@ -16,10 +16,10 @@ from typing import TYPE_CHECKING, Final, Optional, Union
 import pytest
 from conftest import import_script_module
 
-ACCESS = import_script_module("lib.python.access.access")
+ACCESS = import_script_module("lib.python.access.gitlab")
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
-CLI = import_script_module("lib.python.core.cli")
-CREDENTIALS = import_script_module("lib.python.access.credentials")
+CLI = import_script_module("lib.python.core.gitlab.cli")
+GITLAB_CREDENTIALS = import_script_module("lib.python.access.gitlab_credentials")
 GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
 TARGET = import_script_module("lib.python.core.target")
 SCRIPT = import_script_module("gitlab_access")
@@ -68,7 +68,7 @@ def _identity(monkeypatch: pytest.MonkeyPatch) -> None:
     :returns: None; the helper records behavior through its side effects.
     """
     monkeypatch.setattr(
-        CREDENTIALS,
+        GITLAB_CREDENTIALS,
         "resolve_skill_identity",
         lambda _revision: {
             "digest": {"algorithm": "sha256-tree-v1", "value": "a" * 64},
@@ -344,7 +344,7 @@ def _bound_project(
         _target(tmp_path, body=f'project = "{reference}"\n')
     )
     kind, selected = TARGET.select_gitlab_reference(target)
-    return CREDENTIALS.bind_gitlab_session(
+    return GITLAB_CREDENTIALS.bind_gitlab_session(
         target,
         target_kind=kind,
         target_reference=selected,
@@ -466,7 +466,7 @@ def test_relative_file_source_overrides_ambient_tokens_and_reads_exact_project(
     monkeypatch.setenv("CI_JOB_TOKEN", "job-token")
     target = TARGET.load_gitlab_target(path)
     kind, reference = TARGET.select_gitlab_reference(target)
-    session = CREDENTIALS.bind_gitlab_session(
+    session = GITLAB_CREDENTIALS.bind_gitlab_session(
         target,
         target_kind=kind,
         target_reference=reference,
@@ -576,7 +576,7 @@ def test_selected_missing_file_never_falls_back_to_ambient_token(
         )
     )
     with pytest.raises(TARGET.TargetError, match="credential_file_unavailable"):
-        CREDENTIALS.bind_gitlab_session(
+        GITLAB_CREDENTIALS.bind_gitlab_session(
             target,
             target_kind="project",
             target_reference="team/repo",
@@ -600,7 +600,7 @@ def test_environment_source_is_pinned_by_precedence(
     target = TARGET.load_gitlab_target(
         _target(tmp_path, body='project = "team/repo"\n')
     )
-    session = CREDENTIALS.bind_gitlab_session(
+    session = GITLAB_CREDENTIALS.bind_gitlab_session(
         target,
         target_kind="project",
         target_reference="team/repo",
@@ -627,7 +627,7 @@ def test_bound_session_records_effective_source_and_exact_target(
     target_file = _target(tmp_path, body='group = "platform/team"\n')
     target = TARGET.load_gitlab_target(target_file)
     kind, reference = TARGET.select_gitlab_reference(target)
-    session = CREDENTIALS.bind_gitlab_session(
+    session = GITLAB_CREDENTIALS.bind_gitlab_session(
         target,
         target_kind=kind,
         target_reference=reference,
@@ -663,7 +663,7 @@ def test_group_id_readback_requires_the_selected_numeric_id(
     monkeypatch.setenv("GITLAB_TOKEN", "selected-token")
     target = TARGET.load_gitlab_target(_target(tmp_path, body="group = 71\n"))
     kind, reference = TARGET.select_gitlab_reference(target)
-    session = CREDENTIALS.bind_gitlab_session(
+    session = GITLAB_CREDENTIALS.bind_gitlab_session(
         target,
         target_kind=kind,
         target_reference=reference,

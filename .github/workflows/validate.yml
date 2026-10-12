@@ -100,7 +100,8 @@ jobs:
             --arg-type-hints-in-docstring=False --check-return-types=False \
             --allow-init-docstring=True \
             ci-skills/lib/python/core/abstract \
-            ci-skills/lib/python/core/gitlab/abstract_github_callback.py \
+            ci-skills/lib/python/core/executor.py \
+            ci-skills/lib/python/core/gitlab/callback.py \
             ci-skills/lib/python/core/gitlab/gitlab_action.py \
             ci-skills/lib/python/core/gitlab/gitlab_runners.py \
             ci-skills/lib/python/core/gitlab/gitlab_actions.py \

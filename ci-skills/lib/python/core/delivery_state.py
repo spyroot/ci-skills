@@ -16,12 +16,12 @@ from lib.python.core.abstract.skill_action import AuthAction
 from lib.python.core.json_types import JSONObject
 
 if TYPE_CHECKING:
-    from lib.python.access.credentials import RegistryCredential
+    from lib.python.access.harbor_credentials import RegistryCredential
     from lib.python.core.cli_api import ReadSession
-    from lib.python.core.gitlab.github import GitHubService
-    from lib.python.core.gitlab.gitlab_runner import RunnerRuntime
+    from lib.python.core.github.github import GitHubService
     from lib.python.core.harbor.registry_mirror import HarborService
     from lib.python.core.kubernetes.kubernetes import KubernetesService
+    from lib.python.core.runner import RunnerRuntime
     from lib.python.core.target import GitHubTarget, HarborTarget, Target
     from lib.python.core.toolbox import ToolboxBuildResult
 

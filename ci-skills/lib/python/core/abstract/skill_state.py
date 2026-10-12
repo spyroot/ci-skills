@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import pickle
-from collections.abc import MutableMapping, MutableSequence
+from collections.abc import Mapping, MutableMapping, MutableSequence
 from dataclasses import dataclass, field
 from typing import ClassVar, Self, TypedDict, TypeVar
 
@@ -127,6 +127,13 @@ class SkillState:
         default_factory=dict, repr=False
     )
     json_encoder: ClassVar[type[json.JSONEncoder]] = json.JSONEncoder
+
+    def trace(self, event: str, details: Mapping[str, object]) -> None:
+        """Accept an execution event; concrete states may send it to a logger.
+
+        :param event: Lifecycle or transport event emitted by the executor.
+        :param details: Bounded event metadata supplied by the event producer.
+        """
 
     def is_config_checked(self, plugin_type: SkillPluginType) -> bool:
         """Read whether this invocation validated a plugin's configuration.

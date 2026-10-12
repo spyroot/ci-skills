@@ -26,6 +26,7 @@ from lib.python.core.json_types import (
     copy_json,
     json_object,
     json_objects,
+    json_string,
     json_strings,
 )
 from lib.python.core.runtime import redact_tree, sanitize
@@ -61,7 +62,7 @@ def _ceph_tree_lines(roots: Sequence[JSONObject], *, limit: int = 128) -> Sequen
     :raises KeyError: If a hierarchy node lacks its name, type, ID, or children.
     :raises TypeError: If hierarchy children are not an array of object records.
     """  # noqa: DOC502 - Required field indexing and shape readers can fail.
-    lines = []
+    lines: MutableSequence[str] = []
     pending: MutableSequence[tuple[JSONObject, int]] = [
         (node, 0) for node in reversed(roots)
     ]
@@ -85,7 +86,7 @@ def report(
     target: str,
     filters: JSONObject,
     records: Sequence[JSONObject],
-    errors: Sequence[Mapping[str, str]],
+    errors: Sequence[JSONObject],
 ) -> MutableMapping[str, JSONValue]:
     """Construct a versioned diagnostic result from collected evidence.
 
@@ -609,7 +610,8 @@ def emit_result(result: JSONObject, args: Namespace) -> int:
     """  # noqa: DOC503 - emit, receipt writing, and logging propagate errors.
     import sys
 
-    from lib.python.core.cli import log_event, output_mode
+    from lib.python.core.cli import output_mode
+    from lib.python.core.logging import log_event
     from lib.python.core.portable import write_portable_receipt
     from lib.python.sys.status import exit_code
 
@@ -622,9 +624,9 @@ def emit_result(result: JSONObject, args: Namespace) -> int:
     if getattr(args, "receipt_out", None):
         write_portable_receipt(data, args.receipt_out)
     rendered = emit(data, output_mode(args), getattr(args, "output_dir", None))
-    log_event(args, data["kind"], "result", data["status"])
+    log_event(args, json_string(data["kind"]), "result", json_string(data["status"]))
     sys.stdout.write(rendered)
-    return exit_code(data["status"])
+    return exit_code(json_string(data["status"]))
 
 
 def plan_digest(document: JSONObject, ensure_ascii: bool = True) -> str:

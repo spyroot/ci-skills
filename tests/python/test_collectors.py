@@ -8,7 +8,7 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Optional, Union
@@ -73,6 +73,53 @@ def _command_result(
     return runtime.CommandResult(argv, code, stdout, "")
 
 
+def _patch_json_commands(
+    monkeypatch: pytest.MonkeyPatch, runner: Callable[..., CommandResult]
+) -> None:
+    """Replace the shared native JSON command boundary for a test.
+
+    :param monkeypatch: Pytest fixture applying the temporary replacement.
+    :param runner: Synthetic command runner returning the fixture response.
+    :returns: None; the shared collection module receives the test runner.
+    """
+    collection = import_script_module("lib.python.core.collection")
+    monkeypatch.setattr(collection, "run_command", runner)
+
+
+def _patch_cilium_commands(
+    monkeypatch: pytest.MonkeyPatch,
+    cilium: ModuleType,
+    runner: Callable[..., CommandResult],
+) -> None:
+    """Replace Cilium list and direct health command boundaries for a test.
+
+    :param monkeypatch: Pytest fixture applying the temporary replacements.
+    :param cilium: Cilium collector module whose health execution is exercised.
+    :param runner: Synthetic command runner serving list and health responses.
+    :returns: None; shared list and Cilium health boundaries use the test runner.
+    """
+    _patch_json_commands(monkeypatch, runner)
+    monkeypatch.setattr(cilium, "run_command", runner)
+
+
+def _patch_gitlab_job_commands(
+    monkeypatch: pytest.MonkeyPatch,
+    job_read: ModuleType,
+    runner: Callable[..., CommandResult],
+    tail_runner: Callable[..., CommandResult],
+) -> None:
+    """Replace GitLab job JSON and trace-tail boundaries for a test.
+
+    :param monkeypatch: Pytest fixture applying the temporary replacements.
+    :param job_read: GitLab job collector whose direct trace tail is exercised.
+    :param runner: Synthetic JSON command runner for job metadata reads.
+    :param tail_runner: Synthetic bounded trace-tail command runner.
+    :returns: None; metadata and trace reads use only the fixture runners.
+    """
+    _patch_json_commands(monkeypatch, runner)
+    monkeypatch.setattr(job_read, "run_command_tail", tail_runner)
+
+
 def _empty_storage_payloads() -> MutableMapping[str, JSONValue]:
     """Return valid empty Kubernetes list responses for every storage resource.
 
@@ -105,7 +152,7 @@ def test_storage_report_records_malformed_list_envelopes_as_errors(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
     payloads.update(
@@ -131,7 +178,7 @@ def test_storage_report_records_malformed_list_envelopes_as_errors(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, payloads[resource])
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         namespace="all",
         node=None,
@@ -161,7 +208,7 @@ def test_storage_report_records_malformed_pv_and_pvc_fields_as_errors(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
     payloads["persistentvolumeclaims"] = {
@@ -196,7 +243,7 @@ def test_storage_report_records_malformed_pv_and_pvc_fields_as_errors(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, payloads[resource])
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         namespace="all", node=None, storage_class=None, phase="all", search=None
     )
@@ -229,7 +276,7 @@ def test_storage_report_includes_orphaned_pvs_for_phase_filters(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
     payloads["persistentvolumes"] = {
@@ -265,7 +312,7 @@ def test_storage_report_includes_orphaned_pvs_for_phase_filters(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, payloads[resource])
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         namespace="all",
         node=None,
@@ -296,7 +343,7 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     inventory = {
         "nodes": [{"metadata": {"name": "worker-a"}}],
@@ -388,7 +435,7 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": inventory[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         namespace="app",
         node="worker-a",
@@ -421,7 +468,7 @@ def test_storage_controller_lookup_uses_kind_namespace_and_daemonset_counters(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
     payloads["persistentvolumeclaims"] = {
@@ -519,7 +566,7 @@ def test_storage_controller_lookup_uses_kind_namespace_and_daemonset_counters(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, payloads[resource])
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     result = collect.collect_storage(
         _target(target_file),
         SimpleNamespace(
@@ -546,7 +593,7 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     events = {
         "events": [
@@ -637,7 +684,7 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
         calls.append(resource)
         return _command_result(runtime, command, {"items": events[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -668,7 +715,7 @@ def test_event_trace_rejects_naive_and_reversed_time_bounds(target_file: Path) -
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     target = _target(target_file)
     base = {
         "namespace": "all",
@@ -709,7 +756,7 @@ def test_event_trace_uses_series_last_observed_time_inside_window(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     events = {
         "events": [],
@@ -753,7 +800,7 @@ def test_event_trace_uses_series_last_observed_time_inside_window(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": events[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -786,7 +833,7 @@ def test_event_trace_keeps_first_observation_in_window_after_later_repeat(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
 
     def repeated(name: str, first: str) -> MutableMapping[str, JSONValue]:
@@ -825,7 +872,7 @@ def test_event_trace_keeps_first_observation_in_window_after_later_repeat(
         assert command[command.index("get") + 1] == "events.events.k8s.io"
         return _command_result(runtime, command, {"items": events})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -859,7 +906,7 @@ def test_event_trace_prefers_deprecated_count_before_core_count(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     event = {
         "metadata": {
@@ -897,7 +944,7 @@ def test_event_trace_prefers_deprecated_count_before_core_count(
         assert resource == "events.events.k8s.io"
         return _command_result(runtime, command, {"items": [event]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -925,7 +972,7 @@ def test_event_trace_reports_malformed_event_items_as_partial(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     events = {
         "events": [
@@ -962,7 +1009,7 @@ def test_event_trace_reports_malformed_event_items_as_partial(
         calls.append(resource)
         return _command_result(runtime, command, {"items": events[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -1006,7 +1053,7 @@ def test_event_trace_reports_malformed_nested_fields_as_partial(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     event = {
         "metadata": {"name": "runner-pod.abc", "namespace": "jobs"},
@@ -1032,7 +1079,7 @@ def test_event_trace_reports_malformed_nested_fields_as_partial(
         assert command[command.index("get") + 1] == "events.events.k8s.io"
         return _command_result(runtime, command, {"items": [event]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -1062,7 +1109,7 @@ def test_event_trace_accepts_reference_without_optional_kind(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     event = {
         "metadata": {"namespace": "jobs", "name": "runner-pod.abc"},
@@ -1086,7 +1133,7 @@ def test_event_trace_accepts_reference_without_optional_kind(
         command = tuple(str(part) for part in argv)
         return _command_result(runtime, command, {"items": [event]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -1127,7 +1174,7 @@ def test_event_trace_does_not_fallback_on_preferred_api_server_failure(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     calls: MutableSequence[str] = []
 
@@ -1150,7 +1197,7 @@ def test_event_trace_does_not_fallback_on_preferred_api_server_failure(
             raise AssertionError(f"unexpected fallback read: {resource}")
         return runtime.CommandResult(command, 1, "", stderr)
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -1180,7 +1227,7 @@ def test_event_trace_falls_back_and_records_compatibility_reason(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     calls: MutableSequence[str] = []
     core_event = {
@@ -1225,7 +1272,7 @@ def test_event_trace_falls_back_and_records_compatibility_reason(
             )
         return _command_result(runtime, command, {"items": [core_event]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -1262,7 +1309,7 @@ def test_event_trace_does_not_hide_preferred_api_access_denial(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     calls: MutableSequence[str] = []
 
@@ -1281,7 +1328,7 @@ def test_event_trace_does_not_hide_preferred_api_access_denial(
         calls.append(command[command.index("get") + 1])
         return runtime.CommandResult(command, 1, "", "Forbidden")
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -1310,7 +1357,7 @@ def test_event_trace_reports_both_errors_when_fallback_is_malformed(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     calls: MutableSequence[str] = []
 
@@ -1337,7 +1384,7 @@ def test_event_trace_reports_both_errors_when_fallback_is_malformed(
             )
         return _command_result(runtime, command, {})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_json_commands(monkeypatch, fake_run)
     args = SimpleNamespace(
         from_time="2026-10-01T10:00:00Z",
         to_time="2026-10-01T10:10:00Z",
@@ -1369,7 +1416,7 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.cilium_status")
     runtime = import_script_module("lib.python.core.runtime")
     exec_calls: MutableSequence[tuple[str, ...]] = []
     resources = {
@@ -1441,7 +1488,7 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": resources[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_cilium_commands(monkeypatch, collect, fake_run)
     args = SimpleNamespace(namespace="auto", node=None, search=None)
 
     result = collect.collect_cilium(_target(target_file), args)
@@ -1483,7 +1530,7 @@ def test_cilium_status_uses_daemonset_selector_for_agent_pods(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.cilium_status")
     runtime = import_script_module("lib.python.core.runtime")
     resources = {
         "daemonsets": [
@@ -1538,7 +1585,7 @@ def test_cilium_status_uses_daemonset_selector_for_agent_pods(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": resources[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_cilium_commands(monkeypatch, collect, fake_run)
     args = SimpleNamespace(namespace="networking", node=None, search=None)
 
     result = collect.collect_cilium(_target(target_file), args)
@@ -1559,7 +1606,7 @@ def test_cilium_status_exposes_failed_peer_but_proves_successful_read(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.cilium_status")
     live = import_script_module("lib.python.core.live")
     runtime = import_script_module("lib.python.core.runtime")
     resources = {
@@ -1605,7 +1652,7 @@ def test_cilium_status_exposes_failed_peer_but_proves_successful_read(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": resources[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_cilium_commands(monkeypatch, collect, fake_run)
     args = SimpleNamespace(namespace="networking", node=None, search=None)
 
     result = collect.collect_cilium(_target(target_file), args)
@@ -1634,7 +1681,7 @@ def test_cilium_status_reports_partial_for_explicit_namespace_with_zero_pods(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.cilium_status")
     runtime = import_script_module("lib.python.core.runtime")
     resources = {
         "daemonsets": [
@@ -1674,7 +1721,7 @@ def test_cilium_status_reports_partial_for_explicit_namespace_with_zero_pods(
         resource = command[command.index("get") + 1]
         return _command_result(runtime, command, {"items": resources[resource]})
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
+    _patch_cilium_commands(monkeypatch, collect, fake_run)
     args = SimpleNamespace(namespace="missing", node=None, search=None)
 
     result = collect.collect_cilium(_target(target_file), args)
@@ -1697,7 +1744,7 @@ def test_gitlab_job_rejects_job_url_from_different_fqdn(target_file: Path) -> No
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.gitlab.job_read")
     args = SimpleNamespace(
         job_url="https://other.example.test/unit/repo/-/jobs/123",
         search=None,
@@ -1718,7 +1765,7 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.gitlab.job_read")
     runtime = import_script_module("lib.python.core.runtime")
     token = "unit-token-value"
     token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
@@ -1781,8 +1828,7 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
         trace = "\n".join([f"line {index}" for index in range(250)])
         return runtime.CommandResult(command, 0, trace + "\npassword=topsecret\n", "")
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
-    monkeypatch.setattr(collect, "run_command_tail", fake_tail)
+    _patch_gitlab_job_commands(monkeypatch, collect, fake_run, fake_tail)
     args = SimpleNamespace(
         job_url="https://gitlab.example.test/unit/repo/-/jobs/123",
         search="selected",
@@ -1821,7 +1867,7 @@ def test_gitlab_job_records_malformed_nested_api_responses(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.gitlab.job_read")
     runtime = import_script_module("lib.python.core.runtime")
 
     def fake_run(
@@ -1869,8 +1915,7 @@ def test_gitlab_job_records_malformed_nested_api_responses(
         command = tuple(str(part) for part in argv)
         return runtime.CommandResult(command, 0, "selected trace line\n", "")
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
-    monkeypatch.setattr(collect, "run_command_tail", fake_tail)
+    _patch_gitlab_job_commands(monkeypatch, collect, fake_run, fake_tail)
     args = SimpleNamespace(
         job_url="https://gitlab.example.test/unit/repo/-/jobs/123",
         search="selected",
@@ -1898,7 +1943,7 @@ def test_gitlab_job_uses_effective_gitlab_env_token_for_all_reads(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.gitlab.job_read")
     credentials = import_script_module("lib.python.access.credentials")
     runtime = import_script_module("lib.python.core.runtime")
     token = "env-gitlab-token-value"
@@ -1994,8 +2039,7 @@ def test_gitlab_job_uses_effective_gitlab_env_token_for_all_reads(
         require_env(kwargs)
         return runtime.CommandResult(command, 0, "selected trace line\n", "")
 
-    monkeypatch.setattr(collect, "run_command", fake_run)
-    monkeypatch.setattr(collect, "run_command_tail", fake_tail)
+    _patch_gitlab_job_commands(monkeypatch, collect, fake_run, fake_tail)
     args = SimpleNamespace(
         job_url="https://gitlab.example.test/unit/repo/-/jobs/123",
         search="selected",
@@ -2018,7 +2062,7 @@ def test_a_kubernetes_report_identifies_the_api_server_not_only_the_context(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     monkeypatch.setattr(
         runtime,
@@ -2042,7 +2086,7 @@ def test_access_evidence_carries_what_a_reader_needs_to_check_the_run() -> None:
     """A collector report used to keep none of this.
     :returns: None; assertions in the body validate the regression.
     """
-    access = import_script_module("lib.python.access.access")
+    access = import_script_module("lib.python.access.shared")
     gate = {
         "status": "PASS",
         "profile": "base_access_check",
@@ -2078,7 +2122,7 @@ def test_the_receipt_digest_identifies_the_gate_it_came_from() -> None:
     """Two different gates must not share a correlator.
     :returns: None; assertions in the body validate the regression.
     """
-    access = import_script_module("lib.python.access.access")
+    access = import_script_module("lib.python.access.shared")
     first = access.access_evidence({"status": "PASS", "execution_host": "a"})
     again = access.access_evidence({"status": "PASS", "execution_host": "a"})
     other = access.access_evidence({"status": "PASS", "execution_host": "b"})
@@ -2107,7 +2151,7 @@ def test_parse_window_reads_a_relative_duration(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.time_window")
 
     assert collect.parse_window(value).total_seconds() == expected_seconds
 
@@ -2125,7 +2169,7 @@ def test_parse_window_refuses_anything_it_cannot_mean_exactly(value: JSONValue) 
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.time_window")
 
     with pytest.raises(ValueError, match="--last"):
         collect.parse_window(value)
@@ -2154,7 +2198,7 @@ def test_event_trace_refuses_a_relative_window_combined_with_bounds(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.events")
     args = SimpleNamespace(
         last=last,
         from_time=from_time,

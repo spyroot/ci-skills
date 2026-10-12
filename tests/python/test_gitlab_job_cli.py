@@ -22,8 +22,8 @@ from jsonschema import Draft202012Validator
 
 JobReadObservation: TypeAlias = tuple[SimpleNamespace, int, Optional[int]]
 
-CLI = import_script_module("lib.python.core.cli")
-COLLECT = import_script_module("lib.python.core.collect")
+CLI = import_script_module("lib.python.core.gitlab.cli")
+COLLECT = import_script_module("lib.python.core.gitlab.job_read")
 REPORT = import_script_module("lib.python.core.report")
 RUNTIME = import_script_module("lib.python.core.runtime")
 JOBS = import_script_module("lib.python.core.gitlab.gitlab_jobs")

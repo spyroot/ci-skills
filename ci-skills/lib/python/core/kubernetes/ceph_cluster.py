@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Optional
 
-from lib.python.access.access import kubernetes_env, oc_argv
+from lib.python.access.kubernetes import kubernetes_env, oc_argv
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.json_types import JSONObject, JSONValue, json_object, json_objects
 from lib.python.core.kubernetes.kubernetes import KubernetesService

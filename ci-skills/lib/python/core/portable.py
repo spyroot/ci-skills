@@ -100,8 +100,9 @@ def portable_command(argv: Sequence[JSONValue]) -> Sequence[JSONValue]:
     """
     result = list(argv)
     for index, item in enumerate(result[:-1]):
-        if item == "--kubeconfig" and isinstance(result[index + 1], str):
-            result[index + 1] = f"path:{path_token(result[index + 1])}"
+        argument = result[index + 1]
+        if item == "--kubeconfig" and isinstance(argument, str):
+            result[index + 1] = f"path:{path_token(argument)}"
     return result
 
 

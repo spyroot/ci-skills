@@ -41,7 +41,7 @@ from lib.python.core.kubernetes.kubernetes import (
     KubernetesError,
     KubernetesService,
 )
-from lib.python.core.resources import ResourceSet
+from lib.python.core.kubernetes.resources import ResourceSet
 from lib.python.core.runtime import error_class
 from lib.python.core.schema import (
     TOOLBOX_SCHEMA,
@@ -1262,7 +1262,7 @@ class BuildToolbox(K8SCallback[BuildAction]):
             != action.fingerprint
         ):
             raise ToolboxError("secret_ownership_conflict")
-        secret = {
+        secret: JSONObject = {
             "apiVersion": "v1",
             "data": {
                 ".dockerconfigjson": base64.b64encode(action.dockerconfig).decode(

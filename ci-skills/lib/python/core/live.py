@@ -13,12 +13,7 @@ from argparse import Namespace
 from collections.abc import Callable, MutableMapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from lib.python.core.collect import (
-    collect_cilium,
-    collect_events,
-    collect_gitlab_job,
-    collect_storage,
-)
+from lib.python.core.gitlab.job_read import collect_gitlab_job
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -28,6 +23,9 @@ from lib.python.core.json_types import (
     json_objects,
 )
 from lib.python.core.kubernetes.ceph_cluster import collect_ceph_cluster
+from lib.python.core.kubernetes.cilium_status import collect_cilium
+from lib.python.core.kubernetes.events import collect_events
+from lib.python.core.kubernetes.storage import collect_storage
 from lib.python.core.target import Target
 from lib.python.sys.status import BLOCKED, PARTIAL, PASS
 

@@ -9,13 +9,17 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Mapping, MutableMapping, Sequence
-from dataclasses import dataclass, field
 from typing import Final, Optional
 
-from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import JSONDocument, JSONObject, JSONValue
 from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
-from lib.python.core.resources import ResourceSet
+from lib.python.core.kubernetes.resources import ResourceSet
+from lib.python.core.runner import (
+    REGISTRATION_SECRET_SUFFIX,
+    RUNTIME_ROOT,
+    RunnerAction,
+    RunnerRuntime,
+)
 from lib.python.core.toolbox import DOCTOR_PATH
 from lib.python.sys.status import APPLIED, NO_OP, VERIFIED
 
@@ -25,97 +29,9 @@ JOB_API: Final = "batch/v1"
 PULL_SECRET_TYPE: Final = "kubernetes.io/dockerconfigjson"
 PULL_SECRET_KEY: Final = ".dockerconfigjson"
 WORK_VOLUME: Final = "runner-work"
-RUNTIME_ROOT: Final = "/ci-skills/runner"
 RUNNER_CONTAINER: Final = "runner"
 REGISTRY_SECRET_SUFFIX: Final = "-registry"
-REGISTRATION_SECRET_SUFFIX: Final = "-registration"
 DOCTOR_COMMAND: Final = (DOCTOR_PATH,)
-
-
-@dataclass(frozen=True)
-class RunnerRuntime:
-    """Retain provider bootstrap commands and private registration material.
-
-    :param init_command: Native registration command run only by the init container.
-    :param command: Runner process command after registration completes.
-    :param environment: Registration environment entries and Secret references.
-    :param readiness_command: Optional readiness command, empty when unnecessary.
-    :param credential: Private key/value data written only to the owned Secret.
-
-    .. attribute :: init_command
-        :type: Sequence[str]
-
-        Native registration command run only by the init container.
-
-    .. attribute :: command
-        :type: Sequence[str]
-
-        Runner process command after registration completes.
-
-    .. attribute :: environment
-        :type: Sequence[JSONObject]
-
-        Registration environment entries and Secret references.
-
-    .. attribute :: readiness_command
-        :type: Sequence[str]
-
-        Optional readiness command, empty when unnecessary.
-
-    .. attribute :: credential
-        :type: Mapping[str, str]
-
-        Private key/value data written only to the owned Secret.
-    """
-
-    init_command: Sequence[str]
-    command: Sequence[str]
-    environment: Sequence[JSONObject]
-    readiness_command: Sequence[str]
-    credential: Mapping[str, str] = field(repr=False)
-
-
-@dataclass(frozen=True)
-class RunnerAction(SkillAction):
-    """Select one runner workload and its requested registration inputs.
-
-    :param namespace: Runtime-selected workload namespace.
-    :param name: Exact workload and provider runner name.
-    :param source_root: Runner installation directory inside the supplied image.
-    :param labels: Provider labels required during independent read-back.
-    :param timeout: Positive maximum seconds for readiness and temporary Jobs.
-
-    .. attribute :: namespace
-        :type: str
-
-        Runtime-selected workload namespace.
-
-    .. attribute :: name
-        :type: str
-
-        Exact workload and provider runner name.
-
-    .. attribute :: source_root
-        :type: str
-
-        Runner installation directory inside the supplied image.
-
-    .. attribute :: labels
-        :type: Sequence[str]
-
-        Provider labels required during independent read-back.
-
-    .. attribute :: timeout
-        :type: int
-
-        Positive maximum seconds for readiness and temporary Jobs.
-    """
-
-    namespace: str
-    name: str
-    source_root: str
-    labels: Sequence[str]
-    timeout: int
 
 
 class DeployRunner(K8SCallback[RunnerAction]):
@@ -178,7 +94,7 @@ class DeployRunner(K8SCallback[RunnerAction]):
             container["readinessProbe"] = {
                 "exec": {"command": list(runtime.readiness_command)}
             }
-        init = {
+        init: JSONObject = {
             "name": "register",
             "image": image,
             "imagePullPolicy": "IfNotPresent",
@@ -239,7 +155,7 @@ class DeployRunner(K8SCallback[RunnerAction]):
         )
         evidence = running_images(pods, image)
         changed = any(item["action"] == APPLIED for item in resources.evidence)
-        result = {
+        result: JSONObject = {
             "action": APPLIED if changed else NO_OP,
             "verified": True,
             "namespace": action.namespace,
@@ -420,11 +336,12 @@ def running_images(
     :returns: Safe Pod names and observed image IDs matching the expected digest.
     :raises KubernetesError: If the PodList is malformed or no image/state is verified.
     """
-    if not isinstance(document, Mapping) or not isinstance(document.get("items"), list):
+    items = document.get("items") if isinstance(document, Mapping) else None
+    if not isinstance(items, list):
         raise KubernetesError("pod_list_invalid")
     digest = image.rsplit("@", 1)[-1]
     evidence = []
-    for pod in document["items"]:
+    for pod in items:
         if not isinstance(pod, Mapping):
             raise KubernetesError("pod_list_invalid")
         metadata, status = pod.get("metadata", {}), pod.get("status", {})

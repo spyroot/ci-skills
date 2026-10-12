@@ -310,7 +310,8 @@ def load_project_binding(
             source_file=target_path,
             source_kind="binding",
         )
-    if target.kubernetes.kubeconfig is not None or target.kubernetes.kubeconfigs:
+    selected_kubernetes = target.require_kubernetes()
+    if selected_kubernetes.kubeconfig is not None or selected_kubernetes.kubeconfigs:
         raise TargetError("binding_target_kubeconfig_conflict")
     for index, source in enumerate(sources):
         if not isinstance(source, dict):
@@ -337,7 +338,7 @@ def load_project_binding(
             raise TargetError("binding_kubeconfig_unreadable") from exc
         return replace(
             target,
-            kubernetes=replace(target.kubernetes, kubeconfig=selected),
+            kubernetes=replace(selected_kubernetes, kubeconfig=selected),
             kubernetes_source_reference=f"binding:{binding}#{index + 1}:{reference}",
             target_reference=f"binding:{binding}",
             source_file=target_path,

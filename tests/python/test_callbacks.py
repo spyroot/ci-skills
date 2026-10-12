@@ -32,18 +32,17 @@ READ_CLI = import_script_module("lib.python.core.read_cli")
 BINARY_BUILD = import_script_module("lib.python.core.binary_build")
 CONTEXT = import_script_module("lib.python.core.abstract.context")
 DELIVERY_STATE = import_script_module("lib.python.core.delivery_state")
-EXECUTOR = import_script_module("lib.python.core.abstract.skill_exector")
-GITLAB_CALLBACK = import_script_module(
-    "lib.python.core.gitlab.abstract_github_callback"
-)
-GITHUB_RUNNER = import_script_module("lib.python.core.gitlab.github_runner")
+ABSTRACT_EXECUTOR = import_script_module("lib.python.core.abstract.executor")
+EXECUTOR = import_script_module("lib.python.core.executor")
+GITLAB_CALLBACK = import_script_module("lib.python.core.gitlab.callback")
+GITHUB_RUNNER = import_script_module("lib.python.core.github.runner")
 GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
 JSON_TYPES = import_script_module("lib.python.core.json_types")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 REGISTRY = import_script_module("lib.python.core.harbor.registry_mirror")
-RESOURCES = import_script_module("lib.python.core.resources")
+RESOURCES = import_script_module("lib.python.core.kubernetes.resources")
 RUNTIME = import_script_module("lib.python.core.runtime")
-RUNNER_CORE = import_script_module("lib.python.core.gitlab.gitlab_runner")
+RUNNER_CORE = import_script_module("lib.python.core.kubernetes.runner")
 RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
 STATUS = import_script_module("lib.python.sys.status")
 SKILL_ACTION = import_script_module("lib.python.core.abstract.skill_action")
@@ -167,7 +166,7 @@ class Recorded(CALLBACKS.LocalCallback[CONTEXT.ExecutionContext, RecordedAction]
 
 def _callback_executor(
     callbacks: CallbackInput, context: Optional[SKILL_STATE.SkillState] = None
-) -> EXECUTOR.SkillExecutor:
+) -> ABSTRACT_EXECUTOR.SkillExecutor:
     """Create an executor for the current callback abstraction.
 
     :param callbacks: One callback or an ordered iterable of callbacks.
@@ -766,6 +765,57 @@ def test_provider_bases_use_prebound_gitlab_and_reject_missing_harbor_at_bind() 
     assert state.records == []
     assert state.results[gitlab] == {}
     assert state.results[harbor] == {}
+
+
+def test_kubernetes_auth_rejects_non_kubernetes_bound_sources_before_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject a prebound source record that lacks Kubernetes credentials.
+
+    :param monkeypatch: Pytest fixture proving no fallback credential bind occurs.
+    :returns: None; assertions prove configuration fails before provider lifecycle.
+    """
+    sources = import_script_module("lib.python.access.sources")
+    target = TARGET.Target(
+        github=None,
+        gitlab=None,
+        kubernetes=TARGET.KubernetesTarget(
+            context="unit-context",
+            server="https://api.example.test:6443",
+            kubeconfig=None,
+        ),
+        active_surfaces=(SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES.value,),
+        sources=sources.Sources(
+            github=sources.CredentialSource("env:GH_TOKEN", {}),
+            gitlab=None,
+            kubernetes=None,
+            kubeconfig_files=(),
+            execution_host="unit-host",
+        ),
+    )
+    auth = KUBERNETES.K8SAuth(target)
+    state = DELIVERY_STATE.DeliveryState()
+
+    def unexpected_bind(*_args: object, **_kwargs: object) -> object:
+        """Fail when K8SAuth incorrectly attempts to replace bound sources.
+
+        :param _args: Positional arguments passed to the unexpected binder.
+        :param _kwargs: Keyword arguments passed to the unexpected binder.
+        :returns: This function never returns.
+        :raises Failed: Always, because prebound sources must not be replaced.
+        """
+        pytest.fail("K8SAuth replaced prebound credential sources")
+
+    monkeypatch.setattr(KUBERNETES, "bind_sources", unexpected_bind)
+
+    with pytest.raises(ValueError, match="required_credential_source_missing"):
+        CALLBACK_COLLECTIONS.Callbacks([auth]).bind(state)
+
+    assert state.records == []
+    assert state.results[auth] == {}
+    assert not state.is_config_checked(SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES)
+    assert not hasattr(state, "kubernetes_target")
+    assert not hasattr(state, "kubernetes")
 
 
 def test_failure_stops_callbacks_and_retains_all_reverse_cleanup_evidence() -> None:
@@ -1963,7 +2013,7 @@ from dataclasses import dataclass
 from lib.python.core.abstract.callback import LocalCallback
 from lib.python.core.abstract.callbacks import Callbacks
 from lib.python.core.abstract.skill_action import SkillAction
-from lib.python.core.abstract.skill_exector import Executor
+from lib.python.core.executor import Executor
 
 @dataclass(frozen=True)
 class UnitAction(SkillAction):

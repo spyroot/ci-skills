@@ -285,7 +285,7 @@ def test_cluster_wide_list_reads_use_a_bound_sized_for_a_real_cluster(
 
     :returns: None; assertions in the body validate the regression.
     """
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.collection")
     runtime = import_script_module("lib.python.core.runtime")
     seen: MutableSequence[int] = []
 

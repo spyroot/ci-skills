@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Optional
 
-from lib.python.access.access import kubectl_argv, kubernetes_env
+from lib.python.access.kubernetes import kubectl_argv, kubernetes_env
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.objects import KubernetesObject

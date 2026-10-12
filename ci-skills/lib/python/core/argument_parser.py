@@ -11,15 +11,57 @@ import argparse
 import json
 import socket
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
-from typing import Optional
+from typing import NoReturn, Optional, TypeVar, Union, overload
 
+from lib.python.core.json_types import JSONObject
 from lib.python.core.report import emit
 from lib.python.sys.status import BLOCKED
 
+NamespaceT = TypeVar("NamespaceT")
 
-class StructuredParser(argparse.ArgumentParser):
+
+class TrackedArgumentParser(argparse.ArgumentParser):
+    """Retain original arguments for a concrete parser's structured errors.
+
+    .. attribute :: requested
+
+        Original arguments retained as an immutable sequence for output selection.
+    """
+
+    requested: Sequence[str] = ()
+
+    @overload
+    def parse_args(
+        self, args: Optional[Iterable[str]] = None, namespace: None = None
+    ) -> argparse.Namespace: ...
+
+    @overload
+    def parse_args(
+        self, args: Optional[Iterable[str]], namespace: NamespaceT
+    ) -> NamespaceT: ...
+
+    @overload
+    def parse_args(self, *, namespace: NamespaceT) -> NamespaceT: ...
+
+    def parse_args(
+        self,
+        args: Optional[Iterable[str]] = None,
+        namespace: Optional[NamespaceT] = None,
+    ) -> Union[argparse.Namespace, NamespaceT]:
+        """Retain the original arguments and preserve argparse's namespace contract.
+
+        :param args: Arguments to parse, or None for process arguments.
+        :param namespace: Existing namespace to populate, or None for a new namespace.
+        :returns: The supplied namespace instance, or a new argparse.Namespace.
+        :raises SystemExit: Help was requested or arguments are invalid.
+        """  # noqa: DOC502 - argparse handles help and invalid inputs by exiting.
+        self.requested = tuple(sys.argv[1:] if args is None else args)
+        return super().parse_args(self.requested, namespace)
+
+
+class StructuredParser(TrackedArgumentParser):
     """Render invalid arguments in the requested machine output format.
 
     .. attribute :: requested
@@ -30,29 +72,14 @@ class StructuredParser(argparse.ArgumentParser):
 
     requested: Sequence[str]
 
-    def parse_args(
-        self,
-        args: Optional[Sequence[str]] = None,
-        namespace: Optional[argparse.Namespace] = None,
-    ) -> argparse.Namespace:
-        """Remember requested options before parsing for structured errors.
-
-        :param args: Explicit argument sequence, or ``None`` for process arguments.
-        :param namespace: Optional namespace to populate with parsed values.
-        :returns: Parsed argument namespace.
-        :raises SystemExit: ``argparse`` rejects input or handles help.
-        """  # noqa: DOC502 - ArgumentParser.parse_args raises SystemExit for help or invalid input.
-        self.requested = tuple(sys.argv[1:] if args is None else args)
-        return super().parse_args(args, namespace)
-
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> NoReturn:
         """Emit a bounded invalid-arguments report in the requested output mode.
 
         :param message: Parser diagnostic from ``argparse``; it is not copied into
             the report to avoid echoing supplied values.
         :raises SystemExit: Always exits with status two after emitting the report.
         """
-        data = {
+        data: JSONObject = {
             "schema_version": "1.0",
             "kind": self.prog.removesuffix(".py"),
             "status": BLOCKED,

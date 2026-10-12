@@ -156,7 +156,7 @@ def test_harbor_credentials_resolve_beside_target_without_altering_files(
     """
     target_path, selected, before = harbor_target_case
     target_mod = import_script_module("lib.python.core.target")
-    credentials = import_script_module("lib.python.access.credentials")
+    credentials = import_script_module("lib.python.access.harbor_credentials")
 
     target = target_mod.load_target(target_path, required_surfaces=("harbor",))
     credential = credentials.resolve_harbor_credential(target.harbor)
@@ -231,7 +231,7 @@ def test_ambient_kubeconfig_cannot_point_into_installed_skill(
     :returns: None; assertions in the body validate the regression.
     """
     target_mod = import_script_module("lib.python.core.target")
-    credentials = import_script_module("lib.python.access.credentials")
+    credentials = import_script_module("lib.python.access.kubernetes_credentials")
     skill_root = import_script_module("lib.python.core.paths").SKILL_ROOT
     monkeypatch.setenv("KUBECONFIG", str(skill_root / "inside.kubeconfig"))
 
@@ -250,7 +250,7 @@ def test_default_kubeconfig_cannot_point_into_installed_skill(
     :returns: None; assertions in the body validate the regression.
     """
     target_mod = import_script_module("lib.python.core.target")
-    credentials = import_script_module("lib.python.access.credentials")
+    credentials = import_script_module("lib.python.access.kubernetes_credentials")
     skill_root = import_script_module("lib.python.core.paths").SKILL_ROOT
     monkeypatch.delenv("KUBECONFIG", raising=False)
     monkeypatch.setenv("HOME", str(skill_root))

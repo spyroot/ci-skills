@@ -232,14 +232,15 @@ class Callback(AbstractCallback[StateT, ActionT_co]):
 
 
 class LocalCallback(Callback[StateT, ActionT_co]):
-    """Declare that an action uses no external provider configuration.
+    """Declare that an action uses no external provider configuration."""
 
-    .. attribute :: plugin_type
+    @property
+    def plugin_type(self) -> SkillPluginType:
+        """Identify the configuration shared by this plugin's callbacks.
 
-        SkillPluginType cache key for local configuration.
-    """
-
-    plugin_type = SkillPluginType.LOCAL
+        :returns: The local plugin's configuration cache key.
+        """
+        return SkillPluginType.LOCAL
 
     def read_config(self) -> SkillResult:
         """Keep all local action inputs in the supplied action and shared state.

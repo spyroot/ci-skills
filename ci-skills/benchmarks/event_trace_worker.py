@@ -356,7 +356,7 @@ def _sample(arguments: argparse.Namespace) -> WorkerPayload:
     :raises TargetError: If target or credential binding fails.
     """  # noqa: DOC503 - Source, credential, and read helpers propagate failures.
     target = _bound_target(arguments)
-    from lib.python.core.collect import collect_events
+    from lib.python.core.kubernetes.events import collect_events
 
     options = argparse.Namespace(
         from_time=arguments.from_time,

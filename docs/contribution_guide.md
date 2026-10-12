@@ -17,9 +17,10 @@ Start with the nearest installed command in [ci-skills/bin](../ci-skills/bin/) a
 | Responsibility | Existing owner |
 | --- | --- |
 | Callback hooks and ordered binding | [callback.py](../ci-skills/lib/python/core/abstract/callback.py), [callbacks.py](../ci-skills/lib/python/core/abstract/callbacks.py) |
-| Typed state, results and execution | [skill_state.py](../ci-skills/lib/python/core/abstract/skill_state.py), [skill_exector.py](../ci-skills/lib/python/core/abstract/skill_exector.py) |
+| Typed state, results and execution | [skill_state.py](../ci-skills/lib/python/core/abstract/skill_state.py), [SkillExecutor](../ci-skills/lib/python/core/abstract/executor.py), [Executor and WorkflowExecutor](../ci-skills/lib/python/core/executor.py) |
 | Targets and credential selection | [target.py](../ci-skills/lib/python/core/target.py), [credentials.py](../ci-skills/lib/python/access/credentials.py) |
-| Provider services and authentication | [gitlab_session.py](../ci-skills/lib/python/core/gitlab/gitlab_session.py), [github.py](../ci-skills/lib/python/core/gitlab/github.py), [kubernetes.py](../ci-skills/lib/python/core/kubernetes/kubernetes.py), [registry_mirror.py](../ci-skills/lib/python/core/harbor/registry_mirror.py) |
+| Provider services and authentication | [GitlabCallback](../ci-skills/lib/python/core/gitlab/callback.py), [gitlab_session.py](../ci-skills/lib/python/core/gitlab/gitlab_session.py), [github.py](../ci-skills/lib/python/core/github/github.py), [kubernetes.py](../ci-skills/lib/python/core/kubernetes/kubernetes.py), [registry_mirror.py](../ci-skills/lib/python/core/harbor/registry_mirror.py) |
+| Runner inputs and provider operations | [runner.py](../ci-skills/lib/python/core/runner.py), [GitHub registration](../ci-skills/lib/python/core/github/runner.py), [Kubernetes workload](../ci-skills/lib/python/core/kubernetes/runner.py) |
 | Toolbox workflow inputs, planning and reports | [toolbox_actions.py](../ci-skills/lib/python/core/toolbox_actions.py) |
 | Command declaration, help and discovery | [catalog.py](../ci-skills/lib/python/core/catalog.py), [cli.py](../ci-skills/lib/python/core/cli.py) |
 
@@ -104,7 +105,8 @@ observed state before writing; use [status.py](../ci-skills/lib/python/sys/statu
 Reuse named shared constants for fixed domain values. Obtain deployment values such as hosts, project IDs and runner
 names from action inputs, configuration or discovery; obtain credentials through the existing target and credential
 resolver.
-Reuse [ResourceSet](../ci-skills/lib/python/core/resources.py) for Kubernetes ownership, apply/read-back and recovery,
+Reuse [ResourceSet](../ci-skills/lib/python/core/kubernetes/resources.py) for Kubernetes ownership, apply/read-back
+and recovery,
 and `TagSnapshot` in `registry_mirror.py` for Harbor tag restoration. Cleanup releases temporary resources and restores
 failed changes; it does not delete a successfully requested persistent runner or image.
 
@@ -125,7 +127,7 @@ from typing import Optional
 
 import _bootstrap  # installed bin/ import setup
 from lib.python.core.abstract.callbacks import Callbacks
-from lib.python.core.abstract.skill_exector import WorkflowExecutor
+from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.harbor.registry_mirror import HarborAuth, HarborPush, PushAction
 from lib.python.core.toolbox_actions import ConfirmWorkflow, WorkflowAction, workflow_parser
@@ -178,7 +180,8 @@ Make the installed command usable from help and its schema without requiring the
    `ci-skills/tools.json` from the repository root with
    `conda run -n ci-skills python tools/render_manifest.py`.
 
-Use the shared diagnostic arguments from `core.cli.add_log_arguments()`:
+Use the shared diagnostic arguments from
+[core.logging.add_log_arguments()](../ci-skills/lib/python/core/logging.py):
 
 ```text
 --log-level debug --log-format json --log-file PATH
@@ -191,22 +194,13 @@ both debug logging and a log file are selected; keep the trace separate from res
 
 ## 5. Verify the installed behavior
 
-Follow the existing [validation surfaces](../README.md#validation):
-
-- **Local static checks:** run `./bless.sh --staged` from the repository root before committing; it uses the shared
-  lint checks.
-- **GitHub tests:** extend the relevant [callback tests](../tests/python/test_callbacks.py),
-  [workflow tests](../tests/python/test_toolbox_workflows.py) and [catalogue tests](../tests/python/test_catalog.py).
-  Use fake services to prove the changed behavior and its concrete failure path, including applicable confirmation,
-  read-back, no-op and recovery behavior. These test suites run on GitHub, not the laptop.
-- **Live functionality:** install the candidate through [install.sh](../install.sh), then use the installed discovery,
-  help/schema and command as a user would. Execute the affected operation against the selected real targets, read back
-  its result, repeat applicable no-op checks and verify cleanup of smoke-owned resources. A dry-run is not live proof.
+Follow the existing [validation surfaces](../README.md#validation) and
+[installer procedure](../README.md#install-and-first-run). Extend the relevant
+[callback tests](../tests/python/test_callbacks.py), [workflow tests](../tests/python/test_toolbox_workflows.py) and
+[catalogue tests](../tests/python/test_catalog.py) with fake services for the changed behavior and its concrete failure
+path. Install the candidate, use discovery and help as a consumer would, then execute the affected live operation,
+read back the result, repeat applicable no-op checks and verify cleanup of smoke-owned resources.
 
 Keep the PR candidate identity, installed skill identity, result and cleanup evidence in the smoke report. Point to the
 compact execution trace through `trace_artifact`; do not copy or parse the entire trace into another report. If code
 changes the exercised behavior, reinstall and repeat that affected live check before claiming it is proved.
-
-[Target selection](../README.md#target-selection) explains project and user `target.toml` locations for runtime endpoints
-and credentials. This configuration is not repository delivery policy;
-GitHub's mocked code checks do not require access to those private targets.

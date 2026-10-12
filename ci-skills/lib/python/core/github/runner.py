@@ -12,15 +12,15 @@ from typing import Final, Optional
 
 from lib.python.core.catalog import github_variables
 from lib.python.core.cli_api import APIError
-from lib.python.core.gitlab.github import GitHubCallback
-from lib.python.core.gitlab.gitlab_runner import (
+from lib.python.core.github.github import GitHubCallback
+from lib.python.core.json_types import JSONObject
+from lib.python.core.paths import SKILL_ROOT
+from lib.python.core.runner import (
     REGISTRATION_SECRET_SUFFIX,
     RUNTIME_ROOT,
     RunnerAction,
     RunnerRuntime,
 )
-from lib.python.core.json_types import JSONObject
-from lib.python.core.paths import SKILL_ROOT
 from lib.python.sys.status import APPLIED, NO_OP
 
 GITHUB_INIT_SCRIPT: Final = SKILL_ROOT / "lib/bash/runner/github-init.bash"
@@ -122,7 +122,7 @@ class GitHubRunnerRuntime(GitHubCallback[RunnerAction]):
         values = tuple(
             {"name": key, "value": value} for key, value in environment.items()
         )
-        secret = {
+        secret: JSONObject = {
             "name": github_variables(service.host)[0],
             "valueFrom": {
                 "secretKeyRef": {

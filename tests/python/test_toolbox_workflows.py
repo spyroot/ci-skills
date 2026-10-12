@@ -7,6 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import hashlib
 import json
 from argparse import Namespace
 from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
@@ -37,7 +38,9 @@ CALLBACKS = import_script_module("lib.python.core.abstract.callback")
 CALLBACK_COLLECTIONS = import_script_module("lib.python.core.abstract.callbacks")
 SKILL_ACTION = import_script_module("lib.python.core.abstract.skill_action")
 DELIVERY_STATE = import_script_module("lib.python.core.delivery_state")
-EXECUTOR = import_script_module("lib.python.core.abstract.skill_exector")
+EXECUTOR = import_script_module("lib.python.core.executor")
+REGISTRY = import_script_module("lib.python.core.harbor.registry_mirror")
+RUNTIME = import_script_module("lib.python.core.runtime")
 
 
 if TYPE_CHECKING:
@@ -578,6 +581,80 @@ def test_confirm_workflow_resolves_source_digest_and_requires_its_exact_plan(
     action.args.confirm_plan = confirmation
     with pytest.raises(ValueError, match="confirm_plan_mismatch_rerun_plan"):
         callback.run()
+
+
+def test_registry_copy_uses_digest_only_native_references_with_registry_ports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Render portable Skopeo references for tagged digest-pinned images.
+
+    :param monkeypatch: Pytest fixture replacing the bounded native transport.
+    :param tmp_path: Scratch directory supplying an authfile path to the service.
+    :returns: None; assertions prove inspect and copy remove tags but retain ports.
+    """
+    source = "registry.example.test:5443/unit/source:latest@sha256:" + "a" * 64
+    destination = "registry.example.test:5443/unit/destination:unit@sha256:" + "a" * 64
+    native_source = "docker://registry.example.test:5443/unit/source@sha256:" + "a" * 64
+    native_destination = (
+        "docker://registry.example.test:5443/unit/destination@sha256:" + "a" * 64
+    )
+    service = REGISTRY.HarborService(
+        target=TARGET.HarborTarget(
+            url="https://registry.example.test:5443",
+            host="registry.example.test:5443",
+            project="unit",
+        ),
+        credential=REGISTRY.RegistryCredential("unit", "secret", "fixture"),
+        authfile=tmp_path / "auth.json",
+        timeout=30,
+    )
+    raw_manifest = '{"schemaVersion":2}'
+    expected_digest = "sha256:" + hashlib.sha256(raw_manifest.encode()).hexdigest()
+    calls: MutableSequence[tuple[str, ...]] = []
+
+    def fake_transport(argv: Sequence[str], **_kwargs: object) -> RUNTIME.CommandResult:
+        """Record native registry argv and return the matching success fixture.
+
+        :param argv: Complete native command vector built by the registry service.
+        :param _kwargs: Bounded transport options accepted by the fake.
+        :returns: Successful inspect output or successful copy completion.
+        """
+        command = tuple(argv)
+        calls.append(command)
+        stdout = raw_manifest if command[1] == "inspect" else ""
+        return RUNTIME.CommandResult(command, 0, stdout, "")
+
+    monkeypatch.setattr(REGISTRY, "run_command_bounded", fake_transport)
+
+    assert service.copy(source, destination) == expected_digest
+    assert calls == [
+        (
+            "skopeo",
+            "inspect",
+            "--raw",
+            "--authfile",
+            str(service.authfile),
+            native_source,
+        ),
+        (
+            "skopeo",
+            "copy",
+            "--all",
+            "--preserve-digests",
+            "--authfile",
+            str(service.authfile),
+            native_source,
+            native_destination,
+        ),
+        (
+            "skopeo",
+            "inspect",
+            "--raw",
+            "--authfile",
+            str(service.authfile),
+            native_destination,
+        ),
+    ]
 
 
 @pytest.mark.parametrize(

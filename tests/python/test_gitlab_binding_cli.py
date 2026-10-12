@@ -15,7 +15,7 @@ import pytest
 from conftest import import_script_module
 
 ACCESS = import_script_module("gitlab_access")
-CLI = import_script_module("lib.python.core.cli")
+CLI = import_script_module("lib.python.core.gitlab.cli")
 ISSUE = import_script_module("gitlab_issue")
 JOB = import_script_module("gitlab_job")
 PIPELINE = import_script_module("gitlab_pipeline")

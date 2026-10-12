@@ -838,7 +838,7 @@ def test_explicit_target_without_kubeconfig_uses_environment_source(
     :returns: None; assertions in the body validate the regression.
     """
     project_binding = _project_binding()
-    credentials = import_script_module("lib.python.access.credentials")
+    credentials = import_script_module("lib.python.access.kubernetes_credentials")
     target = _write_target(tmp_path)
     config = _write_kubeconfig(tmp_path / "global")
     monkeypatch.setenv("KUBECONFIG", str(config))
@@ -861,7 +861,7 @@ def test_target_without_kubeconfig_uses_user_kubectl_default(
     :returns: None; assertions in the body validate the regression.
     """
     project_binding = _project_binding()
-    credentials = import_script_module("lib.python.access.credentials")
+    credentials = import_script_module("lib.python.access.kubernetes_credentials")
     target = _write_target(tmp_path)
     user_home = tmp_path / "user"
     config = _write_kubeconfig(user_home / ".kube" / "config")

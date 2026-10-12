@@ -17,7 +17,10 @@ from pathlib import Path
 from typing import Final, Optional
 from urllib.parse import quote, urlencode
 
-from lib.python.access.credentials import RegistryCredential, resolve_harbor_credential
+from lib.python.access.harbor_credentials import (
+    RegistryCredential,
+    resolve_harbor_credential,
+)
 from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.skill_action import ActionT_co, SkillAction
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
@@ -36,6 +39,33 @@ HARBOR_API: Final = "api/v2.0"
 REGISTRY_TOKEN_ENDPOINT: Final = "service/token"
 REGISTRY_TOKEN_SERVICE: Final = "harbor-registry"
 COPY_FLAGS: Final = ("--all", "--preserve-digests")
+
+
+def image_at_digest(image: str, digest: str) -> str:
+    """Pin an image without retaining a tag that native registry clients reject.
+
+    :param image: Repository with an optional tag or existing digest.
+    :param digest: Manifest digest returned by the registry read-back.
+    :returns: Repository and digest; a registry port is preserved and a tag is removed.
+    """
+    repository = image.partition("@")[0]
+    slash = repository.rfind("/")
+    colon = repository.rfind(":")
+    if colon > slash:
+        repository = repository[:colon]
+    return f"{repository}@{digest}"
+
+
+def _native_image(image: str) -> str:
+    """Render a Docker transport reference accepted by Skopeo.
+
+    :param image: Caller-selected image, optionally containing both tag and digest.
+    :returns: Transport-prefixed reference; the digest takes precedence over a tag.
+    """
+    reference, separator, digest = image.partition("@")
+    if separator:
+        reference = image_at_digest(reference, digest)
+    return REGISTRY_SCHEME + reference
 
 
 @dataclass
@@ -148,7 +178,7 @@ class HarborService:
                 "--raw",
                 "--authfile",
                 str(self.authfile),
-                REGISTRY_SCHEME + image,
+                _native_image(image),
             ],
             timeout=self.timeout,
         )
@@ -174,8 +204,8 @@ class HarborService:
                 *COPY_FLAGS,
                 "--authfile",
                 str(self.authfile),
-                REGISTRY_SCHEME + source,
-                REGISTRY_SCHEME + destination,
+                _native_image(source),
+                _native_image(destination),
             ],
             timeout=self.timeout,
         )
@@ -339,14 +369,15 @@ class TagSnapshot:
 
 
 class HarborCallback(Callback[DeliveryState, ActionT_co]):
-    """Read the private registry service assigned by authentication.
+    """Read the private registry service assigned by authentication."""
 
-    .. attribute :: plugin_type
+    @property
+    def plugin_type(self) -> SkillPluginType:
+        """Identify the configuration shared by this plugin's callbacks.
 
-        SkillPluginType cache key for Harbor configuration.
-    """
-
-    plugin_type = SkillPluginType.HARBOR
+        :returns: The harbor plugin's configuration cache key.
+        """
+        return SkillPluginType.HARBOR
 
     def read_config(self) -> JSONObject:
         """Reuse a caller-bound registry service for direct library operations.

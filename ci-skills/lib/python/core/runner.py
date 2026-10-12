@@ -1,0 +1,106 @@
+"""Shared runner action and runtime values consumed by provider callbacks.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Final
+
+from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.json_types import JSONObject
+
+RUNTIME_ROOT: Final = "/ci-skills/runner"
+
+
+REGISTRATION_SECRET_SUFFIX: Final = "-registration"
+
+
+@dataclass(frozen=True)
+class RunnerRuntime:
+    """Retain provider bootstrap commands and private registration material.
+
+    :param init_command: Native registration command run only by the init container.
+    :param command: Runner process command after registration completes.
+    :param environment: Registration environment entries and Secret references.
+    :param readiness_command: Optional readiness command, empty when unnecessary.
+    :param credential: Private key/value data written only to the owned Secret.
+
+    .. attribute :: init_command
+        :type: Sequence[str]
+
+        Native registration command run only by the init container.
+
+    .. attribute :: command
+        :type: Sequence[str]
+
+        Runner process command after registration completes.
+
+    .. attribute :: environment
+        :type: Sequence[JSONObject]
+
+        Registration environment entries and Secret references.
+
+    .. attribute :: readiness_command
+        :type: Sequence[str]
+
+        Optional readiness command, empty when unnecessary.
+
+    .. attribute :: credential
+        :type: Mapping[str, str]
+
+        Private key/value data written only to the owned Secret.
+    """
+
+    init_command: Sequence[str]
+    command: Sequence[str]
+    environment: Sequence[JSONObject]
+    readiness_command: Sequence[str]
+    credential: Mapping[str, str] = field(repr=False)
+
+
+@dataclass(frozen=True)
+class RunnerAction(SkillAction):
+    """Select one runner workload and its requested registration inputs.
+
+    :param namespace: Runtime-selected workload namespace.
+    :param name: Exact workload and provider runner name.
+    :param source_root: Runner installation directory inside the supplied image.
+    :param labels: Provider labels required during independent read-back.
+    :param timeout: Positive maximum seconds for readiness and temporary Jobs.
+
+    .. attribute :: namespace
+        :type: str
+
+        Runtime-selected workload namespace.
+
+    .. attribute :: name
+        :type: str
+
+        Exact workload and provider runner name.
+
+    .. attribute :: source_root
+        :type: str
+
+        Runner installation directory inside the supplied image.
+
+    .. attribute :: labels
+        :type: Sequence[str]
+
+        Provider labels required during independent read-back.
+
+    .. attribute :: timeout
+        :type: int
+
+        Positive maximum seconds for readiness and temporary Jobs.
+    """
+
+    namespace: str
+    name: str
+    source_root: str
+    labels: Sequence[str]
+    timeout: int

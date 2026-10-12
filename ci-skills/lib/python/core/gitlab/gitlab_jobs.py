@@ -16,7 +16,6 @@ from math import isfinite
 from typing import Final, Optional, TypedDict
 from urllib.parse import urlencode, urlsplit
 
-from lib.python.core.collect import _timestamp, parse_window
 from lib.python.core.gitlab.gitlab_api import (
     GitLabAPIError,
     GlabAPIClient,
@@ -29,6 +28,7 @@ from lib.python.core.gitlab.gitlab_job_fields import (
 )
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
 from lib.python.core.json_types import JSONObject, JSONValue, json_object
+from lib.python.core.time_window import _timestamp, parse_window
 
 PAGE_SIZE: Final = 100
 SCAN_PAGES: Final = 20

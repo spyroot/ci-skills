@@ -12,8 +12,9 @@ from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Final, Optional
 
-from lib.python.access.access import github_env
-from lib.python.access.credentials import Sources, bind_sources
+from lib.python.access.credentials import bind_sources
+from lib.python.access.github import github_env
+from lib.python.access.sources import Sources
 from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.skill_action import ActionT_co
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
@@ -232,14 +233,15 @@ class GitHubService:
 
 
 class GitHubCallback(Callback[DeliveryState, ActionT_co]):
-    """Use the GitHub service established in this delivery state.
+    """Use the GitHub service established in this delivery state."""
 
-    .. attribute :: plugin_type
+    @property
+    def plugin_type(self) -> SkillPluginType:
+        """Identify the configuration shared by this plugin's callbacks.
 
-        SkillPluginType cache key for GitHub configuration.
-    """
-
-    plugin_type = SkillPluginType.GITHUB
+        :returns: The github plugin's configuration cache key.
+        """
+        return SkillPluginType.GITHUB
 
     def read_config(self) -> JSONObject:
         """Reuse a caller-bound GitHub service for direct library operations.
@@ -386,7 +388,7 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
         service = self._service()
         service.runners()
         self.state.github = service
-        evidence = {
+        evidence: JSONObject = {
             "host": service.host,
             "identity": service.identity,
             "repository": service.repository,

@@ -17,9 +17,10 @@ from typing import TYPE_CHECKING, NoReturn, TypeAlias, Union
 import pytest
 from conftest import import_script_module
 
-ACCESS_CREDENTIALS: ModuleType = import_script_module("lib.python.access.credentials")
+ACCESS_SOURCES: ModuleType = import_script_module("lib.python.access.sources")
 ACTION: ModuleType = import_script_module("lib.python.core.gitlab.gitlab_actions")
 CLI: ModuleType = import_script_module("lib.python.core.cli")
+LOGGING: ModuleType = import_script_module("lib.python.core.logging")
 CLI_API: ModuleType = import_script_module("lib.python.core.cli_api")
 JSON_TYPES: ModuleType = import_script_module("lib.python.core.json_types")
 KUBERNETES: ModuleType = import_script_module("lib.python.core.kubernetes.kubernetes")
@@ -316,7 +317,7 @@ def test_token_source_exports_selected_file_with_empty_clear_set(
     token_file = tmp_path / "selected.token"
     token_file.write_text("selected-token\n", encoding="utf-8")
 
-    source = ACCESS_CREDENTIALS._token_source(
+    source = ACCESS_SOURCES._token_source(
         token_file, ("SELECTED_TOKEN",), "native-store", clear_names=()
     )
 
@@ -334,7 +335,7 @@ def test_token_source_keeps_selected_environment_when_clearing_disjoint_name(
     """
     monkeypatch.setenv("SELECTED_TOKEN", "selected-token")
 
-    source = ACCESS_CREDENTIALS._token_source(
+    source = ACCESS_SOURCES._token_source(
         None, ("SELECTED_TOKEN",), "native-store", clear_names=("OTHER_TOKEN",)
     )
 
@@ -355,7 +356,7 @@ def test_token_source_native_store_exports_no_credential(
     """
     monkeypatch.delenv("SELECTED_TOKEN", raising=False)
 
-    source = ACCESS_CREDENTIALS._token_source(
+    source = ACCESS_SOURCES._token_source(
         None, ("SELECTED_TOKEN",), "native-store", clear_names=("OTHER_TOKEN",)
     )
 
@@ -373,14 +374,18 @@ def test_log_event_derives_error_level_and_rejects_empty_explicit_level(
     """
     args = _log_args()
 
-    CLI.log_event(args, "boundary", "result", STATUS.BLOCKED, level=None, persist=False)
+    LOGGING.log_event(
+        args, "boundary", "result", STATUS.BLOCKED, level=None, persist=False
+    )
     record = JSON_TYPES.json_object(
         CLI_API.response_decoder().decode(capsys.readouterr().err)
     )
 
     assert record["level"] == "error"
     with pytest.raises(KeyError):
-        CLI.log_event(args, "boundary", "result", STATUS.PASS, level="", persist=False)
+        LOGGING.log_event(
+            args, "boundary", "result", STATUS.PASS, level="", persist=False
+        )
 
 
 def test_load_target_reports_malformed_https_authority(tmp_path: Path) -> None:

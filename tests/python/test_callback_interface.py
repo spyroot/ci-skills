@@ -20,7 +20,8 @@ from conftest import import_script_module
 CALLBACK = import_script_module("lib.python.core.abstract.callback")
 CALLBACKS = import_script_module("lib.python.core.abstract.callbacks")
 CONTEXT = import_script_module("lib.python.core.abstract.context")
-EXECUTOR = import_script_module("lib.python.core.abstract.skill_exector")
+ABSTRACT_EXECUTOR = import_script_module("lib.python.core.abstract.executor")
+EXECUTOR = import_script_module("lib.python.core.executor")
 SKILL_ACTION = import_script_module("lib.python.core.abstract.skill_action")
 SKILL_PLUGIN_TYPE = import_script_module("lib.python.core.abstract.skill_plugin_type")
 SKILL_STATE = import_script_module("lib.python.core.abstract.skill_state")
@@ -67,7 +68,7 @@ class CounterState(SKILL_STATE.SkillState):
     x: int = 0
 
 
-class CounterExecutor(EXECUTOR.SkillExecutor[CounterState]):
+class CounterExecutor(ABSTRACT_EXECUTOR.SkillExecutor[CounterState]):
     """Create one observable custom state for the bound callback collection."""
 
     def __init__(self, callbacks: CALLBACKS.Callbacks[CounterState]):
@@ -393,7 +394,7 @@ def test_executor_rejects_invalid_state_before_binding(invalid_state: object) ->
     :returns: None; assertions in the body validate the regression.
     """
 
-    class InvalidExecutor(EXECUTOR.SkillExecutor):
+    class InvalidExecutor(ABSTRACT_EXECUTOR.SkillExecutor):
         """Supply the parametrized invalid state for constructor validation."""
 
         def create_state(self) -> object:

@@ -295,7 +295,7 @@ def _installed_revision(skill_root: Path, digest: TreeDigest) -> Optional[Revisi
         record.get("schema_version") != INSTALLATION_IDENTITY_SCHEMA_VERSION
         or record.get("kind") != INSTALLATION_IDENTITY_KIND
         or record.get("status") != INSTALLATION_IDENTITY_STATUS
-        or any(record.get(key) != digest[key] for key in digest)
+        or any(record.get(key) != value for key, value in digest.items())
         or not isinstance(revision, dict)
         or revision.get("verified") is not True
         or revision.get("source") != "git_head"

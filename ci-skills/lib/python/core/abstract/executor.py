@@ -7,7 +7,6 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-import sys
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, MutableSequence, Sequence
@@ -15,7 +14,6 @@ from typing import Generic, Literal
 
 from lib.python.core.abstract.callback import AbstractCallback
 from lib.python.core.abstract.callbacks import AbstractCallbacks, Callbacks
-from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.abstract.skill_result import SkillResult, require_result
 from lib.python.core.abstract.skill_state import SkillState, StateT
@@ -51,30 +49,6 @@ class SkillExecutor(ABC, Generic[StateT]):
         """
         raise NotImplementedError("concrete executors must create their shared state")
 
-    def _trace(self, event: str, details: Mapping[str, object]) -> None:
-        """Write CLI workflow diagnostics through the existing shared logger.
-
-        :param event: Lifecycle or transport event selected by its producer.
-        :param details: Bounded event metadata, redacted by the shared logger.
-        """
-        from lib.python.core.cli import log_event
-
-        if not isinstance(self.state, ExecutionContext):
-            return
-        args = self.state.args
-        try:
-            log_event(
-                args,
-                getattr(args, "kind", "workflow"),
-                event,
-                str(details.get("status", "OBSERVED")),
-                level="debug",
-                details=details,
-            )
-        except OSError:
-            # Diagnostic failures must not interrupt owned-resource cleanup.
-            sys.stderr.write("workflow trace_output_unavailable\n")
-
     def _invoke(
         self, callback: AbstractCallback[StateT, SkillAction], hook: LifecycleHook
     ) -> SkillResult:
@@ -85,7 +59,7 @@ class SkillExecutor(ABC, Generic[StateT]):
         :returns: The hook's exact result mapping, including an empty mapping.
         :raises TypeError: The hook returns a value that is not a mapping.
         :raises BaseException: The callback hook fails; its exception is propagated.
-        """
+        """  # noqa: DOC503 - require_result validates the shared mapping contract.
         operations: Mapping[LifecycleHook, Callable[[], SkillResult]] = {
             "collect": callback.collect,
             "run": callback.run,
@@ -168,11 +142,7 @@ class SkillExecutor(ABC, Generic[StateT]):
         entered: AbstractCallbacks[StateT, SkillAction] = []
         self.state.failed = False
         self.state.cleanup_failures.clear()
-        tracing = (
-            isinstance(self.state, ExecutionContext)
-            and getattr(self.state.args, "log_level", "info") == "debug"
-        )
-        with recoverable_signals(), execution_trace(self._trace if tracing else None):
+        with recoverable_signals(), execution_trace(self.state.trace):
             try:
                 self._execute(entered)
             except BaseException as primary:
@@ -187,37 +157,3 @@ class SkillExecutor(ABC, Generic[StateT]):
                     failures[0].add_note(f"cleanup failed: {type(failure).__name__}")
                 raise failures[0]
         return self.state.result
-
-
-class Executor(SkillExecutor[ExecutionContext]):
-    """Use the standard command context for callbacks that need no custom state."""
-
-    def create_state(self) -> ExecutionContext:
-        """Create the context before binding the callback collection.
-
-        :returns: A fresh command context with an empty result dictionary.
-        """
-        return ExecutionContext()
-
-
-class WorkflowExecutor(SkillExecutor[StateT]):
-    """Bind a command's explicit context through the shared executor lifecycle."""
-
-    def __init__(self, context: StateT, callbacks: Callbacks[StateT]):
-        """Bind the command's existing state to its declared callback sequence.
-
-        :param context: Concrete state owned by this workflow invocation.
-        :param callbacks: Ordered callbacks sharing this exact state instance.
-        :raises TypeError: The supplied context does not implement SkillState,
-            or a configuration hook returns a non-mapping value.
-        :raises ValueError: A callback already belongs to another state.
-        """  # noqa: DOC502 - SkillExecutor validates state and callback ownership.
-        self._context = context
-        super().__init__(callbacks)
-
-    def create_state(self) -> StateT:
-        """Supply the concrete context selected by the workflow.
-
-        :returns: The invocation's one shared context.
-        """
-        return self._context

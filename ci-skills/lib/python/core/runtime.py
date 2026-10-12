@@ -355,7 +355,7 @@ def run_command_bounded(
                     failure = 124
                     break
                 for key, _ in selector.select(timeout=min(remaining, 0.5)):
-                    chunk = os.read(key.fileobj.fileno(), 8192)
+                    chunk = os.read(key.fd, 8192)
                     if not chunk:
                         selector.unregister(key.fileobj)
                         continue
@@ -472,7 +472,7 @@ def run_command_tail(
                 process.kill()
                 break
             for key, _ in selector.select(timeout=min(remaining, 0.5)):
-                chunk = os.read(key.fileobj.fileno(), 8192)
+                chunk = os.read(key.fd, 8192)
                 if not chunk:
                     selector.unregister(key.fileobj)
                     continue

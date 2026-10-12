@@ -118,14 +118,15 @@ class GitLabState(ExecutionContext):
 
 
 class GitlabCallback(Callback[GitLabState, ActionT_co]):
-    """Use the typed GitLab service established in shared invocation state.
+    """Use the typed GitLab service established in shared invocation state."""
 
-    .. attribute :: plugin_type
+    @property
+    def plugin_type(self) -> SkillPluginType:
+        """Identify the configuration shared by this plugin's callbacks.
 
-        SkillPluginType cache key for GitLab configuration.
-    """
-
-    plugin_type = SkillPluginType.GITLAB
+        :returns: The gitlab plugin's configuration cache key.
+        """
+        return SkillPluginType.GITLAB
 
     def read_config(self) -> JSONObject:
         """Reuse a caller-bound GitLab service for direct library operations.

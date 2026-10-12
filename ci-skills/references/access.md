@@ -12,22 +12,37 @@ and trace reads.
 
 ## Where the target file comes from
 
-Four declared places, first match wins, and the winner is reported back in
+Without a project binding, three declared places are checked in order, and the winner is reported back in
 every report as `target_file` and `target_source`:
 
 | # | Scope | Where | Source name |
 | --- | --- | --- | --- |
-| 1 | one command | `--target PATH` | `argv:--target` |
-| 2 | one environment | `$CI_SKILLS_TARGET` | `env:CI_SKILLS_TARGET` |
-| 3 | one project | `./.ci-skills/target.toml` | `project` |
-| 4 | one user | `~/.ci-skills/target.toml` | `user` |
+| 1 | one environment | `$CI_SKILLS_TARGET` | `env:CI_SKILLS_TARGET` |
+| 2 | one project | `./.ci-skills/target.toml` | `project` |
+| 3 | one user | `~/.ci-skills/target.toml` | `user` |
 
-One cluster means filling in tier 4 once; many clusters mean tier 2 or tier 3,
-one target per cluster. A `--target` that does not exist is an error, never a
-fallback to a lower tier — a silent fallback would aim the run somewhere the
-caller did not ask for. `target.toml.template` in the repository root is the
-file to copy, and `core.catalog.TARGET_PROTOCOL` is the declaration this table
-and `tools.json` are both rendered from.
+One cluster means filling in tier 3 once; many clusters mean tier 1 or tier 2,
+one target per cluster. A set `CI_SKILLS_TARGET` must name an existing file;
+an empty value or missing file blocks without falling back to another target.
+The nonsecret example below shows the target shape;
+include only the providers required by your command. `core.catalog.TARGET_PROTOCOL`
+defines target selection, also published in the installed `tools.json`.
+
+`ci-api` uses these three tiers. `ci-binary-build` validates explicit local inputs without selecting a
+target. For smoke testing, `env ci-skills-smoke=1 <command>` changes only the
+basename in the project and user tiers to `ci-skills-smoke.toml`. Directory
+precedence and relative credential resolution stay unchanged; those tiers do
+not fall back to their ordinary `target.toml` while the switch is set.
+
+`--binding PATH` selects a [project-specific kubeconfig resolver](project-binding.md) before environment
+selection. Without that option, `K8S_ADMIN_DIAGNOSTICS_BINDING` selects a binding. Setting both
+`K8S_ADMIN_DIAGNOSTICS_BINDING` and `CI_SKILLS_TARGET` is an error. An explicit
+or environment-selected target that is absent blocks without trying a lower tier.
+The selected file never inherits missing provider sections from another tier.
+
+The `target_selection` receipt field also records the selected route:
+`binding:`, `env:CI_SKILLS_TARGET -> file:`, `project:` or `user:` with its
+resolved path. Portable receipts replace absolute paths with digest tokens.
 
 This skill resolves; it does not provision. It creates no target file, mints no
 token and fetches no kubeconfig. Putting them there is the operator's job, or
@@ -84,7 +99,7 @@ server = "https://api.cluster.example.com:6443"
 ## Full three-authority live receipt
 
 When accepting the full access capability, run
-`access_check.py --target PATH --json --publication` on each intended
+`access_check.py --json --publication` with the selected target on each intended
 execution host. Supply `--revision SHA` for an installed copy without Git
 metadata, and `--job-url URL` when verifying a requested job. The receipt
 identifies the execution host, time, revision, sources, targets, identities,
@@ -125,12 +140,10 @@ claim, and the invoking project's `CI_COMMIT_SHA` is kept in its own
 repository acceptance checker independently resolves the recorded commit and
 compares its tree and digest.
 
-Required status checks are compared against the set declared as
-`github.required_checks` in the target file, by exact equality. Any nonempty
-read-back used to pass, so protection requiring only an unrelated check
-satisfied the gate; an absent declaration now blocks rather than accepting
-anything. The declared set must be a subset of what protection requires, so
-extra protection is not a failure.
+Publication mode compares required status checks with `github.required_checks`
+in the selected target file. Every declared name must appear in the branch
+protection read-back; additional protected checks are allowed. An absent
+declaration or missing required name blocks that publication check.
 
 Each kubeconfig is digested when sources are bound, and the digest is
 re-checked before every Kubernetes command. Pinning the filename is not pinning
@@ -153,20 +166,17 @@ since it IS the gate rather than a report authorized by one.
 `--receipt-out PATH` writes the committable form, with every absolute host path
 replaced by a digest token. That is what makes a real receipt publishable: the
 captured form names credential locations under the operator's home directory.
-`../../tools/check_live_acceptance.py` compares committed receipts against
-`../../tests/acceptance` and refuses one that is missing, stale, from an
-undeclared executor or identity, aimed at different targets, missing a required
-live check, carrying an unproven one, or produced by a different skill digest.
-For this repository, the expected Ceph namespace is declared there; invoke
-`access_check.py --ceph-namespace NAME` with that selection to prove its reads.
-The validate workflow runs it unconditionally.
+Invoke `access_check.py --ceph-namespace NAME` when the requested live proof
+includes Ceph reads in that selected namespace. Capture live evidence from the
+installed candidate on the intended execution host; the repository's static
+and mocked GitHub checks do not run against these private runtime targets.
 
 `PASS` requires all selected live checks. Missing, invalid, expired,
 wrong-target, or unauthorized credentials block. A mock, file-existence
 check, login-status message, dry run, or receipt from another host is not
 live acceptance evidence.
 
-Cluster-wide list reads carry their own bound, `collect.LIST_TIMEOUT_SECONDS`.
+Cluster-wide list reads carry their own bound, `core.collection.LIST_TIMEOUT_SECONDS`.
 Measured on one target cluster, a whole-cluster event list was 7.7 MB and
 about 20 seconds on its own with up to ten such reads running concurrently;
 the default per-command bound reported that healthy cluster as a timeout, and

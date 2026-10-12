@@ -19,8 +19,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final, Optional
 
-from lib.python.access.access import kubectl_argv, kubernetes_env, oc_argv
-from lib.python.access.credentials import Sources, bind_sources
+from lib.python.access.credentials import bind_sources
+from lib.python.access.kubernetes import kubectl_argv, kubernetes_env, oc_argv
+from lib.python.access.sources import Sources
 from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.skill_action import ActionT_co
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
@@ -449,14 +450,15 @@ class KubernetesService:
 
 
 class K8SCallback(Callback[DeliveryState, ActionT_co]):
-    """Read the verified Kubernetes service from the shared delivery state.
+    """Read the verified Kubernetes service from the shared delivery state."""
 
-    .. attribute :: plugin_type
+    @property
+    def plugin_type(self) -> SkillPluginType:
+        """Identify the configuration shared by this plugin's callbacks.
 
-        SkillPluginType cache key for Kubernetes configuration.
-    """
-
-    plugin_type = SkillPluginType.KUBERNETES
+        :returns: The kubernetes plugin's configuration cache key.
+        """
+        return SkillPluginType.KUBERNETES
 
     def read_config(self) -> JSONObject:
         """Reuse the concrete target from a caller-bound Kubernetes service.
@@ -514,13 +516,17 @@ class K8SAuth(K8SCallback[ProviderAuthAction]):
             raise TargetError("kubernetes_target_missing")
         if self.action.timeout <= 0:
             raise ValueError("kubernetes_timeout_invalid")
-        self.state.kubernetes_target = (
+        target = (
             selected
             if isinstance(selected.sources, Sources)
             else bind_sources(
                 replace(selected, active_surfaces=(SkillPluginType.KUBERNETES.value,))
             )
         )
+        if target.sources is None:
+            raise TargetError("kubernetes_credential_unresolved")
+        target.sources.require(SkillPluginType.KUBERNETES)
+        self.state.kubernetes_target = target
         return {}
 
     def run(self) -> JSONObject:

@@ -14,10 +14,12 @@ import sys
 from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Optional
+from typing import NoReturn, Optional
 
-from lib.python.access.access import access_evidence, check_access
+from lib.python.access.access import check_access
 from lib.python.access.credentials import bind_sources
+from lib.python.access.shared import access_evidence
+from lib.python.core.argument_parser import TrackedArgumentParser
 from lib.python.core.catalog import NODE_LOCAL_COMMANDS, describe_node
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.node_local import (
@@ -34,7 +36,7 @@ from lib.python.core.target import JournalPodRoute, NodePodRoute, Target, Target
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
 
 
-class NodeParser(argparse.ArgumentParser):
+class NodeParser(TrackedArgumentParser):
     """Render node-diagnostic argument failures in the requested output format.
 
     .. attribute :: requested
@@ -45,28 +47,13 @@ class NodeParser(argparse.ArgumentParser):
 
     requested: Sequence[str]
 
-    def parse_args(
-        self,
-        args: Optional[Sequence[str]] = None,
-        namespace: Optional[argparse.Namespace] = None,
-    ) -> argparse.Namespace:
-        """Parse node-diagnostic options and retain the requested output format.
-
-        :param args: Arguments to parse; ``None`` reads process arguments.
-        :param namespace: Existing result namespace, or ``None`` to create one.
-        :returns: Namespace containing parsed options and defaults.
-        :raises SystemExit: For requested help or invalid arguments.
-        """  # noqa: DOC502 - argparse exits for help or invalid arguments.
-        self.requested = list(sys.argv[1:] if args is None else args)
-        return super().parse_args(args, namespace)
-
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> NoReturn:
         """Write a structured node-diagnostic argument failure.
 
         :param message: Argparse diagnostic; raw rejected values are not reproduced.
         :raises SystemExit: With status 2 after writing the failure result.
         """
-        data = {
+        data: JSONObject = {
             "schema_version": "1.0",
             "kind": self.prog.removesuffix(".py"),
             "status": BLOCKED,
@@ -285,7 +272,7 @@ class NodeDiagnosticRun:
             getattr(self.args, "target", None),
             getattr(self.args, "binding", None),
             dry_run=getattr(self.args, "dry_run", False),
-            required_surfaces=NODE_LOCAL_COMMANDS[f"{self.kind}.py"]["requires"],
+            required_surfaces=tuple(NODE_LOCAL_COMMANDS[f"{self.kind}.py"]["requires"]),
         )
         if target.source_file is None or target.source_kind is None:
             raise TargetError("target_source_unresolved")

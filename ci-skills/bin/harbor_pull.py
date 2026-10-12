@@ -14,11 +14,11 @@ from typing import Optional
 
 import _bootstrap  # noqa: F401
 from lib.python.core.abstract.callbacks import Callbacks
-from lib.python.core.abstract.skill_exector import WorkflowExecutor
 from lib.python.core.delivery_state import DeliveryState
-from lib.python.core.gitlab.gitlab_runner import PullImage
+from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.harbor.registry_mirror import HarborAuth
 from lib.python.core.kubernetes.kubernetes import K8SAuth
+from lib.python.core.kubernetes.runner import PullImage
 from lib.python.core.toolbox_actions import (
     ConfirmWorkflow,
     WorkflowAction,

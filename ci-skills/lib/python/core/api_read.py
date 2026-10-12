@@ -15,11 +15,12 @@ import re
 from abc import abstractmethod
 from collections.abc import Mapping, MutableSequence
 from dataclasses import dataclass, field
+from dataclasses import field as action_field
 from enum import StrEnum
 from pathlib import Path
 from typing import Optional, TypeVar
 
-from lib.python.access.credentials import _token_source
+from lib.python.access.sources import _token_source
 from lib.python.core.abstract.callback import LocalCallback
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import SkillAction
@@ -37,7 +38,7 @@ from lib.python.core.cli_api import (
     response_decoder,
     validate_endpoint,
 )
-from lib.python.core.gitlab.github import GitHubAPIClient
+from lib.python.core.github.github import GitHubAPIClient
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.project_binding import SMOKE_ENV, resolve_target_file
@@ -183,11 +184,11 @@ class ApiReadAction(ApiProviderAction):
         Whether to collect array pages through the native CLI.
     """
 
-    endpoint: str
-    field: Optional[str]
-    decode_base64: bool
-    lines: Optional[str]
-    paginate: bool
+    endpoint: str = action_field(init=False)
+    field: Optional[str] = action_field(init=False)
+    decode_base64: bool = action_field(init=False)
+    lines: Optional[str] = action_field(init=False)
+    paginate: bool = action_field(init=False)
 
     def __init__(
         self,
