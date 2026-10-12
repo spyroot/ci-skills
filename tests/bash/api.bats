@@ -2,6 +2,7 @@
 
 setup() {
   tool="${BATS_TEST_DIRNAME}/../../bin/ci-api"
+  export CI_TEST_GH_MARKER="${BATS_TEST_TMPDIR}/gh-calls"
   mkdir -p "${BATS_TEST_TMPDIR}/mock"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
@@ -51,7 +52,6 @@ MOCK
 }
 
 @test 'HTTP 429 GET is retried and then returns data' {
-  export CI_TEST_GH_MARKER="${BATS_TEST_TMPDIR}/gh-called"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
 if [[ ! -e $CI_TEST_GH_MARKER ]]; then
@@ -70,7 +70,6 @@ MOCK
 }
 
 @test 'HTTP 401 GET fails without retry' {
-  export CI_TEST_GH_MARKER="${BATS_TEST_TMPDIR}/gh-calls"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' called >> "$CI_TEST_GH_MARKER"
@@ -85,7 +84,6 @@ MOCK
 }
 
 @test 'Retry-After beyond the budget stops without sleeping or retrying' {
-  export CI_TEST_GH_MARKER="${BATS_TEST_TMPDIR}/gh-calls"
   export CI_TEST_SLEEP_MARKER="${BATS_TEST_TMPDIR}/sleep-called"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
@@ -193,7 +191,6 @@ MOCK
 }
 
 @test 'connection refusal is classified and never displays a token' {
-  export CI_TEST_GH_MARKER="${BATS_TEST_TMPDIR}/gh-calls"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' called >> "$CI_TEST_GH_MARKER"
@@ -215,7 +212,6 @@ MOCK
 }
 
 @test 'multiline token file fails before the provider is called' {
-  export CI_TEST_GH_MARKER="${BATS_TEST_TMPDIR}/gh-called"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' called > "$CI_TEST_GH_MARKER"
@@ -230,7 +226,6 @@ MOCK
 }
 
 @test 'unreadable token path fails before the provider is called' {
-  export CI_TEST_GH_MARKER="${BATS_TEST_TMPDIR}/gh-called"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' called > "$CI_TEST_GH_MARKER"
@@ -243,7 +238,6 @@ MOCK
 }
 
 @test 'HTTP 404 fails without retry and names the missing resource class' {
-  export CI_TEST_GH_MARKER="${BATS_TEST_TMPDIR}/gh-calls"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
 printf '%s\n' called >> "$CI_TEST_GH_MARKER"
