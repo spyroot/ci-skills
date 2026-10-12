@@ -1,11 +1,19 @@
-"""Offline tests for the cross-surface access gate."""
+"""Offline tests for the cross-surface access gate.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping, MutableSequence, Sequence
+from os import PathLike
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import IO, TYPE_CHECKING, Optional, Protocol, TypedDict, Union, Unpack
 
 import pytest
 from conftest import import_script_module
@@ -13,10 +21,89 @@ from conftest import import_script_module
 TEST_REVISION = "a" * 40
 
 
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject
+    from lib.python.core.runtime import CommandResult
+    from lib.python.core.target import Target
+
+
+class _CommandOptions(TypedDict, total=False):
+    """Keyword options accepted by command-runner fixture doubles.
+
+    .. attribute :: timeout
+        :type: int
+
+        Maximum command runtime in seconds.
+
+    .. attribute :: max_bytes
+        :type: int
+
+        Maximum stdout bytes retained by tail runners.
+
+    .. attribute :: max_lines
+        :type: int
+
+        Maximum stdout lines retained by tail runners.
+
+    .. attribute :: env
+        :type: Optional[Mapping[str, Optional[str]]]
+
+        Child environment overrides passed to the runtime helper.
+
+    .. attribute :: cwd
+        :type: Optional[Union[str, Path]]
+
+        Optional child working directory for tail runners.
+    """
+
+    timeout: int
+    max_bytes: int
+    max_lines: int
+    env: Optional[Mapping[str, Optional[str]]]
+    cwd: Optional[Union[str, Path]]
+
+
+class _CommandRunner(Protocol):
+    """Callable shape used by access command-runner doubles."""
+
+    def __call__(
+        self, argv: Sequence[str], **kwargs: Unpack[_CommandOptions]
+    ) -> CommandResult:
+        """Run one native command in a fixture.
+
+        :param argv: Native command vector requested by the access gate.
+        :param **kwargs: Keyword arguments forwarded to the fake command boundary.
+        :returns: Synthetic bounded command result.
+        """
+
+
+class _TokenPath(PathLike[str]):
+    """Expose a scratch token file through the path-like protocol."""
+
+    def __init__(self, path: Path):
+        """Retain the concrete token path used by ``__fspath__``.
+
+        :param path: Scratch token file created by the test.
+        """
+        self.path = path
+
+    def __fspath__(self) -> str:
+        """Return the token filename as text.
+
+        :returns: String path accepted by ``Path``.
+        """
+        return str(self.path)
+
+
 def _load_target(
-    path: Path, *, required_surfaces: tuple[str, ...] | None = None
-) -> Any:
-    """Load the nonsecret target used by access tests."""
+    path: Path, *, required_surfaces: Optional[tuple[str, ...]] = None
+) -> Target:
+    """Load the nonsecret target with optional surface filtering.
+
+    :param path: Fixture target TOML path.
+    :param required_surfaces: Provider surfaces to retain during loading.
+    :returns: Parsed target used by access checks.
+    """
     if required_surfaces is None:
         return import_script_module("lib.python.core.target").load_target(path)
     return import_script_module("lib.python.core.target").load_target(
@@ -24,19 +111,33 @@ def _load_target(
     )
 
 
-def _access_modules() -> tuple[Any, Any]:
-    """Load access and runtime modules through the script package path."""
-    return import_script_module("lib.python.access.access"), import_script_module("lib.python.core.runtime")
+def _access_modules() -> tuple[ModuleType, ModuleType]:
+    """Import access and bounded command runtime through the skill package.
+
+    :returns: Access module and runtime module under test.
+    """
+    return import_script_module("lib.python.access.access"), import_script_module(
+        "lib.python.core.runtime"
+    )
 
 
-def _bind_target(path: Path) -> Any:
-    """Load a target and freeze its credential sources with a test SHA."""
+def _bind_target(path: Path) -> Target:
+    """Bind a fixture target to credential sources with a test revision.
+
+    :param path: Target TOML file to load and bind.
+    :returns: Target carrying selected credential source references.
+    """
     credentials = import_script_module("lib.python.access.credentials")
     return credentials.bind_sources(_load_target(path), revision=TEST_REVISION)
 
 
-def _clear_token_env(monkeypatch) -> None:
-    """Remove ambient token variables so source precedence tests are explicit."""
+def _clear_token_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove ambient GitHub and GitLab tokens before precedence assertions.
+
+    :param monkeypatch: Pytest fixture deleting known token variables.
+
+    :returns: None; the helper records behavior through its side effects.
+    """
     for name in (
         "GH_TOKEN",
         "GITHUB_TOKEN",
@@ -49,6 +150,40 @@ def _clear_token_env(monkeypatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.mark.parametrize("selector", ("string", "path", "pathlike"))
+def test_read_token_file_accepts_declared_path_protocols(
+    tmp_path: Path, selector: str
+) -> None:
+    """Read synthetic tokens from string, Path, and custom PathLike inputs.
+
+    :param tmp_path: Scratch directory containing the token file.
+    :param selector: Path representation passed to ``read_token_file``.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    credentials = import_script_module("lib.python.access.credentials")
+    token = tmp_path / "provider.token"
+    token.write_text("unit-token\n", encoding="utf-8")
+    if selector == "string":
+        selected: Union[str, Path, _TokenPath] = str(token)
+    elif selector == "path":
+        selected = token
+    else:
+        selected = _TokenPath(token)
+
+    assert credentials.read_token_file(selected) == "unit-token"
+
+
+def test_read_token_file_rejects_none_before_filesystem_access() -> None:
+    """Reject a missing path without consulting any live credential location.
+    :returns: None; assertions in the body validate the regression.
+    """
+    credentials = import_script_module("lib.python.access.credentials")
+
+    with pytest.raises(TypeError):
+        credentials.read_token_file(None)
+
+
 @pytest.mark.parametrize(
     ("host", "selected"),
     (
@@ -59,9 +194,17 @@ def _clear_token_env(monkeypatch) -> None:
     ),
 )
 def test_github_file_token_uses_gh_host_class_and_clears_ambient_tokens(
-    monkeypatch, tmp_path, host, selected
-):
-    """The child gh process must use the selected file, not an ambient token."""
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, host: str, selected: str
+) -> None:
+    """Select the host-class token file and clear competing ambient tokens.
+
+    :param monkeypatch: Pytest fixture setting all ambient GitHub tokens.
+    :param tmp_path: Directory receiving the selected synthetic token file.
+    :param host: GitHub host whose cloud or Enterprise class is tested.
+    :param selected: Child variable expected to carry the file token.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     catalog = import_script_module("lib.python.core.catalog")
     credentials = import_script_module("lib.python.access.credentials")
     runtime = import_script_module("lib.python.core.runtime")
@@ -87,7 +230,15 @@ def test_github_file_token_uses_gh_host_class_and_clears_ambient_tokens(
     )
 
 
-def test_ghe_cloud_uses_gh_token_over_lower_priority_and_server_tokens(monkeypatch):
+def test_ghe_cloud_uses_gh_token_over_lower_priority_and_server_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prefer GH_TOKEN for ghe.com while clearing lower-priority values.
+
+    :param monkeypatch: Pytest fixture setting competing GitHub token variables.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     catalog = import_script_module("lib.python.core.catalog")
     credentials = import_script_module("lib.python.access.credentials")
     runtime = import_script_module("lib.python.core.runtime")
@@ -110,7 +261,12 @@ def test_ghe_cloud_uses_gh_token_over_lower_priority_and_server_tokens(monkeypat
 
 
 def _write_token_target(tmp_path: Path, token_file: Path) -> Path:
-    """Write one target file that points at a GitLab token file."""
+    """Write a target selecting an explicit GitLab token file.
+
+    :param tmp_path: Directory receiving the target TOML file.
+    :param token_file: Token path recorded in the GitLab section.
+    :returns: Path to the written target.
+    """
     path = tmp_path / "target-with-token.toml"
     path.write_text(
         (
@@ -134,11 +290,18 @@ def _write_token_target(tmp_path: Path, token_file: Path) -> Path:
 def _write_full_target(
     tmp_path: Path,
     *,
-    github_token_file: Path | None = None,
-    gitlab_token_file: Path | None = None,
-    kubeconfig: Path | None = None,
+    github_token_file: Optional[Path] = None,
+    gitlab_token_file: Optional[Path] = None,
+    kubeconfig: Optional[Path] = None,
 ) -> Path:
-    """Write a target file with optional explicit credential source paths."""
+    """Write all three target surfaces with selected source paths.
+
+    :param tmp_path: Directory receiving the target TOML file.
+    :param github_token_file: Explicit GitHub token path, if selected.
+    :param gitlab_token_file: Explicit GitLab token path, if selected.
+    :param kubeconfig: Explicit Kubernetes config path, if selected.
+    :returns: Path to the written target.
+    """
     path = tmp_path / "target.toml"
     github_token = f'token_file = "{github_token_file}"\n' if github_token_file else ""
     gitlab_token = f'token_file = "{gitlab_token_file}"\n' if gitlab_token_file else ""
@@ -165,21 +328,45 @@ def _write_full_target(
 
 
 def _fake_access_runner(
-    runtime: Any, scenario: str
-) -> tuple[Any, list[tuple[str, ...]]]:
-    """Return a fake command runner and a call journal for one scenario."""
-    calls: list[tuple[str, ...]] = []
+    runtime: ModuleType, scenario: str
+) -> tuple[_CommandRunner, MutableSequence[tuple[str, ...]]]:
+    """Build a command double for access-gate success and failure scenarios.
+
+    :param runtime: Module providing the command-result type.
+    :param scenario: Provider or Kubernetes failure variant to simulate.
+    :returns: Runner callable and journal of exact native argv calls.
+    """
+    calls: MutableSequence[tuple[str, ...]] = []
 
     def completed(
         argv: tuple[str, ...], code: int = 0, stdout: str = "", stderr: str = ""
-    ):
+    ) -> CommandResult:
+        """Construct a native command result for the simulated probe.
+
+        :param argv: Exact command vector returned in the result.
+        :param code: Simulated process exit code.
+        :param stdout: Simulated provider response body.
+        :param stderr: Simulated provider diagnostic.
+        :returns: Runtime command-result record.
+        """
         return runtime.CommandResult(argv, code, stdout, stderr)
 
-    def kube_args(argv: tuple[str, ...]) -> list[str]:
+    def kube_args(argv: tuple[str, ...]) -> Sequence[str]:
+        """Strip pinned context options from a simulated kubectl call.
+
+        :param argv: Full kubectl command with ``--context``.
+        :returns: Kubernetes subcommand arguments after the context value.
+        """
         context_index = argv.index("--context")
         return list(argv[context_index + 2 :])
 
-    def run(argv, **_kwargs):
+    def run(argv: Sequence[str], **_kwargs: Unpack[_CommandOptions]) -> CommandResult:
+        """Answer expected gh, glab, and kubectl probes for one scenario.
+
+        :param argv: Native command requested by the access gate.
+        :param **_kwargs: Ignored keyword arguments accepted by the fake boundary.
+        :returns: Simulated command result, including failures for unknown calls.
+        """
         command = tuple(str(part) for part in argv)
         calls.append(command)
         tool = command[0]
@@ -360,9 +547,18 @@ def _fake_access_runner(
 
 
 def test_kubernetes_collectors_only_require_their_own_live_access(
-    monkeypatch, target_file, capsys
-):
-    """Absent Cilium cannot block Ceph; a Cilium request must still prove exec."""
+    monkeypatch: pytest.MonkeyPatch,
+    target_file: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Let Ceph collect without Cilium while gating Cilium on its own exec.
+
+    :param monkeypatch: Pytest fixture replacing target resolution and commands.
+    :param target_file: Fixture TOML with all three target surfaces.
+    :param capsys: Pytest fixture capturing structured CLI output.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, runtime = _access_modules()
     cli = import_script_module("lib.python.core.cli")
     runner, calls = _fake_access_runner(runtime, "k8s_cilium_missing")
@@ -391,14 +587,27 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
         namespace="rook-ceph",
     )
 
-    def collect_ceph_cluster(_target, _args):
+    def collect_ceph_cluster(_target: Target, _args: argparse.Namespace) -> JSONObject:
+        """Return a Ceph PASS record after Kubernetes-only access succeeds.
+
+        :param _target: Resolved target accepted by the collector double.
+        :param _args: Parsed command arguments accepted by the collector double.
+        :returns: Minimal passing Ceph report.
+        """
         return {"kind": "ceph_cluster", "status": "PASS", "records": [], "errors": []}
 
     assert cli.execute(args, collect_ceph_cluster) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "PASS"
     assert not any("daemonsets" in call for call in calls)
 
-    def collect_cilium(_target, _args):
+    def collect_cilium(_target: Target, _args: argparse.Namespace) -> None:
+        """Expose any Cilium collection before its access gate passes.
+
+        :param _target: Resolved target accepted by the collector double.
+        :param _args: Parsed command arguments accepted by the collector double.
+
+        :returns: None; the helper records behavior through its side effects.
+        """
         pytest.fail("Cilium collection must wait for its live access gate")
 
     assert cli.execute(args, collect_cilium) == 2
@@ -410,9 +619,15 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
 
 
 def test_check_access_passes_when_all_three_authorities_are_admin(
-    monkeypatch, target_file
-):
-    """The gate reports PASS only after GitHub, GitLab, and Kubernetes pass."""
+    monkeypatch: pytest.MonkeyPatch, target_file: Path
+) -> None:
+    """Require observed admin capabilities across GitHub, GitLab, and cluster.
+
+    :param monkeypatch: Pytest fixture installing the success command runner.
+    :param target_file: Fixture target selecting all three surfaces.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, runtime = _access_modules()
     runner, calls = _fake_access_runner(runtime, "success")
     monkeypatch.setattr(access, "run_command", runner)
@@ -441,10 +656,16 @@ def test_check_access_passes_when_all_three_authorities_are_admin(
 
 
 def test_check_access_receipt_records_metadata_and_resolved_sources(
-    monkeypatch,
-    tmp_path,
-):
-    """A PASS receipt identifies the execution host, revision, and sources."""
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Require PASS provenance and effective nonsecret credential sources.
+
+    :param monkeypatch: Pytest fixture clearing token env and stubbing commands.
+    :param tmp_path: Scratch target and kubeconfig path used by the receipt.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, runtime = _access_modules()
     _clear_token_env(monkeypatch)
     kubeconfig = tmp_path / "kubeconfig"
@@ -504,10 +725,16 @@ def test_check_access_receipt_records_metadata_and_resolved_sources(
 
 
 def test_check_access_resolves_ambient_token_environment_sources(
-    monkeypatch,
-    tmp_path,
-):
-    """Environment tokens must be named as the effective credential source."""
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Name effective token variables in receipts without leaking values.
+
+    :param monkeypatch: Pytest fixture selecting ambient token variables.
+    :param tmp_path: Scratch target and kubeconfig path.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, runtime = _access_modules()
     _clear_token_env(monkeypatch)
     kubeconfig = tmp_path / "kubeconfig"
@@ -529,10 +756,16 @@ def test_check_access_resolves_ambient_token_environment_sources(
 
 
 def test_check_access_prefers_explicit_token_files_over_ambient_env(
-    monkeypatch,
-    tmp_path,
-):
-    """Explicit token files are the selected source even when env vars exist."""
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Prefer selected token files and hide both file and ambient values.
+
+    :param monkeypatch: Pytest fixture selecting tokens and fake commands.
+    :param tmp_path: Scratch token files, kubeconfig, and target.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, runtime = _access_modules()
     _clear_token_env(monkeypatch)
     github_token = tmp_path / "github.token"
@@ -543,10 +776,20 @@ def test_check_access_prefers_explicit_token_files_over_ambient_env(
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     monkeypatch.setenv("GH_ENTERPRISE_TOKEN", "ambient-github-token")
     monkeypatch.setenv("GITLAB_TOKEN", "ambient-gitlab-token")
-    observed_envs: list[dict[str, str] | None] = []
+    observed_envs: MutableSequence[Optional[Mapping[str, str]]] = []
     runner, _calls = _fake_access_runner(runtime, "success")
 
-    def fake_run(argv, **kwargs):
+    def fake_run(
+        argv: Sequence[str],
+        **kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> CommandResult:
+        """Capture child environments before delegating to the access double.
+
+        :param argv: Provider command requested by the access gate.
+        :param **kwargs: Keyword arguments forwarded to the fake command boundary.
+        :returns: Scenario runner's simulated command result.
+
+        """
         observed_envs.append(kwargs.get("env"))
         return runner(argv, **kwargs)
 
@@ -590,17 +833,25 @@ def test_check_access_prefers_explicit_token_files_over_ambient_env(
     ),
 )
 def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
-    monkeypatch,
-    tmp_path,
-    mechanism,
-    expected_type,
-):
-    """Kubernetes source read-back names the real auth mechanism only."""
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    mechanism: str,
+    expected_type: str,
+) -> None:
+    """Report effective kubeconfig auth type without serializing secrets.
+
+    :param monkeypatch: Pytest fixture replacing kubectl and token variables.
+    :param tmp_path: Scratch kubeconfig, token, certificate, and key files.
+    :param mechanism: Embedded, file, certificate, or exec auth variant.
+    :param expected_type: Public mechanism label expected in the receipt.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, runtime = _access_modules()
     _clear_token_env(monkeypatch)
     kubeconfig = tmp_path / f"{mechanism}.kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
-    secret_values: list[str] = []
+    secret_values: MutableSequence[str] = []
     if mechanism == "embedded_token":
         user_auth = {"token": "embedded-secret-token"}
         secret_values.append("embedded-secret-token")
@@ -624,7 +875,17 @@ def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
 
     runner, _calls = _fake_access_runner(runtime, "success")
 
-    def fake_run(argv, **kwargs):
+    def fake_run(
+        argv: Sequence[str],
+        **kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> CommandResult:
+        """Replace kubeconfig read-back with the selected auth variant.
+
+        :param argv: Native command requested by the access gate.
+        :param **kwargs: Keyword arguments forwarded to the fake command boundary.
+        :returns: Fixture kubeconfig JSON or another simulated probe result.
+
+        """
         command = tuple(str(part) for part in argv)
         if command[0] == "kubectl":
             context_index = command.index("--context")
@@ -685,9 +946,15 @@ def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
 
 
 def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
-    monkeypatch, tmp_path
-):
-    """A stale embedded token must not hide an unreadable effective tokenFile."""
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Fail closed when tokenFile is unreadable despite a stale inline token.
+
+    :param monkeypatch: Pytest fixture denying reads of the token file.
+    :param tmp_path: Scratch target, kubeconfig, and selected token path.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, _runtime = _access_modules()
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
@@ -696,7 +963,20 @@ def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
     target = _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig))
     original_open = Path.open
 
-    def denied_open(path, *args, **kwargs):
+    def denied_open(
+        path: Path,
+        *args: str,
+        **kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> IO[str]:
+        """Deny the selected token file while preserving other Path.open calls.
+
+        :param path: Path being opened by the access reader.
+        :param *args: Positional arguments forwarded to the helper under test.
+        :param **kwargs: Keyword arguments forwarded to the fake command boundary.
+        :returns: Original file handle for paths other than the selected token.
+        :raises PermissionError: The selected token file is opened.
+
+        """
         if path == token_file:
             raise PermissionError("unit denied")
         return original_open(path, *args, **kwargs)
@@ -725,13 +1005,22 @@ def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
     ),
 )
 def test_check_access_blocks_each_required_surface(
-    monkeypatch,
-    target_file,
-    scenario,
-    surface,
-    reason,
-):
-    """Each authority failure keeps the whole live collection gate blocked."""
+    monkeypatch: pytest.MonkeyPatch,
+    target_file: Path,
+    scenario: str,
+    surface: str,
+    reason: str,
+) -> None:
+    """Require each provider or cluster failure to block the aggregate gate.
+
+    :param monkeypatch: Pytest fixture installing the selected scenario runner.
+    :param target_file: Fixture target selecting all access surfaces.
+    :param scenario: Native command behavior under test.
+    :param surface: Report surface expected to be blocked.
+    :param reason: Expected machine-readable blocking reason.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, runtime = _access_modules()
     runner, _calls = _fake_access_runner(runtime, scenario)
     monkeypatch.setattr(access, "run_command", runner)
@@ -745,12 +1034,28 @@ def test_check_access_blocks_each_required_surface(
 
 
 def test_dry_run_access_lists_probes_without_calling_live_tools(
-    monkeypatch, target_file
-):
-    """Dry run explains intended probes and cannot accidentally become a pass."""
+    monkeypatch: pytest.MonkeyPatch, target_file: Path
+) -> None:
+    """List planned probes without allowing native command execution.
+
+    :param monkeypatch: Pytest fixture replacing all native commands with failure.
+    :param target_file: Fixture target selecting the planned surfaces.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, _runtime = _access_modules()
 
-    def fail_if_called(argv, **_kwargs):
+    def fail_if_called(
+        argv: Sequence[str],
+        **_kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> None:
+        """Abort if a dry-run access report executes any native command.
+
+        :param argv: Native command that would violate the dry-run boundary.
+
+        :param **_kwargs: Ignored keyword arguments accepted by the fake boundary.
+        :returns: None; the helper records behavior through its side effects.
+        """
         pytest.fail(f"dry-run called a live tool: {argv}")
 
     monkeypatch.setattr(access, "run_command", fail_if_called)
@@ -768,9 +1073,15 @@ def test_dry_run_access_lists_probes_without_calling_live_tools(
 
 
 def test_gitlab_access_uses_token_file_only_as_subprocess_environment(
-    monkeypatch, tmp_path
-):
-    """GitLab token-file contents override ambient env and never enter reports."""
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Keep GitLab file token only in the child environment and out of output.
+
+    :param monkeypatch: Pytest fixture selecting token source and fake commands.
+    :param tmp_path: Scratch token file and target.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, runtime = _access_modules()
     _clear_token_env(monkeypatch)
     token = "unit-token-value"
@@ -779,9 +1090,19 @@ def test_gitlab_access_uses_token_file_only_as_subprocess_environment(
     token_file.write_text(token + "\n", encoding="utf-8")
     monkeypatch.setenv("GITLAB_TOKEN", "ambient-token-value")
     target = _load_target(_write_token_target(tmp_path, token_file))
-    observed_envs: list[dict[str, str] | None] = []
+    observed_envs: MutableSequence[Optional[Mapping[str, str]]] = []
 
-    def fake_run(argv, **kwargs):
+    def fake_run(
+        argv: Sequence[str],
+        **kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> runtime.CommandResult:
+        """Answer GitLab access probes while recording child environments.
+
+        :param argv: glab command requested by the access gate.
+        :param **kwargs: Keyword arguments forwarded to the fake command boundary.
+        :returns: Synthetic identity or runner API command result.
+
+        """
         command = tuple(str(part) for part in argv)
         observed_envs.append(kwargs.get("env"))
         assert token not in command
@@ -815,14 +1136,30 @@ def test_gitlab_access_uses_token_file_only_as_subprocess_environment(
 
 
 def test_gitlab_access_without_token_file_uses_glab_host_profile(
-    monkeypatch, target_file
-):
-    """Omitting token_file preserves glab's selected host profile behavior."""
+    monkeypatch: pytest.MonkeyPatch, target_file: Path
+) -> None:
+    """Use the selected glab profile when the target has no token file.
+
+    :param monkeypatch: Pytest fixture clearing tokens and replacing commands.
+    :param target_file: Fixture target without an explicit GitLab token file.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, runtime = _access_modules()
     _clear_token_env(monkeypatch)
-    observed_envs: list[dict[str, str] | None] = []
+    observed_envs: MutableSequence[Optional[Mapping[str, str]]] = []
 
-    def fake_run(argv, **kwargs):
+    def fake_run(
+        argv: Sequence[str],
+        **kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> runtime.CommandResult:
+        """Answer GitLab probes and expose any injected token environment.
+
+        :param argv: glab command requested by the access gate.
+        :param **kwargs: Keyword arguments forwarded to the fake command boundary.
+        :returns: Synthetic identity or runner API command result.
+
+        """
         command = tuple(str(part) for part in argv)
         observed_envs.append(kwargs.get("env"))
         if command[:4] == ("glab", "auth", "status", "--hostname"):
@@ -861,12 +1198,20 @@ def test_gitlab_access_without_token_file_uses_glab_host_profile(
     ),
 )
 def test_gitlab_access_blocks_missing_or_empty_token_file(
-    monkeypatch,
-    tmp_path,
-    token_body,
-    expected_reason,
-):
-    """A configured token_file must exist and contain one nonempty token."""
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    token_body: Optional[str],
+    expected_reason: str,
+) -> None:
+    """Block absent or invalid selected token files before running glab.
+
+    :param monkeypatch: Pytest fixture clearing tokens and rejecting commands.
+    :param tmp_path: Scratch target and optional token file.
+    :param token_body: Token-file text or absent-file case.
+    :param expected_reason: Blocking reason expected from source validation.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, _runtime = _access_modules()
     _clear_token_env(monkeypatch)
     token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
@@ -876,7 +1221,17 @@ def test_gitlab_access_blocks_missing_or_empty_token_file(
     target = _load_target(_write_token_target(tmp_path, token_file))
     calls = []
 
-    def fake_run(argv, **_kwargs):
+    def fake_run(
+        argv: Sequence[str],
+        **_kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> None:
+        """Record and reject any glab call after invalid source selection.
+
+        :param argv: Unexpected native command issued by the access gate.
+
+        :param **_kwargs: Ignored keyword arguments accepted by the fake boundary.
+        :returns: None; the helper records behavior through its side effects.
+        """
         calls.append(tuple(str(part) for part in argv))
         pytest.fail("missing or empty token_file must block before glab runs")
 
@@ -890,8 +1245,16 @@ def test_gitlab_access_blocks_missing_or_empty_token_file(
     assert calls == []
 
 
-def test_kubectl_argv_binds_context_and_optional_kubeconfig(tmp_path, target_file):
-    """Every Kubernetes probe stays pinned to the selected context and file."""
+def test_kubectl_argv_binds_context_and_optional_kubeconfig(
+    tmp_path: Path, target_file: Path
+) -> None:
+    """Require every Kubernetes command to carry selected context and file.
+
+    :param tmp_path: Scratch path named as the target kubeconfig.
+    :param target_file: Fixture target supplying other provider authorities.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access, _runtime = _access_modules()
     target_mod = import_script_module("lib.python.core.target")
     base = _load_target(target_file)

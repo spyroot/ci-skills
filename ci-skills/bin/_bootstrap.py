@@ -3,6 +3,10 @@
 Every command in this directory imports this module before ``lib.python``, so a
 command runs from any working directory, in a checkout or an installed copy,
 with no PYTHONPATH.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Plan or verify PCI Ethernet uplink MTUs on the selected Kubernetes nodes."""
+"""Plan or verify PCI Ethernet uplink MTUs on the selected Kubernetes nodes.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 import argparse
 
@@ -9,7 +14,10 @@ from lib.python.core.kubernetes.mtu_consistency import run
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Expose one named operation with explicit temporary-Pod authorization."""
+    """Declare node selection and confirmed temporary-Pod MTU verification.
+
+    :returns: Parser for the MTU plan, confirmation digest, and time bound.
+    """
     cli = parser("Compare selected nodes' physical PCI Ethernet IPv4 uplink MTUs.")
     cli.add_argument(
         "--node", metavar="NAME", help="one existing node; default all nodes"
@@ -41,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Parse MTU options and run the plan or confirmed verification.
+
+    :returns: Exit code from the MTU workflow runner.
+    """
     return run(build_parser().parse_args())
 
 

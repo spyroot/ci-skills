@@ -9,6 +9,10 @@ Consistency is the other half. Options are declared in capability tiers, so
 `--json` means the same thing in all API commands and a command that filters
 records always spells it `--search`. These tests assert the tiers hold, which is
 what lets a caller learn one interface instead of five.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -17,6 +21,8 @@ import argparse
 import json
 import subprocess
 import sys
+from collections.abc import MutableSet
+from pathlib import Path
 
 import pytest
 from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
@@ -37,8 +43,10 @@ PYTHON_COMMANDS = tuple(
 )
 
 
-def test_runner_actions_declare_mutation_and_readback():
-    """Expose each runner write and its read-back in the machine contract."""
+def test_runner_actions_declare_mutation_and_readback() -> None:
+    """Expose each runner write and its read-back in the machine contract.
+    :returns: None; assertions in the body validate the regression.
+    """
     contract = CATALOG.describe("gitlab_runner.py")
     assert contract["mutates"] is True
     assert contract["side_effects"] != "none"
@@ -56,7 +64,11 @@ def test_runner_actions_declare_mutation_and_readback():
 
 
 def _parser_for(script: str) -> argparse.ArgumentParser:
-    """Return the parser behind one catalogued Python command."""
+    """Load the actual installed-command or node-local parser.
+
+    :param script: Catalogue command path, including its ``.py`` suffix.
+    :returns: Parser constructed by the matching entrypoint or node adapter.
+    """
     if script in CATALOG.NODE_LOCAL_COMMANDS:
         node_cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
         return node_cli.parser(script.removesuffix(".py"))
@@ -66,18 +78,21 @@ def _parser_for(script: str) -> argparse.ArgumentParser:
     return module.build_parser()
 
 
-def _actual_options(script: str) -> set[str]:
-    """Read the options a command really accepts, from its own parser.
+def _actual_options(script: str) -> MutableSet[str]:
+    """Read accepted long options from a command's parser, excluding prose.
 
-    Not from `--help`: the epilog names `--json`, `--yaml`, `--human`,
-    `--describe` and `--target` as prose, and argparse renders the epilog after
-    the options block, so a text scan counted those five as accepted whether
-    argparse defined them or not -- five of the eight universal options were
-    exempt from this gate. A parser object carries no prose.
+    :param script: Catalogue command path to inspect.
+    :returns: Long option names accepted by the real parser.
     """
-    found: set[str] = set()
+    found: MutableSet[str] = set()
 
     def visit(parser: argparse.ArgumentParser) -> None:
+        """Collect accepted long options from one parser and its subcommands.
+
+        :param parser: Argument parser whose option actions are traversed recursively.
+
+        :returns: None; the helper records behavior through its side effects.
+        """
         for action in parser._actions:
             found.update(
                 option for option in action.option_strings if option.startswith("--")
@@ -91,8 +106,13 @@ def _actual_options(script: str) -> set[str]:
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.COMMANDS))
-def test_every_command_accepts_the_universal_tier(script):
-    """`--json` and its siblings mean the same thing in every command."""
+def test_every_command_accepts_the_universal_tier(script: Path) -> None:
+    """Require all catalogue-wide flags on every Python command.
+
+    :param script: Catalogued command whose parser is inspected.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     actual = _actual_options(script)
 
     missing = sorted(set(CATALOG.UNIVERSAL_OPTIONS) - actual)
@@ -100,8 +120,10 @@ def test_every_command_accepts_the_universal_tier(script):
     assert missing == [], f"{script} is missing universal options {missing}"
 
 
-def test_logging_options_have_one_canonical_spelling():
-    """The catalog owns exactly the three supported diagnostic option names."""
+def test_logging_options_have_one_canonical_spelling() -> None:
+    """The catalog owns exactly the three supported diagnostic option names.
+    :returns: None; assertions in the body validate the regression.
+    """
     logging = {
         option for option in CATALOG.UNIVERSAL_OPTIONS if option.startswith("--log-")
     }
@@ -111,8 +133,15 @@ def test_logging_options_have_one_canonical_spelling():
 
 
 @pytest.mark.parametrize("script", PYTHON_COMMANDS)
-def test_every_python_command_parser_and_manifest_match_its_catalog_contract(script):
-    """Every installed Python entrypoint has one catalog-owned option contract."""
+def test_every_python_command_parser_and_manifest_match_its_catalog_contract(
+    script: Path,
+) -> None:
+    """Require parser, catalogue, and rendered manifest option parity.
+
+    :param script: Python command tested across all three contracts.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     if script in CATALOG.COMMANDS:
         contract = CATALOG.describe(script)
     elif script in CATALOG.NODE_LOCAL_COMMANDS:
@@ -128,8 +157,13 @@ def test_every_python_command_parser_and_manifest_match_its_catalog_contract(scr
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.COMMANDS))
-def test_each_capability_brings_its_whole_tier(script):
-    """A command claiming a capability accepts every option in that tier."""
+def test_each_capability_brings_its_whole_tier(script: Path) -> None:
+    """Require every claimed capability to expose all of its flags.
+
+    :param script: Catalogued command whose capability tiers are checked.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     actual = _actual_options(script)
 
     for capability in CATALOG.COMMANDS[script]["capabilities"]:
@@ -139,8 +173,10 @@ def test_each_capability_brings_its_whole_tier(script):
         )
 
 
-def test_a_command_without_a_capability_does_not_offer_its_options():
-    """Otherwise the tiers carry no information."""
+def test_a_command_without_a_capability_does_not_offer_its_options() -> None:
+    """Otherwise the tiers carry no information.
+    :returns: None; assertions in the body validate the regression.
+    """
     for script, entry in CATALOG.COMMANDS.items():
         actual = _actual_options(script)
         for capability, options in CATALOG.CAPABILITY_OPTIONS.items():
@@ -152,8 +188,10 @@ def test_a_command_without_a_capability_does_not_offer_its_options():
             )
 
 
-def test_every_command_describes_itself_without_credentials():
-    """`--describe` must answer before any authority is contacted."""
+def test_every_command_describes_itself_without_credentials() -> None:
+    """`--describe` must answer before any authority is contacted.
+    :returns: None; assertions in the body validate the regression.
+    """
     for script in sorted(CATALOG.COMMANDS):
         result = subprocess.run(
             [sys.executable, str(SCRIPT_ROOT / script), "--describe"],
@@ -170,31 +208,35 @@ def test_every_command_describes_itself_without_credentials():
         assert set(contract["options"]) == set(CATALOG.options_for(script))
 
 
-def test_the_rendered_manifest_matches_the_module():
+def test_the_rendered_manifest_matches_the_module() -> None:
     """`tools.json` is generated, so a stale copy must fail rather than mislead.
 
-    Byte equality, matching `tools/render_manifest.py --check`. Comparing parsed
-    JSON here while the tool compared bytes let a hand-reindented manifest be
-    current to one authority and stale to the other.
+        Byte equality, matching `tools/render_manifest.py --check`. Comparing parsed
+        JSON here while the tool compared bytes let a hand-reindented manifest be
+        current to one authority and stale to the other.
+
+    :returns: None; assertions in the body validate the regression.
     """
     assert MANIFEST_PATH.read_text(encoding="utf-8") == RENDER.render(REPO_ROOT), (
         "tools.json is stale; run tools/render_manifest.py"
     )
 
 
-def test_the_manifest_routes_every_command_and_nothing_else():
-    """Routing that omits a command sends an agent to read prose instead."""
+def test_the_manifest_routes_every_command_and_nothing_else() -> None:
+    """Routing that omits a command sends an agent to read prose instead.
+    :returns: None; assertions in the body validate the regression.
+    """
     manifest = CATALOG.manifest()
 
     declared = (
         set(CATALOG.COMMANDS)
         | set(CATALOG.NODE_LOCAL_COMMANDS)
-        | set(CATALOG.BASH_COMMANDS)
+        | set(CATALOG.READ_COMMANDS)
         | set(CATALOG.DISCOVERY_COMMANDS)
     )
     assert set(manifest["commands"]) == declared
     assert set(manifest["routing"].values()) == declared
-    for command in CATALOG.BASH_COMMANDS:
+    for command in CATALOG.READ_COMMANDS:
         contract = manifest["commands"][command]
         assert (SCRIPT_ROOT.parent / command).is_file()
         assert contract["options"] and contract["required_tools"]
@@ -204,9 +246,15 @@ def test_the_manifest_routes_every_command_and_nothing_else():
 @pytest.mark.parametrize("script", PYTHON_COMMANDS)
 @pytest.mark.parametrize("secret_option", ("--token", "--password"))
 def test_python_parsers_reject_direct_credential_values_before_resolution(
-    script, secret_option
-):
-    """Only target-selected credential sources reach a provider binding."""
+    script: Path, secret_option: str
+) -> None:
+    """Reject direct secret flags before target credential resolution.
+
+    :param script: Python command parser under test.
+    :param secret_option: Direct token or password flag that must be rejected.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     with pytest.raises(SystemExit) as rejected:
         _parser_for(script).parse_args([secret_option, "private-value"])
 
@@ -214,8 +262,13 @@ def test_python_parsers_reject_direct_credential_values_before_resolution(
 
 
 @pytest.mark.parametrize("script", sorted(CATALOG.NODE_LOCAL_COMMANDS))
-def test_node_local_commands_publish_their_distinct_interface(script):
-    """A node read publishes its selected API target and Pod route."""
+def test_node_local_commands_publish_their_distinct_interface(script: Path) -> None:
+    """Require node-local parser options and access route to match the contract.
+
+    :param script: Node-local command whose parser and proposition are compared.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     node_cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
     kind = script.removesuffix(".py")
     actual = {
@@ -228,7 +281,7 @@ def test_node_local_commands_publish_their_distinct_interface(script):
     declared = set(contract["options"])
 
     assert actual == declared
-    assert "--target" in actual
+    assert "--target" not in actual
     assert contract["requires_authorities"] == ["kubernetes"]
     assert set(contract["access_protocol"]) == {"kubernetes"}
     assert contract["execution_surface"] == (
@@ -237,8 +290,10 @@ def test_node_local_commands_publish_their_distinct_interface(script):
     assert set(contract["options"]) == declared
 
 
-def test_each_command_declares_the_authorities_it_needs_and_their_protocol():
-    """An agent must know what access a command needs before running it."""
+def test_each_command_declares_the_authorities_it_needs_and_their_protocol() -> None:
+    """An agent must know what access a command needs before running it.
+    :returns: None; assertions in the body validate the regression.
+    """
     for script, entry in CATALOG.COMMANDS.items():
         assert entry["requires"], f"{script} declares no authority"
         for authority in entry["requires"]:
@@ -250,8 +305,12 @@ def test_each_command_declares_the_authorities_it_needs_and_their_protocol():
         assert set(contract["access_protocol"]) == set(entry["requires"])
 
 
-def test_the_kubernetes_chain_declares_ambient_fallback_after_selected_sources():
-    """The published order matches the effective kubeconfig source binder."""
+def test_the_kubernetes_chain_declares_ambient_fallback_after_selected_sources() -> (
+    None
+):
+    """The published order matches the effective kubeconfig source binder.
+    :returns: None; assertions in the body validate the regression.
+    """
     chain = [step["source"] for step in CATALOG.ACCESS_PROTOCOL["kubernetes"]]
 
     assert chain[0] == "target:kubernetes.kubeconfigs"
@@ -261,19 +320,24 @@ def test_the_kubernetes_chain_declares_ambient_fallback_after_selected_sources()
     assert "first match wins" in CATALOG.ACCESS_PROTOCOL["rule"]
 
 
-def test_the_manifest_is_committed_and_valid_json():
+def test_the_manifest_is_committed_and_valid_json() -> None:
+    """Require the shipped skill manifest to exist and identify its kind.
+    :returns: None; assertions in the body validate the regression.
+    """
     assert MANIFEST_PATH.is_file(), "tools.json must ship with the skill"
     assert json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))["kind"] == (
         "skill_manifest"
     )
 
 
-def test_every_report_kind_the_cli_can_produce_is_a_declared_command():
+def test_every_report_kind_the_cli_can_produce_is_a_declared_command() -> None:
     """`--describe` and required options are looked up by kind, so each must exist.
 
-    The lookup tolerates an undeclared kind rather than raising, which is right
-    for a caller-supplied collector but would hide a real command falling out of
-    the catalog. This is what closes that.
+        The lookup tolerates an undeclared kind rather than raising, which is right
+        for a caller-supplied collector but would hide a real command falling out of
+        the catalog. This is what closes that.
+
+    :returns: None; assertions in the body validate the regression.
     """
     produced = {CLI.ACCESS_CHECK_KIND, *CLI.COLLECTOR_KINDS.values()}
 
@@ -283,8 +347,10 @@ def test_every_report_kind_the_cli_can_produce_is_a_declared_command():
         assert CATALOG.COMMAND_BY_KIND[kind] in CATALOG.COMMANDS
 
 
-def test_mutating_commands_are_identified_in_the_manifest():
-    """An agent must see the write boundary before it chooses a command."""
+def test_mutating_commands_are_identified_in_the_manifest() -> None:
+    """An agent must see the write boundary before it chooses a command.
+    :returns: None; assertions in the body validate the regression.
+    """
     manifest = CATALOG.manifest()
     assert manifest["read_only"] is False
     for script, entry in CATALOG.COMMANDS.items():
@@ -299,12 +365,14 @@ def test_mutating_commands_are_identified_in_the_manifest():
             } <= set(command["options"])
 
 
-def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
-    """A declared variable the code ignores is worse than no declaration.
+def test_the_declared_github_chain_is_the_chain_the_code_resolves(
+    target_file: Path,
+) -> None:
+    """Require enterprise and dotcom credential chains to match the binder.
 
-    The protocol named `GH_TOKEN` for an Enterprise host while `bind_sources`
-    read only `GH_ENTERPRISE_TOKEN` there, so a caller could set exactly the
-    variable the manifest named and still be told the credential store was used.
+    :param target_file: Fixture target selecting an Enterprise GitHub host.
+
+    :returns: None; assertions in the body validate the regression.
     """
     credentials = import_script_module("lib.python.access.credentials")
     target_mod = import_script_module("lib.python.core.target")
@@ -328,8 +396,10 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
     assert credentials.github_variables is CATALOG.github_variables
 
 
-def test_the_declared_gitlab_variables_are_the_ones_resolved():
-    """One list, consumed by the binder and published by the manifest."""
+def test_the_declared_gitlab_variables_are_the_ones_resolved() -> None:
+    """One list, consumed by the binder and published by the manifest.
+    :returns: None; assertions in the body validate the regression.
+    """
     credentials = import_script_module("lib.python.access.credentials")
     access = import_script_module("lib.python.access.access")
     declared = [step["source"] for step in CATALOG.ACCESS_PROTOCOL["gitlab"]]
@@ -340,25 +410,26 @@ def test_the_declared_gitlab_variables_are_the_ones_resolved():
     assert access.GITLAB_VARIABLES is CATALOG.GITLAB_VARIABLES
 
 
-def test_the_declared_target_protocol_is_the_chain_the_code_searches():
-    """`TARGET_PROTOCOL` is published, so reordering it must not be free."""
+def test_the_declared_target_protocol_is_the_chain_the_code_searches() -> None:
+    """`TARGET_PROTOCOL` is published, so reordering it must not be free.
+    :returns: None; assertions in the body validate the regression.
+    """
     declared = [step["source"] for step in CATALOG.TARGET_PROTOCOL]
-    searched = [
-        "argv:--target",
-        *(source for source, _path in PROJECT_BINDING.target_candidates()),
-    ]
+    searched = [source for source, _path in PROJECT_BINDING.target_candidates()]
 
     # No CI_SKILLS_TARGET in this environment, so that tier is absent from the
     # live chain; the remaining order must be exactly the declared one.
     assert [step for step in declared if step != "env:CI_SKILLS_TARGET"] == searched
-    assert [step["location"] for step in CATALOG.TARGET_PROTOCOL][2:] == [
+    assert [step["location"] for step in CATALOG.TARGET_PROTOCOL][1:] == [
         f"./{CATALOG.PROJECT_DIR}/{CATALOG.TARGET_FILENAME}",
         f"~/{CATALOG.PROJECT_DIR}/{CATALOG.TARGET_FILENAME}",
     ]
 
 
-def test_a_declared_required_option_is_enforced_before_any_authority():
-    """`required_options` is published, so it has to be what actually blocks."""
+def test_a_declared_required_option_is_enforced_before_any_authority() -> None:
+    """`required_options` is published, so it has to be what actually blocks.
+    :returns: None; assertions in the body validate the regression.
+    """
     import argparse
 
     args = argparse.Namespace(job_url=None)

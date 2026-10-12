@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Verify one exact GitLab identity and project or group for operations."""
+"""Verify one exact GitLab identity and project or group for operations.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -8,8 +13,9 @@ import json
 import socket
 import sys
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Optional
 
 import _bootstrap  # noqa: F401
 from lib.python.core.catalog import describe
@@ -21,14 +27,18 @@ from lib.python.core.cli import (
     resolve_gitlab_target,
     setup_gitlab_operation,
 )
+from lib.python.core.json_types import JSONObject
 from lib.python.core.portable import write_portable_receipt
 from lib.python.core.report import emit
-from lib.python.sys.status import DRY_RUN, exit_code
 from lib.python.core.target import TargetError, select_gitlab_reference
+from lib.python.sys.status import DRY_RUN, exit_code
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Expose the universal tier and one exact GitLab target selector."""
+    """Declare one GitLab project or group access selection.
+
+    :returns: Parser with common output options and access receipt path.
+    """
     cli = parser(
         "Check one GitLab identity and exact project or group for operations.",
         kind="gitlab_access",
@@ -50,9 +60,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _dry_run(
-    *, target_file: str, target_source: str, target_kind: str, reference: str
-) -> dict[str, Any]:
-    """Describe intent without loading any credential or contacting GitLab."""
+    target_file: str, target_source: str, target_kind: str, reference: str
+) -> JSONObject:
+    """Describe the selected GitLab target without loading credentials.
+
+    :param target_file: Resolved target TOML path included in the plan.
+    :param target_source: Source category of the selected target.
+    :param target_kind: Project or group target category.
+    :param reference: Selected project or group path or numeric reference.
+    :returns: Dry-run access report with no identity or credential evidence.
+    """
     return {
         "schema_version": "1.0",
         "kind": "gitlab_access",
@@ -70,7 +87,13 @@ def _dry_run(
     }
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Describe, plan, or verify one exact GitLab target and emit its report.
+
+    :param argv: Optional command arguments; defaults to process arguments.
+    :returns: Status-derived command exit code or structured failure code.
+    :raises SystemExit: If argparse handles help or rejects invalid arguments.
+    """  # noqa: DOC502 - argparse exits before the provider exception boundary.
     started = time.monotonic()
     args = build_parser().parse_args(argv)
     if args.describe:

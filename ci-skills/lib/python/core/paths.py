@@ -1,4 +1,9 @@
-"""Where the skill lives, declared once for every library module that needs it."""
+"""Where the skill lives, declared once for every library module that needs it.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 

@@ -10,25 +10,35 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable, Mapping
-from typing import Any
+from http.client import HTTPMessage, HTTPResponse
+from typing import Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from lib.python.core.cli_api import (
     MAX_RESPONSE_BYTES,
-    READ_ATTEMPTS,
     APIError,
-    _endpoint,
     http_failure,
     read_retry_delay,
+    response_decoder,
+    validate_endpoint,
 )
+from lib.python.core.json_types import JSONObject, copy_json_object
 from lib.python.core.runtime import trace_event
 
 
 class _NoRedirect(HTTPRedirectHandler):
     """Keep provider authentication on the exact selected authority."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: Request,
+        fp: HTTPResponse,
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> None:
         """Leave redirects as HTTP failures instead of forwarding credentials.
 
         :param req: Original urllib request.
@@ -52,7 +62,7 @@ class HTTPClient:
         authorization: str,
         timeout: int,
         sleep: Callable[[float], None] = time.sleep,
-    ) -> None:
+    ):
         """Keep selected access in memory without adding it to command arguments.
 
         :param origin: Validated provider origin.
@@ -67,32 +77,66 @@ class HTTPClient:
         self._opener = build_opener(_NoRedirect())
 
     def request(
-        self, method: str, endpoint: str, body: Mapping[str, Any] | None = None
-    ) -> Any:
-        """Use bounded retries for safe reads; writes are never blindly retried.
+        self,
+        method: str,
+        endpoint: str,
+        body: Optional[JSONObject] = None,
+    ) -> JSONObject:
+        """Request one JSON object from the bound provider.
 
-        :param method: Provider HTTP method.
-        :param endpoint: Relative path at the selected origin.
-        :param body: Optional JSON request document.
-        :returns: Parsed JSON, or None for an empty successful response.
-        :raises APIError: If transport, HTTP status, response size, or JSON fails.
-        """
-        path = _endpoint(endpoint)
-        data = json.dumps(dict(body)).encode() if body is not None else None
+        :param method: HTTP method; only GET requests may be retried.
+        :param endpoint: Relative API path within the selected provider origin.
+        :param body: JSON-compatible request fields; ``None`` sends no body.
+        :returns: Decoded response object as a mapping; an empty successful
+            response body produces an empty mapping.
+        :raises APIError: If the endpoint or request body is invalid, the
+            request cannot complete within the retry limits, or the response
+            exceeds the byte limit or is not a JSON object.
+        """  # noqa: DOC502 - Request validation and transport/decode helpers can fail.
+        path = validate_endpoint(endpoint)
         request = Request(
             f"{self.origin}/{path}",
-            data=data,
+            data=self._encode_body(body),
             method=method,
             headers={
                 "Authorization": self._authorization,
                 "Content-Type": "application/json",
             },
         )
-        for attempt in range(READ_ATTEMPTS if method == "GET" else 1):
+        return self._decode_response(self._read_response(request, path))
+
+    @staticmethod
+    def _encode_body(body: Optional[JSONObject]) -> Optional[bytes]:
+        """Encode request fields while retaining the no-body selection.
+
+        :param body: JSON-compatible fields; ``None`` selects no request body.
+        :returns: UTF-8 JSON bytes, or ``None`` when no body was selected.
+        :raises APIError: If fields contain unsupported values, nonfinite
+            numbers, circular references, or excessive nesting.
+        """
+        if body is None:
+            return None
+        try:
+            return json.dumps(copy_json_object(body), allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError, UnicodeError, RecursionError):
+            raise APIError("invalid_request_body") from None
+
+    def _read_response(self, request: Request, endpoint: str) -> bytes:
+        """Read response bytes using the shared bounded GET retry policy.
+
+        :param request: Prepared urllib request with bound authorization.
+        :param endpoint: Validated relative path included in diagnostic traces.
+        :returns: Successful response bytes, bounded by the shared size limit.
+        :raises APIError: If an HTTP or connection failure is terminal, retry
+            limits are reached, or the response exceeds the byte limit.
+        """
+        method = request.get_method()
+        attempt = 0
+        while True:
             detail = {
                 "method": method,
                 "origin": self.origin,
-                "path": path,
+                "path": endpoint,
                 "attempt": attempt + 1,
             }
             trace_event("http.started", detail)
@@ -103,11 +147,13 @@ class HTTPClient:
                         "http.completed",
                         {
                             **detail,
-                            "status_code": getattr(response, "status", None),
+                            "status_code": response.status,
                             "response_bytes": len(raw),
                         },
                     )
-                break
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    raise APIError("response_too_large")
+                return raw
             except HTTPError as exc:
                 trace_event("http.failed", {**detail, "status_code": exc.code})
                 reason = http_failure(exc.code) or f"provider_{exc.code}"
@@ -116,12 +162,25 @@ class HTTPClient:
             except (URLError, TimeoutError, OSError):
                 trace_event("http.failed", {**detail, "reason": "transport"})
                 reason, headers = "transport", ""
-            self._sleep(read_retry_delay(method, reason, headers, path, attempt))
-        if len(raw) > MAX_RESPONSE_BYTES:
-            raise APIError("response_too_large")
+            self._sleep(read_retry_delay(method, reason, headers, endpoint, attempt))
+            attempt += 1
+
+    @staticmethod
+    def _decode_response(raw: bytes) -> JSONObject:
+        """Decode an object response or normalize a successful empty body.
+
+        :param raw: Response bytes within the transport's size limit.
+        :returns: Decoded JSON object; empty or whitespace-only bytes produce
+            an empty mapping.
+        :raises APIError: If bytes are invalid UTF-8, invalid or excessively
+            nested JSON, or contain an array, scalar, or JSON null instead of an object.
+        """
         if not raw.strip():
-            return None
+            return {}
         try:
-            return json.loads(raw)
-        except (ValueError, UnicodeError):
+            value = response_decoder().decode(raw.decode("utf-8"))
+        except (ValueError, UnicodeError, RecursionError):
             raise APIError("invalid_json") from None
+        if not isinstance(value, Mapping):
+            raise APIError("invalid_shape")
+        return value

@@ -1,4 +1,4 @@
-"""Plan and compose toolbox, registry, and self-hosted runner operations.
+"""Plan and compose toolbox, registry, and runner delivery operations.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -8,40 +8,47 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping, MutableSequence, Sequence
 from dataclasses import asdict, dataclass, field
+from functools import partial
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Final, Optional
 
-from lib.python.core.action import (
-    Callback,
-    ExecutionContext,
-    ExecutionResult,
-    Executor,
-    emit_result,
-    plan_digest,
+from lib.python.access.credentials import bind_sources
+from lib.python.core.abstract.callback import Callback
+from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.abstract.skill_exector import WorkflowExecutor
+from lib.python.core.catalog import (
+    COMMAND_BY_KIND,
+    COMMANDS,
+    describe,
+    missing_required_options,
 )
-from lib.python.core.catalog import COMMAND_BY_KIND, COMMANDS, describe, missing_required_options
 from lib.python.core.cli import parser
 from lib.python.core.cli_api import APIError
-from lib.python.access.credentials import bind_sources
-from lib.python.core.gitlab.github import GitHubService
-from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
+from lib.python.core.delivery_state import DeliveryState
+from lib.python.core.gitlab.gitlab_runner import RunnerAction, published_image
+from lib.python.core.harbor.registry_mirror import TagSnapshot
+from lib.python.core.json_types import (
+    JSONObject,
+    JSONValue,
+    is_json_value,
+    json_object,
+)
+from lib.python.core.kubernetes.kubernetes import KubernetesError
 from lib.python.core.project_binding import resolve_target
-from lib.python.core.harbor.registry_mirror import HarborService, TagSnapshot
-from lib.python.core.report import report
+from lib.python.core.report import emit_result, plan_digest, report
 from lib.python.core.resources import ResourceSet
-from lib.python.core.gitlab.gitlab_runner import RunnerAction
 from lib.python.core.schema import SCHEMA_DIRECTORY, TOOLBOX_SCHEMA
-from lib.python.sys.status import APPLIED, BLOCKED, DRY_RUN, NO_OP, PASS, PLANNED
 from lib.python.core.target import Target
 from lib.python.core.toolbox import (
+    MANAGED_VALUE,
     BuildAction,
     BuildToolbox,
-    ToolboxBuildResult,
     ToolboxError,
     ToolboxSpec,
 )
+from lib.python.sys.status import APPLIED, BLOCKED, DRY_RUN, NO_OP, PASS, PLANNED
 
 DEFAULT_OPERATION_TIMEOUT: Final = 1800
 MUTATION_OPERATIONS: Final = ("create", "update", "delete")
@@ -50,51 +57,101 @@ FINGERPRINT_TAG_LENGTH: Final = 24
 
 
 def workflow_parser(kind: str) -> argparse.ArgumentParser:
-    """Build a declared workflow parser from the shared command catalogue.
+    """Build a workflow parser from the existing command catalogue.
 
     :param kind: Registered workflow report kind.
-    :returns: Parser using the existing target and output argument contract.
-    """
+    :returns: Parser with catalogue-owned options and shared output/target handling.
+    :raises KeyError: If the requested workflow is absent from the catalogue.
+    """  # noqa: DOC502 - Required catalogue entries are accessed by key.
     entry = COMMANDS[COMMAND_BY_KIND[kind]]
     result = parser(entry["purpose"], kind=kind)
     result.set_defaults(kind=kind)
     if "--spec" in entry["options"]:
-        result.epilog = (result.epilog or "") + (
-            f" Toolbox input schema: {SCHEMA_DIRECTORY / TOOLBOX_SCHEMA}"
-        )
+        result.epilog = (
+            result.epilog or ""
+        ) + f" Toolbox input schema: {SCHEMA_DIRECTORY / TOOLBOX_SCHEMA}"
     result.add_argument("action", nargs="?", choices=tuple(entry["subcommands"]))
     for option, help_text in entry["options"].items():
-        settings: dict[str, Any] = {"help": help_text}
         if option == "--apply":
-            settings["action"] = "store_true"
+            result.add_argument(option, help=help_text, action="store_true")
         elif option == "--label":
-            settings.update(action="append", default=[])
+            result.add_argument(option, help=help_text, action="append", default=[])
         elif option == "--timeout":
-            settings.update(type=int, default=DEFAULT_OPERATION_TIMEOUT)
-        result.add_argument(option, **settings)
+            result.add_argument(
+                option, help=help_text, type=int, default=DEFAULT_OPERATION_TIMEOUT
+            )
+        else:
+            result.add_argument(option, help=help_text)
     return result
 
 
 @dataclass
-class WorkflowAction:
-    """Workflow inputs and report state using the existing plan/apply protocol."""
+class WorkflowAction(SkillAction):
+    """Retain explicit workflow inputs and the planning state they produce.
+
+    :param args: Command arguments parsed by the shared catalogue-owned parser.
+    :param spec: Selected toolbox specification, absent for direct push/pull operations.
+    :param resolved_base: Immutable build base, absent when no build has been planned.
+    :param resolved_source: Immutable direct push source, absent for other operations.
+    :param digest: Prepared plan fingerprint, absent until planning succeeds.
+    :param context: Typed state shared by the declared ordered callbacks.
+    :ivar target: Runtime target assigned by successful preparation.
+    :ivar runner: Workload inputs assigned for every operation except direct push.
+
+    .. attribute :: args
+        :type: argparse.Namespace
+
+        Command arguments parsed by the shared catalogue-owned parser.
+
+    .. attribute :: target
+        :type: Target
+
+        Runtime target assigned by successful preparation.
+
+    .. attribute :: runner
+        :type: RunnerAction
+
+        Workload inputs assigned for every operation except direct push.
+
+    .. attribute :: spec
+        :type: Optional[ToolboxSpec]
+
+        Selected toolbox specification, absent for direct push/pull operations.
+
+    .. attribute :: resolved_base
+        :type: Optional[str]
+
+        Immutable build base, absent when no build has been planned.
+
+    .. attribute :: resolved_source
+        :type: Optional[str]
+
+        Immutable direct push source, absent for other operations.
+
+    .. attribute :: digest
+        :type: Optional[str]
+
+        Prepared plan fingerprint, absent until planning succeeds.
+
+    .. attribute :: context
+        :type: DeliveryState
+
+        Typed state shared by the declared ordered callbacks.
+    """
 
     args: argparse.Namespace
-    target: Target | None = None
-    spec: ToolboxSpec | None = None
-    runner: RunnerAction | None = None
-    resolved_base: str | None = None
-    resolved_source: str | None = None
-    digest: str | None = None
-    context: ExecutionContext = field(default_factory=ExecutionContext)
+    target: Target = field(init=False)
+    runner: RunnerAction = field(init=False)
+    spec: Optional[ToolboxSpec] = None
+    resolved_base: Optional[str] = None
+    resolved_source: Optional[str] = None
+    digest: Optional[str] = None
+    context: DeliveryState = field(default_factory=DeliveryState)
 
-    def prepare(self) -> None:
-        """Validate caller inputs and bind the shared target selection.
+    def _validate(self) -> None:
+        """Reject invalid command modes and missing catalogue-owned arguments.
 
-        :raises ValueError: If required operation inputs are missing or inconsistent.
-        :raises TargetError: If target or credential binding is invalid.
-        :raises SpecificationError: If a selected toolbox spec fails its schema.
-        :raises OSError: If a caller-selected input cannot be read.
+        :raises ValueError: If required inputs, timeout, or plan/apply flags conflict.
         """
         args = self.args
         if not args.action:
@@ -105,16 +162,51 @@ class WorkflowAction:
             raise ValueError("confirm_plan_requires_apply")
         if args.timeout <= 0:
             raise ValueError("timeout_must_be_positive")
-        self.context = ExecutionContext.from_args(args)
-        if getattr(args, "spec", None):
-            self.spec = ToolboxSpec.from_path(Path(args.spec).expanduser())
-        if args.action in ("create", "update") and self.spec is None:
-            raise ValueError("spec_required")
-        entry = COMMANDS[COMMAND_BY_KIND[args.kind]]
         missing = missing_required_options(COMMAND_BY_KIND[args.kind], args)
         if missing:
             raise ValueError("missing_options:" + ",".join(missing))
-        surfaces = tuple(entry["requires"])
+
+    def _workload(self) -> None:
+        """Select workload identity only for operations that create or read workloads.
+
+        :raises ValueError: If the workload or provider registration inputs are missing.
+        """
+        args = self.args
+        if args.kind == "harbor_push":
+            return
+        namespace = getattr(args, "namespace", "") or (
+            self.spec.namespace if self.spec else ""
+        )
+        name = getattr(args, "name", "") or (self.spec.app if self.spec else "")
+        if not namespace or not name:
+            raise ValueError("namespace_and_name_required")
+        source_root = getattr(args, "runner_root", "") or ""
+        labels = tuple(getattr(args, "label", []))
+        if (
+            args.kind == "create_selfhosted_runner"
+            and args.action != "delete"
+            and (not source_root or not labels)
+        ):
+            raise ValueError("runner_root_and_labels_required")
+        self.runner = RunnerAction(namespace, name, source_root, labels, args.timeout)
+
+    def prepare(self) -> None:
+        """Validate inputs and bind the shared runtime target before composition.
+
+        :raises ValueError: If command modes or required operation inputs are invalid.
+        :raises TargetError: If target or credential source binding is invalid.
+        :raises SpecificationError: If the selected toolbox specification is invalid.
+        :raises OSError: If a configured specification or credential cannot be read.
+        """  # noqa: DOC503 - Specification and credential binding propagate failures.
+        self._validate()
+        args = self.args
+        self.context.args = args
+        selected_spec = getattr(args, "spec", "")
+        if selected_spec:
+            self.spec = ToolboxSpec.from_path(Path(selected_spec).expanduser())
+        if args.action in ("create", "update") and self.spec is None:
+            raise ValueError("spec_required")
+        surfaces = tuple(COMMANDS[COMMAND_BY_KIND[args.kind]]["requires"])
         if args.kind == "create_selfhosted_runner" and args.action == "delete":
             surfaces = ("github", "kubernetes")
         self.target = resolve_target(
@@ -122,237 +214,234 @@ class WorkflowAction:
         )
         if not args.dry_run:
             self.target = bind_sources(self.target, revision=args.revision)
-        namespace = getattr(args, "namespace", None) or (
-            self.spec.namespace if self.spec else None
-        )
-        name = getattr(args, "name", None) or (self.spec.app if self.spec else None)
-        if args.kind != "harbor_push" and (not namespace or not name):
-            raise ValueError("namespace_and_name_required")
-        root = getattr(args, "runner_root", None) or ""
-        labels = tuple(getattr(args, "label", []))
-        if (
-            args.kind == "create_selfhosted_runner"
-            and args.action != "delete"
-            and (not root or not labels)
-        ):
-            raise ValueError("runner_root_and_labels_required")
-        if namespace and name:
-            self.runner = RunnerAction(namespace, name, root, labels, args.timeout)
+        self._workload()
         if self.spec is not None and "@sha256:" in self.spec.base_image:
             self.resolved_base = self.spec.base_image
 
     def fingerprint(self) -> str:
-        """Bind operation inputs to the exact selected endpoints and base image.
+        """Bind operation inputs to selected endpoints and resolved image identities.
 
-        :returns: Canonical operation fingerprint with no credential contents.
-        :raises ValueError: If preparation has not selected a target.
-        """
-        if self.target is None:
-            raise ValueError("target_missing")
-        data = {
-            "kind": self.args.kind,
-            "operation": self.args.action,
-            "skill": self.target.skill,
-            "tested_revision": self.target.tested_revision,
-            "target_file": str(self.target.source_file),
-            "target_source": self.target.source_kind,
-            "github": asdict(self.target.github) if self.target.github else None,
-            "kubernetes": {
-                "context": self.target.kubernetes.context,
-                "server": self.target.kubernetes.server,
+        :returns: Canonical nonsecret plan fingerprint using the established document shape.
+        :raises AttributeError: If preparation did not assign the runtime target.
+        :raises TypeError: If an operation input cannot be encoded as JSON.
+        """  # noqa: DOC502 - State access and plan serialization can fail.
+        github = asdict(self.target.github) if self.target.github else None
+        if github and github["token_file"] is not None:
+            github["token_file"] = str(github["token_file"])
+        return plan_digest(
+            {
+                "kind": self.args.kind,
+                "operation": self.args.action,
+                "skill": self.target.skill,
+                "tested_revision": self.target.tested_revision,
+                "target_file": str(self.target.source_file),
+                "target_source": self.target.source_kind,
+                "github": github,
+                "kubernetes": {
+                    "context": self.target.kubernetes.context,
+                    "server": self.target.kubernetes.server,
+                }
+                if self.target.kubernetes
+                else None,
+                "harbor": {
+                    "url": self.target.harbor.url,
+                    "project": self.target.harbor.project,
+                }
+                if self.target.harbor
+                else None,
+                "registry_inputs": {
+                    key: getattr(self.args, key, None)
+                    for key in ("source_image", "repository", "tag", "image")
+                },
+                "specification": self.spec.fingerprint if self.spec else None,
+                "base_image": self.resolved_base,
+                "source_image": self.resolved_source,
+                "runner": asdict(self.runner)
+                if self.args.kind != "harbor_push"
+                else None,
             }
-            if self.target.kubernetes
-            else None,
-            "harbor": {
-                "url": self.target.harbor.url,
-                "project": self.target.harbor.project,
-            }
-            if self.target.harbor
-            else None,
-            "registry_inputs": {
-                key: getattr(self.args, key, None)
-                for key in ("source_image", "repository", "tag", "image")
-            },
-            "specification": self.spec.fingerprint if self.spec else None,
-            "base_image": self.resolved_base,
-            "source_image": self.resolved_source,
-            "runner": asdict(self.runner) if self.runner else None,
-        }
-        if data["github"] and data["github"]["token_file"] is not None:
-            data["github"]["token_file"] = str(data["github"]["token_file"])
-        return plan_digest(data)
+        )
 
     @property
     def repository(self) -> str:
-        """Return the exact project-relative registry repository for this action.
+        """Select the exact project-relative registry repository for this operation.
 
-        :returns: Repository from the toolbox spec or explicit operation inputs.
-        :raises ValueError: If an image points outside the configured Harbor target.
+        :returns: Specification repository, explicit repository, or pinned pull-image repository.
+        :raises ValueError: If the image is outside the configured Harbor target.
         """
         if self.spec is not None:
             return self.spec.image_repository
-        selected = getattr(self.args, "repository", None)
+        selected = getattr(self.args, "repository", "")
         if selected:
             return selected
         image = getattr(self.args, "image", "")
-        if self.target is None or self.target.harbor is None:
+        if self.target.harbor is None:
             raise ValueError("harbor_target_missing")
         prefix = f"{self.target.harbor.host}/{self.target.harbor.project}/"
         if not image.startswith(prefix) or "@sha256:" not in image:
             raise ValueError("harbor_image_target_mismatch")
         return image[len(prefix) :].rsplit("@", 1)[0]
 
-    def execute(self, factory: Callable[[], Executor]) -> int:
-        """Plan or run callbacks and emit the existing versioned report envelope.
+    def _records(self) -> Sequence[JSONObject]:
+        """Select JSON evidence from the generic callback result history.
 
-        :param factory: Thin command composition created after input preparation.
-        :returns: Canonical report exit code.
-        """
+        :returns: Provider records carrying ``verified``, each identified by its
+            producing callback; unrelated framework values remain in shared state.
+        :raises TypeError: If a report-bound result contains values outside the
+            finite JSON data model.
+        :raises RecursionError: If report-bound evidence contains a container
+            cycle or exceeds the JSON validator's nesting depth.
+        """  # noqa: DOC503 - Recursive JSON validation propagates excessive nesting.
+        records: MutableSequence[JSONObject] = []
+        for callback, value in self.context.results.items():
+            if "verified" not in value:
+                continue
+            if not is_json_value(value):
+                raise TypeError("workflow_record_requires_json")
+            records.append({"callback": type(callback).__name__, **json_object(value)})
+        return records
+
+    def _execute(
+        self,
+        factory: Callable[[], WorkflowExecutor[DeliveryState]],
+        output: MutableMapping[str, JSONValue],
+    ) -> bool:
+        """Prepare and run the workflow selected by the caller's known mode.
+
+        :param factory: Constructs the already ordered callback collection after preparation.
+        :param output: Report whose status and target identity this method updates.
+        :returns: Whether a live executor was created rather than an offline plan.
+        :raises ValueError: If inputs or operation-specific verification are invalid.
+        :raises OSError: If configured files or native commands cannot be accessed.
+        :raises APIError: If registry or GitHub operations fail.
+        :raises KubernetesError: If Kubernetes operations or cleanup fail.
+        :raises ToolboxError: If toolbox validation, build, or read-back fails.
+        """  # noqa: DOC502 - Preparation and workflow callbacks propagate failures.
+        self.prepare()
+        output["target"] = str(self.target.source_file)
+        if self.target.skill is not None:
+            output["skill"] = self.target.skill
+            output["tested_revision"] = self.target.tested_revision
+        if self.args.dry_run:
+            self.digest = self.fingerprint()
+            output["status"] = DRY_RUN
+            return False
+        executor = factory()
+        executor.run()
+        output["status"] = PASS if self.args.apply else PLANNED
+        return True
+
+    def execute(self, factory: Callable[[], WorkflowExecutor[DeliveryState]]) -> int:
+        """Run the declared workflow and emit its existing versioned report envelope.
+
+        :param factory: Thin adapter constructing ordered callbacks after preparation.
+        :returns: Canonical report exit code after output and requested receipt writing.
+        :raises OSError: If final report output or receipt writing fails.
+        :raises ValueError: If the final report cannot be rendered or serialized.
+        :raises TypeError: If report-bound callback evidence is not finite JSON.
+        :raises RecursionError: If report-bound evidence contains cyclic or
+            excessively nested containers.
+        """  # noqa: DOC502 - Final report and receipt writing can fail.
         args = self.args
         if args.describe:
-            return emit_result(
-                ExecutionResult(None, describe(COMMAND_BY_KIND[args.kind])), args
-            )
+            return emit_result(describe(COMMAND_BY_KIND[args.kind]), args)
         output = report(args.kind, "", {}, [], [])
+        errors: MutableSequence[JSONObject] = []
+        executed = False
         if args.log_level == "debug" and args.log_file:
             output["trace_artifact"] = str(args.log_file)
-        executor: Executor | None = None
         try:
-            self.prepare()
-            output["target"] = str(self.target.source_file)
-            if self.target.skill is not None:
-                output["skill"] = self.target.skill
-                output["tested_revision"] = self.target.tested_revision
-            if args.dry_run:
-                self.digest = self.fingerprint()
-                output["status"] = DRY_RUN
-            else:
-                executor = factory()
-                executor.run()
-                output["status"] = PASS if args.apply else PLANNED
+            executed = self._execute(factory, output)
         except (ValueError, OSError, APIError, KubernetesError, ToolboxError) as exc:
             output["status"] = BLOCKED
-            output["errors"].append({"source": args.kind, "reason": str(exc)})
-        access: dict[str, Any] = {}
-        for name, service in self.context.services.items():
-            if isinstance(service, HarborService):
-                access[name] = {
-                    "origin": service.target.url,
-                    "identity": service.credential.username,
-                    "credential_source": service.credential.source,
-                }
-            elif isinstance(service, GitHubService):
-                access[name] = {
-                    "host": service.host,
-                    "identity": service.identity,
-                    "repository": service.repository,
-                    "repository_id": service.repository_id,
-                    "credential_source": service.credential_source,
-                }
-            elif isinstance(service, KubernetesService):
-                access[name] = {
-                    "identity": service.identity,
-                    "context": service.target.kubernetes.context,
-                    "server": service.target.kubernetes.server,
-                }
-        output["access"] = access
-        if executor is not None:
-            for callback in executor.callbacks:
-                value = callback.result
-                if isinstance(value, ToolboxBuildResult):
-                    value = asdict(value)
-                if isinstance(value, dict) and "verified" in value:
-                    output["records"].append(
-                        {"callback": type(callback).__name__, **value}
-                    )
-        output.update(operation=getattr(args, "action", None), plan_digest=self.digest)
-        output["summary"] = {
-            "record_count": len(output["records"]),
-            "error_count": len(output["errors"]),
-        }
-        if executor is not None:
+            errors.append({"source": args.kind, "reason": str(exc)})
+        records = self._records()
+        output.update(
+            access=self.context.access_evidence,
+            records=records,
+            errors=errors,
+            operation=getattr(args, "action", None),
+            plan_digest=self.digest,
+        )
+        output["summary"] = {"record_count": len(records), "error_count": len(errors)}
+        if executed or self.context.results:
             output["cleanup"] = {
-                "status": PASS if not executor.cleanup_failures else BLOCKED,
-                "failures": [asdict(item) for item in executor.cleanup_failures],
+                "status": BLOCKED if self.context.cleanup_failures else PASS,
+                "failures": list(self.context.cleanup_failures),
             }
-        return emit_result(ExecutionResult(None, output), args)
+        return emit_result(output, args)
 
 
-class ConfirmWorkflow(Callback[WorkflowAction, dict[str, Any]]):
-    """Resolve live plan inputs before any mutating callback may start."""
+class ConfirmWorkflow(Callback[DeliveryState, WorkflowAction]):
+    """Resolve live plan inputs before any composed mutation callback starts."""
 
-    @property
-    def complete(self) -> bool:
-        """Continue past the plan only for an explicitly confirmed apply.
+    def run(self) -> JSONObject:
+        """Resolve immutable image inputs and validate any requested plan confirmation.
 
-        :returns: Whether this invocation requested mutation.
-        """
-        return bool(self.action and self.action.args.apply)
-
-    def run(self) -> dict[str, Any]:
-        """Confirm the fingerprint of the current selected operation inputs.
-
-        :returns: The exact fingerprint to supply to a later apply invocation.
-        :raises ValueError: If action inputs or explicit confirmation differ.
-        :raises APIError: If resolving a mutable base image fails.
-        """
+        :returns: Exact plan fingerprint and resolved source image when applicable.
+        :raises ValueError: If confirmation differs or a pull image is not immutable.
+        :raises APIError: If native registry image identity cannot be read.
+        """  # noqa: DOC503 - Image validation and native registry reads can fail.
         workflow = self.action
-        if workflow is None:
-            raise ValueError("workflow_action_missing")
         if workflow.spec is not None and workflow.resolved_base is None:
-            harbor = cast(HarborService, self.context.services["harbor"])
-            digest = harbor.inspect(workflow.spec.base_image)
-            image = workflow.spec.base_image.rsplit("@", 1)[0]
-            workflow.resolved_base = image + "@" + digest
-        source = getattr(workflow.args, "source_image", None)
+            digest = self.state.harbor.inspect(workflow.spec.base_image)
+            workflow.resolved_base = (
+                workflow.spec.base_image.rsplit("@", 1)[0] + "@" + digest
+            )
+        source = getattr(workflow.args, "source_image", "")
         if source:
-            harbor = cast(HarborService, self.context.services["harbor"])
-            digest = harbor.inspect(source)
+            digest = self.state.harbor.inspect(source)
             workflow.resolved_source = source.rsplit("@", 1)[0] + "@" + digest
+            self.state.source_image = workflow.resolved_source
+        image = getattr(workflow.args, "image", "")
+        if image:
+            self.state.published_image = published_image(image)
         workflow.digest = workflow.fingerprint()
         if workflow.args.apply and workflow.args.confirm_plan != workflow.digest:
             raise ValueError("confirm_plan_mismatch_rerun_plan")
-        result = {"plan_digest": workflow.digest}
+        result: MutableMapping[str, JSONValue] = {"plan_digest": workflow.digest}
         if workflow.resolved_source is not None:
             result["image"] = workflow.resolved_source
         return result
 
 
-class EnsureNamespace(Callback[WorkflowAction, dict[str, Any]]):
-    """Create a requested absent namespace without changing an existing one."""
+class EnsureNamespace(Callback[DeliveryState, WorkflowAction]):
+    """Create absent selected namespaces while preserving existing namespaces."""
 
-    def collect(self) -> None:
-        """Start the list of namespace resources created by this invocation."""
-        self._created: list[ResourceSet] = []
+    def __init__(self, action: WorkflowAction):
+        """Retain the required workflow and own created namespace tracking.
 
-    def cleanup(self) -> None:
-        """Remove newly created namespaces after dependent cleanup on failure.
-
-        :raises KubernetesError: If owned namespace cleanup cannot complete.
+        :param action: Prepared workload and optional build namespace selection.
         """
-        if self.context.failed:
+        super().__init__(action)
+        self._created: MutableSequence[ResourceSet] = []
+
+    def cleanup(self) -> JSONObject:
+        """Remove only namespaces created here after dependent failure cleanup.
+
+        :returns: Empty evidence after owned namespace cleanup verification.
+        :raises KubernetesError: If a newly created namespace cannot be removed safely.
+        """  # noqa: DOC502 - ResourceSet applies and verifies namespace lifecycle.
+        if self.state.failed:
             for resources in reversed(self._created):
                 resources.cleanup_created()
+        return {}
 
-    def run(self) -> dict[str, Any]:
-        """Read before creation and record the selected namespace UID.
+    def run(self) -> JSONObject:
+        """Read before creation and retain each selected namespace identity.
 
-        :returns: Verified namespace identity and whether it was created.
-        :raises ValueError: If namespace inputs are missing.
-        :raises KubernetesError: If creation or independent read-back fails.
-        """
+        :returns: Verified namespace records with created/no-op status and native UID.
+        :raises KubernetesError: If creation or independent namespace read-back fails.
+        """  # noqa: DOC502 - ResourceSet applies and verifies namespace lifecycle.
         workflow = self.action
-        if workflow is None or workflow.runner is None:
-            raise ValueError("namespace_missing")
-        service = cast(KubernetesService, self.context.services["kubernetes"])
         names = {workflow.runner.namespace}
         if workflow.spec is not None:
             names.add(workflow.spec.namespace)
         records = []
         for name in sorted(names):
-            observed = service.read("namespace", name, "")
+            observed = self.state.kubernetes.read("namespace", name, "")
             if observed is None:
-                resources = ResourceSet(service, "", workflow.runner.name)
+                resources = ResourceSet(self.state.kubernetes, "", workflow.runner.name)
                 self._created.append(resources)
                 records.append(
                     resources.apply(
@@ -365,98 +454,112 @@ class EnsureNamespace(Callback[WorkflowAction, dict[str, Any]]):
                 )
             else:
                 records.append(
-                    {
-                        "name": name,
-                        "uid": observed["metadata"]["uid"],
-                        "action": NO_OP,
-                    }
+                    {"name": name, "uid": observed["metadata"]["uid"], "action": NO_OP}
                 )
         return {"verified": True, "namespaces": records}
 
 
-class HarborBuild(BuildToolbox):
-    """Bind the generic OpenShift build atom to the authenticated registry."""
+class HarborBuild(Callback[DeliveryState, WorkflowAction]):
+    """Construct the generic build action from preceding plan and registry state."""
 
-    def __init__(self, *, workflow: WorkflowAction) -> None:
-        """Keep a workflow whose authentication callbacks run before collection.
+    def __init__(self, workflow: WorkflowAction):
+        """Retain required workflow inputs and initialize child resource ownership.
 
-        :param workflow: Validated inputs and resolved base-image plan.
+        :param workflow: Prepared inputs whose authentication and plan callbacks precede this one.
         """
-        super().__init__(action=None)
-        self.workflow = workflow
-        self._candidate_snapshot: TagSnapshot | None = None
+        super().__init__(workflow)
+        self._builder: Optional[BuildToolbox] = None
+        self._candidate_snapshot: Optional[TagSnapshot] = None
 
-    def collect(self) -> None:
-        """Resolve native build inputs from the preceding Harbor callback.
+    def collect(self) -> JSONObject:
+        """Construct one concrete build action after its required producers finish.
 
-        :raises ValueError: If required plan or authentication inputs are missing.
-        :raises ToolboxError: If generic build input validation fails.
-        """
-        spec = self.workflow.spec
-        if spec is None or self.workflow.resolved_base is None:
+        :returns: Empty evidence after generic build input validation.
+        :raises ValueError: If the confirmed build specification or base is missing.
+        :raises ToolboxError: If generic immutable-image or credential inputs are invalid.
+        :raises APIError: If the prior candidate tag cannot be read for recovery.
+        """  # noqa: DOC503 - Build and registry helpers propagate lifecycle failures.
+        workflow, harbor = self.action, self.state.harbor
+        spec = workflow.spec
+        if spec is None or workflow.resolved_base is None:
             raise ValueError("build_plan_missing")
-        harbor = cast(HarborService, self.context.services["harbor"])
         prefix = f"{harbor.target.host}/{harbor.target.project}/{spec.image_repository}"
         reference = BUILD_TAG_PREFIX + spec.fingerprint[:FINGERPRINT_TAG_LENGTH]
-        self.action = BuildAction(
+        build = BuildAction(
             spec,
-            self.workflow.resolved_base,
+            workflow.resolved_base,
             prefix,
             reference,
             harbor.dockerconfig,
-            lambda _repository, selected: harbor.digest(
-                spec.image_repository, selected
-            ),
+            partial(harbor.digest, spec.image_repository),
         )
-        super().collect()
+        builder = BuildToolbox(build)
+        builder.bind(self.state)
+        self._builder = builder
+        builder.collect()
         self._candidate_snapshot = TagSnapshot.capture(
             harbor, spec.image_repository, reference
         )
+        return {}
 
-    def cleanup(self) -> None:
-        """Clean build helpers and restore the prior candidate tag after failure.
+    def run(self) -> JSONObject:
+        """Run the constructed generic build and retain its typed state output.
 
-        :raises KubernetesError: If build resource cleanup is incomplete.
-        :raises APIError: If candidate tag recovery or read-back fails.
-        """
+        :returns: Safe candidate identity and independent build/registry evidence.
+        :raises ValueError: If lifecycle collection did not construct the build action.
+        :raises ToolboxError: If build execution or exact output verification fails.
+        :raises KubernetesError: If native operations or read-back fail.
+        :raises APIError: If independent registry read-back fails.
+        :raises OSError: If temporary build inputs cannot be prepared.
+        """  # noqa: DOC503 - Build and registry helpers propagate lifecycle failures.
+        if self._builder is None:
+            raise ValueError("build_collection_required")
+        return self._builder.run()
+
+    def cleanup(self) -> JSONObject:
+        """Clean child resources and restore the captured candidate after failure.
+
+        :returns: Empty report evidence after owned cleanup and recovery verification.
+        :raises KubernetesError: If build resource cleanup fails.
+        :raises APIError: If prior candidate state cannot be restored and read back.
+        """  # noqa: DOC502 - Build cleanup and registry restoration can fail.
         try:
-            super().cleanup()
+            if self._builder is not None:
+                self._builder.cleanup()
         finally:
-            if self.context.failed and self._candidate_snapshot is not None:
+            if self.state.failed and self._candidate_snapshot is not None:
                 self._candidate_snapshot.restore()
+        return {}
 
 
-class DeleteToolbox(Callback[WorkflowAction, dict[str, Any]]):
-    """Delete an explicitly selected toolbox build record and registry tags."""
+class DeleteToolbox(Callback[DeliveryState, WorkflowAction]):
+    """Delete explicitly selected owned build configuration and registry tags."""
 
-    def run(self) -> dict[str, Any]:
-        """Remove selected build and image outputs with independent absence proof.
+    def run(self) -> JSONObject:
+        """Delete named build and image outputs with independent absence proof.
 
-        :returns: Verified deletion or no-op evidence for the named toolbox.
-        :raises ValueError: If specification or bound services are unavailable.
-        :raises APIError: If registry delete or absence read-back fails.
-        :raises KubernetesError: If build record deletion or read-back fails.
-        """
-        workflow = self.action
-        if workflow is None or workflow.spec is None:
+        :returns: Applied/no-op deletion evidence for the selected toolbox.
+        :raises ValueError: If no toolbox specification was selected.
+        :raises APIError: If tag deletion or independent absence read-back fails.
+        :raises KubernetesError: If owned BuildConfig deletion or read-back fails.
+        """  # noqa: DOC503 - Registry and Kubernetes deletion helpers can fail.
+        spec = self.action.spec
+        if spec is None:
             raise ValueError("toolbox_spec_missing")
-        spec = workflow.spec
-        harbor = cast(HarborService, self.context.services["harbor"])
-        service = cast(KubernetesService, self.context.services["kubernetes"])
-        from lib.python.core.toolbox import MANAGED_VALUE
-
-        resources = ResourceSet(service, spec.namespace, MANAGED_VALUE)
+        resources = ResourceSet(self.state.kubernetes, spec.namespace, MANAGED_VALUE)
         changed = resources.delete("BuildConfig", spec.app)
-        for reference in (
+        references = (
             spec.image_tag,
             BUILD_TAG_PREFIX + spec.fingerprint[:FINGERPRINT_TAG_LENGTH],
-        ):
-            changed = harbor.delete_tag(spec.image_repository, reference) or changed
+        )
+        for reference in references:
+            changed = (
+                self.state.harbor.delete_tag(spec.image_repository, reference)
+                or changed
+            )
         return {
-            "verified": True,
             "action": APPLIED if changed else NO_OP,
-            "repository": spec.image_repository,
-            "tag": spec.image_tag,
+            "verified": True,
             "namespace": spec.namespace,
             "name": spec.app,
         }

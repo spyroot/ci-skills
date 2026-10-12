@@ -5,23 +5,53 @@ matched `cilium-operator-*` and `cilium-envoy-*`, which carry no health
 endpoint, so a preflight could exec into one and fail despite valid access.
 And treating any successful `json.loads` as a passing read let `null`, `[]` and
 a bare string count as a proven agent health check.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import ModuleType
+from typing import TYPE_CHECKING, Optional
+
 import pytest
 from conftest import import_script_module
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject, JSONValue
 
 READY = {"conditions": [{"type": "Ready", "status": "True"}]}
 NOT_READY = {"conditions": [{"type": "Ready", "status": "False"}]}
 AGENT_LABELS = {"k8s-app": "cilium"}
 
 
-def _cilium():
+def _cilium() -> ModuleType:
+    """Load shared Cilium selection and health parsing helpers.
+
+    :returns: Imported Cilium module under test.
+    """
     return import_script_module("lib.python.core.kubernetes.cilium")
 
 
-def _pod(name, labels, status=None, namespace="cilium", node="n1"):
+def _pod(
+    name: str,
+    labels: Mapping[str, str],
+    status: Optional[JSONObject] = None,
+    namespace: str = "cilium",
+    node: str = "n1",
+) -> JSONObject:
+    """Build a Cilium-like Pod with selected labels and readiness.
+
+    :param name: Pod name used in selection assertions.
+    :param labels: Pod labels compared with the DaemonSet selector.
+    :param status: Explicit Pod status, or ready status when absent.
+    :param namespace: Namespace containing the Pod.
+    :param node: Node hosting the Pod.
+    :returns: Minimal Kubernetes Pod mapping.
+    """
     return {
         "metadata": {"namespace": namespace, "name": name, "labels": labels},
         "spec": {"nodeName": node},
@@ -29,7 +59,16 @@ def _pod(name, labels, status=None, namespace="cilium", node="n1"):
     }
 
 
-def _daemonset(selector, namespace="cilium", name="cilium"):
+def _daemonset(
+    selector: Optional[JSONObject], namespace: str = "cilium", name: str = "cilium"
+) -> JSONObject:
+    """Build a Cilium DaemonSet with optional selector data.
+
+    :param selector: Selector mapping or absent-selector case.
+    :param namespace: Namespace containing the DaemonSet.
+    :param name: DaemonSet name used to reject sibling controllers.
+    :returns: Minimal DaemonSet mapping.
+    """
     item = {"metadata": {"namespace": namespace, "name": name}}
     if selector is not None:
         item["spec"] = {"selector": selector}
@@ -40,8 +79,13 @@ def _daemonset(selector, namespace="cilium", name="cilium"):
     "value",
     (None, [], "ok", 0, {}, {"unrelated": 1}, {"local": "reachable"}, {"nodes": "x"}),
 )
-def test_valid_health_rejects_parseable_non_health_responses(value):
-    """Parseable JSON is not a health response."""
+def test_valid_health_rejects_parseable_non_health_responses(value: JSONValue) -> None:
+    """Reject parseable JSON that lacks structured Cilium health evidence.
+
+    :param value: Null, scalar, list, or malformed health mapping.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     assert _cilium().valid_health(value) is False
 
 
@@ -53,13 +97,20 @@ def test_valid_health_rejects_parseable_non_health_responses(value):
         {"nodes": []},
     ),
 )
-def test_valid_health_accepts_a_structured_response(value):
-    """A response carrying `local` or `nodes` reports health."""
+def test_valid_health_accepts_a_structured_response(value: JSONValue) -> None:
+    """Accept health mappings carrying structured local or nodes data.
+
+    :param value: Valid Cilium health response shape.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     assert _cilium().valid_health(value) is True
 
 
-def test_health_detail_reports_the_node_name_without_requiring_it():
-    """The node name is evidence, not a gate: absent means absent, not invalid."""
+def test_health_detail_reports_the_node_name_without_requiring_it() -> None:
+    """The node name is evidence, not a gate: absent means absent, not invalid.
+    :returns: None; assertions in the body validate the regression.
+    """
     cilium = _cilium()
     captured = {"local": {"name": "ue-2.example.test"}, "nodes": [{}, {}]}
 
@@ -74,8 +125,10 @@ def test_health_detail_reports_the_node_name_without_requiring_it():
     }
 
 
-def test_health_findings_keep_failed_peer_and_endpoint_paths():
-    """A valid response can still contain failed probes on multiple paths."""
+def test_health_findings_keep_failed_peer_and_endpoint_paths() -> None:
+    """A valid response can still contain failed probes on multiple paths.
+    :returns: None; assertions in the body validate the regression.
+    """
     cilium = _cilium()
     response = {
         "local": {"name": "node-a"},
@@ -120,7 +173,12 @@ def test_health_findings_keep_failed_peer_and_endpoint_paths():
     ]
 
 
-def test_daemon_findings_report_failed_components_without_optional_disabled_noise():
+def test_daemon_findings_report_failed_components_without_optional_disabled_noise() -> (
+    None
+):
+    """Report failed Cilium/API components while ignoring disabled Hubble.
+    :returns: None; assertions in the body validate the regression.
+    """
     cilium = _cilium()
     assert cilium.daemon_findings(
         {
@@ -148,13 +206,22 @@ def test_daemon_findings_report_failed_components_without_optional_disabled_nois
     "selector",
     (None, {}, {"matchLabels": {}}, {"matchLabels": {}, "matchExpressions": []}),
 )
-def test_agent_selector_refuses_a_selector_that_would_claim_every_pod(selector):
-    """An empty selector must not become a match-everything selector."""
+def test_agent_selector_refuses_a_selector_that_would_claim_every_pod(
+    selector: Optional[JSONObject],
+) -> None:
+    """Refuse absent or empty selectors that would match every Pod.
+
+    :param selector: Missing or empty DaemonSet selector shape.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     assert _cilium().agent_selector([_daemonset(selector)], "cilium") is None
 
 
-def test_agent_selector_requires_exactly_one_agent_daemonset():
-    """Ambiguous or absent discovery fails closed."""
+def test_agent_selector_requires_exactly_one_agent_daemonset() -> None:
+    """Ambiguous or absent discovery fails closed.
+    :returns: None; assertions in the body validate the regression.
+    """
     cilium = _cilium()
     selector = {"matchLabels": AGENT_LABELS}
 
@@ -164,8 +231,10 @@ def test_agent_selector_requires_exactly_one_agent_daemonset():
     assert cilium.agent_selector([_daemonset(selector)], "cilium") == selector
 
 
-def test_ready_agent_pods_excludes_operator_and_envoy_siblings():
-    """The prefix siblings share the name but are not agents."""
+def test_ready_agent_pods_excludes_operator_and_envoy_siblings() -> None:
+    """The prefix siblings share the name but are not agents.
+    :returns: None; assertions in the body validate the regression.
+    """
     cilium = _cilium()
     pods = [
         _pod("cilium-operator-x", {"name": "cilium-operator"}),
@@ -178,8 +247,10 @@ def test_ready_agent_pods_excludes_operator_and_envoy_siblings():
     assert [item["metadata"]["name"] for item in selected] == ["cilium-agent0"]
 
 
-def test_ready_agent_pods_filters_by_readiness_namespace_and_node():
-    """Only ready agents in the selected namespace, and on the named node."""
+def test_ready_agent_pods_filters_by_readiness_namespace_and_node() -> None:
+    """Only ready agents in the selected namespace, and on the named node.
+    :returns: None; assertions in the body validate the regression.
+    """
     cilium = _cilium()
     selector = {"matchLabels": AGENT_LABELS}
     pods = [
@@ -199,8 +270,10 @@ def test_ready_agent_pods_filters_by_readiness_namespace_and_node():
     ] == ["agent-n1"]
 
 
-def test_match_expressions_are_evaluated_and_unknown_operators_fail_closed():
-    """A selector term the code cannot evaluate must not match."""
+def test_match_expressions_are_evaluated_and_unknown_operators_fail_closed() -> None:
+    """A selector term the code cannot evaluate must not match.
+    :returns: None; assertions in the body validate the regression.
+    """
     cilium = _cilium()
 
     assert cilium.matches_selector(

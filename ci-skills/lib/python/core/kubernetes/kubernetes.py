@@ -15,14 +15,22 @@ import os
 import stat
 import tempfile
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import Final, Optional
 
 from lib.python.access.access import kubectl_argv, kubernetes_env, oc_argv
-from lib.python.core.action import K8SCallback
 from lib.python.access.credentials import Sources, bind_sources
+from lib.python.core.abstract.callback import Callback
+from lib.python.core.abstract.skill_action import ActionT_co
+from lib.python.core.cli_api import response_decoder
+from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
+from lib.python.core.json_types import (
+    JSONDocument,
+    JSONObject,
+    copy_json_object,
+    json_object,
+)
 from lib.python.core.runtime import (
     CommandResult,
     error_class,
@@ -42,8 +50,6 @@ BUILD_POLL_SECONDS: Final = 5
 BUILD_LOG_BYTES: Final = 4096
 BUILD_LOG_LINES: Final = 40
 
-JsonValue = dict[str, Any] | list[Any]
-
 
 class KubernetesError(RuntimeError):
     """A bounded native Kubernetes operation did not complete safely."""
@@ -51,22 +57,31 @@ class KubernetesError(RuntimeError):
 
 @dataclass
 class KubernetesService:
-    """Run native commands against one bound Kubernetes target.
+    """Run native commands against one verified Kubernetes target.
 
-    .. attribute:: target
-        Target selected by the parent action and bound to its credential sources.
+    :param target: Selected context, server, and bound credential sources.
+    :param timeout: Per-command runtime bound in seconds.
+    :ivar identity: Cluster username read after target verification.
 
-    .. attribute:: timeout
-        Process-level bound, in seconds, for every native command.
+    .. attribute :: target
+        :type: Target
 
-    .. attribute:: identity
-        Username read from the selected cluster after verification.
+        Selected context, server, and bound credential sources.
 
+    .. attribute :: timeout
+        :type: int
+
+        Per-command runtime bound in seconds.
+
+    .. attribute :: identity
+        :type: str
+
+        Cluster username read after target verification.
     """
 
     target: Target
     timeout: int = DEFAULT_COMMAND_TIMEOUT
-    identity: str | None = field(default=None, init=False)
+    identity: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Reject an unusable service before any provider command is built.
@@ -82,11 +97,12 @@ class KubernetesService:
     def command(self, *args: str, openshift: bool = False) -> CommandResult:
         """Run one bounded ``kubectl`` or ``oc`` command without a shell.
 
-        :param args: Native client arguments after the selected context flags.
+        :param *args: Native client arguments after the selected context flags.
         :param openshift: Select ``oc`` instead of ``kubectl``.
         :returns: Bounded stdout, stderr, exit status, and exact argument vector.
         :raises TargetError: If the bound kubeconfig changed before execution.
-        """  # noqa: DOC502,DOC503 - shared target binding raises this error
+        :raises OSError: If the native process cannot start or its output cannot be read.
+        """  # noqa: DOC502,DOC503 - Binding and native process failures propagate.
         builder = oc_argv if openshift else kubectl_argv
         return run_command_bounded(
             builder(self.target, *args),
@@ -94,30 +110,31 @@ class KubernetesService:
             env=kubernetes_env(self.target),
         )
 
-    def json(self, *args: str, openshift: bool = False) -> JsonValue:
+    def json(self, *args: str, openshift: bool = False) -> JSONDocument:
         """Run one command and parse its bounded JSON response.
 
         The returned value is internal provider data. Callers must select safe
         report fields and use the shared output redaction boundary before emit.
 
-        :param args: Native client arguments that request a JSON response.
+        :param *args: Native client arguments that request a JSON response.
         :param openshift: Select ``oc`` instead of ``kubectl``.
         :returns: Parsed provider object or list.
         :raises KubernetesError: If the command fails or returns invalid JSON.
         :raises TargetError: If the bound kubeconfig changed before execution.
+        :raises OSError: If the native process cannot start or its output cannot be read.
         """  # noqa: DOC502,DOC503 - command propagates target binding errors
         result = self.command(*args, openshift=openshift)
         if result.returncode:
             raise KubernetesError(error_class(result))
         try:
-            value = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
+            value = response_decoder().decode(result.stdout)
+        except (ValueError, UnicodeError, RecursionError) as exc:
             raise KubernetesError("invalid_json") from exc
         if not isinstance(value, (dict, list)):
             raise KubernetesError("invalid_json_shape")
         return value
 
-    def read(self, kind: str, name: str, namespace: str) -> dict[str, Any] | None:
+    def read(self, kind: str, name: str, namespace: str) -> Optional[JSONObject]:
         """Read one exact object, returning ``None`` when it is absent.
 
         The raw object remains internal so its atomic owner can compare exact
@@ -129,39 +146,41 @@ class KubernetesService:
         :returns: The provider object or ``None`` after an ignored 404.
         :raises KubernetesError: If the read fails or returns a non-object response.
         :raises TargetError: If the bound kubeconfig changed before execution.
-        """  # noqa: DOC502,DOC503 - command propagates target binding errors
+        :raises OSError: If the native process cannot start or its output cannot be read.
+        """  # noqa: DOC502,DOC503 - Command and decoding helpers propagate failures.
         args = [*self._namespace_args(namespace), "get", f"{kind}/{name}"]
         args.extend(("--ignore-not-found", "-o", "json"))
         result = self.command(*args)
-        if result.returncode:
-            raise KubernetesError(error_class(result))
-        if not result.stdout.strip():
+        if result.returncode == 0 and not result.stdout.strip():
             return None
-        try:
-            value = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            raise KubernetesError("invalid_json") from exc
-        if not isinstance(value, dict):
-            raise KubernetesError("invalid_object_response")
-        return value
+        return self._object_response(result)
 
-    def apply(self, document: Mapping[str, Any]) -> dict[str, Any]:
+    def apply(self, document: JSONObject) -> JSONObject:
         """Apply one document through a mode-0600 file.
 
         The raw returned object remains internal for exact atomic read-back and
         must not be emitted directly.
 
-        :param document: Complete Kubernetes object supplied by the atomic owner.
+        :param document: Complete Kubernetes object supplied by the atomic owner;
+            nested mappings and arrays may be read-only containers.
         :returns: Object returned by the Kubernetes API after apply.
         :raises KubernetesError: If serialization, apply, or response parsing fails.
         :raises TargetError: If the bound kubeconfig changed before execution.
-        """  # noqa: DOC502,DOC503 - command propagates target binding errors
+        :raises OSError: If the private manifest cannot be created, permissioned,
+            written, or removed, or the native process cannot start or its output
+            cannot be read.
+        """  # noqa: DOC502,DOC503 - Binding, filesystem, and command failures propagate.
         try:
-            payload = json.dumps(dict(document), separators=(",", ":"), sort_keys=True)
-        except (TypeError, ValueError) as exc:
+            payload = json.dumps(
+                copy_json_object(document),
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        except (TypeError, ValueError, RecursionError) as exc:
             raise KubernetesError("document_not_json") from exc
 
-        path: Path | None = None
+        path: Optional[Path] = None
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w",
@@ -179,15 +198,27 @@ class KubernetesService:
             if path is not None:
                 path.unlink(missing_ok=True)
 
+        return self._object_response(result)
+
+    @staticmethod
+    def _object_response(result: CommandResult) -> JSONObject:
+        """Decode one native result whose successful response must be an object.
+
+        :param result: Bounded native command result containing JSON response text.
+        :returns: Validated provider object through a read-only mapping interface.
+        :raises KubernetesError: If the command failed, JSON is malformed or too
+            deeply nested, or the response is an array, scalar, or JSON null.
+        """
         if result.returncode:
             raise KubernetesError(error_class(result))
         try:
-            value = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
+            value = response_decoder().decode(result.stdout)
+        except (ValueError, UnicodeError, RecursionError) as exc:
             raise KubernetesError("invalid_json") from exc
-        if not isinstance(value, dict):
-            raise KubernetesError("invalid_object_response")
-        return value
+        try:
+            return json_object(value)
+        except TypeError as exc:
+            raise KubernetesError("invalid_object_response") from exc
 
     def delete(self, kind: str, name: str, namespace: str) -> None:
         """Delete one exact object and independently verify absence.
@@ -197,6 +228,8 @@ class KubernetesService:
         :param namespace: Resource namespace, or an empty string for cluster scope.
         :raises KubernetesError: If deletion fails or the object remains present.
         :raises TargetError: If the bound kubeconfig changed before execution.
+        :raises OSError: If deletion or read-back cannot start its native process
+            or read its output.
         """  # noqa: DOC502,DOC503 - read and command propagate their errors
         args = [*self._namespace_args(namespace), "delete", f"{kind}/{name}"]
         args.extend(
@@ -213,7 +246,7 @@ class KubernetesService:
         if self.read(kind, name, namespace) is not None:
             raise KubernetesError("resource_delete_incomplete")
 
-    def wait_rollout(self, kind: str, name: str, namespace: str) -> dict[str, Any]:
+    def wait_rollout(self, kind: str, name: str, namespace: str) -> JSONObject:
         """Wait for a native rollout, then read the exact workload back.
 
         :param kind: Workload kind supported by ``kubectl rollout status``.
@@ -232,7 +265,7 @@ class KubernetesService:
         )
         return self._waited_object(result, kind, name, namespace)
 
-    def wait_job(self, name: str, namespace: str) -> dict[str, Any]:
+    def wait_job(self, name: str, namespace: str) -> JSONObject:
         """Wait for a Kubernetes Job to complete and return its read-back.
 
         :param name: Exact Job name.
@@ -250,7 +283,7 @@ class KubernetesService:
         )
         return self._waited_object(result, "job", name, namespace)
 
-    def wait_build(self, name: str, namespace: str) -> dict[str, Any]:
+    def wait_build(self, name: str, namespace: str) -> JSONObject:
         """Wait for an OpenShift Build phase and verify exact read-back.
 
         :param name: Exact OpenShift Build name.
@@ -371,7 +404,17 @@ class KubernetesService:
         kind: str,
         name: str,
         namespace: str,
-    ) -> dict[str, Any]:
+    ) -> JSONObject:
+        """Read an object back after a successful native wait command.
+
+        :param result: Result of the rollout or Job wait command.
+        :param kind: Resource kind to read back.
+        :param name: Exact resource name.
+        :param namespace: Resource namespace.
+        :returns: Object read from the Kubernetes API after the wait.
+        :raises KubernetesError: The wait failed or the named object is absent.
+        :raises TargetError: Bound kubeconfig changed during read-back.
+        """  # noqa: DOC503 - Read-back validates bound kubeconfig sources.
         if result.returncode:
             raise KubernetesError(error_class(result))
         value = self.read(kind, name, namespace)
@@ -380,60 +423,82 @@ class KubernetesService:
         return value
 
     def _native_timeout(self) -> int:
-        """Let the native command settle before the process-level deadline."""
+        """Reserve process time around a native wait timeout.
+
+        :returns: Native timeout in seconds, at least one and usually one less than
+            the service process timeout.
+        """
         return max(self.timeout - 1, 1)
 
     @staticmethod
     def _namespace_args(namespace: str) -> tuple[str, ...]:
+        """Make optional native namespace arguments.
+
+        :param namespace: Namespace name, or empty text for cluster scope.
+        :returns: ``("--namespace", namespace)`` when nonempty; otherwise empty tuple.
+        """
         return ("--namespace", namespace) if namespace else ()
 
 
-class K8SAuth(K8SCallback[Target, KubernetesService]):
+class K8SCallback(Callback[DeliveryState, ActionT_co]):
+    """Read the verified Kubernetes service from the shared delivery state."""
+
+    @property
+    def kubernetes(self) -> KubernetesService:
+        """Read the service established by the preceding authentication action.
+
+        :returns: The workflow's verified Kubernetes service.
+        :raises AttributeError: If composition omitted Kubernetes authentication.
+        """  # noqa: DOC502 - Missing composition state raises AttributeError.
+        return self.state.kubernetes
+
+
+class K8SAuth(K8SCallback[ProviderAuthAction]):
     """Bind and verify the Kubernetes service selected by the parent action."""
 
-    def __init__(
-        self, *, target: Target, timeout: int = DEFAULT_COMMAND_TIMEOUT
-    ) -> None:
-        """Keep the parent-selected target and process timeout.
+    def __init__(self, target: Target, timeout: int = DEFAULT_COMMAND_TIMEOUT):
+        """Construct required authentication inputs without provider access.
 
-        :param target: Target already selected by the parent workflow.
+        :param target: Runtime target selected by the parent workflow.
         :param timeout: Positive command timeout in seconds.
         """
-        super().__init__(action=target)
-        self.target = target
-        self.timeout = timeout
+        super().__init__(ProviderAuthAction(target, timeout))
 
-    def collect(self) -> None:
-        """Validate the injected target without resolving another target file.
+    def collect(self) -> JSONObject:
+        """Validate the selected authority before invoking native commands.
 
-        :raises TargetError: If the selected target lacks Kubernetes.
+        :returns: Empty evidence after local input validation.
+        :raises TargetError: If the target does not select Kubernetes.
         :raises ValueError: If the command timeout is not positive.
         """
-        if (
-            self.target.kubernetes is None
-            or "kubernetes" not in self.target.active_surfaces
-        ):
+        target = self.action.target
+        if target.kubernetes is None or "kubernetes" not in target.active_surfaces:
             raise TargetError("kubernetes_target_missing")
-        if self.timeout <= 0:
+        if self.action.timeout <= 0:
             raise ValueError("kubernetes_timeout_invalid")
+        return {}
 
-    def run(self) -> KubernetesService:
-        """Freeze existing sources and verify operation-specific access.
+    def run(self) -> JSONObject:
+        """Freeze existing credentials and retain the verified private service.
 
-        :returns: Bound service with verified context, server, and identity.
-        :raises KubernetesError: If live operation-specific verification fails.
-        :raises TargetError: If existing target or credential binding fails.
-        """  # noqa: DOC502,DOC503 - binding and verify errors propagate
+        :returns: Safe identity and selected context/server evidence.
+        :raises KubernetesError: If live context or identity verification fails.
+        :raises TargetError: If target or credential source binding is invalid.
+        :raises OSError: If configured credential inputs cannot be read.
+        """  # noqa: DOC502 - Credential binding and service verification can fail.
+        selected = self.action.target
         target = (
-            self.target
-            if isinstance(self.target.sources, Sources)
-            else bind_sources(self.target)
+            selected
+            if isinstance(selected.sources, Sources)
+            else bind_sources(selected)
         )
-        service = KubernetesService(target, self.timeout)
-        service.verify()
-        return service
-
-    def update(self) -> None:
-        """Expose the verified service to dependent callbacks."""
-        if self.result is not None:
-            self.context.services[KUBERNETES_SERVICE_KEY] = self.result
+        service = KubernetesService(target, self.action.timeout)
+        identity = service.verify()
+        self.state.kubernetes = service
+        evidence = {
+            "identity": identity,
+            "context": target.kubernetes.context,
+            "server": target.kubernetes.server,
+        }
+        self.state.access_evidence[KUBERNETES_SERVICE_KEY] = evidence
+        return evidence

@@ -24,7 +24,9 @@ Verification against the claim happens where the Git objects are -- see
 `tools/check_live_acceptance.py`, which recomputes the digest from the claimed
 revision's tree and compares.
 
-Mustafa Bayramov mbayramo@ciso.com spyroot@gmail.com
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -34,8 +36,9 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Mapping, MutableSequence, Sequence
 from pathlib import Path
-from typing import Any
+from typing import NotRequired, Optional, TypedDict
 
 SHA_PATTERN = re.compile(r"\A[0-9a-fA-F]{40}\Z")
 DIGEST_ALGORITHM = "sha256-tree-v1"
@@ -57,9 +60,121 @@ class ProvenanceError(ValueError):
     """The executed skill cannot be identified."""
 
 
-def _included(root: Path) -> list[Path]:
-    """List the files whose bytes make up the executed skill, sorted."""
-    found: list[Path] = []
+class TreeDigest(TypedDict):
+    """Identify measured skill bytes independently of a revision claim.
+
+    :param algorithm: Digest procedure defined by this module.
+    :param digest: Lowercase SHA-256 digest of the selected file tree.
+    :param file_count: Number of regular files included in the measurement.
+
+    .. attribute :: algorithm
+        :type: str
+
+        Digest procedure defined by this module.
+
+    .. attribute :: digest
+        :type: str
+
+        Lowercase SHA-256 digest of the selected file tree.
+
+    .. attribute :: file_count
+        :type: int
+
+        Number of regular files included in the measurement.
+    """
+
+    algorithm: str
+    digest: str
+    file_count: int
+
+
+class Revision(TypedDict):
+    """Record one skill revision and how it was verified.
+
+    :param value: Commit SHA, or None when no revision is known.
+    :param source: Evidence source, or None when no revision is known.
+    :param verified: Whether measured source bytes prove this revision.
+    :param detail: Optional reason a discovered revision remains unverified.
+
+    .. attribute :: value
+        :type: Optional[str]
+
+        Commit SHA, or None when no revision is known.
+
+    .. attribute :: source
+        :type: Optional[str]
+
+        Evidence source, or None when no revision is known.
+
+    .. attribute :: verified
+        :type: bool
+
+        Whether measured source bytes prove this revision.
+
+    .. attribute :: detail
+        :type: NotRequired[str]
+
+        Optional reason a discovered revision remains unverified.
+    """
+
+    value: Optional[str]
+    source: Optional[str]
+    verified: bool
+    detail: NotRequired[str]
+
+
+class ConsumerRevision(TypedDict):
+    """Keep the invoking project's identity separate from the installed skill.
+
+    :param commit: CI commit claim, or None outside a declared CI environment.
+    :param source: CI variable reference, or None when no claim was supplied.
+
+    .. attribute :: commit
+        :type: Optional[str]
+
+        CI commit claim, or None outside a declared CI environment.
+
+    .. attribute :: source
+        :type: Optional[str]
+
+        CI variable reference, or None when no claim was supplied.
+    """
+
+    commit: Optional[str]
+    source: Optional[str]
+
+
+class SkillIdentity(TreeDigest):
+    """Combine measured bytes with independent skill and consumer revisions.
+
+    TreeDigest documents the inherited algorithm, digest, and file_count fields.
+
+    :param revision: Skill revision evidence for the measured file tree.
+    :param consuming_project: Separate invoking-project commit claim.
+
+    .. attribute :: revision
+        :type: Revision
+
+        Skill revision evidence for the measured file tree.
+
+    .. attribute :: consuming_project
+        :type: ConsumerRevision
+
+        Separate invoking-project commit claim.
+    """
+
+    revision: Revision
+    consuming_project: ConsumerRevision
+
+
+def _included(root: Path) -> Sequence[Path]:
+    """Select installed skill files that contribute to its source digest.
+
+    :param root: Skill root to walk recursively.
+    :returns: Sorted regular files excluding symlinks, installer identity,
+        bytecode, cache directories, and platform metadata.
+    """
+    found: MutableSequence[Path] = []
     for path in root.rglob("*"):
         if not path.is_file() or path.is_symlink():
             continue
@@ -74,8 +189,15 @@ def _included(root: Path) -> list[Path]:
     return sorted(found)
 
 
-def tree_digest(root: Path) -> dict[str, Any]:
-    """Digest an installed skill tree over path, exec bit and content."""
+def tree_digest(root: Path) -> TreeDigest:
+    """Hash installed skill paths, executable bits, and file contents.
+
+    :param root: Skill directory whose current bytes are being identified.
+    :returns: Digest algorithm, SHA-256 hex digest, and included file count.
+    :raises ProvenanceError: The skill directory is missing or contains no
+        includable files.
+    :raises OSError: An included file cannot be read.
+    """  # noqa: DOC503 - Reading included source files can propagate OSError.
     root = Path(root).resolve()
     if not root.is_dir():
         raise ProvenanceError(f"skill_root_missing:{root}")
@@ -96,7 +218,14 @@ def tree_digest(root: Path) -> dict[str, Any]:
     }
 
 
-def _git(root: Path, *args: str) -> str | None:
+def _git(root: Path, *args: str) -> Optional[str]:
+    """Read one Git result for optional source revision verification.
+
+    :param root: Working directory passed to Git.
+    :param *args: Git subcommand and arguments.
+    :returns: Trimmed stdout on success, or ``None`` for process, timeout, or
+        Git command failure.
+    """
     try:
         result = subprocess.run(
             ["git", "-C", str(root), *args],
@@ -112,8 +241,13 @@ def _git(root: Path, *args: str) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def _git_revision(skill_root: Path) -> dict[str, Any] | None:
-    """Return a VERIFIED revision only for a clean subtree in its own repo."""
+def _git_revision(skill_root: Path) -> Optional[Revision]:
+    """Identify the tracked skill's own Git revision and cleanliness.
+
+    :param skill_root: Skill directory inside a possible source checkout.
+    :returns: Revision record with verification status, or ``None`` when no
+        suitable tracked repository or SHA exists.
+    """
     toplevel = _git(skill_root, "rev-parse", "--show-toplevel")
     if not toplevel:
         return None
@@ -139,15 +273,19 @@ def _git_revision(skill_root: Path) -> dict[str, Any] | None:
     return {"value": head.lower(), "source": "git_head", "verified": True}
 
 
-def _installed_revision(
-    skill_root: Path, digest: dict[str, Any]
-) -> dict[str, Any] | None:
-    """Read installer-recorded source identity for unchanged installed bytes."""
+def _installed_revision(skill_root: Path, digest: TreeDigest) -> Optional[Revision]:
+    """Verify installer-recorded revision against current installed bytes.
+
+    :param skill_root: Installed skill directory containing optional identity file.
+    :param digest: Current algorithm, digest, and file count from ``tree_digest``.
+    :returns: Verified installer revision, or ``None`` for missing, malformed,
+        stale, or unverified installer identity.
+    """
     path = skill_root / INSTALLATION_IDENTITY_NAME
     try:
         if not path.is_file() or path.is_symlink():
             return None
-        record = json.loads(path.read_text(encoding="utf-8"))
+        record: object = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError):
         return None
     if not isinstance(record, dict):
@@ -172,8 +310,13 @@ def _installed_revision(
     }
 
 
-def consuming_project(environ: dict[str, str] | None = None) -> dict[str, Any]:
-    """Record the CI commit of the project that invoked the skill, separately."""
+def consuming_project(environ: Optional[Mapping[str, str]] = None) -> ConsumerRevision:
+    """Record the invoking CI project's commit separately from skill identity.
+
+    :param environ: Environment mapping, or ``None`` to use process variables.
+    :returns: Lowercased first nonempty ``CI_COMMIT_SHA`` or ``GITHUB_SHA`` and
+        its variable source; both fields are ``None`` when absent.
+    """
     environ = os.environ if environ is None else environ
     for name in CONSUMER_VARIABLES:
         value = (environ.get(name) or "").strip()
@@ -184,10 +327,21 @@ def consuming_project(environ: dict[str, str] | None = None) -> dict[str, Any]:
 
 def skill_identity(
     skill_root: Path,
-    claimed: str | None = None,
-    environ: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    """Describe the executed skill: its digest, and the revision claim for it."""
+    claimed: Optional[str] = None,
+    environ: Optional[Mapping[str, str]] = None,
+) -> SkillIdentity:
+    """Identify executed skill bytes and any defensible revision label.
+
+    :param skill_root: Skill directory whose bytes are measured.
+    :param claimed: Optional caller-supplied full commit SHA when no verified
+        revision is available.
+    :param environ: Optional invoking project environment for separate CI commit.
+    :returns: Tree digest, revision provenance and verification status, and
+        invoking project commit fields.
+    :raises ProvenanceError: Skill bytes cannot be measured or the fallback claim
+        is not a full SHA.
+    :raises OSError: An included skill file cannot be read.
+    """  # noqa: DOC503 - Reading included source files can propagate OSError.
     digest = tree_digest(skill_root)
     root = Path(skill_root).resolve()
     revision = _git_revision(root) or _installed_revision(root, digest)

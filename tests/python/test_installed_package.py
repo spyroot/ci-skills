@@ -1,19 +1,30 @@
-"""Installed skill entrypoint smoke tests without source-tree PYTHONPATH."""
+"""Installed skill entrypoint smoke tests without source-tree PYTHONPATH.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
+import importlib.abc
 import json
 import os
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Union
 
 import pytest
 import yaml
-from tests.python.conftest import REPO_ROOT, install_executable, load_module
+from conftest import REPO_ROOT, install_executable, load_module
 
 SKILL_ROOT = REPO_ROOT / "ci-skills"
+
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject, JSONValue
 
 ENTRYPOINT_CASES = (
     ("access_check.py", (), "access_check", "PASS"),
@@ -269,6 +280,23 @@ if tool == "kubectl":
         emit({"local": {"status": "reachable"}})
     if "get" in kargs:
         resource = kargs[kargs.index("get") + 1]
+        if (
+            resource == "deployments"
+            and "-n" in kargs
+            and kargs[kargs.index("-n") + 1] == "rook-ceph"
+            and "-l" in kargs
+            and kargs[kargs.index("-l") + 1] == "app=rook-ceph-operator"
+        ):
+            emit({
+                "items": [{
+                    "metadata": {
+                        "namespace": "rook-ceph",
+                        "name": "rook-ceph-operator",
+                        "labels": {"app": "rook-ceph-operator"},
+                    },
+                    "status": {"readyReplicas": 1},
+                }],
+            })
         resources = {
             "nodes": [{"metadata": {"name": "worker-a"}}],
             "pods": [
@@ -327,7 +355,11 @@ if tool == "kubectl":
                 "status": {"attached": True},
             }],
             "deployments": [{
-                "metadata": {"namespace": "kube-system", "name": "cilium-operator"},
+                "metadata": {
+                    "namespace": "kube-system",
+                    "name": "cilium-operator",
+                    "labels": {"app": "cilium-operator"},
+                },
                 "status": {"readyReplicas": 1},
             }],
             "statefulsets": [],
@@ -409,6 +441,12 @@ raise SystemExit(127)
 
 
 def _write_target(tmp_path: Path, kubeconfig: Path) -> Path:
+    """Write a fixture target for installed command integration checks.
+
+    :param tmp_path: Scratch directory receiving ``target.toml``.
+    :param kubeconfig: Kubeconfig path recorded in the Kubernetes target.
+    :returns: Path to the written target file.
+    """
     target = tmp_path / "target.toml"
     target.write_text(
         (
@@ -438,8 +476,12 @@ def _write_target(tmp_path: Path, kubeconfig: Path) -> Path:
     return target
 
 
-def _toml_string(value: str | Path) -> str:
-    """Return one TOML basic string for a synthetic path or name."""
+def _toml_string(value: Union[str, Path]) -> str:
+    """Quote a path or name as a TOML-compatible basic string.
+
+    :param value: Synthetic path or identifier to encode.
+    :returns: JSON-escaped string accepted by the fixture TOML writer.
+    """
     return json.dumps(str(value))
 
 
@@ -450,7 +492,14 @@ def _write_kubeconfig_for_target(
     server: str = "https://api.cluster.example.test:6443",
     cluster: str = "cluster-a",
 ) -> Path:
-    """Write a kubeconfig that target.py can match by context and server."""
+    """Write a kubeconfig matching a selected target context and server.
+
+    :param path: Destination kubeconfig file.
+    :param context: Context name to declare.
+    :param server: Kubernetes API server URL to declare.
+    :param cluster: Cluster name referenced by the context.
+    :returns: Path to the written kubeconfig.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         (
@@ -477,7 +526,12 @@ def _write_kubeconfig_for_target(
 def _write_target_with_kubeconfigs(
     tmp_path: Path, kubeconfigs: tuple[Path, ...]
 ) -> Path:
-    """Write a target with an ordered combined kubeconfig path."""
+    """Write a target with an ordered kubeconfig source list.
+
+    :param tmp_path: Scratch directory receiving the target file.
+    :param kubeconfigs: Kubeconfig paths encoded in precedence order.
+    :returns: Path to the written target file.
+    """
     target = tmp_path / "target-kubeconfigs.toml"
     target.write_text(
         (
@@ -501,6 +555,11 @@ def _write_target_with_kubeconfigs(
 
 
 def _install_skill(tmp_path: Path) -> Path:
+    """Install the committed candidate through the production installer.
+
+    :param tmp_path: Scratch root for source snapshot and installation.
+    :returns: Installed skill directory after revision verification.
+    """
     installed = tmp_path / "installed" / "ci-skills"
     installer = load_module(
         "skill_installer", REPO_ROOT / "tools" / "install_ci_skills.py"
@@ -513,7 +572,11 @@ def _install_skill(tmp_path: Path) -> Path:
 
 
 def _installed_python_entrypoints(installed: Path) -> tuple[Path, ...]:
-    """Return installed Python commands that are public entrypoints."""
+    """List Python commands delivered in the installed skill's bin directory.
+
+    :param installed: Installed skill root produced by the production installer.
+    :returns: Sorted entrypoint paths, excluding package and bootstrap helpers.
+    """
     excluded = {"__init__.py", "_bootstrap.py"}
     return tuple(
         path
@@ -525,7 +588,12 @@ def _installed_python_entrypoints(installed: Path) -> tuple[Path, ...]:
 def test_installed_python_entrypoints_import_from_unrelated_directory(
     tmp_path: Path,
 ) -> None:
-    """Every installed Python command loads its package namespace for ``--help``."""
+    """Require every installed Python command to load without source-checkout paths.
+
+    :param tmp_path: Isolated installation and unrelated command working directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -552,8 +620,82 @@ def test_installed_python_entrypoints_import_from_unrelated_directory(
         assert str(REPO_ROOT) not in result.stderr
 
 
-def test_installed_bash_entrypoints_run_from_unrelated_directory(tmp_path: Path):
-    """Copied Bash commands resolve their own libraries, not checkout libraries."""
+def test_installed_read_entrypoints_describe_json_yaml_and_help_without_target(
+    tmp_path: Path,
+) -> None:
+    """Require read commands to publish contracts from an unrelated directory.
+
+    :param tmp_path: Isolated installation and unrelated command working directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    commands = (installed / "bin" / "ci-api", installed / "bin" / "ci-binary-build")
+
+    for command in commands:
+        help_result = subprocess.run(
+            [str(command), "--help"],
+            check=False,
+            capture_output=True,
+            cwd=unrelated,
+            env=environment,
+            text=True,
+            timeout=10,
+        )
+        assert help_result.returncode == 0, help_result.stderr
+        assert "--target" not in help_result.stdout
+        for heading in (
+            "Summary",
+            "Description",
+            "Examples",
+            "Options",
+            "Output modes",
+            "Usage",
+        ):
+            assert heading in help_result.stdout
+
+        json_result = subprocess.run(
+            [str(command), "--describe"],
+            check=False,
+            capture_output=True,
+            cwd=unrelated,
+            env=environment,
+            text=True,
+            timeout=10,
+        )
+        yaml_result = subprocess.run(
+            [str(command), "--describe", "--yaml"],
+            check=False,
+            capture_output=True,
+            cwd=unrelated,
+            env=environment,
+            text=True,
+            timeout=10,
+        )
+
+        contract = json.loads(json_result.stdout)
+        yaml_contract = yaml.safe_load(yaml_result.stdout)
+        assert json_result.returncode == 0, json_result.stderr
+        assert yaml_result.returncode == 0, yaml_result.stderr
+        assert contract == yaml_contract
+        assert contract["command"] == f"bin/{command.name}"
+        assert contract["kind"] == "command_contract"
+        assert "--target" not in contract["options"]
+
+
+def test_installed_bash_entrypoints_run_from_unrelated_directory(
+    tmp_path: Path,
+) -> None:
+    """Require copied Bash commands to resolve their installed libraries.
+
+    :param tmp_path: Isolated installation, working directory, and fake native tools.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installed = _install_skill(tmp_path)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -655,9 +797,17 @@ def _run_installed_node_script(
     args: tuple[str, ...],
     *,
     cwd: Path,
-    env: dict[str, str],
+    env: Mapping[str, str],
 ) -> subprocess.CompletedProcess[str]:
-    """Run an installed node script directly from an unrelated directory."""
+    """Invoke an installed node command from outside the source tree.
+
+    :param installed: Installed skill root containing ``bin``.
+    :param script_name: Node command filename beneath ``bin``.
+    :param args: Command flags and values for this smoke case.
+    :param cwd: Unrelated working directory for the child process.
+    :param env: Child environment with the fixture target and native tools.
+    :returns: Completed process with captured stdout and stderr.
+    """
     return subprocess.run(
         [sys.executable, str(installed / "bin" / script_name), *args],
         check=False,
@@ -670,7 +820,13 @@ def _run_installed_node_script(
 
 
 def _assert_sanitized_failure_log(stderr: str, kind: str) -> None:
-    """Installed API commands log one sanitized diagnostic line on stderr."""
+    """Require one safe diagnostic without usage text or input echo.
+
+    :param stderr: Captured diagnostic text from the installed command.
+    :param kind: Report kind expected in the failure line.
+
+    :returns: None; the helper records behavior through its side effects.
+    """
     assert stderr
     assert "BLOCKED:" not in stderr
     assert "usage:" not in stderr.lower()
@@ -688,16 +844,28 @@ def _assert_sanitized_failure_log(stderr: str, kind: str) -> None:
     ("script_name", "extra_args", "kind", "expected_status"), ENTRYPOINT_CASES
 )
 def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
-    tmp_path,
-    fake_bin,
-    mode,
-    loader,
-    script_name,
-    extra_args,
-    kind,
-    expected_status,
-):
-    """Every installed script renders normal machine output outside the repo."""
+    tmp_path: Path,
+    fake_bin: Path,
+    mode: JSONValue,
+    loader: importlib.abc.Loader,
+    script_name: str,
+    extra_args: Sequence[str],
+    kind: str,
+    expected_status: str,
+) -> None:
+    """Require installed commands to emit normal JSON/YAML outside checkout.
+
+    :param tmp_path: Scratch installation, target, and unrelated cwd.
+    :param fake_bin: Fixture directory for native provider and cluster doubles.
+    :param mode: JSON or YAML output flag under test.
+    :param loader: Parser paired with the selected output mode.
+    :param script_name: Installed command selected by the case table.
+    :param extra_args: Required command arguments supplied by the case table.
+    :param kind: Expected report kind for the selected command.
+    :param expected_status: PASS or DRY_RUN status from the case table.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -717,6 +885,7 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
             "HOME": str(tmp_path / "home"),
             "LC_ALL": "C",
             "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+            "CI_SKILLS_TARGET": str(target),
         }
     )
 
@@ -724,8 +893,6 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
         [
             sys.executable,
             str(installed / "bin" / script_name),
-            "--target",
-            str(target),
             "--revision",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             mode,
@@ -741,19 +908,18 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
         text=True,
         timeout=10,
     )
-    data: dict[str, Any] = loader(result.stdout)
+    data: JSONObject = loader(result.stdout)
 
     assert result.returncode == 0
     assert data["kind"] == kind
     assert data["status"] == expected_status
     assert str(REPO_ROOT) not in result.stdout
 
+    missing_env = {**env, "CI_SKILLS_TARGET": str(tmp_path / "missing-target.toml")}
     failure = subprocess.run(
         [
             sys.executable,
             str(installed / "bin" / script_name),
-            "--target",
-            str(tmp_path / "missing-target.toml"),
             mode,
             *(
                 str(content_file) if item == "@CONTENT@" else item
@@ -763,7 +929,7 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
         check=False,
         capture_output=True,
         cwd=unrelated,
-        env=env,
+        env=missing_env,
         text=True,
         timeout=10,
     )
@@ -779,9 +945,17 @@ def test_installed_entrypoints_run_from_unrelated_cwd_without_source_pythonpath(
     ("mode", "loader"), (("--json", json.loads), ("--yaml", yaml.safe_load))
 )
 def test_installed_mtu_entrypoint_plans_and_applies_from_unrelated_cwd(
-    tmp_path, fake_bin, mode, loader
-):
-    """The new installed command needs no source PYTHONPATH or ambient context."""
+    tmp_path: Path, fake_bin: Path, mode: JSONValue, loader: importlib.abc.Loader
+) -> None:
+    """Require installed MTU plan and apply output from unrelated cwd.
+
+    :param tmp_path: Scratch installation, target, and unrelated cwd.
+    :param fake_bin: Fixture directory for native command doubles.
+    :param mode: JSON or YAML output flag under test.
+    :param loader: Parser paired with the selected output mode.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -797,10 +971,11 @@ def test_installed_mtu_entrypoint_plans_and_applies_from_unrelated_cwd(
             "HOME": str(tmp_path / "home"),
             "LC_ALL": "C",
             "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+            "CI_SKILLS_TARGET": str(target),
         }
     )
     script = installed / "bin" / "k8s_verify_mtu_consistency.py"
-    base = [sys.executable, str(script), "--target", str(target), mode]
+    base = [sys.executable, str(script), mode]
     plan = subprocess.run(
         base,
         check=False,
@@ -833,10 +1008,16 @@ def test_installed_mtu_entrypoint_plans_and_applies_from_unrelated_cwd(
 
 
 def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
-    tmp_path,
-    fake_bin,
-):
-    """The installed API gate uses the declared combined kubeconfig path."""
+    tmp_path: Path,
+    fake_bin: Path,
+) -> None:
+    """Require installed access check to use selected plural kubeconfig paths.
+
+    :param tmp_path: Scratch installation and matching/unrelated kubeconfigs.
+    :param fake_bin: Fixture directory for native provider and cluster doubles.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -857,6 +1038,7 @@ def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
             "HOME": str(tmp_path / "home"),
             "LC_ALL": "C",
             "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+            "CI_SKILLS_TARGET": str(target),
         }
     )
 
@@ -864,8 +1046,6 @@ def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
         [
             sys.executable,
             str(installed / "bin" / "access_check.py"),
-            "--target",
-            str(target),
             "--revision",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "--json",
@@ -894,13 +1074,22 @@ def test_installed_api_entrypoint_uses_plural_kubeconfigs_from_unrelated_cwd(
     (("access_check.py", "access_check"), ("ceph_cluster.py", "ceph_cluster")),
 )
 def test_installed_api_and_ceph_invalid_args_are_structured(
-    tmp_path,
-    mode,
-    loader,
-    script_name,
-    kind,
-):
-    """Shared StructuredParser failures emit machine-readable stdout."""
+    tmp_path: Path,
+    mode: JSONValue,
+    loader: importlib.abc.Loader,
+    script_name: str,
+    kind: str,
+) -> None:
+    """Require installed API and Ceph commands to report invalid flags safely.
+
+    :param tmp_path: Scratch installation and unrelated cwd.
+    :param mode: JSON or YAML output flag under test.
+    :param loader: Parser paired with the selected output mode.
+    :param script_name: Installed access or Ceph command under test.
+    :param kind: Expected report kind in the structured failure.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -922,7 +1111,7 @@ def test_installed_api_and_ceph_invalid_args_are_structured(
         text=True,
         timeout=10,
     )
-    data: dict[str, Any] = loader(result.stdout)
+    data: JSONObject = loader(result.stdout)
 
     assert result.returncode == 2
     _assert_sanitized_failure_log(result.stderr, kind)
@@ -936,13 +1125,22 @@ def test_installed_api_and_ceph_invalid_args_are_structured(
 )
 @pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
 def test_installed_node_entrypoints_dry_run_from_unrelated_cwd(
-    tmp_path,
-    mode,
-    loader,
-    script_name,
-    kind,
-):
-    """Installed node commands plan their declared route without source PYTHONPATH."""
+    tmp_path: Path,
+    mode: JSONValue,
+    loader: importlib.abc.Loader,
+    script_name: str,
+    kind: str,
+) -> None:
+    """Require installed node commands to publish a dry-run route.
+
+    :param tmp_path: Scratch installation, target, and unrelated cwd.
+    :param mode: JSON or YAML output flag under test.
+    :param loader: Parser paired with the selected output mode.
+    :param script_name: Installed node command selected by the case table.
+    :param kind: Expected node report kind.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -952,13 +1150,12 @@ def test_installed_node_entrypoints_dry_run_from_unrelated_cwd(
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     target = _write_target(tmp_path, kubeconfig)
+    env["CI_SKILLS_TARGET"] = str(target)
 
     result = subprocess.run(
         [
             sys.executable,
             str(installed / "bin" / script_name),
-            "--target",
-            str(target),
             "--dry-run",
             mode,
         ],
@@ -969,7 +1166,7 @@ def test_installed_node_entrypoints_dry_run_from_unrelated_cwd(
         text=True,
         timeout=10,
     )
-    data: dict[str, Any] = loader(result.stdout)
+    data: JSONObject = loader(result.stdout)
 
     assert result.returncode == 0
     assert data["kind"] == kind
@@ -983,14 +1180,24 @@ def test_installed_node_entrypoints_dry_run_from_unrelated_cwd(
 )
 @pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
 def test_installed_node_entrypoints_normal_smoke_with_fake_native_tools(
-    tmp_path,
-    fake_bin,
-    mode,
-    loader,
-    script_name,
-    kind,
-):
-    """Installed node entrypoints read existing Pods with fake native CLIs."""
+    tmp_path: Path,
+    fake_bin: Path,
+    mode: JSONValue,
+    loader: importlib.abc.Loader,
+    script_name: str,
+    kind: str,
+) -> None:
+    """Require installed node reads through selected existing Pods.
+
+    :param tmp_path: Scratch installation, target, and unrelated cwd.
+    :param fake_bin: Fixture directory for native provider and cluster doubles.
+    :param mode: JSON or YAML output flag under test.
+    :param loader: Parser paired with the selected output mode.
+    :param script_name: Installed node command selected by the case table.
+    :param kind: Expected node report kind.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -1006,6 +1213,7 @@ def test_installed_node_entrypoints_normal_smoke_with_fake_native_tools(
             "HOME": str(tmp_path / "home"),
             "LC_ALL": "C",
             "PATH": str(fake_bin) + os.pathsep + env.get("PATH", ""),
+            "CI_SKILLS_TARGET": str(target),
         }
     )
 
@@ -1013,8 +1221,6 @@ def test_installed_node_entrypoints_normal_smoke_with_fake_native_tools(
         installed,
         script_name,
         (
-            "--target",
-            str(target),
             "--revision",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             mode,
@@ -1022,7 +1228,7 @@ def test_installed_node_entrypoints_normal_smoke_with_fake_native_tools(
         cwd=unrelated,
         env=env,
     )
-    data: dict[str, Any] = loader(result.stdout)
+    data: JSONObject = loader(result.stdout)
 
     assert result.returncode == 0
     assert data["kind"] == kind
@@ -1033,11 +1239,18 @@ def test_installed_node_entrypoints_normal_smoke_with_fake_native_tools(
 
 @pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
 def test_installed_node_entrypoints_report_missing_native_dependency(
-    tmp_path,
-    script_name,
-    kind,
-):
-    """Missing native CLIs block before any selected Pod exec."""
+    tmp_path: Path,
+    script_name: str,
+    kind: str,
+) -> None:
+    """Require a blocked report when an installed node tool is absent.
+
+    :param tmp_path: Scratch installation, target, and empty command path.
+    :param script_name: Installed node command selected by the case table.
+    :param kind: Expected node report kind.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     empty_path = tmp_path / "empty-bin"
@@ -1055,13 +1268,12 @@ def test_installed_node_entrypoints_report_missing_native_dependency(
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     target = _write_target(tmp_path, kubeconfig)
+    env["CI_SKILLS_TARGET"] = str(target)
 
     result = _run_installed_node_script(
         installed,
         script_name,
         (
-            "--target",
-            str(target),
             "--revision",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "--json",
@@ -1083,13 +1295,22 @@ def test_installed_node_entrypoints_report_missing_native_dependency(
 )
 @pytest.mark.parametrize(("script_name", "kind"), NODE_ENTRYPOINT_CASES)
 def test_installed_node_entrypoints_invalid_args_are_structured(
-    tmp_path,
-    mode,
-    loader,
-    script_name,
-    kind,
-):
-    """Parser failures emit structured stdout and exit 2."""
+    tmp_path: Path,
+    mode: JSONValue,
+    loader: importlib.abc.Loader,
+    script_name: str,
+    kind: str,
+) -> None:
+    """Require installed node parser failures to emit structured stdout.
+
+    :param tmp_path: Scratch installation and unrelated cwd.
+    :param mode: JSON or YAML output flag under test.
+    :param loader: Parser paired with the selected output mode.
+    :param script_name: Installed node command selected by the case table.
+    :param kind: Expected node report kind.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installed = _install_skill(tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
@@ -1111,7 +1332,7 @@ def test_installed_node_entrypoints_invalid_args_are_structured(
         text=True,
         timeout=10,
     )
-    data: dict[str, Any] = loader(result.stdout)
+    data: JSONObject = loader(result.stdout)
 
     assert result.returncode == 2
     assert result.stderr == ""

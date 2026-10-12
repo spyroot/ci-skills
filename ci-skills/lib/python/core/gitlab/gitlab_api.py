@@ -1,4 +1,9 @@
-"""Exact-host GitLab API transport used by access checks and operations."""
+"""Exact-host GitLab API transport used by access checks and operations.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -11,10 +16,10 @@ import re
 import stat
 import time
 from collections import Counter
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, MutableSequence, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Optional, Union
 from urllib.parse import parse_qsl, urlsplit
 
 from lib.python.core.cli_api import (
@@ -27,7 +32,8 @@ from lib.python.core.cli_api import (
     READ_ATTEMPTS as READ_ATTEMPTS,  # noqa: PLC0414 - compatibility export
 )
 from lib.python.core.cli_api import APIError as GitLabAPIError
-from lib.python.core.cli_api import CLIAPIClient, _endpoint
+from lib.python.core.cli_api import APISession, CLIAPIClient, validate_endpoint
+from lib.python.core.json_types import JSONObject
 
 CREATE_LOCK_WAIT_SECONDS = 30
 _UNCERTAIN_WRITE = frozenset(
@@ -56,9 +62,7 @@ def uncertain_write(error: GitLabAPIError) -> bool:
     return error.reason in _UNCERTAIN_WRITE
 
 
-def unverified_write(
-    target_id: int, resource: dict[str, Any], reason: str
-) -> dict[str, Any]:
+def unverified_write(target_id: int, resource: JSONObject, reason: str) -> JSONObject:
     """Preserve an unverified write in a partial action record.
 
     :param target_id: Numeric ID of the selected GitLab target.
@@ -81,18 +85,23 @@ def unverified_write(
 
 
 def _lock_root() -> Path:
+    """Locate this user's local GitLab resource-lock directory.
+
+    :returns: ``/tmp`` directory path qualified by the current numeric user ID.
+    """
     return Path("/tmp") / f"ci-skills-gitlab-locks-{os.getuid()}"
 
 
 class CreateGuard:
     """A same-host create lock with a crash-persistent uncertain marker."""
 
-    def __init__(self, descriptor: int) -> None:
+    def __init__(self, descriptor: int):
         """Load the lock's persistent uncertain-create marker.
 
         :param descriptor: Open descriptor for the selected create lock.
         :raises GitLabAPIError: If the marker contains an unknown state.
-        """
+        :raises OSError: Seeking or reading the locked marker descriptor fails.
+        """  # noqa: DOC503 - descriptor seek and read propagate OSError
         self._descriptor = descriptor
         os.lseek(descriptor, 0, os.SEEK_SET)
         state = os.read(descriptor, 16)
@@ -101,10 +110,20 @@ class CreateGuard:
         self.pending = state == b"pending\n"
 
     def require_ready(self) -> None:
+        """Refuse another create while a prior outcome remains uncertain.
+
+        :raises GitLabAPIError: Persistent pending marker requires read-back
+            reconciliation before a retry.
+        """
         if self.pending:
             raise GitLabAPIError("create_outcome_uncertain_reconcile_before_retry")
 
     def _set(self, value: bytes) -> None:
+        """Persist one create marker on the locked descriptor.
+
+        :param value: Marker bytes; empty bytes clear the marker.
+        :raises OSError: Writing, truncating, or syncing the marker fails.
+        """  # noqa: DOC502 - marker write and fsync propagate OSError
         os.lseek(self._descriptor, 0, os.SEEK_SET)
         os.write(self._descriptor, value)
         os.ftruncate(self._descriptor, len(value))
@@ -112,6 +131,11 @@ class CreateGuard:
         self.pending = bool(value)
 
     def mark_pending(self) -> None:
+        """Persist an uncertain-create marker before dispatching a POST.
+
+        :raises GitLabAPIError: A previous create remains unreconciled.
+        :raises OSError: Persisting the marker fails.
+        """  # noqa: DOC502 - readiness validation and marker persistence propagate failures
         self.require_ready()
         self._set(b"pending\n")
 
@@ -119,23 +143,31 @@ class CreateGuard:
         """Clear an uncertain create after an independent empty read.
 
         :raises GitLabAPIError: If an earlier create is absent and needs a new plan.
-        """
+        :raises OSError: Clearing the independently reconciled marker fails.
+        """  # noqa: DOC503 - marker cleanup propagates OSError
         if self.pending:
             self.clear()
             raise GitLabAPIError("create_outcome_uncertain_absent_after_readback_retry")
 
     def clear(self) -> None:
+        """Remove an existing pending marker after verified reconciliation.
+
+        :raises OSError: Clearing the persistent marker fails.
+        """  # noqa: DOC502 - persistent marker cleanup propagates OSError
         if self.pending:
             self._set(b"")
 
 
 @contextmanager
-def _locked_descriptor(identity: Sequence[str | int]) -> Iterator[int]:
-    """Lock one resource identity in a private local file.
+def _locked_descriptor(identity: Sequence[Union[str, int]]) -> Iterator[int]:
+    """Hold an exclusive local lock for one provider resource identity.
 
-    :param identity: Exact provider and resource identifiers; never a credential.
-    :returns: Open, exclusively locked descriptor for the caller's operation.
-    :raises GitLabAPIError: If the lock path is unsafe or acquisition times out.
+    :param identity: Provider and resource identifiers, without credentials.
+    :yields: Open locked file descriptor until the caller's scope exits.
+    :ytype: int
+    :raises GitLabAPIError: Lock directory/file metadata is unsafe or acquisition
+        exceeds its deadline.
+    :raises OSError: Lock file creation, locking, or cleanup fails.
     """
     root = _lock_root()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -189,6 +221,7 @@ def create_guard(
     :yields: Guard that records an uncertain POST until reconciliation.
     :ytype: CreateGuard
     :raises GitLabAPIError: If the lock or recovery marker is unsafe.
+    :raises OSError: Acquiring, reading, or releasing the resource lock fails.
     """  # noqa: DOC502 - lock failures propagate from the context manager
     with _locked_descriptor([origin, target_kind, target_id, kind, title]) as fd:
         yield CreateGuard(fd)
@@ -203,6 +236,7 @@ def runner_update_guard(origin: str, runner_id: int) -> Iterator[None]:
     :yields: Control after the resource lock is acquired.
     :ytype: None
     :raises GitLabAPIError: If the local lock cannot be acquired safely.
+    :raises OSError: Accessing or releasing the resource lock fails.
     """  # noqa: DOC502 - lock failures propagate from the context manager
     with _locked_descriptor([origin, "runner", runner_id]):
         yield
@@ -211,7 +245,7 @@ def runner_update_guard(origin: str, runner_id: int) -> Iterator[None]:
 class GlabAPIClient(CLIAPIClient):
     """Bind the shared CLI transport to GitLab's native API command."""
 
-    def argv(self, host: str, method: str, endpoint: str) -> list[str]:
+    def argv(self, host: str, method: str, endpoint: str) -> MutableSequence[str]:
         """Build GitLab's native JSON API invocation.
 
         :param host: Exact selected GitLab hostname.
@@ -233,7 +267,9 @@ class GlabAPIClient(CLIAPIClient):
         ]
 
 
-def next_keyset_endpoint(session: Any, current: str, headers: str) -> str | None:
+def next_keyset_endpoint(
+    session: APISession, current: str, headers: str
+) -> Optional[str]:
     """Resolve GitLab's next cursor without changing host or collection.
 
     :param session: Exact-host bound GitLab session.
@@ -254,7 +290,7 @@ def next_keyset_endpoint(session: Any, current: str, headers: str) -> str | None
         raise GitLabAPIError("pagination_link_invalid")
     parsed = urlsplit(matches[0])
     prefix = "/api/v4/"
-    base = urlsplit(_endpoint(current))
+    base = urlsplit(validate_endpoint(current))
     if (
         parsed.scheme != "https"
         or parsed.netloc.lower() != session.host
@@ -274,4 +310,4 @@ def next_keyset_endpoint(session: Any, current: str, headers: str) -> str | None
     next_filters = Counter(pair for pair in next_pairs if pair[0] not in cursor_keys)
     if current_filters != next_filters:
         raise GitLabAPIError("pagination_link_invalid")
-    return _endpoint(f"{relative}?{parsed.query}")
+    return validate_endpoint(f"{relative}?{parsed.query}")

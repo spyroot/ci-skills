@@ -9,37 +9,123 @@ from __future__ import annotations
 
 import json
 import pickle
-from collections.abc import Sequence
+from collections.abc import MutableMapping, MutableSequence
 from dataclasses import dataclass, field
-from typing import ClassVar, Self, TypeVar
+from typing import ClassVar, Self, TypedDict, TypeVar
 
 from lib.python.core.abstract.skill_result import SkillResult
 
 
+class CleanupFailure(TypedDict):
+    """Report one callback cleanup failure without retaining exception objects.
+
+    :param callback: Concrete callback class whose cleanup hook failed.
+    :param reason: Redacted failure text safe for the workflow report.
+
+    .. attribute :: callback
+        :type: str
+
+        Concrete callback class whose cleanup hook failed.
+
+    .. attribute :: reason
+        :type: str
+
+        Redacted failure text safe for the workflow report.
+    """
+
+    callback: str
+    reason: str
+
+
 @dataclass
 class SkillState:
-    """Own the result and common invocation data.
+    """Own shared invocation data, hook history, and per-callback results.
 
-    Concrete states add typed fields, such as ``x: int = 0``. Callbacks retain
-    this same mutable instance; ordinary field assignments are visible to all.
+    Concrete states add domain fields. Every callback retains this same mutable
+    instance, so later callbacks observe assignments made by earlier callbacks.
+
+    :param result: Last successful hook result; empty before execution.
+    :param records: Successful hook results in execution order, including cleanup.
+    :param results: Each bound callback's most recent run result, initially empty.
+    :param cleanup_failures: Callback names and sanitized reasons from failed cleanup hooks.
+    :param failed: Whether the current run failed or an operation remained incomplete.
+    :param name: Caller-supplied workflow name for reporting.
+    :param debug: Caller-selected diagnostic detail setting.
+    :param verbose: Caller-selected verbose output setting.
+    :param environment: Caller-supplied invocation environment values.
+
+    .. attribute :: result
+        :type: SkillResult
+
+        Last successful hook result; empty before execution.
+
+    .. attribute :: records
+        :type: MutableSequence[SkillResult]
+
+        Successful hook results in execution order, including cleanup.
+
+    .. attribute :: results
+        :type: MutableMapping[object, SkillResult]
+
+        Each bound callback's most recent run result, initially empty.
+
+    .. attribute :: cleanup_failures
+        :type: MutableSequence[CleanupFailure]
+
+        Callback names and sanitized reasons from failed cleanup hooks.
+
+    .. attribute :: failed
+        :type: bool
+
+        Whether the current run failed or an operation remained incomplete.
+
+    .. attribute :: name
+        :type: str
+
+        Caller-supplied workflow name for reporting.
+
+    .. attribute :: debug
+        :type: bool
+
+        Caller-selected diagnostic detail setting.
+
+    .. attribute :: verbose
+        :type: bool
+
+        Caller-selected verbose output setting.
+
+    .. attribute :: environment
+        :type: MutableMapping[str, str]
+
+        Caller-supplied invocation environment values.
+
+    .. attribute :: json_encoder
+        :type: ClassVar[type[json.JSONEncoder]]
+
+        Encoder used by to_json for the reportable state values.
     """
 
     result: SkillResult = field(default_factory=dict)
-    records: Sequence[SkillResult] = field(default_factory=list)
-    results: dict[object, SkillResult] = field(default_factory=dict, repr=False)
+    records: MutableSequence[SkillResult] = field(default_factory=list)
+    results: MutableMapping[object, SkillResult] = field(
+        default_factory=dict, repr=False
+    )
+    cleanup_failures: MutableSequence[CleanupFailure] = field(default_factory=list)
     failed: bool = False
     name: str = ""
     debug: bool = False
     verbose: bool = False
-    environment: dict[str, str] = field(default_factory=dict)
+    environment: MutableMapping[str, str] = field(default_factory=dict)
     json_encoder: ClassVar[type[json.JSONEncoder]] = json.JSONEncoder
 
     def state_dict(self) -> SkillResult:
-        """Return the common, reportable state values.
+        """Select the common reportable values without serializing provider services.
 
-        Concrete states override this method to include their reportable fields.
+        Concrete state subclasses override this method to expose additional fields.
+        Per-callback keys, failure objects, and cleanup failures are not included here.
 
-        :returns: A dictionary of invocation metadata and the current result.
+        :returns: Mapping containing name, debug/verbose flags, environment, current
+            result, and ordered hook records.
         """
         return {
             "name": self.name,
@@ -58,23 +144,27 @@ class SkillState:
         return f"name: {self.name}\ndebug: {self.debug}\nverbose: {self.verbose}"
 
     def to_json(self) -> str:
-        """Serialize the reportable state values.
+        """Encode the reportable state selected by state_dict.
 
-        :returns: JSON containing the values exposed by state_dict.
-        :raises TypeError: If a value is unsupported by json_encoder.
-        """
+        :returns: Indented JSON text containing the selected state values.
+        :raises TypeError: A selected value is unsupported by json_encoder.
+        :raises ValueError: Selected values contain a circular reference.
+        """  # noqa: DOC502 - json.dumps reports unsupported or circular values.
         return json.dumps(self.state_dict(), cls=self.json_encoder, indent=4)
 
     @classmethod
     def load_state_from_file(cls, file_path: str) -> Self:
         """Restore a concrete state from a caller-selected trusted pickle file.
 
-        :param file_path: File previously written by save_state_to_file.
-        :returns: The restored concrete state.
-        :raises OSError: If the file cannot be read.
-        :raises pickle.UnpicklingError: If the file is not valid pickle data.
-        :raises TypeError: If the stored object has another state type.
-        """
+        :param file_path: Path previously written by save_state_to_file.
+        :returns: Deserialized instance of this concrete state class.
+        :raises OSError: The file cannot be opened or read.
+        :raises EOFError: The file ends before a pickle value can be read.
+        :raises pickle.UnpicklingError: The file contains invalid pickle data.
+        :raises ImportError: A class required by the stored value cannot be imported.
+        :raises AttributeError: A class or attribute referenced by the pickle is unavailable.
+        :raises TypeError: The stored object has a different state type.
+        """  # noqa: DOC503 - file access and pickle.load propagate decode failures.
         with open(file_path, "rb") as handle:
             state = pickle.load(handle)
         if not isinstance(state, cls):
@@ -87,7 +177,7 @@ class SkillState:
         :param file_path: Destination for the serialized concrete state.
         :raises OSError: If the destination cannot be written.
         :raises pickle.PicklingError: If this state cannot be serialized.
-        """
+        """  # noqa: DOC502 - file access and pickle.dump propagate write failures.
         with open(file_path, "wb") as handle:
             pickle.dump(self, handle)
 

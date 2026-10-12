@@ -1,19 +1,38 @@
-"""Focused tests for target parsing and command runtime helpers."""
+"""Focused tests for target parsing and command runtime helpers.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import subprocess
 import sys
 import time
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import TypeAlias, Union
 
 import pytest
+from conftest import REPO_ROOT, import_script_module
 
-from tests.python.conftest import REPO_ROOT, import_script_module
+HarborTargetCase: TypeAlias = tuple[
+    Path, tuple[Path, ...], Mapping[Path, tuple[bytes, int]]
+]
 
 
 @pytest.fixture(params=("combined", "pair"))
-def harbor_target_case(tmp_path, monkeypatch, request):
-    """Create one target-relative Harbor credential selection per supported form."""
+def harbor_target_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> HarborTargetCase:
+    """Create combined or paired Harbor credential files beside a target.
+
+    :param tmp_path: Scratch target, credential, and unrelated cwd directories.
+    :param monkeypatch: Pytest fixture moving cwd away from the target.
+    :param request: Parametrized fixture case selecting combined or paired form.
+    :returns: Target path, selected credential paths, and original file state.
+    """
     target_parent = tmp_path / "operator-config"
     target_parent.mkdir()
     combined = target_parent / "harbor.credential"
@@ -46,8 +65,13 @@ def harbor_target_case(tmp_path, monkeypatch, request):
     return target_path, selected, before
 
 
-def test_load_target_accepts_exact_nonsecret_authorities(target_file):
-    """A target file supplies all live authorities without secret material."""
+def test_load_target_accepts_exact_nonsecret_authorities(target_file: Path) -> None:
+    """Read all declared provider hosts and cluster context without inline secrets.
+
+    :param target_file: Fixture target with GitHub, GitLab, and Kubernetes sections.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = import_script_module("lib.python.core.target").load_target(target_file)
 
     assert target.github.host == "github.example.test"
@@ -61,9 +85,16 @@ def test_load_target_accepts_exact_nonsecret_authorities(target_file):
 
 @pytest.mark.parametrize("declaration", ("relative", "absolute", "tilde"))
 def test_load_target_resolves_token_files_from_declared_location(
-    tmp_path, monkeypatch, declaration
-):
-    """Credential paths retain relative, absolute, and tilde resolution semantics."""
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declaration: str
+) -> None:
+    """Resolve relative, absolute, and tilde token paths independent of cwd.
+
+    :param tmp_path: Scratch target, token files, home, and unrelated cwd.
+    :param monkeypatch: Pytest fixture setting HOME and cwd when needed.
+    :param declaration: Path form written into the target.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target_parent = tmp_path / "operator-config"
     target_parent.mkdir()
     github_token_file = target_parent / "github.token"
@@ -115,9 +146,14 @@ def test_load_target_resolves_token_files_from_declared_location(
 
 
 def test_harbor_credentials_resolve_beside_target_without_altering_files(
-    harbor_target_case,
-):
-    """Combined and paired Harbor files are resolved and consumed read-only."""
+    harbor_target_case: HarborTargetCase,
+) -> None:
+    """Read combined or paired Harbor files without changing their bytes/mode.
+
+    :param harbor_target_case: Target path, selected paths, and original file state.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target_path, selected, before = harbor_target_case
     target_mod = import_script_module("lib.python.core.target")
     credentials = import_script_module("lib.python.access.credentials")
@@ -136,9 +172,15 @@ def test_harbor_credentials_resolve_beside_target_without_altering_files(
 
 
 def test_load_target_rejects_relative_token_file_resolved_inside_installed_skill(
-    tmp_path, monkeypatch
-):
-    """Target-relative credential paths retain the installed-skill exclusion."""
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject a target-relative token path inside the installed skill.
+
+    :param tmp_path: Scratch installed-skill and target directories.
+    :param monkeypatch: Pytest fixture selecting the synthetic skill root.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target_mod = import_script_module("lib.python.core.target")
     skill_root = tmp_path / "installed-skill"
     skill_root.mkdir()
@@ -168,16 +210,26 @@ def test_load_target_rejects_relative_token_file_resolved_inside_installed_skill
         target_mod.load_target(target_path)
 
 
-def test_skill_root_is_the_folder_that_holds_skill_md():
-    """lib.python.core.paths declares the skill root once; the boundary tests below rely on it."""
+def test_skill_root_is_the_folder_that_holds_skill_md() -> None:
+    """core.paths declares the skill root once; the boundary tests below rely on it.
+    :returns: None; assertions in the body validate the regression.
+    """
     skill_root = import_script_module("lib.python.core.paths").SKILL_ROOT
 
     assert skill_root == REPO_ROOT / "ci-skills"
     assert (skill_root / "SKILL.md").is_file()
 
 
-def test_ambient_kubeconfig_cannot_point_into_installed_skill(monkeypatch, target_file):
-    """An environment override cannot bypass the declared file boundary."""
+def test_ambient_kubeconfig_cannot_point_into_installed_skill(
+    monkeypatch: pytest.MonkeyPatch, target_file: Path
+) -> None:
+    """Reject KUBECONFIG that points inside the installed skill tree.
+
+    :param monkeypatch: Pytest fixture setting the ambient kubeconfig path.
+    :param target_file: Fixture target selecting cluster context/server.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target_mod = import_script_module("lib.python.core.target")
     credentials = import_script_module("lib.python.access.credentials")
     skill_root = import_script_module("lib.python.core.paths").SKILL_ROOT
@@ -187,8 +239,16 @@ def test_ambient_kubeconfig_cannot_point_into_installed_skill(monkeypatch, targe
         credentials._kubernetes_source(target_mod.load_target(target_file))
 
 
-def test_default_kubeconfig_cannot_point_into_installed_skill(monkeypatch, target_file):
-    """The kubectl default obeys the same selected-file boundary."""
+def test_default_kubeconfig_cannot_point_into_installed_skill(
+    monkeypatch: pytest.MonkeyPatch, target_file: Path
+) -> None:
+    """Reject kubectl's home default when it resolves inside installed skill.
+
+    :param monkeypatch: Pytest fixture setting HOME and clearing KUBECONFIG.
+    :param target_file: Fixture target selecting cluster context/server.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target_mod = import_script_module("lib.python.core.target")
     credentials = import_script_module("lib.python.access.credentials")
     skill_root = import_script_module("lib.python.core.paths").SKILL_ROOT
@@ -240,6 +300,21 @@ def test_default_kubeconfig_cannot_point_into_installed_skill(monkeypatch, targe
                 'repository = "unit/repo"\n'
                 "\n"
                 "[gitlab]\n"
+                'url = "https://["\n'
+                "\n"
+                "[kubernetes]\n"
+                'context = "unit-context"\n'
+                'server = "https://api.cluster.example.test:6443"\n'
+            ),
+            "invalid authority",
+        ),
+        (
+            (
+                "[github]\n"
+                'host = "github.example.test"\n'
+                'repository = "unit/repo"\n'
+                "\n"
+                "[gitlab]\n"
                 'url = "https://token@gitlab.example.test"\n'
                 "\n"
                 "[kubernetes]\n"
@@ -267,9 +342,16 @@ def test_default_kubeconfig_cannot_point_into_installed_skill(monkeypatch, targe
     ),
 )
 def test_load_target_rejects_ambiguous_or_secret_authorities(
-    tmp_path, content, message
-):
-    """Bad target files fail before any live command can use the wrong surface."""
+    tmp_path: Path, content: str, message: str
+) -> None:
+    """Reject inline secrets and malformed host/origin authorities.
+
+    :param tmp_path: Directory receiving the invalid target TOML.
+    :param content: Target text for the selected failure case.
+    :param message: Expected validation error fragment.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     path = tmp_path / "target.toml"
     path.write_text(content, encoding="utf-8")
     target_mod = import_script_module("lib.python.core.target")
@@ -278,8 +360,10 @@ def test_load_target_rejects_ambiguous_or_secret_authorities(
         target_mod.load_target(path)
 
 
-def test_runtime_sanitizes_secret_like_output_and_bounds_text():
-    """External command output is redacted before it enters diagnostics."""
+def test_runtime_sanitizes_secret_like_output_and_bounds_text() -> None:
+    """External command output is redacted before it enters diagnostics.
+    :returns: None; assertions in the body validate the regression.
+    """
     runtime = import_script_module("lib.python.core.runtime")
     private_key = "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----"
     text = (
@@ -299,12 +383,29 @@ def test_runtime_sanitizes_secret_like_output_and_bounds_text():
     assert len(sanitized) == 120
 
 
-def test_run_command_uses_argument_vector_and_noninteractive_environment(monkeypatch):
-    """Command execution disables prompts and avoids shell expansion."""
+def test_run_command_uses_argument_vector_and_noninteractive_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pass argv literally and disable prompts without a shell.
+
+    :param monkeypatch: Pytest fixture replacing subprocess execution.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     runtime = import_script_module("lib.python.core.runtime")
     captured = {}
 
-    def fake_run(argv, **kwargs):
+    def fake_run(
+        argv: Sequence[str],
+        **kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> subprocess.CompletedProcess[str]:
+        """Capture subprocess argv/options and return a successful process.
+
+        :param argv: Literal command vector passed by the runtime.
+        :param **kwargs: Keyword arguments forwarded to the fake command boundary.
+        :returns: Completed process carrying the fixture success output.
+
+        """
         captured["argv"] = argv
         captured["kwargs"] = kwargs
         return subprocess.CompletedProcess(argv, 0, "ok", "")
@@ -321,8 +422,10 @@ def test_run_command_uses_argument_vector_and_noninteractive_environment(monkeyp
     assert captured["kwargs"]["env"]["GLAB_NO_PROMPT"] == "1"
 
 
-def test_run_command_tail_keeps_only_bounded_stdout_tail():
-    """Trace collection keeps recent lines without retaining full command output."""
+def test_run_command_tail_keeps_only_bounded_stdout_tail() -> None:
+    """Trace collection keeps recent lines without retaining full command output.
+    :returns: None; assertions in the body validate the regression.
+    """
     runtime = import_script_module("lib.python.core.runtime")
 
     result = runtime.run_command_tail(
@@ -345,16 +448,20 @@ def test_run_command_tail_keeps_only_bounded_stdout_tail():
     ]
 
 
-def test_run_command_tail_rejects_unbounded_limits():
-    """Tail limits must stay positive so a trace cannot request full output."""
+def test_run_command_tail_rejects_unbounded_limits() -> None:
+    """Tail limits must stay positive so a trace cannot request full output.
+    :returns: None; assertions in the body validate the regression.
+    """
     runtime = import_script_module("lib.python.core.runtime")
 
     with pytest.raises(ValueError, match="tail limits"):
         runtime.run_command_tail(["tool"], max_lines=0)
 
 
-def test_run_command_tail_times_out_after_child_closes_pipes_then_lingers():
-    """A child that closes output pipes must still be reaped by the deadline."""
+def test_run_command_tail_times_out_after_child_closes_pipes_then_lingers() -> None:
+    """A child that closes output pipes must still be reaped by the deadline.
+    :returns: None; assertions in the body validate the regression.
+    """
     runtime = import_script_module("lib.python.core.runtime")
     start = time.monotonic()
 
@@ -384,8 +491,17 @@ def test_run_command_tail_times_out_after_child_closes_pipes_then_lingers():
         (1, "other failure", "command_failed"),
     ),
 )
-def test_error_class_maps_command_failures(returncode, stderr, expected):
-    """Gate output classifies common external failures for safe next steps."""
+def test_error_class_maps_command_failures(
+    returncode: int, stderr: str, expected: str
+) -> None:
+    """Map native exit and stderr patterns to stable failure classes.
+
+    :param returncode: Process status for the selected failure case.
+    :param stderr: Diagnostic text used by the classifier.
+    :param expected: Machine-readable failure class asserted by the test.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     runtime = import_script_module("lib.python.core.runtime")
     result = runtime.CommandResult(("tool",), returncode, "", stderr)
 

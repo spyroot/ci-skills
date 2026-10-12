@@ -1,21 +1,28 @@
-"""Runner relation reads and reversible record deletion contracts."""
+"""Runner relation reads and reversible record deletion contracts.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Optional, Union
 
 import pytest
+from conftest import import_script_module
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
-from tests.python.conftest import import_script_module
-
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
+GITLAB_ACTION = import_script_module("lib.python.core.gitlab.gitlab_action")
+GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
 RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
 REPORT = import_script_module("lib.python.core.report")
@@ -33,6 +40,8 @@ VERIFIED_IDENTITY = {
     "username": "unit",
     "web_url": "https://gitlab.example.test/unit",
 }
+
+
 VERIFIED_TARGET = {
     "kind": "project",
     "id": 42,
@@ -50,12 +59,25 @@ TAG_VALIDATOR = Draft202012Validator(
 )
 
 
+if TYPE_CHECKING:
+    from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+    from lib.python.core.json_types import JSONObject, JSONValue
+
+
 def _plan(
     operation: str,
-    body: dict[str, Any],
-    resource_id: int | None = None,
-    runner_snapshot: dict[str, Any] | None = None,
+    body: JSONObject,
+    resource_id: Optional[int] = None,
+    runner_snapshot: Optional[JSONObject] = None,
 ) -> ACTION.ActionPlan:
+    """Build a project-scoped runner action plan for one operation.
+
+    :param operation: Runner get, list, delete, or tag verb.
+    :param body: Operation-specific runner filters or desired fields.
+    :param resource_id: Exact runner ID for non-list operations.
+    :param runner_snapshot: Verified live identity/assignment snapshot for delete.
+    :returns: Action plan bound to the fixture project and revision.
+    """
     return ACTION.ActionPlan(
         kind="gitlab_runner",
         operation=operation,
@@ -63,7 +85,7 @@ def _plan(
         target_kind="project",
         target_reference="team/repo",
         target_file="/selected/target.toml",
-        target_source="argv:--target;target:gitlab.project",
+        target_source="env:CI_SKILLS_TARGET;target:gitlab.project",
         body=body,
         resource_id=resource_id,
         runner_snapshot=runner_snapshot,
@@ -71,30 +93,102 @@ def _plan(
     )
 
 
+def _bound_session(
+    plan: ACTION.ActionPlan,
+    *,
+    skill: JSONObject = VERIFIED_SKILL,
+    credential_source: str = "env:GITLAB_TOKEN",
+    credential_digest: str = "sha256:unit",
+) -> BoundGitLabSession:
+    """Create the concrete GitLab session required by workflow receipts.
+
+    :param plan: Runner action plan whose target fields identify the session.
+    :param skill: Installed-skill identity supplied to the workflow.
+    :param credential_source: Nonsecret credential origin recorded in receipts.
+    :param credential_digest: Credential continuity digest recorded in receipts.
+    :returns: Bound GitLab session matching the production workflow shape.
+    """
+    return GITLAB_SESSION.BoundGitLabSession(
+        origin=plan.origin,
+        host="gitlab.example.test",
+        target_kind=plan.target_kind,
+        target_reference=plan.target_reference,
+        target_source=plan.target_source,
+        target_file=Path(plan.target_file),
+        credential_source=credential_source,
+        credential_digest=credential_digest,
+        execution_host="unit-host",
+        skill=skill,
+        environment={},
+    )
+
+
 class FakeAPI:
-    def __init__(self, responses):
+    """Replay runner read and delete responses for lifecycle proof tests."""
+
+    def __init__(
+        self,
+        responses: Mapping[tuple[str, str], Sequence[Union[JSONValue, BaseException]]],
+    ):
+        """Copy scripted endpoint responses into mutable request queues.
+
+        :param responses: Method/endpoint mapping to ordered results or failures.
+        """
         self.responses = {key: list(value) for key, value in responses.items()}
         self.calls = []
 
-    def _next(self, method, endpoint):
+    def _next(self, method: str, endpoint: str) -> JSONValue:
+        """Record a request and consume its next scripted response.
+
+        :param method: GET or DELETE verb selecting a response queue.
+        :param endpoint: Relative runner API path selecting that queue.
+        :returns: Next provider result for this request.
+        :raises BaseException: Scripted provider failure supplied by the test.
+        """  # noqa: DOC503 - The dynamic fixture exception is raised verbatim.
         self.calls.append((method, endpoint))
         value = self.responses[(method, endpoint)].pop(0)
         if isinstance(value, BaseException):
             raise value
         return value
 
-    def get_json(self, session, endpoint):
+    def get_json(self, session: BoundGitLabSession, endpoint: str) -> JSONValue:
+        """Consume a scripted runner GET response.
+
+        :param session: Bound session accepted by the API double.
+        :param endpoint: Relative runner read path.
+        :returns: Next scripted GET result.
+        """
         return self._next("GET", endpoint)
 
-    def delete_json(self, session, endpoint):
+    def delete_json(self, session: BoundGitLabSession, endpoint: str) -> JSONValue:
+        """Consume a scripted runner DELETE response.
+
+        :param session: Bound session accepted by the API double.
+        :param endpoint: Relative runner deletion path.
+        :returns: Next scripted DELETE result.
+        """
         return self._next("DELETE", endpoint)
 
 
-def _list():
+def _list() -> str:
+    """Name the selected project's first runner-list page.
+
+    :returns: Relative GitLab endpoint for project 42 runners.
+    """
     return "projects/42/runners?per_page=100&page=1"
 
 
-def _runner(identifier=23, **changes):
+def _runner(
+    identifier: int = 23,
+    **changes: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+) -> JSONObject:
+    """Build an owned protected runner detail with selected changes.
+
+    :param identifier: Runner ID used in read and deletion cases.
+    :param **changes: Field changes applied to the default provider record.
+    :returns: Provider runner mapping assigned to fixture project 42.
+
+    """
     return {
         "id": identifier,
         "description": "owned-runner",
@@ -115,7 +209,10 @@ def _runner(identifier=23, **changes):
     }
 
 
-def test_get_from_failed_job_resolves_runner_relation_without_raw_payload():
+def test_get_from_failed_job_resolves_runner_relation_without_raw_payload() -> None:
+    """Resolve a failed job's runner and emit only schema-allowed fields.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("get", {"job_id": 9})
     api = FakeAPI(
         {
@@ -165,7 +262,10 @@ def test_get_from_failed_job_resolves_runner_relation_without_raw_payload():
     assert "access=ref_protected" in human
 
 
-def test_get_from_unassigned_job_reports_relation_without_guessing_runner():
+def test_get_from_unassigned_job_reports_relation_without_guessing_runner() -> None:
+    """Keep an unassigned job relation without inventing a runner record.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("get", {"job_id": 9})
     api = FakeAPI(
         {
@@ -180,7 +280,10 @@ def test_get_from_unassigned_job_reports_relation_without_guessing_runner():
     assert api.calls == [("GET", "projects/42/jobs/9")]
 
 
-def test_list_filters_protected_runner_and_limits_public_fields():
+def test_list_filters_protected_runner_and_limits_public_fields() -> None:
+    """Filter the selected project list by online and protected runner state.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan(
         "list", {"description": None, "limit": 10, "filters": ["protected", "online"]}
     )
@@ -201,7 +304,16 @@ def test_list_filters_protected_runner_and_limits_public_fields():
     assert result.truncated is False
 
 
-def test_delete_requires_scope_and_global_404_readback(monkeypatch, tmp_path) -> None:
+def test_delete_requires_scope_and_global_404_readback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Delete only after scoped snapshot and verify global 404 plus scoped absence.
+
+    :param monkeypatch: Pytest fixture selecting scratch create-lock storage.
+    :param tmp_path: Private directory for the runner mutation lock.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     snapshot = {
         "id": 23,
@@ -250,7 +362,16 @@ def test_delete_requires_scope_and_global_404_readback(monkeypatch, tmp_path) ->
         DELETE_VALIDATOR.validate(rendered)
 
 
-def test_repeat_delete_is_verified_no_op_without_write(monkeypatch, tmp_path) -> None:
+def test_repeat_delete_is_verified_no_op_without_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Classify a globally and locally absent runner as read-only NO_OP.
+
+    :param monkeypatch: Pytest fixture selecting scratch lock storage.
+    :param tmp_path: Private directory for the runner mutation lock.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     plan = _plan(
         "delete",
@@ -270,7 +391,16 @@ def test_repeat_delete_is_verified_no_op_without_write(monkeypatch, tmp_path) ->
     assert all(method == "GET" for method, _ in api.calls)
 
 
-def test_delete_refuses_runner_outside_selected_project(monkeypatch, tmp_path) -> None:
+def test_delete_refuses_runner_outside_selected_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Reject deletion when exact runner detail is outside the selected project.
+
+    :param monkeypatch: Pytest fixture selecting scratch lock storage.
+    :param tmp_path: Private directory for the runner mutation lock.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     plan = _plan(
         "delete",
@@ -303,8 +433,17 @@ def test_delete_refuses_runner_outside_selected_project(monkeypatch, tmp_path) -
     ],
 )
 def test_delete_refuses_identity_or_assignment_drift_before_write(
-    monkeypatch, tmp_path, observed: dict[str, Any], reason: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, observed: JSONObject, reason: str
 ) -> None:
+    """Reject runner deletion if detail or project assignments changed.
+
+    :param monkeypatch: Pytest fixture selecting scratch lock storage.
+    :param tmp_path: Private directory for the runner mutation lock.
+    :param observed: Runner detail with changed description or assignments.
+    :param reason: Expected fail-closed drift reason.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     plan = _plan(
         "delete",
@@ -330,6 +469,9 @@ def test_delete_refuses_identity_or_assignment_drift_before_write(
 
 
 def test_delete_plan_requires_numeric_id_and_live_snapshot() -> None:
+    """Keep offline deletion unconfirmable until numeric ID and live snapshot.
+    :returns: None; assertions in the body validate the regression.
+    """
     args = ACTION.action_parser("gitlab_runner").parse_args(
         ["delete", "--description", "owned-runner", "--dry-run"]
     )
@@ -343,8 +485,16 @@ def test_delete_plan_requires_numeric_id_and_live_snapshot() -> None:
 
 @pytest.mark.parametrize("action", ["get", "list", "delete"])
 def test_runner_live_operation_refuses_unverified_skill_before_api(
-    monkeypatch, capsys, action: str
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], action: str
 ) -> None:
+    """Block get, list, and delete before API use for unverified skill bytes.
+
+    :param monkeypatch: Pytest fixture replacing target, bind, and API factories.
+    :param capsys: Pytest fixture capturing the blocked machine report.
+    :param action: Runner operation selected for the unverified-skill check.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     arguments = [action, "--json"]
     if action != "list":
         arguments.extend(["--runner-id", "23"])
@@ -355,18 +505,20 @@ def test_runner_live_operation_refuses_unverified_skill_before_api(
         {"description": None},
         resource_id=23 if action != "list" else None,
     )
-    session = SimpleNamespace(
+    session = _bound_session(
+        plan,
         skill={"revision": {"value": "a" * 40, "verified": False}},
         credential_source="unit",
-        credential_digest="sha256:unit",
     )
     monkeypatch.setattr(
-        ACTION, "resolve_gitlab_target", lambda *a, **kw: (object(), "unit")
+        GITLAB_ACTION, "resolve_gitlab_target", lambda *a, **kw: (object(), "unit")
     )
-    monkeypatch.setattr(ACTION, "make_plan", lambda *a, **kw: plan)
-    monkeypatch.setattr(ACTION, "bind_gitlab_session", lambda *a, **kw: session)
+    monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *a, **kw: plan)
+    monkeypatch.setattr(GITLAB_ACTION, "bind_gitlab_session", lambda *a, **kw: session)
     monkeypatch.setattr(
-        ACTION, "GlabAPIClient", lambda **kw: pytest.fail("API client must not run")
+        GITLAB_ACTION,
+        "GlabAPIClient",
+        lambda **kw: pytest.fail("API client must not run"),
     )
     assert RUNNER.main(arguments) == 2
     output = json.loads(capsys.readouterr().out)
@@ -375,22 +527,28 @@ def test_runner_live_operation_refuses_unverified_skill_before_api(
 
 
 def test_runner_read_cli_writes_portable_live_receipt(
-    monkeypatch, tmp_path: Path, capsys
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Redact local target and credential paths in a runner read receipt.
+
+    :param monkeypatch: Pytest fixture replacing selected provider operations.
+    :param tmp_path: Scratch destination for the written receipt.
+    :param capsys: Pytest fixture capturing the live command output.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("get", {"description": None}, resource_id=23)
-    session = SimpleNamespace(
-        skill=VERIFIED_SKILL,
-        credential_source="file:/selected/credential",
-        credential_digest="sha256:unit",
+    session = _bound_session(
+        plan, skill=VERIFIED_SKILL, credential_source="file:/selected/credential"
     )
     monkeypatch.setattr(
-        ACTION, "resolve_gitlab_target", lambda *a, **kw: (object(), "unit")
+        GITLAB_ACTION, "resolve_gitlab_target", lambda *a, **kw: (object(), "unit")
     )
-    monkeypatch.setattr(ACTION, "make_plan", lambda *a, **kw: plan)
-    monkeypatch.setattr(ACTION, "bind_gitlab_session", lambda *a, **kw: session)
-    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda **kw: object())
+    monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *a, **kw: plan)
+    monkeypatch.setattr(GITLAB_ACTION, "bind_gitlab_session", lambda *a, **kw: session)
+    monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda **kw: object())
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "check_gitlab_operation_access",
         lambda *a, **kw: {
             "status": "PASS",
@@ -398,13 +556,24 @@ def test_runner_read_cli_writes_portable_live_receipt(
             "target": VERIFIED_TARGET,
         },
     )
-    monkeypatch.setattr(
-        RUNNERS.ReadRunner,
-        "run",
-        lambda _self: RUNNERS.RunnerReadResult(
+
+    def read_runner(_self: JSONValue) -> JSONObject:
+        """Return the public mapping while retaining the typed read observation.
+
+        :param _self: Patched runner callback supplied by the workflow.
+        :returns: Public runner read mapping used by the shared executor.
+        """
+        observation = RUNNERS.RunnerReadResult(
             [RUNNERS._record(_runner())], False, None
-        ),
-    )
+        )
+        _self.state.runner_read = observation
+        return {
+            "records": observation.records,
+            "truncated": observation.truncated,
+            "related_job": observation.related_job,
+        }
+
+    monkeypatch.setattr(RUNNERS.ReadRunner, "run", read_runner)
     receipt_path = tmp_path / "runner-get.json"
     assert (
         RUNNER.main(
@@ -424,6 +593,9 @@ def test_runner_read_cli_writes_portable_live_receipt(
 def test_runner_live_result_schemas_reject_unverified_skill_and_empty_identity() -> (
     None
 ):
+    """Reject live runner records without verified skill or identity evidence.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("get", {"description": None}, resource_id=23)
     result = ACTION._result(
         plan,
@@ -450,6 +622,9 @@ def test_runner_live_result_schemas_reject_unverified_skill_and_empty_identity()
 
 
 def test_runner_delete_live_plan_binds_assignments_in_digest() -> None:
+    """Change deletion digest when live project assignments change.
+    :returns: None; assertions in the body validate the regression.
+    """
     offline = _plan("delete", {"description": None}, resource_id=23)
     snapshot = {
         "id": 23,
@@ -478,6 +653,9 @@ def test_runner_delete_live_plan_binds_assignments_in_digest() -> None:
 
 
 def test_runner_delete_partial_requires_verified_context_and_readback() -> None:
+    """Require verified context around uncertain runner deletion evidence.
+    :returns: None; assertions in the body validate the regression.
+    """
     snapshot = {
         "id": 23,
         "present": True,
@@ -530,6 +708,9 @@ def test_runner_delete_partial_requires_verified_context_and_readback() -> None:
 
 
 def test_runner_result_schemas_close_every_status_shape() -> None:
+    """Validate all runner status/verb shapes and reject extra or missing fields.
+    :returns: None; assertions in the body validate the regression.
+    """
     live = {
         "identity": VERIFIED_IDENTITY,
         "verified_target": VERIFIED_TARGET,

@@ -1,4 +1,9 @@
-"""Run bounded native CLIs and keep external output out of gate diagnostics."""
+"""Run bounded native CLIs and keep external output out of gate diagnostics.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -7,12 +12,14 @@ import re
 import selectors
 import subprocess
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Optional, Union, overload
+
+from lib.python.core.json_types import JSONObject, JSONValue
 
 # How long a killed child is given to be reaped, so the worst case is the
 # caller's timeout plus this, not unbounded.
@@ -22,6 +29,34 @@ OUTPUT_LIMIT_EXIT_CODE = 125
 
 @dataclass(frozen=True)
 class CommandResult:
+    """Capture one native command's invocation and bounded text output.
+
+    :param argv: Exact command arguments executed by the runtime.
+    :param returncode: Native process exit code.
+    :param stdout: Captured standard output after runtime decoding.
+    :param stderr: Captured standard error after runtime decoding.
+
+    .. attribute :: argv
+        :type: tuple[str, ...]
+
+        Exact command arguments executed by the runtime.
+
+    .. attribute :: returncode
+        :type: int
+
+        Native process exit code.
+
+    .. attribute :: stdout
+        :type: str
+
+        Captured standard output after runtime decoding.
+
+    .. attribute :: stderr
+        :type: str
+
+        Captured standard error after runtime decoding.
+    """
+
     argv: tuple[str, ...]
     returncode: int
     stdout: str
@@ -78,11 +113,11 @@ _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def redact(value: str) -> str:
-    """Remove credential forms from text, with no length bound.
+    """Remove recognized credential forms and terminal escapes from text.
 
-    Separate from `sanitize` so a whole report can be redacted at its output
-    boundary without the 1000-character truncation that bounds one command's
-    captured output.
+    :param value: Text that may contain credential assignments, tokens, URL
+        userinfo, private keys, or ANSI escapes.
+    :returns: Full text with recognized sensitive forms replaced or stripped.
     """
     result = _ANSI_ESCAPE.sub("", value).replace("\x1b", "")
     result = _URL_USERINFO.sub(lambda match: match.group(1) + "[REDACTED]@", result)
@@ -97,47 +132,92 @@ def redact(value: str) -> str:
 
 
 def is_secret_name(name: str) -> bool:
-    """Report whether a field name declares its value to be a credential."""
+    """Identify a field name that declares a credential value.
+
+    :param name: Field name to test against the shared credential-name pattern.
+    :returns: ``True`` when the name matches the pattern.
+    """
     return bool(_SECRET_NAME.match(name))
 
 
-def redact_tree(value: Any) -> Any:
-    """Redact every string in a nested structure, keys included.
+@overload
+def redact_tree(value: JSONObject) -> MutableMapping[str, JSONValue]:
+    """Retain the JSON object contract while redacting nested evidence.
 
-    A mapping whose KEY names a credential has its whole value replaced,
-    whatever that value looks like: the key is the evidence, and redacting the
-    two independently lets {"GITLAB_TOKEN": "value"} through untouched.
-    """
+    :param value: JSON report whose string fields and keys may contain credentials.
+    :returns: New mutable JSON object with credentials replaced by redaction markers.
+    :raises RecursionError: If report containers contain a cycle or excessive nesting.
+    """  # noqa: DOC502 - Recursive redaction can exceed container nesting limits.
+
+
+@overload
+def redact_tree(value: Mapping[str, object]) -> MutableMapping[str, object]:
+    """Preserve the object shape of a redacted report.
+
+    :param value: Read-only report fields whose nested strings may contain secrets.
+    :returns: New mutable mapping containing redacted keys and values.
+    :raises RecursionError: If report containers contain a cycle or excessive nesting.
+    """  # noqa: DOC502 - Recursive redaction can exceed container nesting limits.
+
+
+@overload
+def redact_tree(value: object) -> object:
+    """Accept an untrusted report value before its concrete shape is known.
+
+    :param value: Value to inspect recursively at the report boundary.
+    :returns: Redacted strings and containers; other values remain unchanged.
+    :raises RecursionError: If report containers contain a cycle or excessive nesting.
+    """  # noqa: DOC502 - Recursive redaction can exceed container nesting limits.
+
+
+def redact_tree(value: object) -> object:
+    """Redact strings and credential-named values in a nested report value.
+
+    :param value: String, mapping, non-byte sequence, or scalar report value.
+    :returns: A redacted string, transformed mapping or list, or unchanged scalar.
+        Unsupported objects remain unchanged so the output serializer can reject them.
+    :raises RecursionError: If report containers contain a cycle or excessive nesting.
+    """  # noqa: DOC502 - Recursive redaction can exceed container nesting limits.
     if isinstance(value, str):
         return redact(value)
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {
             redact(str(key)): (
                 "[REDACTED]" if is_secret_name(str(key)) else redact_tree(item)
             )
             for key, item in value.items()
         }
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
         return [redact_tree(item) for item in value]
     return value
 
 
 def sanitize(value: str, limit: int = 1000) -> str:
-    """Redact credential forms and bound untrusted report text."""
+    """Redact and truncate text destined for a bounded diagnostic field.
+
+    :param value: Untrusted text to sanitize.
+    :param limit: Maximum characters retained after redaction.
+    :returns: Redacted text truncated to ``limit`` characters.
+    """
     return redact(value)[:limit]
 
 
-TraceSink = Callable[[str, dict[str, Any]], None]
-_TRACE_SINK: ContextVar[TraceSink | None] = ContextVar("execution_trace", default=None)
+TraceSink = Callable[[str, Mapping[str, object]], None]
+_TRACE_SINK: ContextVar[Optional[TraceSink]] = ContextVar(
+    "execution_trace", default=None
+)
 TRACE_TEXT_LIMIT = 4096
 
 
 @contextmanager
-def execution_trace(sink: TraceSink | None) -> Iterator[None]:
-    """Bind diagnostics to one workflow and restore the caller's trace afterward.
+def execution_trace(sink: Optional[TraceSink]) -> Iterator[None]:
+    """Bind one workflow's diagnostic writer for the context scope.
 
-    :param sink: Workflow diagnostic writer, or None to disable tracing.
-    :yields: Control with the selected diagnostic writer bound.
+    :param sink: Event writer receiving safe event names and redacted details,
+        or ``None`` to disable tracing for this scope.
+    :yields: Control while the selected writer is bound; the previous writer is
+        restored when the scope exits.
+    :ytype: None
     """
     token = _TRACE_SINK.set(sink)
     try:
@@ -146,7 +226,7 @@ def execution_trace(sink: TraceSink | None) -> Iterator[None]:
         _TRACE_SINK.reset(token)
 
 
-def trace_event(event: str, details: dict[str, Any]) -> None:
+def trace_event(event: str, details: Mapping[str, object]) -> None:
     """Send a workflow event through the selected shared diagnostic writer.
 
     :param event: Stable operation event name.
@@ -168,6 +248,14 @@ def trace_enabled() -> bool:
 def _traced_result(
     argv: tuple[str, ...], returncode: int, stdout: str, stderr: str
 ) -> CommandResult:
+    """Build a command result and report bounded trace metadata when enabled.
+
+    :param argv: Exact command argument vector.
+    :param returncode: Native process exit status.
+    :param stdout: Captured standard output.
+    :param stderr: Captured standard error.
+    :returns: Command result carrying the supplied vector, status, and streams.
+    """
     result = CommandResult(argv, returncode, stdout, stderr)
     if trace_enabled():
         safe_argv = []
@@ -193,9 +281,16 @@ def run_command(
     argv: Sequence[str],
     *,
     timeout: int = 25,
-    env: dict[str, str | None] | None = None,
+    env: Optional[Mapping[str, Optional[str]]] = None,
 ) -> CommandResult:
-    """Execute an argument vector without a shell or interactive prompts."""
+    """Run a native argument vector without a shell or interactive input.
+
+    :param argv: Executable and arguments; each item is converted to text.
+    :param timeout: Maximum subprocess runtime in seconds.
+    :param env: Child environment overrides; ``None`` values remove variables.
+    :returns: Captured command result; missing tools and timeouts use status 127
+        and 124 respectively.
+    """
     command = tuple(str(part) for part in argv)
     environment = _environment(env)
     try:
@@ -219,14 +314,18 @@ def run_command_bounded(
     argv: Sequence[str],
     *,
     timeout: int = 25,
-    env: dict[str, str | None] | None = None,
+    env: Optional[Mapping[str, Optional[str]]] = None,
     max_stdout_bytes: int = 8 * 1024 * 1024,
 ) -> CommandResult:
-    """Capture a JSON response with a hard in-memory and process output limit.
+    """Run a native command with a strict stdout byte limit.
 
-    The command is killed when stdout exceeds the limit. Only the last 4096
-    stderr bytes are retained for classification; neither stream is reported
-    directly by an API caller. A timeout or output limit always reaps the child.
+    :param argv: Executable and arguments; each item is converted to text.
+    :param timeout: Maximum command runtime in seconds.
+    :param env: Child environment overrides; ``None`` values remove variables.
+    :param max_stdout_bytes: Maximum stdout bytes before the child is killed.
+    :returns: Captured result; status 125 means stdout exceeded its limit,
+        124 means timeout, and 127 means the executable is missing.
+    :raises ValueError: ``timeout`` or ``max_stdout_bytes`` is nonpositive.
     """
     if timeout <= 0 or max_stdout_bytes <= 0:
         raise ValueError("command limits must be positive")
@@ -244,7 +343,7 @@ def run_command_bounded(
     stdout = bytearray()
     stderr = bytearray()
     deadline = time.monotonic() + timeout
-    failure: int | None = None
+    failure: Optional[int] = None
     try:
         with selectors.DefaultSelector() as selector:
             assert process.stdout is not None and process.stderr is not None
@@ -296,7 +395,14 @@ def run_command_bounded(
     )
 
 
-def _environment(overrides: dict[str, str | None] | None) -> dict[str, str]:
+def _environment(
+    overrides: Optional[Mapping[str, Optional[str]]],
+) -> MutableMapping[str, str]:
+    """Prepare a noninteractive child environment from process variables.
+
+    :param overrides: Variables to set or unset after prompt-disabling defaults.
+    :returns: New environment mapping; a ``None`` override removes its key.
+    """
     environment = os.environ.copy()
     environment.update(
         {
@@ -320,18 +426,20 @@ def run_command_tail(
     timeout: int = 30,
     max_bytes: int = 65536,
     max_lines: int = 200,
-    env: dict[str, str | None] | None = None,
-    cwd: str | Path | None = None,
+    env: Optional[Mapping[str, Optional[str]]] = None,
+    cwd: Optional[Union[str, Path]] = None,
 ) -> CommandResult:
-    """Stream a command and retain only bounded stdout/stderr tail bytes.
-    :param argv:
-    :param timeout:
-    :param max_bytes:
-    :param max_lines:
-    :param env:
-    :param cwd:
-    :return: CommandResult
-    :raises ValueError:
+    """Run a native command and retain bounded output tails.
+
+    :param argv: Executable and arguments; each item is converted to text.
+    :param timeout: Maximum command runtime in seconds.
+    :param max_bytes: Maximum stdout bytes retained from the end of the stream.
+    :param max_lines: Maximum stdout lines returned after byte truncation.
+    :param env: Child environment overrides; ``None`` values remove variables.
+    :param cwd: Optional child working directory.
+    :returns: Command result with the final stdout lines and final 4096 stderr
+        bytes; status 124 means timeout and 127 means missing executable.
+    :raises ValueError: ``max_bytes`` or ``max_lines`` is nonpositive.
     """
     if max_bytes <= 0 or max_lines <= 0:
         raise ValueError("tail limits must be positive")
@@ -397,7 +505,13 @@ def run_command_tail(
 
 
 def error_class(result: CommandResult) -> str:
-    """Classify an external command without emitting its raw stderr."""
+    """Classify a native result without exposing raw stderr.
+
+    :param result: Native command status and stderr to classify.
+    :returns: Stable reason such as ``missing_tool``, ``timeout``,
+        ``response_too_large``, ``authentication``, ``authorization``,
+        ``resource_unavailable``, ``transport``, or ``command_failed``.
+    """
     if result.returncode == 127:
         return "missing_tool"
     if result.returncode == 124:

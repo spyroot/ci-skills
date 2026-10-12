@@ -15,15 +15,21 @@ import os
 import socket
 import subprocess
 from abc import ABC, abstractmethod
+from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass, field, replace
+from os import PathLike
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Final, Optional, Union
 
-from lib.python.core.catalog import GITHUB_TOKEN_VARIABLES, GITLAB_VARIABLES, github_variables
+from lib.python.core.catalog import (
+    GITHUB_TOKEN_VARIABLES,
+    GITLAB_VARIABLES,
+    github_variables,
+)
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
 from lib.python.core.paths import SKILL_ROOT
-from lib.python.core.provenance import ProvenanceError, skill_identity
+from lib.python.core.provenance import ProvenanceError, SkillIdentity, skill_identity
 from lib.python.core.target import (
     GitLabOperationTarget,
     HarborTarget,
@@ -35,15 +41,71 @@ from lib.python.core.target import (
 
 @dataclass(frozen=True)
 class CredentialSource:
+    """Resolved credential source and child-process environment overrides.
+
+    :param reference: Reportable source identifier without credential contents.
+    :param environment: Variables to set; ``None`` removes an ambient variable.
+
+    .. attribute :: reference
+        :type: str
+
+        Reportable source identifier without credential contents.
+
+    .. attribute :: environment
+        :type: Mapping[str, Optional[str]]
+
+        Variables to set; ``None`` removes an ambient variable.
+    """
+
     reference: str
-    environment: dict[str, str | None] = field(repr=False)
+    environment: Mapping[str, Optional[str]] = field(repr=False)
 
 
 @dataclass(frozen=True)
 class Sources:
-    github: CredentialSource | None
-    gitlab: CredentialSource | None
-    kubernetes: CredentialSource | None
+    """Credential and kubeconfig selections frozen for one invocation.
+
+    :param github: Selected GitHub credential source, or ``None`` if inactive.
+    :param gitlab: Selected GitLab credential source, or ``None`` if inactive.
+    :param kubernetes: Selected kubeconfig environment, or ``None`` if inactive.
+    :param kubeconfig_files: Resolved kubeconfig files in search-path order.
+    :param execution_host: Hostname where source selection occurred.
+    :param kubeconfig_digests: SHA-256 digests used to detect later file changes.
+
+    .. attribute :: github
+        :type: Optional[CredentialSource]
+
+        Selected GitHub credential source, or ``None`` if inactive.
+
+    .. attribute :: gitlab
+        :type: Optional[CredentialSource]
+
+        Selected GitLab credential source, or ``None`` if inactive.
+
+    .. attribute :: kubernetes
+        :type: Optional[CredentialSource]
+
+        Selected kubeconfig environment, or ``None`` if inactive.
+
+    .. attribute :: kubeconfig_files
+        :type: tuple[Path, ...]
+
+        Resolved kubeconfig files in search-path order.
+
+    .. attribute :: execution_host
+        :type: str
+
+        Hostname where source selection occurred.
+
+    .. attribute :: kubeconfig_digests
+        :type: tuple[str, ...]
+
+        SHA-256 digests used to detect later file changes.
+    """
+
+    github: Optional[CredentialSource]
+    gitlab: Optional[CredentialSource]
+    kubernetes: Optional[CredentialSource]
     kubeconfig_files: tuple[Path, ...]
     execution_host: str
     # Content digests captured at bind time. Pinning the FILENAME is not
@@ -56,7 +118,21 @@ class Sources:
 
 @dataclass(frozen=True)
 class ResolvedGitLabCredential:
-    """Hold one selected GitLab token and its reportable source."""
+    """GitLab token retained in memory with its reportable origin.
+
+    :param source: Credential source identifier without the token value.
+    :param token: Selected secret, excluded from representation and comparison.
+
+    .. attribute :: source
+        :type: str
+
+        Credential source identifier without the token value.
+
+    .. attribute :: token
+        :type: str
+
+        Selected secret, excluded from representation and comparison.
+    """
 
     source: str
     token: str = field(repr=False, compare=False)
@@ -65,7 +141,7 @@ class ResolvedGitLabCredential:
 class GitLabAuthentication(ABC):
     """Bind one GitLab target through a selectable credential source."""
 
-    def __init__(self, target: GitLabOperationTarget) -> None:
+    def __init__(self, target: GitLabOperationTarget):
         """Retain the selected GitLab target for this authentication attempt.
 
         :param target: Validated host and target configuration to bind.
@@ -86,7 +162,7 @@ class GitLabAuthentication(ABC):
         target_kind: str,
         target_reference: str,
         target_source: str,
-        revision: str | None = None,
+        revision: Optional[str] = None,
     ) -> BoundGitLabSession:
         """Bind credential, host, target, and skill identity for one operation.
 
@@ -101,7 +177,7 @@ class GitLabAuthentication(ABC):
             raise TargetError("gitlab_target_missing")
         credential = self.resolve()
         identity = resolve_skill_identity(revision)
-        environment: dict[str, str | None] = {
+        environment: Mapping[str, Optional[str]] = {
             **dict.fromkeys(GITLAB_VARIABLES),
             "CI_JOB_TOKEN": None,
             "GLAB_ENABLE_CI_AUTOLOGIN": None,
@@ -152,8 +228,17 @@ class ConfiguredGitLabAuthentication(GitLabAuthentication):
         return ResolvedGitLabCredential(source.reference, token)
 
 
-def _file_token(path: Path) -> str:
-    """Read one selected private token without returning it to a report."""
+def read_token_file(path: Union[str, PathLike[str]]) -> str:
+    """Read the selected private token file for a child provider client.
+
+    :param path: String or text path-like filename selected by runtime configuration;
+        its file must contain UTF-8 text and be at most 4096 bytes.
+    :returns: Nonempty token stripped of surrounding whitespace.
+    :raises TypeError: If path is not a string or text path-like object.
+    :raises TargetError: The file is unreadable, oversized, undecodable, empty,
+        or contains whitespace inside the token.
+    """  # noqa: DOC503 - Path construction rejects non-path arguments.
+    path = Path(path)
     try:
         if not path.is_file() or path.stat().st_size > 4096:
             raise TargetError("credential_file_unavailable")
@@ -166,18 +251,29 @@ def _file_token(path: Path) -> str:
 
 
 def _token_source(
-    path: Path | None,
-    names: tuple[str, ...],
+    path: Optional[Path],
+    names: Sequence[str],
     store: str,
     *,
-    clear_names: tuple[str, ...] | None = None,
+    clear_names: Optional[Sequence[str]] = None,
 ) -> CredentialSource:
-    """Pin explicit file, first effective environment variable, or CLI store."""
-    selected: str | None = None
-    value: str | None = None
+    """Select a token file, an environment variable, or the native CLI store.
+
+    :param path: Explicit token file; ``None`` enables environment/store selection.
+    :param names: Nonempty ordered sequence of accepted credential variable names.
+    :param store: Reportable store identifier when no file or variable is selected.
+    :param clear_names: Variables to clear from child environments; ``None`` uses
+        the accepted credential names. The selected token is always exported.
+    :returns: Source reference and environment overrides for the selected token.
+    :raises TargetError: If the selected file is invalid or a selected environment
+        variable is empty; no fallback is attempted after that failure.
+    :raises IndexError: If a token file is selected without any accepted variable names.
+    """  # noqa: DOC503 - Selecting the first variable can raise IndexError.
+    selected: Optional[str] = None
+    value: Optional[str] = None
     if path is not None:
         selected = names[0]
-        value = _file_token(path)
+        value = read_token_file(path)
         reference = f"file:{path.resolve()}"
     else:
         for name in names:
@@ -190,15 +286,23 @@ def _token_source(
                 break
         else:
             reference = store
-    overrides = {
-        name: (value if name == selected else None)
-        for name in (clear_names if clear_names is not None else names)
+    overrides: MutableMapping[str, Optional[str]] = {
+        name: None for name in (clear_names if clear_names is not None else names)
     }
+    if selected is not None:
+        overrides[selected] = value
     return CredentialSource(reference, overrides)
 
 
 def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ...]]:
-    """Pin the effective kubeconfig path set without assuming an auth type."""
+    """Resolve and verify the configured kubeconfig search path.
+
+    :param target: Runtime target containing Kubernetes configuration.
+    :returns: Credential-source record exporting ``KUBECONFIG`` and its ordered
+        tuple of resolved paths.
+    :raises TargetError: If Kubernetes is absent or a selected kubeconfig is empty,
+        unreadable, missing, or located inside the installed skill.
+    """
     if target.kubernetes is None:
         raise TargetError("kubernetes_target_missing")
     if target.kubernetes.kubeconfigs:
@@ -236,12 +340,12 @@ def _kubernetes_source(target: Target) -> tuple[CredentialSource, tuple[Path, ..
     ), paths
 
 
-def resolve_skill_identity(explicit: str | None) -> dict[str, Any]:
-    """Identify the executed skill by digest, with the revision as a claim.
+def resolve_skill_identity(explicit: Optional[str]) -> SkillIdentity:
+    """Identify the installed skill bytes and claimed source revision.
 
-    Replaces format-only revision resolution: a 40-hex string proves nothing
-    about the code that ran, and `CI_COMMIT_SHA` belongs to whatever project
-    invoked the skill, not to the skill. See `core.provenance`.
+    :param explicit: Optional revision claim supplied by the caller.
+    :returns: Provenance mapping containing the content digest and revision claim.
+    :raises TargetError: If installed provenance cannot be resolved or verified.
     """
     try:
         return skill_identity(SKILL_ROOT, explicit)
@@ -249,9 +353,14 @@ def resolve_skill_identity(explicit: str | None) -> dict[str, Any]:
         raise TargetError(str(exc)) from exc
 
 
-def kubeconfig_digests(paths: tuple[Path, ...]) -> tuple[str, ...]:
-    """Digest each kubeconfig's bytes, in search-path order."""
-    digests: list[str] = []
+def kubeconfig_digests(paths: Sequence[Path]) -> tuple[str, ...]:
+    """Hash kubeconfig contents in their configured search order.
+
+    :param paths: Ordered kubeconfig paths to read.
+    :returns: Tuple of hexadecimal SHA-256 digests in the same order.
+    :raises TargetError: If any selected kubeconfig cannot be read.
+    """
+    digests: MutableSequence[str] = []
     for path in paths:
         try:
             digests.append(hashlib.sha256(path.read_bytes()).hexdigest())
@@ -260,28 +369,33 @@ def kubeconfig_digests(paths: tuple[Path, ...]) -> tuple[str, ...]:
     return tuple(digests)
 
 
-def assert_kubeconfig_unchanged(sources: object) -> None:
-    """Refuse a kubeconfig that changed after it was verified.
+def assert_kubeconfig_unchanged(sources: Optional[Sources]) -> None:
+    """Reject kubeconfig changes after source binding.
 
-    Called immediately before each Kubernetes command is built, in the thread
-    that builds it, so the refusal propagates out of the collector and blocks.
-    Raising it inside the per-resource read path would be caught there and
-    degraded into a PARTIAL report with silently missing resources.
+    :param sources: Bound source record; None means the target has not been bound.
+        A record with no digests has no pinned files to check.
+    :raises TargetError: If a pinned file is unreadable or its digest changed.
 
-    This is detect-and-block, not an atomic pin: a file swapped between this
-    check and the command's own open is still possible. It closes the
-    non-adversarial case that actually happens -- a login rewriting the
-    kubeconfig mid-invocation.
+    The check detects changes before command construction; it does not make
+    subsequent file access atomic.
     """
-    if not isinstance(sources, Sources) or not sources.kubeconfig_digests:
+    if sources is None or not sources.kubeconfig_digests:
         return
     current = kubeconfig_digests(sources.kubeconfig_files)
     if current != sources.kubeconfig_digests:
         raise TargetError("kubeconfig_changed_during_invocation")
 
 
-def bind_sources(target: Target, *, revision: str | None = None) -> Target:
-    """Freeze effective source selection for access checks and collectors."""
+def bind_sources(target: Target, *, revision: Optional[str] = None) -> Target:
+    """Freeze active provider credentials and skill identity for an invocation.
+
+    :param target: Runtime target declaring the surfaces required by the command.
+    :param revision: Optional claimed revision of the installed skill.
+    :returns: Copy of the target containing selected sources, kubeconfig digests,
+        execution host, and skill provenance.
+    :raises TargetError: If an active surface, selected credential, kubeconfig,
+        or installed skill identity cannot be resolved.
+    """
     github = None
     if "github" in target.active_surfaces:
         if target.github is None:
@@ -324,11 +438,11 @@ def bind_sources(target: Target, *, revision: str | None = None) -> Target:
 
 
 def _glab_store_token(host: str) -> str:
-    """Pin one exact-host stored token noninteractively or refuse that source.
+    """Read one exact-host glab token without prompting.
 
-    The command runs outside a repository so a local glab profile cannot
-    replace the selected host. Its stdout is held only in memory and is never
-    included in an exception or report.
+    :param host: Provider hostname whose native CLI credential entry is selected.
+    :returns: Nonempty stored token, retained only in process memory.
+    :raises TargetError: If glab cannot return a valid token within ten seconds.
     """
     environment = os.environ.copy()
     for name in (*GITLAB_VARIABLES, "CI_JOB_TOKEN", "GLAB_ENABLE_CI_AUTOLOGIN"):
@@ -362,7 +476,7 @@ def bind_gitlab_session(
     target_kind: str,
     target_reference: str,
     target_source: str,
-    revision: str | None = None,
+    revision: Optional[str] = None,
 ) -> BoundGitLabSession:
     """Bind the selected target through the shared authentication interface.
 
@@ -373,7 +487,7 @@ def bind_gitlab_session(
     :param revision: Explicit skill revision for an installed copy.
     :returns: Bound session for access read-back and API operations.
     :raises TargetError: If target selection or credential binding fails.
-    """
+    """  # noqa: DOC502 - ConfiguredGitLabAuthentication.bind validates inputs.
     return ConfiguredGitLabAuthentication(target).bind(
         target_kind=target_kind,
         target_reference=target_reference,
@@ -387,7 +501,27 @@ MAX_REGISTRY_CREDENTIAL_BYTES: Final = 64 * 1024
 
 @dataclass(frozen=True)
 class RegistryCredential:
-    """Resolved registry identity and secret retained only in memory."""
+    """Registry identity and secret retained only in memory.
+
+    :param username: Selected registry username or robot-account name.
+    :param password: Selected secret, excluded from representation and comparison.
+    :param source: Reportable credential-file reference.
+
+    .. attribute :: username
+        :type: str
+
+        Selected registry username or robot-account name.
+
+    .. attribute :: password
+        :type: str
+
+        Selected secret, excluded from representation and comparison.
+
+    .. attribute :: source
+        :type: str
+
+        Reportable credential-file reference.
+    """
 
     username: str
     password: str = field(repr=False, compare=False)
@@ -414,8 +548,8 @@ def resolve_harbor_credential(target: HarborTarget) -> RegistryCredential:
         if target.username_file is None or target.password_file is None:
             raise TargetError("harbor_credential_selection_invalid")
         return RegistryCredential(
-            _file_token(target.username_file),
-            _file_token(target.password_file),
+            read_token_file(target.username_file),
+            read_token_file(target.password_file),
             f"file:{target.username_file} -> file:{target.password_file}",
         )
     path = target.credential_file

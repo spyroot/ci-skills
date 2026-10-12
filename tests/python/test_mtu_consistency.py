@@ -1,19 +1,40 @@
-"""Physical MTU reports keep exact target, plan, and cleanup evidence."""
+"""Physical MTU reports keep exact target, plan, and cleanup evidence.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Union
 
 import pytest
-from tests.python.conftest import import_script_module
+from conftest import import_script_module
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject, JSONValue
+    from lib.python.core.kubernetes.mtu_consistency import MtuPlan, MtuRead
+    from lib.python.core.target import Target
 
 MTU = import_script_module("lib.python.core.kubernetes.mtu_consistency")
 RUNTIME = import_script_module("lib.python.core.runtime")
 TARGET = import_script_module("lib.python.core.target")
 
 
-def _link(name: str, mtu: int, *, bus: str = "pci", family: str = "inet"):
+def _link(name: str, mtu: int, *, bus: str = "pci", family: str = "inet") -> JSONObject:
+    """Build an ip-link record with selectable bus and address family.
+
+    :param name: Interface name used in output records.
+    :param mtu: MTU reported for the interface.
+    :param bus: Parent bus used to distinguish PCI from virtual links.
+    :param family: Address family used to test IPv4 extraction.
+    :returns: Link mapping resembling ``ip -d -j addr show`` output.
+    """
     return {
         "ifname": name,
         "mtu": mtu,
@@ -30,7 +51,12 @@ def _link(name: str, mtu: int, *, bus: str = "pci", family: str = "inet"):
     }
 
 
-def _target(tmp_path):
+def _target(tmp_path: Path) -> Target:
+    """Build a Kubernetes-only target pinned to a fixture context/file.
+
+    :param tmp_path: Directory receiving the target TOML path.
+    :returns: Target carrying selected cluster and kubeconfig references.
+    """
     path = tmp_path / "target.toml"
     path.write_text(
         '[kubernetes]\ncontext = "selected"\n'
@@ -45,12 +71,20 @@ def _target(tmp_path):
         ),
         active_surfaces=("kubernetes",),
         source_file=path,
-        source_kind="argv:--target",
+        source_kind="env:CI_SKILLS_TARGET",
         target_reference=f"cli:{path}",
     )
 
 
-def _args(**overrides):
+def _args(
+    **overrides: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+) -> SimpleNamespace:
+    """Build parsed-command-shaped MTU options with selected overrides.
+
+    :param **overrides: Field overrides applied to the default test namespace.
+    :returns: Namespace-shaped options used by plan and collection tests.
+
+    """
     values = {
         "target": None,
         "binding": None,
@@ -74,7 +108,11 @@ def _args(**overrides):
     return SimpleNamespace(**values)
 
 
-def _plan():
+def _plan() -> MtuPlan:
+    """Build a two-node MTU plan with a fixed digest and host command.
+
+    :returns: Plan selecting diagnostics namespace and both fixture nodes.
+    """
     return MTU.MtuPlan(
         "diagnostics",
         ("node-a", "node-b"),
@@ -86,7 +124,10 @@ def _plan():
     )
 
 
-def test_physical_uplinks_include_pci_links_without_ipv4():
+def test_physical_uplinks_include_pci_links_without_ipv4() -> None:
+    """Keep PCI Ethernet without IPv4 while excluding virtual and veth links.
+    :returns: None; assertions in the body validate the regression.
+    """
     payload = [
         _link("eno1", 9000),
         _link("cilium_vxlan", 1450, bus="virtual"),
@@ -126,26 +167,53 @@ def test_physical_uplinks_include_pci_links_without_ipv4():
 @pytest.mark.parametrize(
     "payload", ({}, None, [_link("eno1", 9000) | {"addr_info": {}}])
 )
-def test_malformed_link_envelopes_fail_instead_of_reporting_empty_pass(payload):
+def test_malformed_link_envelopes_fail_instead_of_reporting_empty_pass(
+    payload: JSONValue,
+) -> None:
+    """Reject malformed link envelopes instead of claiming no uplinks.
+
+    :param payload: Invalid root or address-list shape supplied to the parser.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     with pytest.raises(TypeError):
         MTU.physical_uplinks(payload)
 
 
-def test_node_command_pins_kubeconfig_context_and_non_tty_debug(tmp_path, monkeypatch):
+def test_node_command_pins_kubeconfig_context_and_non_tty_debug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Require oc debug to pin target file/context without TTY or SSH.
+
+    :param tmp_path: Directory used for target and kubeconfig paths.
+    :param monkeypatch: Pytest fixture replacing the debug command runner.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
     seen = []
 
-    def fake_run(argv, **_kwargs):
+    def fake_run(
+        argv: Sequence[str],
+        **_kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> RUNTIME.CommandResult:
+        """Record the exact oc debug argv and return one physical uplink.
+
+        :param argv: Native debug command requested for the selected node.
+        :param **_kwargs: Ignored keyword arguments accepted by the fake boundary.
+        :returns: Successful command result containing JSON link data.
+
+        """
         seen.append(tuple(argv))
         return RUNTIME.CommandResult(
             tuple(argv), 0, json.dumps([_link("eno1", 9000)]), ""
         )
 
     monkeypatch.setattr(MTU, "run_command_tail", fake_run)
-    links, error = MTU._read_one(target, _plan(), "node-a", "unit-marker", 90)
+    observation = MTU._read_one(target, _plan(), "node-a", "unit-marker", 90)
 
-    assert error is None
-    assert links[0]["mtu"] == 9000
+    assert observation.errors == []
+    assert observation.records[0]["mtu"] == 9000
     assert seen == [
         (
             "oc",
@@ -171,7 +239,16 @@ def test_node_command_pins_kubeconfig_context_and_non_tty_debug(tmp_path, monkey
     assert "ssh" not in seen[0]
 
 
-def test_non_openshift_target_blocks_before_debug_pod_creation(tmp_path, monkeypatch):
+def test_non_openshift_target_blocks_before_debug_pod_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject absent OpenShift API before choosing nodes or creating debug Pods.
+
+    :param tmp_path: Directory used for the selected target.
+    :param monkeypatch: Pytest fixture replacing cluster probes and node read.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
     monkeypatch.setattr(MTU.shutil, "which", lambda _name: "/fake/oc")
     monkeypatch.setattr(
@@ -192,13 +269,20 @@ def test_non_openshift_target_blocks_before_debug_pod_creation(tmp_path, monkeyp
 
 
 def test_mtu_mismatch_is_partial_with_action_and_verified_cleanup(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Report an inter-node MTU mismatch as partial after verified cleanup.
+
+    :param tmp_path: Directory used for the selected target.
+    :param monkeypatch: Pytest fixture returning differing node link data.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
     monkeypatch.setattr(
         MTU,
         "_read_one",
-        lambda _target, _plan, node, _marker, _timeout: (
+        lambda _target, _plan, node, _marker, _timeout: MTU.MtuRead(
             [
                 {
                     "node": node,
@@ -207,7 +291,7 @@ def test_mtu_mismatch_is_partial_with_action_and_verified_cleanup(
                     )[0],
                 }
             ],
-            None,
+            [],
         ),
     )
     monkeypatch.setattr(
@@ -225,12 +309,32 @@ def test_mtu_mismatch_is_partial_with_action_and_verified_cleanup(
     assert result["findings"][0]["code"] == "physical_mtu_mismatch"
 
 
-def test_identical_multi_nic_nodes_are_consistent(tmp_path, monkeypatch):
+def test_identical_multi_nic_nodes_are_consistent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Compare MTU by interface, allowing distinct NIC sizes across nodes.
+
+    :param tmp_path: Directory used for the selected target.
+    :param monkeypatch: Pytest fixture returning matching per-NIC node data.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
 
-    def fake_read(_target, _plan, node, _marker, _timeout):
+    def fake_read(
+        _target: Target, _plan: MtuPlan, node: str, _marker: str, _timeout: int
+    ) -> MtuRead:
+        """Return matching two-interface inventory for each selected node.
+
+        :param _target: Selected cluster target accepted by the double.
+        :param _plan: MTU plan accepted by the double.
+        :param node: Node name attached to each returned link.
+        :param _marker: Debug-run marker accepted by the double.
+        :param _timeout: Read timeout accepted by the double.
+        :returns: Node-labeled read observation with no errors.
+        """
         links = MTU.physical_uplinks([_link("eno1", 9000), _link("eno2", 1500)])
-        return [{"node": node, **link} for link in links], None
+        return MTU.MtuRead([{"node": node, **link} for link in links], [])
 
     monkeypatch.setattr(MTU, "_read_one", fake_read)
     monkeypatch.setattr(
@@ -251,14 +355,23 @@ def test_identical_multi_nic_nodes_are_consistent(tmp_path, monkeypatch):
     assert result["findings"] == []
 
 
-def test_cleanup_failure_blocks_even_when_nic_reads_succeed(tmp_path, monkeypatch):
+def test_cleanup_failure_blocks_even_when_nic_reads_succeed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Block an otherwise healthy MTU report when debug Pods remain.
+
+    :param tmp_path: Directory used for the selected target.
+    :param monkeypatch: Pytest fixture simulating healthy reads and failed cleanup.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
     monkeypatch.setattr(
         MTU,
         "_read_one",
-        lambda _target, _plan, node, _marker, _timeout: (
+        lambda _target, _plan, node, _marker, _timeout: MTU.MtuRead(
             [{"node": node, **MTU.physical_uplinks([_link("eno1", 9000)])[0]}],
-            None,
+            [],
         ),
     )
     monkeypatch.setattr(
@@ -279,14 +392,31 @@ def test_cleanup_failure_blocks_even_when_nic_reads_succeed(tmp_path, monkeypatc
 
 
 def test_cleanup_deletes_only_this_runs_marked_pod_and_reads_back(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Delete only the marked debug Pod and verify it is absent afterward.
+
+    :param tmp_path: Directory used for target and kubeconfig paths.
+    :param monkeypatch: Pytest fixture returning before/after Pod lists.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
     observed = iter([["node-a-debug"], []])
     calls = []
     monkeypatch.setattr(MTU, "_marked_pods", lambda *_args: next(observed))
 
-    def fake_run(argv, **_kwargs):
+    def fake_run(
+        argv: Sequence[str],
+        **_kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> RUNTIME.CommandResult:
+        """Record the marked Pod deletion and return native success.
+
+        :param argv: kubectl delete command with selected namespace and context.
+        :param **_kwargs: Ignored keyword arguments accepted by the fake boundary.
+        :returns: Successful result reporting Pod deletion.
+
+        """
         calls.append(tuple(argv))
         return RUNTIME.CommandResult(tuple(argv), 0, "pod deleted", "")
 
@@ -315,10 +445,25 @@ def test_cleanup_deletes_only_this_runs_marked_pod_and_reads_back(
     ]
 
 
-def test_marked_pod_readback_ignores_other_debug_runs(tmp_path, monkeypatch):
+def test_marked_pod_readback_ignores_other_debug_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Filter debug Pods by the selected run marker, preserving other runs.
+
+    :param tmp_path: Directory used for the selected target.
+    :param monkeypatch: Pytest fixture supplying mixed-run Pod JSON.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
 
-    def pod(name, marker):
+    def pod(name: str, marker: str) -> JSONObject:
+        """Build a debug Pod with its own run marker.
+
+        :param name: Pod name returned in marked read-back.
+        :param marker: CI_SKILLS_MTU_RUN_ID value in the debugger container.
+        :returns: Minimal Pod mapping for the namespace list fixture.
+        """
         return {
             "metadata": {"name": name},
             "spec": {
@@ -344,19 +489,51 @@ def test_marked_pod_readback_ignores_other_debug_runs(tmp_path, monkeypatch):
 
 
 def test_timeout_keeps_partial_evidence_and_still_verifies_cleanup(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retain one node's MTU data when another times out, then clean up.
+
+    :param tmp_path: Directory used for the selected target.
+    :param monkeypatch: Pytest fixture simulating mixed node results.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
     called = []
 
-    def fake_read(_target, _plan, node, _marker, _timeout):
-        if node == "node-a":
-            return [
-                {"node": node, **MTU.physical_uplinks([_link("eno1", 9000)])[0]}
-            ], None
-        return [], {"source": "node/node-b", "reason": "node/node-b:timeout"}
+    def fake_read(
+        _target: Target, _plan: MtuPlan, node: str, _marker: str, _timeout: int
+    ) -> MtuRead:
+        """Return node-a data and a node-b timeout error.
 
-    def fake_cleanup(*_args):
+        :param _target: Selected cluster target accepted by the double.
+        :param _plan: MTU plan accepted by the double.
+        :param node: Selected node determining success or timeout.
+        :param _marker: Debug-run marker accepted by the double.
+        :param _timeout: Read timeout accepted by the double.
+        :returns: Node read observation for the selected branch.
+        """
+        if node == "node-a":
+            return MTU.MtuRead(
+                [
+                    {
+                        "node": node,
+                        **MTU.physical_uplinks([_link("eno1", 9000)])[0],
+                    }
+                ],
+                [],
+            )
+        return MTU.MtuRead(
+            [], [{"source": "node/node-b", "reason": "node/node-b:timeout"}]
+        )
+
+    def fake_cleanup(*_args: str) -> JSONObject:
+        """Record cleanup after a node timeout and claim verified removal.
+
+        :param *_args: Ignored positional arguments accepted by the fake boundary.
+        :returns: Passing cleanup record with no remaining Pods.
+
+        """
         called.append("cleanup")
         return {"status": "PASS", "verified": True, "remaining_pods": []}
 
@@ -373,16 +550,38 @@ def test_timeout_keeps_partial_evidence_and_still_verifies_cleanup(
     ]
 
 
-def test_interrupted_debug_still_runs_cleanup(tmp_path, monkeypatch):
+def test_interrupted_debug_still_runs_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run cleanup under ignored signals and restore original handlers.
+
+    :param tmp_path: Directory used for the selected target.
+    :param monkeypatch: Pytest fixture replacing read and cleanup operations.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
     called = []
     original_int = MTU.signal.getsignal(MTU.signal.SIGINT)
     original_term = MTU.signal.getsignal(MTU.signal.SIGTERM)
 
-    def interrupted(*_args):
+    def interrupted(*_args: str) -> None:
+        """Interrupt a node read before returning link data.
+
+        :param *_args: Ignored positional arguments accepted by the fake boundary.
+        :returns: None; the helper records behavior through its side effects.
+        :raises MTU.Interrupted: Debug collection is interrupted.
+
+        """
         raise MTU.Interrupted("interrupted")
 
-    def fake_cleanup(*_args):
+    def fake_cleanup(*_args: str) -> JSONObject:
+        """Verify signal masking during cleanup after interruption.
+
+        :param *_args: Ignored positional arguments accepted by the fake boundary.
+        :returns: Passing cleanup record with no remaining Pods.
+
+        """
         assert MTU.signal.getsignal(MTU.signal.SIGINT) == MTU.signal.SIG_IGN
         assert MTU.signal.getsignal(MTU.signal.SIGTERM) == MTU.signal.SIG_IGN
         called.append("cleanup")
@@ -402,13 +601,27 @@ def test_interrupted_debug_still_runs_cleanup(tmp_path, monkeypatch):
 
 
 def test_default_plan_and_mismatched_confirmation_never_launch_debug(
-    tmp_path, monkeypatch, capsys
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Require an exact plan digest before launching a node debug Pod.
+
+    :param tmp_path: Directory used for the selected target.
+    :param monkeypatch: Pytest fixture replacing access, plan, and collector.
+    :param capsys: Pytest fixture capturing planned and denied machine reports.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
     monkeypatch.setattr(MTU, "resolve_target", lambda *_args, **_kwargs: target)
     monkeypatch.setattr(MTU, "bind_sources", lambda target, **_kwargs: target)
 
-    def base_kubernetes_access(_target, *, cilium):
+    def base_kubernetes_access(_target: Target, *, cilium: str) -> JSONObject:
+        """Allow base cluster access without requiring a Cilium probe.
+
+        :param _target: Selected cluster target accepted by the fake gate.
+        :param cilium: Must be false for the MTU-only access path.
+        :returns: Passing base Kubernetes access result.
+        """
         assert cilium is False
         return {"status": "PASS"}
 
@@ -431,7 +644,16 @@ def test_default_plan_and_mismatched_confirmation_never_launch_debug(
     assert denied["errors"] == [{"source": "plan", "reason": "plan_digest_mismatch"}]
 
 
-def test_plan_digest_changes_when_selected_nodes_change(tmp_path, monkeypatch):
+def test_plan_digest_changes_when_selected_nodes_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bind the plan digest to the exact set of selected nodes.
+
+    :param tmp_path: Directory used for the selected target.
+    :param monkeypatch: Pytest fixture varying node selection between plans.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = _target(tmp_path)
     monkeypatch.setattr(MTU, "_verify_openshift", lambda _target: None)
     monkeypatch.setattr(MTU, "_read_namespace", lambda _target: "diagnostics")

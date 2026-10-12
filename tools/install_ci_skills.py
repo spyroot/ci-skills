@@ -15,25 +15,31 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import shutil
 import stat
 import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Iterator, Mapping, MutableMapping, MutableSequence, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import Optional
 
 SKILL_NAME = "ci-skills"
 JOURNAL_NAME = f".{SKILL_NAME}.install-transaction.json"
 LOCK_NAME = f".{SKILL_NAME}.install.lock"
 LOCK_WAIT_SECONDS = 30
 SOURCE = Path(__file__).resolve().parents[1] / SKILL_NAME
-sys.path.insert(0, str(SOURCE))
+runpy.run_path(str(SOURCE / "bin" / "_bootstrap.py"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agent_profile import AgentProfile, AgentProfileError, AgentProfileReason
+from lib.python.core.cli_api import response_decoder
+from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.provenance import (
     INSTALLATION_IDENTITY_KIND,
     INSTALLATION_IDENTITY_NAME,
@@ -77,27 +83,49 @@ RECOVERY = {
 
 
 def skills_directory() -> Path:
-    """Resolve the user's configured Codex home at invocation time."""
+    """Resolve the default Codex skills directory at invocation time.
+
+    :returns: CODEX_HOME/skills when configured, otherwise ~/.codex/skills.
+    """
     codex_home = os.environ.get("CODEX_HOME")
     return (
         Path(codex_home).expanduser() if codex_home else Path.home() / ".codex"
     ) / "skills"
 
 
-def plan_fingerprint(plan: dict[str, Any]) -> str:
-    """Bind a confirmed install to its source bytes, revision and destination."""
-    revision = plan["revision"].get("value") or ""
-    values = (plan["source"], plan["destination"], revision, plan["digest"])
-    return hashlib.sha256("\0".join(values).encode()).hexdigest()
+def plan_fingerprint(plan: JSONObject) -> str:
+    """Bind an installation decision to source, destination, revision, and bytes.
+
+    :param plan: Install plan containing revision, source, destination, and digest.
+    :returns: SHA-256 hexadecimal confirmation fingerprint.
+    :raises KeyError: If the plan lacks revision, source, destination, or digest.
+    :raises TypeError: If revision is not an object or a fingerprint field is not text.
+    """  # noqa: DOC503 - Required plan fields are accessed by key.
+    revision = plan["revision"]
+    if not isinstance(revision, Mapping):
+        raise TypeError("invalid_install_revision")
+    values = (
+        plan["source"],
+        plan["destination"],
+        revision.get("value") or "",
+        plan["digest"],
+    )
+    fields: MutableSequence[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise TypeError("invalid_install_fingerprint")
+        fields.append(value)
+    return hashlib.sha256("\0".join(fields).encode()).hexdigest()
 
 
-def confirmed_fingerprint(core_fingerprint: str, agent_plan: dict[str, Any]) -> str:
+def confirmed_fingerprint(core_fingerprint: str, agent_plan: JSONObject) -> str:
     """Bind confirmation to agent state and both installer implementations.
 
     :param core_fingerprint: Digest of the skill source and destination plan.
     :param agent_plan: Complete agent host and bundled-skill plan.
     :returns: SHA-256 fingerprint of the combined installation decision.
-    """
+    :raises OSError: If either installer implementation cannot be read for hashing.
+    """  # noqa: DOC502 - Installer implementation files are read for hashing.
     implementation = {
         name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
         for name in ("install_ci_skills.py", "agent_profile.py")
@@ -113,19 +141,32 @@ def confirmed_fingerprint(core_fingerprint: str, agent_plan: dict[str, Any]) -> 
 
 
 def _present(path: Path) -> bool:
-    """Include broken links when deciding whether an install path is occupied."""
+    """Treat an existing path or broken symlink as an occupied install slot.
+
+    :param path: Candidate skill destination or transaction path.
+    :returns: True if the path exists or is a symlink.
+    """
     return path.is_symlink() or path.exists()
 
 
 def _entry_digest(path: Path) -> str:
-    """Identify a directory or preserved link without traversing link targets."""
+    """Digest a skill directory or the text of a preserved symlink.
+
+    :param path: Existing directory or symlink to identify without following links.
+    :returns: SHA-256 hexadecimal digest for the selected entry.
+    """
     if path.is_symlink():
         return hashlib.sha256(b"symlink\0" + os.readlink(path).encode()).hexdigest()
     return tree_digest(path)["digest"]
 
 
-def package_files(source: Path) -> list[Path]:
-    """Select installable files and refuse links to paths outside the skill."""
+def package_files(source: Path) -> Sequence[Path]:
+    """Select installable skill files after rejecting missing manifests and links.
+
+    :param source: Source skill directory to inventory.
+    :returns: Included file paths relative to the source directory.
+    :raises ValueError: If SKILL.md is missing or any source entry is a symlink.
+    """
     if not (source / "SKILL.md").is_file():
         raise ValueError("skill_manifest_missing")
     for path in source.rglob("*"):
@@ -135,9 +176,15 @@ def package_files(source: Path) -> list[Path]:
 
 
 def _write_installation_identity(
-    staging: Path, digest: dict[str, Any], revision: dict[str, Any]
+    staging: Path, digest: JSONObject, revision: JSONObject
 ) -> None:
-    """Record the verified source identity beside the installed bytes."""
+    """Write the verified source identity beside staged skill bytes.
+
+    :param staging: Newly created staging directory receiving the identity record.
+    :param digest: Source tree digest, algorithm, and file count.
+    :param revision: Source revision identity; unverified revisions are skipped.
+    :raises OSError: If the exclusive identity file cannot be created or synced.
+    """  # noqa: DOC502 - Identity creation, writing, and syncing propagate OSError.
     if revision.get("verified") is not True:
         return
     record = {
@@ -162,10 +209,16 @@ def _write_installation_identity(
 
 def _installed_matches(
     destination: Path,
-    expected_digest: dict[str, Any],
-    expected_revision: dict[str, Any],
+    expected_digest: JSONObject,
+    expected_revision: JSONObject,
 ) -> bool:
-    """Accept an idempotent install only when bytes and source identity match."""
+    """Check installed bytes and verified revision before an idempotent upgrade.
+
+    :param destination: Existing installed skill directory.
+    :param expected_digest: Digest mapping computed from the source skill.
+    :param expected_revision: Source revision identity required for a match.
+    :returns: True if bytes match and verified revision matches when required.
+    """
     if tree_digest(destination) != expected_digest:
         return False
     if expected_revision.get("verified") is not True:
@@ -180,12 +233,27 @@ def _installed_matches(
 
 
 def _journal_path(skills_dir: Path) -> Path:
+    """Locate the install transaction journal inside the skills directory.
+
+    :param skills_dir: Parent directory for the installed skill.
+    :returns: Path to the fixed transaction journal name.
+    """
     return skills_dir / JOURNAL_NAME
 
 
 @contextmanager
-def _mutation_lock(skills_dir: Path, *, deadline: float | None = None):
-    """Serialize destination inspection and mutation across local processes."""
+def _mutation_lock(
+    skills_dir: Path, *, deadline: Optional[float] = None
+) -> Iterator[None]:
+    """Hold an exclusive file lock while inspecting and changing a skill install.
+
+    :param skills_dir: Parent directory containing the installer lock file.
+    :param deadline: Optional absolute monotonic deadline for lock acquisition.
+    :yields: Control to the caller while the exclusive lock is held.
+    :raises ValueError: If the lock file is unsafe or acquisition times out.
+    :raises OSError: If the lock file cannot be opened or locking fails.
+    :ytype: None
+    """
     skills_dir.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(
         skills_dir / LOCK_NAME,
@@ -216,8 +284,13 @@ def _mutation_lock(skills_dir: Path, *, deadline: float | None = None):
         os.close(descriptor)
 
 
-def _write_journal(skills_dir: Path, data: dict[str, Any]) -> None:
-    """Publish a complete transaction atomically before moving the old skill."""
+def _write_journal(skills_dir: Path, data: JSONObject) -> None:
+    """Publish a complete install transaction through an exclusive hard link.
+
+    :param skills_dir: Directory receiving the transaction journal.
+    :param data: Transaction nonce, digests, and previous-entry kind.
+    :raises OSError: If the temporary journal cannot be written or published.
+    """  # noqa: DOC502 - Journal staging, linking, and cleanup propagate OSError.
     descriptor, name = tempfile.mkstemp(
         prefix=f".{SKILL_NAME}.journal-", dir=skills_dir
     )
@@ -232,16 +305,23 @@ def _write_journal(skills_dir: Path, data: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _read_journal(skills_dir: Path) -> tuple[dict[str, Any], Path, Path]:
+def _read_journal(skills_dir: Path) -> tuple[JSONObject, Path, Path]:
+    """Validate an interrupted-install journal and derive its transaction paths.
+
+    :param skills_dir: Directory holding the journal and staged entries.
+    :returns: Validated journal data, staging path, and previous-version path.
+    :raises ValueError: If the journal or related symlink state is unsafe.
+    :raises OSError: If the journal metadata cannot be read.
+    """  # noqa: DOC503 - Journal metadata access outside the decoder guard can fail.
     journal = _journal_path(skills_dir)
     metadata = journal.lstat()
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
         raise ValueError("install_recovery_unsafe")
     try:
-        data = json.loads(journal.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError) as exc:
+        data = response_decoder().decode(journal.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
         raise ValueError("install_recovery_unsafe") from exc
-    if not isinstance(data, dict) or data.get("schema_version") != "1.0":
+    if not isinstance(data, Mapping) or data.get("schema_version") != "1.0":
         raise ValueError("install_recovery_unsafe")
     nonce = data.get("nonce")
     if (
@@ -250,15 +330,14 @@ def _read_journal(skills_dir: Path) -> tuple[dict[str, Any], Path, Path]:
         or any(char not in "0123456789abcdef" for char in nonce)
     ):
         raise ValueError("install_recovery_unsafe")
-    if not all(
-        isinstance(data.get(key), str) and len(data[key]) == 64
-        for key in ("old_digest", "new_digest")
-    ):
-        raise ValueError("install_recovery_unsafe")
+    for key in ("old_digest", "new_digest"):
+        digest = data.get(key)
+        if not isinstance(digest, str) or len(digest) != 64:
+            raise ValueError("install_recovery_unsafe")
     staging = skills_dir / f".{SKILL_NAME}.stage-{nonce}"
     previous = skills_dir / f".{SKILL_NAME}.previous-{nonce}"
     old_kind = data.get("old_kind", "directory")
-    if old_kind not in {"directory", "symlink"}:
+    if not isinstance(old_kind, str) or old_kind not in {"directory", "symlink"}:
         raise ValueError("install_recovery_unsafe")
     if staging.is_symlink() or (previous.is_symlink() and old_kind != "symlink"):
         raise ValueError("install_recovery_unsafe")
@@ -266,12 +345,21 @@ def _read_journal(skills_dir: Path) -> tuple[dict[str, Any], Path, Path]:
 
 
 def _recover_install_unlocked(
-    skills_dir: Path, *, dry_run: bool, deadline: float | None = None
-) -> dict[str, Any]:
-    """Reconcile one interrupted install without deleting an unknown skill."""
+    skills_dir: Path, *, dry_run: bool, deadline: Optional[float] = None
+) -> MutableMapping[str, JSONValue]:
+    """Reconcile a journaled install from verified active and previous entries.
+
+    :param skills_dir: Parent directory containing the interrupted transaction.
+    :param dry_run: Whether to report the recovery action without changing paths.
+    :param deadline: Optional absolute monotonic deadline before recovery starts.
+    :returns: Recovery result with action and PASS, DRY_RUN, or BLOCKED status.
+    :raises OSError: If the selected parent path cannot be resolved before recovery.
+
+    Journal validation and transaction I/O failures become a BLOCKED result.
+    """  # noqa: DOC503 - transaction ValueError is caught; initial path resolution can raise.
     skills_dir = skills_dir.expanduser().resolve()
     destination = skills_dir / SKILL_NAME
-    result: dict[str, Any] = {
+    result: MutableMapping[str, JSONValue] = {
         "schema_version": "1.0",
         "kind": "skill_install_recovery",
         "destination": str(destination),
@@ -334,9 +422,15 @@ def _recover_install_unlocked(
 
 
 def recover_install(
-    skills_dir: Path, *, dry_run: bool, deadline: float | None = None
-) -> dict[str, Any]:
-    """Recover under the same lock as installation and upgrade."""
+    skills_dir: Path, *, dry_run: bool, deadline: Optional[float] = None
+) -> MutableMapping[str, JSONValue]:
+    """Run install recovery under the shared mutation lock when applying.
+
+    :param skills_dir: Parent directory containing an interrupted install.
+    :param dry_run: Whether to inspect and plan without modifying paths.
+    :param deadline: Optional absolute monotonic deadline for lock and recovery.
+    :returns: Recovery result with PASS, DRY_RUN, or BLOCKED status.
+    """
     if dry_run:
         return _recover_install_unlocked(skills_dir, dry_run=True)
     try:
@@ -363,13 +457,26 @@ def _install_unlocked(
     dry_run: bool,
     require_verified: bool = True,
     upgrade: bool = False,
-    deadline: float | None = None,
-    expected_fingerprint: str | None = None,
-) -> dict[str, Any]:
-    """Stage and verify a skill with a recoverable cross-rename journal."""
+    deadline: Optional[float] = None,
+    expected_fingerprint: Optional[str] = None,
+) -> MutableMapping[str, JSONValue]:
+    """Stage, verify, activate, and journal one installation decision.
+
+    :param source: Source skill tree whose bytes and identity are installed.
+    :param skills_dir: Parent directory receiving the installed skill.
+    :param dry_run: Whether to return a plan without changing install paths.
+    :param require_verified: Whether source revision proof is mandatory.
+    :param upgrade: Whether an occupied destination may be replaced.
+    :param deadline: Optional absolute monotonic deadline before activation.
+    :param expected_fingerprint: Optional digest of the confirmed source plan.
+    :returns: Install result with PASS or DRY_RUN status, or BLOCKED for I/O,
+        validation, or unsuccessful recovery within the transaction.
+    :raises BaseException: If an interruption or an error outside the I/O and
+        validation handlers escapes; activation failures trigger rollback first.
+    """  # noqa: DOC503 - Explicit ValueError paths are caught and reported as BLOCKED.
     skills_dir = skills_dir.expanduser().resolve()
     destination = skills_dir / SKILL_NAME
-    result: dict[str, Any] = {
+    result: MutableMapping[str, JSONValue] = {
         "schema_version": "1.0",
         "kind": "skill_install",
         "source": str(source.resolve()),
@@ -488,10 +595,20 @@ def install(
     dry_run: bool,
     require_verified: bool = True,
     upgrade: bool = False,
-    deadline: float | None = None,
-    expected_fingerprint: str | None = None,
-) -> dict[str, Any]:
-    """Serialize the full install decision and mutation for one skill root."""
+    deadline: Optional[float] = None,
+    expected_fingerprint: Optional[str] = None,
+) -> MutableMapping[str, JSONValue]:
+    """Preflight an install and serialize its confirmed mutation under a lock.
+
+    :param source: Source skill tree to fingerprint and copy.
+    :param skills_dir: Parent directory receiving the installed skill.
+    :param dry_run: Whether to return only the installation plan.
+    :param require_verified: Whether source revision proof is mandatory.
+    :param upgrade: Whether an occupied destination may be replaced.
+    :param deadline: Optional absolute monotonic deadline for apply.
+    :param expected_fingerprint: Optional digest bound to the earlier plan.
+    :returns: Install result with PASS, DRY_RUN, or BLOCKED status.
+    """
     preflight = _install_unlocked(
         source,
         skills_dir,
@@ -523,81 +640,192 @@ def install(
         }
 
 
-def main() -> int:
-    """Plan or apply a confirmed skill and agent-profile installation.
+@dataclass(frozen=True)
+class PreparedInstall:
+    """Required apply inputs created together by successful install planning.
 
-    :returns: Zero for a valid plan or complete install, otherwise two.
+    :param profile: Agent-profile installer bound to the consuming repository.
+    :param agent_plan: Agent dependencies and bundled-skill observations to confirm.
+    :param core_fingerprint: Confirmation digest for source and destination skill bytes.
+
+    .. attribute :: profile
+        :type: AgentProfile
+
+        Agent-profile installer bound to the consuming repository.
+
+    .. attribute :: agent_plan
+        :type: JSONObject
+
+        Agent dependencies and bundled-skill observations to confirm.
+
+    .. attribute :: core_fingerprint
+        :type: str
+
+        Confirmation digest for source and destination skill bytes.
     """
-    started = time.monotonic()
-    parser = argparse.ArgumentParser(
-        description="Install ci-skills from this checkout. Audience: human and agent.",
-        epilog="Example: tools/install_ci_skills.py --dry-run --json",
-    )
-    location = parser.add_mutually_exclusive_group()
-    location.add_argument(
-        "--skills-dir",
-        type=Path,
-        help="Codex skills directory (default: $CODEX_HOME/skills or ~/.codex/skills)",
-    )
-    location.add_argument(
-        "--destination",
-        type=Path,
-        help="absolute destination ending in /ci-skills",
-    )
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
-        "--dry-run", action="store_true", help="show the install plan (default)"
-    )
-    mode.add_argument("--apply", action="store_true", help="copy the verified skill")
-    parser.add_argument(
-        "--upgrade",
-        action="store_true",
-        help="replace an installed skill and preserve its previous version",
-    )
-    parser.add_argument(
-        "--recover",
-        action="store_true",
-        help="reconcile an interrupted install or upgrade",
-    )
-    parser.add_argument(
-        "--confirm-install",
-        metavar="FINGERPRINT",
-        help="confirm a new installation with the dry-run fingerprint",
-    )
-    parser.add_argument(
-        "--confirm-upgrade",
-        metavar="FINGERPRINT",
-        help="confirm replacement with the dry-run fingerprint",
-    )
-    parser.add_argument(
-        "--confirm-recover",
-        action="store_true",
-        help="confirm recovery with --recover --apply",
-    )
-    parser.add_argument(
-        "--timeout",
-        help="apply deadline, for example 10s",
-    )
-    parser.add_argument("--log-format", choices=("text", "json"))
-    parser.add_argument("--log-level", choices=("debug", "info", "warning", "error"))
-    parser.add_argument("--log-file", type=Path)
-    parser.add_argument("--run-id")
-    modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--json", action="store_true", help="print JSON")
-    modes.add_argument("--yaml", action="store_true", help="print YAML")
-    args = parser.parse_args()
-    skills_dir = args.skills_dir or skills_directory()
-    if args.destination is not None:
-        if not args.destination.is_absolute() or args.destination.name != SKILL_NAME:
-            parser.error("--destination must be an absolute path ending in /ci-skills")
-        skills_dir = args.destination.parent
-    explicit_logging = any(
-        value is not None
-        for value in (args.log_format, args.log_level, args.log_file, args.run_id)
-    )
-    args.log_format = args.log_format or "text"
-    args.log_level = args.log_level or "info"
-    if args.yaml:
+
+    profile: AgentProfile
+    agent_plan: JSONObject
+    core_fingerprint: str
+
+
+class InstallerCLI:
+    """Thin command-line adapter for the reusable installer operations."""
+
+    def __init__(
+        self,
+        parser: argparse.ArgumentParser,
+        args: argparse.Namespace,
+        started: float,
+    ):
+        """Normalize parsed arguments without changing installer state.
+
+        :param parser: Parser used to report argument errors consistently.
+        :param args: Parsed command-line namespace from ``argparse``.
+        :param started: Monotonic timestamp captured before parsing began.
+        :raises SystemExit: If the explicit destination is not an absolute skill path.
+        :raises OSError: If the destination cannot be resolved on this filesystem.
+        """  # noqa: DOC502 - Destination resolution and parser errors propagate failures.
+        self.parser = parser
+        self.args = args
+        self.started = started
+        self.skills_dir = self._resolve_skills_dir()
+        self.destination = self.skills_dir.expanduser().resolve() / SKILL_NAME
+        self.explicit_logging = any(
+            value is not None
+            for value in (
+                args.log_format,
+                args.log_level,
+                args.log_file,
+                args.run_id,
+            )
+        )
+        self.args.log_format = self.args.log_format or "text"
+        self.args.log_level = self.args.log_level or "info"
+        self.yaml: Optional[ModuleType] = None
+
+    @staticmethod
+    def build_parser() -> argparse.ArgumentParser:
+        """Build the non-interactive installer argument parser.
+
+        :returns: Parser with install, upgrade, recovery, logging, and output flags.
+        """
+        parser = argparse.ArgumentParser(
+            description=(
+                "Install ci-skills from this checkout. Audience: human and agent."
+            ),
+            epilog="Example: tools/install_ci_skills.py --dry-run --json",
+        )
+        location = parser.add_mutually_exclusive_group()
+        location.add_argument(
+            "--skills-dir",
+            type=Path,
+            help=(
+                "Codex skills directory "
+                "(default: $CODEX_HOME/skills or ~/.codex/skills)"
+            ),
+        )
+        location.add_argument(
+            "--destination",
+            type=Path,
+            help="absolute destination ending in /ci-skills",
+        )
+        mode = parser.add_mutually_exclusive_group()
+        mode.add_argument(
+            "--dry-run", action="store_true", help="show the install plan (default)"
+        )
+        mode.add_argument(
+            "--apply", action="store_true", help="copy the verified skill"
+        )
+        parser.add_argument(
+            "--upgrade",
+            action="store_true",
+            help="replace an installed skill and preserve its previous version",
+        )
+        parser.add_argument(
+            "--recover",
+            action="store_true",
+            help="reconcile an interrupted install or upgrade",
+        )
+        parser.add_argument(
+            "--confirm-install",
+            metavar="FINGERPRINT",
+            help="confirm a new installation with the dry-run fingerprint",
+        )
+        parser.add_argument(
+            "--confirm-upgrade",
+            metavar="FINGERPRINT",
+            help="confirm replacement with the dry-run fingerprint",
+        )
+        parser.add_argument(
+            "--confirm-recover",
+            action="store_true",
+            help="confirm recovery with --recover --apply",
+        )
+        parser.add_argument(
+            "--timeout",
+            help="apply deadline, for example 10s",
+        )
+        parser.add_argument("--log-format", choices=("text", "json"))
+        parser.add_argument(
+            "--log-level", choices=("debug", "info", "warning", "error")
+        )
+        parser.add_argument("--log-file", type=Path)
+        parser.add_argument("--run-id")
+        modes = parser.add_mutually_exclusive_group()
+        modes.add_argument("--json", action="store_true", help="print JSON")
+        modes.add_argument("--yaml", action="store_true", help="print YAML")
+        return parser
+
+    @classmethod
+    def from_command_line(cls, started: float) -> InstallerCLI:
+        """Parse process arguments and create the CLI adapter.
+
+        :param started: Monotonic timestamp captured before parser construction.
+        :returns: Initialized command-line adapter.
+        :raises SystemExit: If argparse rejects the supplied command line.
+        :raises OSError: If initialization cannot resolve the destination on this filesystem.
+        """  # noqa: DOC502 - Parsing and adapter initialization propagate failures.
+        parser = cls.build_parser()
+        return cls(parser, parser.parse_args(), started)
+
+    def run(self) -> int:
+        """Execute the requested installer mode and emit one bounded result.
+
+        :returns: Zero for PASS or DRY_RUN results, otherwise two.
+        """
+        if not self._ensure_yaml_available():
+            return 2
+        result = self._dispatch()
+        result = self._log_if_requested(result)
+        self._emit(result)
+        return 0 if result["status"] in {"PASS", "DRY_RUN"} else 2
+
+    def _resolve_skills_dir(self) -> Path:
+        """Resolve the parent skills directory from mutually exclusive inputs.
+
+        :returns: Directory containing the installed ``ci-skills`` entry.
+        :raises SystemExit: If ``--destination`` is not an absolute ci-skills path.
+        """  # noqa: DOC502 - parser.error exits when the destination is invalid.
+        skills_dir = self.args.skills_dir or skills_directory()
+        if self.args.destination is not None:
+            if (
+                not self.args.destination.is_absolute()
+                or self.args.destination.name != SKILL_NAME
+            ):
+                self.parser.error(
+                    "--destination must be an absolute path ending in /ci-skills"
+                )
+            skills_dir = self.args.destination.parent
+        return skills_dir
+
+    def _ensure_yaml_available(self) -> bool:
+        """Load PyYAML only when YAML output was requested.
+
+        :returns: True when output can proceed; false after emitting BLOCKED JSON.
+        """
+        if not self.args.yaml:
+            return True
         try:
             import yaml
         except ImportError:
@@ -613,144 +841,211 @@ def main() -> int:
                     sort_keys=True,
                 )
             )
-            return 2
-    if args.recover and args.upgrade:
-        result = {
-            "schema_version": "1.0",
-            "kind": "skill_install_recovery",
-            "status": "BLOCKED",
-            "destination": str(skills_dir.expanduser().resolve() / SKILL_NAME),
-            "reason": "recover_and_upgrade_conflict",
-            "safe_next_step": "Run --recover first, then start a separate --upgrade.",
-        }
-    elif args.recover and args.apply and not args.confirm_recover:
-        result = {
-            "schema_version": "1.0",
-            "kind": "skill_install_recovery" if args.recover else "skill_install",
-            "status": "BLOCKED",
-            "source": str(SOURCE.resolve()),
-            "destination": str(skills_dir.expanduser().resolve() / SKILL_NAME),
-            "action": "recover",
-            "reason": "confirmation_required",
-            "safe_next_step": "Use --confirm-recover with --recover --apply.",
-        }
-    elif (
-        args.recover
-        and args.apply
-        and (not args.timeout or not re.fullmatch(r"[1-9][0-9]*s", args.timeout))
-    ):
-        result = {
-            "schema_version": "1.0",
-            "kind": "skill_install_recovery",
-            "status": "BLOCKED",
-            "destination": str(skills_dir.expanduser().resolve() / SKILL_NAME),
-            "reason": "timeout_required",
-            "safe_next_step": "Pass --timeout DURATION, for example 10s.",
-        }
-    elif args.recover:
-        deadline = started + int(args.timeout[:-1]) if args.apply else None
-        result = recover_install(skills_dir, dry_run=not args.apply, deadline=deadline)
-    else:
-        plan = install(SOURCE, skills_dir, dry_run=True, upgrade=args.upgrade)
-        if plan["status"] == "DRY_RUN":
-            try:
-                repository = _git(Path.cwd(), "rev-parse", "--show-toplevel")
-                if repository is None:
-                    raise AgentProfileError(AgentProfileReason.REPOSITORY_UNAVAILABLE)
-                agent_profile = AgentProfile(SOURCE.parent, Path(repository))
-                plan["agent"] = agent_profile.plan()
-            except (
-                OSError,
-                KeyError,
-                TypeError,
-                ValueError,
-                json.JSONDecodeError,
-            ) as exc:
-                reason = (
-                    exc.reason.value
-                    if isinstance(exc, AgentProfileError)
-                    else AgentProfileReason.PROFILE_INVALID.value
-                )
-                plan.update(
-                    status="BLOCKED",
-                    reason=reason,
-                    safe_next_step=RECOVERY[reason],
-                )
-            core_fingerprint = plan_fingerprint(plan)
-            if plan["status"] == "DRY_RUN":
-                plan["fingerprint"] = confirmed_fingerprint(
-                    core_fingerprint, plan["agent"]
-                )
-            plan["source_revision"] = plan["revision"]["value"]
-            plan["mode"] = "dry-run"
-            plan["mutable_link"] = False
-        if not args.apply or plan["status"] != "DRY_RUN":
-            result = plan
-        elif not args.timeout or not re.fullmatch(r"[1-9][0-9]*s", args.timeout):
-            result = {
+            return False
+        self.yaml = yaml
+        return True
+
+    def _dispatch(self) -> MutableMapping[str, JSONValue]:
+        """Route the command to recovery or install planning/apply logic.
+
+        :returns: Structured result ready for optional logging and output.
+        """
+        if self.args.recover:
+            return self._recover()
+        return self._install_or_plan()
+
+    def _recover(self) -> MutableMapping[str, JSONValue]:
+        """Plan or apply interrupted-install recovery.
+
+        :returns: Recovery result preserving the legacy validation order.
+        """
+        if self.args.upgrade:
+            return {
+                "schema_version": "1.0",
+                "kind": "skill_install_recovery",
+                "status": "BLOCKED",
+                "destination": str(self.destination),
+                "reason": "recover_and_upgrade_conflict",
+                "safe_next_step": (
+                    "Run --recover first, then start a separate --upgrade."
+                ),
+            }
+        if self.args.apply and not self.args.confirm_recover:
+            return {
+                "schema_version": "1.0",
+                "kind": "skill_install_recovery",
+                "status": "BLOCKED",
+                "source": str(SOURCE.resolve()),
+                "destination": str(self.destination),
+                "action": "recover",
+                "reason": "confirmation_required",
+                "safe_next_step": "Use --confirm-recover with --recover --apply.",
+            }
+        if self.args.apply and not self._valid_timeout():
+            return {
+                "schema_version": "1.0",
+                "kind": "skill_install_recovery",
+                "status": "BLOCKED",
+                "destination": str(self.destination),
+                "reason": "timeout_required",
+                "safe_next_step": "Pass --timeout DURATION, for example 10s.",
+            }
+        deadline = self._deadline() if self.args.apply else None
+        return recover_install(
+            self.skills_dir,
+            dry_run=not self.args.apply,
+            deadline=deadline,
+        )
+
+    def _install_or_plan(self) -> MutableMapping[str, JSONValue]:
+        """Build a plan, then apply it only after timeout and fingerprint checks.
+
+        :returns: Installation plan, completed installation, or classified failure.
+        :raises KeyError: If a core plan lacks its required revision or confirmation.
+        :raises TypeError: If the core plan supplies a non-object revision.
+        """  # noqa: DOC503 - Required plan fields are indexed outside validation handlers.
+        plan = install(SOURCE, self.skills_dir, dry_run=True, upgrade=self.args.upgrade)
+        if plan["status"] != "DRY_RUN":
+            return plan
+        revision = plan["revision"]
+        if not isinstance(revision, Mapping):
+            raise TypeError("invalid_install_revision")
+        plan.update(
+            source_revision=revision["value"], mode="dry-run", mutable_link=False
+        )
+        try:
+            prepared = self._prepare_install(plan)
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            reason = (
+                exc.reason.value
+                if isinstance(exc, AgentProfileError)
+                else AgentProfileReason.PROFILE_INVALID.value
+            )
+            plan.update(
+                status="BLOCKED", reason=reason, safe_next_step=RECOVERY[reason]
+            )
+            return plan
+        if not self.args.apply:
+            return plan
+        if not self._valid_timeout():
+            return {
                 **plan,
                 "status": "BLOCKED",
                 "reason": "timeout_required",
                 "safe_next_step": "Pass --timeout DURATION, for example 10s.",
             }
-        elif (args.confirm_upgrade if args.upgrade else args.confirm_install) != plan[
-            "fingerprint"
-        ]:
-            result = {
+        if self._confirmation() != plan["fingerprint"]:
+            return {
                 **plan,
                 "status": "BLOCKED",
                 "reason": "confirmation_required",
-                "safe_next_step": "Pass the current dry-run fingerprint with the matching confirmation option.",
+                "safe_next_step": (
+                    "Pass the current dry-run fingerprint with the matching "
+                    "confirmation option."
+                ),
             }
-        else:
-            seconds = int(args.timeout[:-1])
-            try:
-                with _mutation_lock(
-                    skills_dir.expanduser().resolve(), deadline=started + seconds
-                ):
-                    if (
-                        confirmed_fingerprint(core_fingerprint, plan["agent"])
-                        != plan["fingerprint"]
-                    ):
-                        raise AgentProfileError(AgentProfileReason.FINGERPRINT_CHANGED)
-                    agent_result = agent_profile.apply(plan["agent"], started + seconds)
-                    result = _install_unlocked(
-                        SOURCE,
-                        skills_dir,
-                        dry_run=False,
-                        upgrade=args.upgrade,
-                        deadline=started + seconds,
-                        expected_fingerprint=core_fingerprint,
+        return self._apply_confirmed(plan, prepared)
+
+    def _prepare_install(self, plan: MutableMapping[str, JSONValue]) -> PreparedInstall:
+        """Attach agent-profile evidence and confirmation to a valid source plan.
+
+        :param plan: Successful core dry-run plan, updated with agent and fingerprint fields.
+        :returns: Concrete profile, agent plan, and fingerprint required for apply.
+        :raises AgentProfileError: If the consuming repository or its agent profile
+            cannot be resolved, or declared dependencies cannot be inspected.
+        :raises OSError: If source files cannot be read while planning or fingerprinting.
+        :raises KeyError: If source or profile metadata lacks a required field.
+        :raises TypeError: If source or profile metadata has an invalid shape.
+        :raises ValueError: If source or profile metadata cannot be decoded or validated.
+        """  # noqa: DOC503 - Profile construction and fingerprint helpers propagate failures.
+        repository = _git(Path.cwd(), "rev-parse", "--show-toplevel")
+        if repository is None:
+            raise AgentProfileError(AgentProfileReason.REPOSITORY_UNAVAILABLE)
+        profile = AgentProfile(SOURCE.parent, Path(repository))
+        agent_plan = profile.plan()
+        fingerprint = plan_fingerprint(plan)
+        plan["agent"] = agent_plan
+        plan["fingerprint"] = confirmed_fingerprint(fingerprint, agent_plan)
+        return PreparedInstall(profile, agent_plan, fingerprint)
+
+    def _apply_confirmed(
+        self,
+        plan: Mapping[str, JSONValue],
+        prepared: PreparedInstall,
+    ) -> MutableMapping[str, JSONValue]:
+        """Apply a confirmed core and agent plan under the existing installer lock.
+
+        :param plan: Dry-run report whose confirmation matched the command line.
+        :param prepared: Required profile and fingerprints produced during planning.
+        :returns: Applied installation or a BLOCKED result for profile, lock, or
+            installation failure, retaining the confirmation and observed revision.
+        :raises KeyError: If a caller supplies a plan without its confirmation field.
+        :raises ValueError: If timeout text is malformed before the protected apply begins.
+        """  # noqa: DOC503 - AgentProfileError is caught as ValueError; plan indexing may fail.
+        deadline = self._deadline()
+        try:
+            with _mutation_lock(
+                self.skills_dir.expanduser().resolve(), deadline=deadline
+            ):
+                if (
+                    confirmed_fingerprint(
+                        prepared.core_fingerprint, prepared.agent_plan
                     )
-                    result["agent"] = agent_result
-            except (OSError, ValueError) as exc:
-                reason = (
-                    exc.reason.value
-                    if isinstance(exc, AgentProfileError)
-                    else AgentProfileReason.COMMAND_FAILED.value
+                    != plan["fingerprint"]
+                ):
+                    raise AgentProfileError(AgentProfileReason.FINGERPRINT_CHANGED)
+                agent_result = prepared.profile.apply(prepared.agent_plan, deadline)
+                result = _install_unlocked(
+                    SOURCE,
+                    self.skills_dir,
+                    dry_run=False,
+                    upgrade=self.args.upgrade,
+                    deadline=deadline,
+                    expected_fingerprint=prepared.core_fingerprint,
                 )
-                result = {
-                    **plan,
-                    "status": "BLOCKED",
-                    "reason": reason,
-                    "safe_next_step": RECOVERY[reason],
-                }
-                if isinstance(exc, AgentProfileError) and exc.command:
-                    result["failed_command"] = exc.command
-                    result["failed_exit_code"] = exc.exit_code
-            result["fingerprint"] = plan["fingerprint"]
-            result["source_revision"] = result.get("revision", {}).get("value")
-            result["mutable_link"] = False
-    if explicit_logging:
+                result["agent"] = agent_result
+        except (OSError, ValueError) as exc:
+            reason = (
+                exc.reason.value
+                if isinstance(exc, AgentProfileError)
+                else AgentProfileReason.COMMAND_FAILED.value
+            )
+            result = {
+                **plan,
+                "status": "BLOCKED",
+                "reason": reason,
+                "safe_next_step": RECOVERY[reason],
+            }
+            if isinstance(exc, AgentProfileError) and exc.command:
+                result["failed_command"] = exc.command
+                result["failed_exit_code"] = exc.exit_code
+        revision = result.get("revision", {})
+        result["fingerprint"] = plan["fingerprint"]
+        result["source_revision"] = (
+            revision.get("value") if isinstance(revision, Mapping) else None
+        )
+        result["mutable_link"] = False
+        return result
+
+    def _log_if_requested(
+        self, result: MutableMapping[str, JSONValue]
+    ) -> MutableMapping[str, JSONValue]:
+        """Write the optional CLI log event after installer execution.
+
+        :param result: Structured result to report and possibly modify on log failure.
+        :returns: The same result mapping, updated if log-file writing is blocked.
+        """
+        if not self.explicit_logging:
+            return result
         from lib.python.core.cli import log_event
 
         try:
             log_event(
-                args,
+                self.args,
                 result.get("kind", "skill_install"),
                 "finished",
                 result["status"],
-                elapsed=time.monotonic() - started,
+                elapsed=time.monotonic() - self.started,
                 error_class=result.get("reason"),
             )
         except OSError:
@@ -759,15 +1054,69 @@ def main() -> int:
                 reason="log_file_unwritable",
                 safe_next_step=RECOVERY["log_file_unwritable"],
             )
-    if args.yaml:
-        print(yaml.safe_dump(result, sort_keys=True), end="")
-    elif args.json:
-        print(json.dumps(result, sort_keys=True))
-    else:
-        print(f"{result['status']}: {result['destination']}")
-        if result.get("reason"):
-            print(result["reason"], file=sys.stderr)
-    return 0 if result["status"] in {"PASS", "DRY_RUN"} else 2
+        return result
+
+    def _emit(self, result: Mapping[str, JSONValue]) -> None:
+        """Emit the final result in the selected bounded format.
+
+        :param result: Structured result returned by installer execution.
+        """
+        if self.args.yaml:
+            assert self.yaml is not None
+            print(self.yaml.safe_dump(result, sort_keys=True), end="")
+        elif self.args.json:
+            print(json.dumps(result, sort_keys=True))
+        else:
+            print(f"{result['status']}: {result['destination']}")
+            if result.get("reason"):
+                print(result["reason"], file=sys.stderr)
+
+    def _valid_timeout(self) -> bool:
+        """Check the legacy seconds-only timeout syntax.
+
+        :returns: True when ``--timeout`` is a positive integer followed by ``s``.
+        """
+        return bool(
+            self.args.timeout and re.fullmatch(r"[1-9][0-9]*s", self.args.timeout)
+        )
+
+    def _timeout_seconds(self) -> int:
+        """Parse the already validated seconds-only timeout.
+
+        :returns: Timeout seconds from the command line.
+        :raises ValueError: If the timeout text before its final suffix is not an integer.
+        """  # noqa: DOC502 - Integer conversion rejects malformed timeout text.
+        return int(self.args.timeout[:-1])
+
+    def _deadline(self) -> float:
+        """Convert the timeout argument into an absolute monotonic deadline.
+
+        :returns: Absolute deadline for apply or recovery operations.
+        :raises ValueError: If the timeout text before its final suffix is not an integer.
+        """  # noqa: DOC502 - Timeout parsing propagates ValueError.
+        return self.started + self._timeout_seconds()
+
+    def _confirmation(self) -> Optional[str]:
+        """Select the confirmation flag matching install or upgrade mode.
+
+        :returns: Confirmation fingerprint from the command line, if any.
+        """
+        return (
+            self.args.confirm_upgrade
+            if self.args.upgrade
+            else self.args.confirm_install
+        )
+
+
+def main() -> int:
+    """Plan or apply a confirmed skill and agent-profile installation.
+
+    :returns: Zero for a valid plan or complete install, otherwise two.
+    :raises SystemExit: If argument parsing reports invalid input.
+    :raises OSError: If initialization cannot resolve the destination on this filesystem.
+    """  # noqa: DOC502 - Argument parsing and adapter construction propagate failures.
+    started = time.monotonic()
+    return InstallerCLI.from_command_line(started).run()
 
 
 if __name__ == "__main__":

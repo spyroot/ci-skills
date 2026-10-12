@@ -1,18 +1,34 @@
-"""Bounded GitLab job listing for one verified project."""
+"""Bounded GitLab job listing for one verified project.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
+from argparse import Namespace
+from collections.abc import Mapping, MutableSequence, MutableSet, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from fnmatch import fnmatchcase
 from math import isfinite
-from typing import Any, Final, TypedDict
+from typing import Final, Optional, TypedDict
 from urllib.parse import urlencode, urlsplit
 
 from lib.python.core.collect import _timestamp, parse_window
-from lib.python.core.gitlab.gitlab_api import GitLabAPIError, GlabAPIClient, next_keyset_endpoint
-from lib.python.core.gitlab.gitlab_job_fields import FILTERABLE_JOB_STATUSES, GitLabJobFields
+from lib.python.core.gitlab.gitlab_api import (
+    GitLabAPIError,
+    GlabAPIClient,
+    next_keyset_endpoint,
+)
+from lib.python.core.gitlab.gitlab_job_fields import (
+    FILTERABLE_JOB_STATUSES,
+    GitLabJobFields,
+    job_text,
+)
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+from lib.python.core.json_types import JSONObject, JSONValue, json_object
 
 PAGE_SIZE: Final = 100
 SCAN_PAGES: Final = 20
@@ -21,26 +37,110 @@ MAX_RECORD_ERRORS: Final = 32
 
 
 class RunnerSummary(TypedDict):
-    """Public runner identity attached to a GitLab job."""
+    """Bounded public runner identity attached to a GitLab job.
+
+
+    .. attribute :: id
+        :type: int
+
+        Positive assigned runner ID.
+
+    .. attribute :: description
+        :type: Optional[str]
+
+        Runner description when the provider supplies one.
+    """
 
     id: int
-    description: str | None
+    description: Optional[str]
 
 
 class JobSummary(TypedDict):
-    """Fields emitted by the bounded job-list result."""
+    """Public fields returned for one job in a bounded project scan.
+
+
+    .. attribute :: id
+        :type: int
+
+        Positive GitLab job ID.
+
+    .. attribute :: name
+        :type: str
+
+        Nonblank job name.
+
+    .. attribute :: stage
+        :type: str
+
+        Nonblank pipeline stage.
+
+    .. attribute :: status
+        :type: str
+
+        Provider job status.
+
+    .. attribute :: stuck
+        :type: bool
+
+        Derived pending-job age classification.
+
+    .. attribute :: failure_reason
+        :type: Optional[str]
+
+        Provider failure reason when available.
+
+    .. attribute :: created_at
+        :type: str
+
+        Job creation timestamp.
+
+    .. attribute :: started_at
+        :type: Optional[str]
+
+        Start timestamp when available.
+
+    .. attribute :: finished_at
+        :type: Optional[str]
+
+        Completion timestamp when available.
+
+    .. attribute :: duration
+        :type: Optional[float]
+
+        Finite job duration in seconds when available.
+
+    .. attribute :: runner
+        :type: Optional[RunnerSummary]
+
+        Bounded assigned runner identity when available.
+
+    .. attribute :: pipeline_id
+        :type: int
+
+        Positive parent pipeline ID.
+
+    .. attribute :: ref
+        :type: str
+
+        Branch or tag associated with the job.
+
+    .. attribute :: web_url
+        :type: str
+
+        HTTPS job URL on the bound GitLab host.
+    """
 
     id: int
     name: str
     stage: str
     status: str
     stuck: bool
-    failure_reason: str | None
+    failure_reason: Optional[str]
     created_at: str
-    started_at: str | None
-    finished_at: str | None
-    duration: float | None
-    runner: RunnerSummary | None
+    started_at: Optional[str]
+    finished_at: Optional[str]
+    duration: Optional[float]
+    runner: Optional[RunnerSummary]
     pipeline_id: int
     ref: str
     web_url: str
@@ -48,10 +148,36 @@ class JobSummary(TypedDict):
 
 @dataclass(frozen=True)
 class JobListResult:
-    """Validated records and completeness from one bounded API scan."""
+    """Bounded project job scan with completeness and record errors.
 
-    records: list[JobSummary]
-    errors: list[dict[str, str]]
+    :param records: Validated public jobs retained by the selected filters.
+    :param errors: Bounded source and reason entries for collection failures.
+    :param truncated: Whether matching results exceeded the return limit.
+    :param first_page_failed: Whether the initial provider page could not be read.
+
+    .. attribute :: records
+        :type: Sequence[JobSummary]
+
+        Validated public jobs retained by the selected filters.
+
+    .. attribute :: errors
+        :type: Sequence[Mapping[str, str]]
+
+        Bounded source and reason entries for collection failures.
+
+    .. attribute :: truncated
+        :type: bool
+
+        Whether matching results exceeded the return limit.
+
+    .. attribute :: first_page_failed
+        :type: bool
+
+        Whether the initial provider page could not be read.
+    """
+
+    records: Sequence[JobSummary]
+    errors: Sequence[Mapping[str, str]]
     truncated: bool
     first_page_failed: bool = False
 
@@ -69,20 +195,65 @@ class JobQuery:
     :param start: Inclusive UTC lower bound, when selected.
     :param end: Inclusive UTC upper bound, when selected.
     :param stuck_after: Minimum pending or created age in seconds.
+
+    .. attribute :: statuses
+        :type: tuple[str, ...]
+
+        Requested GitLab or derived job states.
+
+    .. attribute :: pipeline_id
+        :type: Optional[int]
+
+        Exact pipeline ID, when selected.
+
+    .. attribute :: ref
+        :type: Optional[str]
+
+        Exact branch or tag, when selected.
+
+    .. attribute :: search
+        :type: Optional[str]
+
+        Case-insensitive substring across the declared fields.
+
+    .. attribute :: name_glob
+        :type: Optional[str]
+
+        Shell-style job-name pattern, when selected.
+
+    .. attribute :: limit
+        :type: int
+
+        Maximum returned matching records.
+
+    .. attribute :: start
+        :type: Optional[datetime]
+
+        Inclusive UTC lower bound, when selected.
+
+    .. attribute :: end
+        :type: Optional[datetime]
+
+        Inclusive UTC upper bound, when selected.
+
+    .. attribute :: stuck_after
+        :type: int
+
+        Minimum pending or created age in seconds.
     """
 
     statuses: tuple[str, ...]
-    pipeline_id: int | None
-    ref: str | None
-    search: str | None
-    name_glob: str | None
+    pipeline_id: Optional[int]
+    ref: Optional[str]
+    search: Optional[str]
+    name_glob: Optional[str]
     limit: int
-    start: datetime | None
-    end: datetime | None
+    start: Optional[datetime]
+    end: Optional[datetime]
     stuck_after: int
 
     @classmethod
-    def from_args(cls, args: Any) -> JobQuery:
+    def from_args(cls, args: Namespace) -> JobQuery:
         """Validate CLI values before any GitLab access.
 
         :param args: Parsed job-list arguments.
@@ -132,7 +303,7 @@ class JobQuery:
             stuck_after=args.stuck_after,
         )
 
-    def public(self) -> dict[str, Any]:
+    def public(self) -> JSONObject:
         """Return only filters safe for the machine report.
 
         :returns: The selected list filters and bounded result limit.
@@ -180,76 +351,124 @@ class JobQuery:
 
 @dataclass(frozen=True)
 class JobRecord:
-    """Validated public fields from one GitLab job response."""
+    """Validated public job and pipeline identity from a GitLab response.
+
+    :param id: Positive GitLab job ID.
+    :param name: Nonblank provider job name.
+    :param stage: Nonblank pipeline stage.
+    :param status: Nonblank provider job state.
+    :param failure_reason: Optional provider failure explanation.
+    :param created_at: Parsed job creation time.
+    :param started_at: Parsed start time when the job ran.
+    :param finished_at: Parsed completion time when terminal.
+    :param duration: Optional finite job duration in seconds.
+    :param runner: Optional bounded runner identity attached to the job.
+    :param pipeline_id: Positive parent pipeline ID.
+    :param ref: Branch or tag reported for the job.
+    :param web_url: HTTPS job URL on the bound GitLab host.
+
+    .. attribute :: id
+        :type: int
+
+        Positive GitLab job ID.
+
+    .. attribute :: name
+        :type: str
+
+        Nonblank provider job name.
+
+    .. attribute :: stage
+        :type: str
+
+        Nonblank pipeline stage.
+
+    .. attribute :: status
+        :type: str
+
+        Nonblank provider job state.
+
+    .. attribute :: failure_reason
+        :type: Optional[str]
+
+        Optional provider failure explanation.
+
+    .. attribute :: created_at
+        :type: datetime
+
+        Parsed job creation time.
+
+    .. attribute :: started_at
+        :type: Optional[datetime]
+
+        Parsed start time when the job ran.
+
+    .. attribute :: finished_at
+        :type: Optional[datetime]
+
+        Parsed completion time when terminal.
+
+    .. attribute :: duration
+        :type: Optional[float]
+
+        Optional finite job duration in seconds.
+
+    .. attribute :: runner
+        :type: Optional[RunnerSummary]
+
+        Optional bounded runner identity attached to the job.
+
+    .. attribute :: pipeline_id
+        :type: int
+
+        Positive parent pipeline ID.
+
+    .. attribute :: ref
+        :type: str
+
+        Branch or tag reported for the job.
+
+    .. attribute :: web_url
+        :type: str
+
+        HTTPS job URL on the bound GitLab host.
+    """
 
     id: int
     name: str
     stage: str
     status: str
-    failure_reason: str | None
+    failure_reason: Optional[str]
     created_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
-    duration: float | None
-    runner: RunnerSummary | None
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+    duration: Optional[float]
+    runner: Optional[RunnerSummary]
     pipeline_id: int
     ref: str
     web_url: str
 
     @classmethod
-    def from_api(cls, item: Any, host: str) -> JobRecord:
-        """Narrow an untrusted API object to the advertised job fields.
+    def from_api(cls, item: JSONValue, host: str) -> JobRecord:
+        """Narrow a decoded API value to the advertised job fields.
 
-        :param item: One GitLab job API value.
+        :param item: One decoded GitLab job API value.
         :param host: Exact bound GitLab host.
         :returns: Validated public job record.
-        :raises ValueError: If required data is absent, malformed, or off host.
+        :raises ValueError: Required data is absent, malformed, or points off host.
         """
-        if not isinstance(item, dict) or not isinstance(item.get("pipeline"), dict):
-            # Preserve the provider error code consumed by list reports.
-            raise ValueError("job_response_invalid")  # noqa: TRY004
-        pipeline = item.get("pipeline")
-        runner = item.get("runner")
-        url = item.get("web_url")
-        if (
-            type(pipeline.get("id")) is not int
-            or pipeline["id"] <= 0
-            or not isinstance(url, str)
-            or urlsplit(url).scheme != "https"
-            or urlsplit(url).netloc.lower() != host
-        ):
-            raise ValueError("job_response_invalid")
-        fields = GitLabJobFields.from_api(item)
-        for field in ("ref", "created_at"):
-            if not isinstance(item.get(field), str) or not item[field].strip():
-                raise ValueError(f"job_{field}_invalid")
-        duration = item.get("duration")
-        if duration is not None and (
-            isinstance(duration, bool)
-            or not isinstance(duration, (int, float))
-            or duration < 0
-            or not isfinite(duration)
-        ):
-            raise ValueError("job_duration_invalid")
-        if runner is not None and (
-            not isinstance(runner, dict)
-            or type(runner.get("id")) is not int
-            or runner["id"] <= 0
-        ):
-            raise ValueError("job_runner_invalid")
-        selected_runner: RunnerSummary | None = None
-        if runner is not None:
-            description = runner.get("description")
-            if description is not None and not isinstance(description, str):
-                raise ValueError("job_runner_invalid")
-            selected_runner = {"id": runner["id"], "description": description}
         try:
-            created = _timestamp(item["created_at"])
-            started = _timestamp(item["started_at"]) if item.get("started_at") else None
-            finished = (
-                _timestamp(item["finished_at"]) if item.get("finished_at") else None
-            )
-        except (TypeError, ValueError) as exc:
+            item = json_object(item)
+        except TypeError as exc:
+            raise ValueError("job_response_invalid") from exc
+        pipeline_id, url = _job_identity(item, host)
+        fields = GitLabJobFields.from_api(item)
+        ref = job_text(item, "ref")
+        created_text = job_text(item, "created_at")
+        try:
+            created = _timestamp(created_text)
+            started = _optional_timestamp(item.get("started_at"))
+            finished = _optional_timestamp(item.get("finished_at"))
+        except ValueError as exc:
             raise ValueError("job_timestamp_invalid") from exc
         return cls(
             id=fields.id,
@@ -260,10 +479,10 @@ class JobRecord:
             created_at=created,
             started_at=started,
             finished_at=finished,
-            duration=float(duration) if duration is not None else None,
-            runner=selected_runner,
-            pipeline_id=pipeline["id"],
-            ref=item["ref"],
+            duration=_duration(item.get("duration")),
+            runner=_runner(item.get("runner")),
+            pipeline_id=pipeline_id,
+            ref=ref,
             web_url=url,
         )
 
@@ -279,7 +498,7 @@ class JobRecord:
             and (now - self.created_at).total_seconds() >= after
         )
 
-    def public(self, *, stuck: bool) -> JobSummary:
+    def public(self, stuck: bool) -> JobSummary:
         """Render the declared job-list record without raw provider data.
 
         :param stuck: Derived pending-age state at collection time.
@@ -303,84 +522,226 @@ class JobRecord:
         }
 
 
+def _job_identity(item: JSONObject, host: str) -> tuple[int, str]:
+    """Validate the parent pipeline ID and same-host HTTPS job link.
+
+    :param item: Decoded GitLab job object.
+    :param host: Exact authority selected by the bound session.
+    :returns: Positive parent pipeline ID and verified job URL.
+    :raises ValueError: If pipeline identity or URL fields are missing, have
+        an invalid JSON shape, or do not identify a positive pipeline on the bound host.
+    """
+    pipeline, url = item.get("pipeline"), item.get("web_url")
+    if not isinstance(pipeline, Mapping) or not isinstance(url, str):
+        # JobScan retains malformed provider values as ValueError failures.
+        raise ValueError("job_response_invalid")  # noqa: TRY004
+    identifier = pipeline.get("id")
+    if (
+        type(identifier) is not int
+        or identifier <= 0
+        or urlsplit(url).scheme != "https"
+        or urlsplit(url).netloc.lower() != host
+    ):
+        raise ValueError("job_response_invalid")
+    return identifier, url
+
+
+def _duration(value: JSONValue) -> Optional[float]:
+    """Validate a nullable duration without accepting booleans or nonfinite values.
+
+    :param value: Provider duration in seconds, or JSON null when unavailable.
+    :returns: Finite nonnegative seconds as a float, or None.
+    :raises ValueError: A present duration is nonnumeric, negative, or nonfinite.
+    """
+    if value is None:
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or value < 0
+        or not isfinite(value)
+    ):
+        raise ValueError("job_duration_invalid")
+    return float(value)
+
+
+def _runner(value: JSONValue) -> Optional[RunnerSummary]:
+    """Validate the small public runner identity attached to a job.
+
+    :param value: Provider runner object, or JSON null before assignment.
+    :returns: Positive runner ID and nullable description, or None when unassigned.
+    :raises ValueError: A present runner has malformed identity or description.
+    """
+    if value is None:
+        return None
+    try:
+        value = json_object(value)
+    except TypeError as exc:
+        raise ValueError("job_runner_invalid") from exc
+    identifier, description = value.get("id"), value.get("description")
+    if type(identifier) is not int or identifier <= 0:
+        raise ValueError("job_runner_invalid")
+    if description is not None and not isinstance(description, str):
+        raise ValueError("job_runner_invalid")
+    return {"id": identifier, "description": description}
+
+
+def _optional_timestamp(value: JSONValue) -> Optional[datetime]:
+    """Normalize a job timestamp that the provider may not have assigned yet.
+
+    :param value: ISO timestamp, empty text, or JSON null before the event.
+    :returns: UTC timestamp, or None when no event time is present.
+    :raises ValueError: A present value is not text or is not timezone-aware ISO time.
+    """
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        # JobRecord and JobScan classify invalid provider timestamps together.
+        raise ValueError("job_timestamp_invalid")  # noqa: TRY004
+    return _timestamp(value)
+
+
+class JobScan:
+    """Retain bounded scan evidence while following one project's keyset cursor.
+
+    :ivar session: Bound host and credentials supplied by the caller.
+    :ivar query: Validated filters and result limit supplied by the caller.
+    :ivar client: Caller-selected transport for every cursor page.
+    :ivar records: Validated matching records plus at most one truncation sentinel.
+    :ivar errors: Bounded provider, record-validation, or pagination failure records.
+    :ivar seen_ids: Validated job IDs already consumed by this scan.
+    :ivar seen_endpoints: Cursor endpoints already requested by this scan.
+    :ivar previous_id: Last valid job ID, absent until the first valid record.
+    :ivar now: One UTC observation time shared by every derived stuck-state check.
+    """
+
+    def __init__(
+        self, session: BoundGitLabSession, query: JobQuery, client: GlabAPIClient
+    ):
+        """Bind the provider and query and initialize independent scan state.
+
+        :param session: Exact-host credential and selected-project session.
+        :param query: Validated filters and maximum returned record count.
+        :param client: Provider transport used for every page in this scan.
+        """
+        self.session, self.query, self.client = session, query, client
+        self.records: MutableSequence[JobSummary] = []
+        self.errors: MutableSequence[Mapping[str, str]] = []
+        self.seen_ids: MutableSet[int] = set()
+        self.seen_endpoints: MutableSet[str] = set()
+        self.previous_id: Optional[int] = None
+        self.now = datetime.now(UTC)
+
+    def _result(
+        self, truncated: bool, first_page_failed: bool = False
+    ) -> JobListResult:
+        """Snapshot retained evidence without exceeding the query's result limit.
+
+        :param truncated: Whether completeness could not be established.
+        :param first_page_failed: Whether the initial provider page was unreadable.
+        :returns: Bounded public observations and accumulated failure reasons.
+        """
+        return JobListResult(
+            self.records[: self.query.limit], self.errors, truncated, first_page_failed
+        )
+
+    def _consume(self, items: Sequence[JSONValue]) -> bool:
+        """Validate one page's ordering and append matching public records.
+
+        :param items: Bounded decoded job values from one cursor page.
+        :returns: Whether scanning may continue within record and error bounds.
+        """
+        for item in items:
+            try:
+                job = JobRecord.from_api(item, self.session.host)
+            except ValueError as exc:
+                self.errors.append({"source": "jobs", "reason": str(exc)})
+                if len(self.errors) >= MAX_RECORD_ERRORS:
+                    self.errors.append(
+                        {"source": "jobs", "reason": "invalid_record_limit_reached"}
+                    )
+                    return False
+                continue
+            if job.id in self.seen_ids or (
+                self.previous_id is not None and job.id >= self.previous_id
+            ):
+                self.errors.append(
+                    {"source": "jobs", "reason": "pagination_order_invalid"}
+                )
+                return False
+            self.seen_ids.add(job.id)
+            self.previous_id = job.id
+            if self.query.matches(job, self.now):
+                stuck = job.is_stuck(self.now, self.query.stuck_after)
+                self.records.append(job.public(stuck))
+                if len(self.records) > self.query.limit:
+                    return False
+        return True
+
+    def run(self, endpoint: str) -> JobListResult:
+        """Follow bounded cursor pages while preserving partial provider evidence.
+
+        :param endpoint: Initial project-jobs endpoint with fixed query filters.
+        :returns: Complete or truncated observations with classified collection errors.
+        """
+        for page in range(SCAN_PAGES):
+            if endpoint in self.seen_endpoints:
+                self.errors.append(
+                    {"source": "jobs", "reason": "pagination_cursor_repeated"}
+                )
+                return self._result(True)
+            self.seen_endpoints.add(endpoint)
+            try:
+                items, headers = self.client.get_json_with_headers(
+                    self.session, endpoint
+                )
+            except GitLabAPIError as exc:
+                self.errors.append({"source": "jobs", "reason": exc.reason})
+                return self._result(True, first_page_failed=page == 0)
+            if not isinstance(items, list) or len(items) > PAGE_SIZE:
+                self.errors.append({"source": "jobs", "reason": "job_page_invalid"})
+                return self._result(True, first_page_failed=page == 0)
+            if not self._consume(items):
+                return self._result(True)
+            try:
+                next_endpoint = next_keyset_endpoint(self.session, endpoint, headers)
+            except GitLabAPIError as exc:
+                self.errors.append({"source": "jobs", "reason": exc.reason})
+                return self._result(True)
+            if next_endpoint is None:
+                return self._result(False)
+            endpoint = next_endpoint
+        self.errors.append({"source": "jobs", "reason": "scan_limit_reached"})
+        return self._result(True)
+
+
 def list_jobs(
     session: BoundGitLabSession,
     project_id: int,
     query: JobQuery,
-    *,
-    api_client: GlabAPIClient | None = None,
+    api_client: Optional[GlabAPIClient] = None,
 ) -> JobListResult:
     """Read newest jobs through GitLab's stable project-job cursor.
 
     :param session: Credential and host already bound to this project.
     :param project_id: Project ID read back from the access check.
     :param query: Validated list filters and result limit.
-    :param api_client: Optional GitLab transport supplied by the caller.
+    :param api_client: Optional caller-owned transport; otherwise use the native client.
     :returns: Public records, classified errors, and truncation state.
-    :raises ValueError: If the project ID is invalid.
+    :raises ValueError: The project ID is not a positive built-in integer.
     """
     if type(project_id) is not int or project_id <= 0:
         raise ValueError("project_id_invalid")
-    client = api_client or GlabAPIClient()
-    selected_scopes = set(query.statuses) - {"stuck"}
+    client = api_client if api_client is not None else GlabAPIClient()
+    scopes = set(query.statuses) - {"stuck"}
     if "stuck" in query.statuses:
-        selected_scopes.update(("pending", "created"))
+        scopes.update(("pending", "created"))
     parameters = [
         ("pagination", "keyset"),
         ("per_page", str(PAGE_SIZE)),
         ("order_by", "id"),
         ("sort", "desc"),
-        *(("scope[]", status) for status in sorted(selected_scopes)),
+        *(("scope[]", status) for status in sorted(scopes)),
     ]
     endpoint = f"projects/{project_id}/jobs?{urlencode(parameters)}"
-    records: list[JobSummary] = []
-    errors: list[dict[str, str]] = []
-    now = datetime.now(UTC)
-    seen_ids: set[int] = set()
-    seen_endpoints: set[str] = set()
-    previous_id: int | None = None
-    for page in range(SCAN_PAGES):
-        if endpoint in seen_endpoints:
-            errors.append({"source": "jobs", "reason": "pagination_cursor_repeated"})
-            return JobListResult(records, errors, True)
-        seen_endpoints.add(endpoint)
-        try:
-            items, headers = client.get_json_with_headers(session, endpoint)
-        except GitLabAPIError as exc:
-            errors.append({"source": "jobs", "reason": exc.reason})
-            return JobListResult(records, errors, True, first_page_failed=page == 0)
-        if not isinstance(items, list) or len(items) > PAGE_SIZE:
-            errors.append({"source": "jobs", "reason": "job_page_invalid"})
-            return JobListResult(records, errors, True, first_page_failed=page == 0)
-        for item in items:
-            try:
-                job = JobRecord.from_api(item, session.host)
-            except ValueError as exc:
-                errors.append({"source": "jobs", "reason": str(exc)})
-                if len(errors) >= MAX_RECORD_ERRORS:
-                    errors.append(
-                        {"source": "jobs", "reason": "invalid_record_limit_reached"}
-                    )
-                    return JobListResult(records, errors, True)
-                continue
-            if job.id in seen_ids or (
-                previous_id is not None and job.id >= previous_id
-            ):
-                errors.append({"source": "jobs", "reason": "pagination_order_invalid"})
-                return JobListResult(records, errors, True)
-            seen_ids.add(job.id)
-            previous_id = job.id
-            if query.matches(job, now):
-                records.append(job.public(stuck=job.is_stuck(now, query.stuck_after)))
-                if len(records) > query.limit:
-                    return JobListResult(records[: query.limit], errors, True)
-        try:
-            next_endpoint = next_keyset_endpoint(session, endpoint, headers)
-        except GitLabAPIError as exc:
-            errors.append({"source": "jobs", "reason": exc.reason})
-            return JobListResult(records, errors, True)
-        if next_endpoint is None:
-            return JobListResult(records, errors, False)
-        endpoint = next_endpoint
-    errors.append({"source": "jobs", "reason": "scan_limit_reached"})
-    return JobListResult(records, errors, True)
+    return JobScan(session, query, client).run(endpoint)

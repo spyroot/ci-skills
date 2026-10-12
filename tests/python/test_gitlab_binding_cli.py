@@ -1,13 +1,18 @@
-"""GitLab entrypoints honor one selected project binding without API calls."""
+"""GitLab entrypoints honor one selected project binding without API calls.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
-
-from tests.python.conftest import import_script_module
+from conftest import import_script_module
 
 ACCESS = import_script_module("gitlab_access")
 CLI = import_script_module("lib.python.core.cli")
@@ -17,6 +22,12 @@ PIPELINE = import_script_module("gitlab_pipeline")
 
 
 def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create ambient and bound GitLab targets with a project binding.
+
+    :param tmp_path: Scratch project directory receiving all target files.
+    :param monkeypatch: Pytest fixture selecting cwd and clearing env selectors.
+    :returns: Path to binding that selects the bound target.
+    """
     project = tmp_path / "project"
     project.mkdir()
     ambient = project / ".ci-skills" / "target.toml"
@@ -44,7 +55,13 @@ def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return binding
 
 
-def _invoke(kind: str, selector: list[str]) -> int:
+def _invoke(kind: str, selector: Sequence[str]) -> int:
+    """Call one GitLab entrypoint with the selected binding arguments.
+
+    :param kind: Action, access, pipeline, or job command to invoke.
+    :param selector: Explicit ``--binding`` tokens or empty env-selector case.
+    :returns: Command exit code.
+    """
     if kind == "action":
         return ISSUE.main(["open-bug", "--title", "test", "--json", *selector])
     if kind == "access":
@@ -72,6 +89,16 @@ def test_gitlab_entrypoint_uses_selected_binding_over_project_target(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Prefer explicit or env binding over the ambient project target.
+
+    :param kind: GitLab entrypoint whose dry-run selection is checked.
+    :param selection: Explicit flag or environment binding tier.
+    :param tmp_path: Scratch project with ambient and bound targets.
+    :param monkeypatch: Pytest fixture setting cwd and selected binding.
+    :param capsys: Pytest fixture capturing the machine report.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     binding = _selection(tmp_path, monkeypatch)
     if selection == "explicit":
         selector = ["--binding", str(binding)]
@@ -110,6 +137,14 @@ def test_missing_binding_blocks_without_falling_back_to_project_target(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Block a missing selected binding instead of using ambient target.
+
+    :param tmp_path: Scratch project and missing binding path.
+    :param monkeypatch: Pytest fixture setting the binding selector.
+    :param capsys: Pytest fixture capturing the blocked action result.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     _selection(tmp_path, monkeypatch)
     monkeypatch.setenv("K8S_ADMIN_DIAGNOSTICS_BINDING", str(tmp_path / "missing.toml"))
 
@@ -126,6 +161,14 @@ def test_conflicting_environment_selectors_block_without_target_fallback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Block simultaneous target and binding env selectors.
+
+    :param tmp_path: Scratch project with target and binding files.
+    :param monkeypatch: Pytest fixture setting conflicting variables.
+    :param capsys: Pytest fixture capturing the blocked action result.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     binding = _selection(tmp_path, monkeypatch)
     monkeypatch.setenv("K8S_ADMIN_DIAGNOSTICS_BINDING", str(binding))
     monkeypatch.setenv(

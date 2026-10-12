@@ -1,4 +1,9 @@
-"""Prove the exact clean repository subtree used by a benchmark process."""
+"""Prove the exact clean repository subtree used by a benchmark process.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -6,8 +11,9 @@ import hashlib
 import os
 import re
 import subprocess
+from collections.abc import MutableSequence, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 SHA_PATTERN = re.compile(r"\A[0-9a-fA-F]{40}\Z")
 DIGEST_ALGORITHM = "sha256-tree-v1"
@@ -16,11 +22,71 @@ EXCLUDED_SUFFIXES = (".pyc", ".pyo")
 EXCLUDED_NAMES = (".DS_Store",)
 
 
+class TreeIdentity(TypedDict):
+    """Describe measured source bytes and executable bits.
+
+    :param algorithm: Canonical tree-hash algorithm identifier.
+    :param digest: Hexadecimal SHA-256 of the selected file records.
+    :param file_count: Number of files included in the measurement.
+
+    .. attribute :: algorithm
+        :type: str
+
+        Canonical tree-hash algorithm identifier.
+
+    .. attribute :: digest
+        :type: str
+
+        Hexadecimal SHA-256 of the selected file records.
+
+    .. attribute :: file_count
+        :type: int
+
+        Number of files included in the measurement.
+    """
+
+    algorithm: str
+    digest: str
+    file_count: int
+
+
+class SourceIdentity(TreeIdentity):
+    """Bind measured tree bytes to their verified repository revision.
+
+    TreeIdentity documents the inherited digest fields.
+
+    :param revision: Full lowercase commit SHA verified against checkout HEAD.
+    :param subtree: Repository-relative directory whose bytes were measured.
+
+    .. attribute :: revision
+        :type: str
+
+        Full lowercase commit SHA verified against checkout HEAD.
+
+    .. attribute :: subtree
+        :type: str
+
+        Repository-relative directory whose bytes were measured.
+    """
+
+    revision: str
+    subtree: str
+
+
 class SourceIdentityError(ValueError):
     """A benchmark source subtree cannot be tied to one clean revision."""
 
 
 def _git(root: Path, *arguments: str) -> str:
+    """Read one Git value from the selected benchmark source checkout.
+
+    :param root: Checkout used for the Git query.
+    :param *arguments: Git subcommand and its arguments.
+    :returns: Trimmed command stdout.
+    :raises SourceIdentityError: Git exits nonzero.
+    :raises OSError: Git cannot start.
+    :raises subprocess.TimeoutExpired: Git exceeds its 15-second bound.
+    """  # noqa: DOC503 - Bounded Git execution may fail or time out.
     result = subprocess.run(
         ["git", "-C", str(root), *arguments],
         check=False,
@@ -33,8 +99,14 @@ def _git(root: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-def _included(root: Path) -> list[Path]:
-    found: list[Path] = []
+def _included(root: Path) -> Sequence[Path]:
+    """Select regular source files for an executable-tree digest.
+
+    :param root: Source subtree to walk recursively.
+    :returns: Sorted files excluding symlinks, bytecode, cache directories,
+        and platform metadata.
+    """
+    found: MutableSequence[Path] = []
     for path in root.rglob("*"):
         if not path.is_file() or path.is_symlink():
             continue
@@ -47,8 +119,14 @@ def _included(root: Path) -> list[Path]:
     return sorted(found)
 
 
-def tree_digest(root: Path) -> dict[str, Any]:
-    """Digest a tree over relative path, executable bit, and content bytes."""
+def tree_digest(root: Path) -> TreeIdentity:
+    """Fingerprint the actual bytes and executable bits in one source subtree.
+
+    :param root: Directory whose current contents are measured.
+    :returns: Digest algorithm, SHA-256 hex value, and included file count.
+    :raises SourceIdentityError: Subtree is missing or contains no included files.
+    :raises OSError: An included file cannot be read.
+    """  # noqa: DOC503 - Path.read_bytes can fail for selected source files.
     root = root.resolve()
     if not root.is_dir():
         raise SourceIdentityError("source_subtree_missing")
@@ -69,8 +147,18 @@ def tree_digest(root: Path) -> dict[str, Any]:
     }
 
 
-def source_identity(root: Path, revision: str, subtree: Path) -> dict[str, Any]:
-    """Return exact revision and content identity for one clean tracked subtree."""
+def source_identity(root: Path, revision: str, subtree: Path) -> SourceIdentity:
+    """Verify one clean tracked source subtree against an exact commit.
+
+    :param root: Repository checkout containing the source subtree.
+    :param revision: Required full 40-character commit SHA.
+    :param subtree: Tracked subtree whose current bytes will be measured.
+    :returns: Source-tree digest, lowercase revision, and relative subtree path.
+    :raises SourceIdentityError: SHA, checkout HEAD, tracking state, cleanliness,
+        or subtree containment does not match the requested source.
+    :raises OSError: Git cannot start or an included source file cannot be read.
+    :raises subprocess.TimeoutExpired: A Git query exceeds its time bound.
+    """  # noqa: DOC503 - Bounded Git execution may fail or time out.
     root = root.resolve()
     subtree = subtree.resolve()
     if not SHA_PATTERN.fullmatch(revision):

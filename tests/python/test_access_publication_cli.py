@@ -1,14 +1,43 @@
-"""CLI tests for publication-mode access receipts."""
+"""CLI tests for publication-mode access receipts.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, MutableSequence, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from conftest import install_executable, parse_json_output, run_script
 
 TEST_REVISION = "a" * 40
+
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONValue
+
+
+@pytest.fixture(autouse=True)
+def _select_live_target_from_environment(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Expose the selected target through the public environment contract.
+
+    :param request: Pytest request used to detect the optional target fixture.
+    :param monkeypatch: Fixture setting ``CI_SKILLS_TARGET`` for child commands.
+
+    :returns: None; the helper records behavior through its side effects.
+    """
+    if "live_target_file" in request.fixturenames:
+        monkeypatch.setenv(
+            "CI_SKILLS_TARGET", str(request.getfixturevalue("live_target_file"))
+        )
+
 
 FAKE_ACCESS_TOOLS = """#!/usr/bin/env python3
 import json
@@ -34,6 +63,9 @@ if tool == "gh":
             if os.environ.get("FAKE_GH_PROTECTION_FAIL") == "1":
                 print("not found", file=sys.stderr)
                 raise SystemExit(1)
+            malformed = os.environ.get("FAKE_GH_PROTECTION_JSON")
+            if malformed is not None:
+                emit(json.loads(malformed))
             contexts = [
                 value
                 for value in os.environ.get(
@@ -47,6 +79,9 @@ if tool == "gh":
             print(os.environ.get("FAKE_GH_ADMIN", "false"))
             raise SystemExit(0)
         if endpoint == "repos/unit/repo":
+            malformed = os.environ.get("FAKE_GH_REPOSITORY_JSON")
+            if malformed is not None:
+                emit(json.loads(malformed))
             emit({"full_name": "unit/repo"})
     raise SystemExit(98)
 
@@ -139,8 +174,12 @@ raise SystemExit(127)
 
 
 @pytest.fixture
-def fake_access_tools(fake_bin):
-    """Install fake native CLIs used by publication-mode tests."""
+def fake_access_tools(fake_bin: Path) -> Path:
+    """Install fake gh, glab, and kubectl for publication checks.
+
+    :param fake_bin: Pytest directory receiving native command doubles.
+    :returns: Directory prepended to the child command path.
+    """
     for tool in ("gh", "glab", "kubectl"):
         install_executable(fake_bin, tool, FAKE_ACCESS_TOOLS)
     return fake_bin
@@ -148,7 +187,11 @@ def fake_access_tools(fake_bin):
 
 @pytest.fixture
 def live_target_file(tmp_path: Path) -> Path:
-    """Provide a target file with a concrete kubeconfig source for live gates."""
+    """Write a target declaring one required check and a kubeconfig.
+
+    :param tmp_path: Scratch directory receiving target and kubeconfig files.
+    :returns: Path to the fixture target.
+    """
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     target = tmp_path / "target.toml"
@@ -173,14 +216,18 @@ def live_target_file(tmp_path: Path) -> Path:
 
 
 def test_access_check_publication_pass_reports_admin_and_required_check_receipt(
-    fake_access_tools,
-    live_target_file,
-):
-    """Publication mode requires every check the target declares."""
+    fake_access_tools: Path,
+    live_target_file: Path,
+) -> None:
+    """Require publication PASS to prove admin and declared branch check.
+
+    :param fake_access_tools: Directory of native provider and cluster doubles.
+    :param live_target_file: Target declaring the required check and kubeconfig.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = run_script(
         "access_check.py",
-        "--target",
-        live_target_file,
         "--revision",
         TEST_REVISION,
         "--publication",
@@ -205,14 +252,18 @@ def test_access_check_publication_pass_reports_admin_and_required_check_receipt(
 
 
 def test_access_check_publication_denies_non_admin_identity(
-    fake_access_tools,
-    live_target_file,
-):
-    """Publication mode blocks when GitHub repository administration is absent."""
+    fake_access_tools: Path,
+    live_target_file: Path,
+) -> None:
+    """Block publication when the selected GitHub identity lacks admin rights.
+
+    :param fake_access_tools: Directory of native command doubles.
+    :param live_target_file: Target declaring the required branch check.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = run_script(
         "access_check.py",
-        "--target",
-        live_target_file,
         "--revision",
         TEST_REVISION,
         "--publication",
@@ -230,14 +281,18 @@ def test_access_check_publication_denies_non_admin_identity(
 
 
 def test_access_check_publication_blocks_when_protection_read_fails(
-    fake_access_tools,
-    live_target_file,
-):
-    """Publication mode cannot pass if branch protection cannot be read back."""
+    fake_access_tools: Path,
+    live_target_file: Path,
+) -> None:
+    """Block publication if branch protection cannot be read back.
+
+    :param fake_access_tools: Directory of native command doubles.
+    :param live_target_file: Target declaring the protected branch check.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = run_script(
         "access_check.py",
-        "--target",
-        live_target_file,
         "--revision",
         TEST_REVISION,
         "--publication",
@@ -254,14 +309,18 @@ def test_access_check_publication_blocks_when_protection_read_fails(
 
 
 def test_access_check_publication_blocks_when_required_checks_are_empty(
-    fake_access_tools,
-    live_target_file,
-):
-    """Publication mode requires at least one required branch protection check."""
+    fake_access_tools: Path,
+    live_target_file: Path,
+) -> None:
+    """Block publication when protection read-back has no required checks.
+
+    :param fake_access_tools: Directory of native command doubles.
+    :param live_target_file: Target requiring a named branch check.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = run_script(
         "access_check.py",
-        "--target",
-        live_target_file,
         "--revision",
         TEST_REVISION,
         "--publication",
@@ -277,15 +336,93 @@ def test_access_check_publication_blocks_when_required_checks_are_empty(
     assert data["surfaces"]["github"]["reason"] == "required_checks_missing"
 
 
-def test_publication_blocks_when_only_an_unrelated_check_is_required(
-    fake_access_tools,
-    live_target_file,
-):
-    """The defect: any nonempty set used to pass, so the declared one was moot."""
+def test_access_check_blocks_when_github_repository_name_is_not_text(
+    fake_access_tools: Path,
+    live_target_file: Path,
+) -> None:
+    """Classify malformed repository identity before publication probes.
+
+    :param fake_access_tools: Directory of native command doubles.
+    :param live_target_file: Target selecting the repository under test.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = run_script(
         "access_check.py",
-        "--target",
-        live_target_file,
+        "--revision",
+        TEST_REVISION,
+        "--publication",
+        "--json",
+        fake_bin=fake_access_tools,
+        env={
+            "FAKE_GH_ADMIN": "true",
+            "FAKE_GH_REPOSITORY_JSON": json.dumps({"full_name": False}),
+            "FAKE_GH_REQUIRED_CONTEXTS": "portable-required-check",
+        },
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 2
+    assert data["status"] == "BLOCKED"
+    assert data["surfaces"]["github"]["status"] == "BLOCKED"
+    assert data["surfaces"]["github"]["reason"] == "JSON string required"
+
+
+@pytest.mark.parametrize(
+    "protection",
+    (
+        {"required_status_checks": None},
+        {"required_status_checks": "enabled"},
+        {"required_status_checks": []},
+    ),
+    ids=("null", "scalar", "array"),
+)
+def test_access_check_publication_blocks_malformed_required_status_checks(
+    fake_access_tools: Path,
+    live_target_file: Path,
+    protection: Mapping[str, JSONValue],
+) -> None:
+    """Classify malformed branch-protection shapes as missing required checks.
+
+    :param fake_access_tools: Directory of native command doubles.
+    :param live_target_file: Target requiring a named branch check.
+    :param protection: Malformed branch-protection JSON emitted by the fake CLI.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    result = run_script(
+        "access_check.py",
+        "--revision",
+        TEST_REVISION,
+        "--publication",
+        "--json",
+        fake_bin=fake_access_tools,
+        env={
+            "FAKE_GH_ADMIN": "true",
+            "FAKE_GH_PROTECTION_JSON": json.dumps(protection),
+        },
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 2
+    assert data["status"] == "BLOCKED"
+    assert data["surfaces"]["github"]["status"] == "BLOCKED"
+    assert data["surfaces"]["github"]["reason"] == "required_checks_missing"
+
+
+def test_publication_blocks_when_only_an_unrelated_check_is_required(
+    fake_access_tools: Path,
+    live_target_file: Path,
+) -> None:
+    """Block a nonempty protection set missing the declared check.
+
+    :param fake_access_tools: Directory of native command doubles.
+    :param live_target_file: Target naming the check that must be present.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    result = run_script(
+        "access_check.py",
         "--revision",
         TEST_REVISION,
         "--publication",
@@ -306,14 +443,18 @@ def test_publication_blocks_when_only_an_unrelated_check_is_required(
 
 
 def test_publication_accepts_extra_checks_beyond_the_declared_set(
-    fake_access_tools,
-    live_target_file,
-):
-    """Declared is a subset: more protection than asked for is not a failure."""
+    fake_access_tools: Path,
+    live_target_file: Path,
+) -> None:
+    """Accept protection that contains the required check plus extras.
+
+    :param fake_access_tools: Directory of native command doubles.
+    :param live_target_file: Target naming the minimum required check.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = run_script(
         "access_check.py",
-        "--target",
-        live_target_file,
         "--revision",
         TEST_REVISION,
         "--publication",
@@ -334,14 +475,18 @@ def test_publication_accepts_extra_checks_beyond_the_declared_set(
 
 
 def test_a_declared_check_is_matched_exactly_not_by_substring(
-    fake_access_tools,
-    live_target_file,
-):
-    """`invalidate-cache` must never satisfy a declared `validate`."""
+    fake_access_tools: Path,
+    live_target_file: Path,
+) -> None:
+    """Reject a protection context that only extends the declared name.
+
+    :param fake_access_tools: Directory of native command doubles.
+    :param live_target_file: Target naming the exact required check.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = run_script(
         "access_check.py",
-        "--target",
-        live_target_file,
         "--revision",
         TEST_REVISION,
         "--publication",
@@ -359,10 +504,16 @@ def test_a_declared_check_is_matched_exactly_not_by_substring(
 
 
 def test_publication_blocks_when_the_target_declares_no_required_checks(
-    fake_access_tools,
-    tmp_path,
-):
-    """An absent declaration must refuse, not fall back to accepting anything."""
+    fake_access_tools: Path,
+    tmp_path: Path,
+) -> None:
+    """Refuse publication when the target omits required-check policy.
+
+    :param fake_access_tools: Directory of native command doubles.
+    :param tmp_path: Scratch kubeconfig and target without required checks.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     target = tmp_path / "undeclared.toml"
@@ -385,14 +536,13 @@ def test_publication_blocks_when_the_target_declares_no_required_checks(
 
     result = run_script(
         "access_check.py",
-        "--target",
-        target,
         "--revision",
         TEST_REVISION,
         "--publication",
         "--json",
         fake_bin=fake_access_tools,
         env={
+            "CI_SKILLS_TARGET": str(target),
             "FAKE_GH_ADMIN": "true",
             "FAKE_GH_REQUIRED_CONTEXTS": "portable-required-check",
         },
@@ -404,23 +554,22 @@ def test_publication_blocks_when_the_target_declares_no_required_checks(
 
 
 def test_the_written_receipt_carries_no_path_from_this_host(
-    fake_access_tools,
-    live_target_file,
-    tmp_path,
-):
-    """Every path-bearing field must be declared, not only the ones we remember.
+    fake_access_tools: Path,
+    live_target_file: Path,
+    tmp_path: Path,
+) -> None:
+    """Require portable written receipts to exclude absolute host paths.
 
-    `target_file` was added to the receipt without being added to
-    `PATH_VALUE_FIELDS`, so the committable form carried an absolute home
-    directory path. Asserting the absence of the host's own prefix catches the
-    next field too, rather than the one field already fixed.
+    :param fake_access_tools: Directory of native command doubles.
+    :param live_target_file: Selected target whose captured path must be redacted.
+    :param tmp_path: Scratch destination for the committable receipt.
+
+    :returns: None; assertions in the body validate the regression.
     """
     receipt_path = tmp_path / "written" / "receipt.json"
 
     result = run_script(
         "access_check.py",
-        "--target",
-        live_target_file,
         "--revision",
         TEST_REVISION,
         "--publication",
@@ -443,23 +592,28 @@ def test_the_written_receipt_carries_no_path_from_this_host(
     assert data["target_file"] == str(live_target_file)
     assert str(tmp_path) not in body
     assert written["target_file"].startswith("path:")
-    assert written["target_source"] == "argv:--target"
+    assert written["target_source"] == "env:CI_SKILLS_TARGET"
     # The structural invariant, which holds for a field under any home
     # directory rather than only one under this fixture's tmp_path.
     assert _absolute_path_values(written) == []
 
 
-def _absolute_path_values(value, path="") -> list[str]:
-    """Return every string in a receipt that is an absolute filesystem path."""
+def _absolute_path_values(value: JSONValue, path: str = "") -> Sequence[str]:
+    """Find absolute path strings anywhere in a nested receipt.
+
+    :param value: Current scalar, mapping, or list under inspection.
+    :param path: Dotted/indexed location of that value in the receipt.
+    :returns: Locations and values of strings beginning with ``/``.
+    """
     if isinstance(value, str):
         return [f"{path}={value}"] if value.startswith("/") else []
-    if isinstance(value, dict):
-        found = []
+    if isinstance(value, Mapping):
+        found: MutableSequence[str] = []
         for name, child in value.items():
             found.extend(_absolute_path_values(child, f"{path}.{name}"))
         return found
-    if isinstance(value, list):
-        found = []
+    if isinstance(value, Sequence) and not isinstance(value, str):
+        found: MutableSequence[str] = []
         for index, child in enumerate(value):
             found.extend(_absolute_path_values(child, f"{path}[{index}]"))
         return found
@@ -467,20 +621,18 @@ def _absolute_path_values(value, path="") -> list[str]:
 
 
 def test_a_forgotten_required_argument_is_not_reported_as_an_access_failure(
-    live_target_file,
-):
-    """The reader must be sent to the argument, not to an authority.
+    live_target_file: Path,
+) -> None:
+    """Report a missing job URL before attempting provider access.
 
-    `--job-url` left argparse so `--describe` could answer without it. Enforcing
-    it inside the collector put it AFTER the live gate, so a host with no
-    cluster access saw a Kubernetes denial instead of the missing argument.
+    :param live_target_file: Valid target that must not mask the usage failure.
+
+    :returns: None; assertions in the body validate the regression.
     """
     result = run_script(
         "gitlab_job.py",
-        "--target",
-        live_target_file,
         "--json",
-        env={"PATH": "/nonexistent"},
+        env={"PATH": "/nonexistent", "CI_SKILLS_TARGET": str(live_target_file)},
     )
     data = parse_json_output(result)
 

@@ -16,10 +16,15 @@ from lib.python.core.abstract.skill_state import SkillState, StateT
 
 
 class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
-    """Require an action and bind to the executor-owned state."""
+    """Define one concrete action executed against shared workflow state.
+
+    The action is required at construction. The executor binds one state before
+    calling hooks in the workflow's declared order; each callback retains its own
+    run result in that state.
+    """
 
     @abstractmethod
-    def __init__(self, action: ActionT_co) -> None:
+    def __init__(self, action: ActionT_co):
         """Retain the required action before the executor binds shared state.
 
         :param action: Required read, authentication, or mutation inputs.
@@ -35,7 +40,7 @@ class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
 
         :returns: The required operation inputs supplied at construction.
         """
-        return self._skill_action
+        return self._action
 
     @property
     @abstractmethod
@@ -59,20 +64,21 @@ class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
 
     @abstractmethod
     def bind(self, state: StateT) -> None:
-        """Bind the state supplied by the callback collection.
+        """Bind the executor's shared state before any lifecycle hook runs.
 
-        :param state: The one mutable state owned by the executor.
-        :raises ValueError: If this callback already belongs to a different state.
-        :raises NotImplementedError: If a subclass invokes this abstract body.
+        :param state: One concrete mutable state owned by the workflow executor.
+        :raises NotImplementedError: A subclass invokes the unimplemented abstract body.
         """
         raise NotImplementedError("concrete callbacks must implement this hook")
 
     @property
     def result(self) -> SkillResult:
-        """Read the result owned by the shared state.
+        """Read this callback's result from the shared state.
 
-        :returns: The shared JSON result, including an empty dictionary.
-        """
+        :returns: This callback's most recent run mapping, or its initial empty
+            mapping before execution; another callback cannot replace this entry.
+        :raises AttributeError: If the executor has not bound this callback yet.
+        """  # noqa: DOC502 - state access raises AttributeError before binding.
         return self.state.results[self]
 
     @property
@@ -85,37 +91,37 @@ class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
 
     @abstractmethod
     def collect(self) -> SkillResult:
-        """Collect the action inputs.
+        """Collect inputs and observations needed by the action.
 
-        :returns: JSON evidence from collection.
-        :raises NotImplementedError: If a subclass invokes this abstract body.
+        :returns: Result mapping from this hook; an empty mapping represents no data.
+        :raises NotImplementedError: A subclass invokes the unimplemented abstract body.
         """
         raise NotImplementedError("concrete callbacks must implement this hook")
 
     @abstractmethod
     def run(self) -> SkillResult:
-        """Perform the required action.
+        """Perform the concrete action and produce its reportable result.
 
-        :returns: The JSON result to retain in the shared state.
-        :raises NotImplementedError: If a subclass invokes this abstract body.
+        :returns: Result mapping from this hook; an empty mapping represents no data.
+        :raises NotImplementedError: A subclass invokes the unimplemented abstract body.
         """
         raise NotImplementedError("concrete callbacks must implement this hook")
 
     @abstractmethod
     def update(self) -> SkillResult:
-        """Apply the action's post-run work.
+        """Perform the action's post-run work.
 
-        :returns: JSON evidence from the update.
-        :raises NotImplementedError: If a subclass invokes this abstract body.
+        :returns: Result mapping from this hook; an empty mapping represents no data.
+        :raises NotImplementedError: A subclass invokes the unimplemented abstract body.
         """
         raise NotImplementedError("concrete callbacks must implement this hook")
 
     @abstractmethod
     def cleanup(self) -> SkillResult:
-        """Release resources owned by this callback.
+        """Release or recover resources owned by this callback.
 
-        :returns: JSON evidence from cleanup.
-        :raises NotImplementedError: If a subclass invokes this abstract body.
+        :returns: Result mapping from this hook; an empty mapping represents no data.
+        :raises NotImplementedError: A subclass invokes the unimplemented abstract body.
         """
         raise NotImplementedError("concrete callbacks must implement this hook")
 
@@ -123,11 +129,12 @@ class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
 class Callback(AbstractCallback[StateT, ActionT_co]):
     """Provide state access and defaults for hooks a callback does not need."""
 
-    def __init__(self, action: ActionT_co) -> None:
+    def __init__(self, action: ActionT_co):
         """Retain the required action; the collection supplies state through bind.
 
         :param action: Required inputs for this callback's operation.
-        """
+        :raises TypeError: If action does not implement SkillAction.
+        """  # noqa: DOC502 - AbstractCallback validates the required action.
         super().__init__(action)
 
     @property
@@ -135,7 +142,8 @@ class Callback(AbstractCallback[StateT, ActionT_co]):
         """Read the retained state reference.
 
         :returns: The same object assigned through the state setter.
-        """
+        :raises AttributeError: If the executor has not bound this callback yet.
+        """  # noqa: DOC502 - unbound state attribute access raises AttributeError.
         return self._state
 
     @state.setter
@@ -157,34 +165,38 @@ class Callback(AbstractCallback[StateT, ActionT_co]):
         """Retain the collection's shared state before any hook runs.
 
         :param state: The one mutable state owned by the executor.
+        :raises TypeError: If state does not implement SkillState.
         :raises ValueError: If this callback already belongs to a different state.
-        """
+        """  # noqa: DOC502 - the state setter validates ownership and type.
         self.state = state
 
     def collect(self) -> SkillResult:
-        """Keep the state result when collection is unnecessary.
+        """Retain the current workflow result when no collection is needed.
 
-        :returns: The existing state-owned JSON dictionary.
-        """
+        :returns: Existing state-owned result mapping, without copying it.
+        :raises AttributeError: The executor has not bound this callback to a state.
+        """  # noqa: DOC502 - state access requires an existing binding.
         return self.state.result
 
     def run(self) -> SkillResult:
-        """Keep the state result when this callback uses other hooks only.
+        """Produce an empty result when the action has no reportable data.
 
-        :returns: The existing state-owned JSON dictionary.
+        :returns: A new empty mapping owned by this callback's run.
         """
-        return self.state.result
+        return {}
 
     def update(self) -> SkillResult:
-        """Keep the state result when post-run work is unnecessary.
+        """Retain the current workflow result when no post-run work is needed.
 
-        :returns: The existing state-owned JSON dictionary.
-        """
+        :returns: Existing state-owned result mapping, without copying it.
+        :raises AttributeError: The executor has not bound this callback to a state.
+        """  # noqa: DOC502 - state access requires an existing binding.
         return self.state.result
 
     def cleanup(self) -> SkillResult:
-        """Keep the state result when no resources need releasing.
+        """Retain the current workflow result when no resource cleanup is needed.
 
-        :returns: The existing state-owned JSON dictionary.
-        """
+        :returns: Existing state-owned result mapping, without copying it.
+        :raises AttributeError: The executor has not bound this callback to a state.
+        """  # noqa: DOC502 - state access requires an existing binding.
         return self.state.result

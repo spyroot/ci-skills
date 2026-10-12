@@ -1,11 +1,19 @@
-"""Portable receipts retain source identity without publishing host paths."""
+"""Portable receipts retain source identity without publishing host paths.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
-from tests.python.conftest import import_script_module
+from conftest import import_script_module
 
 
 def test_project_source_and_recorded_query_paths_are_portable() -> None:
+    """Keep source schemes and argv digest while tokenizing private paths.
+    :returns: None; assertions in the body validate the regression.
+    """
     portable = import_script_module("lib.python.core.portable")
     argv_digest = "a" * 64
     local = {
@@ -36,4 +44,22 @@ def test_project_source_and_recorded_query_paths_are_portable() -> None:
     assert f"#argv-sha256:{argv_digest}" in rendered["credential_sources"]["kubernetes"]
     assert "file:path:" in rendered["credential_sources"]["kubernetes"]
     assert rendered["queries"]["pods"][2].startswith("path:")
+    assert "/private/" not in str(rendered)
+
+
+def test_portable_root_document_without_key_keeps_nested_path_redaction() -> None:
+    """Portable conversion accepts a root object without an enclosing key.
+    :returns: None; assertions in the body validate the regression.
+    """
+    portable = import_script_module("lib.python.core.portable")
+
+    rendered = portable.portable(
+        {
+            "target_file": "/private/operator/target.toml",
+            "nested": {"target_file": "/private/operator/work"},
+        }
+    )
+
+    assert rendered["target_file"].startswith("path:")
+    assert rendered["nested"]["target_file"].startswith("path:")
     assert "/private/" not in str(rendered)

@@ -16,7 +16,9 @@ The initial access receipts hold the selected targets and API-read identities.
 Later operation receipts are compared with that setup; no checked-in environment
 or identity values are a second authority.
 
-Mustafa Byarmov mbayramo@ciso.com / spyroot@gmail.com
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -24,16 +26,71 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import runpy
 import subprocess
-import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Final, Optional, TypeAlias, TypedDict
 
 SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
-if str(SKILL_ROOT) not in sys.path:
-    sys.path.insert(0, str(SKILL_ROOT))
+runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
+
+from lib.python.core.cli_api import response_decoder
+from lib.python.core.json_types import JSONObject, JSONValue, json_integer, json_string
+
+OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
+ReceiptPairKey: TypeAlias = tuple[str, str, str, str, str, int, str]
+
+
+class AcceptanceResult(TypedDict, total=False):
+    """Acceptance envelope retaining only accepted names and classified failures.
+
+    :param schema_version: Stable live-acceptance evidence version.
+    :param kind: Existing live_acceptance report identifier.
+    :param status: PASS when every required receipt passes, otherwise BLOCKED.
+    :param skill_digest: Measured candidate source digest when available.
+    :param accepted: Sorted names of accepted setup and operation receipts.
+    :param problems: Sorted classified acceptance failures, or a loading diagnostic.
+
+    .. attribute :: schema_version
+        :type: str
+
+        Stable live-acceptance evidence version.
+
+    .. attribute :: kind
+        :type: str
+
+        Existing live_acceptance report identifier.
+
+    .. attribute :: status
+        :type: str
+
+        PASS when every required receipt passes, otherwise BLOCKED.
+
+    .. attribute :: skill_digest
+        :type: str
+
+        Measured candidate source digest when available.
+
+    .. attribute :: accepted
+        :type: Sequence[str]
+
+        Sorted names of accepted setup and operation receipts.
+
+    .. attribute :: problems
+        :type: Sequence[str]
+
+        Sorted classified acceptance failures, or a loading diagnostic.
+    """
+
+    schema_version: str
+    kind: str
+    status: str
+    skill_digest: str
+    accepted: Sequence[str]
+    problems: Sequence[str]
+
 
 SCHEMA_VERSION = "1.0"
 RECEIPT_KIND = "access_check"
@@ -96,19 +153,30 @@ class AcceptanceError(RuntimeError):
     """Acceptance inputs could not be read."""
 
 
-def _mapping(value: Any) -> dict[str, Any]:
-    """Return a mapping for guarded receipt reads, without accepting its shape."""
-    return value if isinstance(value, dict) else {}
+def _mapping(value: JSONValue) -> JSONObject:
+    """Guard a receipt field before reading child keys.
+
+    :param value: Untrusted decoded receipt field.
+    :returns: Read-only object view, or an empty object for a missing/nonobject field.
+    """
+    return value if isinstance(value, Mapping) else {}
 
 
-def _load_receipts(directory: Path) -> dict[str, Any]:
+def _load_receipts(directory: Path) -> Mapping[str, JSONObject]:
+    """Load and validate JSON receipt objects from one directory.
+
+    :param directory: Existing directory containing committed JSON receipts.
+    :returns: Receipt mappings keyed by their file names.
+    :raises AcceptanceError: If the directory is absent, a file cannot be decoded,
+        a receipt root is not an object, or no JSON receipts exist.
+    """
     if not directory.is_dir():
         raise AcceptanceError(f"receipt_directory_missing:{directory}")
-    receipts: dict[str, Any] = {}
+    receipts: MutableMapping[str, JSONObject] = {}
     for path in sorted(directory.glob("*.json")):
         try:
-            receipt = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
+            receipt = response_decoder().decode(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, RecursionError) as exc:
             raise AcceptanceError(f"receipt_unreadable:{path.name}") from exc
         if not isinstance(receipt, dict):
             raise AcceptanceError(f"receipt_invalid_shape:{path.name}")
@@ -118,7 +186,7 @@ def _load_receipts(directory: Path) -> dict[str, Any]:
     return receipts
 
 
-def _load_receipt_dirs(paths: Sequence[Path]) -> dict[str, Any]:
+def _load_receipt_dirs(paths: Sequence[Path]) -> Mapping[str, JSONObject]:
     """Load committed acceptance receipts from one or more directories.
 
     :param paths: Candidate receipt directories in priority order.
@@ -126,7 +194,7 @@ def _load_receipt_dirs(paths: Sequence[Path]) -> dict[str, Any]:
     :raises AcceptanceError: If a required directory is unreadable, a receipt
         is malformed, or two directories contain the same receipt name.
     """
-    receipts: dict[str, Any] = {}
+    receipts: MutableMapping[str, JSONObject] = {}
     for index, directory in enumerate(paths):
         if not directory.exists():
             if index == 0:
@@ -142,15 +210,16 @@ def _load_receipt_dirs(paths: Sequence[Path]) -> dict[str, Any]:
 
 
 def check_candidate_identity(
-    receipt: dict[str, Any], repository_root: Path, skill_root: Path
-) -> list[str]:
+    receipt: JSONObject, repository_root: Path, skill_root: Path
+) -> Sequence[str]:
     """Verify a committed receipt against the exact candidate skill tree.
 
     :param receipt: Live receipt with a verified tested source revision.
     :param repository_root: Git checkout containing the candidate HEAD.
     :param skill_root: Candidate's ``ci-skills`` directory.
     :returns: Stable reasons when source, tree identity, or digest differs.
-    """
+    :raises UnicodeError: If Git output cannot be decoded using the process encoding.
+    """  # noqa: DOC502 - The nested Git process decodes text and can raise UnicodeError.
     skill = _mapping(receipt.get("skill"))
     source = _mapping(skill.get("revision"))
     revision = receipt.get("tested_revision")
@@ -165,7 +234,13 @@ def check_candidate_identity(
     ):
         return ["candidate_revision_unverified"]
 
-    def git(*args: str) -> subprocess.CompletedProcess[str] | None:
+    def git(*args: str) -> Optional[subprocess.CompletedProcess[str]]:
+        """Run one Git query within the candidate checkout without raising on I/O.
+
+        :param *args: Git arguments following the selected repository root.
+        :returns: Captured Git process result, or None if Git could not start.
+        :raises UnicodeError: If Git output cannot be decoded using the process encoding.
+        """  # noqa: DOC502 - subprocess.run propagates output decoding failures.
         try:
             return subprocess.run(
                 ["git", "-C", str(repository_root), *args],
@@ -204,7 +279,12 @@ def check_candidate_identity(
     return []
 
 
-def _parse_time(value: Any) -> datetime | None:
+def _parse_time(value: JSONValue) -> Optional[datetime]:
+    """Parse a receipt timestamp, treating a naive value as UTC.
+
+    :param value: Untrusted captured-at field from a receipt.
+    :returns: A timezone-aware timestamp, or None for invalid input.
+    """
     if not isinstance(value, str) or not value:
         return None
     try:
@@ -216,13 +296,23 @@ def _parse_time(value: Any) -> datetime | None:
 
 def _check_common(
     name: str,
-    receipt: dict[str, Any],
+    receipt: JSONObject,
     digest: str,
     now: datetime,
     max_age_days: int,
-) -> list[str]:
-    """Verify fields shared by diagnostics and GitLab operation receipts."""
-    problems: list[str] = []
+) -> MutableSequence[str]:
+    """Check schema, status, digest, freshness, and sanitization evidence.
+
+    :param name: Receipt file name prefixed to each reported problem.
+    :param receipt: Parsed diagnostic or GitLab operation receipt.
+    :param digest: Expected digest of the candidate skill tree.
+    :param now: Reference time used for freshness and future-date checks.
+    :param max_age_days: Maximum accepted age of the receipt in whole days.
+    :returns: Mutable problem list owned by the caller for additional checks.
+    :raises TypeError: If now is naive while a receipt timestamp is timezone-aware.
+    :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
+    """  # noqa: DOC502 - Datetime comparison and recursive redaction can fail.
+    problems: MutableSequence[str] = []
     if receipt.get("schema_version") != SCHEMA_VERSION:
         problems.append(f"{name}:schema_version_unexpected")
     if receipt.get("status") != "PASS":
@@ -249,11 +339,22 @@ def _check_common(
 
 def _check_receipt(
     name: str,
-    receipt: dict[str, Any],
+    receipt: JSONObject,
     digest: str,
     now: datetime,
-) -> list[str]:
-    """Validate the publication setup's own live access and read-back evidence."""
+) -> MutableSequence[str]:
+    """Validate the initial publication access receipt and live read-backs.
+
+    :param name: Receipt file name prefixed to each reported problem.
+    :param receipt: Parsed publication access receipt to inspect.
+    :param digest: Expected digest of the candidate skill tree.
+    :param now: Reference time used for receipt freshness.
+    :returns: Mutable problem list for missing identity, target, or live proof.
+    :raises ImportError: If the shared command-authority catalogue cannot be loaded.
+    :raises TypeError: If a nested readback has an incompatible type or now is naive
+        while receipt timestamps are timezone-aware.
+    :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
+    """  # noqa: DOC502 - Shared validators and catalogue import propagate failures.
     from lib.python.core.catalog import DEFAULT_AUTHORITIES
 
     problems = _check_common(name, receipt, digest, now, MAX_RECEIPT_AGE_DAYS)
@@ -337,8 +438,12 @@ def _check_receipt(
     return problems
 
 
-def _gitlab_context(receipt: dict[str, Any]) -> dict[str, Any]:
-    """Extract runtime expectations from an initial GitLab access receipt."""
+def _gitlab_context(receipt: JSONObject) -> JSONObject:
+    """Extract host, identity, credential, and target context from access proof.
+
+    :param receipt: Initial GitLab access receipt with target and identity fields.
+    :returns: Expected runtime context for matching later GitLab receipts.
+    """
     target = _mapping(receipt.get("target"))
     identity = _mapping(receipt.get("identity"))
     return {
@@ -354,8 +459,13 @@ def _gitlab_context(receipt: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _matches_context(receipt: dict[str, Any], context: dict[str, Any]) -> bool:
-    """Locate the initial access proof for this exact host, origin and target."""
+def _matches_context(receipt: JSONObject, context: JSONObject) -> bool:
+    """Match an operation receipt to an exact access host and target.
+
+    :param receipt: GitLab operation receipt carrying verified target details.
+    :param context: Host, origin, and target identity from an access receipt.
+    :returns: True when the operation's host, origin, and target all match.
+    """
     target = _mapping(receipt.get("verified_target"))
     return (
         receipt.get("execution_host") == context.get("execution_host")
@@ -368,12 +478,24 @@ def _matches_context(receipt: dict[str, Any], context: dict[str, Any]) -> bool:
 
 def _check_gitlab_receipt(
     name: str,
-    receipt: dict[str, Any],
-    required: dict[str, Any],
+    receipt: JSONObject,
+    required: JSONObject,
     digest: str,
     now: datetime,
-) -> list[str]:
-    """Accept one exact-host, exact-target GitLab access or action read-back."""
+) -> MutableSequence[str]:
+    """Validate one GitLab receipt against selected access and operation proof.
+
+    :param name: Receipt file name prefixed to each reported problem.
+    :param receipt: Parsed GitLab access, read, or mutation receipt.
+    :param required: Expected host, credential, target, kind, and operation fields.
+    :param digest: Expected digest of the candidate skill tree.
+    :param now: Reference time used for receipt freshness.
+    :returns: Mutable problem list for context or read-back mismatch.
+    :raises KeyError: If the required context lacks its kind field.
+    :raises TypeError: If nested evidence has an incompatible type or now is naive
+        while receipt timestamps are timezone-aware.
+    :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
+    """  # noqa: DOC502 - Context indexing and shared validators propagate failures.
     problems = _check_common(name, receipt, digest, now, MAX_RECEIPT_AGE_DAYS)
     kind = required["kind"]
     if kind not in GITLAB_RECEIPT_KINDS or receipt.get("kind") != kind:
@@ -381,7 +503,7 @@ def _check_gitlab_receipt(
     for field in ("execution_host", "origin"):
         if receipt.get(field) != required.get(field):
             problems.append(f"{name}:{field}_mismatch")
-    identity = receipt.get("identity") or {}
+    identity = _mapping(receipt.get("identity"))
     if identity.get("username") != required.get("username") or identity.get(
         "id"
     ) != required.get("identity_id"):
@@ -395,11 +517,11 @@ def _check_gitlab_receipt(
         problems.append(f"{name}:credential_source_unresolved")
     if not receipt.get("target_source"):
         problems.append(f"{name}:target_source_unresolved")
-    target = (
+    target = _mapping(
         receipt.get("target")
         if kind == "gitlab_access"
         else receipt.get("verified_target")
-    ) or {}
+    )
     if (
         target.get("kind") != required.get("target_kind")
         or target.get("id") != required.get("target_id")
@@ -442,8 +564,8 @@ def _check_gitlab_receipt(
 
 
 def _check_gitlab_read_receipt(
-    name: str, receipt: dict[str, Any], required: dict[str, Any]
-) -> list[str]:
+    name: str, receipt: JSONObject, required: JSONObject
+) -> Sequence[str]:
     """Validate a live read receipt that must not mutate GitLab.
 
     :param name: Receipt file name used in diagnostics.
@@ -451,7 +573,7 @@ def _check_gitlab_read_receipt(
     :param required: Expected operation and target entry.
     :returns: Acceptance problems for this read receipt.
     """
-    problems: list[str] = []
+    problems: MutableSequence[str] = []
     records = receipt.get("records")
     readback = receipt.get("readback")
     if (
@@ -482,9 +604,7 @@ def _check_gitlab_read_receipt(
     return problems
 
 
-def _runner_delete_readback_verified(
-    receipt: dict[str, Any], required: dict[str, Any]
-) -> bool:
+def _runner_delete_readback_verified(receipt: JSONObject, required: JSONObject) -> bool:
     """Check delete-specific before/action/absence evidence.
 
     :param receipt: Parsed runner delete receipt.
@@ -535,22 +655,30 @@ def _runner_delete_readback_verified(
 
 
 def _runner_smoke_cleanup_verified(
-    receipt: dict[str, Any],
-    required: dict[str, Any],
+    receipt: JSONObject,
+    required: JSONObject,
     digest: str,
     now: datetime,
 ) -> bool:
-    """Require independent absence read-back for a disposable created runner."""
+    """Verify a disposable runner's deletion and independent absence read-back.
+
+    :param receipt: Runner creation receipt containing smoke cleanup evidence.
+    :param required: Expected project target identity from setup access.
+    :param digest: Expected skill digest in the cleanup evidence.
+    :param now: Reference time bounding cleanup receipt freshness.
+    :returns: True only when the exact created runner is absent afterward.
+    :raises TypeError: If now is naive while receipt timestamps are timezone-aware.
+    """  # noqa: DOC502 - Datetime comparisons reject mixed timezone awareness.
     cleanup = receipt.get("smoke_cleanup")
     if not isinstance(cleanup, dict):
         return False
     captured = _parse_time(cleanup.get("captured_at"))
     created = _parse_time(receipt.get("captured_at"))
-    runner_id = (receipt.get("readback") or {}).get("id")
+    runner_id = _mapping(receipt.get("readback")).get("id")
     before = cleanup.get("before")
     deletion = cleanup.get("delete")
     after = cleanup.get("after")
-    revision = (receipt.get("skill") or {}).get("revision") or {}
+    revision = _mapping(_mapping(receipt.get("skill")).get("revision"))
     if (
         cleanup.get("schema_version") != SCHEMA_VERSION
         or cleanup.get("kind") != "gitlab_runner_smoke_cleanup"
@@ -597,8 +725,11 @@ def _runner_smoke_cleanup_verified(
     )
 
 
-def _redactor():
-    """Return the skill's own redactor, so one rule covers capture and review."""
+def _redactor() -> Optional[Callable[[JSONObject], JSONObject]]:
+    """Load the installed skill's receipt redactor for acceptance review.
+
+    :returns: Shared object redaction function, or None when the skill library is absent.
+    """
     try:
         from lib.python.core.runtime import redact_tree
     except ImportError:
@@ -606,9 +737,14 @@ def _redactor():
     return redact_tree
 
 
-def _resource_identity(receipt: dict[str, Any]) -> Any:
+def _resource_identity(receipt: JSONObject) -> Optional[tuple[str, JSONValue]]:
+    """Select a stable resource identifier from an operation read-back.
+
+    :param receipt: GitLab operation receipt with a readback object.
+    :returns: First available id, iid, or slug pair, or None when absent.
+    """
     readback = receipt.get("readback") or {}
-    if not isinstance(readback, dict):
+    if not isinstance(readback, Mapping):
         return None
     for key in ("id", "iid", "slug"):
         if readback.get(key):
@@ -616,166 +752,259 @@ def _resource_identity(receipt: dict[str, Any]) -> Any:
     return None
 
 
+class AcceptanceReview:
+    """Evaluate setup, operation, and repeated-readback receipts in declared order."""
+
+    def __init__(
+        self,
+        setup: Mapping[str, JSONObject],
+        receipts: Mapping[str, JSONObject],
+        skill_root: Path,
+        now: datetime,
+        repository_root: Optional[Path],
+    ):
+        """Retain receipt views and initialize candidate-bound evaluation state.
+
+        :param setup: Existing access receipts captured before writes, keyed by name.
+        :param receipts: Setup and operation receipt objects keyed by unique name.
+        :param skill_root: Candidate skill tree whose current bytes are fingerprinted.
+        :param now: Timezone-aware reference time for receipt freshness.
+        :param repository_root: Checkout for exact source verification, or None to omit it.
+        :raises ImportError: If shared provenance code cannot be loaded.
+        :raises OSError: If a candidate skill source file cannot be read.
+        :raises ValueError: If the candidate source tree cannot be fingerprinted.
+        """  # noqa: DOC502 - The provenance import and tree_digest propagate failures.
+        from lib.python.core.provenance import tree_digest
+
+        self.setup = setup
+        self.receipts = receipts
+        self.skill_root = skill_root
+        self.now = now
+        self.repository_root = repository_root
+        self.digest = tree_digest(skill_root)["digest"]
+        self.problems: MutableSequence[str] = []
+        self.accepted: MutableSequence[str] = []
+        self.contexts: MutableSequence[JSONObject] = []
+        self.publication_hosts: set[str] = set()
+        self.observed_operations: set[OperationKey] = set()
+        self.matched_operations: MutableMapping[
+            ReceiptPairKey, MutableMapping[str, tuple[str, JSONObject]]
+        ] = {}
+
+    def setup_receipts(self) -> None:
+        """Require publication proof and retain each accepted GitLab access context.
+
+        :raises ImportError: If the shared command-authority catalogue cannot be loaded.
+        :raises RecursionError: If receipt containers exceed recursive redaction limits.
+        """  # noqa: DOC502 - Receipt helpers propagate import and recursion failures.
+        for name, receipt in self.setup.items():
+            kind = receipt.get("kind")
+            try:
+                if kind == RECEIPT_KIND:
+                    found = _check_receipt(name, receipt, self.digest, self.now)
+                    host = receipt.get("execution_host")
+                    if not isinstance(host, str):
+                        found.append(f"{name}:receipt_invalid_shape")
+                    elif host in self.publication_hosts:
+                        found.append(f"{name}:receipt_ambiguous")
+                    if isinstance(host, str):
+                        self.publication_hosts.add(host)
+                elif kind == "gitlab_access":
+                    context = _gitlab_context(receipt)
+                    found = _check_gitlab_receipt(
+                        name, receipt, {**context, "kind": kind}, self.digest, self.now
+                    )
+                    if (
+                        any(not value for value in context.values())
+                        or type(context["identity_id"]) is not int
+                        or context["identity_id"] <= 0
+                        or type(context["target_id"]) is not int
+                        or context["target_id"] <= 0
+                        or receipt.get("errors")
+                    ):
+                        found.append(f"{name}:setup_context_incomplete")
+                else:
+                    found = [f"{name}:setup_kind_unexpected"]
+                if self.repository_root is not None:
+                    found.extend(
+                        f"{name}:{reason}"
+                        for reason in check_candidate_identity(
+                            receipt, self.repository_root, self.skill_root
+                        )
+                    )
+            except (AttributeError, KeyError, TypeError, ValueError):
+                found = [f"{name}:receipt_invalid_shape"]
+            self.problems.extend(found)
+            if not found:
+                self.accepted.append(name)
+                if kind == "gitlab_access":
+                    self.contexts.append(context)
+                    self.observed_operations.add((kind, None, None))
+        if not any(
+            self.setup[name].get("kind") == RECEIPT_KIND for name in self.accepted
+        ):
+            self.problems.append("access_check:setup_missing")
+
+    def operation_receipts(self) -> None:
+        """Match each operation to one setup context and retain repeatable pairs.
+
+        Malformed fields contribute classified problems; accepted receipts retain
+        their original bytes and must still match the candidate identity.
+        """
+        for name, receipt in self.receipts.items():
+            if name in self.setup:
+                if receipt != self.setup[name]:
+                    self.problems.append(f"{name}:setup_receipt_mismatch")
+                continue
+            kind = receipt.get("kind")
+            operation = receipt.get("operation")
+            result_action = receipt.get("result_action")
+            if (
+                not isinstance(kind, str)
+                or not (operation is None or isinstance(operation, str))
+                or not (result_action is None or isinstance(result_action, str))
+            ):
+                self.problems.append(f"{name}:receipt_not_declared")
+                continue
+            operation_key = (kind, operation, result_action)
+            if operation_key not in REQUIRED_GITLAB_OPERATIONS:
+                self.problems.append(f"{name}:receipt_not_declared")
+                continue
+            candidates = [
+                context
+                for context in self.contexts
+                if _matches_context(receipt, context)
+            ]
+            if len(candidates) != 1:
+                self.problems.append(f"{name}:setup_context_missing_or_ambiguous")
+                continue
+            required = {
+                **candidates[0],
+                "kind": kind,
+                "operation": operation,
+                "result_action": result_action,
+            }
+            try:
+                found = _check_gitlab_receipt(
+                    name, receipt, required, self.digest, self.now
+                )
+                if self.repository_root is not None:
+                    found.extend(
+                        f"{name}:{reason}"
+                        for reason in check_candidate_identity(
+                            receipt, self.repository_root, self.skill_root
+                        )
+                    )
+            except (AttributeError, KeyError, TypeError, ValueError):
+                found = [f"{name}:receipt_invalid_shape"]
+            self.problems.extend(found)
+            if not found:
+                if (kind, operation) in REPEATABLE_GITLAB_OPERATIONS:
+                    try:
+                        pair = (
+                            json_string(required["execution_host"]),
+                            json_string(required["origin"]),
+                            kind,
+                            json_string(operation),
+                            json_string(required["target_kind"]),
+                            json_integer(required["target_id"]),
+                            json_string(required["target_path"]),
+                        )
+                    except (KeyError, TypeError):
+                        self.problems.append(f"{name}:receipt_invalid_shape")
+                        continue
+                    actions = self.matched_operations.setdefault(pair, {})
+                    if result_action in actions:
+                        self.problems.append(f"{name}:receipt_ambiguous")
+                    actions[json_string(result_action)] = (name, receipt)
+                self.accepted.append(name)
+                self.observed_operations.add(operation_key)
+
+    def repeated_receipts(self) -> None:
+        """Require operation coverage and matching APPLIED/NO_OP resource evidence."""
+        for kind, operation, action in sorted(
+            REQUIRED_GITLAB_OPERATIONS - self.observed_operations,
+            key=lambda entry: tuple(str(value) for value in entry),
+        ):
+            self.problems.append(
+                f"{kind}:{operation or 'check'}:{action or 'check'}:receipt_missing"
+            )
+        for pair, actions in self.matched_operations.items():
+            if set(actions) != {"APPLIED", "NO_OP"}:
+                self.problems.append(f"{pair[2]}:{pair[3]}:repeat_readback_missing")
+                continue
+            applied_name, applied = actions["APPLIED"]
+            noop_name, noop = actions["NO_OP"]
+            if (
+                not applied.get("plan_digest")
+                or applied.get("plan_digest") != noop.get("plan_digest")
+                or not _resource_identity(applied)
+                or _resource_identity(applied) != _resource_identity(noop)
+                or applied.get("credential_source") != noop.get("credential_source")
+                or applied.get("credential_digest") != noop.get("credential_digest")
+            ):
+                self.problems.append(
+                    f"{applied_name}:{noop_name}:repeat_readback_mismatch"
+                )
+
+    def result(self) -> AcceptanceResult:
+        """Serialize the accumulated acceptance outcome without changing receipts.
+
+        :returns: Existing live-acceptance envelope with sorted names and problems.
+        """
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "kind": "live_acceptance",
+            "status": "PASS" if not self.problems else "BLOCKED",
+            "skill_digest": self.digest,
+            "accepted": sorted(self.accepted),
+            "problems": sorted(self.problems),
+        }
+
+
 def evaluate(
-    setup: dict[str, Any],
-    receipts: dict[str, Any],
+    setup: Mapping[str, JSONObject],
+    receipts: Mapping[str, JSONObject],
     skill_root: Path,
-    *,
-    now: datetime | None = None,
-    repository_root: Path | None = None,
-) -> dict[str, Any]:
+    now: Optional[datetime] = None,
+    repository_root: Optional[Path] = None,
+) -> AcceptanceResult:
     """Compare action receipts with the initial authenticated runtime setup.
 
     :param setup: Existing access receipts keyed by name, captured before writes.
     :param receipts: Parsed operation and setup receipts keyed by file name.
     :param skill_root: Candidate skill tree used for digest comparison.
-    :param now: Optional reference time for receipt freshness.
-    :param repository_root: Git checkout for exact source commit verification.
+    :param now: Reference time for freshness, or None to read the current UTC time.
+    :param repository_root: Checkout for source verification, or None to omit it.
     :returns: Acceptance status, accepted receipts, and stable problem reasons.
-    """
-    from lib.python.core.provenance import tree_digest
-
-    now = now or datetime.now(UTC)
-    digest = tree_digest(skill_root)["digest"]
-    problems: list[str] = []
-    accepted: list[str] = []
-    contexts: list[dict[str, Any]] = []
-    publication_hosts: set[str] = set()
-    observed_operations: set[tuple[str, str | None, str | None]] = set()
-    matched_operations: dict[
-        tuple[Any, ...], dict[str, tuple[str, dict[str, Any]]]
-    ] = {}
-    for name, receipt in setup.items():
-        kind = receipt.get("kind")
-        try:
-            if kind == RECEIPT_KIND:
-                found = _check_receipt(name, receipt, digest, now)
-                host = receipt.get("execution_host")
-                if host in publication_hosts:
-                    found.append(f"{name}:receipt_ambiguous")
-                publication_hosts.add(host)
-            elif kind == "gitlab_access":
-                context = _gitlab_context(receipt)
-                found = _check_gitlab_receipt(
-                    name, receipt, {**context, "kind": kind}, digest, now
-                )
-                if (
-                    any(not value for value in context.values())
-                    or type(context["identity_id"]) is not int
-                    or context["identity_id"] <= 0
-                    or type(context["target_id"]) is not int
-                    or context["target_id"] <= 0
-                    or receipt.get("errors")
-                ):
-                    found.append(f"{name}:setup_context_incomplete")
-            else:
-                found = [f"{name}:setup_kind_unexpected"]
-            if repository_root is not None:
-                found.extend(
-                    f"{name}:{reason}"
-                    for reason in check_candidate_identity(
-                        receipt, repository_root, skill_root
-                    )
-                )
-        except (AttributeError, KeyError, TypeError, ValueError):
-            found = [f"{name}:receipt_invalid_shape"]
-        problems.extend(found)
-        if not found:
-            accepted.append(name)
-            if kind == "gitlab_access":
-                contexts.append(context)
-                observed_operations.add((kind, None, None))
-    if not any(setup[name].get("kind") == RECEIPT_KIND for name in accepted):
-        problems.append("access_check:setup_missing")
-
-    for name, receipt in receipts.items():
-        if name in setup:
-            if receipt != setup[name]:
-                problems.append(f"{name}:setup_receipt_mismatch")
-            continue
-        kind = receipt.get("kind")
-        operation = receipt.get("operation")
-        result_action = receipt.get("result_action")
-        operation_key = (kind, operation, result_action)
-        if operation_key not in REQUIRED_GITLAB_OPERATIONS:
-            problems.append(f"{name}:receipt_not_declared")
-            continue
-        candidates = [
-            context for context in contexts if _matches_context(receipt, context)
-        ]
-        if len(candidates) != 1:
-            problems.append(f"{name}:setup_context_missing_or_ambiguous")
-            continue
-        required = {
-            **candidates[0],
-            "kind": kind,
-            "operation": operation,
-            "result_action": result_action,
-        }
-        try:
-            found = _check_gitlab_receipt(name, receipt, required, digest, now)
-            if repository_root is not None:
-                found.extend(
-                    f"{name}:{reason}"
-                    for reason in check_candidate_identity(
-                        receipt, repository_root, skill_root
-                    )
-                )
-        except (AttributeError, KeyError, TypeError, ValueError):
-            found = [f"{name}:receipt_invalid_shape"]
-        problems.extend(found)
-        if not found:
-            accepted.append(name)
-            observed_operations.add(operation_key)
-            if (kind, operation) in REPEATABLE_GITLAB_OPERATIONS:
-                pair = (
-                    required["execution_host"],
-                    required["origin"],
-                    kind,
-                    operation,
-                    required["target_kind"],
-                    required["target_id"],
-                    required["target_path"],
-                )
-                actions = matched_operations.setdefault(pair, {})
-                if result_action in actions:
-                    problems.append(f"{name}:receipt_ambiguous")
-                actions[result_action] = (name, receipt)
-
-    for kind, operation, action in sorted(
-        REQUIRED_GITLAB_OPERATIONS - observed_operations,
-        key=lambda entry: tuple(str(value) for value in entry),
-    ):
-        problems.append(
-            f"{kind}:{operation or 'check'}:{action or 'check'}:receipt_missing"
-        )
-    for pair, actions in matched_operations.items():
-        if set(actions) != {"APPLIED", "NO_OP"}:
-            problems.append(f"{pair[2]}:{pair[3]}:repeat_readback_missing")
-            continue
-        applied_name, applied = actions["APPLIED"]
-        noop_name, noop = actions["NO_OP"]
-        if (
-            not applied.get("plan_digest")
-            or applied.get("plan_digest") != noop.get("plan_digest")
-            or not _resource_identity(applied)
-            or _resource_identity(applied) != _resource_identity(noop)
-            or applied.get("credential_source") != noop.get("credential_source")
-            or applied.get("credential_digest") != noop.get("credential_digest")
-        ):
-            problems.append(f"{applied_name}:{noop_name}:repeat_readback_mismatch")
-
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "kind": "live_acceptance",
-        "status": "PASS" if not problems else "BLOCKED",
-        "skill_digest": digest,
-        "accepted": sorted(accepted),
-        "problems": sorted(problems),
-    }
+    :raises ImportError: If shared provenance or authority modules cannot be loaded.
+    :raises OSError: If a candidate source file cannot be read for its digest.
+    :raises ValueError: If the candidate skill tree cannot be fingerprinted.
+    :raises RecursionError: If receipt containers exceed recursive redaction limits.
+    """  # noqa: DOC502 - Review construction and receipt helpers propagate failures.
+    review = AcceptanceReview(
+        setup,
+        receipts,
+        skill_root,
+        now if now is not None else datetime.now(UTC),
+        repository_root,
+    )
+    review.setup_receipts()
+    review.operation_receipts()
+    review.repeated_receipts()
+    return review.result()
 
 
 def main() -> int:
+    """Evaluate committed live receipts and render the selected output format.
+
+    :returns: Zero for accepted evidence, or two for blocked acceptance.
+    :raises SystemExit: If arguments are invalid or help is requested.
+    :raises ImportError: If required shared modules or requested YAML support are absent.
+    :raises OSError: If final output cannot be written.
+    :raises UnicodeError: If final output cannot be encoded.
+    :raises RecursionError: If receipt containers exceed recursive redaction limits.
+    """  # noqa: DOC502 - Argument parsing, imports, and output helpers propagate failures.
     cli = argparse.ArgumentParser(
         description="Verify committed live-access receipts against this revision.",
         epilog="Example: check_live_acceptance.py --root . --json",

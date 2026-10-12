@@ -7,23 +7,37 @@ spyroot@gmail.com
 
 from abc import ABC
 from argparse import Namespace
+from collections.abc import MutableMapping
 from dataclasses import dataclass, field
 from typing import Self
 
 from lib.python.core.abstract.skill_state import SkillState
+from lib.python.core.json_types import JSONValue
 
 
 @dataclass
 class ExecutionContext(SkillState, ABC):
-    """Add parsed arguments to the inherited result and record sequence.
+    """Add command arguments and a JSON report to SkillState.
 
-    Provider workflows add concrete service fields in their own state classes.
-    This common context contains no provider clients.
+    Inherited invocation fields are documented by SkillState. Provider-specific
+    states declare their required provider clients as concrete named fields.
+
+    :param args: Parsed command arguments used to construct the workflow.
+    :param report: Mutable command report retained for final rendering.
+
+    .. attribute :: args
+        :type: Namespace
+
+        Parsed command arguments used to construct the workflow.
+
+    .. attribute :: report
+        :type: MutableMapping[str, JSONValue]
+
+        Command report retained for final rendering.
     """
 
     args: Namespace = field(default_factory=Namespace)
-    services: dict[str, object] = field(default_factory=dict, repr=False)
-    report: dict[str, object] = field(default_factory=dict)
+    report: MutableMapping[str, JSONValue] = field(default_factory=dict)
 
     @classmethod
     def from_args(cls, args: Namespace) -> Self:

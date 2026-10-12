@@ -11,11 +11,17 @@ import json
 import signal
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, Optional
 
 import pytest
 from conftest import REPO_ROOT, load_module
 from jsonschema import Draft202012Validator
+
+if TYPE_CHECKING:
+    from lib.python.core.provenance import SkillIdentity
 
 INSTALLATION_IDENTITY_SCHEMA = json.loads(
     (REPO_ROOT / "schemas" / "skill-installation-identity.schema.json").read_text(
@@ -25,11 +31,20 @@ INSTALLATION_IDENTITY_SCHEMA = json.loads(
 Draft202012Validator.check_schema(INSTALLATION_IDENTITY_SCHEMA)
 
 
-def _installer():
+def _installer() -> ModuleType:
+    """Load the package installer module from the repository tools directory.
+
+    :returns: Imported installer module exposing install and recovery operations.
+    """
     return load_module("skill_installer", REPO_ROOT / "tools" / "install_ci_skills.py")
 
 
 def _source(tmp_path: Path) -> Path:
+    """Create a minimal skill package with a manifest and one script.
+
+    :param tmp_path: Pytest temporary directory containing the source package.
+    :returns: Path to the generated package root.
+    """
     source = tmp_path / "source"
     (source / "scripts").mkdir(parents=True)
     (source / "SKILL.md").write_text("---\nname: unit\n---\n", encoding="utf-8")
@@ -37,7 +52,13 @@ def _source(tmp_path: Path) -> Path:
     return source
 
 
-def test_install_copies_all_package_files_and_reads_back_digest(tmp_path):
+def test_install_copies_all_package_files_and_reads_back_digest(tmp_path: Path) -> None:
+    """Copy package files and verify the installed tree digest by read-back.
+
+    :param tmp_path: Pytest directory for source and installed skill trees.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "codex" / "skills"
@@ -57,14 +78,34 @@ def test_install_copies_all_package_files_and_reads_back_digest(tmp_path):
     assert result["digest"] == installer.tree_digest(destination)["digest"]
 
 
-def test_verified_install_records_source_identity(monkeypatch, tmp_path):
+def test_verified_install_records_source_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Record verified source revision and require that record for idempotence.
+
+    :param monkeypatch: Pytest fixture supplying a verified source identity.
+    :param tmp_path: Pytest directory for source, destination, and identity record.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
     revision = {"value": "a" * 40, "source": "git_head", "verified": True}
     original_identity = installer.skill_identity
 
-    def verified_identity(root, claimed=None, environ=None):
+    def verified_identity(
+        root: Path,
+        claimed: Optional[str] = None,
+        environ: Optional[Mapping[str, str]] = None,
+    ) -> SkillIdentity:
+        """Attach a verified revision only to the test source package.
+
+        :param root: Package root whose identity the installer requests.
+        :param claimed: Optional claimed revision forwarded to the original resolver.
+        :param environ: Optional environment forwarded to the original resolver.
+        :returns: Original skill identity with source revision when root matches source.
+        """
         identity = original_identity(root, claimed, environ)
         if Path(root) == source:
             identity["revision"] = revision
@@ -104,7 +145,13 @@ def test_verified_install_records_source_identity(monkeypatch, tmp_path):
     assert "already_installed" not in without_record
 
 
-def test_package_files_ignores_generated_and_platform_noise(tmp_path):
+def test_package_files_ignores_generated_and_platform_noise(tmp_path: Path) -> None:
+    """Exclude platform metadata and compiled cache files from package inventory.
+
+    :param tmp_path: Pytest directory holding the package and noise files.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     (source / ".DS_Store").write_text("noise", encoding="utf-8")
@@ -118,7 +165,13 @@ def test_package_files_ignores_generated_and_platform_noise(tmp_path):
     assert files == [Path("SKILL.md"), Path("scripts/check.py")]
 
 
-def test_missing_manifest_blocks_without_creating_destination(tmp_path):
+def test_missing_manifest_blocks_without_creating_destination(tmp_path: Path) -> None:
+    """Block an install with no skill manifest before creating a destination.
+
+    :param tmp_path: Pytest directory holding manifest-free source and destination.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = tmp_path / "source"
     (source / "scripts").mkdir(parents=True)
@@ -135,7 +188,13 @@ def test_missing_manifest_blocks_without_creating_destination(tmp_path):
     assert not skills_dir.exists()
 
 
-def test_unverified_source_revision_blocks_before_install(tmp_path):
+def test_unverified_source_revision_blocks_before_install(tmp_path: Path) -> None:
+    """Require a verified source revision before default installation.
+
+    :param tmp_path: Pytest directory holding an unverified source package.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
 
@@ -147,7 +206,13 @@ def test_unverified_source_revision_blocks_before_install(tmp_path):
     assert not (tmp_path / "skills").exists()
 
 
-def test_dry_run_and_existing_destination_are_non_destructive(tmp_path):
+def test_dry_run_and_existing_destination_are_non_destructive(tmp_path: Path) -> None:
+    """Preserve an existing skill and avoid writes during installation planning.
+
+    :param tmp_path: Pytest directory holding source and a preexisting destination.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -169,7 +234,13 @@ def test_dry_run_and_existing_destination_are_non_destructive(tmp_path):
     assert marker.read_text(encoding="utf-8") == "keep"
 
 
-def test_upgrade_preserves_previous_skill_and_verifies_new_copy(tmp_path):
+def test_upgrade_preserves_previous_skill_and_verifies_new_copy(tmp_path: Path) -> None:
+    """Preserve the previous skill while activating and verifying an upgrade.
+
+    :param tmp_path: Pytest directory holding source and versioned installations.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -198,7 +269,16 @@ def test_upgrade_preserves_previous_skill_and_verifies_new_copy(tmp_path):
     assert upgraded["digest"] == installer.tree_digest(destination)["digest"]
 
 
-def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(tmp_path, monkeypatch):
+def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Restore the previous skill when staged upgrade activation fails.
+
+    :param tmp_path: Pytest directory holding source and installed skill.
+    :param monkeypatch: Pytest fixture injecting a staged-directory rename failure.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -209,7 +289,14 @@ def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(tmp_path, monkeypa
 
     original_rename = Path.rename
 
-    def fail_activation(path: Path, target: Path):
+    def fail_activation(path: Path, target: Path) -> Path:
+        """Fail only the staged rename into the active skill destination.
+
+        :param path: Source path passed to ``Path.rename``.
+        :param target: Rename destination compared with the active skill path.
+        :returns: Result of the original rename for all other paths.
+        :raises OSError: When activation renames the staged skill into place.
+        """
         if (
             path.name.startswith(f".{installer.SKILL_NAME}.stage-")
             and target == destination
@@ -227,7 +314,15 @@ def test_upgrade_rolls_back_when_new_copy_cannot_be_activated(tmp_path, monkeypa
     assert not list(skills_dir.glob(f".{installer.SKILL_NAME}.previous-*"))
 
 
-def test_repeated_upgrade_preserves_each_immediate_previous_version(tmp_path):
+def test_repeated_upgrade_preserves_each_immediate_previous_version(
+    tmp_path: Path,
+) -> None:
+    """Keep the immediate predecessor after each successive skill upgrade.
+
+    :param tmp_path: Pytest directory holding three successive package versions.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -250,7 +345,13 @@ def test_repeated_upgrade_preserves_each_immediate_previous_version(tmp_path):
     ).read_text() == "version three\n"
 
 
-def test_recovery_restores_old_skill_after_interrupted_upgrade(tmp_path):
+def test_recovery_restores_old_skill_after_interrupted_upgrade(tmp_path: Path) -> None:
+    """Recover an interrupted upgrade by restoring the verified previous copy.
+
+    :param tmp_path: Pytest directory holding an upgrade journal and previous copy.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -289,7 +390,15 @@ def test_recovery_restores_old_skill_after_interrupted_upgrade(tmp_path):
     assert not (skills_dir / installer.JOURNAL_NAME).exists()
 
 
-def test_recovery_finishes_verified_activation_without_rolling_it_back(tmp_path):
+def test_recovery_finishes_verified_activation_without_rolling_it_back(
+    tmp_path: Path,
+) -> None:
+    """Complete recovery when the new active copy already matches its journal.
+
+    :param tmp_path: Pytest directory holding journal, previous, and active copies.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -324,7 +433,16 @@ def test_recovery_finishes_verified_activation_without_rolling_it_back(tmp_path)
 
 
 @pytest.mark.parametrize("interruption", ("SIGTERM", "SIGINT"))
-def test_interrupted_upgrade_restores_last_good_install(tmp_path, interruption):
+def test_interrupted_upgrade_restores_last_good_install(
+    tmp_path: Path, interruption: str
+) -> None:
+    """Restore the last good install after SIGTERM or SIGINT interrupts activation.
+
+    :param tmp_path: Pytest directory holding source and active skill trees.
+    :param interruption: Signal name delivered to the installer subprocess.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -341,6 +459,7 @@ from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("interrupted_installer", sys.argv[1])
 module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 original = Path.rename
 destination = Path(sys.argv[4])
@@ -375,7 +494,13 @@ module.install(Path(sys.argv[2]), Path(sys.argv[3]), dry_run=False,
     assert not (skills_dir / installer.JOURNAL_NAME).exists()
 
 
-def test_symlinked_source_file_is_rejected(tmp_path):
+def test_symlinked_source_file_is_rejected(tmp_path: Path) -> None:
+    """Reject a source package containing a symlink before installing files.
+
+    :param tmp_path: Pytest directory holding a skill with a linked source file.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     (source / "scripts" / "linked.py").symlink_to(source / "scripts" / "check.py")
@@ -390,7 +515,15 @@ def test_symlinked_source_file_is_rejected(tmp_path):
     assert not (tmp_path / "skills").exists()
 
 
-def test_explicit_upgrade_preserves_previous_copy_and_is_idempotent(tmp_path):
+def test_explicit_upgrade_preserves_previous_copy_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    """Preserve the prior script on upgrade and recognize a repeated install.
+
+    :param tmp_path: Pytest directory holding source, active, and backup trees.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -423,7 +556,13 @@ def test_explicit_upgrade_preserves_previous_copy_and_is_idempotent(tmp_path):
     assert (backup / "scripts" / "check.py").read_text() == "print('ok')\n"
 
 
-def test_explicit_upgrade_preserves_symlink_destination(tmp_path):
+def test_explicit_upgrade_preserves_symlink_destination(tmp_path: Path) -> None:
+    """Back up a symlink destination while activating a real skill directory.
+
+    :param tmp_path: Pytest directory holding source and linked destination.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -442,7 +581,13 @@ def test_explicit_upgrade_preserves_symlink_destination(tmp_path):
     assert (destination / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
 
 
-def test_confirmed_install_rejects_changed_source_bytes(tmp_path):
+def test_confirmed_install_rejects_changed_source_bytes(tmp_path: Path) -> None:
+    """Reject installation when source bytes change after plan fingerprinting.
+
+    :param tmp_path: Pytest directory holding planned source and destination.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     source = _source(tmp_path)
     skills_dir = tmp_path / "skills"
@@ -462,7 +607,16 @@ def test_confirmed_install_rejects_changed_source_bytes(tmp_path):
     assert not (skills_dir / installer.SKILL_NAME).exists()
 
 
-def test_default_destination_uses_codex_home(monkeypatch, tmp_path):
+def test_default_destination_uses_codex_home(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Resolve the default skills directory from CODEX_HOME then HOME.
+
+    :param monkeypatch: Pytest fixture setting the home environment variables.
+    :param tmp_path: Pytest directory supplying isolated home paths.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
 
@@ -474,8 +628,10 @@ def test_default_destination_uses_codex_home(monkeypatch, tmp_path):
     assert installer.skills_directory() == tmp_path / "home" / ".codex" / "skills"
 
 
-def test_every_agent_failure_reason_has_one_recovery_step():
-    """Keep every agent failure mapped to one actionable recovery message."""
+def test_every_agent_failure_reason_has_one_recovery_step() -> None:
+    """Keep every agent failure mapped to one actionable recovery message.
+    :returns: None; assertions in the body validate the regression.
+    """
     installer = _installer()
 
     for reason in installer.AgentProfileReason:

@@ -1,7 +1,14 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
+#!/usr/bin/env python3
+"""Read one bounded native Git API response.
 
-CI_SKILLS_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-# shellcheck source=ci-skills/lib/bash/api/api.bash
-source "$CI_SKILLS_ROOT/lib/bash/api/api.bash"
-ci_api_main "$@"
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
+
+import _bootstrap  # noqa: F401 - installed package import path
+from lib.python.core.read_cli import api_main
+
+
+if __name__ == "__main__":
+    raise SystemExit(api_main())

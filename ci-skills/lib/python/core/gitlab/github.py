@@ -8,14 +8,23 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final, cast
+from typing import Final, Optional
 
 from lib.python.access.access import github_env
-from lib.python.core.action import GitHubCallback
-from lib.python.core.catalog import github_variables
-from lib.python.core.cli_api import APIError, CLIAPIClient
 from lib.python.access.credentials import Sources, bind_sources
+from lib.python.core.abstract.callback import Callback
+from lib.python.core.abstract.skill_action import ActionT_co
+from lib.python.core.catalog import github_variables
+from lib.python.core.cli_api import APIError, CLIAPIClient, ReadSession
+from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
+from lib.python.core.json_types import (
+    JSONDocument,
+    JSONObject,
+    json_object,
+    json_objects,
+)
 from lib.python.core.runtime import run_command_bounded
 from lib.python.core.target import Target, TargetError
 
@@ -29,7 +38,15 @@ class GitHubAPIClient(CLIAPIClient):
     """Use GitHub's native CLI with the existing shared transport."""
 
     @staticmethod
-    def argv(host: str, method: str, endpoint: str) -> list[str]:
+    def pagination_arguments() -> Sequence[str]:
+        """Collect GitHub pages using the native CLI's page-array output.
+
+        :returns: Native flags that retain each page inside the outer response array.
+        """
+        return ("--paginate", "--slurp")
+
+    @staticmethod
+    def argv(host: str, method: str, endpoint: str) -> MutableSequence[str]:
         """Build an exact-host native GitHub API request.
 
         :param host: Configured GitHub hostname.
@@ -51,45 +68,100 @@ class GitHubAPIClient(CLIAPIClient):
 
 @dataclass(frozen=True)
 class GitHubService:
-    """Bound GitHub identity, repository, credential, and API adapter."""
+    """GitHub service created after identity and repository read-back.
+
+    :param host: Selected provider hostname.
+    :param repository: Verified owner/repository path.
+    :param environment: Child credential overrides; ``None`` removes an ambient variable.
+    :param api: Native GitHub CLI transport shared by all service operations.
+    :param identity: Nonempty login read from the authenticated user response.
+    :param repository_id: Positive repository ID returned by the selected provider.
+    :param credential_source: Reportable reference to the selected credential source.
+
+    .. attribute :: host
+        :type: str
+
+        Selected provider hostname.
+
+    .. attribute :: repository
+        :type: str
+
+        Verified owner/repository path.
+
+    .. attribute :: environment
+        :type: Mapping[str, Optional[str]]
+
+        Child credential overrides; ``None`` removes an ambient variable.
+
+    .. attribute :: api
+        :type: GitHubAPIClient
+
+        Native GitHub CLI transport shared by all service operations.
+
+    .. attribute :: identity
+        :type: str
+
+        Nonempty login read from the authenticated user response.
+
+    .. attribute :: repository_id
+        :type: int
+
+        Positive repository ID returned by the selected provider.
+
+    .. attribute :: credential_source
+        :type: str
+
+        Reportable reference to the selected credential source.
+    """
 
     host: str
     repository: str
-    environment: dict[str, str | None] = field(repr=False)
+    environment: Mapping[str, Optional[str]] = field(repr=False)
     api: GitHubAPIClient = field(repr=False)
     identity: str
     repository_id: int
     credential_source: str
 
     def request(
-        self, method: str, endpoint: str, body: dict[str, Any] | None = None
-    ) -> Any:
+        self, method: str, endpoint: str, body: Optional[JSONObject] = None
+    ) -> JSONDocument:
         """Call the shared transport against this bound GitHub service.
 
         :param method: HTTP method required by the atom.
         :param endpoint: Relative API endpoint.
-        :param body: Optional request object.
-        :returns: Parsed provider response.
-        :raises APIError: If the request or provider response fails.
-        """
-        return self.api._request(self, method, endpoint, body)
+        :param body: JSON request fields; ``None`` sends no request body.
+        :returns: Decoded response object or array; empty DELETE returns an empty mapping.
+        :raises APIError: If endpoint or body validation fails, a provider failure
+            is terminal or exhausts GET retries, response bytes exceed the limit,
+            or the decoded result is not a JSON object or array.
+        :raises OSError: If the native CLI cannot start or private request-body
+            file creation, writing, or removal fails.
+        """  # noqa: DOC503 - The shared transport propagates native process and body-file errors.
+        response = self.api._request(self, method, endpoint, body)
+        if not isinstance(response, (Mapping, Sequence)) or isinstance(response, str):
+            raise APIError("github_response_invalid")
+        return response
 
-    def runners(self) -> list[dict[str, Any]]:
+    def runners(self) -> Sequence[JSONObject]:
         """Read all repository runner pages using the provider's total count.
 
         :returns: Runner records for the exact authenticated repository.
         :raises APIError: If response shape or pagination is incomplete.
         """
-        records: list[dict[str, Any]] = []
+        records: MutableSequence[JSONObject] = []
         page = 1
         while True:
             payload = self.request(
                 "GET",
                 f"repos/{self.repository}/actions/runners?per_page={GITHUB_PAGE_SIZE}&page={page}",
             )
-            batch = payload.get("runners") if isinstance(payload, dict) else None
-            total = payload.get("total_count") if isinstance(payload, dict) else None
-            if not isinstance(batch, list) or not isinstance(total, int):
+            try:
+                document = json_object(payload)
+                batch = json_objects(document.get("runners"))
+            except TypeError as exc:
+                raise APIError("runner_response_invalid") from exc
+            total = document.get("total_count")
+            if type(total) is not int or total < 0:
                 raise APIError("runner_response_invalid")
             records.extend(batch)
             if len(records) >= total:
@@ -98,7 +170,7 @@ class GitHubService:
                 raise APIError("runner_pages_incomplete")
             page += 1
 
-    def runner(self, name: str) -> dict[str, Any] | None:
+    def runner(self, name: str) -> Optional[JSONObject]:
         """Find an exact runner name without silently selecting among duplicates.
 
         :param name: Caller-selected GitHub runner name.
@@ -110,7 +182,7 @@ class GitHubService:
             raise APIError("runner_name_not_unique")
         return matching[0] if matching else None
 
-    def wait_online(self, name: str, timeout: int) -> dict[str, Any]:
+    def wait_online(self, name: str, timeout: int) -> JSONObject:
         """Poll native runner state until the exact runner is online.
 
         :param name: Exact expected runner name.
@@ -158,77 +230,131 @@ class GitHubService:
         return selected[0]
 
 
-class GitHubAuth(GitHubCallback[None, GitHubService]):
-    """Verify runtime identity and repository without publication-policy checks."""
+class GitHubCallback(Callback[DeliveryState, ActionT_co]):
+    """Use the GitHub service established in this delivery state."""
 
-    def __init__(self, *, target: Target, timeout: int) -> None:
-        """Retain one shared target selection for GitHub operations.
+    @property
+    def github(self) -> GitHubService:
+        """Read the authenticated service selected for this workflow.
 
-        :param target: Existing target resolver result.
-        :param timeout: Per-request time bound in seconds.
+        :returns: Private client bound to the verified repository and identity.
+        :raises AttributeError: If composition omitted GitHub authentication.
+        """  # noqa: DOC502 - the executor-owned state attribute is absent before authentication
+        return self.state.github
+
+
+class GitHubAuth(GitHubCallback[ProviderAuthAction]):
+    """Verify runtime identity and repository before dependent runner actions."""
+
+    def __init__(self, target: Target, timeout: int):
+        """Construct the required target and request-bound inputs.
+
+        :param target: Existing runtime target resolver result.
+        :param timeout: Positive per-request time bound in seconds.
         """
-        super().__init__()
-        self.target = target
-        self.timeout = timeout
+        super().__init__(ProviderAuthAction(target, timeout))
 
-    def run(self) -> GitHubService:
-        """Freeze credentials and read back authenticated user and repository.
+    def _environment(
+        self, target: Target, reference: str
+    ) -> Mapping[str, Optional[str]]:
+        """Pin a selected native credential into child-only overrides.
 
-        :returns: Shared service bound to the proven repository and identity.
-        :raises TargetError: If the selected credential cannot be resolved.
-        :raises APIError: If user, repository, or runner access read-back fails.
-        """
-        target = (
-            self.target
-            if isinstance(self.target.sources, Sources)
-            else bind_sources(self.target)
-        )
-        if target.github is None:
+        :param target: Target whose credential sources are already bound.
+        :param reference: Reportable selected credential-source reference.
+        :returns: Child environment with one resolved private credential.
+        :raises TargetError: GitHub is unselected or its native credential is unusable.
+        :raises OSError: If the native credential command cannot be launched.
+        """  # noqa: DOC503 - credential resolution and native command launch propagate failures
+        github = target.github
+        if github is None:
             raise TargetError("github_target_missing")
-        environment = dict(github_env(target) or {})
-        sources = cast(Sources, target.sources)
-        if sources.github is None:
-            raise TargetError("github_credential_unresolved")
-        reference = sources.github.reference
+        environment: MutableMapping[str, Optional[str]] = dict(github_env(target) or {})
         if reference.startswith("gh-credential-store:"):
             result = run_command_bounded(
-                ["gh", "auth", "token", "--hostname", target.github.host],
+                ["gh", "auth", "token", "--hostname", github.host],
                 env=environment,
-                timeout=self.timeout,
+                timeout=self.action.timeout,
             )
             token = result.stdout.strip()
             if result.returncode or not token or any(char.isspace() for char in token):
                 raise TargetError("credential_store_unpinnable")
-            environment[github_variables(target.github.host)[0]] = token
-        api = GitHubAPIClient(timeout=self.timeout)
-        bound = GitHubService(
-            target.github.host,
-            target.github.repository,
-            environment,
-            api,
-            "",
-            0,
-            reference,
-        )
-        user = bound.request("GET", "user")
-        repository = bound.request("GET", f"repos/{bound.repository}")
-        if not isinstance(user, dict) or not isinstance(user.get("login"), str):
+            environment[github_variables(github.host)[0]] = token
+        return environment
+
+    def _service(self, target: Target, sources: Sources) -> GitHubService:
+        """Verify user and repository fields before constructing a usable service.
+
+        :param target: Bound target with a selected GitHub repository.
+        :param sources: Frozen credential sources for this invocation.
+        :returns: GitHub service carrying actual provider identity values.
+        :raises TargetError: GitHub is unselected or its bound credential is unavailable.
+        :raises APIError: If authenticated identity or repository read-back is invalid.
+        :raises OSError: If a native provider command cannot be launched.
+        """  # noqa: DOC503 - native credential and transport calls propagate OSError
+        github = target.github
+        if github is None:
+            raise TargetError("github_target_missing")
+        if sources.github is None:
+            raise TargetError("github_credential_unresolved")
+        reference = sources.github.reference
+        environment = self._environment(target, reference)
+        api = GitHubAPIClient(timeout=self.action.timeout)
+        session = ReadSession(github.host, environment, reference)
+        user = api._request(session, "GET", "user")
+        identity = user.get("login") if isinstance(user, Mapping) else None
+        if not isinstance(identity, str) or not identity.strip():
             raise APIError("github_identity_missing")
+        repository = api._request(session, "GET", f"repos/{github.repository}")
+        repository_id = (
+            repository.get("id") if isinstance(repository, Mapping) else None
+        )
+        name = repository.get("full_name") if isinstance(repository, Mapping) else None
         if (
-            not isinstance(repository, dict)
-            or repository.get("full_name", "").casefold() != bound.repository.casefold()
-            or not isinstance(repository.get("id"), int)
+            not isinstance(name, str)
+            or name.casefold() != github.repository.casefold()
+            or not isinstance(repository_id, int)
+            or isinstance(repository_id, bool)
+            or repository_id <= 0
         ):
             raise APIError("github_repository_mismatch")
-        service = GitHubService(
-            bound.host,
-            bound.repository,
+        return GitHubService(
+            github.host,
+            github.repository,
             environment,
             api,
-            user["login"],
-            repository["id"],
+            identity,
+            repository_id,
             reference,
         )
+
+    def run(self) -> JSONObject:
+        """Bind private access once and report only verified public identity fields.
+
+        :returns: Safe repository, login, and credential-source evidence.
+        :raises TargetError: If target or selected credential binding is invalid.
+        :raises APIError: If identity, repository, or runner access read-back fails.
+        :raises OSError: If configured credentials or native tools cannot be read.
+        """  # noqa: DOC503 - authentication and provider reads propagate API and file failures
+        selected = self.action.target
+        target = (
+            selected
+            if isinstance(selected.sources, Sources)
+            else bind_sources(selected)
+        )
+        if target.github is None:
+            raise TargetError("github_target_missing")
+        sources = target.sources
+        if not isinstance(sources, Sources):
+            raise TargetError("credential_sources_unbound")
+        service = self._service(target, sources)
         service.runners()
-        self.context.services[GITHUB_SERVICE_KEY] = service
-        return service
+        self.state.github = service
+        evidence = {
+            "host": service.host,
+            "identity": service.identity,
+            "repository": service.repository,
+            "repository_id": service.repository_id,
+            "credential_source": service.credential_source,
+        }
+        self.state.access_evidence[GITHUB_SERVICE_KEY] = evidence
+        return evidence

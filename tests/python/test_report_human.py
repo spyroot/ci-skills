@@ -1,15 +1,24 @@
-"""Human report rendering tests for nested diagnostic evidence."""
+"""Human report rendering tests for nested diagnostic evidence.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
-
-from tests.python.conftest import import_script_module
+from conftest import import_script_module
 
 REPORT = import_script_module("lib.python.core.report")
+
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject
 
 
 @pytest.mark.parametrize(
@@ -206,15 +215,24 @@ REPORT = import_script_module("lib.python.core.report")
     ),
 )
 def test_human_output_is_byte_stable_for_specialized_reports(
-    data: dict[str, object],
+    data: JSONObject,
     expected: str,
 ) -> None:
-    """Specialized report branches preserve their established terminal bytes."""
+    """Preserve the established terminal text for each specialized report.
+
+    :param data: Report fixture exercising one specialized renderer.
+    :param expected: Exact rendered text required for that fixture.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     assert REPORT.human(data) == expected
 
 
-def _access_report() -> dict[str, object]:
-    """Return one minimal access result reused by emit persistence checks."""
+def _access_report() -> JSONObject:
+    """Build the minimal access result used by persistence tests.
+
+    :returns: PASS report containing one selected GitHub authority.
+    """
     return {
         "kind": "access_check",
         "status": "PASS",
@@ -223,7 +241,9 @@ def _access_report() -> dict[str, object]:
 
 
 def test_emit_accepts_omitted_and_none_output_directories() -> None:
-    """Omitting persistence produces the same human report as an explicit None."""
+    """Omitting persistence produces the same human report as an explicit None.
+    :returns: None; assertions in the body validate the regression.
+    """
     expected = "Access: PASS\n  github: PASS unit/repo\n"
 
     assert REPORT.emit(_access_report(), "human") == expected
@@ -233,7 +253,12 @@ def test_emit_accepts_omitted_and_none_output_directories() -> None:
 def test_emit_persists_paired_files_only_for_an_explicit_directory(
     tmp_path: Path,
 ) -> None:
-    """A requested output directory receives the rendered JSON and human pair."""
+    """Write matching JSON and human reports only to the requested directory.
+
+    :param tmp_path: Scratch parent for the unique paired-report directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     destination = tmp_path / "reports"
     rendered = REPORT.emit(_access_report(), "human", str(destination))
     run_directories = list(destination.iterdir())
@@ -256,8 +281,10 @@ def test_emit_persists_paired_files_only_for_an_explicit_directory(
     assert text_path.read_text(encoding="utf-8") == expected
 
 
-def test_human_storage_report_includes_nested_attachments_and_controllers():
-    """Storage summaries show the matching attachment and controller context."""
+def test_human_storage_report_includes_nested_attachments_and_controllers() -> None:
+    """Storage summaries show the matching attachment and controller context.
+    :returns: None; assertions in the body validate the regression.
+    """
     report = import_script_module("lib.python.core.report")
     data = {
         "kind": "storage_report",
@@ -283,8 +310,10 @@ def test_human_storage_report_includes_nested_attachments_and_controllers():
     assert "deploy-selected" in text
 
 
-def test_human_gitlab_report_includes_matching_trace_tail():
-    """CI job summaries include the trace line that matched the search."""
+def test_human_gitlab_report_includes_matching_trace_tail() -> None:
+    """CI job summaries include the trace line that matched the search.
+    :returns: None; assertions in the body validate the regression.
+    """
     report = import_script_module("lib.python.core.report")
     data = {
         "kind": "gitlab_job",
@@ -302,8 +331,10 @@ def test_human_gitlab_report_includes_matching_trace_tail():
     assert "selected trace line" in text
 
 
-def test_human_cilium_report_includes_health_payload_summary():
-    """Cilium summaries include nested health data from the agent command."""
+def test_human_cilium_report_includes_health_payload_summary() -> None:
+    """Cilium summaries include nested health data from the agent command.
+    :returns: None; assertions in the body validate the regression.
+    """
     report = import_script_module("lib.python.core.report")
     data = {
         "kind": "cilium_status",

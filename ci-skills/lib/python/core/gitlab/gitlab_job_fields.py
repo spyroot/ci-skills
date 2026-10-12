@@ -8,7 +8,9 @@ spyroot@gmail.com
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Final, Optional
+
+from lib.python.core.json_types import JSONObject, JSONValue, json_object
 
 TERMINAL_JOB_STATUSES: Final = frozenset({"success", "failed", "canceled", "skipped"})
 FILTERABLE_JOB_STATUSES: Final = frozenset(
@@ -16,38 +18,94 @@ FILTERABLE_JOB_STATUSES: Final = frozenset(
 )
 
 
+def job_text(item: JSONObject, field: str) -> str:
+    """Read a required job string while preserving its provider spelling.
+
+    :param item: Decoded job object returned by the GitLab transport.
+    :param field: Required string field, used in the stable invalid-field reason.
+    :returns: Original nonblank provider text, including meaningful whitespace.
+    :raises ValueError: The selected field is absent, nontext, or blank.
+    """
+    value = item.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"job_{field}_invalid")
+    return value
+
+
 @dataclass(frozen=True)
 class GitLabJobFields:
-    """Validated fields common to project job lists and pipeline jobs."""
+    """Validated fields shared by job-list and pipeline-job responses.
+
+    :param id: Positive GitLab job ID.
+    :param name: Nonblank provider job name.
+    :param stage: Nonblank pipeline stage name.
+    :param status: Nonblank provider job status.
+    :param failure_reason: Optional provider failure explanation.
+
+    .. attribute :: id
+        :type: int
+
+        Positive GitLab job ID.
+
+    .. attribute :: name
+        :type: str
+
+        Nonblank provider job name.
+
+    .. attribute :: stage
+        :type: str
+
+        Nonblank pipeline stage name.
+
+    .. attribute :: status
+        :type: str
+
+        Nonblank provider job status.
+
+    .. attribute :: failure_reason
+        :type: Optional[str]
+
+        Optional provider failure explanation.
+    """
 
     id: int
     name: str
     stage: str
     status: str
-    failure_reason: str | None
+    failure_reason: Optional[str]
 
     @classmethod
-    def from_api(cls, item: Any) -> GitLabJobFields:
-        """Normalize the shared fields of one untrusted GitLab job.
+    def from_api(cls, item: JSONValue) -> GitLabJobFields:
+        """Normalize the shared fields of one decoded GitLab job value.
 
-        :param item: One GitLab job API response object.
+        :param item: JSON value from one GitLab job API response.
         :returns: Validated fields common to both job read routes.
-        :raises ValueError: If an ID or shared field is missing or malformed.
+        :raises ValueError: The value is not an object or a shared field is malformed.
         """
-        if not isinstance(item, dict) or type(item.get("id")) is not int:
+        try:
+            item = json_object(item)
+        except TypeError as exc:
+            raise ValueError("job_response_invalid") from exc
+        identifier = item.get("id")
+        if type(identifier) is not int or identifier <= 0:
             raise ValueError("job_response_invalid")
-        if item["id"] <= 0:
-            raise ValueError("job_response_invalid")
-        for field in ("name", "stage", "status"):
-            if not isinstance(item.get(field), str) or not item[field].strip():
-                raise ValueError(f"job_{field}_invalid")
+        name, stage, status = (
+            job_text(item, field) for field in ("name", "stage", "status")
+        )
         failure_reason = item.get("failure_reason")
         if failure_reason is not None and not isinstance(failure_reason, str):
             raise ValueError("job_failure_reason_invalid")
-        return cls(
-            id=item["id"],
-            name=item["name"],
-            stage=item["stage"],
-            status=item["status"],
-            failure_reason=failure_reason,
-        )
+        return cls(identifier, name, stage, status, failure_reason)
+
+    def public(self) -> JSONObject:
+        """Expose the common job fields without the original provider response.
+
+        :returns: JSON object containing identity, stage, status, and failure reason.
+        """
+        return {
+            "id": self.id,
+            "name": self.name,
+            "stage": self.stage,
+            "status": self.status,
+            "failure_reason": self.failure_reason,
+        }

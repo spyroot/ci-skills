@@ -7,25 +7,29 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping, MutableSequence, Sequence
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pytest
-
-from tests.python.conftest import import_script_module
+from conftest import import_script_module
 
 JOBS = import_script_module("lib.python.core.gitlab.gitlab_jobs")
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
 SCRIPT = import_script_module("gitlab_job")
 
 
-def _query(*options: str) -> Any:
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject, JSONValue
+
+
+def _query(*options: str) -> JOBS.JobQuery:
     """Parse one declared job-list query through its public CLI.
 
-    :param options: Extra list flags to validate.
+    :param *options: Value supplied by the fixture or parameterized regression.
     :returns: Validated job query.
-    :raises ValueError: If the selected flags conflict or are invalid.
+
     """
     args = SCRIPT.build_parser().parse_args(
         ["list", "--project", "unit/repo", *options]
@@ -33,14 +37,15 @@ def _query(*options: str) -> Any:
     return JOBS.JobQuery.from_args(args)
 
 
-def _job(identifier: int, **changes: object) -> dict[str, object]:
+def _job(identifier: int, **changes: JSONValue) -> MutableMapping[str, JSONValue]:
     """Build one provider response with optional field overrides.
 
     :param identifier: Positive job ID.
-    :param changes: Provider fields to override for the case.
+    :param **changes: Field changes applied to the default provider record.
     :returns: A job response for the test API.
+
     """
-    job: dict[str, object] = {
+    job: MutableMapping[str, JSONValue] = {
         "id": identifier,
         "name": "build-app",
         "stage": "test",
@@ -76,13 +81,17 @@ def test_job_query_rejects_invalid_or_conflicting_filters(
     """Reject bad filter inputs before a provider read.
 
     :param options: Invalid CLI flag combination.
+
+    :returns: None; assertions in the body validate the regression.
     """
     with pytest.raises(ValueError):
         _query(*options)
 
 
 def test_job_query_combines_declared_filters_and_derives_stuck_state() -> None:
-    """Apply combined filters and derive stuck state from pending age."""
+    """Apply combined filters and derive stuck state from pending age.
+    :returns: None; assertions in the body validate the regression.
+    """
     query = _query(
         "--status",
         "failed",
@@ -115,7 +124,9 @@ def test_job_query_combines_declared_filters_and_derives_stuck_state() -> None:
 
 
 def test_job_record_rejects_off_host_and_malformed_provider_data() -> None:
-    """Reject an off-host link and a nonfinite provider duration."""
+    """Reject an off-host link and a nonfinite provider duration.
+    :returns: None; assertions in the body validate the regression.
+    """
     with pytest.raises(ValueError, match="job_response_invalid"):
         JOBS.JobRecord.from_api(
             _job(5, web_url="https://other.example.test/job/5"),
@@ -126,18 +137,20 @@ def test_job_record_rejects_off_host_and_malformed_provider_data() -> None:
 
 
 def test_job_list_follows_keyset_cursor_and_preserves_descending_ids() -> None:
-    """Read successive provider pages without changing job order."""
+    """Read successive provider pages without changing job order.
+    :returns: None; assertions in the body validate the regression.
+    """
 
     class Pages:
         """Return two cursor pages and capture requested endpoints."""
 
-        def __init__(self) -> None:
+        def __init__(self):
             """Start with no requested endpoints."""
-            self.endpoints: list[str] = []
+            self.endpoints: MutableSequence[str] = []
 
         def get_json_with_headers(
-            self, _session: object, endpoint: str
-        ) -> tuple[list[dict[str, object]], str]:
+            self, _session: SimpleNamespace, endpoint: str
+        ) -> tuple[Sequence[JSONObject], str]:
             """Return the next page for the requested cursor.
 
             :param _session: Unused bound session.
@@ -164,18 +177,20 @@ def test_job_list_follows_keyset_cursor_and_preserves_descending_ids() -> None:
 
 
 def test_job_list_reports_duplicate_cursor_data_as_incomplete() -> None:
-    """Mark repeated provider records as incomplete."""
+    """Mark repeated provider records as incomplete.
+    :returns: None; assertions in the body validate the regression.
+    """
 
     class Pages:
         """Repeat one job on the second page."""
 
-        def __init__(self) -> None:
+        def __init__(self):
             """Start with no API reads."""
             self.calls = 0
 
         def get_json_with_headers(
-            self, _session: object, endpoint: str
-        ) -> tuple[list[dict[str, object]], str]:
+            self, _session: SimpleNamespace, endpoint: str
+        ) -> tuple[Sequence[JSONObject], str]:
             """Return a repeated job after the first cursor.
 
             :param _session: Unused bound session.
@@ -196,14 +211,16 @@ def test_job_list_reports_duplicate_cursor_data_as_incomplete() -> None:
 
 
 def test_job_list_rejects_off_host_cursor() -> None:
-    """Keep the first page but refuse a cursor on another GitLab host."""
+    """Keep the first page but refuse a cursor on another GitLab host.
+    :returns: None; assertions in the body validate the regression.
+    """
 
     class Page:
         """Return one page with a cross-host next link."""
 
         def get_json_with_headers(
-            self, _session: object, _endpoint: str
-        ) -> tuple[list[dict[str, object]], str]:
+            self, _session: SimpleNamespace, _endpoint: str
+        ) -> tuple[Sequence[JSONObject], str]:
             """Supply a GitLab page with an invalid next host.
 
             :param _session: Unused bound session.
@@ -223,14 +240,16 @@ def test_job_list_rejects_off_host_cursor() -> None:
 
 
 def test_job_list_classifies_malformed_record_and_limit_truncation() -> None:
-    """Keep valid jobs but report malformed data and a result limit."""
+    """Keep valid jobs but report malformed data and a result limit.
+    :returns: None; assertions in the body validate the regression.
+    """
 
     class Page:
         """Return one page containing a malformed provider record."""
 
         def get_json_with_headers(
-            self, _session: object, _endpoint: str
-        ) -> tuple[list[dict[str, object]], str]:
+            self, _session: SimpleNamespace, _endpoint: str
+        ) -> tuple[Sequence[JSONObject], str]:
             """Return four jobs including one with missing fields.
 
             :param _session: Unused bound session.
@@ -272,6 +291,8 @@ def test_keyset_cursor_preserves_exact_collection_filters(
 
     :param current_query: Query sent for the current page.
     :param next_query: Query supplied by the provider's next link.
+
+    :returns: None; assertions in the body validate the regression.
     """
     session = SimpleNamespace(host="gitlab.example.test")
     current = f"projects/42/jobs?{current_query}"
@@ -287,25 +308,27 @@ def test_job_list_distinguishes_first_and_later_page_failure(
     """Classify a total read failure separately from an incomplete scan.
 
     :param fail_first: Fail before any valid provider page when true.
+
+    :returns: None; assertions in the body validate the regression.
     """
 
     class Pages:
         """Fail on the requested page after zero or one successful reads."""
 
-        def __init__(self) -> None:
+        def __init__(self):
             """Track how many API pages were requested."""
             self.calls = 0
 
         def get_json_with_headers(
-            self, _session: object, endpoint: str
-        ) -> tuple[list[dict[str, object]], str]:
+            self, _session: SimpleNamespace, endpoint: str
+        ) -> tuple[Sequence[JSONObject], str]:
             """Return one page or a classified provider failure.
 
             :param _session: Unused bound session.
             :param endpoint: Requested project jobs endpoint.
             :returns: One job and its next cursor when permitted.
-            :raises GitLabAPIError: When the selected page fails.
-            """
+            :raises GitLabAPIError: Configured provider failure for this page.
+            """  # noqa: DOC503 - The test raises the imported provider error class.
             self.calls += 1
             if fail_first or self.calls > 1:
                 raise API.GitLabAPIError("transport")

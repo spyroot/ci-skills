@@ -1,4 +1,9 @@
-"""Shared diagnostic status tokens and command exit semantics."""
+"""Shared diagnostic status tokens and command exit semantics.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 PASS = "PASS"
 BLOCKED = "BLOCKED"
@@ -12,7 +17,11 @@ VERIFIED = "VERIFIED"
 
 
 def exit_code(status: str) -> int:
-    """Success means a complete live pass or an explicitly labeled plan."""
+    """Map a diagnostic status to its process exit code.
+
+    :param status: Shared status token reported by a command.
+    :returns: Zero for ``PASS``, ``DRY_RUN``, or ``PLANNED``; two otherwise.
+    """
     return 0 if status in (PASS, DRY_RUN, PLANNED) else 2
 
 

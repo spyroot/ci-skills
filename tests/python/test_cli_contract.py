@@ -1,9 +1,17 @@
-"""CLI contract tests for every public diagnostics command."""
+"""CLI contract tests for every public diagnostics command.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable, Collection, Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import yaml
@@ -14,6 +22,10 @@ from conftest import (
     read_journal,
     run_script,
 )
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONValue
+    from lib.python.core.target import Target
 
 SCRIPT_CASES = (
     ("access_check.py", (), {"github", "gitlab", "kubernetes"}),
@@ -52,12 +64,20 @@ SCRIPT_CASES = (
         ("cilium_status.py", ("--namespace", "--node", "--search")),
     ),
 )
-def test_help_lists_common_and_script_specific_flags(script_name, specific_flags):
-    """Help output is dependency-free and documents every supported argument."""
+def test_help_lists_common_and_script_specific_flags(
+    script_name: str, specific_flags: Sequence[str]
+) -> None:
+    """Require each public script's help to list its shared and own options.
+
+    :param script_name: Parametrized diagnostics entrypoint.
+    :param specific_flags: Options expected only for that entrypoint.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = run_script(script_name, "--help")
 
     assert result.returncode == 0
-    for flag in ("--target", "--revision", "--json", "--yaml", "--dry-run", "--help"):
+    for flag in ("--revision", "--json", "--yaml", "--dry-run", "--help"):
         assert flag in result.stdout
     for flag in specific_flags:
         assert flag in result.stdout
@@ -65,14 +85,25 @@ def test_help_lists_common_and_script_specific_flags(script_name, specific_flags
 
 @pytest.mark.parametrize(("script_name", "extra_args", "authorities"), SCRIPT_CASES)
 def test_dry_run_json_lists_access_probes_without_external_calls(
-    fake_bin,
-    call_journal,
-    target_file,
-    script_name,
-    extra_args,
-    authorities,
-):
-    """Dry run is a local explanation mode and cannot contact live tools."""
+    fake_bin: Path,
+    call_journal: Path,
+    target_file: Path,
+    script_name: str,
+    extra_args: Sequence[str],
+    authorities: Collection[str],
+) -> None:
+    """Require JSON dry runs to describe probes without invoking native tools.
+
+    :param fake_bin: Directory containing fail-fast fake ``gh``, ``glab``, and
+            ``kubectl`` commands.
+    :param call_journal: Path that records accidental fake-command execution.
+    :param target_file: Nonsecret target path selected for the command.
+    :param script_name: Parametrized diagnostics entrypoint.
+    :param extra_args: Entry-specific arguments needed to reach its dry run.
+    :param authorities: Exact authority names expected in its dry-run report.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     body = (
         "#!/usr/bin/env python3\n"
         "import json, os, pathlib, sys\n"
@@ -86,13 +117,11 @@ def test_dry_run_json_lists_access_probes_without_external_calls(
 
     result = run_script(
         script_name,
-        "--target",
-        target_file,
         "--json",
         "--dry-run",
         *extra_args,
         fake_bin=fake_bin,
-        env={"FAKE_JOURNAL": str(call_journal)},
+        env={"CI_SKILLS_TARGET": str(target_file), "FAKE_JOURNAL": str(call_journal)},
     )
     data = parse_json_output(result)
 
@@ -106,15 +135,19 @@ def test_dry_run_json_lists_access_probes_without_external_calls(
     assert read_journal(call_journal) == []
 
 
-def test_output_modes_are_mutually_exclusive(target_file):
-    """An ambiguous machine mode still returns a structured argument error."""
+def test_output_modes_are_mutually_exclusive(target_file: Path) -> None:
+    """Require combined JSON/YAML flags to produce an argument error report.
+
+    :param target_file: Nonsecret target injected to keep selection deterministic.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = run_script(
         "access_check.py",
-        "--target",
-        target_file,
         "--json",
         "--yaml",
         "--dry-run",
+        env={"CI_SKILLS_TARGET": str(target_file)},
     )
 
     assert result.returncode == 2
@@ -139,8 +172,20 @@ def test_output_modes_are_mutually_exclusive(target_file):
     (("--json", json.loads), ("--yaml", yaml.safe_load)),
 )
 def test_argparse_failures_keep_machine_output_contract(
-    script_name, args, mode, loader
-):
+    script_name: str,
+    args: Sequence[str],
+    mode: str,
+    loader: Callable[[str], JSONValue],
+) -> None:
+    """Require invalid CLI inputs to emit structured machine errors.
+
+    :param script_name: Parametrized command with an invalid option or value.
+    :param args: Invalid argument sequence for that command.
+    :param mode: JSON or YAML output flag appended to the invalid input.
+    :param loader: Decoder corresponding to the selected machine format.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = run_script(script_name, *args, mode)
     data = loader(result.stdout)
 
@@ -156,14 +201,23 @@ def test_argparse_failures_keep_machine_output_contract(
     (("--json", json.loads), ("--yaml", yaml.safe_load)),
 )
 def test_machine_readable_target_failures_emit_blocked_envelope(
-    tmp_path,
-    flag,
-    loader,
-):
-    """Target failures in machine-readable modes still write an error report."""
+    tmp_path: Path,
+    flag: str,
+    loader: Callable[[str], JSONValue],
+) -> None:
+    """Require a missing selected target to emit a blocked machine report.
+
+    :param tmp_path: Directory for a deliberately nonexistent target path.
+    :param flag: JSON or YAML mode selected for the command.
+    :param loader: Decoder for the selected mode.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     missing_target = tmp_path / "missing-target.toml"
 
-    result = run_script("access_check.py", "--target", missing_target, flag)
+    result = run_script(
+        "access_check.py", flag, env={"CI_SKILLS_TARGET": str(missing_target)}
+    )
     data = loader(result.stdout)
 
     assert result.returncode == 2
@@ -179,14 +233,24 @@ def test_machine_readable_target_failures_emit_blocked_envelope(
     ((True, False, json.loads), (False, True, yaml.safe_load)),
 )
 def test_cli_execute_validation_errors_emit_machine_readable_envelope(
-    monkeypatch,
-    capsys,
-    tmp_path,
-    json_mode,
-    yaml_mode,
-    loader,
-):
-    """Collector validation failures keep the declared output contract."""
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    json_mode: bool,
+    yaml_mode: bool,
+    loader: Callable[[str], JSONValue],
+) -> None:
+    """Keep collector validation failures in JSON or YAML output.
+
+    :param monkeypatch: Fixture injecting target selection and fake access result.
+    :param capsys: Fixture capturing direct CLI output.
+    :param tmp_path: Directory for a minimal local kubeconfig and target.
+    :param json_mode: Whether JSON output is selected in this case.
+    :param yaml_mode: Whether YAML output is selected in this case.
+    :param loader: Decoder for the selected output mode.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     cli = import_script_module("lib.python.core.cli")
     status = import_script_module("lib.python.sys.status")
     kubeconfig = tmp_path / "kubeconfig"
@@ -227,7 +291,15 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
         },
     )
 
-    def collect_storage(_target, _args):
+    def collect_storage(_target: Target, _args: argparse.Namespace) -> None:
+        """Simulate malformed provider data reaching the collector boundary.
+
+        :param _target: Selected target, unused by this failure fake.
+        :param _args: Parsed collector options, unused by this failure fake.
+        :returns: None; the helper records behavior through its side effects.
+        :raises ValueError: Always reports the nested response failure.
+
+        """
         raise ValueError("malformed nested response")
 
     exit_status = cli.execute(args, collect_storage)
@@ -238,6 +310,6 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
     assert data["status"] == "BLOCKED"
     assert data["kind"] == "storage_report"
     assert data["errors"] == [
-        {"source": "collect_storage", "reason": "malformed nested response"}
+        {"source": "storage_report", "reason": "malformed nested response"}
     ]
     assert "BLOCKED:" not in captured.err

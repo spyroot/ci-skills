@@ -1,4 +1,9 @@
-"""Shared CLI adapter for explicit targets and output modes."""
+"""Shared CLI adapter for explicit targets and output modes.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -8,10 +13,11 @@ import os
 import socket
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Optional
 
 from lib.python.access.access import (
     access_evidence,
@@ -19,6 +25,7 @@ from lib.python.access.access import (
     check_gitlab_operation_access,
     dry_run_access,
 )
+from lib.python.access.credentials import bind_gitlab_session, bind_sources
 from lib.python.core.catalog import (
     COMMAND_BY_KIND,
     COMMANDS,
@@ -28,14 +35,21 @@ from lib.python.core.catalog import (
     describe,
     missing_required_options,
 )
-from lib.python.access.credentials import bind_gitlab_session, bind_sources
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
-from lib.python.core.portable import portable
+from lib.python.core.help import CommandHelp, CommandHelpFormatter
+from lib.python.core.json_types import JSONObject, JSONValue, copy_json_object
+from lib.python.core.portable import write_portable_receipt
 from lib.python.core.project_binding import BINDING_ENV, resolve_target_file
 from lib.python.core.project_binding import resolve_target as resolve_project_target
 from lib.python.core.report import emit, report
 from lib.python.core.runtime import redact_tree, sanitize
+from lib.python.core.target import (
+    GitLabOperationTarget,
+    Target,
+    TargetError,
+    select_gitlab_reference,
+)
 from lib.python.sys.status import (
     BLOCKED,
     DRY_RUN,
@@ -45,7 +59,6 @@ from lib.python.sys.status import (
     PROFILE_FULL,
     exit_code,
 )
-from lib.python.core.target import GitLabOperationTarget, Target, TargetError, select_gitlab_reference
 
 # The documented per-host location. Keeping it here rather than in each script
 # means one answer to "where does the target live", and the script-interface
@@ -68,18 +81,31 @@ COLLECTOR_KINDS = {
 ACCESS_CHECK_KIND = "access_check"
 
 
-def resolve_target(explicit: str | None) -> tuple[Path, str]:
-    """Preserve the target-file resolver used by existing command consumers."""
+def resolve_target(explicit: Optional[str]) -> tuple[Path, str]:
+    """Resolve the runtime target file through the shared search order.
+
+    :param explicit: Internal path override, or ``None`` for normal resolution.
+    :returns: Selected target path and its source identifier.
+    :raises TargetError: If the selected file is missing or selection is invalid.
+    """  # noqa: DOC502 - Target/source resolution propagates validation and I/O.
     return resolve_target_file(explicit)
 
 
 def resolve_gitlab_target(
-    explicit_target: str | None,
-    explicit_binding: str | None,
+    explicit_target: Optional[str],
+    explicit_binding: Optional[str],
     *,
     dry_run: bool = False,
 ) -> tuple[GitLabOperationTarget, str]:
-    """Resolve one GitLab target through the declared target or binding tier."""
+    """Resolve GitLab settings from a target file or project binding.
+
+    :param explicit_target: Internal target-file override, or ``None``.
+    :param explicit_binding: Project-binding override, or ``None``.
+    :param dry_run: Whether binding resolution may omit live credential-file checks.
+    :returns: GitLab operation target and reportable selection source.
+    :raises TargetError: If configuration, GitLab settings, or source identity
+        cannot be resolved.
+    """
     selected = resolve_project_target(
         explicit_target,
         explicit_binding,
@@ -100,14 +126,14 @@ def resolve_gitlab_target(
 
 
 def setup_gitlab_operation(
-    explicit_target: str | None,
-    explicit_binding: str | None,
+    explicit_target: Optional[str],
+    explicit_binding: Optional[str],
     *,
-    project: str | None,
-    group: str | None,
-    revision: str | None,
-    api_client: GlabAPIClient | None = None,
-) -> tuple[BoundGitLabSession, dict[str, Any]]:
+    project: Optional[str],
+    group: Optional[str],
+    revision: Optional[str],
+    api_client: Optional[GlabAPIClient] = None,
+) -> tuple[BoundGitLabSession, JSONObject]:
     """Bind a live GitLab target and return its existing access read-back.
 
     :param explicit_target: Operator-selected target file, or normal resolution.
@@ -145,14 +171,11 @@ def setup_gitlab_operation(
 
 
 def output_mode(args: argparse.Namespace) -> str:
-    """Choose the output format, defaulting to JSON for a non-terminal reader.
+    """Select explicit output or choose a default from stdout's terminal state.
 
-    An agent should not have to discover `--json`. A human at a terminal wants
-    the summary; anything reading a pipe wants the machine-readable document,
-    and that is the overwhelmingly common case for this skill. So the default
-    follows the reader: a TTY gets `human`, a pipe or file gets `json`. The
-    three flags remain explicit overrides in both directions, `--human`
-    included, so a person piping into a pager still has a way to ask.
+    :param args: Namespace containing JSON, YAML, and optional human-mode flags.
+    :returns: ``json`` or ``yaml`` when explicitly selected; otherwise ``human``
+        for an explicit human flag or terminal stdout, and ``json`` for a pipe.
     """
     if args.json:
         return "json"
@@ -172,13 +195,27 @@ class MachineArgumentParser(argparse.ArgumentParser):
 
     def __init__(
         self,
-        *args: Any,
-        report_kind: str | None = None,
-        help_contract: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> None:
-        kwargs["allow_abbrev"] = False
-        super().__init__(*args, **kwargs)
+        prog: Optional[str] = None,
+        description: Optional[str] = None,
+        epilog: Optional[str] = None,
+        report_kind: Optional[str] = None,
+        help_contract: Optional[JSONObject] = None,
+    ):
+        """Configure argument parsing and optional catalogue-driven help.
+
+        :param prog: Executable name; None uses the process argument name.
+        :param description: Optional command purpose for ordinary argparse help.
+        :param epilog: Optional final guidance for ordinary argparse help.
+        :param report_kind: Command result kind used for structured argument failures.
+        :param help_contract: Command metadata used to render ordered help sections.
+        """
+        super().__init__(
+            prog=prog,
+            description=description,
+            epilog=epilog,
+            allow_abbrev=False,
+            formatter_class=CommandHelpFormatter,
+        )
         self.report_kind = report_kind
         self.help_contract = help_contract
         self._raw_argv: tuple[str, ...] = ()
@@ -187,39 +224,37 @@ class MachineArgumentParser(argparse.ArgumentParser):
         """Render ordered help from a command contract when one is supplied.
 
         :returns: Human help, with argparse rendering every accepted option.
-        """
+        :raises TypeError: If catalogue text, description maps, or examples are malformed.
+        :raises KeyError: If a catalogue example lacks its description or command.
+        """  # noqa: DOC502 - Catalogue field readers validate the help contract.
         contract = self.help_contract
+        if contract is None and Path(self.prog).name in COMMANDS:
+            contract = describe(Path(self.prog).name)
         if contract is None:
             return super().format_help()
-        formatter = self._get_formatter()
-        for heading, key in (("Summary", "summary"), ("Description", "description")):
-            formatter.start_section(heading)
-            formatter.add_text(contract[key])
-            formatter.end_section()
-        formatter.start_section("Examples")
-        for example in contract["examples"]:
-            formatter.add_text(f"{example['description']}: {example['command']}")
-        formatter.end_section()
-        formatter.start_section("Options")
-        formatter.add_arguments(self._actions)
-        formatter.end_section()
-        formatter.start_section("Output modes")
-        for mode, meaning in contract["output_modes"].items():
-            formatter.add_text(f"{mode}: {meaning}")
-        formatter.end_section()
-        formatter.start_section("Usage")
-        formatter.add_text(contract["usage"])
-        formatter.add_text("Exit 0: success; exit 2: invalid node or arguments.")
-        formatter.end_section()
-        return formatter.format_help()
+        return CommandHelp(contract).render(self)
 
     def parse_args(
-        self, args: list[str] | None = None, namespace: argparse.Namespace | None = None
+        self,
+        args: Optional[Sequence[str]] = None,
+        namespace: Optional[argparse.Namespace] = None,
     ) -> argparse.Namespace:
+        """Parse arguments and retain the requested failure-output mode.
+
+        :param args: Arguments to parse, or ``None`` to read process arguments.
+        :param namespace: Existing namespace to populate, or ``None`` for a new one.
+        :returns: Namespace containing parsed arguments and defaults.
+        :raises SystemExit: For requested help or invalid CLI arguments.
+        """  # noqa: DOC502 - argparse exits for help and invalid arguments.
         self._raw_argv = tuple(sys.argv[1:] if args is None else args)
         return super().parse_args(self._raw_argv, namespace)
 
     def error(self, message: str) -> None:
+        """Report invalid arguments in the explicitly selected output format.
+
+        :param message: Argparse diagnostic used when no machine format was selected.
+        :raises SystemExit: With status 2 after writing the argument failure.
+        """  # noqa: DOC502 - argparse exits for help and invalid arguments.
         modes = [
             flag.partition("=")[0]
             for flag in self._raw_argv
@@ -242,8 +277,16 @@ class MachineArgumentParser(argparse.ArgumentParser):
 
 
 def parser(
-    description: str, *, output_dir: bool = True, kind: str | None = None
+    description: str, *, output_dir: bool = True, kind: Optional[str] = None
 ) -> argparse.ArgumentParser:
+    """Create the shared parser used by diagnostic command adapters.
+
+    :param description: Human-readable purpose of the command.
+    :param output_dir: Whether paired-report file output is accepted.
+    :param kind: Result kind used for structured argument failures.
+    :returns: Parser with binding selection, output, discovery, dry-run,
+        provenance, and logging options; targets use the shared runtime resolver.
+    """
     result = MachineArgumentParser(
         report_kind=kind,
         description=description,
@@ -254,23 +297,14 @@ def parser(
             "Exit 0 = PASS, DRY_RUN or PLANNED; 2 = BLOCKED or PARTIAL. "
             "Run --describe for this command's machine-readable contract, or "
             "see tools.json for the whole skill. "
-            "Target resolves in order: --target or --binding, "
+            "Target resolves in order: --binding, "
             "CI_SKILLS_TARGET or K8S_ADMIN_DIAGNOSTICS_BINDING, "
             f"./{PROJECT_DIR}/{TARGET_FILENAME}, {DEFAULT_TARGET}. "
             "Example: %(prog)s --json"
         ),
     )
-    selection = result.add_mutually_exclusive_group()
-    selection.add_argument(
-        "--target",
-        metavar="PATH",
-        default=None,
-        help=(
-            "nonsecret TOML target file "
-            f"(default: {DEFAULT_TARGET}, override with CI_SKILLS_TARGET)"
-        ),
-    )
-    selection.add_argument(
+    result.set_defaults(target=None)
+    result.add_argument(
         "--binding",
         metavar="PATH",
         help="explicit project binding for target and ordered kubeconfig sources",
@@ -342,13 +376,32 @@ def log_event(
     status: str,
     *,
     elapsed: float = 0.0,
-    error_class: str | None = None,
+    error_class: Optional[str] = None,
     persist: bool = True,
-    level: str | None = None,
-    details: dict[str, Any] | None = None,
+    level: Optional[str] = None,
+    details: Optional[Mapping[str, object]] = None,
 ) -> None:
-    """Emit one bounded, secret-free diagnostic line to stderr and an optional file."""
-    level = level or ("error" if status in {BLOCKED, "PARTIAL"} else "info")
+    """Write a bounded diagnostic to stderr and an optional private log file.
+
+    :param args: Namespace containing logging controls and operation metadata.
+    :param kind: Command or component identifier included in the diagnostic.
+    :param event: Lifecycle event being reported.
+    :param status: Canonical result status for the event.
+    :param elapsed: Elapsed time in seconds, recorded as nonnegative milliseconds.
+    :param error_class: Classified failure reason, or ``None``.
+    :param persist: Whether the optional log-file destination may be written.
+    :param level: Explicit severity, or ``None`` to derive it from status.
+    :param details: Additional data passed through the shared redaction function.
+    :raises OSError: If stderr or the selected log file cannot be written.
+    :raises KeyError: If the supplied severity or configured threshold is invalid.
+    :raises TypeError: If details retain an unsupported object after redaction
+        and therefore cannot be serialized as JSON.
+    :raises RecursionError: If details contain a cycle or excessive nesting.
+    :raises ValueError: If elapsed is NaN and cannot be rounded to milliseconds.
+    :raises OverflowError: If elapsed is infinite and cannot be rounded to milliseconds.
+    """  # noqa: DOC502 - Indexing, redaction, rounding, serialization, and I/O can fail.
+    if level is None:
+        level = "error" if status in {BLOCKED, "PARTIAL"} else "info"
     thresholds = {"debug": 0, "info": 1, "warning": 2, "error": 3}
     if thresholds[level] < thresholds[getattr(args, "log_level", "info")]:
         return
@@ -406,9 +459,17 @@ def _failure(
     source: str,
     reason: str,
     *,
-    cleanup_errors: list[dict[str, str]] | None = None,
+    cleanup_errors: Optional[Sequence[Mapping[str, str]]] = None,
 ) -> int:
-    """Emit a stable machine-readable failure even when normal rendering fails."""
+    """Write a blocked result while preserving the command's output mode.
+
+    :param args: Namespace containing output and diagnostic options.
+    :param kind: Command result kind.
+    :param source: Stage that failed.
+    :param reason: Failure description, sanitized before rendering.
+    :param cleanup_errors: Additional resource-cleanup failures, when present.
+    :returns: Exit status 2 after writing the blocked result.
+    """
     data = {
         "schema_version": "1.0",
         "kind": kind,
@@ -451,32 +512,190 @@ def _failure(
     return 2
 
 
-def execute(
-    args: argparse.Namespace,
-    collect: Callable[[Target, argparse.Namespace], dict[str, Any]] | None = None,
-    *,
-    live_checks: bool = False,
-) -> int:
-    started = time.monotonic()
-    kind = (
-        ACCESS_CHECK_KIND
-        if collect is None
-        else COLLECTOR_KINDS.get(collect.__name__, collect.__name__)
+Collector = Callable[[Target, argparse.Namespace], JSONObject]
+ReportReader = Callable[[Target, argparse.Namespace, JSONObject], JSONObject]
+
+COLLECTION_PROBES: Mapping[str, Sequence[str]] = {
+    "collect_storage": (
+        "concurrent node, Pod, PVC/PV, StorageClass, CSI, attachment, controller reads",
+    ),
+    "collect_events": (
+        "events.k8s.io read; core fallback only if resource is absent",
+        "time and object filtering",
+    ),
+    "collect_cilium": (
+        "concurrent DaemonSet, Pod, operator, CiliumNode reads",
+        "non-TTY health on ready agents",
+    ),
+    "collect_gitlab_job": ("job, pipeline, runner API reads", "bounded job trace read"),
+    "collect_ceph_cluster": (
+        "concurrent Ceph status, OSD tree, inactive PG and OSD/monitor Pod reads",
+        "node, Ready and Pod condition filtering",
+    ),
+    "collect_mtu_consistency": (
+        "read selected nodes and create temporary oc debug Pods on apply",
+        "read PCI Ethernet IPv4 links and verify Pod cleanup",
+    ),
+}
+
+
+def _access_report(
+    target: Target, args: argparse.Namespace, gate: JSONObject
+) -> JSONObject:
+    """Return the access evidence already collected for this invocation.
+
+    :param target: Resolved runtime authority, retained by the shared reader interface.
+    :param args: Parsed command inputs, retained by the shared reader interface.
+    :param gate: Completed access report from the selected authority checks.
+    :returns: The same access report without an additional provider call.
+    """
+    return gate
+
+
+def _live_access_report(
+    target: Target, args: argparse.Namespace, gate: JSONObject
+) -> JSONObject:
+    """Extend a passing access report with the installed diagnostic read bundle.
+
+    :param target: Runtime target used for each independent diagnostic read.
+    :param args: Optional job and Ceph selections from the command parser.
+    :param gate: Successful access report copied before attaching live evidence.
+    :returns: Access report containing each collector's independent read-back.
+    :raises RuntimeError: If the worker pool cannot start or submit its reads.
+    """  # noqa: DOC502 - The collector thread pool can fail to start.
+    from lib.python.core.live import collect_live_checks
+
+    return collect_live_checks(target, args, copy_json_object(gate))
+
+
+def _collector_report(
+    collect: Collector, target: Target, args: argparse.Namespace, gate: JSONObject
+) -> JSONObject:
+    """Read one diagnostic and attach the access evidence that authorized it.
+
+    :param collect: One concrete collector selected by its installed command.
+    :param target: Resolved runtime target for that collector.
+    :param args: Parsed collection filters and command options.
+    :param gate: Successful prerequisite access evidence.
+    :returns: Collector report copied into an owned mapping with its access summary.
+    :raises Exception: If the selected collector fails; the command boundary converts
+        that original failure into a blocked result with its collection stage.
+    :raises RecursionError: If collector evidence contains cyclic nested containers.
+    """  # noqa: DOC502 - The supplied collector and recursive copy can fail.
+    data = copy_json_object(collect(target, args))
+    data["access"] = access_evidence(gate)
+    return data
+
+
+def _diagnostic_target(args: argparse.Namespace, script: Optional[str]) -> Target:
+    """Resolve the command's required authorities and bind live source identity.
+
+    :param args: Parsed target resolution, plan, and source revision options.
+    :param script: Declared executable name, or None for a library-only collector.
+    :returns: Runtime target with source provenance bound for a live invocation.
+    :raises TargetError: If target selection, credentials, or source identity is invalid.
+    :raises OSError: If selected source files cannot be read.
+    """  # noqa: DOC502 - Target/source resolution propagates validation and I/O.
+    required = tuple(COMMANDS[script]["requires"]) if script else DEFAULT_AUTHORITIES
+    target = resolve_project_target(
+        args.target,
+        getattr(args, "binding", None),
+        dry_run=args.dry_run,
+        required_surfaces=required,
     )
-    # The catalog is keyed by script name, but a command must not learn its own
-    # identity from argv[0]: a symlink, a wrapper or a renamed installed copy
-    # would then print another command's contract, or raise KeyError where every
-    # other path returns a structured envelope. The report kind IS the identity.
-    # `.get`, because a caller may pass a collector this catalog does not
-    # declare. Every real command's kind IS declared -- COLLECTOR_KINDS is
-    # checked against the catalog by test -- so this only keeps an undeclared
-    # one from raising where every other path returns an envelope.
+    if not args.dry_run:
+        target = bind_sources(target, revision=getattr(args, "revision", None))
+    return target
+
+
+def _diagnostic_gate(
+    args: argparse.Namespace,
+    target: Target,
+    kind: str,
+    probes: Sequence[str],
+    profile: str,
+) -> MutableMapping[str, JSONValue]:
+    """Check declared access or construct its non-contacting plan.
+
+    :param args: Parsed plan and publication options plus collection filters.
+    :param target: Bound authority selected for this invocation.
+    :param kind: Canonical result kind, used to select Cilium prerequisites.
+    :param probes: Planned collection operations; empty for an access-only command.
+    :param profile: Live access profile declared by the calling command.
+    :returns: Mutable access evidence or plan with the selected profile.
+    :raises TargetError: If a required authority cannot be selected or verified.
+    :raises OSError: If a prerequisite probe cannot read its local configuration.
+    """  # noqa: DOC502 - Access and target helpers propagate failures.
+    publication = bool(getattr(args, "publication", False))
+    needs_cilium = kind in {ACCESS_CHECK_KIND, "cilium_status"}
+    gate = copy_json_object(
+        dry_run_access(target, publication=publication, cilium=needs_cilium)
+        if args.dry_run
+        else check_access(target, publication=publication, cilium=needs_cilium)
+    )
+    if args.dry_run and kind != ACCESS_CHECK_KIND:
+        gate["collection_probes"] = probes
+        gate["filters"] = {
+            key: value
+            for key, value in vars(args).items()
+            if key not in {"target", "binding", "json", "yaml", "dry_run", "output_dir"}
+        }
+    gate["profile"] = PROFILE_DRY_RUN if args.dry_run else profile
+    return gate
+
+
+def _write_diagnostic(
+    args: argparse.Namespace, data: JSONObject, kind: str, started: float
+) -> int:
+    """Write one diagnostic through the shared receipt, report, and logging paths.
+
+    :param args: Output mode, optional report/receipt paths, and diagnostic settings.
+    :param data: Final report from the access gate or selected collector.
+    :param kind: Canonical command identity used for logging.
+    :param started: Monotonic start time used to calculate elapsed seconds.
+    :returns: Canonical process exit code for the report status.
+    :raises OSError: If requested files or output streams cannot be written.
+    :raises RuntimeError: If YAML output is requested without PyYAML.
+    :raises TypeError: If the report or its status has an invalid shape.
+    :raises ValueError: If output serialization encounters invalid numeric data.
+    :raises KeyError: If the report lacks its required status or rendering fields.
+    :raises RecursionError: If report containers contain a cycle or excessive nesting.
+    """  # noqa: DOC503 - Report rendering, receipt writes, and logging can fail.
+    receipt = getattr(args, "receipt_out", None)
+    if receipt:
+        write_portable_receipt(data, receipt)
+    status = data["status"]
+    if not isinstance(status, str):
+        raise TypeError("report status must be a string")
+    rendered = emit(data, output_mode(args), getattr(args, "output_dir", None))
+    log_event(args, kind, "result", status, elapsed=time.monotonic() - started)
+    sys.stdout.write(rendered)
+    return exit_code(status)
+
+
+def _execute_report(
+    args: argparse.Namespace,
+    kind: str,
+    read: ReportReader,
+    probes: Sequence[str],
+    profile: str,
+) -> int:
+    """Run one selected diagnostic reader after discovery and access checks.
+
+    :param args: Parsed command inputs shared by every stage.
+    :param kind: Canonical command result identity.
+    :param read: Concrete reader invoked only after a passing live access gate.
+    :param probes: Planned collection operations shown without contacting providers.
+    :param profile: Access profile recorded by this command.
+    :returns: Canonical result exit code; setup and read failures produce a blocked report.
+    :raises OSError: If even the final blocked report cannot be written to stdout.
+    """  # noqa: DOC502 - Final result writes can still fail at stdout.
+    started = time.monotonic()
     script = COMMAND_BY_KIND.get(kind)
     if getattr(args, "describe", False):
         if script is None:
             return _failure(args, kind, "arguments", f"no declared contract for {kind}")
-        contract = describe(script)
-        sys.stdout.write(json.dumps(contract, indent=2, sort_keys=True) + "\n")
+        sys.stdout.write(json.dumps(describe(script), indent=2, sort_keys=True) + "\n")
         return 0
     if args.dry_run and any(
         getattr(args, name, None) for name in ("output_dir", "receipt_out", "log_file")
@@ -484,105 +703,21 @@ def execute(
         return _failure(args, kind, "arguments", "dry_run_cannot_write_output")
     missing = missing_required_options(script, args) if script else []
     if missing:
-        # Enforced here rather than by argparse because --describe must answer
-        # without it, and enforced BEFORE the access gate because a forgotten
-        # argument is not an access failure: reporting it as one sends the
-        # reader to the wrong authority.
         return _failure(
             args, kind, "arguments", f"{', '.join(missing)} is required; see --describe"
         )
     source = "target"
     try:
-        required_surfaces = (
-            tuple(COMMANDS[script]["requires"]) if script else DEFAULT_AUTHORITIES
-        )
-        target = resolve_project_target(
-            args.target,
-            getattr(args, "binding", None),
-            dry_run=args.dry_run,
-            required_surfaces=required_surfaces,
-        )
-        publication = bool(getattr(args, "publication", False))
-        if not args.dry_run:
-            target = bind_sources(target, revision=getattr(args, "revision", None))
+        target = _diagnostic_target(args, script)
         source = "access_check"
-        needs_cilium = kind in {ACCESS_CHECK_KIND, "cilium_status"}
-        gate = (
-            dry_run_access(target, publication=publication, cilium=needs_cilium)
-            if args.dry_run
-            else check_access(target, publication=publication, cilium=needs_cilium)
-        )
-        if args.dry_run and collect is not None:
-            probes = {
-                "collect_storage": [
-                    "concurrent node, Pod, PVC/PV, StorageClass, CSI, attachment, controller reads"
-                ],
-                "collect_events": [
-                    "events.k8s.io read; core fallback only if resource is absent",
-                    "time and object filtering",
-                ],
-                "collect_cilium": [
-                    "concurrent DaemonSet, Pod, operator, CiliumNode reads",
-                    "non-TTY health on ready agents",
-                ],
-                "collect_gitlab_job": [
-                    "job, pipeline, runner API reads",
-                    "bounded job trace read",
-                ],
-                "collect_ceph_cluster": [
-                    "concurrent Ceph status, OSD tree, inactive PG and OSD/monitor Pod reads",
-                    "node, Ready and Pod condition filtering",
-                ],
-                "collect_mtu_consistency": [
-                    "read selected nodes and create temporary oc debug Pods on apply",
-                    "read PCI Ethernet IPv4 links and verify Pod cleanup",
-                ],
-            }
-            gate["collection_probes"] = probes.get(collect.__name__, [])
-            gate["filters"] = {
-                key: value
-                for key, value in vars(args).items()
-                if key
-                not in {"target", "binding", "json", "yaml", "dry_run", "output_dir"}
-            }
-        # Only access_check.py runs the expanded bundle, so every report names
-        # which gate it actually passed rather than the docs implying one.
-        gate["profile"] = (
-            PROFILE_DRY_RUN
-            if args.dry_run
-            else (PROFILE_FULL if live_checks else PROFILE_BASE)
-        )
-        if live_checks and not args.dry_run and gate["status"] == PASS:
-            from lib.python.core.live import collect_live_checks
-
-            data = collect_live_checks(target, args, gate)
-        elif collect is None or args.dry_run or gate["status"] != PASS:
+        gate = _diagnostic_gate(args, target, kind, probes, profile)
+        if args.dry_run or gate["status"] != PASS:
             data = gate
         else:
-            source = collect.__name__
-            data = collect(target, args)
-            data["access"] = access_evidence(gate)
-        receipt_out = getattr(args, "receipt_out", None)
-        if receipt_out:
-            # The committable form: produced by code, never by hand-editing, so
-            # a receipt that reaches a public repository cannot carry a host
-            # path.
-            destination = Path(receipt_out).expanduser()
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            partial = destination.with_name(f".{destination.name}.partial")
-            partial.write_text(
-                json.dumps(portable(redact_tree(data)), indent=2, sort_keys=True)
-                + "\n",
-                encoding="utf-8",
-            )
-            os.replace(partial, destination)
-        mode = output_mode(args)
-        rendered = emit(data, mode, getattr(args, "output_dir", None))
-        log_event(
-            args, kind, "result", data["status"], elapsed=time.monotonic() - started
-        )
-        sys.stdout.write(rendered)
-        return exit_code(data["status"])
+            source = kind
+            data = read(target, args, gate)
+        source = "output"
+        return _write_diagnostic(args, data, kind, started)
     except (
         TargetError,
         RuntimeError,
@@ -593,8 +728,43 @@ def execute(
         IndexError,
     ) as exc:
         return _failure(args, kind, source, str(exc))
-    except Exception:  # noqa: BLE001 - preserve structured output for unexpected provider data
+    except Exception:  # noqa: BLE001 - unexpected provider data must retain the result envelope
         return _failure(args, kind, source, "unexpected_runtime_failure")
+
+
+def execute(args: argparse.Namespace, collect: Collector) -> int:
+    """Run the one concrete collector selected by an installed diagnostic command.
+
+    :param args: Parsed diagnostic options and filters.
+    :param collect: Required collector accepting a target and returning a JSON report.
+    :returns: Shared command exit code after rendering the result or failure report.
+    :raises OSError: If the final report cannot be written to stdout.
+    """  # noqa: DOC502 - Final result writes can still fail at stdout.
+    kind = COLLECTOR_KINDS.get(collect.__name__, collect.__name__)
+    return _execute_report(
+        args,
+        kind,
+        partial(_collector_report, collect),
+        COLLECTION_PROBES.get(collect.__name__, ()),
+        PROFILE_BASE,
+    )
+
+
+def execute_access(args: argparse.Namespace, live_checks: bool = False) -> int:
+    """Run the access command with its explicitly selected diagnostic profile.
+
+    :param args: Parsed authority, publication, output, and optional read selections.
+    :param live_checks: Include independent installed collectors after access passes.
+    :returns: Shared command exit code after rendering access evidence or its plan.
+    :raises OSError: If the final report cannot be written to stdout.
+    """  # noqa: DOC502 - Final result writes can still fail at stdout.
+    return _execute_report(
+        args,
+        ACCESS_CHECK_KIND,
+        _live_access_report if live_checks else _access_report,
+        (),
+        PROFILE_FULL if live_checks else PROFILE_BASE,
+    )
 
 
 def execute_gitlab_job(args: argparse.Namespace) -> int:
@@ -696,7 +866,9 @@ def execute_gitlab_job_list(args: argparse.Namespace) -> int:
 
     :param args: Parsed list filters and universal output options.
     :returns: Shared status exit code.
-    """
+
+    Target, provider, and collection exceptions become structured failure reports.
+    """  # noqa: DOC501, DOC503 - the target-kind validation is caught by this adapter.
     from lib.python.core.gitlab.gitlab_jobs import JobQuery, list_jobs
     from lib.python.core.target import select_gitlab_reference
 

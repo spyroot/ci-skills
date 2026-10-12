@@ -1,13 +1,26 @@
-"""Portable operation receipts retain source identity without leaking secrets."""
+"""Portable operation receipts retain source identity without leaking secrets.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
-from tests.python.conftest import import_script_module
+from conftest import import_script_module
 
 
-def test_write_portable_receipt_redacts_and_replaces_atomically(tmp_path):
+def test_write_portable_receipt_redacts_and_replaces_atomically(tmp_path: Path) -> None:
+    """Require receipt replacement to hide paths and token values.
+
+    :param tmp_path: Directory containing a preexisting stale receipt and the
+            final JSON destination.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     portable = import_script_module("lib.python.core.portable")
     destination = tmp_path / "receipt.json"
     destination.write_text("stale", encoding="utf-8")

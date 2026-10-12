@@ -9,21 +9,24 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import os
 import tempfile
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final, cast, Union, Mapping
+from typing import Final, Optional
 from urllib.parse import quote, urlencode
 
-from lib.python.core.action import AbstractCallback, HarborCallback
-from lib.python.core.cli_api import APIError
 from lib.python.access.credentials import RegistryCredential, resolve_harbor_credential
-from lib.python.protocol.http import HTTPClient
+from lib.python.core.abstract.callback import Callback
+from lib.python.core.abstract.skill_action import ActionT_co, SkillAction
+from lib.python.core.cli_api import APIError, response_decoder
+from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
+from lib.python.core.json_types import JSONObject
 from lib.python.core.runtime import error_class, run_command_bounded
-from lib.python.sys.status import APPLIED, NO_OP
 from lib.python.core.target import HarborTarget, Target, TargetError
+from lib.python.protocol.http import HTTPClient
+from lib.python.sys.status import APPLIED, NO_OP
 
 HARBOR_SERVICE_KEY: Final = "harbor"
 REGISTRY_SCHEME: Final = "docker://"
@@ -36,7 +39,33 @@ COPY_FLAGS: Final = ("--all", "--preserve-digests")
 
 @dataclass
 class HarborService:
-    """Selected registry, private native auth file, and bounded API client."""
+    """Bind one registry target to private native and API credentials.
+
+    :param target: Selected Harbor origin, host, project, and credential reference.
+    :param credential: Resolved registry username and password kept out of reports.
+    :param authfile: Private native-client auth file path.
+    :param timeout: Runtime bound for registry API and native commands.
+
+    .. attribute :: target
+        :type: HarborTarget
+
+        Selected Harbor origin, host, project, and credential reference.
+
+    .. attribute :: credential
+        :type: RegistryCredential
+
+        Resolved registry username and password kept out of reports.
+
+    .. attribute :: authfile
+        :type: Path
+
+        Private native-client auth file path.
+
+    .. attribute :: timeout
+        :type: int
+
+        Runtime bound for registry API and native commands.
+    """
 
     target: HarborTarget
     credential: RegistryCredential = field(repr=False)
@@ -85,15 +114,13 @@ class HarborService:
         name = quote(quote(repository, safe=""), safe="")
         return f"{HARBOR_API}/projects/{project}/repositories/{name}/artifacts/{quote(reference, safe='')}"
 
-    def digest(
-            self, repository:
-            str, reference: str
-    ) -> Union[str, None]:
+    def digest(self, repository: str, reference: str) -> Optional[str]:
         """Read the registry's artifact digest, preserving an actual absence.
-        
+
         :param repository: Project-relative repository.
         :param reference: Tag or digest to read back.
-        :return: Provider digest, or None for HTTP 404.
+        :returns: Provider digest, or None for HTTP 404.
+        :raises APIError: If access fails or the returned digest is malformed.
         """
         try:
             result = self.api.request("GET", self.artifact_path(repository, reference))
@@ -175,11 +202,7 @@ class HarborService:
             raise APIError("tag_delete_incomplete")
         return True
 
-    def authorize(
-            self,
-            repository: str,
-            actions: tuple[str, ...]
-    ) -> Mapping[str, Any]:
+    def authorize(self, repository: str, actions: Sequence[str]) -> JSONObject:
         """Read the authenticated registry grant for the requested operation.
 
         :param repository: Selected project-relative repository.
@@ -195,24 +218,7 @@ class HarborService:
             }
         )
         response = self.api.request("GET", f"{REGISTRY_TOKEN_ENDPOINT}?{query}")
-        try:
-            # This is a claim read from the authenticated TLS token endpoint,
-            # not a client-side signature verification or a substitute for push.
-            token = response["token"]
-            payload = token.split(".")[1]
-            claims = json.loads(
-                base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
-            )
-            granted = sorted(
-                {
-                    action
-                    for entry in claims.get("access", [])
-                    if entry.get("type") == "repository" and entry.get("name") == name
-                    for action in entry.get("actions", [])
-                }
-            )
-        except (KeyError, IndexError, TypeError, ValueError):
-            raise APIError("registry_grant_invalid") from None
+        granted = self._granted_actions(response, name)
         if not set(actions).issubset(granted):
             raise APIError("registry_actions_not_granted")
         return {
@@ -223,23 +229,81 @@ class HarborService:
             "granted_actions": granted,
         }
 
+    @staticmethod
+    def _granted_actions(response: JSONObject, repository: str) -> Sequence[str]:
+        """Read capability claims returned by the authenticated registry endpoint.
+
+        This parses a response from the selected TLS authority; it does not claim
+        independent JWT signature verification or successful image publication.
+
+        :param response: JSON object returned by the registry token endpoint.
+        :param repository: Exact project/repository scope requested by the caller.
+        :returns: Sorted capabilities granted for that repository scope.
+        :raises APIError: If token encoding, JSON, or capability fields are invalid.
+        """
+        token = response.get("token")
+        if not isinstance(token, str):
+            raise APIError("registry_grant_invalid")
+        try:
+            payload = token.split(".")[1]
+            raw = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+            claims = response_decoder().decode(raw.decode("utf-8"))
+        except (IndexError, ValueError, UnicodeError, RecursionError):
+            raise APIError("registry_grant_invalid") from None
+        entries = claims.get("access", []) if isinstance(claims, Mapping) else None
+        if not isinstance(entries, list):
+            raise APIError("registry_grant_invalid")
+        granted: set[str] = set()
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                raise APIError("registry_grant_invalid")
+            actions = entry.get("actions", [])
+            if not isinstance(actions, list) or any(
+                not isinstance(item, str) for item in actions
+            ):
+                raise APIError("registry_grant_invalid")
+            if entry.get("type") == "repository" and entry.get("name") == repository:
+                granted.update(actions)
+        return sorted(granted)
+
 
 @dataclass(frozen=True)
 class TagSnapshot:
-    """Registry tag state captured before a workflow may mutate it."""
+    """Retain a registry tag's prior digest or absence for recovery.
+
+    :param service: Authenticated Harbor service used for read-back and restoration.
+    :param repository: Selected project-relative destination repository.
+    :param tag: Exact mutable destination tag.
+    :param prior_digest: Observed digest, or None if the tag was absent.
+
+    .. attribute :: service
+        :type: HarborService
+
+        Authenticated Harbor service used for read-back and restoration.
+
+    .. attribute :: repository
+        :type: str
+
+        Selected project-relative destination repository.
+
+    .. attribute :: tag
+        :type: str
+
+        Exact mutable destination tag.
+
+    .. attribute :: prior_digest
+        :type: Optional[str]
+
+        Observed digest, or None if the tag was absent.
+    """
 
     service: HarborService = field(repr=False)
     repository: str
     tag: str
-    prior_digest: str | None
+    prior_digest: Optional[str]
 
     @classmethod
-    def capture(
-            cls,
-            service: HarborService,
-            repository: str,
-            tag: str
-    ) -> TagSnapshot:
+    def capture(cls, service: HarborService, repository: str, tag: str) -> TagSnapshot:
         """Read and retain the exact current state of one registry tag.
 
         :param service: Authenticated registry service.
@@ -247,7 +311,7 @@ class TagSnapshot:
         :param tag: Exact mutable tag that a later operation may change.
         :returns: Snapshot that can restore the observed digest or absence.
         :raises APIError: If the current registry state cannot be read.
-        """
+        """  # noqa: DOC502 - Registry read/restore helpers propagate APIError.
         return cls(service, repository, tag, service.digest(repository, tag))
 
     def restore(self) -> bool:
@@ -273,120 +337,161 @@ class TagSnapshot:
         return True
 
 
-class HarborAuth(
-    HarborCallback[None, HarborService]
-):
-    """Resolve existing Harbor credentials once and prove requested access."""
+class HarborCallback(Callback[DeliveryState, ActionT_co]):
+    """Read the private registry service assigned by authentication."""
 
-    def __init__(
-        self, *, target: Target, repository: str, actions: tuple[str, ...], timeout: int
-    ) -> None:
-        """Bind the exact target and access needed by the following operations.
+    @property
+    def harbor(self) -> HarborService:
+        """Read the verified service retained in shared delivery state.
 
-        :param target: Shared target resolver result.
-        :param repository: Caller-selected repository under its Harbor project.
-        :param actions: Required native registry capabilities.
-        :param timeout: Bound for native commands and API requests.
-        """
-        super().__init__()
-        self.target = target
-        self.repository = repository
-        self.actions = actions
-        self.timeout = timeout
-        self._path: Path
-        self.evidence: Mapping[str, Any] = {}
-
-    def run(self) -> HarborService:
-        """Create one private native auth file and verify the selected grant.
-
-        :returns: Shared Harbor service for dependent callbacks.
-        :raises TargetError: If Harbor target or credentials are unavailable.
-        :raises APIError: If native registry authorization fails.
-        :raises OSError: If the temporary credential file cannot be created.
-        """
-        if self.target.harbor is None:
-            raise TargetError("harbor_target_missing")
-        credential = resolve_harbor_credential(self.target.harbor)
-        descriptor, name = tempfile.mkstemp(
-            prefix="ci-skills-registry-", suffix=".json"
-        )
-
-        self._path = Path(name)
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(credential.dockerconfig(self.target.harbor.host))
-
-        service = HarborService(
-            self.target.harbor, credential, self._path, self.timeout
-        )
-
-        self.evidence = service.authorize(self.repository, self.actions)
-        self.context.services[HARBOR_SERVICE_KEY] = service
-        return service
-
-    def cleanup(self) -> None:
-        """Remove only this invocation's temporary credential file.
-
-        :raises OSError: If the private helper cannot be removed.
-        """
-        if self._path is not None:
-            self._path.unlink(missing_ok=True)
+        :returns: Bound registry service with its private native auth file.
+        :raises AttributeError: If composition omitted Harbor authentication.
+        """  # noqa: DOC502 - Missing composition state raises AttributeError.
+        return self.state.harbor
 
 
 @dataclass(frozen=True)
-class PushAction:
-    """Selected registry destination and an explicit or dependent source."""
+class HarborAuthAction(ProviderAuthAction):
+    """Describe the exact registry grant required by a delivery workflow.
+
+    :param target: Runtime-selected target containing Harbor access configuration.
+    :param timeout: Maximum seconds for each API or native registry command.
+    :param repository: Project-relative repository whose grant will be verified.
+    :param actions: Explicit native registry capabilities required by the workflow.
+
+    .. attribute :: repository
+        :type: str
+
+        Project-relative repository whose grant will be verified.
+
+    .. attribute :: actions
+        :type: Sequence[str]
+
+        Explicit native registry capabilities required by the workflow.
+    """
+
+    repository: str
+    actions: Sequence[str]
+
+
+class HarborAuth(HarborCallback[HarborAuthAction]):
+    """Resolve existing credentials and prove the requested registry grant."""
+
+    def __init__(
+        self, target: Target, repository: str, actions: Sequence[str], timeout: int
+    ):
+        """Retain required authentication inputs and own any temporary auth file.
+
+        :param target: Shared runtime target resolver result.
+        :param repository: Caller-selected repository under its Harbor project.
+        :param actions: Registry capabilities needed by the declared workflow.
+        :param timeout: Maximum seconds for native commands and API requests.
+        """
+        super().__init__(HarborAuthAction(target, timeout, repository, actions))
+        self._path: Optional[Path] = None
+
+    def run(self) -> JSONObject:
+        """Create private native credentials and retain the verified service.
+
+        :returns: Safe identity, origin, repository, and granted capabilities.
+        :raises TargetError: If Harbor target or credentials are unavailable.
+        :raises APIError: If the registry does not grant the required capabilities.
+        :raises OSError: If the private credential file cannot be created or written.
+        """  # noqa: DOC503 - Registry authorization and private-file writes can fail.
+        action = self.action
+        target = action.target.harbor
+        if target is None:
+            raise TargetError("harbor_target_missing")
+        credential = resolve_harbor_credential(target)
+        descriptor, name = tempfile.mkstemp(
+            prefix="ci-skills-registry-", suffix=".json"
+        )
+        self._path = Path(name)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(credential.dockerconfig(target.host))
+        service = HarborService(target, credential, self._path, action.timeout)
+        evidence = service.authorize(action.repository, action.actions)
+        self.state.harbor = service
+        self.state.access_evidence[HARBOR_SERVICE_KEY] = evidence
+        return evidence
+
+    def cleanup(self) -> JSONObject:
+        """Remove this invocation's private native credential helper.
+
+        :returns: Empty evidence after cleanup; no credential paths are reported.
+        :raises OSError: If the created private helper cannot be removed.
+        """  # noqa: DOC502 - Path.unlink can propagate filesystem errors.
+        if self._path is not None:
+            self._path.unlink(missing_ok=True)
+        return {}
+
+
+@dataclass(frozen=True)
+class PushAction(SkillAction):
+    """Select a registry destination for the preceding producer's image.
+
+    :param repository: Project-relative destination repository.
+    :param tag: Destination tag selected for publication and independent read-back.
+
+    .. attribute :: repository
+        :type: str
+
+        Project-relative destination repository.
+
+    .. attribute :: tag
+        :type: str
+
+        Destination tag selected for publication and independent read-back.
+    """
 
     repository: str
     tag: str
-    source: str | AbstractCallback[Any]
 
 
-class HarborPush(HarborCallback[PushAction, dict[str, Any]]):
-    """Publish an image with the native copy client and exact digest read-back."""
+class HarborPush(HarborCallback[PushAction]):
+    """Publish the state-owned source image and retain its immutable destination."""
 
-    def collect(self) -> None:
-        """Initialize destination recovery before publication can change a tag."""
-        self._tag_snapshot: TagSnapshot
-        if self.action is None:
-            raise ValueError("push_action_required")
+    def __init__(self, action: PushAction):
+        """Retain the required destination and initialize recovery ownership.
 
-        service = cast(HarborService, self.harbor)
+        :param action: Destination repository and tag selected by the workflow.
+        """
+        super().__init__(action)
+        self._tag_snapshot: Optional[TagSnapshot] = None
+
+    def collect(self) -> JSONObject:
+        """Capture the destination's prior digest or absence before publication.
+
+        :returns: Empty report evidence; the recovery snapshot remains internal.
+        :raises APIError: If the current destination tag cannot be read.
+        """  # noqa: DOC502 - Registry read/restore helpers propagate APIError.
         self._tag_snapshot = TagSnapshot.capture(
-            service, self.action.repository, self.action.tag
+            self.harbor, self.action.repository, self.action.tag
         )
+        return {}
 
-    def cleanup(self) -> None:
-        """Restore or remove the destination tag when this workflow fails.
+    def cleanup(self) -> JSONObject:
+        """Restore the prior tag or absence after a failed workflow.
 
-        A pre-existing tag is copied back from its prior content digest. A tag
-        created by this invocation is removed instead.
+        :returns: Empty evidence after independent recovery verification.
+        :raises APIError: If the captured tag state cannot be restored and read back.
+        """  # noqa: DOC502 - Registry read/restore helpers propagate APIError.
+        if self.state.failed and self._tag_snapshot is not None:
+            self._tag_snapshot.restore()
+        return {}
 
-        :raises APIError: If prior tag state cannot be restored and read back.
-        """
-        if not self.context.failed or self._tag_snapshot is None:
-            return
-        self._tag_snapshot.restore()
+    def run(self) -> JSONObject:
+        """Skip an identical tag or copy and verify the preceding producer's image.
 
-    def run(self) -> dict[str, Any]:
-        """Skip an identical tag or copy and verify the requested image.
-
-        :returns: Destination, digest, and independently verified action evidence.
-        :raises ValueError: If the required source result is missing.
-        :raises APIError: If native registry copy or read-back fails.
-        """
-        action = self.action
-        if action is None:
-            raise ValueError("push_action_required")
-        service = cast(HarborService, self.harbor)
-        source = action.source
-        if isinstance(source, AbstractCallback):
-            source = (
-                source.result.get("image")
-                if isinstance(source.result, dict)
-                else getattr(source.result, "image", None)
-            )
-        if not isinstance(source, str) or not source:
-            raise ValueError("source_image_required")
+        :returns: Applied/no-op destination, digest, and verified read-back evidence.
+        :raises ValueError: If the producer supplied no immutable source image.
+        :raises AttributeError: If composition omitted the source-image producer.
+        :raises APIError: If native copying or independent digest verification fails.
+        """  # noqa: DOC503 - Source state and registry helpers propagate failures.
+        action, service = self.action, self.harbor
+        source = self.state.source_image
+        if not source or "@sha256:" not in source:
+            raise ValueError("immutable_source_image_required")
         expected = service.inspect(source)
         current = service.digest(action.repository, action.tag)
         destination = service.image(action.repository, action.tag)
@@ -394,9 +499,10 @@ class HarborPush(HarborCallback[PushAction, dict[str, Any]]):
         digest = service.copy(source, destination) if changed else expected
         if service.digest(action.repository, action.tag) != digest:
             raise APIError("published_digest_mismatch")
+        self.state.published_image = service.image(action.repository, digest)
         return {
             "action": APPLIED if changed else NO_OP,
             "verified": True,
-            "image": service.image(action.repository, digest),
+            "image": self.state.published_image,
             "digest": digest,
         }

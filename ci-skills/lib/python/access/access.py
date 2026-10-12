@@ -1,7 +1,8 @@
-"""
-Read-only verification of the three explicitly selected live authorities.
+"""Read-only verification of the three explicitly selected live authorities.
 
-Mustafa Bayramov mbayramo@ciso.com spyroot@gmail.com
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -9,47 +10,144 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from os import PathLike
 from pathlib import Path
-from typing import Any
+from typing import Optional, Union
 from urllib.parse import quote, urlsplit
 
-from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
-from lib.python.core.kubernetes.cilium import HEALTH_COMMAND, agent_selector, ready_agent_pods, valid_health
+from lib.python.access.credentials import (
+    Sources,
+    assert_kubeconfig_unchanged,
+    read_token_file,
+)
 from lib.python.core.catalog import GITLAB_VARIABLES, github_variables
-from lib.python.access.credentials import Sources, assert_kubeconfig_unchanged
+from lib.python.core.cli_api import response_decoder
+from lib.python.core.gitlab.gitlab_api import GlabAPIClient
+from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+from lib.python.core.json_types import (
+    JSONObject,
+    JSONValue,
+    json_object,
+    json_objects,
+    json_string,
+    json_strings,
+)
+from lib.python.core.kubernetes.cilium import (
+    HEALTH_COMMAND,
+    agent_selector,
+    ready_agent_pods,
+    valid_health,
+)
 from lib.python.core.runtime import CommandResult, error_class, run_command
-from lib.python.sys.status import BLOCKED, DRY_RUN, PASS
 from lib.python.core.target import GitLabOperationTarget, Target
+from lib.python.sys.status import BLOCKED, DRY_RUN, PASS
 
 
 @dataclass(frozen=True)
 class Surface:
+    """Observed access state for one selected authority.
+
+    :param name: Authority identifier used in the access report.
+    :param status: PASS or BLOCKED result of the access probes.
+    :param identity: Authenticated identity, or ``None`` when unverified.
+    :param target: Selected authority or resource identifier.
+    :param observed_capability: Capabilities verified before the result was returned.
+    :param next_step: Suggested recovery action, or ``None`` on success.
+    :param reason: Classified failure, or ``None`` on success.
+    :param credential_source: Reportable credential origin, when bound.
+    :param details: Additional verified access facts, when available.
+
+    .. attribute :: name
+        :type: str
+
+        Authority identifier used in the access report.
+
+    .. attribute :: status
+        :type: str
+
+        PASS or BLOCKED result of the access probes.
+
+    .. attribute :: identity
+        :type: Optional[str]
+
+        Authenticated identity, or ``None`` when unverified.
+
+    .. attribute :: target
+        :type: str
+
+        Selected authority or resource identifier.
+
+    .. attribute :: observed_capability
+        :type: Sequence[str]
+
+        Capabilities verified before the result was returned.
+
+    .. attribute :: next_step
+        :type: Optional[str]
+
+        Suggested recovery action, or ``None`` on success.
+
+    .. attribute :: reason
+        :type: Optional[str]
+
+        Classified failure, or ``None`` on success.
+
+    .. attribute :: credential_source
+        :type: Optional[str]
+
+        Reportable credential origin, when bound.
+
+    .. attribute :: details
+        :type: Optional[JSONObject]
+
+        Additional verified access facts, when available.
+    """
+
     name: str
     status: str
-    identity: str | None
+    identity: Optional[str]
     target: str
-    observed_capability: list[str]
-    next_step: str | None
-    reason: str | None = None
-    credential_source: str | None = None
-    details: dict[str, Any] | None = None
+    observed_capability: Sequence[str]
+    next_step: Optional[str]
+    reason: Optional[str] = None
+    credential_source: Optional[str] = None
+    details: Optional[JSONObject] = None
 
-    def as_dict(self) -> dict[str, Any]:
-        return vars(self)
+    def as_dict(self) -> JSONObject:
+        """Expose the access result as report fields.
+
+        :returns: Mapping of this surface's fields and their current values.
+        """
+        return {
+            "name": self.name,
+            "status": self.status,
+            "identity": self.identity,
+            "target": self.target,
+            "observed_capability": self.observed_capability,
+            "next_step": self.next_step,
+            "reason": self.reason,
+            "credential_source": self.credential_source,
+            "details": self.details,
+        }
 
 
-def kubectl_argv(
-        target: Target,
-        *args: str
-) -> list[str]:
-    """Bind every Kubernetes command to the supplied context and optional file
-    :param target:
-    :param args:
-    :return:
-    """
+def kubectl_argv(target: Target, *args: str) -> MutableSequence[str]:
+    """Build a kubectl command bound to the selected Kubernetes target.
+
+    :param target: ``core.target.Target`` containing the Kubernetes context and
+        optional bound kubeconfig sources.
+    :param *args: kubectl subcommand and arguments appended after target options.
+    :returns: Argument list beginning with ``kubectl``, followed by a kubeconfig
+        option when applicable, ``--context`` and its value, then caller arguments.
+    :raises ValueError: If the target does not select a Kubernetes authority.
+    :raises TargetError: If a previously pinned kubeconfig changed or is unreadable.
+    """  # noqa: DOC503 - Credential helpers propagate TargetError.
+    if target.kubernetes is None:
+        raise ValueError("kubernetes_target_required")
     assert_kubeconfig_unchanged(target.sources)
     command = ["kubectl"]
     sources = target.sources if isinstance(target.sources, Sources) else None
@@ -61,16 +159,31 @@ def kubectl_argv(
     return command
 
 
-def oc_argv(target: Target, *args: str) -> list[str]:
-    """Use the same pinned kubeconfig and context for OpenShift commands.
-    :param target:
-    :param args:
-    :return:
-    """
+def oc_argv(target: Target, *args: str) -> MutableSequence[str]:
+    """Build an OpenShift command using the same Kubernetes target binding.
+
+    :param target: ``core.target.Target`` containing context and kubeconfig sources.
+    :param *args: oc subcommand and arguments appended after target options.
+    :returns: Argument list beginning with ``oc``, optional kubeconfig selection,
+        the selected context, and caller arguments.
+    :raises ValueError: If the target does not select a Kubernetes authority.
+    :raises TargetError: If a previously pinned kubeconfig changed or is unreadable.
+    """  # noqa: DOC502 - kubectl_argv validates target and kubeconfig.
     return ["oc", *kubectl_argv(target, *args)[1:]]
 
 
-def glab_argv(target: Target | GitLabOperationTarget, endpoint: str) -> list[str]:
+def glab_argv(
+    target: Union[Target, GitLabOperationTarget], endpoint: str
+) -> MutableSequence[str]:
+    """Build a read-only glab request for the selected GitLab host.
+
+    :param target: Runtime target or operation target containing GitLab settings.
+    :param endpoint: Provider-relative API endpoint to request.
+    :returns: Argument list for ``glab api`` with hostname and explicit GET method.
+    :raises ValueError: If the target does not select a GitLab authority.
+    """
+    if target.gitlab is None:
+        raise ValueError("gitlab_target_required")
     return [
         "glab",
         "api",
@@ -82,22 +195,33 @@ def glab_argv(target: Target | GitLabOperationTarget, endpoint: str) -> list[str
     ]
 
 
-def _token_file(path: Path | None, variable: str) -> dict[str, str] | None:
-    """Load one selected host token into a child environment, never a report."""
-    if path is None:
-        return None
-    try:
-        if not path.is_file() or path.stat().st_size > 4096:
-            raise ValueError("credential_file_unavailable")
-        token = path.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeError) as exc:
-        raise ValueError("credential_file_unavailable") from exc
-    if not token or any(character.isspace() for character in token):
-        raise ValueError("credential_file_invalid")
-    return {variable: token}
+def _token_file(
+    path: Optional[Union[str, PathLike[str]]], variable: str
+) -> Optional[Mapping[str, str]]:
+    """Create a child-process credential override when a file is selected.
+
+    :param path: Selected token filename, or ``None`` to leave native CLI
+        authentication unchanged.
+    :param variable: Environment variable under which the token is supplied.
+    :returns: Mapping from the variable name to the token, or ``None`` when
+        no credential file is configured.
+    :raises TargetError: If the selected file cannot provide a valid token.
+    :raises TypeError: If a nonempty selection is not a text path-like value.
+    """  # noqa: DOC502 - read_token_file validates and reads the path.
+    return None if path is None else {variable: read_token_file(path)}
 
 
-def github_env(target: Target) -> dict[str, str | None] | None:
+def github_env(target: Target) -> Optional[Mapping[str, Optional[str]]]:
+    """Select credential overrides for a GitHub child process.
+
+    :param target: Runtime target with GitHub settings and optional bound sources.
+    :returns: Bound environment overrides, a selected token-file override, or
+        ``None`` when the native CLI should use its existing authentication.
+    :raises TargetError: If an explicitly selected token file is invalid.
+    :raises ValueError: If the target does not select a GitHub authority.
+    """  # noqa: DOC503 - Credential helpers propagate TargetError.
+    if target.github is None:
+        raise ValueError("github_target_required")
     if isinstance(target.sources, Sources):
         return target.sources.github.environment
     return _token_file(
@@ -105,45 +229,85 @@ def github_env(target: Target) -> dict[str, str | None] | None:
     )
 
 
-def gitlab_env(target: Target) -> dict[str, str | None] | None:
+def gitlab_env(target: Target) -> Optional[Mapping[str, Optional[str]]]:
+    """Select credential overrides for a GitLab child process.
+
+    :param target: Runtime target with GitLab settings and optional bound sources.
+    :returns: Bound overrides including the GitLab host, a token-file override,
+        or ``None`` when the native CLI should use its existing authentication.
+    :raises TargetError: If an explicitly selected token file is invalid.
+    :raises ValueError: If the target does not select a GitLab authority.
+    """  # noqa: DOC503 - Credential helpers propagate TargetError.
+    if target.gitlab is None:
+        raise ValueError("gitlab_target_required")
     if isinstance(target.sources, Sources):
         return {**target.sources.gitlab.environment, "GITLAB_HOST": target.gitlab.host}
     return _token_file(target.gitlab.token_file, GITLAB_VARIABLES[0])
 
 
-def kubernetes_env(target: Target) -> dict[str, str | None] | None:
-    """Use the kubeconfig source frozen before the live access gate."""
+def kubernetes_env(target: Target) -> Optional[Mapping[str, Optional[str]]]:
+    """Use the kubeconfig environment frozen during source binding.
+
+    :param target: Runtime target with optional bound credential sources.
+    :returns: Bound Kubernetes environment overrides, or ``None`` when unbound.
+    """
     if isinstance(target.sources, Sources):
         return target.sources.kubernetes.environment
     return None
 
 
-def _json(result: CommandResult) -> Any:
+def _json(result: CommandResult) -> JSONValue:
+    """Decode successful native-command output for an access probe.
+
+    :param result: Command exit status, stdout, and stderr.
+    :returns: JSON value decoded from stdout.
+    :raises ValueError: If the command failed or stdout is not valid JSON.
+    """
     if result.returncode:
         raise ValueError(error_class(result))
     try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
+        return response_decoder().decode(result.stdout)
+    except (ValueError, RecursionError) as exc:
         raise ValueError("invalid_json") from exc
 
 
 def _blocked(
     name: str,
     target: str,
-    observed: list[str],
+    observed: Sequence[str],
     reason: str,
     next_step: str,
-    credential_source: str | None = None,
+    credential_source: Optional[str] = None,
 ) -> Surface:
+    """Create a failed access result with the observations already collected.
+
+    :param name: Authority identifier used in the report.
+    :param target: Selected authority or resource identifier.
+    :param observed: Capabilities verified before the failure.
+    :param reason: Classified failure reason.
+    :param next_step: Suggested recovery action for the operator.
+    :param credential_source: Reportable credential origin, when available.
+    :returns: BLOCKED surface result without an authenticated identity.
+    """
     return Surface(
         name, BLOCKED, None, target, observed, next_step, reason, credential_source
     )
 
 
 def github_access(target: Target) -> Surface:
+    """Verify GitHub authentication and access to the selected repository.
+
+    :param target: Runtime target containing the GitHub host and repository.
+    :returns: PASS surface with verified login and repository access, or BLOCKED
+        surface with the failed capability and a suggested recovery action.
+    :raises ValueError: If the target does not select a GitHub authority.
+    :raises OSError: If a native authentication or API process cannot be started.
+    """  # noqa: DOC503 - Response validation is caught; native I/O can escape.
+    if target.github is None:
+        raise ValueError("github_target_required")
     host = target.github.host
     repo = target.github.repository
-    observed: list[str] = []
+    observed: MutableSequence[str] = []
     source = (
         target.sources.github.reference if isinstance(target.sources, Sources) else None
     )
@@ -182,7 +346,7 @@ def github_access(target: Target) -> Surface:
         )
         if not isinstance(user, dict) or not isinstance(repository, dict):
             raise TypeError("invalid_response")
-        if repository.get("full_name", "").lower() != repo.lower():
+        if json_string(repository.get("full_name", "")).lower() != repo.lower():
             raise ValueError("repository_mismatch")
         login = user.get("login")
         if not isinstance(login, str) or not login:
@@ -208,8 +372,89 @@ def github_access(target: Target) -> Surface:
     )
 
 
+def _required_check_names(result: CommandResult) -> Sequence[str]:
+    """Read declared status-check names from a validated branch-protection response.
+
+    :param result: Completed native API read for the selected branch protection.
+    :returns: Sorted nonempty check names declared by contexts or check records.
+    :raises ValueError: If the command failed, JSON is invalid, or no names are declared.
+    :raises KeyError: If the protection object lacks required_status_checks.
+    :raises TypeError: If protection fields are not their declared object or array shapes.
+    """  # noqa: DOC503 - shared decoding and field readers validate the provider response.
+    protection = json_object(_json(result))
+    required = json_object(protection["required_status_checks"])
+    contexts = json_strings(required.get("contexts", []))
+    checks = json_objects(required.get("checks", []))
+    names = sorted(
+        {name for name in contexts if name}
+        | {
+            json_string(check["context"])
+            for check in checks
+            if isinstance(check.get("context"), str) and check["context"]
+        }
+    )
+    if not names:
+        raise ValueError("required_checks_missing")
+    return names
+
+
+def _publication_result(
+    base: Surface, required_checks: Sequence[str], names: Sequence[str]
+) -> Surface:
+    """Compare declared publication checks with the observed branch protection.
+
+    :param base: Successful repository access probe whose identity is retained.
+    :param required_checks: Check names required by the selected target configuration.
+    :param names: Nonempty validated check names observed in branch protection.
+    :returns: PASS with verified check names when every declaration is present;
+        otherwise BLOCKED naming absent declarations or missing required checks.
+    """
+    expected = set(required_checks)
+    if not expected:
+        return _blocked(
+            "github",
+            base.target,
+            base.observed_capability,
+            "required_checks_not_declared",
+            "Declare github.required_checks in the target file.",
+            base.credential_source,
+        )
+    missing = sorted(expected - set(names))
+    if missing:
+        return _blocked(
+            "github",
+            base.target,
+            base.observed_capability,
+            "required_checks_incomplete:" + ",".join(missing),
+            "Require every declared status check on the protected branch.",
+            base.credential_source,
+        )
+    return Surface(
+        "github",
+        PASS,
+        base.identity,
+        base.target,
+        base.observed_capability
+        + ["repository_admin", "protection_read", "required_checks_read"],
+        None,
+        credential_source=base.credential_source,
+        details={"required_checks": names},
+    )
+
+
 def github_publication_access(target: Target) -> Surface:
-    """Extra check before changing required-check settings for publication."""
+    """Verify repository administration and declared required checks.
+
+    :param target: Runtime target containing GitHub repository and required checks.
+    :returns: PASS surface when repository access, administration, and all declared
+        checks are verified; otherwise a BLOCKED surface with recovery guidance.
+    :raises TargetError: If a configured credential file becomes invalid after
+        the initial access probe and before the publication probes.
+    :raises OSError: If a publication probe process cannot be started.
+    :raises ValueError: If the target does not select a GitHub authority.
+    """  # noqa: DOC503 - Credential and process helpers propagate failures.
+    if target.github is None:
+        raise ValueError("github_target_required")
     base = github_access(target)
     if base.status != PASS:
         return base
@@ -254,23 +499,8 @@ def github_publication_access(target: Target) -> Surface:
             base.credential_source,
         )
     try:
-        protection = json.loads(result.stdout)
-        required = protection["required_status_checks"]
-        contexts = required.get("contexts", [])
-        checks = required.get("checks", [])
-        names = sorted(
-            {name for name in contexts if isinstance(name, str) and name}
-            | {
-                check.get("context")
-                for check in checks
-                if isinstance(check, dict)
-                and isinstance(check.get("context"), str)
-                and check.get("context")
-            }
-        )
-        if not names:
-            raise ValueError("required_checks_missing")
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        names = _required_check_names(result)
+    except (KeyError, TypeError, ValueError):
         return _blocked(
             "github",
             base.target,
@@ -279,47 +509,22 @@ def github_publication_access(target: Target) -> Surface:
             "Configure and read back at least one required main-branch status check.",
             base.credential_source,
         )
-    # Any nonempty set used to pass, so protection requiring only an unrelated
-    # check satisfied the gate while the intended one was absent. The expected
-    # set is declared in the target file and compared by exact equality: a
-    # substring test would accept `invalidate-cache` for `validate`, and an
-    # intersection test would accept one declared check out of several.
-    expected = set(target.github.required_checks)
-    if not expected:
-        return _blocked(
-            "github",
-            base.target,
-            base.observed_capability,
-            "required_checks_not_declared",
-            "Declare github.required_checks in the target file.",
-            base.credential_source,
-        )
-    missing = sorted(expected - set(names))
-    if missing:
-        return _blocked(
-            "github",
-            base.target,
-            base.observed_capability,
-            "required_checks_incomplete:" + ",".join(missing),
-            "Require every declared status check on the protected branch.",
-            base.credential_source,
-        )
-    return Surface(
-        "github",
-        PASS,
-        base.identity,
-        base.target,
-        base.observed_capability
-        + ["repository_admin", "protection_read", "required_checks_read"],
-        None,
-        credential_source=base.credential_source,
-        details={"required_checks": names},
-    )
+    return _publication_result(base, target.github.required_checks, names)
 
 
 def gitlab_access(target: Target) -> Surface:
+    """Verify instance-admin identity and runner-list access on GitLab.
+
+    :param target: Runtime target containing the selected GitLab host.
+    :returns: PASS surface with the verified username, or BLOCKED surface when
+        authentication, host identity, admin status, or runner access fails.
+    :raises ValueError: If the target does not select a GitLab authority.
+    :raises OSError: If a native authentication or API process cannot be started.
+    """  # noqa: DOC503 - Response validation is caught; native I/O can escape.
+    if target.gitlab is None:
+        raise ValueError("gitlab_target_required")
     host = target.gitlab.host
-    observed: list[str] = []
+    observed: MutableSequence[str] = []
     source = (
         target.sources.gitlab.reference if isinstance(target.sources, Sources) else None
     )
@@ -384,11 +589,23 @@ def gitlab_access(target: Target) -> Surface:
     )
 
 
-def _gitlab_positive_id(value: Any) -> bool:
+def _gitlab_positive_id(value: object) -> bool:
+    """Check the provider identifier boundary without accepting booleans.
+
+    :param value: Untrusted ID field from a decoded GitLab response.
+    :returns: Whether the value is a positive integer distinct from bool.
+    """
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
-def _gitlab_origin_matches(value: Any, origin: str) -> bool:
+def _gitlab_origin_matches(value: object, origin: str) -> bool:
+    """Compare a provider resource URL with the selected GitLab origin.
+
+    :param value: Untrusted web_url field from the provider response.
+    :param origin: Already selected HTTPS GitLab origin.
+    :returns: Whether scheme and authority match and URL user information is absent.
+    :raises ValueError: If the supplied URL cannot be parsed.
+    """  # noqa: DOC502 - urlsplit rejects malformed bracketed hosts.
     if not isinstance(value, str):
         return False
     observed = urlsplit(value)
@@ -402,7 +619,12 @@ def _gitlab_origin_matches(value: Any, origin: str) -> bool:
 
 
 def _gitlab_safe_reason(error: Exception) -> str:
-    """Never place an API body, stderr, or credential in the access report."""
+    """Select a classified error name without exposing response content.
+
+    :param error: Failure raised during the bound access probes.
+    :returns: Validated lower-case reason code, or provider_request_failed when the
+        exception contains only unsafe or unclassified detail.
+    """
     reason = getattr(error, "reason", None)
     if reason is None and isinstance(error, ValueError):
         reason = str(error)
@@ -412,19 +634,28 @@ def _gitlab_safe_reason(error: Exception) -> str:
 
 
 def check_gitlab_operation_access(
-    session: BoundGitLabSession, api_client: Any = None
-) -> dict[str, Any]:
-    """Read back one bound GitLab identity and exact numeric target.
+    session: BoundGitLabSession, api_client: Optional[GlabAPIClient] = None
+) -> JSONObject:
+    """Verify one bound GitLab identity and its selected project or group.
 
-    This gate is separate from the diagnostic instance-admin gate: a project
-    or group operation does not imply GitHub, Kubernetes, or instance runner
-    permissions. Both API reads use the same bound credential and host.
-    """
-    receipt: dict[str, Any] = {
+    :param session: Selected host, target reference, provenance, and private child
+        environment reused for both access reads.
+    :param api_client: Injectable native GitLab client; omission selects the shared
+        GlabAPIClient implementation.
+    :returns: Versioned access receipt with verified numeric identity and target on
+        PASS, or BLOCKED with classified errors and the observations made before
+        failure. Credentials and response bodies are excluded from the receipt.
+
+    Provider and identity-validation failures are caught and recorded in errors;
+    they do not escape as exceptions from this access check.
+    """  # noqa: DOC501, DOC503 - validation exceptions are converted to BLOCKED evidence here.
+    observations: MutableSequence[JSONValue] = []
+    errors: MutableSequence[JSONValue] = []
+    receipt: MutableMapping[str, JSONValue] = {
         "schema_version": "1.0",
         "kind": "gitlab_access",
         "status": BLOCKED,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": datetime.now(UTC).isoformat(),
         "execution_host": session.execution_host,
         "origin": session.origin,
         "target_source": session.target_source,
@@ -434,14 +665,12 @@ def check_gitlab_operation_access(
         "skill": session.skill,
         "identity": None,
         "target": None,
-        "observed_capability": [],
-        "errors": [],
+        "observed_capability": observations,
+        "errors": errors,
     }
     source = "user"
     try:
         if api_client is None:
-            from lib.python.core.gitlab.gitlab_api import GlabAPIClient
-
             api_client = GlabAPIClient()
         user = api_client.get_json(session, "user")
         if (
@@ -458,7 +687,7 @@ def check_gitlab_operation_access(
             "username": user["username"],
             "web_url": user["web_url"],
         }
-        receipt["observed_capability"].append("identity_read")
+        observations.append("identity_read")
 
         source = "target"
         endpoint_kind = "projects" if session.target_kind == "project" else "groups"
@@ -488,20 +717,23 @@ def check_gitlab_operation_access(
             "full_path": full_path,
             "web_url": item["web_url"],
         }
-        receipt["observed_capability"].append("target_read")
+        observations.append("target_read")
         receipt["status"] = PASS
     except Exception as exc:  # noqa: BLE001 - keep every provider failure structured
-        receipt["errors"].append({"source": source, "reason": _gitlab_safe_reason(exc)})
+        errors.append({"source": source, "reason": _gitlab_safe_reason(exc)})
     return receipt
 
 
-def cilium_discovery(target: Target) -> tuple[str, dict[str, Any]]:
-    """Resolve the agent namespace and its DaemonSet selector in ONE read.
+def cilium_discovery(target: Target) -> tuple[str, JSONObject]:
+    """Resolve a unique Cilium namespace and agent selector in one read.
 
-    The selector comes from the same listing that resolves the namespace; a
-    second namespaced read would issue an extra API call and give the preflight
-    its own discovery path, which is how it came to disagree with the collector.
-    """
+    :param target: Runtime target selecting the Kubernetes authority.
+    :returns: Cilium namespace and the matching DaemonSet's label selector.
+    :raises TypeError: If the API result is not a DaemonSet list.
+    :raises ValueError: If the read fails, namespace is ambiguous, or selector is absent.
+    :raises TargetError: If a pinned kubeconfig changed or cannot be read.
+    :raises OSError: If the native DaemonSet query cannot be started.
+    """  # noqa: DOC503 - Kubeconfig validation and native reads can escape.
     data = _json(
         run_command(
             kubectl_argv(target, "get", "daemonsets", "--all-namespaces", "-o", "json"),
@@ -530,7 +762,13 @@ def cilium_discovery(target: Target) -> tuple[str, dict[str, Any]]:
 
 
 def _credential_path(value: str, target: Target) -> Path:
-    """Resolve a credential path against its sole kubeconfig source."""
+    """Resolve a kubeconfig credential path against its source file.
+
+    :param value: Absolute credential path or path relative to its kubeconfig.
+    :param target: Runtime target containing the bound kubeconfig sources.
+    :returns: Expanded absolute credential path.
+    :raises ValueError: If a relative path has no unique bound kubeconfig source.
+    """
     selected = Path(value).expanduser()
     if not selected.is_absolute():
         sources = target.sources if isinstance(target.sources, Sources) else None
@@ -540,9 +778,16 @@ def _credential_path(value: str, target: Target) -> Path:
     return selected.resolve()
 
 
-def _auth_mechanism(user: dict[str, Any], target: Target) -> dict[str, str]:
-    """Identify the selected kubeconfig user's configured auth mechanism."""
-    options: list[dict[str, str]] = []
+def _auth_mechanism(user: JSONObject, target: Target) -> Mapping[str, str]:
+    """Identify the selected kubeconfig user's single authentication mechanism.
+
+    :param user: Selected kubeconfig user mapping.
+    :param target: Runtime target used to resolve external credential paths.
+    :returns: Mapping describing the mechanism type and its nonsecret source.
+    :raises ValueError: If credential files are unavailable or no unique mechanism
+        can be determined.
+    """
+    options: MutableSequence[Mapping[str, str]] = []
     if "tokenFile" in user:
         token_file = user["tokenFile"]
         if not isinstance(token_file, str) or not token_file:
@@ -585,13 +830,17 @@ def _auth_mechanism(user: dict[str, Any], target: Target) -> dict[str, str]:
     return options[0]
 
 
-def _cilium_access(
-        target: Target) -> tuple[list[str], dict[str, Any]]:
-    """Prove the Cilium-specific exec path after base cluster access succeeds.
-    :param target:
-    :return:
-    """
-    observed: list[str] = []
+def _cilium_access(target: Target) -> tuple[Sequence[str], JSONObject]:
+    """Verify permission and read health from a ready Cilium agent.
+
+    :param target: Runtime target selecting the Kubernetes authority.
+    :returns: Verified capability names and the pod used for the health read.
+    :raises ValueError: If discovery, exec permission, readiness, or the read fails.
+    :raises TypeError: If pod-list or health responses have an invalid shape.
+    :raises TargetError: If a pinned kubeconfig changed or cannot be read.
+    :raises OSError: If a native permission, Pod, or health process cannot be started.
+    """  # noqa: DOC503 - Kubeconfig validation and native reads can escape.
+    observed: MutableSequence[str] = []
     namespace, agent_pod_selector = cilium_discovery(target)
     observed.append("cilium_namespace:" + namespace)
     result = run_command(
@@ -630,162 +879,221 @@ def _cilium_access(
     return observed, {"cilium_health_pod": pod_name}
 
 
-def kubernetes_access(
-        target: Target, *, cilium: bool = False
-) -> Surface:
-    """
+class KubernetesAccessProbe:
+    """Collect Kubernetes access evidence through the selected native context."""
 
-    :param target:
-    :param cilium:
-    :return:
-    """
-    name = target.kubernetes.context
-    server = target.kubernetes.server
-    observed: list[str] = []
+    def __init__(self, target: Target):
+        """Keep the selected target and observations for one access attempt.
+
+        :param target: Runtime target with Kubernetes settings and bound sources.
+        :raises ValueError: If the target has no Kubernetes authority.
+        """
+        if target.kubernetes is None:
+            raise ValueError("kubernetes_target_required")
+        self.target = target
+        self.kubernetes = target.kubernetes
+        self.observed: MutableSequence[str] = []
+        self.details: MutableMapping[str, JSONValue] = {}
+
+    def read(self, *arguments: str) -> JSONValue:
+        """Read JSON through the already selected kubectl context.
+
+        :param *arguments: Native kubectl arguments after the context selection.
+        :returns: Validated JSON value returned by the native command.
+        :raises ValueError: If the command fails or returns invalid JSON.
+        :raises TargetError: If a pinned kubeconfig changed or is unreadable.
+        :raises OSError: If the native process cannot be started.
+        """  # noqa: DOC502 - JSON, kubeconfig, and process helpers can fail.
+        return _json(
+            run_command(
+                kubectl_argv(self.target, *arguments),
+                env=kubernetes_env(self.target),
+            )
+        )
+
+    def check_file(self) -> None:
+        """Verify the explicitly selected kubeconfig file is readable and nonempty.
+
+        :raises ValueError: If a selected file is missing, empty, or unreadable.
+        """
+        path = self.kubernetes.kubeconfig
+        if path is None:
+            return
+        if not path.is_file():
+            raise ValueError("kubeconfig_unavailable")
+        try:
+            with path.open("rb") as handle:
+                if not handle.read(1):
+                    raise ValueError("kubeconfig_empty")
+        except OSError as exc:
+            raise ValueError("kubeconfig_unreadable") from exc
+        self.observed.append("kubeconfig_read")
+
+    @staticmethod
+    def entry(config: JSONObject, collection: str, name: str, field: str) -> JSONObject:
+        """Select one named mapping from a kubectl kubeconfig response.
+
+        :param config: Validated kubeconfig JSON object.
+        :param collection: Native collection key, such as ``contexts``.
+        :param name: Exact entry name referenced by the selected context.
+        :param field: Nested mapping containing that entry's configuration.
+        :returns: Configuration mapping of the uniquely named entry.
+        :raises ValueError: If the entry is missing or duplicated.
+        :raises TypeError: If the collection or selected entry has an invalid shape.
+        """
+        entries = config.get(collection)
+        if not isinstance(entries, list):
+            raise TypeError("invalid_context_response")
+        matches = [
+            item
+            for item in entries
+            if isinstance(item, Mapping) and item.get("name") == name
+        ]
+        reason = (
+            "context_not_unique"
+            if collection == "contexts"
+            else "kubeconfig_entry_unresolved"
+        )
+        if len(matches) != 1:
+            raise ValueError(reason)
+        selected = matches[0].get(field)
+        if not isinstance(selected, Mapping):
+            raise TypeError("invalid_context_response")
+        return selected
+
+    def check_context(self) -> None:
+        """Verify the selected context's API server and TLS configuration.
+
+        :raises ValueError: If configuration cannot identify the selected server,
+            TLS verification is disabled, or bound credentials are unresolved.
+        :raises TypeError: If kubectl configuration or its entries have an invalid shape.
+        :raises TargetError: If pinned kubeconfig files changed or are unreadable.
+        :raises OSError: If the native process cannot be started.
+        """  # noqa: DOC503 - Kubeconfig validation and native reads can escape.
+        config = self.read("config", "view", "--raw", "-o", "json")
+        if not isinstance(config, Mapping):
+            raise TypeError("invalid_context_response")
+        context = self.entry(config, "contexts", self.kubernetes.context, "context")
+        cluster_name = context.get("cluster")
+        if not isinstance(cluster_name, str) or not cluster_name:
+            raise ValueError("api_server_mismatch")
+        cluster = self.entry(config, "clusters", cluster_name, "cluster")
+        if cluster.get("server") != self.kubernetes.server:
+            raise ValueError("api_server_mismatch")
+        if cluster.get("insecure-skip-tls-verify") is True:
+            raise ValueError("tls_verification_disabled")
+        if isinstance(self.target.sources, Sources):
+            self.describe_credentials(config, context)
+        self.observed.append("context_server_match")
+
+    def describe_credentials(self, config: JSONObject, context: JSONObject) -> None:
+        """Record the resolved kubeconfig authentication mechanism without secrets.
+
+        :param config: Native kubeconfig object containing user entries.
+        :param context: Selected context referring to one user entry.
+        :raises ValueError: If the user reference or its mechanism is unresolved.
+        :raises TypeError: If user entries or the bound credential source are invalid.
+        """
+        user_name = context.get("user")
+        if not isinstance(user_name, str) or not user_name:
+            raise ValueError("kubeconfig_user_unresolved")
+        user = self.entry(config, "users", user_name, "user")
+        sources = self.target.sources
+        if not isinstance(sources, Sources):
+            raise TypeError("required_credential_source_missing")
+        self.details.update(
+            {
+                "context": self.kubernetes.context,
+                "user_entry": user_name,
+                "api_server": self.kubernetes.server,
+                "kubeconfig_files": [str(path) for path in sources.kubeconfig_files],
+                "auth_mechanism": _auth_mechanism(user, self.target),
+            }
+        )
+
+    def identity(self) -> str:
+        """Verify TLS access and read the effective Kubernetes username.
+
+        :returns: Nonempty username returned by the selected API server.
+        :raises ValueError: If API access fails or no username is reported.
+        :raises TypeError: If the identity response is not a JSON object.
+        :raises TargetError: If pinned kubeconfig files changed or are unreadable.
+        :raises OSError: If the native process cannot be started.
+        """  # noqa: DOC503 - Kubeconfig validation and native reads can escape.
+        self.read("get", "--raw=/version")
+        self.observed.append("tls_api_reachable")
+        whoami = self.read("auth", "whoami", "-o", "json")
+        if not isinstance(whoami, Mapping):
+            raise TypeError("invalid_identity_response")
+        status = whoami.get("status", {})
+        user = status.get("userInfo", {}) if isinstance(status, Mapping) else {}
+        identity = user.get("username") if isinstance(user, Mapping) else None
+        if not identity:
+            user = whoami.get("userInfo", {})
+            identity = user.get("username") if isinstance(user, Mapping) else None
+        if not isinstance(identity, str) or not identity:
+            raise ValueError("missing_identity")
+        self.observed.append("effective_identity")
+        return identity
+
+    def check_permissions(self) -> None:
+        """Verify the diagnostic gate's existing cluster administration permissions.
+
+        :raises ValueError: If any required authorization probe is denied.
+        :raises TargetError: If pinned kubeconfig files changed or are unreadable.
+        :raises OSError: If the native process cannot be started.
+        """  # noqa: DOC503 - Kubeconfig validation and native reads can escape.
+        checks = (
+            ("cluster_wildcard", ("*", "*", "--all-namespaces")),
+            (
+                "clusterrolebinding_create",
+                ("create", "clusterrolebindings.rbac.authorization.k8s.io"),
+            ),
+            (
+                "clusterrolebinding_update",
+                ("update", "clusterrolebindings.rbac.authorization.k8s.io"),
+            ),
+            (
+                "clusterrolebinding_delete",
+                ("delete", "clusterrolebindings.rbac.authorization.k8s.io"),
+            ),
+            ("clusterrole_bind", ("bind", "clusterroles.rbac.authorization.k8s.io")),
+        )
+        for label, arguments in checks:
+            result = run_command(
+                kubectl_argv(self.target, "auth", "can-i", *arguments, "-q"),
+                env=kubernetes_env(self.target),
+            )
+            if result.returncode:
+                raise ValueError(label + "_denied")
+            self.observed.append(label)
+
+
+def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
+    """Verify cluster identity, TLS access, and the required permissions.
+
+    :param target: Runtime target containing context, expected server, and sources.
+    :param cilium: Whether to additionally verify the Cilium health exec path.
+    :returns: PASS surface with verified identity and capabilities, or a BLOCKED
+        surface with observations made before the failed probe and recovery guidance.
+    :raises ValueError: If the caller did not select a Kubernetes authority.
+    """  # noqa: DOC502 - Probe construction rejects a missing authority.
+    probe = KubernetesAccessProbe(target)
+    selected = f"{probe.kubernetes.context} -> {probe.kubernetes.server}"
     source = (
         target.sources.kubernetes.reference
         if isinstance(target.sources, Sources)
         else None
     )
-
-    details: dict[str, Any] = {}
     try:
-        if target.kubernetes.kubeconfig:
-            path = target.kubernetes.kubeconfig
-            if not path.is_file():
-                raise ValueError("kubeconfig_unavailable")
-            try:
-                with path.open("rb") as handle:
-                    if not handle.read(1):
-                        raise ValueError("kubeconfig_empty")
-            except OSError as exc:
-                raise ValueError("kubeconfig_unreadable") from exc
-            observed.append("kubeconfig_read")
-        config = _json(
-            run_command(
-                kubectl_argv(target, "config", "view", "--raw", "-o", "json"),
-                env=kubernetes_env(target),
-            )
-        )
-        if not isinstance(config, dict):
-            raise TypeError("invalid_context_response")
-        contexts = [
-            item for item in config.get("contexts", []) if item.get("name") == name
-        ]
-        if len(contexts) != 1:
-            raise ValueError("context_not_unique")
-        cluster_name = contexts[0].get("context", {}).get("cluster")
-        user_name = contexts[0].get("context", {}).get("user")
-        clusters = [
-            item
-            for item in config.get("clusters", [])
-            if item.get("name") == cluster_name
-        ]
-
-        actual = (
-            clusters[0].get("cluster", {}).get("server") if len(clusters) == 1 else None
-        )
-        if actual != server:
-            raise ValueError("api_server_mismatch")
-
-        if clusters[0].get("cluster", {}).get("insecure-skip-tls-verify") is True:
-            raise ValueError("tls_verification_disabled")
-
-        if isinstance(target.sources, Sources):
-            users = [
-                item
-                for item in config.get("users", [])
-                if item.get("name") == user_name
-            ]
-
-            if len(users) != 1 or not isinstance(users[0].get("user"), dict):
-                raise ValueError("kubeconfig_user_unresolved")
-
-            details = {
-                "context": name,
-                "user_entry": user_name,
-                "api_server": server,
-                "kubeconfig_files": [
-                    str(path) for path in target.sources.kubeconfig_files
-                ],
-                "auth_mechanism": _auth_mechanism(users[0]["user"], target),
-            }
-        observed.append("context_server_match")
-        _json(
-            run_command(
-                kubectl_argv(target, "get", "--raw=/version"),
-                env=kubernetes_env(target),
-            )
-        )
-        observed.append("tls_api_reachable")
-        whoami = _json(
-            run_command(
-                kubectl_argv(target, "auth", "whoami", "-o", "json"),
-                env=kubernetes_env(target),
-            )
-        )
-        if not isinstance(whoami, dict):
-            raise TypeError("invalid_identity_response")
-        identity = whoami.get("status", {}).get("userInfo", {}).get("username")
-        if not identity:
-            identity = whoami.get("userInfo", {}).get("username")
-        if not isinstance(identity, str) or not identity:
-            raise ValueError("missing_identity")
-        observed.append("effective_identity")
-        checks = [
-            ("cluster_wildcard", ["auth", "can-i", "*", "*", "--all-namespaces", "-q"]),
-            (
-                "clusterrolebinding_create",
-                [
-                    "auth",
-                    "can-i",
-                    "create",
-                    "clusterrolebindings.rbac.authorization.k8s.io",
-                    "-q",
-                ],
-            ),
-            (
-                "clusterrolebinding_update",
-                [
-                    "auth",
-                    "can-i",
-                    "update",
-                    "clusterrolebindings.rbac.authorization.k8s.io",
-                    "-q",
-                ],
-            ),
-            (
-                "clusterrolebinding_delete",
-                [
-                    "auth",
-                    "can-i",
-                    "delete",
-                    "clusterrolebindings.rbac.authorization.k8s.io",
-                    "-q",
-                ],
-            ),
-            (
-                "clusterrole_bind",
-                [
-                    "auth",
-                    "can-i",
-                    "bind",
-                    "clusterroles.rbac.authorization.k8s.io",
-                    "-q",
-                ],
-            ),
-        ]
-        for label, args in checks:
-            result = run_command(
-                kubectl_argv(target, *args), env=kubernetes_env(target)
-            )
-            if result.returncode:
-                raise ValueError(label + "_denied")
-            observed.append(label)
+        probe.check_file()
+        probe.check_context()
+        identity = probe.identity()
+        probe.check_permissions()
         if cilium:
-            cilium_observed, cilium_details = _cilium_access(target)
-            observed.extend(cilium_observed)
-            details.update(cilium_details)
+            observed, details = _cilium_access(target)
+            probe.observed.extend(observed)
+            probe.details.update(details)
     except (
         ValueError,
         KeyError,
@@ -796,8 +1104,8 @@ def kubernetes_access(
     ) as exc:
         return _blocked(
             "kubernetes",
-            f"{name} -> {server}",
-            observed,
+            selected,
+            probe.observed,
             str(exc),
             "Verify the exact context, API TLS, cluster admin RBAC"
             + (", and Cilium exec permission." if cilium else "."),
@@ -807,34 +1115,30 @@ def kubernetes_access(
         "kubernetes",
         PASS,
         identity,
-        f"{name} -> {server}",
-        observed,
+        selected,
+        probe.observed,
         None,
         credential_source=source,
-        details=details,
+        details=probe.details,
     )
 
 
-def access_evidence(
-        gate: dict[str, Any]
-) -> dict[str, Any]:
-    """Summarize the gate that authorized one collector run.
+def access_evidence(gate: JSONObject) -> JSONObject:
+    """Extract the access facts attached to a collector report.
 
-    A collector report used to replace the gate result entirely, so it carried
-    no identities, no credential-source references, no execution host and no
-    tested revision -- a Kubernetes report named its target only by context.
-    A fixed subset is attached instead of the whole receipt, which would
-    re-embed the credential paths. `receipt_sha256` is a correlator for the gate
-    object this run produced -- two reports from one gate carry the same value
-    and two gates never do. It is deliberately NOT a match against a written
-    receipt: `--receipt-out` writes the portable, redacted form, so the bytes
-    would never agree.
+    :param gate: Access-gate receipt produced for the current invocation.
+    :returns: Mapping of status, identities, selected targets, credential-source
+        references, provenance, and a SHA-256 correlator of the supplied receipt.
+    :raises TypeError: If the surfaces field or one of its entries is not an object.
 
-    :param gate:
-    :return:
+    The correlator hashes the in-memory receipt, not a separately redacted file.
     """
     body = json.dumps(gate, sort_keys=True, default=str).encode("utf-8")
     surfaces = gate.get("surfaces") or {}
+    if not isinstance(surfaces, Mapping) or any(
+        not isinstance(surface, Mapping) for surface in surfaces.values()
+    ):
+        raise TypeError("invalid_access_surfaces")
     return {
         "profile": gate.get("profile"),
         "status": gate.get("status"),
@@ -852,22 +1156,26 @@ def access_evidence(
         "target_selection": gate.get("target_selection"),
         "targets": gate.get("targets"),
         "identities": {
-            name: surface.get("identity") for name, surface in surfaces.items()
+            name: surface.get("identity")
+            for name, surface in surfaces.items()
+            if isinstance(surface, Mapping)
         },
         "receipt_sha256": hashlib.sha256(body).hexdigest(),
     }
 
 
 def check_access(
-    target: Target, *,
-        publication: bool = False,
-        cilium: bool = True
-) -> dict[str, Any]:
-    """Probe this command's declared authorities and fail closed on denial.
-    :param target:
-    :param publication:
-    :param cilium:
-    :return:
+    target: Target, *, publication: bool = False, cilium: bool = True
+) -> JSONObject:
+    """Probe active authorities and combine their observed access results.
+
+    :param target: Runtime target declaring active authorities and their sources.
+    :param publication: Whether GitHub requires administration and required-check probes.
+    :param cilium: Whether Kubernetes requires the Cilium health exec probe.
+    :returns: Access receipt with per-surface results; overall PASS requires every
+        selected surface to pass, otherwise the receipt reports BLOCKED.
+    :raises ValueError: If active surfaces are invalid, publication lacks GitHub,
+        or a required bound credential source is absent.
     """
     checks = {
         "github": github_publication_access if publication else github_access,
@@ -914,7 +1222,7 @@ def check_access(
         receipt.update(
             {
                 "execution_host": target.sources.execution_host,
-                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "captured_at": datetime.now(UTC).isoformat(),
                 "target_file": str(target.source_file) if target.source_file else None,
                 "target_source": target.source_kind,
                 "tested_revision": target.tested_revision,
@@ -932,13 +1240,14 @@ def check_access(
 
 def dry_run_access(
     target: Target, *, publication: bool = False, cilium: bool = True
-) -> dict[str, Any]:
-    """
+) -> JSONObject:
+    """Describe access probes without contacting the selected authorities.
 
-    :param target:
-    :param publication:
-    :param cilium:
-    :return:
+    :param target: Runtime target declaring active authorities and their settings.
+    :param publication: Whether to include GitHub publication checks.
+    :param cilium: Whether to include Cilium health checks.
+    :returns: DRY_RUN access receipt listing selected targets and planned probes.
+    :raises ValueError: If publication checks are requested without GitHub.
     """
     selected = target.active_surfaces
     if publication and "github" not in selected:

@@ -1,4 +1,9 @@
-"""Plan and verify physical uplink MTUs through temporary OpenShift debug Pods."""
+"""Plan and verify physical uplink MTUs through temporary OpenShift debug Pods.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -12,20 +17,37 @@ import socket
 import stat
 import sys
 import uuid
+from argparse import Namespace
+from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from types import FrameType
+from typing import Optional
 
 from lib.python.access.access import check_access, kubectl_argv, kubernetes_env, oc_argv
-from lib.python.core.cli import _failure, output_mode
 from lib.python.access.credentials import Sources, bind_sources
+from lib.python.core.cli import _failure, output_mode
+from lib.python.core.cli_api import response_decoder
+from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import emit, report
-from lib.python.core.runtime import CommandResult, error_class, run_command_tail, sanitize
-from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, PROFILE_BASE, exit_code
+from lib.python.core.runtime import (
+    CommandResult,
+    error_class,
+    run_command_tail,
+    sanitize,
+)
 from lib.python.core.target import Target, TargetError, kubernetes_label
+from lib.python.sys.status import (
+    BLOCKED,
+    DRY_RUN,
+    PARTIAL,
+    PASS,
+    PROFILE_BASE,
+    exit_code,
+)
 
 KIND = "k8s_verify_mtu_consistency"
 MAX_OUTPUT_BYTES = 1_048_576
@@ -46,21 +68,54 @@ class Interrupted(RuntimeError):
 
 @dataclass(frozen=True)
 class MtuPlan:
-    """The exact target and node inventory authorized by one plan digest."""
+    """Bind one MTU verification to selected nodes and runtime inputs.
+
+    :param namespace: Namespace used for temporary debug Pods.
+    :param nodes: Exact node names selected from live inventory.
+    :param digest: Confirmation fingerprint for this plan.
+    :param inputs: Nonsecret inputs included in the plan fingerprint.
+
+    .. attribute :: namespace
+        :type: str
+
+        Namespace used for temporary debug Pods.
+
+    .. attribute :: nodes
+        :type: tuple[str, ...]
+
+        Exact node names selected from live inventory.
+
+    .. attribute :: digest
+        :type: str
+
+        Confirmation fingerprint for this plan.
+
+    .. attribute :: inputs
+        :type: JSONObject
+
+        Nonsecret inputs included in the plan fingerprint.
+    """
 
     namespace: str
     nodes: tuple[str, ...]
     digest: str
-    inputs: dict[str, Any]
+    inputs: JSONObject
 
 
 class EventLogger:
     """Emit bounded, credential-free diagnostics without changing report stdout."""
 
-    def __init__(self, args: Any, run_id: str):
+    def __init__(self, args: Namespace, run_id: str):
+        """Open optional private append-only logging for one MTU run.
+
+        :param args: Parsed log file, level, and format settings.
+        :param run_id: Identifier attached to every emitted event.
+        :raises ValueError: Existing log file grants access beyond its owner.
+        :raises OSError: Log file cannot be opened or inspected.
+        """  # noqa: DOC503 - os.open and os.fstat propagate filesystem errors.
         self.args = args
         self.run_id = run_id
-        self.fd: int | None = None
+        self.fd: Optional[int] = None
         if args.log_file:
             path = Path(args.log_file).expanduser()
             self.fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -70,11 +125,19 @@ class EventLogger:
                 raise ValueError("log_file_not_private")
 
     def event(self, level: str, action: str, result: str) -> None:
+        """Write one diagnostic event to stderr and optional private file.
+
+        :param level: Debug, info, warning, or error severity.
+        :param action: Operation name recorded in the event.
+        :param result: Bounded result text selected by the caller.
+        :raises ValueError: A supplied level is outside the configured level order.
+        :raises OSError: Writing the optional log file fails.
+        """  # noqa: DOC502 - Level lookup and output writes can fail.
         levels = ("debug", "info", "warning", "error")
         if levels.index(level) < levels.index(self.args.log_level):
             return
         item = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": level,
             "run_id": self.run_id,
             "component": KIND,
@@ -90,36 +153,55 @@ class EventLogger:
             os.write(self.fd, line.encode("utf-8"))
 
     def close(self) -> None:
+        """Close the optional private log descriptor after the run.
+
+        :raises OSError: Closing the descriptor fails.
+        """  # noqa: DOC502 - os.close can propagate descriptor errors.
         if self.fd is not None:
             os.close(self.fd)
 
 
-def _response(result: CommandResult, source: str) -> Any:
-    """Reject failed, truncated, or malformed external responses."""
+def _response(result: CommandResult, source: str) -> JSONValue:
+    """Decode a successful bounded native response as JSON.
+
+    :param result: Command status and captured output.
+    :param source: Query name included in validation errors.
+    :returns: Decoded JSON value.
+    :raises ValueError: Command failed, output approached its bound, or JSON is
+        malformed, nonfinite, or exceeds decoder nesting limits.
+    """
     if result.returncode:
         raise ValueError(f"{source}:{error_class(result)}")
     if len(result.stdout.encode("utf-8")) >= MAX_OUTPUT_BYTES - 4:
         raise ValueError(f"{source}:output_limit")
     try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
+        return response_decoder().decode(result.stdout)
+    except (ValueError, RecursionError) as exc:
         raise ValueError(f"{source}:invalid_json") from exc
 
 
-def physical_uplinks(payload: Any) -> list[dict[str, Any]]:
-    """Select PCI Ethernet links and retain optional IPv4 address metadata."""
+def physical_uplinks(payload: JSONValue) -> Sequence[JSONObject]:
+    """Select physical PCI Ethernet links from host ``ip`` JSON.
+
+    :param payload: Decoded list from ``ip -d -j addr show``.
+    :returns: Interface, MTU, state, PCI device, and IPv4 address records sorted
+        by interface name.
+    :raises TypeError: Link, metadata, or address entries have malformed shapes.
+    :raises ValueError: Selected link fields, IPv4 values, or interface names are
+        invalid or duplicated.
+    """
     if not isinstance(payload, list):
         raise TypeError("links:invalid_list_response")
-    selected: list[dict[str, Any]] = []
+    selected: MutableSequence[JSONObject] = []
     for item in payload:
-        if not isinstance(item, dict):
+        if not isinstance(item, Mapping):
             raise TypeError("links:invalid_item")
         if item.get("link_type") != "ether" or item.get("parentbus") != "pci":
             continue
         if not isinstance(item.get("parentdev"), str) or not item["parentdev"]:
             continue
         linkinfo = item.get("linkinfo", {})
-        if not isinstance(linkinfo, dict):
+        if not isinstance(linkinfo, Mapping):
             raise TypeError("links:invalid_linkinfo")
         if linkinfo.get("info_kind") not in (None, ""):
             continue
@@ -128,7 +210,7 @@ def physical_uplinks(payload: Any) -> list[dict[str, Any]]:
             raise TypeError("links:invalid_addresses")
         ipv4 = []
         for address in addresses:
-            if not isinstance(address, dict):
+            if not isinstance(address, Mapping):
                 raise TypeError("links:invalid_address")
             if address.get("family") == "inet":
                 local = address.get("local")
@@ -155,13 +237,22 @@ def physical_uplinks(payload: Any) -> list[dict[str, Any]]:
                 "ipv4_addresses": sorted(set(ipv4)),
             }
         )
-    selected.sort(key=lambda link: link["interface"])
     if len({link["interface"] for link in selected}) != len(selected):
         raise ValueError("links:duplicate_interface")
-    return selected
+    return sorted(selected, key=lambda link: str(link["interface"]))
 
 
-def _read_nodes(target: Target, selected: str | None) -> tuple[str, ...]:
+def _read_nodes(target: Target, selected: Optional[str]) -> tuple[str, ...]:
+    """Read node inventory and optionally require one exact member.
+
+    :param target: Bound Kubernetes target used for the node list query.
+    :param selected: Optional exact node name requested by the caller.
+    :returns: Selected one-node tuple or all node names sorted.
+    :raises ValueError: Command fails, inventory is empty, or a node name is
+        invalid, duplicated, or absent from the selected cluster.
+    :raises TypeError: Node list response has an invalid envelope.
+    :raises TargetError: Bound kubeconfig changes before query construction.
+    """  # noqa: DOC503 - Bound-kubeconfig validation runs before native reads.
     command = kubectl_argv(target, "get", "nodes", "-o", "json")
     payload = _response(
         run_command_tail(
@@ -173,12 +264,12 @@ def _read_nodes(target: Target, selected: str | None) -> tuple[str, ...]:
         ),
         "nodes",
     )
-    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("items"), list):
         raise TypeError("nodes:invalid_list_response")
     names = []
     for item in payload["items"]:
-        metadata = item.get("metadata") if isinstance(item, dict) else None
-        name = metadata.get("name") if isinstance(metadata, dict) else None
+        metadata = item.get("metadata") if isinstance(item, Mapping) else None
+        name = metadata.get("name") if isinstance(metadata, Mapping) else None
         if not isinstance(name, str) or not DNS_NAME.fullmatch(name) or len(name) > 253:
             raise ValueError("nodes:invalid_item")
         names.append(name)
@@ -196,7 +287,13 @@ def _read_nodes(target: Target, selected: str | None) -> tuple[str, ...]:
 
 
 def _verify_openshift(target: Target) -> None:
-    """Block before debug Pods if this target lacks the OpenShift API or CLI."""
+    """Confirm the selected cluster exposes the OpenShift config API.
+
+    :param target: Bound Kubernetes target for the API discovery read.
+    :raises ValueError: ``oc`` is unavailable, discovery fails, or the response
+        does not identify the expected API resource list.
+    :raises TargetError: Bound kubeconfig changes before discovery.
+    """  # noqa: DOC503 - Bound-kubeconfig validation runs before native reads.
     if shutil.which("oc") is None:
         raise ValueError("oc:missing_tool")
     command = kubectl_argv(target, "get", "--raw=/apis/config.openshift.io/v1")
@@ -214,7 +311,7 @@ def _verify_openshift(target: Target) -> None:
         raise ValueError(f"cluster:openshift_api_{error_class(response)}")
     payload = _response(response, "openshift_api")
     if (
-        not isinstance(payload, dict)
+        not isinstance(payload, Mapping)
         or payload.get("kind") != "APIResourceList"
         or payload.get("groupVersion") != "config.openshift.io/v1"
     ):
@@ -222,7 +319,13 @@ def _verify_openshift(target: Target) -> None:
 
 
 def _read_namespace(target: Target) -> str:
-    """Use the selected context's namespace, or Kubernetes' default namespace."""
+    """Read the selected context namespace for temporary debug Pods.
+
+    :param target: Bound Kubernetes target whose context is queried.
+    :returns: Valid DNS-label namespace, using ``default`` if the context omits it.
+    :raises ValueError: Context read fails or the namespace is invalid.
+    :raises TargetError: Bound kubeconfig changes before query construction.
+    """  # noqa: DOC503 - Bound-kubeconfig validation runs before native reads.
     command = kubectl_argv(
         target, "config", "view", "--minify", "-o", "jsonpath={..namespace}"
     )
@@ -238,7 +341,13 @@ def _read_namespace(target: Target) -> str:
 
 
 def _source_digest(target: Target) -> str:
-    """Bind the plan to the selected target file and optional project binding."""
+    """Bind a plan to selected target and binding file bytes.
+
+    :param target: Resolved target carrying source path and optional binding path.
+    :returns: SHA-256 digest over the canonical paths and contents in order.
+    :raises TargetError: Target source file was not recorded.
+    :raises OSError: A selected source file cannot be read.
+    """  # noqa: DOC503 - Path.read_bytes propagates selected-source I/O errors.
     if target.source_file is None:
         raise TargetError("target_file_unresolved")
     parts = [target.source_file.resolve()]
@@ -254,8 +363,20 @@ def _source_digest(target: Target) -> str:
     return digest.hexdigest()
 
 
-def build_plan(target: Target, args: Any) -> MtuPlan:
-    """Read an exact node inventory without creating a debug Pod."""
+def build_plan(target: Target, args: Namespace) -> MtuPlan:
+    """Plan exact OpenShift node reads without creating debug Pods.
+
+    :param target: Bound Kubernetes target with selected context and source files.
+    :param args: Optional node filter and requested command timeout.
+    :returns: Namespace, selected node names, source-bound inputs, and plan digest.
+    :raises ValueError: OpenShift discovery, namespace, or node inventory is
+        unavailable or invalid.
+    :raises TypeError: Node inventory response is malformed.
+    :raises OSError: If a source file is unreadable or a native read cannot start.
+    :raises TargetError: Bound source changes or source file is unresolved.
+    """  # noqa: DOC503 - Discovery and source fingerprint helpers can fail.
+    if target.kubernetes is None:
+        raise TargetError("kubernetes_target_missing")
     _verify_openshift(target)
     nodes = _read_nodes(target, args.node)
     namespace = _read_namespace(target)
@@ -281,8 +402,18 @@ def build_plan(target: Target, args: Any) -> MtuPlan:
     return MtuPlan(namespace, nodes, hashlib.sha256(encoded).hexdigest(), inputs)
 
 
-def _marked_pods(target: Target, namespace: str, marker: str) -> list[str]:
-    """Read back only Pods bearing this invocation's unique debug marker."""
+def _marked_pods(target: Target, namespace: str, marker: str) -> Sequence[str]:
+    """Find temporary debug Pods bearing this invocation's unique marker.
+
+    :param target: Bound Kubernetes target for a namespace Pod list.
+    :param namespace: Namespace selected by the MTU plan.
+    :param marker: Exact environment marker value assigned to this invocation.
+    :returns: Sorted unique names of marked Pods only.
+    :raises ValueError: Pod read fails, output is malformed, or a marked name is
+        invalid.
+    :raises TypeError: Pod list or an item has an invalid shape.
+    :raises TargetError: Bound kubeconfig changes before listing.
+    """  # noqa: DOC503 - Bound-kubeconfig validation runs before native reads.
     command = kubectl_argv(target, "-n", namespace, "get", "pods", "-o", "json")
     payload = _response(
         run_command_tail(
@@ -294,21 +425,21 @@ def _marked_pods(target: Target, namespace: str, marker: str) -> list[str]:
         ),
         "cleanup_pods",
     )
-    if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("items"), list):
         raise TypeError("cleanup_pods:invalid_list_response")
     found = []
     for item in payload["items"]:
-        if not isinstance(item, dict):
+        if not isinstance(item, Mapping):
             raise TypeError("cleanup_pods:invalid_item")
         spec = item.get("spec")
-        containers = spec.get("containers") if isinstance(spec, dict) else None
+        containers = spec.get("containers") if isinstance(spec, Mapping) else None
         if not isinstance(containers, list):
             raise TypeError("cleanup_pods:invalid_item")
         marked = any(
-            isinstance(container, dict)
+            isinstance(container, Mapping)
             and isinstance(container.get("env"), list)
             and any(
-                isinstance(entry, dict)
+                isinstance(entry, Mapping)
                 and entry.get("name") == MARKER
                 and entry.get("value") == marker
                 for entry in container["env"]
@@ -317,15 +448,24 @@ def _marked_pods(target: Target, namespace: str, marker: str) -> list[str]:
         )
         if marked:
             metadata = item.get("metadata")
-            name = metadata.get("name") if isinstance(metadata, dict) else None
+            name = metadata.get("name") if isinstance(metadata, Mapping) else None
             if not isinstance(name, str) or not DNS_NAME.fullmatch(name):
                 raise ValueError("cleanup_pods:invalid_marked_name")
             found.append(name)
     return sorted(set(found))
 
 
-def _cleanup(target: Target, namespace: str, marker: str) -> dict[str, Any]:
-    """Delete only this run's surviving debug Pods and independently verify absence."""
+def _cleanup(
+    target: Target, namespace: str, marker: str
+) -> MutableMapping[str, JSONValue]:
+    """Delete only this run's marked debug Pods and verify absence.
+
+    :param target: Bound Kubernetes target for list/delete/read-back operations.
+    :param namespace: Namespace used by the MTU plan.
+    :param marker: Unique invocation marker identifying candidate Pods.
+    :returns: Cleanup status, observed and remaining Pod names, and per-delete
+        failures; an exception becomes a blocked result with unknown remainder.
+    """
     try:
         observed = _marked_pods(target, namespace, marker)
         failed = []
@@ -367,9 +507,150 @@ def _cleanup(target: Target, namespace: str, marker: str) -> dict[str, Any]:
         }
 
 
+@dataclass(frozen=True)
+class MtuRead:
+    """Hold physical-uplink observations and independent native read errors.
+
+    :param records: Node-qualified interface observations from successful reads.
+    :param errors: Classified errors for nodes whose observations are unavailable.
+
+    .. attribute :: records
+        :type: Sequence[JSONObject]
+
+        Node-qualified interface observations from successful reads.
+
+    .. attribute :: errors
+        :type: Sequence[Mapping[str, str]]
+
+        Classified errors for nodes whose observations are unavailable.
+    """
+
+    records: Sequence[JSONObject]
+    errors: Sequence[Mapping[str, str]]
+
+    def report(
+        self,
+        target: Target,
+        node: Optional[str],
+        plan: MtuPlan,
+        marker: str,
+        cleanup: JSONObject,
+    ) -> MutableMapping[str, JSONValue]:
+        """Compare observed MTUs per interface and attach cleanup evidence.
+
+        :param target: Bound Kubernetes authority named in the report.
+        :param node: Optional exact node filter supplied by the caller.
+        :param plan: Namespace and exact selected-node plan used for reads.
+        :param marker: Invocation marker identifying temporary debug Pods.
+        :param cleanup: Required verified flag and observed cleanup result.
+        :returns: Records, per-interface MTU comparisons, actions, and final status.
+        :raises ValueError: If called with a record lacking a string node/interface
+            or an integer MTU, cleanup lacks a Boolean verified field, or the target has no Kubernetes authority.
+        :raises KeyError: If required plan selection fields are absent.
+        """  # noqa: DOC503 - Required plan fields are accessed by key.
+        verified = cleanup.get("verified")
+        if not isinstance(verified, bool):
+            # Invalid cleanup evidence uses the report validation error contract.
+            raise ValueError("mtu:invalid_cleanup")  # noqa: TRY004
+        records = sorted(
+            self.records, key=lambda row: (str(row["node"]), str(row["interface"]))
+        )
+        errors = self.errors
+        by_interface: MutableMapping[str, set[int]] = {}
+        nodes: set[str] = set()
+        for row in records:
+            interface, mtu, node_name = (
+                row.get("interface"),
+                row.get("mtu"),
+                row.get("node"),
+            )
+            if (
+                not isinstance(interface, str)
+                or not isinstance(node_name, str)
+                or type(mtu) is not int
+            ):
+                raise ValueError("mtu:invalid_observation")
+            by_interface.setdefault(interface, set()).add(mtu)
+            nodes.add(node_name)
+        mtu_values = sorted({mtu for values in by_interface.values() for mtu in values})
+        mtu_by_interface = {
+            name: sorted(values) for name, values in sorted(by_interface.items())
+        }
+        nodes_read = sorted(nodes)
+        result = report(
+            KIND,
+            kubernetes_label(target),
+            {"node": node, "selection": plan.inputs["selection"]},
+            records,
+            errors,
+        )
+        result["plan_digest"] = plan.digest
+        result["planned_nodes"] = list(plan.nodes)
+        result["namespace"] = plan.namespace
+        result["side_effects"] = ["temporary_oc_debug_pods"]
+        result["debug_marker"] = marker
+        result["access_proven"] = True
+        result["cleanup"] = cleanup
+        result["mtu_values"] = mtu_values
+        result["summary"] = {
+            "record_count": len(records),
+            "error_count": len(errors),
+            "nodes_selected": len(plan.nodes),
+            "nodes_read": len(nodes_read),
+            "mtu_values": mtu_values,
+            "mtu_by_interface": mtu_by_interface,
+            "consistent": bool(records)
+            and not errors
+            and verified
+            and not any(len(values) > 1 for values in mtu_by_interface.values()),
+        }
+        findings = [
+            {
+                "code": "physical_mtu_mismatch",
+                "action": "inspect_node_physical_nic_mtu",
+                "interface": name,
+                "mtu_values": values,
+            }
+            for name, values in mtu_by_interface.items()
+            if len(values) > 1
+        ]
+        result["findings"] = findings
+        result["condition"] = (
+            "UNKNOWN"
+            if errors or not verified
+            else "INCONSISTENT"
+            if findings
+            else "CONSISTENT"
+        )
+        result["status"] = (
+            BLOCKED
+            if not records or not verified
+            else PARTIAL
+            if errors or findings
+            else PASS
+        )
+        if errors or not verified:
+            result["safe_next_step"] = (
+                "Review failed node reads or temporary Pod cleanup on the selected target."
+            )
+        return result
+
+
 def _read_one(
     target: Target, plan: MtuPlan, node: str, marker: str, timeout: int
-) -> tuple[list[dict[str, Any]], dict[str, str] | None]:
+) -> MtuRead:
+    """Run one OpenShift node debug read for physical uplinks.
+
+    :param target: Bound Kubernetes target for ``oc debug``.
+    :param plan: Confirmed namespace and node inventory.
+    :param node: Exact node selected by the plan.
+    :param marker: Unique run marker placed in the debug Pod environment.
+    :param timeout: Maximum debug command runtime in seconds.
+    :returns: Fixed records/errors observation; a failed read has no records and
+        one classified error. Successful empty interface inventory is an error.
+    :raises TargetError: Bound kubeconfig changes before command construction.
+    :raises OSError: If the native debug process cannot be started.
+    """  # noqa: DOC503 - Local read errors become evidence; setup can fail.
     command = oc_argv(
         target,
         "debug",
@@ -397,17 +678,29 @@ def _read_one(
         links = physical_uplinks(_response(result, f"node/{node}"))
         if not links:
             raise ValueError(f"node/{node}:no_pci_ethernet_uplink")
-        return [{"node": node, **link} for link in links], None
+        return MtuRead([{"node": node, **link} for link in links], [])
     except (ValueError, TypeError) as exc:
-        return [], {"source": f"node/{node}", "reason": sanitize(str(exc), 160)}
+        return MtuRead(
+            [], [{"source": f"node/{node}", "reason": sanitize(str(exc), 160)}]
+        )
 
 
 def collect_mtu_consistency(
-    target: Target, args: Any, plan: MtuPlan, marker: str
-) -> dict[str, Any]:
-    """Read all planned nodes, clean temporary Pods, and classify consistency."""
-    records: list[dict[str, Any]] = []
-    errors: list[dict[str, str]] = []
+    target: Target, args: Namespace, plan: MtuPlan, marker: str
+) -> MutableMapping[str, JSONValue]:
+    """Read planned node MTUs and clean every marked temporary debug Pod.
+
+    :param target: Bound Kubernetes target used by reads and cleanup.
+    :param args: Node filter and per-node command timeout.
+    :param plan: Confirmed namespace, nodes, and digest.
+    :param marker: Unique invocation marker used to identify cleanup candidates.
+    :returns: MTU records, mismatch findings, cleanup read-back, and ``PASS``,
+        ``PARTIAL``, or ``BLOCKED`` status.
+    :raises ValueError: If the plan has no nodes, observations are malformed, or
+        signal handling is attempted outside the main thread.
+    """  # noqa: DOC502 - Pool sizing and final observation validation can fail.
+    records: MutableSequence[JSONObject] = []
+    errors: MutableSequence[Mapping[str, str]] = []
     executor = ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(plan.nodes)))
     try:
         futures = {
@@ -417,10 +710,9 @@ def collect_mtu_consistency(
         for future in as_completed(futures):
             node = futures[future]
             try:
-                links, error = future.result()
-                records.extend(links)
-                if error:
-                    errors.append(error)
+                observation = future.result()
+                records.extend(observation.records)
+                errors.extend(observation.errors)
             except (
                 TargetError,
                 ValueError,
@@ -445,77 +737,21 @@ def collect_mtu_consistency(
             signal.signal(signal.SIGTERM, previous_term)
             signal.signal(signal.SIGINT, previous_int)
 
-    records.sort(key=lambda row: (row["node"], row["interface"]))
-    mtu_values = sorted({row["mtu"] for row in records})
-    by_interface: dict[str, set[int]] = {}
-    for row in records:
-        by_interface.setdefault(row["interface"], set()).add(row["mtu"])
-    mtu_by_interface = {
-        name: sorted(values) for name, values in sorted(by_interface.items())
-    }
-    nodes_read = sorted({row["node"] for row in records})
-    result = report(
-        KIND,
-        kubernetes_label(target),
-        {"node": args.node, "selection": plan.inputs["selection"]},
-        records,
-        errors,
-    )
-    result["plan_digest"] = plan.digest
-    result["planned_nodes"] = list(plan.nodes)
-    result["namespace"] = plan.namespace
-    result["side_effects"] = ["temporary_oc_debug_pods"]
-    result["debug_marker"] = marker
-    result["access_proven"] = True
-    result["cleanup"] = cleanup
-    result["mtu_values"] = mtu_values
-    result["summary"] = {
-        "record_count": len(records),
-        "error_count": len(errors),
-        "nodes_selected": len(plan.nodes),
-        "nodes_read": len(nodes_read),
-        "mtu_values": mtu_values,
-        "mtu_by_interface": mtu_by_interface,
-        "consistent": bool(records)
-        and not errors
-        and cleanup["verified"]
-        and not any(len(values) > 1 for values in mtu_by_interface.values()),
-    }
-    findings = [
-        {
-            "code": "physical_mtu_mismatch",
-            "action": "inspect_node_physical_nic_mtu",
-            "interface": name,
-            "mtu_values": values,
-        }
-        for name, values in mtu_by_interface.items()
-        if len(values) > 1
-    ]
-    result["findings"] = findings
-    result["condition"] = (
-        "UNKNOWN"
-        if errors or not cleanup["verified"]
-        else "INCONSISTENT"
-        if findings
-        else "CONSISTENT"
-    )
-    result["status"] = (
-        BLOCKED
-        if not records or not cleanup["verified"]
-        else PARTIAL
-        if errors or findings
-        else PASS
-    )
-    if errors or not cleanup["verified"]:
-        result["safe_next_step"] = (
-            "Review failed node reads or temporary Pod cleanup on the selected target."
-        )
-    return result
+    return MtuRead(records, errors).report(target, args.node, plan, marker, cleanup)
 
 
 def _base_result(
-    target: Target, plan: MtuPlan, gate: dict[str, Any], status: str
-) -> dict[str, Any]:
+    target: Target, plan: MtuPlan, gate: JSONObject, status: str
+) -> MutableMapping[str, JSONValue]:
+    """Build a plan-stage MTU report without node mutations.
+
+    :param target: Bound Kubernetes target selected for the run.
+    :param plan: Exact node and namespace plan.
+    :param gate: Access-check evidence attached to the report.
+    :param status: Planned or blocked report status.
+    :returns: Report with plan digest, node selection, side-effect declaration,
+        cleanup intent, and access evidence.
+    """
     data = report(
         KIND,
         kubernetes_label(target),
@@ -548,12 +784,24 @@ def _base_result(
     return data
 
 
-def _signal_interrupt(_signum: int, _frame: Any) -> None:
+def _signal_interrupt(_signum: int, _frame: Optional[FrameType]) -> None:
+    """Convert a process signal into the MTU cleanup exception.
+
+    :param _signum: Signal number supplied by Python.
+    :param _frame: Interrupted frame supplied by Python.
+    :raises Interrupted: Always, so the active run enters cleanup.
+    """
     raise Interrupted("interrupted")
 
 
-def run(args: Any) -> int:
-    """Plan by default; apply only the exact confirmed fingerprint."""
+def run(args: Namespace) -> int:
+    """Plan an MTU read or apply an exact confirmed plan.
+
+    :param args: Parsed target, output, logging, selection, timeout, and
+        confirmation arguments.
+    :returns: Zero for a valid plan or complete pass; blocked or partial runs
+        return the shared nonzero exit code.
+    """
     if args.describe:
         from lib.python.core.catalog import describe
 
@@ -639,10 +887,12 @@ def run(args: Any) -> int:
                 }
             )
             logger.event(
-                "info" if data["status"] == PASS else "warning", "apply", data["status"]
+                "info" if data["status"] == PASS else "warning",
+                "apply",
+                str(data["status"]),
             )
         sys.stdout.write(emit(data, output_mode(args), args.output_dir))
-        return exit_code(data["status"])
+        return exit_code(str(data["status"]))
     except (TargetError, ValueError, OSError, RuntimeError, TypeError, KeyError) as exc:
         logger.event("error", "run", BLOCKED)
         return _failure(args, KIND, stage, str(exc))

@@ -5,7 +5,7 @@ and infer the interface. Two things make that unnecessary, and both come from
 here:
 
 * **Consistency.** API options are declared as CAPABILITY TIERS, not per command.
-  Every API command accepts the universal tier, so `--json`, `--target`,
+  Every API command accepts the universal tier, so `--json`,
   `--dry-run`, `--revision`, `--output-dir` and `--describe` mean the same thing
   everywhere. A command that filters records accepts `--search`; one scoped to a
   namespace accepts `--namespace`; one reading a time range accepts `--last`,
@@ -21,6 +21,7 @@ the real one is a test failure rather than a surprise at runtime.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, Final
 
@@ -32,7 +33,6 @@ GITLAB_ACTION_SCHEMA: Final = "schemas/results/gitlab-action.schema.json"
 
 # Every API command accepts these. Node diagnostics share the target protocol.
 UNIVERSAL_OPTIONS: dict[str, str] = {
-    "--target": "nonsecret TOML naming the exact authorities; defaults to the per-host location",
     "--binding": "project-declared target and ordered kubeconfig source resolver",
     "--json": "versioned JSON document",
     "--yaml": "versioned YAML document",
@@ -180,12 +180,6 @@ ACCESS_PROTOCOL: dict[str, Any] = {
 # calling project's business rather than something this skill hardcodes.
 TARGET_PROTOCOL: list[dict[str, str]] = [
     {
-        "source": "argv:--target",
-        "location": "the path given",
-        "scope": "one command",
-        "when": "passed; a missing file is an error, never a fallback",
-    },
-    {
         "source": "env:CI_SKILLS_TARGET",
         "location": "$CI_SKILLS_TARGET",
         "scope": "one environment",
@@ -195,17 +189,17 @@ TARGET_PROTOCOL: list[dict[str, str]] = [
         "source": "project",
         "location": "./.ci-skills/target.toml",
         "scope": "one project",
-        "when": "present in the working directory",
+        "when": "present in the working directory; ci-skills-smoke selects ci-skills-smoke.toml instead",
     },
     {
         "source": "user",
         "location": "~/.ci-skills/target.toml",
         "scope": "one user",
-        "when": "present; the documented default",
+        "when": "present; ci-skills-smoke selects ci-skills-smoke.toml instead, without normal-target fallback",
     },
 ]
 
-# Deliberately four places, in the shape agent tooling already uses -- a
+# Deliberately three places, in the shape agent tooling already uses -- a
 # project `./.ci-skills/` beside a user `~/.ci-skills/`, exactly as `.claude`
 # and `.codex` are laid out. Adding XDG and `~/.config` variants on top would
 # recreate the problem this protocol exists to remove: a caller searching
@@ -700,7 +694,6 @@ COMMANDS: dict[str, dict[str, Any]] = {
 
 # Node diagnostics use existing selected Pods through the same API target.
 NODE_LOCAL_OPTIONS: dict[str, str] = {
-    "--target": "nonsecret TOML naming the exact authorities and node Pod routes",
     "--binding": "project binding for target and ordered kubeconfig sources",
     "--revision": "exact source commit of the installed copy, recorded as a claim",
     "--json": "versioned JSON document",
@@ -733,66 +726,112 @@ NODE_LOCAL_COMMANDS: dict[str, dict[str, Any]] = {
     },
 }
 
-BASH_COMMANDS: dict[str, dict[str, Any]] = {
+READ_OPTIONS: Final[Mapping[str, str]] = {
+    option: UNIVERSAL_OPTIONS[option]
+    for option in (
+        "--json",
+        "--yaml",
+        "--describe",
+        "--dry-run",
+        "--log-format",
+        "--log-level",
+        "--log-file",
+        "--run-id",
+    )
+}
+READ_EXIT_CODES: Final[Mapping[str, str]] = {
+    "0": "successful read or validated plan",
+    "64": "invalid arguments",
+    "65": "invalid provider data, manifest or source identity",
+    "66": "missing input file or directory",
+    "69": "provider, credential or required tool unavailable",
+}
+READ_COMMANDS: Final[Mapping[str, Mapping[str, Any]]] = {
     "bin/ci-api": {
         "report_kind": "ci_api",
         "purpose": "Read one caller-selected GitHub or GitLab API endpoint with bounded output.",
         "use_when": "A supported domain command does not expose the selected GET resource.",
         "requires_authorities": ["one caller-selected GitHub or GitLab host"],
-        "required_tools": ["bash", "jq", "gh or glab"],
-        "required_options": ["--provider", "--endpoint for get"],
-        "options": [
-            "--provider",
-            "--host",
-            "--token-file",
-            "--endpoint",
-            "--field",
-            "--decode-base64",
-            "--lines",
-            "--paginate",
-            "--output",
-            "--dry-run",
-            "--log-format",
-            "--log-level",
-            "--log-file",
-            "--run-id",
-            "--help",
+        "required_tools": ["python3", "gh or glab"],
+        "required_options": ["--provider"],
+        "options": {
+            **READ_OPTIONS,
+            "--provider": "native provider: github or gitlab",
+            "--host": "provider host override; otherwise use the resolved target",
+            "--token-file": "existing token-file reference; otherwise use shared credential resolution",
+            "--endpoint": "relative GET endpoint; required by get",
+            "--field": "select one dotted JSON object field",
+            "--decode-base64": "decode the selected field as UTF-8 text",
+            "--lines": "numbered START:END slice of text; at most 200 lines",
+            "--paginate": "collect native array pages within the response limit",
+            "--output": "legacy output selection: json or text; default json",
+        },
+        "subcommands": {
+            "check": {"purpose": "Read the authenticated provider identity."},
+            "get": {
+                "purpose": "Read one relative endpoint.",
+                "required_options": ["--endpoint"],
+            },
+        },
+        "description": "Use the shared target and credential resolver, bounded GET retries and a 1 MiB response limit. Native provider data stays native; field and text selection reduce what the agent reads.",
+        "examples": [
+            {
+                "description": "Read the configured GitLab identity",
+                "command": "ci-api check --provider gitlab",
+            },
+            {
+                "description": "Select one field",
+                "command": "ci-api get --provider github --endpoint user --field login --output text",
+            },
         ],
-        "subcommands": ["check", "get"],
-        "returns": "Bounded JSON or selected text; dry-run returns a request plan.",
+        "output_modes": {
+            "json": "native JSON or selected content; default",
+            "yaml": "the same selected value as YAML",
+            "text": "raw endpoint text or one selected scalar",
+        },
+        "usage": "Choose check or get and one provider. Target resolution is automatic; CI_SKILLS_TARGET and ci-skills-smoke support tests and live smoke.",
+        "returns": "Bounded JSON, YAML or selected text; dry-run returns a request plan.",
         "read_only": True,
         "side_effects": "none",
-        "execution_surface": "local CLI and one caller-selected provider API",
+        "execution_surface": "installed Python command and one caller-selected provider API",
     },
     "bin/ci-binary-build": {
         "report_kind": "ci_binary_build",
         "purpose": "Plan an exact-commit OpenShift Binary BuildConfig without applying it.",
         "use_when": "A selected BuildConfig and source commit need validation before a build.",
         "requires_authorities": [],
-        "required_tools": ["bash", "git", "jq", "yq"],
+        "required_tools": ["python3", "PyYAML", "git"],
         "required_options": [
             "--spec",
             "--source-repo",
             "--source-commit",
             "--commit-label",
         ],
-        "options": [
-            "--spec",
-            "--source-repo",
-            "--source-commit",
-            "--commit-label",
-            "--context",
-            "--dry-run",
-            "--log-format",
-            "--log-level",
-            "--log-file",
-            "--run-id",
-            "--help",
+        "options": {
+            **READ_OPTIONS,
+            "--spec": "caller-owned Binary/Docker BuildConfig YAML or JSON",
+            "--source-repo": "source Git repository containing the exact commit",
+            "--source-commit": "exact lowercase 40-character source commit",
+            "--commit-label": "BuildConfig metadata label containing the selected commit",
+            "--context": "optional caller context recorded in the plan",
+            "--dry-run": "validate the same plan; this command always plans and never builds",
+        },
+        "description": "Validate the caller's BuildConfig, commit label and Dockerfile at the exact Git commit. Return the manifest, source tree and SHA-256 fingerprint for a later callback.",
+        "examples": [
+            {
+                "description": "Validate selected build inputs",
+                "command": 'ci-binary-build --spec "$BUILD_CONFIG" --source-repo "$SOURCE_REPO" --source-commit "$SOURCE_COMMIT" --commit-label "$COMMIT_LABEL"',
+            },
         ],
-        "returns": "A JSON plan and fingerprint bound to one Git tree and BuildConfig.",
+        "output_modes": {
+            "json": "validated plan and fingerprint; default",
+            "yaml": "the same plan and fingerprint as YAML",
+        },
+        "usage": "Supply the BuildConfig, source repository, exact commit and commit-label key. This operation never executes a build or publishes an image.",
+        "returns": "A JSON or YAML plan and fingerprint bound to one Git tree and BuildConfig.",
         "read_only": True,
         "side_effects": "none",
-        "execution_surface": "local Git checkout; no cluster call",
+        "execution_surface": "installed Python command and local Git checkout; no cluster call",
     },
 }
 
@@ -968,23 +1007,33 @@ def describe(script: str) -> dict[str, Any]:
     :returns: Machine-readable command contract.
     """
     discovery = script in DISCOVERY_COMMANDS
-    entry = DISCOVERY_COMMANDS[script] if discovery else COMMANDS[script]
+    read = script in READ_COMMANDS
+    entry = (
+        READ_COMMANDS[script]
+        if read
+        else DISCOVERY_COMMANDS[script]
+        if discovery
+        else COMMANDS[script]
+    )
     authorities = entry.get("requires", entry.get("requires_authorities", ()))
+    access = ("github", "gitlab") if script == "bin/ci-api" else authorities
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "command_contract",
         "skill": SKILL_NAME,
         "command": script,
-        "report_kind": entry["report_kind"] if discovery else entry["kind"],
+        "report_kind": entry["report_kind"] if discovery or read else entry["kind"],
         "purpose": entry["purpose"],
         "use_when": entry["use_when"],
         "requires_authorities": list(authorities),
-        "access_protocol": {name: ACCESS_PROTOCOL[name] for name in authorities},
+        "access_protocol": {name: ACCESS_PROTOCOL[name] for name in access},
         "capabilities": list(entry.get("capabilities", ())),
         "required_options": list(entry.get("required_options", ())),
         "options": (
             {option: UNIVERSAL_OPTIONS[option] for option in entry["options"]}
             if discovery
+            else dict(entry["options"])
+            if read
             else options_for(script)
         ),
         "returns": entry["returns"],
@@ -994,13 +1043,15 @@ def describe(script: str) -> dict[str, Any]:
         "execution_surface": entry.get("execution_surface", "selected authority API"),
         "required_tools": list(entry.get("required_tools", ())),
         "status_values": STATUS_MEANING,
-        "exit_codes": EXIT_CODES,
+        "exit_codes": dict(READ_EXIT_CODES) if read else EXIT_CODES,
         "default_output": (
             "json"
-            if discovery
+            if discovery or read
             else "json when stdout is not a terminal, human when it is"
         ),
-        "target_protocol": [] if discovery else TARGET_PROTOCOL,
+        "target_protocol": []
+        if discovery or script == "bin/ci-binary-build"
+        else TARGET_PROTOCOL,
         **(
             {
                 "summary": entry["purpose"],
@@ -1009,7 +1060,7 @@ def describe(script: str) -> dict[str, Any]:
                 "output_modes": entry["output_modes"],
                 "usage": entry["usage"],
             }
-            if discovery
+            if discovery or read
             else {}
         ),
     }
@@ -1104,7 +1155,24 @@ def manifest() -> dict[str, Any]:
                 }
                 for script, entry in NODE_LOCAL_COMMANDS.items()
             },
-            **BASH_COMMANDS,
+            **{
+                script: {
+                    **{
+                        key: value
+                        for key, value in entry.items()
+                        if key
+                        not in {
+                            "description",
+                            "examples",
+                            "output_modes",
+                            "usage",
+                            "options",
+                        }
+                    },
+                    "options": sorted(entry["options"]),
+                }
+                for script, entry in READ_COMMANDS.items()
+            },
             **DISCOVERY_COMMANDS,
         },
         "routing": {
