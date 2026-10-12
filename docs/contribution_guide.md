@@ -115,8 +115,9 @@ Declare dependencies through callback order and concrete state fields. For examp
 while constructing the workflow. `Callbacks` normalizes one callback or an ordered iterable through `listify()`;
 it does not infer dependencies or reorder them.
 
-The following composition is from [harbor_push.py](../ci-skills/bin/harbor_push.py). Authentication establishes access,
-confirmation resolves the source image and checks the plan, and confirmed publication consumes that shared state:
+The following composition is abridged from [harbor_push.py](../ci-skills/bin/harbor_push.py).
+Authentication establishes access, confirmation resolves the source image and checks the plan,
+and confirmed publication consumes that shared state:
 
 ```python
 from collections.abc import Sequence

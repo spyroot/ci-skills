@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Optional
 
 import pytest
 import yaml
-from conftest import REPO_ROOT, pytest_selectors
+from conftest import REPO_ROOT, selected_test_paths
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject, JSONValue
@@ -606,7 +606,7 @@ def test_existing_ci_test_step_collects_benchmark_contract_tests() -> None:
     command = str(unit["run"])
     benchmark = "tests/python/test_event_trace_benchmark.py"
 
-    assert "tests/python" in pytest_selectors(command)
+    assert "tests/python" in selected_test_paths(command)
     tokens = shlex.split(command)
     assert f"--ignore={benchmark}" not in tokens
     assert all(

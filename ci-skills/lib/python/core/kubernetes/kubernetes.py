@@ -15,7 +15,7 @@ import os
 import stat
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final, Optional
 
@@ -517,7 +517,9 @@ class K8SAuth(K8SCallback[ProviderAuthAction]):
         self.state.kubernetes_target = (
             selected
             if isinstance(selected.sources, Sources)
-            else bind_sources(selected)
+            else bind_sources(
+                replace(selected, active_surfaces=(SkillPluginType.KUBERNETES.value,))
+            )
         )
         return {}
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Final, Optional
 
 from lib.python.access.access import github_env
@@ -360,7 +360,9 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
         target = (
             selected
             if isinstance(selected.sources, Sources)
-            else bind_sources(selected)
+            else bind_sources(
+                replace(selected, active_surfaces=(SkillPluginType.GITHUB.value,))
+            )
         )
         github, sources = target.github, target.sources
         if github is None:

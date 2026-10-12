@@ -12,7 +12,7 @@ from argparse import Namespace
 from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from email.message import Message
 from pathlib import Path
-from types import TracebackType
+from types import ModuleType, TracebackType
 from typing import TYPE_CHECKING, Optional, Self, Union
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
@@ -448,6 +448,54 @@ def _workflow_action(
     return action
 
 
+class _RecordingWorkflowExecutor:
+    """Retain entrypoint callback composition without binding providers."""
+
+    def __init__(
+        self,
+        context: DELIVERY_STATE.DeliveryState,
+        callbacks: CALLBACK_COLLECTIONS.Callbacks,
+    ) -> None:
+        """Store the context and declared callbacks supplied by an entrypoint.
+
+        :param context: State selected by the workflow action.
+        :param callbacks: Declared callbacks before lifecycle binding.
+        """
+        self.context = context
+        self.callbacks = callbacks
+
+
+def _record_workflow_executors(
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+) -> MutableSequence[_RecordingWorkflowExecutor]:
+    """Replace one entrypoint executor with a composition-recording factory.
+
+    :param monkeypatch: Pytest fixture replacing the entrypoint executor class.
+    :param module: Entrypoint module whose composition factory is under test.
+    :returns: Executors built by the entrypoint factory in call order.
+    """
+    recorded: MutableSequence[_RecordingWorkflowExecutor] = []
+
+    def build(
+        *,
+        context: DELIVERY_STATE.DeliveryState,
+        callbacks: CALLBACK_COLLECTIONS.Callbacks,
+    ) -> _RecordingWorkflowExecutor:
+        """Record one entrypoint composition without provider configuration.
+
+        :param context: State selected by the workflow action.
+        :param callbacks: Declared callbacks before lifecycle binding.
+        :returns: Executor double retaining the supplied composition.
+        """
+        executor = _RecordingWorkflowExecutor(context, callbacks)
+        recorded.append(executor)
+        return executor
+
+    monkeypatch.setattr(module, "WorkflowExecutor", build)
+    return recorded
+
+
 def test_workflow_fingerprint_binds_installed_identity_revision_and_resolved_source() -> (
     None
 ):
@@ -609,6 +657,7 @@ def test_entrypoint_main_composes_declared_callbacks_without_provider_access(
     """
     module = load_module(f"workflow_entrypoint_{script[:-3]}", SCRIPT_ROOT / script)
     captured: MutableSequence[SKILL_ACTION.SkillAction] = []
+    executors = _record_workflow_executors(monkeypatch, module)
 
     class FakeWorkflowAction(SKILL_ACTION.SkillAction):
         """Capture callbacks composed by each public workflow entrypoint."""
@@ -640,6 +689,7 @@ def test_entrypoint_main_composes_declared_callbacks_without_provider_access(
 
     assert module.main(argv) == 0
     action = captured[0]
+    assert executors[0].context is action.context
     assert [type(callback).__name__ for callback in action.callbacks] == list(
         expected_callbacks
     )
@@ -709,11 +759,14 @@ def test_workflow_dry_run_emits_schema_valid_plan_without_constructing_mutations
     assert captured["records"] == []
 
 
-def test_plan_callback_stops_before_a_dependent_mutation() -> None:
+def test_plan_callback_stops_before_a_dependent_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Construct only auth and confirmation callbacks for an unconfirmed plan.
     :returns: None; assertions in the body validate the regression.
     """
     module = load_module("workflow_plan_toolbox", SCRIPT_ROOT / "toolbox.py")
+    executors = _record_workflow_executors(monkeypatch, module)
     action = _workflow_action(
         target=_workflow_target(
             revision="a" * 40,
@@ -730,10 +783,11 @@ def test_plan_callback_stops_before_a_dependent_mutation() -> None:
         app="runner",
     )
 
-    callbacks = [
-        type(callback).__name__ for callback in module.workflow(action).callbacks
-    ]
+    executor = module.workflow(action)
+    callbacks = [type(callback).__name__ for callback in executor.callbacks]
 
+    assert executors == [executor]
+    assert executor.context is action.context
     assert callbacks == ["K8SAuth", "HarborAuth", "ConfirmWorkflow"]
     assert "EnsureNamespace" not in callbacks
     assert "HarborBuild" not in callbacks

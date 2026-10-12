@@ -64,7 +64,7 @@ def import_script_module(module_name: str) -> ModuleType:
     return import_module(module_name)
 
 
-def pytest_selectors(command: str) -> tuple[str, ...]:
+def selected_test_paths(command: str) -> tuple[str, ...]:
     """Return positional ``tests/python`` selectors from one shell command.
 
     :param command: Workflow ``run`` script containing a pytest invocation.
