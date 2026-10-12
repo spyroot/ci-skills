@@ -1,16 +1,26 @@
-"""Validate explicit, nonsecret host and cluster targets for diagnostic commands."""
+"""Validate explicit, nonsecret host and cluster targets for diagnostic commands.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Mapping, MutableSequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Optional, Union
 from urllib.parse import urlsplit
 
-from .catalog import AUTHORITIES, DEFAULT_AUTHORITIES
-from .endpoints import TARGET_CONTRACT
-from .paths import SKILL_ROOT
+from lib.python.core.catalog import AUTHORITIES, DEFAULT_AUTHORITIES
+from lib.python.core.endpoints import TARGET_CONTRACT
+from lib.python.core.paths import SKILL_ROOT
+
+if TYPE_CHECKING:
+    from lib.python.access.credentials import Sources
+    from lib.python.core.provenance import SkillIdentity
 
 
 class TargetError(ValueError):
@@ -19,9 +29,37 @@ class TargetError(ValueError):
 
 @dataclass(frozen=True)
 class GitHubTarget:
+    """Select a GitHub repository and its configured authentication source.
+
+    :param host: GitHub HTTPS authority verified for API requests.
+    :param repository: Owner/repository path selected by the target file.
+    :param token_file: Existing token file, or ``None`` to use runtime credential resolution.
+    :param required_checks: Operator-declared protection checks to verify.
+
+    .. attribute :: host
+        :type: str
+
+        GitHub HTTPS authority verified for API requests.
+
+    .. attribute :: repository
+        :type: str
+
+        Owner/repository path selected by the target file.
+
+    .. attribute :: token_file
+        :type: Optional[Path]
+
+        Existing token file, or ``None`` to use runtime credential resolution.
+
+    .. attribute :: required_checks
+        :type: tuple[str, ...]
+
+        Operator-declared protection checks to verify.
+    """
+
     host: str
     repository: str
-    token_file: Path | None = None
+    token_file: Optional[Path] = None
     # Which status checks protection must require. Declared by the operator,
     # because the expected check name is project-specific and this skill is
     # deliberately project-neutral.
@@ -30,29 +68,121 @@ class GitHubTarget:
 
 @dataclass(frozen=True)
 class HarborTarget:
-    """Configured registry endpoint and existing credential file references."""
+    """Select a registry project and existing credential file references.
+
+    :param url: Harbor HTTPS origin used for API requests.
+    :param host: Network authority extracted from the origin.
+    :param project: Registry project selected by the target file.
+    :param credential_file: Combined credential file, or ``None`` when unconfigured.
+    :param username_file: Separate username file, or ``None`` when unconfigured.
+    :param password_file: Separate password file, or ``None`` when unconfigured.
+
+    .. attribute :: url
+        :type: str
+
+        Harbor HTTPS origin used for API requests.
+
+    .. attribute :: host
+        :type: str
+
+        Network authority extracted from the origin.
+
+    .. attribute :: project
+        :type: str
+
+        Registry project selected by the target file.
+
+    .. attribute :: credential_file
+        :type: Optional[Path]
+
+        Combined credential file, or ``None`` when unconfigured.
+
+    .. attribute :: username_file
+        :type: Optional[Path]
+
+        Separate username file, or ``None`` when unconfigured.
+
+    .. attribute :: password_file
+        :type: Optional[Path]
+
+        Separate password file, or ``None`` when unconfigured.
+    """
 
     url: str
     host: str
     project: str
-    credential_file: Path | None = None
-    username_file: Path | None = None
-    password_file: Path | None = None
+    credential_file: Optional[Path] = None
+    username_file: Optional[Path] = None
+    password_file: Optional[Path] = None
 
 
 @dataclass(frozen=True)
 class GitLabTarget:
+    """Select a GitLab origin and configured operation scopes.
+
+    :param url: GitLab HTTPS origin used for API requests.
+    :param host: Network authority extracted from the origin.
+    :param token_file: Existing token file, or ``None`` to use runtime credential resolution.
+    :param project: Project path, or ``None`` when no project is selected.
+    :param group: Group path, or ``None`` when no group is selected.
+    :param runner_id: Positive runner ID, or ``None`` when no runner is selected.
+
+    .. attribute :: url
+        :type: str
+
+        GitLab HTTPS origin used for API requests.
+
+    .. attribute :: host
+        :type: str
+
+        Network authority extracted from the origin.
+
+    .. attribute :: token_file
+        :type: Optional[Path]
+
+        Existing token file, or ``None`` to use runtime credential resolution.
+
+    .. attribute :: project
+        :type: Optional[str]
+
+        Project path, or ``None`` when no project is selected.
+
+    .. attribute :: group
+        :type: Optional[str]
+
+        Group path, or ``None`` when no group is selected.
+
+    .. attribute :: runner_id
+        :type: Optional[int]
+
+        Positive runner ID, or ``None`` when no runner is selected.
+    """
+
     url: str
     host: str
-    token_file: Path | None = None
-    project: str | None = None
-    group: str | None = None
-    runner_id: int | None = None
+    token_file: Optional[Path] = None
+    project: Optional[str] = None
+    group: Optional[str] = None
+    runner_id: Optional[int] = None
 
 
 @dataclass(frozen=True)
 class GitLabOperationTarget:
-    """A GitLab-only selection for project and group operations."""
+    """GitLab-only target selection for project and group operations.
+
+    :param gitlab: Selected GitLab origin, scope, and token reference.
+    :param source_file: Target TOML file from which this selection was loaded.
+
+    .. attribute :: gitlab
+        :type: GitLabTarget
+
+        Selected GitLab origin, scope, and token reference.
+
+    .. attribute :: source_file
+        :type: Path
+
+        Target TOML file from which this selection was loaded.
+    """
 
     gitlab: GitLabTarget
     source_file: Path
@@ -60,7 +190,27 @@ class GitLabOperationTarget:
 
 @dataclass(frozen=True)
 class NodePodRoute:
-    """One existing Pod selected by namespace, label selector, and node."""
+    """Existing Pod route selected for nonmutating node-local reads.
+
+    :param namespace: Namespace in which the existing Pod is selected.
+    :param selector: Label selector used to find the Pod.
+    :param container: Container name used for bounded Pod exec.
+
+    .. attribute :: namespace
+        :type: str
+
+        Namespace in which the existing Pod is selected.
+
+    .. attribute :: selector
+        :type: str
+
+        Label selector used to find the Pod.
+
+    .. attribute :: container
+        :type: str
+
+        Container name used for bounded Pod exec.
+    """
 
     namespace: str
     selector: str
@@ -69,7 +219,27 @@ class NodePodRoute:
 
 @dataclass(frozen=True)
 class JournalPodRoute:
-    """Existing Pod whose declared mount exposes the host journal directory."""
+    """Existing Pod route that exposes the selected host journal path.
+
+    :param pod: Namespace, selector, and container of the existing Pod.
+    :param directory: Journal directory visible inside that container.
+    :param host_path: Expected host path verified against the Pod volume.
+
+    .. attribute :: pod
+        :type: NodePodRoute
+
+        Namespace, selector, and container of the existing Pod.
+
+    .. attribute :: directory
+        :type: str
+
+        Journal directory visible inside that container.
+
+    .. attribute :: host_path
+        :type: str
+
+        Expected host path verified against the Pod volume.
+    """
 
     pod: NodePodRoute
     directory: str
@@ -78,47 +248,184 @@ class JournalPodRoute:
 
 @dataclass(frozen=True)
 class NodeDiagnosticsTarget:
-    """Exact node and existing Pod routes for nonmutating node reads."""
+    """Selected node with optional existing Pod routes for diagnostics.
+
+    :param node: Kubernetes node name checked before Pod exec.
+    :param cilium: Optional existing Cilium Pod route on the node.
+    :param journal: Optional existing journal Pod and mount route.
+
+    .. attribute :: node
+        :type: str
+
+        Kubernetes node name checked before Pod exec.
+
+    .. attribute :: cilium
+        :type: Optional[NodePodRoute]
+
+        Optional existing Cilium Pod route on the node.
+
+    .. attribute :: journal
+        :type: Optional[JournalPodRoute]
+
+        Optional existing journal Pod and mount route.
+    """
 
     node: str
-    cilium: NodePodRoute | None
-    journal: JournalPodRoute | None
+    cilium: Optional[NodePodRoute]
+    journal: Optional[JournalPodRoute]
 
 
 @dataclass(frozen=True)
 class KubernetesTarget:
+    """Select a Kubernetes context, expected server, and credential search path.
+
+    :param context: Explicit kubeconfig context used for each native command.
+    :param server: Expected API origin checked against the selected context.
+    :param kubeconfig: Single selected file, or ``None`` for the resolved search path.
+    :param kubeconfigs: Kubeconfig files in native precedence order.
+    :param node_diagnostics: Existing node/Pod routes, or ``None`` when not configured.
+
+    .. attribute :: context
+        :type: str
+
+        Explicit kubeconfig context used for each native command.
+
+    .. attribute :: server
+        :type: str
+
+        Expected API origin checked against the selected context.
+
+    .. attribute :: kubeconfig
+        :type: Optional[Path]
+
+        Single selected file, or ``None`` for the resolved search path.
+
+    .. attribute :: kubeconfigs
+        :type: tuple[Path, ...]
+
+        Kubeconfig files in native precedence order.
+
+    .. attribute :: node_diagnostics
+        :type: Optional[NodeDiagnosticsTarget]
+
+        Existing node/Pod routes, or ``None`` when not configured.
+    """
+
     context: str
     server: str
-    kubeconfig: Path | None
+    kubeconfig: Optional[Path]
     # The full search path, in kubectl's own order. A credential and the context
     # that selects it often live in different files -- a CA-verified overlay
     # plus the file holding the token, for instance -- and requiring the
     # operator to export KUBECONFIG for that is a trap: the default kubeconfig
     # is usually a DIFFERENT cluster, so a cold run silently aims elsewhere.
     kubeconfigs: tuple[Path, ...] = ()
-    node_diagnostics: NodeDiagnosticsTarget | None = None
+    node_diagnostics: Optional[NodeDiagnosticsTarget] = None
 
 
 @dataclass(frozen=True)
 class Target:
-    github: GitHubTarget | None
-    gitlab: GitLabTarget | None
-    kubernetes: KubernetesTarget | None
+    """Retain selected authorities and their runtime source and skill provenance.
+
+    :param github: Selected GitHub authority, or ``None`` when not required.
+    :param gitlab: Selected GitLab authority, or ``None`` when not required.
+    :param kubernetes: Selected Kubernetes authority, or ``None`` when not required.
+    :param active_surfaces: Authorities requested for this invocation.
+    :param sources: Bound runtime credential sources, or ``None`` before binding.
+    :param tested_revision: Verified source commit, or ``None`` before identity binding.
+    :param source_file: Target TOML path, or ``None`` before source resolution.
+    :param source_kind: Target-source classification, or ``None`` before resolution.
+    :param skill: Installed identity, or ``None`` before identity binding.
+    :param kubernetes_source_reference: Kubeconfig provenance, or ``None`` when unbound.
+    :param target_reference: Target provenance, or ``None`` before source resolution.
+    :param harbor: Selected registry authority, or ``None`` when not required.
+
+    .. attribute :: github
+        :type: Optional[GitHubTarget]
+
+        Selected GitHub authority, or ``None`` when not required.
+
+    .. attribute :: gitlab
+        :type: Optional[GitLabTarget]
+
+        Selected GitLab authority, or ``None`` when not required.
+
+    .. attribute :: kubernetes
+        :type: Optional[KubernetesTarget]
+
+        Selected Kubernetes authority, or ``None`` when not required.
+
+    .. attribute :: active_surfaces
+        :type: tuple[str, ...]
+
+        Authorities requested for this invocation.
+
+    .. attribute :: sources
+        :type: Optional[Sources]
+
+        Bound runtime credential sources, or ``None`` before binding.
+
+    .. attribute :: tested_revision
+        :type: Optional[str]
+
+        Verified source commit, or ``None`` before identity binding.
+
+    .. attribute :: source_file
+        :type: Optional[Path]
+
+        Target TOML path, or ``None`` before source resolution.
+
+    .. attribute :: source_kind
+        :type: Optional[str]
+
+        Target-source classification, or ``None`` before resolution.
+
+    .. attribute :: skill
+        :type: Optional[SkillIdentity]
+
+        Installed identity, or ``None`` before identity binding.
+
+    .. attribute :: kubernetes_source_reference
+        :type: Optional[str]
+
+        Kubeconfig provenance, or ``None`` when unbound.
+
+    .. attribute :: target_reference
+        :type: Optional[str]
+
+        Target provenance, or ``None`` before source resolution.
+
+    .. attribute :: harbor
+        :type: Optional[HarborTarget]
+
+        Selected registry authority, or ``None`` when not required.
+    """
+
+    github: Optional[GitHubTarget]
+    gitlab: Optional[GitLabTarget]
+    kubernetes: Optional[KubernetesTarget]
     active_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES
-    sources: object | None = field(default=None, repr=False, compare=False)
-    tested_revision: str | None = None
+    sources: Optional[Sources] = field(default=None, repr=False, compare=False)
+    tested_revision: Optional[str] = None
     # Which declared source supplied this target, so a report can say where it
     # came from rather than leaving the reader to guess the search order.
-    source_file: Path | None = None
-    source_kind: str | None = None
-    skill: dict[str, Any] | None = None
-    kubernetes_source_reference: str | None = None
-    target_reference: str | None = None
-    harbor: HarborTarget | None = None
+    source_file: Optional[Path] = None
+    source_kind: Optional[str] = None
+    skill: Optional[SkillIdentity] = None
+    kubernetes_source_reference: Optional[str] = None
+    target_reference: Optional[str] = None
+    harbor: Optional[HarborTarget] = None
 
 
-def _table(value: object, name: str, keys: frozenset[str]) -> dict[str, object]:
-    """Return one table after rejecting undeclared fields, including credentials."""
+def _table(value: object, name: str, keys: frozenset[str]) -> Mapping[str, object]:
+    """Validate one authority table against its declared keys.
+
+    :param value: Parsed TOML value expected to be a table.
+    :param name: Table name used in validation diagnostics.
+    :param keys: Names permitted directly in this table.
+    :returns: Original table after shape and field validation.
+    :raises TargetError: The value is not a table or contains undeclared fields.
+    """
     if not isinstance(value, dict):
         raise TargetError(f"{name} must be a TOML table")
     unknown = set(value) - keys
@@ -129,8 +436,14 @@ def _table(value: object, name: str, keys: frozenset[str]) -> dict[str, object]:
     return value
 
 
-def _string(table: dict[str, object], key: str) -> str:
-    """Read a required nonempty string without guessing a default."""
+def _string(table: Mapping[str, object], key: str) -> str:
+    """Read a required nonempty string from a target table.
+
+    :param table: Parsed authority table.
+    :param key: Required field name.
+    :returns: Field value with surrounding whitespace removed.
+    :raises TargetError: The field is absent, is not text, or is blank.
+    """
     value = table.get(key)
     if not isinstance(value, str) or not value.strip():
         raise TargetError(f"{key} must be a nonempty string")
@@ -138,8 +451,19 @@ def _string(table: dict[str, object], key: str) -> str:
 
 
 def _https_url(value: str, key: str) -> tuple[str, str]:
-    """Require an HTTPS authority URL with a fully qualified hostname."""
-    parsed = urlsplit(value)
+    """Validate an HTTPS origin and extract its authority.
+
+    :param value: Candidate URL without a resource path, query, or fragment.
+    :param key: Target field name used in error messages.
+    :returns: URL without a trailing slash and lowercased network authority.
+    :raises TargetError: The URL has a malformed authority, lacks HTTPS, a full
+        hostname, or a valid port, or includes credentials, a resource path,
+        query, or fragment.
+    """
+    try:
+        parsed = urlsplit(value)
+    except ValueError as exc:
+        raise TargetError(f"{key} has an invalid authority") from exc
     if (
         parsed.scheme != "https"
         or not parsed.hostname
@@ -180,15 +504,24 @@ def assert_external_path(path: Path, skill_root: Path, key: str) -> None:
 
 
 def _optional_files(
-    table: dict[str, object], key: str, skill_root: Path
+    table: Mapping[str, object], key: str, skill_root: Path
 ) -> tuple[Path, ...]:
-    """Read an optional ordered list of readable paths outside the skill."""
+    """Resolve an optional ordered list of external absolute file paths.
+
+    :param table: Parsed target table containing the optional list.
+    :param key: List field name.
+    :param skill_root: Installed skill directory excluded from selections.
+    :returns: Canonical unique paths in declared order, or an empty tuple when
+        the field is absent.
+    :raises TargetError: The list is empty or malformed, contains a relative or
+        duplicate path, or selects a path inside the skill.
+    """
     value = table.get(key)
     if value is None:
         return ()
     if not isinstance(value, list) or not value:
         raise TargetError(f"{key} must be a nonempty list when supplied")
-    resolved: list[Path] = []
+    resolved: MutableSequence[Path] = []
     for item in value:
         if not isinstance(item, str) or not item.strip():
             raise TargetError(f"{key} entries must be nonempty paths")
@@ -203,14 +536,21 @@ def _optional_files(
     return tuple(resolved)
 
 
-def _optional_names(table: dict[str, object], key: str) -> tuple[str, ...]:
-    """Read an optional list of exact, nonempty names."""
+def _optional_names(table: Mapping[str, object], key: str) -> tuple[str, ...]:
+    """Read an optional list of distinct exact names.
+
+    :param table: Parsed target table containing the optional list.
+    :param key: List field name.
+    :returns: Nonempty names with surrounding whitespace removed, or an empty
+        tuple when the field is absent.
+    :raises TargetError: The list is empty, malformed, or contains duplicates.
+    """
     value = table.get(key)
     if value is None:
         return ()
     if not isinstance(value, list) or not value:
         raise TargetError(f"{key} must be a nonempty list when supplied")
-    names: list[str] = []
+    names: MutableSequence[str] = []
     for item in value:
         if not isinstance(item, str) or not item.strip():
             raise TargetError(f"{key} entries must be nonempty strings")
@@ -221,12 +561,12 @@ def _optional_names(table: dict[str, object], key: str) -> tuple[str, ...]:
 
 
 def _optional_file(
-    table: dict[str, object],
+    table: Mapping[str, object],
     key: str,
     skill_root: Path,
     *,
-    target_directory: Path | None = None,
-) -> Path | None:
+    target_directory: Optional[Path] = None,
+) -> Optional[Path]:
     """Resolve an optional file, using its target directory when supplied.
 
     :param table: Parsed authority settings containing the optional path.
@@ -249,8 +589,16 @@ def _optional_file(
     return path
 
 
-def _optional_reference(table: dict[str, object], key: str) -> str | None:
-    """Accept an exact numeric ID or relative GitLab project/group path."""
+def _optional_reference(table: Mapping[str, object], key: str) -> Optional[str]:
+    """Normalize a GitLab project or group selector.
+
+    :param table: Table containing the optional selector.
+    :param key: ``project`` or ``group`` field name for diagnostics.
+    :returns: Positive numeric ID as text or a relative path, or ``None`` when
+        absent.
+    :raises TargetError: The selector is invalid, absolute, empty, or contains
+        whitespace or a URL scheme.
+    """
     value = table.get(key)
     if value is None:
         return None
@@ -302,8 +650,14 @@ def _parse_gitlab(
     )
 
 
-def _read_target_data(source: Path, skill_root: Path) -> dict[str, object]:
-    """Read one selected target file without searching another location."""
+def _read_target_data(source: Path, skill_root: Path) -> Mapping[str, object]:
+    """Read exactly one selected TOML target outside the installed skill.
+
+    :param source: Selected target file path; no fallback search is performed.
+    :param skill_root: Installed skill directory excluded from selections.
+    :returns: Parsed target TOML mapping.
+    :raises TargetError: The file is inside the skill, unreadable, or invalid TOML.
+    """
     assert_external_path(source, skill_root, "target file")
     try:
         with source.open("rb") as handle:
@@ -313,7 +667,7 @@ def _read_target_data(source: Path, skill_root: Path) -> dict[str, object]:
     return data
 
 
-def load_gitlab_target(path: str | Path) -> GitLabOperationTarget:
+def load_gitlab_target(path: Union[str, Path]) -> GitLabOperationTarget:
     """Load GitLab settings with relative tokens beside the selected target.
 
     Other declared authority tables are permitted but are not validated here.
@@ -335,8 +689,8 @@ def load_gitlab_target(path: str | Path) -> GitLabOperationTarget:
 def select_gitlab_reference(
     target: GitLabOperationTarget,
     *,
-    project: str | None = None,
-    group: str | None = None,
+    project: Optional[str] = None,
+    group: Optional[str] = None,
 ) -> tuple[str, str]:
     """Select one GitLab project or group, applying an explicit override.
 
@@ -366,7 +720,13 @@ def select_gitlab_reference(
     )
 
 
-def _node_diagnostics(value: object | None) -> NodeDiagnosticsTarget | None:
+def _node_diagnostics(value: object) -> Optional[NodeDiagnosticsTarget]:
+    """Parse optional node and existing Pod routes for diagnostic reads.
+
+    :param value: Parsed ``kubernetes.node_diagnostics`` table, or ``None``.
+    :returns: Validated node and optional Cilium/journal Pod routes, or ``None``.
+    :raises TargetError: A route, node name, or journal directory is invalid.
+    """
     if value is None:
         return None
     name = "kubernetes.node_diagnostics"
@@ -393,6 +753,13 @@ def _node_diagnostics(value: object | None) -> NodeDiagnosticsTarget | None:
 
 
 def _node_pod_route(value: object, kind: str) -> NodePodRoute:
+    """Validate one existing Pod route declared for node diagnostics.
+
+    :param value: Parsed Cilium or journal route table.
+    :param kind: Route kind used to select its declared fields.
+    :returns: Namespace, label selector, and container route.
+    :raises TargetError: Required route fields are absent, unsupported, or invalid.
+    """
     name = f"kubernetes.node_diagnostics.{kind}"
     table = _table(value, name, TARGET_CONTRACT.names(name))
     namespace = _string(table, "namespace")
@@ -404,6 +771,13 @@ def _node_pod_route(value: object, kind: str) -> NodePodRoute:
 
 
 def _absolute_path(value: str, key: str) -> str:
+    """Validate an absolute journal directory without traversal segments.
+
+    :param value: Candidate directory path.
+    :param key: Journal field name used in an invalid-path diagnostic.
+    :returns: Original absolute path string.
+    :raises TargetError: The path is relative, root-only, or contains ``..``.
+    """
     path = Path(value)
     if not path.is_absolute() or ".." in path.parts or value == "/":
         raise TargetError(
@@ -413,7 +787,7 @@ def _absolute_path(value: str, key: str) -> str:
 
 
 def load_target(
-    path: str | Path, *, required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES
+    path: Union[str, Path], *, required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES
 ) -> Target:
     """Load requested authorities with relative tokens beside the target file.
 

@@ -110,7 +110,6 @@
         "--receipt-out",
         "--revision",
         "--run-id",
-        "--target",
         "--yaml"
       ],
       "purpose": "Prove access to every selected authority and emit one receipt.",
@@ -129,61 +128,70 @@
       "use_when": "When you need one live receipt proving GitHub, GitLab, and Kubernetes access on the execution host."
     },
     "bin/ci-api": {
-      "execution_surface": "local CLI and one caller-selected provider API",
+      "execution_surface": "installed Python command and one caller-selected provider API",
       "options": [
-        "--provider",
-        "--host",
-        "--token-file",
+        "--decode-base64",
+        "--describe",
+        "--dry-run",
         "--endpoint",
         "--field",
-        "--decode-base64",
+        "--host",
+        "--json",
         "--lines",
-        "--paginate",
-        "--output",
-        "--dry-run",
+        "--log-file",
         "--log-format",
         "--log-level",
-        "--log-file",
+        "--output",
+        "--paginate",
+        "--provider",
         "--run-id",
-        "--help"
+        "--token-file",
+        "--yaml"
       ],
       "purpose": "Read one caller-selected GitHub or GitLab API endpoint with bounded output.",
       "read_only": true,
       "report_kind": "ci_api",
       "required_options": [
-        "--provider",
-        "--endpoint for get"
+        "--provider"
       ],
       "required_tools": [
-        "bash",
-        "jq",
+        "python3",
         "gh or glab"
       ],
       "requires_authorities": [
         "one caller-selected GitHub or GitLab host"
       ],
-      "returns": "Bounded JSON or selected text; dry-run returns a request plan.",
+      "returns": "Bounded JSON, YAML or selected text; dry-run returns a request plan.",
       "side_effects": "none",
-      "subcommands": [
-        "check",
-        "get"
-      ],
+      "subcommands": {
+        "check": {
+          "purpose": "Read the authenticated provider identity."
+        },
+        "get": {
+          "purpose": "Read one relative endpoint.",
+          "required_options": [
+            "--endpoint"
+          ]
+        }
+      },
       "use_when": "A supported domain command does not expose the selected GET resource."
     },
     "bin/ci-binary-build": {
-      "execution_surface": "local Git checkout; no cluster call",
+      "execution_surface": "installed Python command and local Git checkout; no cluster call",
       "options": [
-        "--spec",
-        "--source-repo",
-        "--source-commit",
         "--commit-label",
         "--context",
+        "--describe",
         "--dry-run",
+        "--json",
+        "--log-file",
         "--log-format",
         "--log-level",
-        "--log-file",
         "--run-id",
-        "--help"
+        "--source-commit",
+        "--source-repo",
+        "--spec",
+        "--yaml"
       ],
       "purpose": "Plan an exact-commit OpenShift Binary BuildConfig without applying it.",
       "read_only": true,
@@ -195,13 +203,12 @@
         "--commit-label"
       ],
       "required_tools": [
-        "bash",
-        "git",
-        "jq",
-        "yq"
+        "python3",
+        "PyYAML",
+        "git"
       ],
       "requires_authorities": [],
-      "returns": "A JSON plan and fingerprint bound to one Git tree and BuildConfig.",
+      "returns": "A JSON or YAML plan and fingerprint bound to one Git tree and BuildConfig.",
       "side_effects": "none",
       "use_when": "A selected BuildConfig and source commit need validation before a build."
     },
@@ -229,7 +236,6 @@
         "--ready",
         "--revision",
         "--run-id",
-        "--target",
         "--yaml"
       ],
       "purpose": "Read Ceph health, root/rack/host/OSD hierarchy, inactive PGs, and OSD/monitor Pods.",
@@ -259,7 +265,6 @@
         "--json",
         "--revision",
         "--search",
-        "--target",
         "--yaml"
       ],
       "purpose": "Classify host Ceph/RBD kernel journal lines through an existing Pod.",
@@ -286,7 +291,6 @@
         "--json",
         "--revision",
         "--search",
-        "--target",
         "--yaml"
       ],
       "purpose": "Read Cilium daemon status and health from an existing agent Pod on one node.",
@@ -323,7 +327,6 @@
         "--revision",
         "--run-id",
         "--search",
-        "--target",
         "--yaml"
       ],
       "purpose": "Aggregate Cilium agent, operator and node health by real exec.",
@@ -364,7 +367,6 @@
         "--run-id",
         "--runner-root",
         "--spec",
-        "--target",
         "--timeout",
         "--yaml"
       ],
@@ -440,7 +442,6 @@
         "--revision",
         "--run-id",
         "--search",
-        "--target",
         "--to",
         "--yaml"
       ],
@@ -475,7 +476,6 @@
         "--receipt-out",
         "--revision",
         "--run-id",
-        "--target",
         "--yaml"
       ],
       "purpose": "Resolve the effective GitLab credential and read back identity and exact target.",
@@ -517,7 +517,6 @@
         "--receipt-out",
         "--revision",
         "--run-id",
-        "--target",
         "--timeout",
         "--title",
         "--yaml"
@@ -577,7 +576,6 @@
         "--search",
         "--status",
         "--stuck-after",
-        "--target",
         "--to",
         "--yaml"
       ],
@@ -635,7 +633,6 @@
         "--run-id",
         "--start-date",
         "--state",
-        "--target",
         "--timeout",
         "--title",
         "--yaml"
@@ -689,7 +686,6 @@
         "--project",
         "--revision",
         "--run-id",
-        "--target",
         "--yaml"
       ],
       "purpose": "Read one CI pipeline and bounded job progress by stage.",
@@ -735,7 +731,6 @@
         "--runner-id",
         "--runner-type",
         "--tag",
-        "--target",
         "--timeout",
         "--token-out",
         "--yaml"
@@ -832,7 +827,6 @@
         "--revision",
         "--run-id",
         "--slug",
-        "--target",
         "--timeout",
         "--title",
         "--yaml"
@@ -888,7 +882,6 @@
         "--receipt-out",
         "--revision",
         "--run-id",
-        "--target",
         "--timeout",
         "--yaml"
       ],
@@ -938,7 +931,6 @@
         "--run-id",
         "--source-image",
         "--tag",
-        "--target",
         "--timeout",
         "--yaml"
       ],
@@ -986,7 +978,6 @@
         "--output-dir",
         "--revision",
         "--run-id",
-        "--target",
         "--timeout",
         "--yaml"
       ],
@@ -1075,7 +1066,6 @@
         "--run-id",
         "--search",
         "--storage-class",
-        "--target",
         "--yaml"
       ],
       "purpose": "Correlate claims, volumes, attachments, pods and controllers.",
@@ -1110,7 +1100,6 @@
         "--revision",
         "--run-id",
         "--spec",
-        "--target",
         "--timeout",
         "--yaml"
       ],
@@ -1166,7 +1155,6 @@
     "--json": "versioned JSON document",
     "--revision": "exact source commit of the installed copy, recorded as a claim",
     "--search": "case-insensitive text filter over returned records",
-    "--target": "nonsecret TOML naming the exact authorities and node Pod routes",
     "--yaml": "versioned YAML document"
   },
   "read_only": false,
@@ -1206,12 +1194,6 @@
   },
   "target_protocol": [
     {
-      "location": "the path given",
-      "scope": "one command",
-      "source": "argv:--target",
-      "when": "passed; a missing file is an error, never a fallback"
-    },
-    {
       "location": "$CI_SKILLS_TARGET",
       "scope": "one environment",
       "source": "env:CI_SKILLS_TARGET",
@@ -1221,13 +1203,13 @@
       "location": "./.ci-skills/target.toml",
       "scope": "one project",
       "source": "project",
-      "when": "present in the working directory"
+      "when": "present in the working directory; ci-skills-smoke selects ci-skills-smoke.toml instead"
     },
     {
       "location": "~/.ci-skills/target.toml",
       "scope": "one user",
       "source": "user",
-      "when": "present; the documented default"
+      "when": "present; ci-skills-smoke selects ci-skills-smoke.toml instead, without normal-target fallback"
     }
   ],
   "universal_options": {
@@ -1242,7 +1224,6 @@
     "--output-dir": "write paired JSON and text reports to this explicit path",
     "--revision": "exact source commit of the installed copy, recorded as a claim",
     "--run-id": "caller-selected identifier included in diagnostic logs",
-    "--target": "nonsecret TOML naming the exact authorities; defaults to the per-host location",
     "--yaml": "versioned YAML document"
   }
 }

@@ -16,9 +16,9 @@ Start with the nearest installed command in [ci-skills/bin](../ci-skills/bin/) a
 
 | Responsibility | Existing owner |
 | --- | --- |
-| Callback hooks, context, ordering, result emission | [action.py](../ci-skills/lib/python/core/action.py) |
-| Targets and credential selection | [target.py](../ci-skills/lib/python/core/target.py), [credentials.py](../ci-skills/lib/python/core/credentials.py) |
-| Provider services and authentication | [gitlab_session.py](../ci-skills/lib/python/core/gitlab_session.py), [github.py](../ci-skills/lib/python/core/github.py), [kubernetes.py](../ci-skills/lib/python/core/kubernetes.py), [registry_mirror.py](../ci-skills/lib/python/core/registry_mirror.py) |
+| Callback hooks, context, ordering, result emission | [action.py](../ci-skills/lib/python/core/abstract/action.py) |
+| Targets and credential selection | [target.py](../ci-skills/lib/python/core/target.py), [credentials.py](../ci-skills/lib/python/access/credentials.py) |
+| Provider services and authentication | [gitlab_session.py](../ci-skills/lib/python/core/gitlab/gitlab_session.py), [github.py](../ci-skills/lib/python/core/gitlab/github.py), [kubernetes.py](../ci-skills/lib/python/core/kubernetes/kubernetes.py), [registry_mirror.py](../ci-skills/lib/python/core/harbor/registry_mirror.py) |
 | Toolbox workflow inputs, planning and reports | [toolbox_actions.py](../ci-skills/lib/python/core/toolbox_actions.py) |
 | Command declaration, help and discovery | [catalog.py](../ci-skills/lib/python/core/catalog.py), [cli.py](../ci-skills/lib/python/core/cli.py) |
 
@@ -81,7 +81,7 @@ class InspectImage(HarborCallback[ImageAction, str]):
 ```
 
 For writes, retain the operation's existing plan/apply confirmation and independent read-back. Compare desired and
-observed state before writing; use [status.py](../ci-skills/lib/python/core/status.py)'s `APPLIED` and `NO_OP` values.
+observed state before writing; use [status.py](../ci-skills/lib/python/sys/status.py)'s `APPLIED` and `NO_OP` values.
 Reuse named shared constants for fixed domain values. Obtain deployment values such as hosts, project IDs and runner
 names from action inputs, configuration or discovery; obtain credentials through the existing target and credential
 resolver.

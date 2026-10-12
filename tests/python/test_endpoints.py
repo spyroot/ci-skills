@@ -5,6 +5,10 @@ exactly those, and `gates/gate-ci-skills-endpoints.py` (library:
 `tools/skillkit/endpoint_gate.py`) refuses any other key in the tracked
 documents of the format. Gate tests run the command against throwaway git
 repositories built from this checkout's real documents.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -13,16 +17,18 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import MutableSequence, MutableSet, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import jsonschema
 import pytest
 import yaml
 from conftest import REPO_ROOT, git, import_script_module, load_module
 
-ENDPOINTS = import_script_module("core.endpoints")
-CATALOG = import_script_module("core.catalog")
-TARGET = import_script_module("core.target")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+CATALOG = import_script_module("lib.python.core.catalog")
+TARGET = import_script_module("lib.python.core.target")
 GATE_LIB = load_module(
     "skillkit_endpoint_gate", REPO_ROOT / "tools" / "skillkit" / "endpoint_gate.py"
 )
@@ -45,12 +51,20 @@ IDENTITY = (
 )
 
 
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """A git repository holding the real target documents, committed once."""
+    """Commit the real target template and Markdown examples in a temporary Git repo.
+
+    :param tmp_path: Pytest directory receiving copied documents and Git history.
+    :returns: Root of the isolated committed repository used by gate tests.
+    """
     root = tmp_path / "repo"
     root.mkdir()
-    documents = [REPO_ROOT / TEMPLATE, REPO_ROOT / "README.md"]
+    documents: MutableSequence[Path] = [REPO_ROOT / TEMPLATE, REPO_ROOT / "README.md"]
     documents += sorted((REPO_ROOT / "ci-skills").glob("**/*.md"))
     for document in documents:
         copy = root / document.relative_to(REPO_ROOT)
@@ -63,6 +77,13 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run the endpoint gate command against a selected document repository.
+
+    :param root: Repository root passed through the gate's root option.
+    :param *args: Positional arguments forwarded to the helper under test.
+    :returns: Completed command with captured standard output, error, and exit code.
+
+    """
     return subprocess.run(
         [sys.executable, str(GATE), "--root", str(root), *args],
         capture_output=True,
@@ -71,7 +92,14 @@ def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def _gate(root: Path, *args: str) -> tuple[int, dict]:
+def _gate(root: Path, *args: str) -> tuple[int, JSONObject]:
+    """Run the gate in JSON mode and validate its result schema.
+
+    :param root: Repository containing the target documents to inspect.
+    :param *args: Positional arguments forwarded to the helper under test.
+    :returns: Gate exit code and schema-valid JSON result mapping.
+
+    """
     result = _run(root, "--json", *args)
     record = json.loads(result.stdout)
     jsonschema.validate(record, SCHEMA)
@@ -79,14 +107,31 @@ def _gate(root: Path, *args: str) -> tuple[int, dict]:
 
 
 def _append(path: Path, text: str) -> None:
+    """Append a case-specific target fragment to an existing fixture document.
+
+    :param path: Document in the temporary repository to extend.
+    :param text: Target fragment or comment appended to that document.
+
+    :returns: None; the helper records behavior through its side effects.
+    """
     path.write_text(path.read_text() + text)
 
 
-def _rules(record: dict) -> list[tuple[str, str]]:
+def _rules(record: JSONObject) -> Sequence[tuple[str, str]]:
+    """Extract gate finding rules with their target-contract paths.
+
+    :param record: JSON gate result containing finding objects.
+    :returns: Rule and target-path pairs in report order.
+    """
     return [(item["rule"], item["path"]) for item in record["findings"]]
 
 
-def _paths(text: str) -> set[str]:
+def _paths(text: str) -> MutableSet[str]:
+    """Parse target text and collect every observed table or key path.
+
+    :param text: TOML document or commented target example to scan.
+    :returns: Set of target-contract paths found by the document parser.
+    """
     return {use.path for use in GATE_LIB.TargetDocument("t.toml", text).uses()}
 
 
@@ -94,6 +139,9 @@ def _paths(text: str) -> set[str]:
 
 
 def test_the_contract_accepts_exactly_the_keys_the_parser_accepted() -> None:
+    """Keep each GitHub, GitLab, Kubernetes, and diagnostics key set explicit.
+    :returns: None; assertions in the body validate the regression.
+    """
     contract = ENDPOINTS.TARGET_CONTRACT
     assert contract.names("github") == {
         "host",
@@ -135,11 +183,17 @@ def test_the_contract_accepts_exactly_the_keys_the_parser_accepted() -> None:
 
 
 def test_the_authorities_come_from_the_contract() -> None:
+    """Derive the public authority list from the target contract.
+    :returns: None; assertions in the body validate the regression.
+    """
     assert CATALOG.AUTHORITIES == ENDPOINTS.TARGET_CONTRACT.authorities
     assert CATALOG.AUTHORITIES == ("github", "gitlab", "harbor", "kubernetes")
 
 
 def test_every_declared_key_is_a_pointer_or_a_listed_value() -> None:
+    """Classify declared endpoint, access, and value keys without gaps.
+    :returns: None; assertions in the body validate the regression.
+    """
     contract = ENDPOINTS.TARGET_CONTRACT
     assert contract.unpaired() == ()
     assert contract.role("gitlab.token_file") is ENDPOINTS.Role.ACCESS
@@ -150,6 +204,9 @@ def test_every_declared_key_is_a_pointer_or_a_listed_value() -> None:
 
 
 def test_an_unknown_table_path_is_refused_by_the_contract() -> None:
+    """Raise for an authority table absent from the target contract.
+    :returns: None; assertions in the body validate the regression.
+    """
     with pytest.raises(KeyError):
         ENDPOINTS.TARGET_CONTRACT.names(UNKNOWN_AUTHORITY)
 
@@ -157,6 +214,12 @@ def test_an_unknown_table_path_is_refused_by_the_contract() -> None:
 def test_the_parser_rejects_a_key_the_contract_does_not_declare(
     tmp_path: Path,
 ) -> None:
+    """Reject an undeclared GitLab namespace key in a target file.
+
+    :param tmp_path: Pytest directory holding the invalid target file.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = tmp_path / "target.toml"
     target.write_text(
         '[gitlab]\nurl = "https://gitlab.example.test"\nnamespace = "x"\n'
@@ -168,6 +231,12 @@ def test_the_parser_rejects_a_key_the_contract_does_not_declare(
 def test_the_parser_keeps_the_journal_route_fields_and_refuses_them_for_cilium(
     tmp_path: Path,
 ) -> None:
+    """Retain journal mount fields while rejecting them on the Cilium route.
+
+    :param tmp_path: Pytest directory holding both target variants.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = tmp_path / "target.toml"
     head = (
         "[kubernetes]\n"
@@ -199,6 +268,9 @@ def test_the_parser_keeps_the_journal_route_fields_and_refuses_them_for_cilium(
 
 
 def test_commented_keys_belong_to_the_commented_table_and_active_keys_do_not() -> None:
+    """Attribute commented and active keys to their respective table contexts.
+    :returns: None; assertions in the body validate the regression.
+    """
     document = GATE_LIB.TargetDocument(
         "t.toml",
         "[kubernetes]\n"
@@ -238,10 +310,20 @@ def test_commented_keys_belong_to_the_commented_table_and_active_keys_do_not() -
     ],
 )
 def test_every_spelling_of_a_table_or_key_is_seen(text: str, expected: str) -> None:
+    """Recognize commented, quoted, spaced, array, and array-table key paths.
+
+    :param text: TOML spelling selected by the parametrized parser case.
+    :param expected: Contract path expected from that spelling.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     assert expected in _paths(text)
 
 
 def test_a_binding_block_is_another_format_and_a_target_block_is_read() -> None:
+    """Skip binding TOML while scanning target examples in Markdown fences.
+    :returns: None; assertions in the body validate the regression.
+    """
     markdown = (
         "```toml\n"
         'schema_version = "1.0"\n'
@@ -271,6 +353,12 @@ def test_a_binding_block_is_another_format_and_a_target_block_is_read() -> None:
 def test_the_gate_passes_the_real_documents_and_lists_the_value_keys(
     repo: Path,
 ) -> None:
+    """Pass tracked target documents and list all declared value keys.
+
+    :param repo: Fixture repository committed with real target documents.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     code, record = _gate(repo)
     assert code == 0
     assert record["status"] == "PASS"
@@ -279,6 +367,12 @@ def test_the_gate_passes_the_real_documents_and_lists_the_value_keys(
 
 
 def test_a_random_active_key_fails_with_its_line(repo: Path) -> None:
+    """Report an undeclared active GitLab key at its exact template line.
+
+    :param repo: Fixture repository whose target template receives the key.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     template = repo / TEMPLATE
     lines = template.read_text().splitlines()
     index = lines.index('url = "https://gitlab.example.com"')
@@ -298,6 +392,12 @@ def test_a_random_active_key_fails_with_its_line(repo: Path) -> None:
 
 
 def test_a_commented_random_key_fails(repo: Path) -> None:
+    """Reject an undeclared key even when it appears only as a comment.
+
+    :param repo: Fixture repository whose target template receives the comment.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     _append(repo / TEMPLATE, "# pipeline_id = 42\n")
     code, record = _gate(repo)
     assert code == 1
@@ -307,6 +407,12 @@ def test_a_commented_random_key_fails(repo: Path) -> None:
 
 
 def test_a_new_authority_without_a_declaration_fails(repo: Path) -> None:
+    """Reject a commented authority table and key absent from the contract.
+
+    :param repo: Fixture repository whose template receives the new authority.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     _append(repo / TEMPLATE, f'\n# [{UNKNOWN_AUTHORITY}]\n# url = "x"\n')
     code, record = _gate(repo)
     assert code == 1
@@ -315,6 +421,12 @@ def test_a_new_authority_without_a_declaration_fails(repo: Path) -> None:
 
 
 def test_a_random_key_in_a_documented_example_fails(repo: Path) -> None:
+    """Report an undeclared Kubernetes key in a Markdown target example.
+
+    :param repo: Fixture repository whose access example receives the key.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access = repo / "ci-skills" / "references" / "access.md"
     access.write_text(
         access.read_text().replace(
@@ -330,6 +442,12 @@ def test_a_random_key_in_a_documented_example_fails(repo: Path) -> None:
 
 
 def test_a_top_level_key_in_an_example_is_not_skipped(repo: Path) -> None:
+    """Inspect and reject top-level keys in a fenced target example.
+
+    :param repo: Fixture repository whose access example receives the key.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access = repo / "ci-skills" / "references" / "access.md"
     access.write_text(
         access.read_text().replace(
@@ -342,6 +460,12 @@ def test_a_top_level_key_in_an_example_is_not_skipped(repo: Path) -> None:
 
 
 def test_an_example_that_does_not_parse_fails(repo: Path) -> None:
+    """Fail the gate when a Markdown target example contains invalid TOML.
+
+    :param repo: Fixture repository whose example gets a broken table header.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     access = repo / "ci-skills" / "references" / "access.md"
     access.write_text(
         access.read_text().replace("```toml\n[github]\n", "```toml\n[github\n")
@@ -352,6 +476,12 @@ def test_an_example_that_does_not_parse_fails(repo: Path) -> None:
 
 
 def test_vendored_upstream_text_is_not_checked(repo: Path) -> None:
+    """Exclude vendored upstream Markdown from target-example validation.
+
+    :param repo: Fixture repository receiving a vendored upstream page.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     vendored = repo / "ci-skills" / "references" / "vendor" / "upstream" / "page.md"
     vendored.parent.mkdir(parents=True)
     vendored.write_text('```toml\n[runners.kubernetes]\nnamespace = "x"\n```\n')
@@ -361,6 +491,12 @@ def test_vendored_upstream_text_is_not_checked(repo: Path) -> None:
 
 
 def test_a_value_key_new_since_the_base_fails(repo: Path) -> None:
+    """Flag a target value key introduced after the chosen Git base.
+
+    :param repo: Fixture repository with a base commit lacking runner_id.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     template = repo / TEMPLATE
     current = template.read_text()
     template.write_text(current.replace("# runner_id = 123\n", ""))
@@ -372,12 +508,24 @@ def test_a_value_key_new_since_the_base_fails(repo: Path) -> None:
 
 
 def test_a_value_key_present_at_the_base_is_listed_not_failed(repo: Path) -> None:
+    """List an existing value key without treating it as newly introduced.
+
+    :param repo: Fixture repository whose base already declares runner_id.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     code, record = _gate(repo, "--base", "HEAD")
     assert code == 0
     assert "gitlab.runner_id" in record["value_keys"]
 
 
 def test_a_declared_key_missing_from_the_template_fails(repo: Path) -> None:
+    """Report a contract key whose template documentation was removed.
+
+    :param repo: Fixture repository whose template omits GitLab group.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     template = repo / TEMPLATE
     template.write_text(template.read_text().replace('# group = "group"\n', ""))
     code, record = _gate(repo)
@@ -386,6 +534,12 @@ def test_a_declared_key_missing_from_the_template_fails(repo: Path) -> None:
 
 
 def test_a_declared_table_missing_from_the_template_fails(repo: Path) -> None:
+    """Report a diagnostics table absent from the target template.
+
+    :param repo: Fixture repository whose template omits the Cilium table header.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     template = repo / TEMPLATE
     header = "# [kubernetes.node_diagnostics.cilium]\n"
     assert header in template.read_text()
@@ -396,6 +550,12 @@ def test_a_declared_table_missing_from_the_template_fails(repo: Path) -> None:
 
 
 def test_an_unreadable_base_fails_closed(repo: Path) -> None:
+    """Fail closed when the selected Git base revision cannot be read.
+
+    :param repo: Fixture repository queried with a nonexistent base revision.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     code, record = _gate(repo, "--base", "no-such-revision")
     assert code == 1
     assert _rules(record) == [("base_unreadable", TEMPLATE)]
@@ -404,6 +564,13 @@ def test_an_unreadable_base_fails_closed(repo: Path) -> None:
 def test_a_base_shaped_like_an_option_is_not_passed_to_git_as_one(
     repo: Path, tmp_path: Path
 ) -> None:
+    """Treat an option-shaped Git base as data without creating its output file.
+
+    :param repo: Fixture repository used for the base comparison.
+    :param tmp_path: Pytest directory holding the sentinel output path.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     leak = tmp_path / "leak"
     code, record = _gate(repo, f"--base=--output={leak}")
     assert code == 1
@@ -412,6 +579,12 @@ def test_a_base_shaped_like_an_option_is_not_passed_to_git_as_one(
 
 
 def test_the_staged_index_is_checked_not_the_working_tree(repo: Path) -> None:
+    """Inspect staged template bytes independently of clean working-tree bytes.
+
+    :param repo: Fixture repository with an undeclared key staged in the index.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     template = repo / TEMPLATE
     clean = template.read_text()
     _append(template, "# pipeline_id = 42\n")
@@ -424,12 +597,24 @@ def test_the_staged_index_is_checked_not_the_working_tree(repo: Path) -> None:
 
 
 def test_a_missing_template_means_the_gate_could_not_run(tmp_path: Path) -> None:
+    """Exit with an execution error when no target template is present.
+
+    :param tmp_path: Empty Pytest directory used as the gate root.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = _run(tmp_path, "--json")
     assert result.returncode == 2
     assert result.stdout == ""
 
 
 def test_an_authority_without_access_is_unpaired(repo: Path) -> None:
+    """Report a contract authority declaring an endpoint but no access key.
+
+    :param repo: Fixture repository supplied to the direct gate instance.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     contract = ENDPOINTS.TargetContract(
         (
             ENDPOINTS.Table(
@@ -442,6 +627,12 @@ def test_an_authority_without_access_is_unpaired(repo: Path) -> None:
 
 
 def test_yaml_output_is_the_same_record(repo: Path) -> None:
+    """Render YAML and JSON gate modes as equivalent result records.
+
+    :param repo: Fixture repository scanned in both output modes.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     _, record = _gate(repo)
     assert yaml.safe_load(_run(repo, "--yaml").stdout) == record
 
@@ -468,6 +659,9 @@ VALID = {
 
 
 def test_the_schema_accepts_a_valid_record() -> None:
+    """Accept the complete endpoint-gate result fixture under its JSON schema.
+    :returns: None; assertions in the body validate the regression.
+    """
     jsonschema.validate(VALID, SCHEMA)
 
 
@@ -486,7 +680,13 @@ def test_the_schema_accepts_a_valid_record() -> None:
         ),
     ],
 )
-def test_the_schema_rejects_an_invalid_record(change) -> None:
+def test_the_schema_rejects_an_invalid_record(change: str) -> None:
+    """Reject missing, extra, mistyped, or unsupported result fields.
+
+    :param change: Fixture mutation for one invalid endpoint-gate record case.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     record = json.loads(json.dumps(VALID))
     change(record)
     with pytest.raises(jsonschema.ValidationError):

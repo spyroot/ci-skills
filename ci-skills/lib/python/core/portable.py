@@ -15,6 +15,10 @@ the path never leaves the host.
 The transform names the fields it rewrites rather than pattern-matching every
 string. A path-shaped regex over arbitrary values also rewrites a URL authority
 and a `owner/repository` pair, and acceptance compares those by exact equality.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -23,10 +27,12 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Optional
 
-from .runtime import redact_tree
+from lib.python.core.json_types import JSONObject, JSONValue
+from lib.python.core.runtime import redact_tree
 
 DIGEST_LENGTH = 12
 # Fields that carry an absolute path on the execution host. Each is rewritten
@@ -46,16 +52,20 @@ COMMAND_MAP_FIELDS = ("queries",)
 
 
 def path_token(path: str) -> str:
-    """Return a stable, non-reversible token for one absolute path."""
+    """Make a stable short SHA-256 token for a filesystem path string.
+
+    :param path: Path text to identify without copying it into a receipt.
+    :returns: First twelve hexadecimal characters of its UTF-8 SHA-256 digest.
+    """
     return hashlib.sha256(path.encode("utf-8")).hexdigest()[:DIGEST_LENGTH]
 
 
 def portable_reference(value: str) -> str:
-    """Rewrite one credential reference, keeping its scheme.
+    """Replace path portions of a source reference with path tokens.
 
-    `file:/home/op/gitlab.token` becomes `file:path:<digest>`; a reference that
-    carries no path, such as `env:GITLAB_TOKEN` or
-    `gh-credential-store:github.com`, is returned unchanged.
+    :param value: Credential or target source reference to transform.
+    :returns: Reference with absolute file, binding, or command paths tokenized;
+        references without path portions remain unchanged.
     """
     if value.startswith("binding:"):
         binding, mark, selected = value.removeprefix("binding:").partition("#")
@@ -82,8 +92,12 @@ def portable_reference(value: str) -> str:
     return value
 
 
-def portable_command(argv: list[Any]) -> list[Any]:
-    """Hide the host kubeconfig path in a recorded command argument vector."""
+def portable_command(argv: Sequence[JSONValue]) -> Sequence[JSONValue]:
+    """Tokenize kubeconfig paths in a recorded native argument vector.
+
+    :param argv: Command arguments that may contain ``--kubeconfig PATH``.
+    :returns: New argument list with each matching path replaced by a token.
+    """
     result = list(argv)
     for index, item in enumerate(result[:-1]):
         if item == "--kubeconfig" and isinstance(result[index + 1], str):
@@ -91,11 +105,18 @@ def portable_command(argv: list[Any]) -> list[Any]:
     return result
 
 
-def portable(value: Any, *, key: str | None = None) -> Any:
-    """Render a receipt, or any part of one, in committable form."""
+def portable(value: JSONValue, key: Optional[str] = None) -> JSONValue:
+    """Transform path-bearing receipt fields into committable values.
+
+    :param value: Receipt value or nested part to transform.
+    :param key: Parent field name used to identify path-bearing string values;
+        ``None`` identifies the root document, which has no enclosing field.
+    :returns: Transformed mapping or list, tokenized reference, or unchanged
+        scalar; recognized command vectors tokenize kubeconfig paths.
+    """
     if isinstance(value, str):
         return portable_reference(value) if key in PATH_VALUE_FIELDS else value
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {
             name: (
                 {inner: portable_reference(item) for inner, item in child.items()}
@@ -113,12 +134,19 @@ def portable(value: Any, *, key: str | None = None) -> Any:
     return value
 
 
-def write_portable_receipt(data: dict[str, Any], selected: str) -> None:
-    """Atomically write redacted evidence to a caller-selected 0600 file."""
+def write_portable_receipt(data: JSONObject, selected: str) -> None:
+    """Write a redacted, path-tokenized receipt through an atomic replacement.
+
+    :param data: Receipt mapping to redact and transform before serialization.
+    :param selected: Destination path; parent directories are created if needed.
+    :raises OSError: Creating, writing, syncing, or replacing the destination
+        fails.
+    :raises TypeError: The transformed receipt cannot be serialized as JSON.
+    """  # noqa: DOC502 - Serialization and atomic filesystem writes can fail.
     destination = Path(selected).expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
     body = json.dumps(portable(redact_tree(data)), indent=2, sort_keys=True) + "\n"
-    temporary: Path | None = None
+    temporary: Optional[Path] = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",

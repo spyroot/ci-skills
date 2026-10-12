@@ -99,18 +99,21 @@ jobs:
             --skip-checking-private-functions=True \
             --arg-type-hints-in-docstring=False --check-return-types=False \
             --allow-init-docstring=True \
-            ci-skills/lib/python/core/gitlab_runners.py \
-            ci-skills/lib/python/core/gitlab_actions.py \
-            ci-skills/lib/python/core/action.py \
-            ci-skills/lib/python/core/gitlab_milestones.py \
-            ci-skills/lib/python/core/gitlab_api.py \
+            ci-skills/lib/python/core/abstract \
+            ci-skills/lib/python/core/gitlab/abstract_github_callback.py \
+            ci-skills/lib/python/core/gitlab/gitlab_action.py \
+            ci-skills/lib/python/core/gitlab/gitlab_runners.py \
+            ci-skills/lib/python/core/gitlab/gitlab_actions.py \
+            ci-skills/lib/python/core/gitlab/gitlab_milestones.py \
+            ci-skills/lib/python/core/gitlab/gitlab_api.py \
             ci-skills/lib/python/core/catalog.py \
             ci-skills/lib/python/core/report.py \
             ci-skills/bin/gitlab_runner.py
           pydoclint --style=sphinx --skip-checking-short-docstrings=False \
             --arg-type-hints-in-docstring=False --check-return-types=False \
             --allow-init-docstring=True \
-            ci-skills/lib/python/core/gitlab_runners.py ci-skills/bin/gitlab_runner.py
+            ci-skills/lib/python/core/gitlab/gitlab_runners.py \
+            ci-skills/bin/gitlab_runner.py
           pydoclint --style=sphinx --skip-checking-short-docstrings=False \
             --skip-checking-private-functions=True --check-class-attributes=False \
             --arg-type-hints-in-docstring=False --check-return-types=False \
@@ -153,6 +156,7 @@ jobs:
             tests/python/test_gitlab_runner_recovery.py \
             tests/python/test_gitlab_runner_lifecycle.py \
             tests/python/test_catalog.py \
+            tests/python/test_callback_interface.py \
             tests/python/test_callbacks.py \
             tests/python/test_toolbox_workflows.py \
             tests/python/test_propositions.py \

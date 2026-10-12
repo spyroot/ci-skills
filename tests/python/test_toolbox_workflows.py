@@ -1,61 +1,117 @@
-"""Focused workflow contracts for toolbox publication and runner composition."""
+"""Focused workflow contracts for toolbox publication and runner composition.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import json
 from argparse import Namespace
+from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from email.message import Message
 from pathlib import Path
-from typing import Self
+from types import TracebackType
+from typing import TYPE_CHECKING, Optional, Self, Union
 from urllib.error import HTTPError, URLError
+from urllib.request import Request
 
 import pytest
-from jsonschema import Draft202012Validator
-from jsonschema.exceptions import ValidationError
-
-from tests.python.conftest import (
+from conftest import (
     REPO_ROOT,
     SCRIPT_ROOT,
     import_script_module,
     load_module,
 )
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
 
-HTTP = import_script_module("core.http")
-SCHEMA = import_script_module("core.schema")
-STATUS = import_script_module("core.status")
-TARGET = import_script_module("core.target")
-WORKFLOWS = import_script_module("core.toolbox_actions")
-CALLBACKS = import_script_module("core.action")
+HTTP = import_script_module("lib.python.protocol.http")
+API = import_script_module("lib.python.core.cli_api")
+SCHEMA = import_script_module("lib.python.core.schema")
+STATUS = import_script_module("lib.python.sys.status")
+TARGET = import_script_module("lib.python.core.target")
+WORKFLOWS = import_script_module("lib.python.core.toolbox_actions")
+CALLBACKS = import_script_module("lib.python.core.abstract.callback")
+CALLBACK_COLLECTIONS = import_script_module("lib.python.core.abstract.callbacks")
+SKILL_ACTION = import_script_module("lib.python.core.abstract.skill_action")
+DELIVERY_STATE = import_script_module("lib.python.core.delivery_state")
+EXECUTOR = import_script_module("lib.python.core.abstract.skill_exector")
+
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject, JSONValue
 
 
 class _Response:
-    """Minimal successful urllib response for retry-contract tests."""
+    """Minimal successful urllib response for retry-contract tests.
 
-    status = 200
+    .. attribute :: status
+        :type: int
 
-    def __init__(self, payload: object) -> None:
+        HTTP status code exposed by urllib responses.
+    """
+
+    status: int = 200
+
+    def __init__(self, payload: JSONValue):
+        """Store one JSON-serializable response payload.
+
+        :param payload: JSON value encoded into the fake provider response body.
+        """
         self.payload = json.dumps(payload).encode()
 
     def __enter__(self) -> Self:
+        """Enter the context manager used by ``urllib`` responses.
+
+        :returns: The fake response instance.
+        """
         return self
 
-    def __exit__(self, *_unused: object) -> None:
-        return None
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None:
+        """Exit the response context without suppressing failures.
+
+        :param exc_type: Exception class supplied by the context manager, if any.
+        :param exc: Exception instance supplied by the context manager, if any.
+        :param traceback: Traceback supplied by the context manager, if any.
+        :returns: None.
+        """
+        return
 
     def read(self, _limit: int) -> bytes:
-        """Return the bounded JSON bytes supplied by the test."""
+        """Return the bounded JSON bytes supplied by the test.
+
+        :param _limit: Maximum byte count requested by the client.
+        :returns: The encoded fake response body.
+        """
         return self.payload
 
 
 class _Opener:
     """Return the selected finite sequence of urllib outcomes."""
 
-    def __init__(self, outcomes: list[object]) -> None:
-        self.outcomes = iter(outcomes)
-        self.requests: list[object] = []
+    def __init__(self, outcomes: Sequence[Union[_Response, BaseException]]):
+        """Create a finite fake opener.
 
-    def open(self, request: object, *, timeout: int) -> _Response:
-        """Record one request and return or raise its configured outcome."""
+        :param outcomes: Ordered provider responses or exceptions.
+        """
+        self.outcomes = iter(outcomes)
+        self.requests: MutableSequence[Request] = []
+
+    def open(self, request: Request, *, timeout: int) -> _Response:
+        """Record one request and return or raise its configured outcome.
+
+        :param request: Prepared urllib request from the client.
+        :param timeout: Per-request timeout selected by the client.
+        :returns: The configured fake response.
+        :raises BaseException: Configured transport failure supplied by the test.
+        """  # noqa: DOC503 - The dynamic fixture exception is raised verbatim.
         assert timeout == 7
         self.requests.append(request)
         outcome = next(self.outcomes)
@@ -65,8 +121,13 @@ class _Opener:
         return outcome
 
 
-def _http_error(status: int, *, retry_after: str | None = None) -> HTTPError:
-    """Build one provider response error without a body."""
+def _http_error(status: int, *, retry_after: Optional[str] = None) -> HTTPError:
+    """Build one provider response error without a body.
+
+    :param status: Provider HTTP status code.
+    :param retry_after: Optional Retry-After header value.
+    :returns: HTTPError shaped like a urllib provider failure.
+    """
     headers = Message()
     if retry_after is not None:
         headers["Retry-After"] = retry_after
@@ -75,8 +136,15 @@ def _http_error(status: int, *, retry_after: str | None = None) -> HTTPError:
     )
 
 
-def _http_client(outcomes: list[object], sleeps: list[float]) -> tuple[object, _Opener]:
-    """Return a direct HTTP client with a finite fake opener."""
+def _http_client(
+    outcomes: Sequence[Union[_Response, BaseException]], sleeps: MutableSequence[float]
+) -> tuple[HTTP.HTTPClient, _Opener]:
+    """Return a direct HTTP client with a finite fake opener.
+
+    :param outcomes: Ordered provider responses or exceptions.
+    :param sleeps: Mutable capture for requested retry delays.
+    :returns: Bound HTTP client and the fake opener it will use.
+    """
     opener = _Opener(outcomes)
     client = HTTP.HTTPClient(
         "https://harbor.example.test",
@@ -88,9 +156,11 @@ def _http_client(outcomes: list[object], sleeps: list[float]) -> tuple[object, _
     return client, opener
 
 
-def test_http_get_retries_shared_transient_policy_and_retry_after():
-    """Harbor reads use the same bounded safe-read retry policy as CLI reads."""
-    sleeps: list[float] = []
+def test_http_get_retries_shared_transient_policy_and_retry_after() -> None:
+    """Harbor reads use the same bounded safe-read retry policy as CLI reads.
+    :returns: None; assertions in the body validate the regression.
+    """
+    sleeps: MutableSequence[float] = []
     client, opener = _http_client(
         [
             _http_error(503),
@@ -111,9 +181,14 @@ def test_http_get_retries_shared_transient_policy_and_retry_after():
 
 
 @pytest.mark.parametrize("outcome", (_http_error(408), URLError("offline")))
-def test_http_get_retries_provider_timeout_and_transport(outcome):
-    """Safe Harbor reads retry both provider timeout and transport failure once."""
-    sleeps: list[float] = []
+def test_http_get_retries_provider_timeout_and_transport(outcome: JSONValue) -> None:
+    """Retry one safe GET after a provider timeout or transport error.
+
+    :param outcome: Initial HTTP 408 response error or urllib transport error.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    sleeps: MutableSequence[float] = []
     client, opener = _http_client(
         [outcome, _Response({"digest": "sha256:unit"})], sleeps
     )
@@ -127,9 +202,15 @@ def test_http_get_retries_provider_timeout_and_transport(outcome):
     ("status", "reason"),
     ((401, "authentication"), (403, "authorization")),
 )
-def test_http_get_authentication_errors_are_terminal(status, reason):
-    """Credential failures do not replay an authenticated request."""
-    sleeps: list[float] = []
+def test_http_get_authentication_errors_are_terminal(status: int, reason: str) -> None:
+    """Stop an authenticated GET after its first credential failure.
+
+    :param status: HTTP 401 or 403 returned by the provider.
+    :param reason: Expected authentication or authorization error category.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    sleeps: MutableSequence[float] = []
     client, opener = _http_client([_http_error(status)], sleeps)
 
     with pytest.raises(HTTP.APIError, match=reason) as failure:
@@ -140,23 +221,30 @@ def test_http_get_authentication_errors_are_terminal(status, reason):
     assert sleeps == []
 
 
-def test_http_get_retry_exhaustion_stops_at_the_shared_attempt_bound():
-    """A persistently unavailable Harbor never retries beyond READ_ATTEMPTS."""
-    sleeps: list[float] = []
-    client, opener = _http_client([_http_error(503)] * HTTP.READ_ATTEMPTS, sleeps)
+def test_http_get_retry_exhaustion_stops_at_the_shared_attempt_bound() -> None:
+    """A persistently unavailable Harbor never retries beyond READ_ATTEMPTS.
+    :returns: None; assertions in the body validate the regression.
+    """
+    sleeps: MutableSequence[float] = []
+    client, opener = _http_client([_http_error(503)] * API.READ_ATTEMPTS, sleeps)
 
     with pytest.raises(HTTP.APIError, match="provider_5xx") as failure:
         client.request("GET", "artifacts/unit")
 
-    assert failure.value.attempts == HTTP.READ_ATTEMPTS
-    assert len(opener.requests) == HTTP.READ_ATTEMPTS
-    assert len(sleeps) == HTTP.READ_ATTEMPTS - 1
+    assert failure.value.attempts == API.READ_ATTEMPTS
+    assert len(opener.requests) == API.READ_ATTEMPTS
+    assert len(sleeps) == API.READ_ATTEMPTS - 1
 
 
 @pytest.mark.parametrize("method", ("POST", "PUT", "DELETE"))
-def test_http_writes_are_never_replayed(method):
-    """A failed write remains one observable provider attempt."""
-    sleeps: list[float] = []
+def test_http_writes_are_never_replayed(method: str) -> None:
+    """Attempt a failed provider mutation once without sleeping or retrying.
+
+    :param method: POST, PUT, or DELETE method used for the failed request.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    sleeps: MutableSequence[float] = []
     client, opener = _http_client([_http_error(503)], sleeps)
 
     with pytest.raises(HTTP.APIError, match="provider_5xx") as failure:
@@ -167,8 +255,12 @@ def test_http_writes_are_never_replayed(method):
     assert sleeps == []
 
 
-def _toolbox_document(linux: dict[str, object]) -> dict[str, object]:
-    """Return a minimal schema-valid toolbox document around one install route."""
+def _toolbox_document(linux: JSONObject) -> JSONObject:
+    """Embed one Linux installation route in a minimal ToolboxSpec document.
+
+    :param linux: Selected dependency's Linux method and its supplied fields.
+    :returns: ToolboxSpec mapping passed to specification validation.
+    """
     return {
         "apiVersion": "ci-skills/v1",
         "kind": "ToolboxSpec",
@@ -227,9 +319,15 @@ def _toolbox_document(linux: dict[str, object]) -> dict[str, object]:
     ),
 )
 def test_toolbox_schema_requires_each_selected_installation_method_input(
-    linux, missing
-):
-    """The installed schema rejects incomplete selected installation routes."""
+    linux: JSONObject, missing: str
+) -> None:
+    """Reject each installation route that omits a method-required field.
+
+    :param linux: Incomplete archive, deb, installer, download, go, npm, or uv route.
+    :param missing: Name of the field deliberately omitted from that route.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     with pytest.raises(SCHEMA.SpecificationError, match="invalid_specification"):
         SCHEMA.validate_specification(_toolbox_document(linux), "toolbox.schema.json")
 
@@ -262,16 +360,25 @@ def test_toolbox_schema_requires_each_selected_installation_method_input(
         {"method": "uv", "package": "tool==1.0.0"},
     ),
 )
-def test_toolbox_schema_accepts_complete_selected_installation_routes(linux):
-    """Every supported route admits its complete declared input fields."""
+def test_toolbox_schema_accepts_complete_selected_installation_routes(
+    linux: JSONObject,
+) -> None:
+    """Accept each supported installation method with all required fields.
+
+    :param linux: Complete archive, deb, installer, download, go, npm, or uv route.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     SCHEMA.validate_specification(
         _toolbox_document(linux),
         "toolbox.schema.json",
     )
 
 
-def test_workflow_records_accept_only_shared_action_outcomes():
-    """Callback records use the one shared applied/no-op/verified vocabulary."""
+def test_workflow_records_accept_only_shared_action_outcomes() -> None:
+    """Callback records use the one shared applied/no-op/verified vocabulary.
+    :returns: None; assertions in the body validate the regression.
+    """
     schema = json.loads(
         (REPO_ROOT / "schemas" / "results" / "toolbox-workflow.schema.json").read_text(
             encoding="utf-8"
@@ -291,9 +398,14 @@ def test_workflow_records_accept_only_shared_action_outcomes():
 
 
 def _workflow_target(
-    *, revision: str | None, skill: dict[str, object] | None
-) -> object:
-    """Return the minimum selected target needed for a workflow fingerprint."""
+    *, revision: Optional[str], skill: Optional[JSONObject]
+) -> TARGET.Target:
+    """Create the selected Harbor target used by workflow plan fingerprints.
+
+    :param revision: Optional installed code revision bound into the plan.
+    :param skill: Optional installed skill identity bound into the plan.
+    :returns: Target with Harbor configuration and supplied provenance fields.
+    """
     return TARGET.Target(
         github=None,
         gitlab=None,
@@ -310,8 +422,16 @@ def _workflow_target(
     )
 
 
-def _workflow_action(*, target: object, source: str, apply: bool = False) -> object:
-    """Build one prepared source-image workflow without provider access."""
+def _workflow_action(
+    *, target: TARGET.Target, source: str, apply: bool = False
+) -> WORKFLOWS.WorkflowAction:
+    """Prepare a Harbor push action with a selected target and source image.
+
+    :param target: Target supplying Harbor and installed identity fields.
+    :param source: Source image reference assigned to the action.
+    :param apply: Whether the action requests publication instead of planning.
+    :returns: Workflow action ready for fingerprint or callback execution.
+    """
     action = WORKFLOWS.WorkflowAction(
         Namespace(
             kind="harbor_push",
@@ -328,8 +448,12 @@ def _workflow_action(*, target: object, source: str, apply: bool = False) -> obj
     return action
 
 
-def test_workflow_fingerprint_binds_installed_identity_revision_and_resolved_source():
-    """A plan cannot be reused after installed code or its source image changes."""
+def test_workflow_fingerprint_binds_installed_identity_revision_and_resolved_source() -> (
+    None
+):
+    """A plan cannot be reused after installed code or its source image changes.
+    :returns: None; assertions in the body validate the regression.
+    """
     skill = {"algorithm": "sha256-tree-v1", "digest": "a" * 64}
     source = "harbor.example.test/unit/source@sha256:" + "b" * 64
     action = _workflow_action(
@@ -364,9 +488,14 @@ def test_workflow_fingerprint_binds_installed_identity_revision_and_resolved_sou
 
 @pytest.mark.parametrize("confirmation", (None, "0" * 64))
 def test_confirm_workflow_resolves_source_digest_and_requires_its_exact_plan(
-    confirmation,
-):
-    """A mutable source tag becomes immutable before confirmation and publication."""
+    confirmation: Optional[str],
+) -> None:
+    """Resolve a mutable image tag before requiring exact plan confirmation.
+
+    :param confirmation: Missing or incorrect plan digest rejected on apply.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     source = "harbor.example.test/unit/source:latest"
     digest = "sha256:" + "f" * 64
     action = _workflow_action(
@@ -378,12 +507,21 @@ def test_confirm_workflow_resolves_source_digest_and_requires_its_exact_plan(
     )
 
     class Harbor:
+        """Resolve the selected mutable source image to one fixed digest."""
+
         def inspect(self, image: str) -> str:
+            """Resolve the selected source tag to the test digest.
+
+            :param image: Source image reference passed to Harbor inspection.
+            :returns: Immutable digest used to bind the workflow plan.
+            """
             assert image == source
             return digest
 
     callback = WORKFLOWS.ConfirmWorkflow(action=action)
-    callback.bind(WORKFLOWS.ExecutionContext(services={"harbor": Harbor()}))
+    state = DELIVERY_STATE.DeliveryState()
+    state.harbor = Harbor()
+    callback.bind(state)
     result = callback.run()
 
     assert result["image"] == source + "@" + digest
@@ -404,8 +542,6 @@ def test_confirm_workflow_resolves_source_digest_and_requires_its_exact_plan(
                 "K8SAuth",
                 "HarborAuth",
                 "ConfirmWorkflow",
-                "EnsureNamespace",
-                "HarborBuild",
             ),
         ),
         (
@@ -419,7 +555,7 @@ def test_confirm_workflow_resolves_source_digest_and_requires_its_exact_plan(
                 "--tag",
                 "unit",
             ],
-            ("HarborAuth", "ConfirmWorkflow", "HarborPush"),
+            ("HarborAuth", "ConfirmWorkflow"),
         ),
         (
             "harbor_pull.py",
@@ -432,7 +568,7 @@ def test_confirm_workflow_resolves_source_digest_and_requires_its_exact_plan(
                 "--name",
                 "pull",
             ],
-            ("K8SAuth", "HarborAuth", "ConfirmWorkflow", "PullImage"),
+            ("K8SAuth", "HarborAuth", "ConfirmWorkflow"),
         ),
         (
             "create_selfhosted_runner.py",
@@ -452,34 +588,49 @@ def test_confirm_workflow_resolves_source_digest_and_requires_its_exact_plan(
                 "GitHubAuth",
                 "HarborAuth",
                 "ConfirmWorkflow",
-                "EnsureNamespace",
-                "HarborBuild",
-                "HarborPush",
-                "PullImage",
-                "GitHubRunnerRuntime",
-                "DeployRunner",
-                "CreateGitHubRunner",
             ),
         ),
     ),
 )
 def test_entrypoint_main_composes_declared_callbacks_without_provider_access(
-    monkeypatch, script, argv, expected_callbacks
-):
-    """Each public workflow main builds its declared callback graph before execution."""
-    module = load_module(f"workflow_entrypoint_{script[:-3]}", SCRIPT_ROOT / script)
-    captured: list[object] = []
+    monkeypatch: pytest.MonkeyPatch,
+    script: Path,
+    argv: Sequence[str],
+    expected_callbacks: Sequence[str],
+) -> None:
+    """Build each public entrypoint's declared callback sequence before execution.
 
-    class FakeWorkflowAction:
-        def __init__(self, args: object) -> None:
+    :param monkeypatch: Pytest fixture replacing the workflow action adapter.
+    :param script: Public entrypoint module loaded for this workflow case.
+    :param argv: Command arguments selecting the entrypoint operation.
+    :param expected_callbacks: Ordered callback class names required by the route.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    module = load_module(f"workflow_entrypoint_{script[:-3]}", SCRIPT_ROOT / script)
+    captured: MutableSequence[SKILL_ACTION.SkillAction] = []
+
+    class FakeWorkflowAction(SKILL_ACTION.SkillAction):
+        """Capture callbacks composed by each public workflow entrypoint."""
+
+        def __init__(self, args: Namespace):
+            """Provide the fields each entrypoint needs to compose its callbacks.
+
+            :param args: Parsed command arguments supplied by the public entrypoint.
+            """
             self.args = args
             self.target = object()
             self.spec = Namespace(image_repository="toolbox", image_tag="unit")
             self.runner = object()
             self.repository = "toolbox"
-            self.context = CALLBACKS.ExecutionContext()
+            self.context = DELIVERY_STATE.DeliveryState()
 
-        def execute(self, factory: object) -> int:
+        def execute(self, factory: Callable[[], EXECUTOR.WorkflowExecutor]) -> int:
+            """Capture callbacks built by the entrypoint's executor factory.
+
+            :param factory: Entrypoint callback-executor factory under test.
+            :returns: Successful command exit code after capturing the callback list.
+            """
             captured.append(self)
             executor = factory()
             self.callbacks = executor.callbacks
@@ -494,12 +645,26 @@ def test_entrypoint_main_composes_declared_callbacks_without_provider_access(
     )
 
 
-def _captured_report(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-    """Replace report emission with a capture at the command result boundary."""
-    captured: dict[str, object] = {}
+def _captured_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> MutableMapping[str, JSONValue]:
+    """Capture a workflow report at the command result emission boundary.
 
-    def emit(result: object, _args: object) -> int:
-        captured.update(result.report)
+    :param monkeypatch: Pytest fixture replacing the workflow result emitter.
+    :returns: Mutable mapping filled with the emitted report fields.
+    """
+    captured: MutableMapping[str, JSONValue] = {}
+
+    def emit(result: Mapping[str, JSONValue], _args: Namespace) -> int:
+        """Copy the emitted action report into the test capture.
+
+        :param result: Workflow report mapping emitted by the action adapter.
+        :param _args: Command arguments accepted but unused by this fake emitter.
+        :returns: Successful command exit code.
+        """
+        if not isinstance(result, Mapping):
+            pytest.fail("workflow emitter received a non-mapping result")
+        captured.update(result)
         return 0
 
     monkeypatch.setattr(WORKFLOWS, "emit_result", emit)
@@ -507,9 +672,14 @@ def _captured_report(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
 
 
 def test_workflow_dry_run_emits_schema_valid_plan_without_constructing_mutations(
-    monkeypatch,
-):
-    """Dry-run computes a bound plan without constructing the callback workflow."""
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Emit a schema-valid dry-run plan without constructing callbacks.
+
+    :param monkeypatch: Pytest fixture replacing preparation and report emission.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     action = _workflow_action(
         target=_workflow_target(
             revision=None,
@@ -539,8 +709,11 @@ def test_workflow_dry_run_emits_schema_valid_plan_without_constructing_mutations
     assert captured["records"] == []
 
 
-def test_plan_callback_stops_before_a_dependent_mutation():
-    """An unconfirmed plan retains its digest and never enters downstream work."""
+def test_plan_callback_stops_before_a_dependent_mutation() -> None:
+    """Construct only auth and confirmation callbacks for an unconfirmed plan.
+    :returns: None; assertions in the body validate the regression.
+    """
+    module = load_module("workflow_plan_toolbox", SCRIPT_ROOT / "toolbox.py")
     action = _workflow_action(
         target=_workflow_target(
             revision="a" * 40,
@@ -548,24 +721,33 @@ def test_plan_callback_stops_before_a_dependent_mutation():
         ),
         source="",
     )
-    action.args.source_image = None
-    mutations: list[str] = []
+    action.args.kind = "toolbox"
+    action.args.timeout = 1800
+    action.spec = Namespace(
+        image_repository="toolbox",
+        image_tag="unit",
+        namespace="unit",
+        app="runner",
+    )
 
-    class Mutation(CALLBACKS.Callback[object, object]):
-        def run(self) -> object:
-            mutations.append("run")
-            return None
+    callbacks = [
+        type(callback).__name__ for callback in module.workflow(action).callbacks
+    ]
 
-    confirm = WORKFLOWS.ConfirmWorkflow(action=action)
-    CALLBACKS.Executor(callbacks=[confirm, Mutation()]).run()
-
-    assert isinstance(confirm.result, dict)
-    assert confirm.result["plan_digest"] == action.fingerprint()
-    assert mutations == []
+    assert callbacks == ["K8SAuth", "HarborAuth", "ConfirmWorkflow"]
+    assert "EnsureNamespace" not in callbacks
+    assert "HarborBuild" not in callbacks
 
 
-def test_workflow_failure_emits_schema_valid_blocked_result(monkeypatch):
-    """Input failure returns the shared blocked result instead of an exception leak."""
+def test_workflow_failure_emits_schema_valid_blocked_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Emit a schema-valid blocked report when input preparation fails.
+
+    :param monkeypatch: Pytest fixture replacing preparation and report emission.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     action = _workflow_action(
         target=_workflow_target(
             revision=None,
@@ -580,6 +762,12 @@ def test_workflow_failure_emits_schema_valid_blocked_result(monkeypatch):
     captured = _captured_report(monkeypatch)
 
     def fail_prepare() -> None:
+        """Simulate an invalid workflow input before callback construction.
+
+        :returns: None; the helper records behavior through its side effects.
+        :raises ValueError: Always, to trigger the blocked result path.
+
+        """
         raise ValueError("unit_input_failure")
 
     monkeypatch.setattr(action, "prepare", fail_prepare)

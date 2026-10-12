@@ -9,10 +9,12 @@ spyroot@gmail.com
 import argparse
 import json
 import sys
+from collections.abc import Sequence
+from typing import Optional
 
 import _bootstrap  # noqa: F401
-from core.catalog import describe, proposition
-from core.cli import MachineArgumentParser, add_log_arguments, log_event
+from lib.python.core.catalog import describe, proposition
+from lib.python.core.cli import MachineArgumentParser, add_log_arguments, log_event
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,12 +45,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     """Expand one node without loading credentials or fetching references.
 
     :param argv: Optional command arguments.
     :returns: Zero on success; two for an unknown node.
-    """
+    :raises SystemExit: If argparse handles help or rejects invalid arguments.
+    :raises ImportError: If YAML output is requested without the YAML dependency.
+    :raises OSError: If the requested log or process output cannot be written.
+    """  # noqa: DOC502 - Argument parsing, YAML import, and output writes can fail.
     args = build_parser().parse_args(argv)
     try:
         data = describe("reference.py") if args.describe else proposition(args.node)

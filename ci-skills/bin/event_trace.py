@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Read a bounded, time-ordered Kubernetes event trace."""
+"""Read a bounded, time-ordered Kubernetes event trace.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 import argparse
 
 import _bootstrap  # noqa: F401
-from core.cli import execute, parser
-from core.collect import collect_events
+from lib.python.core.cli import execute, parser
+from lib.python.core.collect import collect_events
 
 
 # The parser is built by its own function so the declared interface can be
@@ -13,7 +18,10 @@ from core.collect import collect_events
 # several flags as prose, and a text scan cannot tell those apart from the
 # options argparse actually accepts. See tests/test_catalog.py.
 def build_parser() -> argparse.ArgumentParser:
-    """Return this command's parser: the universal tier plus its own options."""
+    """Declare the bounded event window and native object filters.
+
+    :returns: Parser for event time, namespace, object, and text filters.
+    """
     cli = parser("Trace Kubernetes events with native time and object filters.")
     cli.add_argument(
         "--from",
@@ -43,6 +51,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Parse event filters and execute the bounded event collector.
+
+    :returns: Exit code from the shared command executor.
+    """
     return execute(build_parser().parse_args(), collect_events)
 
 

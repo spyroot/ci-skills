@@ -139,7 +139,8 @@
           "github",
           "gitlab",
           "harbor",
-          "kubernetes"
+          "kubernetes",
+          "one caller-selected GitHub or GitLab host"
         ]
       }
     },

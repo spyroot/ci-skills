@@ -1,4 +1,9 @@
-"""Tests for the public repository neutrality gate."""
+"""Tests for the public repository neutrality gate.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -7,19 +12,30 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.python.conftest import REPO_ROOT, forbidden_project_term
+from conftest import REPO_ROOT, forbidden_project_term
 
 NEUTRALITY_TOOL = REPO_ROOT / "tools" / "check_project_neutrality.py"
 
 
 def _init_repo(root: Path) -> None:
-    """Create a temporary Git repository for path and byte scans."""
+    """Initialize a fixture Git repository for neutrality scans.
+
+    :param root: Directory to create and initialize with Git.
+
+    :returns: None; the helper records behavior through its side effects.
+    """
     root.mkdir()
     subprocess.run(["git", "-C", str(root), "init"], check=True, capture_output=True)
 
 
 def _run_neutrality(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run the neutrality checker against a fixture repository."""
+    """Run the public-neutrality checker against a fixture repository.
+
+    :param root: Repository root passed to the checker.
+    :param *args: Positional arguments forwarded to the helper under test.
+    :returns: Child process status and captured text streams.
+
+    """
     return subprocess.run(
         [sys.executable, str(NEUTRALITY_TOOL), "--root", str(root), *args],
         check=False,
@@ -29,8 +45,13 @@ def _run_neutrality(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_neutrality_scan_passes_clean_tracked_and_dot_files(tmp_path):
-    """Clean tracked files and dotfiles produce a PASS result."""
+def test_neutrality_scan_passes_clean_tracked_and_dot_files(tmp_path: Path) -> None:
+    """Require a clean tracked README and dotfile to pass neutrality scanning.
+
+    :param tmp_path: Directory for the isolated fixture repository.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     root = tmp_path / "repo"
     _init_repo(root)
     (root / "README.md").write_text("portable skill\n", encoding="utf-8")
@@ -48,8 +69,13 @@ def test_neutrality_scan_passes_clean_tracked_and_dot_files(tmp_path):
     assert data["violations"] == []
 
 
-def test_neutrality_scan_rejects_marker_in_path_and_file_bytes(tmp_path):
-    """The scan checks both file names and contents, including dotfiles."""
+def test_neutrality_scan_rejects_marker_in_path_and_file_bytes(tmp_path: Path) -> None:
+    """Require both path and dotfile-content markers to fail neutrality.
+
+    :param tmp_path: Directory for the isolated fixture repository.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     marker = forbidden_project_term()
     root = tmp_path / "repo"
     _init_repo(root)
@@ -68,8 +94,10 @@ def test_neutrality_scan_rejects_marker_in_path_and_file_bytes(tmp_path):
     assert ".hidden:content" in data["violations"]
 
 
-def test_neutrality_checker_source_does_not_store_marker_literal():
-    """The checker must not exempt itself by storing the prohibited term."""
+def test_neutrality_checker_source_does_not_store_marker_literal() -> None:
+    """The checker must not exempt itself by storing the prohibited term.
+    :returns: None; assertions in the body validate the regression.
+    """
     source = NEUTRALITY_TOOL.read_text(encoding="utf-8").casefold()
 
     assert forbidden_project_term() not in source

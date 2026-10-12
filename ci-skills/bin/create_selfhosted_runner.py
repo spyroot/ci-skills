@@ -6,20 +6,26 @@ mbayramo@cisco.com
 spyroot@gmail.com
 """
 
+from __future__ import annotations
+
 from argparse import ArgumentParser
+from collections.abc import Sequence
+from typing import Optional
 
 import _bootstrap  # noqa: F401
-from core.action import Executor
-from core.github import GitHubAuth
-from core.github_runner import (
+from lib.python.core.abstract.callbacks import Callbacks
+from lib.python.core.abstract.skill_exector import WorkflowExecutor
+from lib.python.core.delivery_state import DeliveryState
+from lib.python.core.gitlab.github import GitHubAuth
+from lib.python.core.gitlab.github_runner import (
     CreateGitHubRunner,
     DeleteGitHubRunner,
     GitHubRunnerRuntime,
 )
-from core.kubernetes import K8SAuth
-from core.registry_mirror import HarborAuth, HarborPush, PushAction
-from core.runner import DeleteRunner, DeployRunner, PullImage
-from core.toolbox_actions import (
+from lib.python.core.gitlab.gitlab_runner import DeleteRunner, DeployRunner, PullImage
+from lib.python.core.harbor.registry_mirror import HarborAuth, HarborPush, PushAction
+from lib.python.core.kubernetes.kubernetes import K8SAuth
+from lib.python.core.toolbox_actions import (
     ConfirmWorkflow,
     EnsureNamespace,
     HarborBuild,
@@ -36,54 +42,51 @@ def build_parser() -> ArgumentParser:
     return workflow_parser("create_selfhosted_runner")
 
 
-def workflow(action: WorkflowAction) -> Executor:
-    """Connect independent callback outputs into the selected operation.
+def workflow(action: WorkflowAction) -> WorkflowExecutor[DeliveryState]:
+    """Construct the already ordered callbacks for the selected plan or apply mode.
 
-    :param action: Prepared caller inputs and shared target selection.
-    :returns: Executor with authentication preceding every provider operation.
-    """
+    :param action: Prepared runtime target and concrete operation inputs.
+    :returns: Executor sharing one typed state across the declared callback sequence.
+    :raises ValueError: If a callback already belongs to a different workflow state.
+    """  # noqa: DOC502 - Executor construction rejects callbacks bound elsewhere.
     callbacks = [
-        K8SAuth(target=action.target, timeout=action.args.timeout),
-        GitHubAuth(target=action.target, timeout=action.args.timeout),
+        K8SAuth(action.target, action.args.timeout),
+        GitHubAuth(action.target, action.args.timeout),
     ]
     if action.args.action == "delete":
-        callbacks += [
-            ConfirmWorkflow(action=action),
-            DeleteRunner(action=action.runner),
-            DeleteGitHubRunner(action=action.runner),
-        ]
+        callbacks.append(ConfirmWorkflow(action))
+        if action.args.apply:
+            callbacks.extend(
+                (DeleteRunner(action.runner), DeleteGitHubRunner(action.runner))
+            )
     else:
-        auth = HarborAuth(
-            target=action.target,
-            repository=action.spec.image_repository,
-            actions=("pull", "push"),
-            timeout=action.args.timeout,
-        )
-        build = HarborBuild(workflow=action)
-        publish = HarborPush(
-            action=PushAction(
-                action.spec.image_repository, action.spec.image_tag, build
+        callbacks.extend(
+            (
+                HarborAuth(
+                    action.target,
+                    action.repository,
+                    ("pull", "push"),
+                    action.args.timeout,
+                ),
+                ConfirmWorkflow(action),
             )
         )
-        runtime = GitHubRunnerRuntime(action=action.runner)
-        runner = DeployRunner(
-            action=action.runner, image=publish, runtime=runtime, dockerconfig=auth
-        )
-        callbacks += [
-            auth,
-            ConfirmWorkflow(action=action),
-            EnsureNamespace(action=action),
-            build,
-            publish,
-            PullImage(action=action.runner, image=publish, dockerconfig=auth),
-            runtime,
-            runner,
-            CreateGitHubRunner(action=action.runner, deployment=runner),
-        ]
-    return Executor(context=action.context, callbacks=callbacks)
+        if action.args.apply:
+            callbacks.extend(
+                (
+                    EnsureNamespace(action),
+                    HarborBuild(action),
+                    HarborPush(PushAction(action.repository, action.spec.image_tag)),
+                    PullImage(action.runner),
+                    GitHubRunnerRuntime(action.runner),
+                    DeployRunner(action.runner),
+                    CreateGitHubRunner(action.runner),
+                )
+            )
+    return WorkflowExecutor(context=action.context, callbacks=Callbacks(callbacks))
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     """Execute the selected workflow and emit its shared result envelope.
 
     :param argv: Optional command arguments.

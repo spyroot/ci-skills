@@ -1,26 +1,55 @@
-"""Runner plans and recovery use mocked GitLab responses only."""
+"""Runner plans and recovery use mocked GitLab responses only.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, Optional, Union
+
+if TYPE_CHECKING:
+    from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+    from lib.python.core.json_types import JSONValue
 
 import pytest
+from conftest import import_script_module
 
-from tests.python.conftest import import_script_module
-
-ACTION = import_script_module("core.gitlab_actions")
-API = import_script_module("core.gitlab_api")
-RUNNERS = import_script_module("core.gitlab_runners")
+ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
+GITLAB_ACTION = import_script_module("lib.python.core.gitlab.gitlab_action")
+GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
+API = import_script_module("lib.python.core.gitlab.gitlab_api")
+RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
 RUNNER = import_script_module("gitlab_runner")
 
 
-def _list(endpoint):
+def _list(endpoint: str) -> str:
+    """Append the first bounded page query to a runner collection path.
+
+    :param endpoint: Group or project runner endpoint.
+    :returns: Endpoint requesting page one with 100 records.
+    """
     return endpoint + ("&" if "?" in endpoint else "?") + "per_page=100&page=1"
 
 
-def _plan(*, project_ids=None, operation="assign", token_out=None):
+def _plan(
+    *,
+    project_ids: Optional[Sequence[int]] = None,
+    operation: str = "assign",
+    token_out: Optional[str] = None,
+) -> ACTION.ActionPlan:
+    """Build a group runner assignment or create plan.
+
+    :param project_ids: Confirmed group project IDs for assignment.
+    :param operation: Runner assign or create verb.
+    :param token_out: Private one-time token destination for create.
+    :returns: Group-scoped runner action plan.
+    """
     return ACTION.ActionPlan(
         kind="gitlab_runner",
         operation=operation,
@@ -39,30 +68,102 @@ def _plan(*, project_ids=None, operation="assign", token_out=None):
     )
 
 
+def _bound_session(plan: ACTION.ActionPlan) -> BoundGitLabSession:
+    """Create the concrete GitLab session used by CLI recovery tests.
+
+    :param plan: Runner action plan whose target fields identify the session.
+    :returns: Bound session carrying verified skill and credential provenance.
+    """
+    return GITLAB_SESSION.BoundGitLabSession(
+        origin=plan.origin,
+        host="gitlab.example.test",
+        target_kind=plan.target_kind,
+        target_reference=plan.target_reference,
+        target_source=plan.target_source,
+        target_file=Path(plan.target_file),
+        credential_source="env:GITLAB_TOKEN",
+        credential_digest="sha256:unit",
+        execution_host="unit-host",
+        skill={
+            "digest": "unit",
+            "revision": {"value": "a" * 40, "verified": True},
+        },
+        environment={},
+    )
+
+
 class FakeAPI:
-    def __init__(self, responses):
+    """Replay runner creation, deletion, and read-back for recovery tests."""
+
+    def __init__(
+        self,
+        responses: Mapping[tuple[str, str], Sequence[Union[JSONValue, BaseException]]],
+    ):
+        """Copy scripted API response queues and start a call journal.
+
+        :param responses: Method/endpoint mapping to ordered results or errors.
+        """
         self.responses = {key: list(values) for key, values in responses.items()}
         self.calls = []
 
-    def _next(self, method, endpoint, body=None):
+    def _next(
+        self, method: str, endpoint: str, body: Optional[JSONValue] = None
+    ) -> JSONValue:
+        """Record a request and consume its next scripted response.
+
+        :param method: GET, POST, or DELETE verb selecting the queue.
+        :param endpoint: Relative API path selecting the queue.
+        :param body: Create payload recorded with the request.
+        :returns: Next provider response for the selected request.
+        :raises BaseException: Scripted provider failure supplied by the test.
+        """  # noqa: DOC503 - The dynamic fixture exception is raised verbatim.
         self.calls.append((method, endpoint, body))
         value = self.responses[(method, endpoint)].pop(0)
         if isinstance(value, BaseException):
             raise value
         return value
 
-    def get_json(self, session, endpoint):
+    def get_json(self, session: BoundGitLabSession, endpoint: str) -> JSONValue:
+        """Consume a scripted runner GET response.
+
+        :param session: Bound session accepted by the fake API.
+        :param endpoint: Relative runner read endpoint.
+        :returns: Next scripted GET result.
+        """
         return self._next("GET", endpoint)
 
-    def post_json(self, session, endpoint, body):
+    def post_json(
+        self, session: BoundGitLabSession, endpoint: str, body: JSONValue
+    ) -> JSONValue:
+        """Consume a scripted runner POST response.
+
+        :param session: Bound session accepted by the fake API.
+        :param endpoint: Relative runner create endpoint.
+        :param body: Create payload recorded in the call journal.
+        :returns: Next scripted POST result.
+        """
         return self._next("POST", endpoint, body)
 
-    def delete_json(self, session, endpoint):
+    def delete_json(self, session: BoundGitLabSession, endpoint: str) -> JSONValue:
+        """Consume a scripted runner DELETE response.
+
+        :param session: Bound session accepted by the fake API.
+        :param endpoint: Relative runner deletion endpoint.
+        :returns: Next scripted DELETE result.
+        """
         return self._next("DELETE", endpoint)
 
 
 @pytest.mark.parametrize("confirmed", (None, (11,)))
-def test_group_apply_refuses_missing_or_changed_project_set_before_post(confirmed):
+def test_group_apply_refuses_missing_or_changed_project_set_before_post(
+    confirmed: Optional[tuple[int, ...]],
+) -> None:
+    """Reject assignment without matching live group project snapshot.
+
+    :param confirmed: Missing or stale project-ID set supplied to the plan.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     api = FakeAPI(
         {
             ("GET", "runners/7"): [
@@ -82,7 +183,10 @@ def test_group_apply_refuses_missing_or_changed_project_set_before_post(confirme
     assert all(method == "GET" for method, _, _ in api.calls)
 
 
-def test_group_repeat_returns_no_op_with_independent_membership_readback():
+def test_group_repeat_returns_no_op_with_independent_membership_readback() -> None:
+    """Return verified NO_OP for assignments already present without POST.
+    :returns: None; assertions in the body validate the regression.
+    """
     api = FakeAPI(
         {
             ("GET", "runners/7"): [
@@ -116,15 +220,19 @@ def test_group_repeat_returns_no_op_with_independent_membership_readback():
     assert all(method == "GET" for method, _, _ in api.calls)
 
 
-def test_live_plan_cli_binds_group_ids_without_post(monkeypatch, tmp_path, capsys):
+def test_live_plan_cli_binds_group_ids_without_post(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Publish confirmed group IDs and digest from a read-only live plan.
+
+    :param monkeypatch: Pytest fixture replacing target, session, API, and access.
+    :param tmp_path: Unused pytest path fixture; no filesystem effect asserted.
+    :param capsys: Pytest fixture capturing the planned report.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan()
-    session = SimpleNamespace(
-        origin=plan.origin,
-        target_reference=plan.target_reference,
-        credential_source="env:GITLAB_TOKEN",
-        credential_digest="sha256:unit",
-        skill={"digest": "unit"},
-    )
+    session = _bound_session(plan)
     api = FakeAPI(
         {
             (
@@ -134,17 +242,17 @@ def test_live_plan_cli_binds_group_ids_without_post(monkeypatch, tmp_path, capsy
         }
     )
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "resolve_gitlab_target",
         lambda *_args, **_kwargs: (object(), "test"),
     )
-    monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
+    monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
-        ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
     )
-    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda *, timeout: api)
+    monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: api)
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "check_gitlab_operation_access",
         lambda _session, api_client: {
             "status": "PASS",
@@ -177,8 +285,15 @@ def test_live_plan_cli_binds_group_ids_without_post(monkeypatch, tmp_path, capsy
 
 
 def test_runner_token_write_readback_failure_deletes_created_runner(
-    monkeypatch, tmp_path: Path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Delete a created runner if one-time token sink cannot be verified.
+
+    :param monkeypatch: Pytest fixture failing token-file read-back.
+    :param tmp_path: Private lock and token destination directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     token_out = tmp_path / "one-time.token"
     scope = "groups/42/runners"
@@ -195,7 +310,20 @@ def test_runner_token_write_readback_failure_deletes_created_runner(
     )
     original_read = Path.read_text
 
-    def fail_token_read(path, *args, **kwargs):
+    def fail_token_read(
+        path: Path,
+        *args: str,
+        **kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> str:
+        """Fail only the token sink read while forwarding other file reads.
+
+        :param path: Path being read by the runner create workflow.
+        :param *args: Positional arguments forwarded to the helper under test.
+        :param **kwargs: Keyword arguments forwarded to the fake command boundary.
+        :returns: Original reader's text for paths other than the token sink.
+        :raises OSError: Created token file is read back.
+
+        """
         if path == token_out:
             raise OSError("injected readback failure")
         return original_read(path, *args, **kwargs)
@@ -212,7 +340,10 @@ def test_runner_token_write_readback_failure_deletes_created_runner(
     assert any(method == "DELETE" for method, _, _ in api.calls)
 
 
-def test_membership_snapshot_reads_direct_associations_once():
+def test_membership_snapshot_reads_direct_associations_once() -> None:
+    """Read direct runner project associations in one API request.
+    :returns: None; assertions in the body validate the regression.
+    """
     api = FakeAPI(
         {
             ("GET", "runners/7"): [
@@ -225,7 +356,10 @@ def test_membership_snapshot_reads_direct_associations_once():
     assert api.calls == [("GET", "runners/7", None)]
 
 
-def test_group_runner_is_not_accepted_for_project_assignment():
+def test_group_runner_is_not_accepted_for_project_assignment() -> None:
+    """Reject a group-type runner before project assignment writes.
+    :returns: None; assertions in the body validate the regression.
+    """
     api = FakeAPI(
         {("GET", "runners/7"): [{"id": 7, "runner_type": "group_type", "projects": []}]}
     )
@@ -236,7 +370,10 @@ def test_group_runner_is_not_accepted_for_project_assignment():
     assert api.calls == [("GET", "runners/7", None)]
 
 
-def test_runner_create_requires_token_sink_during_offline_plan():
+def test_runner_create_requires_token_sink_during_offline_plan() -> None:
+    """Reject a create plan lacking a private one-time token destination.
+    :returns: None; assertions in the body validate the regression.
+    """
     args = SimpleNamespace(
         action="create",
         description="fresh-runner",
@@ -258,8 +395,16 @@ def test_runner_create_requires_token_sink_during_offline_plan():
     "reason", ("authentication", "authorization", "command_failed")
 )
 def test_terminal_runner_post_failure_clears_pending_and_preserves_reason(
-    reason, monkeypatch, tmp_path: Path
-):
+    reason: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Keep terminal create refusal and clear its pending marker.
+
+    :param reason: Authentication, authorization, or command failure class.
+    :param monkeypatch: Pytest fixture selecting scratch create-lock storage.
+    :param tmp_path: Private lock and token destination directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     token_out = tmp_path / "one-time.token"
     api = FakeAPI(
@@ -275,8 +420,15 @@ def test_terminal_runner_post_failure_clears_pending_and_preserves_reason(
 
 
 def test_malformed_runner_create_response_keeps_uncertain_recovery_marker(
-    monkeypatch, tmp_path: Path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Keep pending recovery marker when create response lacks runner ID.
+
+    :param monkeypatch: Pytest fixture selecting scratch create-lock storage.
+    :param tmp_path: Private lock and token destination directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     token_out = tmp_path / "one-time.token"
     api = FakeAPI(
@@ -298,8 +450,15 @@ def test_malformed_runner_create_response_keeps_uncertain_recovery_marker(
 
 
 def test_absent_runner_after_uncertain_post_requires_separate_retry(
-    monkeypatch, tmp_path: Path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Clear uncertain marker after absence but defer POST to next invocation.
+
+    :param monkeypatch: Pytest fixture selecting scratch create-lock storage.
+    :param tmp_path: Private lock and token destination directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     token_out = tmp_path / "one-time.token"
     scope = "groups/42/runners"
@@ -330,8 +489,15 @@ def test_absent_runner_after_uncertain_post_requires_separate_retry(
 
 
 def test_existing_runner_error_names_manual_recovery_not_missing_command(
-    monkeypatch, tmp_path: Path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Require manual recovery for existing same-description runner before retry.
+
+    :param monkeypatch: Pytest fixture selecting scratch create-lock storage.
+    :param tmp_path: Private lock and token destination directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     token_out = tmp_path / "one-time.token"
     scope = "groups/42/runners"

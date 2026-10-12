@@ -1,7 +1,14 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
+#!/usr/bin/env python3
+"""Validate one exact-commit binary BuildConfig plan.
 
-CI_SKILLS_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-# shellcheck source=ci-skills/lib/bash/automation/binary_build.bash
-source "$CI_SKILLS_ROOT/lib/bash/automation/binary_build.bash"
-ci_binary_build_main "$@"
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
+
+import _bootstrap  # noqa: F401 - installed package import path
+from lib.python.core.read_cli import binary_main
+
+
+if __name__ == "__main__":
+    raise SystemExit(binary_main())

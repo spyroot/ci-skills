@@ -5,6 +5,10 @@ the one that keeps the committed `tools.json` equal to its declaration. Two
 things need proving: `--check` reports staleness without writing anything, and a
 write makes `--check` pass. `tests/test_catalog.py` covers the repository's own
 manifest being current; these cover the tool that makes it so.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -15,13 +19,20 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.python.conftest import REPO_ROOT
+from conftest import REPO_ROOT
 
 TOOL = REPO_ROOT / "tools" / "render_manifest.py"
 MANIFEST = Path("ci-skills") / "tools.json"
 
 
 def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Invoke the manifest generator against a selected scratch root.
+
+    :param root: Repository-shaped directory passed as ``--root``.
+    :param *args: Positional arguments forwarded to the helper under test.
+    :returns: Child process status and captured output.
+
+    """
     return subprocess.run(
         [sys.executable, str(TOOL), "--root", str(root), *args],
         capture_output=True,
@@ -32,28 +43,54 @@ def _run(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _copy_repo(tmp_path: Path) -> Path:
-    """Copy the skill tree and the manifest into a scratch root."""
+    """Copy the installed catalogue surface and manifest into a scratch root.
+
+    :param tmp_path: Pytest directory for a repository-shaped fixture.
+    :returns: Scratch root containing bootstrap, library, and manifest bytes.
+    """
     root = tmp_path / "repo"
+    skill_root = root / "ci-skills"
     (root / MANIFEST.parent).mkdir(parents=True)
+    (skill_root / "bin").mkdir(parents=True)
+    (skill_root / "lib").mkdir(parents=True)
+    shutil.copy2(
+        REPO_ROOT / "ci-skills" / "bin" / "__init__.py",
+        skill_root / "bin" / "__init__.py",
+    )
+    shutil.copy2(
+        REPO_ROOT / "ci-skills" / "bin" / "_bootstrap.py",
+        skill_root / "bin" / "_bootstrap.py",
+    )
+    shutil.copy2(
+        REPO_ROOT / "ci-skills" / "lib" / "__init__.py",
+        skill_root / "lib" / "__init__.py",
+    )
     shutil.copytree(
         REPO_ROOT / "ci-skills" / "lib" / "python",
-        root / "ci-skills" / "lib" / "python",
+        skill_root / "lib" / "python",
         ignore=shutil.ignore_patterns("__pycache__"),
     )
     shutil.copy2(REPO_ROOT / MANIFEST, root / MANIFEST)
     return root
 
 
-def test_check_reports_current_for_the_committed_manifest():
-    """The repository's own manifest must be current, in the tool's own terms."""
+def test_check_reports_current_for_the_committed_manifest() -> None:
+    """The repository's own manifest must be current, in the tool's own terms.
+    :returns: None; assertions in the body validate the regression.
+    """
     result = _run(REPO_ROOT, "--check", "--json")
 
     assert result.returncode == 0
     assert json.loads(result.stdout)["status"] == "CURRENT"
 
 
-def test_check_reports_stale_without_writing_anything(tmp_path):
-    """`--check` is a read: it must not quietly repair what it reports."""
+def test_check_reports_stale_without_writing_anything(tmp_path: Path) -> None:
+    """Require check mode to report a removed command without repairing it.
+
+    :param tmp_path: Directory for the copied and deliberately stale manifest.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     root = _copy_repo(tmp_path)
     mangled = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
     mangled["commands"].pop("event_trace.py")
@@ -67,11 +104,14 @@ def test_check_reports_stale_without_writing_anything(tmp_path):
     assert (root / MANIFEST).read_text(encoding="utf-8") == before
 
 
-def test_a_reindented_manifest_is_stale_rather_than_merely_different(tmp_path):
-    """The tool compares bytes, so the test that guards the repo must too.
+def test_a_reindented_manifest_is_stale_rather_than_merely_different(
+    tmp_path: Path,
+) -> None:
+    """Require byte-level staleness for semantically equal reindentation.
 
-    A hand-reindented manifest parses to the same object. One authority calling
-    that current while the other calls it stale is worse than either rule.
+    :param tmp_path: Directory for the copied manifest with changed formatting.
+
+    :returns: None; assertions in the body validate the regression.
     """
     root = _copy_repo(tmp_path)
     parsed = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
@@ -82,8 +122,13 @@ def test_a_reindented_manifest_is_stale_rather_than_merely_different(tmp_path):
     assert json.loads(_run(root, "--check", "--json").stdout)["status"] == "STALE"
 
 
-def test_rendering_makes_check_pass_and_is_idempotent(tmp_path):
-    """Write, then check, then write again: the second write changes nothing."""
+def test_rendering_makes_check_pass_and_is_idempotent(tmp_path: Path) -> None:
+    """Require first render to write and second render to change nothing.
+
+    :param tmp_path: Directory for a scratch manifest initialized to an empty object.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     root = _copy_repo(tmp_path)
     (root / MANIFEST).write_text("{}\n", encoding="utf-8")
 
@@ -95,8 +140,13 @@ def test_rendering_makes_check_pass_and_is_idempotent(tmp_path):
     assert json.loads(_run(root, "--check", "--json").stdout)["status"] == "CURRENT"
 
 
-def test_a_root_without_the_skill_fails_loudly(tmp_path):
-    """A wrong --root must not render an empty manifest over a real one."""
+def test_a_root_without_the_skill_fails_loudly(tmp_path: Path) -> None:
+    """Require an unrelated root to fail instead of rendering an empty manifest.
+
+    :param tmp_path: Empty directory lacking a catalogue module.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     result = _run(tmp_path, "--check", "--json")
 
     assert result.returncode != 0

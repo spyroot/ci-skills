@@ -13,40 +13,61 @@ committed copy current again.
 Without this, regenerating the manifest means hand-reproducing the serialization
 the test compares against, and the next person edits the generated file instead
 of the declaration.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import sys
+import runpy
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import Optional
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_RELATIVE = Path("ci-skills")
 LIBRARY_RELATIVE = SKILL_RELATIVE / "lib" / "python"
 
 
-def load_catalog(root: Path) -> Any:
-    """Import the catalog module from the skill tree, uninstalled."""
+def load_catalog(root: Path) -> ModuleType:
+    """Import the source catalog directly from a selected skill checkout.
+
+    :param root: Repository root containing the ci-skills library.
+    :returns: Imported catalog module exposing the manifest declaration.
+    :raises FileNotFoundError: If the expected catalog source file is missing.
+    """
+    skill_root = root / SKILL_RELATIVE
     library = root / LIBRARY_RELATIVE
     if not (library / "core" / "catalog.py").is_file():
         raise FileNotFoundError(f"no catalog module under {library}")
-    sys.path.insert(0, str(library))
-    # Imported after sys.path is set up, which is the point of this function.
-    from core import catalog
+    runpy.run_path(str(skill_root / "bin" / "_bootstrap.py"))
+    # Import after the installed package bootstrap selects the skill root.
+    from lib.python.core import catalog
 
     return catalog
 
 
 def render(root: Path) -> str:
-    """Return the manifest exactly as it is written, newline included."""
+    """Serialize the catalog manifest with stable ordering and trailing newline.
+
+    :param root: Repository root containing the catalog declaration.
+    :returns: JSON manifest text exactly as written to tools.json.
+    """
     manifest = load_catalog(root).manifest()
     return json.dumps(manifest, indent=2, sort_keys=True) + "\n"
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Check or update the committed tools manifest from its catalog.
+
+    :param argv: Optional command arguments; defaults to process arguments.
+    :returns: Zero for current or rendered manifest, two for a stale check.
+    """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
     parser.add_argument(

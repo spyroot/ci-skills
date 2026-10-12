@@ -13,8 +13,9 @@ The directory containing this file is the installed skill root. Keep the
 working directory at the calling project root so its `.ci-skills/target.toml`
 can be selected. Run Python entrypoints under `bin/` with Python 3.11 or
 newer; the documented environment uses `conda run -n ci-skills python`.
-Run Bash entrypoints under `bin/` by path. Use these commands for supported
-operations instead of rebuilding them with one-off CLI parsing.
+This includes the extensionless `bin/ci-api` and `bin/ci-binary-build`.
+Use these commands for supported operations instead of rebuilding them with
+one-off CLI parsing.
 
 Diagnose a Kubernetes-backed CI, storage, or network symptom, or act on an
 explicit GitLab request. GitLab operation commands default to an offline
@@ -25,10 +26,10 @@ and returns a plan.
 
 ## 1. Choose the command for the symptom
 
-Run the relevant command from `tools.json` directly. Each command resolves and
-checks only its declared authority: GitLab for a job, or Kubernetes for storage,
-events, Cilium, and Ceph. Its `access` field reports the effective source and
-identity. A Kubernetes-only target needs only `[kubernetes]`; a GitLab-only
+Run the relevant command from `tools.json` directly. Target-backed commands
+resolve only their declared authority: GitLab for a job, or Kubernetes for
+storage, events, Cilium, and Ceph. Diagnostic reports use `access` to report the
+effective source and identity. A Kubernetes-only target needs only `[kubernetes]`; a GitLab-only
 target needs only `[gitlab]`. The selected target file never inherits missing
 tables from a lower tier. For a selected GitLab operation, its command also
 reads back GitLab identity and target before applying a change.
@@ -96,14 +97,19 @@ Routing, in short:
 | physical PCI NIC MTU mismatch across nodes | `k8s_verify_mtu_consistency.py` |
 | Cilium daemon and health on a selected node | `cilium_node.py` |
 | Ceph or RBD kernel messages on that node | `ceph_kernel.py` |
+| a bounded GitHub or GitLab API response | `bin/ci-api get --provider PROVIDER --endpoint PATH` |
+| validate an exact-commit OpenShift build plan | `bin/ci-binary-build` |
 
 ## 3. One target and output interface
 
-Use `<command> --describe` for its exact options. Commands share `--target`,
-`--json`, `--yaml`, `--human`, `--dry-run`, and `--revision`; diagnostic commands
-also accept `--binding` for a project-selected kubeconfig source. Use native
+Use `<command> --describe` for its exact options. Diagnostic commands share
+`--target`, `--json`, `--yaml`, `--human`, `--dry-run`, and `--revision`, and
+accept `--binding` for a project-selected kubeconfig source. Use native
 filters such as `--namespace`, `--node`, or `--last` where the command declares
 them.
+
+`ci-api` and `ci-binary-build` have no `--target` option. Their defaults and
+output contracts are described in section 9.
 
 For a GitLab operation, select the exact project or group in the target file or
 with `--project`/`--group`. Run the action without `--apply` to get a
@@ -141,6 +147,12 @@ one once; many clusters mean the environment variable or a per-project file.
 The common case takes no arguments at all. Output needs no flag either: a
 terminal gets the human summary, a pipe or file gets versioned JSON.
 
+For `ci-api`, resolution starts with `CI_SKILLS_TARGET`, then the project
+file, then the user file. Tests and live smoke can set that environment
+variable to an existing file. Setting the `ci-skills-smoke` environment
+variable selects `ci-skills-smoke.toml` in the project/user directories
+instead of `target.toml`; there is no separate dev-mode switch.
+
 `--binding PATH` or `K8S_ADMIN_DIAGNOSTICS_BINDING` names a project target and
 ordered file, environment, or command sources for its kubeconfig. The receipt
 records the selected source; see the binding protocol before using it.
@@ -168,7 +180,9 @@ pair; pass the job's own interval when correlating a job.
   out of the cluster, not that the read failed. Say "unverified, evidence
   expired".
 
-Exit 0 is `PASS`, `DRY_RUN`, or `PLANNED`; exit 2 is `BLOCKED` or `PARTIAL`.
+For these diagnostic and operation reports, exit 0 is `PASS`, `DRY_RUN`, or
+`PLANNED`; exit 2 is `BLOCKED` or `PARTIAL`. The two read tools retain the
+exit classes in section 9.
 
 ## 5. Correlate, then state your confidence
 
@@ -176,8 +190,9 @@ Correlate by job time, Pod UID, node, claim and event reason. Mark each
 conclusion **confirmed** by direct read-back, **correlated** by matching time
 and identity, or **unverified** when evidence is missing or expired.
 
-Every API report carries the gate that authorized it: `access.profile`, the
-identities, the credential sources, the execution host, and `skill.digest`.
+Diagnostic and GitLab operation reports carry the gate that authorized them:
+`access.profile`, the identities, the credential sources, the execution host,
+and `skill.digest`.
 That digest is identical across every report from one installed copy, and each
 carries a `receipt_sha256` tying it to its gate — cross-check and cite them,
 and several reports become one audit trail.
@@ -191,8 +206,8 @@ and compares its skill tree and digest.
 
 ## 6. Persisting evidence
 
-Nothing is written unless you ask. `--output-dir PATH` writes paired JSON and
-text. For an artifact that will be kept or committed, use `access_check.py
+Nothing is written unless you ask. Where declared, `--output-dir PATH` writes
+paired JSON and text. For an artifact that will be kept or committed, use `access_check.py
 --receipt-out PATH` instead: only that form digests absolute host paths, and
 the captured form names credential locations under someone's home directory.
 Review any artifact before sharing — event messages and job traces can carry
@@ -233,14 +248,28 @@ An incomplete read or cleanup is `BLOCKED` or `PARTIAL`; a real MTU mismatch is
 `PARTIAL` with `physical_mtu_mismatch` and an inspection action. It does not
 change host interfaces or repair networking.
 
-## 9. Use the Bash tools
+## 9. Read APIs and validate binary build plans
 
 `bin/ci-api` performs a bounded GET against a caller-selected GitHub or
-GitLab API endpoint. Supply its exact provider, host, endpoint, and token file
-when the target declares one. It does not resolve `target.toml`; its result is
-separate from an exact-target access receipt. `bin/ci-binary-build` produces
-an exact-commit OpenShift Binary BuildConfig plan and does not change the
-cluster. Both commands expose `--help` and machine-readable output.
+GitLab API endpoint through native `gh` or `glab`. Select the provider and
+relative endpoint; host and token references resolve from the selected
+`target.toml`. `--host` and `--token-file` provide explicit overrides.
+`check --provider PROVIDER` reads authenticated identity. For `get`, use
+`--field` for a dotted JSON field, `--decode-base64` for encoded file content,
+`--lines START:END` for a bounded text slice, and `--paginate` for array pages.
+Its output is the selected provider value, not an access-receipt envelope.
+
+`bin/ci-binary-build` uses Git and PyYAML to validate the caller's BuildConfig,
+source repository, full commit, and commit-label key. It checks the Dockerfile
+at that commit and returns a fingerprinted plan. It does not resolve a cluster
+target, execute a build, or publish an image.
+
+Both are Python entrypoints over shared callbacks. They default to JSON and
+support `--yaml`, `--help`, and catalogue-driven `--describe`. API reads also
+support `--output text`. Exit 0 means success; 64 means invalid arguments,
+65 invalid data, 66 missing input, and 69 a blocked operation. `--dry-run`
+on `ci-api` describes the request without contacting the provider; the binary
+planner always validates local inputs and never executes the build.
 
 For a Ceph network or RBD timeout, start with `ceph_cluster.py` and
 `event_trace.py`, then run the MTU command when physical network consistency

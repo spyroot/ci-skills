@@ -1,19 +1,28 @@
-"""Regression tests for the required validation workflow gates."""
+"""Regression tests for the required validation workflow gates.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import yaml
-
-from tests.python.conftest import REPO_ROOT
+from conftest import REPO_ROOT
 
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
 
 
 def _workflow_text() -> str:
+    """Read the committed GitHub validation workflow for policy assertions.
+
+    :returns: Full UTF-8 workflow source text.
+    :raises OSError: The workflow file cannot be read.
+    """  # noqa: DOC502 - Path.read_text propagates filesystem errors.
     return WORKFLOW.read_text(encoding="utf-8")
 
 
-def test_validate_workflow_runs_required_static_policy_gates():
+def test_validate_workflow_runs_required_static_policy_gates() -> None:
     """The validation workflow calls the shared static entrypoint."""
     text = _workflow_text()
 
@@ -21,14 +30,14 @@ def test_validate_workflow_runs_required_static_policy_gates():
     assert "git diff --check" in text
 
 
-def test_validate_workflow_runs_installed_package_smoke():
+def test_validate_workflow_runs_installed_package_smoke() -> None:
     """The validation workflow runs the isolated installed-package smoke."""
     text = _workflow_text()
 
     assert "tests/python/test_installed_package.py" in text
 
 
-def test_acceptance_evaluator_is_offline_and_unconditional():
+def test_acceptance_evaluator_is_offline_and_unconditional() -> None:
     """GitHub runs the offline evaluator without invoking live publication."""
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     steps = workflow["jobs"]["validate"]["steps"]

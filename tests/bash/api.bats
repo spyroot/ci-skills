@@ -174,7 +174,7 @@ MOCK
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
 [[ ${GH_ENTERPRISE_TOKEN:-} == ci-selected-token ]] || exit 97
-[[ ${GH_TOKEN:-} == ci-selected-token ]] || exit 98
+[[ ! ${GH_TOKEN+x} ]] || exit 98
 [[ ! ${GITHUB_TOKEN+x} && ! ${GITHUB_ENTERPRISE_TOKEN+x} ]] || exit 99
 printf '%s\n' '{"login":"selected"}'
 MOCK

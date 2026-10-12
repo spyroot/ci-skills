@@ -1,24 +1,37 @@
-"""Offline evidence for GitLab-only target, source, and exact-target access."""
+"""Offline evidence for GitLab-only target, source, and exact-target access.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, MutableMapping, MutableSequence
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final, Optional, Union
 
 import pytest
+from conftest import import_script_module
 
-from tests.python.conftest import import_script_module
-
-ACCESS = import_script_module("core.access")
-CLI = import_script_module("core.cli")
-CREDENTIALS = import_script_module("core.credentials")
-TARGET = import_script_module("core.target")
+ACCESS = import_script_module("lib.python.access.access")
+API = import_script_module("lib.python.core.gitlab.gitlab_api")
+CLI = import_script_module("lib.python.core.cli")
+CREDENTIALS = import_script_module("lib.python.access.credentials")
+GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
+TARGET = import_script_module("lib.python.core.target")
 SCRIPT = import_script_module("gitlab_access")
-PROJECT_BINDING = import_script_module("core.project_binding")
+PROJECT_BINDING = import_script_module("lib.python.core.project_binding")
 
 REVISION: Final = "a" * 40
+
+
+if TYPE_CHECKING:
+    from lib.python.core.gitlab.gitlab_api import GlabAPIClient
+    from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+    from lib.python.core.json_types import JSONObject, JSONValue
 
 
 def _target(
@@ -26,9 +39,18 @@ def _target(
     *,
     filename: str = "selected.toml",
     url: str = "https://gitlab.example.test",
-    token_file: str | Path | None = None,
+    token_file: Optional[Union[str, Path]] = None,
     body: str = "",
 ) -> Path:
+    """Write a GitLab target with selected project and credential fields.
+
+    :param tmp_path: Directory receiving the target TOML file.
+    :param filename: Target file basename.
+    :param url: GitLab origin written to the target.
+    :param token_file: Optional token path written to the GitLab section.
+    :param body: Additional GitLab fields or deliberately invalid tables.
+    :returns: Path to the written target file.
+    """
     path = tmp_path / filename
     token = f'token_file = "{token_file}"\n' if token_file else ""
     path.write_text(
@@ -38,7 +60,13 @@ def _target(
     return path
 
 
-def _identity(monkeypatch) -> None:
+def _identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace skill identity lookup with nonsecret digest/revision evidence.
+
+    :param monkeypatch: Pytest fixture replacing the identity resolver.
+
+    :returns: None; the helper records behavior through its side effects.
+    """
     monkeypatch.setattr(
         CREDENTIALS,
         "resolve_skill_identity",
@@ -49,47 +77,144 @@ def _identity(monkeypatch) -> None:
     )
 
 
-def _clear_gitlab_env(monkeypatch) -> None:
+def _clear_gitlab_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove ambient GitLab token candidates before precedence checks.
+
+    :param monkeypatch: Pytest fixture deleting provider token variables.
+
+    :returns: None; the helper records behavior through its side effects.
+    """
     for name in ("GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN", "OAUTH_TOKEN", "CI_JOB_TOKEN"):
         monkeypatch.delenv(name, raising=False)
 
 
 class FakeAPI:
-    def __init__(self, responses: dict[str, object]):
-        self.responses = responses
-        self.calls: list[tuple[object, str]] = []
+    """Return scripted GitLab identity and target reads for access checks."""
 
-    def get_json(self, session, endpoint: str):
+    def __init__(self, responses: Mapping[str, JSONValue]):
+        """Set exact endpoint responses and start a session/endpoint journal.
+
+        :param responses: Relative API paths mapped to fixture JSON results.
+        """
+        self.responses = responses
+        self.calls: MutableSequence[tuple[BoundGitLabSession, str]] = []
+
+    def get_json(self, session: BoundGitLabSession, endpoint: str) -> JSONValue:
+        """Record a selected-session read and return its endpoint fixture.
+
+        :param session: Bound GitLab session whose identity is later asserted.
+        :param endpoint: Exact user or target path requested by the access gate.
+        :returns: JSON fixture for that endpoint.
+        """
         self.calls.append((session, endpoint))
         return self.responses[endpoint]
 
 
-def test_shared_setup_resolves_binds_and_reads_access_once(monkeypatch) -> None:
-    """One shared setup reuses its exact session for the access read-back."""
-    target = object()
-    session = object()
-    api = object()
-    receipt = {
+def test_shared_setup_resolves_binds_and_reads_access_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reuse one target and bound session through resolution, bind, and read.
+
+    :param monkeypatch: Pytest fixture replacing each shared setup operation.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    target = TARGET.GitLabOperationTarget(
+        TARGET.GitLabTarget(
+            url="https://gitlab.example.test",
+            host="gitlab.example.test",
+            project="team/repo",
+        ),
+        Path("/selected/target.toml"),
+    )
+    session = GITLAB_SESSION.BoundGitLabSession(
+        origin="https://gitlab.example.test",
+        host="gitlab.example.test",
+        target_kind="project",
+        target_reference="team/repo",
+        target_source="project",
+        target_file=Path("/selected/target.toml"),
+        credential_source="env:GITLAB_TOKEN",
+        credential_digest="sha256:unit",
+        execution_host="unit-host",
+        skill={"digest": "unit", "revision": {"value": REVISION, "verified": True}},
+        environment={},
+    )
+    api = API.GlabAPIClient()
+    receipt: JSONObject = {
         "status": "PASS",
         "identity": {"id": 17, "username": "operator"},
         "target": {"id": 42, "full_path": "team/repo"},
     }
-    observed: list[tuple[object, ...]] = []
+    observed: MutableSequence[tuple[str, str]] = []
 
-    def resolve(explicit_target, explicit_binding, *, dry_run):
-        observed.append(("resolve", explicit_target, explicit_binding, dry_run))
+    def resolve(
+        explicit_target: Optional[str],
+        explicit_binding: Optional[str],
+        *,
+        dry_run: bool,
+    ) -> tuple[TARGET.GitLabOperationTarget, str]:
+        """Record exact target/binding selection for the shared setup.
+
+        :param explicit_target: Caller-selected target file argument.
+        :param explicit_binding: Caller-selected binding file argument.
+        :param dry_run: Whether setup requested a non-live target resolution.
+        :returns: Fixture target and project source reference.
+        """
+        observed.append(("resolve", f"{explicit_target}:{explicit_binding}:{dry_run}"))
         return target, "project"
 
-    def select(selected, *, project, group):
-        observed.append(("select", selected, project, group))
+    def select(
+        selected: TARGET.GitLabOperationTarget, *, project: str, group: Optional[str]
+    ) -> tuple[str, str]:
+        """Record project/group selection from the resolved target.
+
+        :param selected: Target passed from resolution to scope selection.
+        :param project: Explicit project reference.
+        :param group: Explicit group reference, absent in this case.
+        :returns: Selected project kind and exact reference.
+        """
+        observed.append(("select", f"{selected is target}:{project}:{group}"))
         return "project", "team/repo"
 
-    def bind(selected, **kwargs):
-        observed.append(("bind", selected, kwargs))
+    def bind(
+        selected: TARGET.GitLabOperationTarget,
+        *,
+        target_kind: str,
+        target_reference: str,
+        target_source: str,
+        revision: Optional[str],
+    ) -> BoundGitLabSession:
+        """Record selected scope and return the fixture session.
+
+        :param selected: Target passed to the GitLab binder.
+        :param target_kind: Selected GitLab target kind.
+        :param target_reference: Exact selected project or group reference.
+        :param target_source: Nonsecret source of the selected target.
+        :param revision: Installed skill revision supplied by the caller.
+        :returns: Bound fixture session reused by the access read.
+        """
+        observed.append(
+            (
+                "bind",
+                (
+                    f"{selected is target}:{target_kind}:{target_reference}:"
+                    f"{target_source}:{revision}"
+                ),
+            )
+        )
         return session
 
-    def check(bound_session, *, api_client):
-        observed.append(("access", bound_session, api_client))
+    def check(
+        bound_session: BoundGitLabSession, *, api_client: GlabAPIClient
+    ) -> JSONObject:
+        """Record the access read against the bound session and API client.
+
+        :param bound_session: Session returned by the fake binder.
+        :param api_client: Injected API client passed by the caller.
+        :returns: Passing identity and selected-target receipt.
+        """
+        observed.append(("access", f"{bound_session is session}:{api_client is api}"))
         return receipt
 
     monkeypatch.setattr(CLI, "resolve_gitlab_target", resolve)
@@ -110,46 +235,78 @@ def test_shared_setup_resolves_binds_and_reads_access_once(monkeypatch) -> None:
     assert actual_receipt is receipt
     assert actual_receipt["identity"] == {"id": 17, "username": "operator"}
     assert observed == [
-        ("resolve", "selected.toml", "binding.toml", False),
-        ("select", target, "team/repo", None),
-        (
-            "bind",
-            target,
-            {
-                "target_kind": "project",
-                "target_reference": "team/repo",
-                "target_source": "project",
-                "revision": REVISION,
-            },
-        ),
-        ("access", session, api),
+        ("resolve", "selected.toml:binding.toml:False"),
+        ("select", "True:team/repo:None"),
+        ("bind", f"True:project:team/repo:project:{REVISION}"),
+        ("access", "True:True"),
     ]
 
 
 def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
-    monkeypatch, capsys
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The installed access command delegates live setup without altering receipt data."""
-    session = object()
-    receipt = {
+    """Delegate the live access CLI to shared setup without rewriting receipt.
+
+    :param monkeypatch: Pytest fixture replacing shared setup.
+    :param capsys: Pytest fixture capturing JSON CLI output.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    session = GITLAB_SESSION.BoundGitLabSession(
+        origin="https://gitlab.example.test",
+        host="gitlab.example.test",
+        target_kind="project",
+        target_reference="team/repo",
+        target_source="env:CI_SKILLS_TARGET",
+        target_file=Path("/selected/target.toml"),
+        credential_source="env:GITLAB_TOKEN",
+        credential_digest="sha256:unit",
+        execution_host="unit-host",
+        skill={"digest": "unit", "revision": {"value": REVISION, "verified": True}},
+        environment={},
+    )
+    receipt: JSONObject = {
         "status": "PASS",
         "identity": {"id": 17, "username": "operator"},
         "target": {"id": 42, "full_path": "team/repo"},
         "errors": [],
     }
-    observed: list[tuple[object, ...]] = []
+    observed: MutableSequence[
+        tuple[Optional[str], Optional[str], Mapping[str, Optional[str]]]
+    ] = []
 
-    def setup(explicit_target, explicit_binding, **kwargs):
-        observed.append((explicit_target, explicit_binding, kwargs))
+    def setup(
+        explicit_target: Optional[str],
+        explicit_binding: Optional[str],
+        *,
+        project: Optional[str],
+        group: Optional[str],
+        revision: Optional[str],
+    ) -> tuple[BoundGitLabSession, JSONObject]:
+        """Record CLI selection options and return a passing receipt.
+
+        :param explicit_target: Target path argument passed by the command.
+        :param explicit_binding: Binding path argument passed by the command.
+        :param project: Project override supplied by the command.
+        :param group: Group override supplied by the command.
+        :param revision: Installed skill revision supplied by the command.
+        :returns: Bound fixture session and original access receipt.
+        """
+        observed.append(
+            (
+                explicit_target,
+                explicit_binding,
+                {"project": project, "group": group, "revision": revision},
+            )
+        )
         return session, receipt
 
+    monkeypatch.setenv("CI_SKILLS_TARGET", "selected.toml")
     monkeypatch.setattr(SCRIPT, "setup_gitlab_operation", setup)
 
     result = SCRIPT.main(
         [
             "check",
-            "--target",
-            "selected.toml",
             "--project",
             "team/repo",
             "--revision",
@@ -163,14 +320,23 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
     assert data == receipt
     assert observed == [
         (
-            "selected.toml",
+            None,
             None,
             {"project": "team/repo", "group": None, "revision": REVISION},
         )
     ]
 
 
-def _bound_project(tmp_path, monkeypatch, *, reference: str = "team/repo"):
+def _bound_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, reference: str = "team/repo"
+) -> BoundGitLabSession:
+    """Bind a project target to a selected synthetic token source.
+
+    :param tmp_path: Directory receiving the GitLab target.
+    :param monkeypatch: Pytest fixture selecting the environment token.
+    :param reference: Project path written to the target and bound session.
+    :returns: GitLab session pinned to that project and source.
+    """
     _identity(monkeypatch)
     _clear_gitlab_env(monkeypatch)
     monkeypatch.setenv("GITLAB_TOKEN", "selected-token")
@@ -182,11 +348,19 @@ def _bound_project(tmp_path, monkeypatch, *, reference: str = "team/repo"):
         target,
         target_kind=kind,
         target_reference=selected,
-        target_source="argv:--target",
+        target_source="env:CI_SKILLS_TARGET",
     )
 
 
-def test_gitlab_only_target_does_not_weaken_full_diagnostic_target(tmp_path):
+def test_gitlab_only_target_does_not_weaken_full_diagnostic_target(
+    tmp_path: Path,
+) -> None:
+    """Accept GitLab-only loading while keeping full diagnostic target strict.
+
+    :param tmp_path: Directory receiving a GitLab-only target.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     path = _target(tmp_path, body='project = "team/repo"\n')
     selected = TARGET.load_gitlab_target(path)
     assert selected.gitlab.project == "team/repo"
@@ -194,7 +368,15 @@ def test_gitlab_only_target_does_not_weaken_full_diagnostic_target(tmp_path):
         TARGET.load_target(path)
 
 
-def test_full_target_can_supply_project_without_changing_diagnostic_gate(tmp_path):
+def test_full_target_can_supply_project_without_changing_diagnostic_gate(
+    tmp_path: Path,
+) -> None:
+    """Read a project from a complete target through both target loaders.
+
+    :param tmp_path: Directory receiving a three-surface target.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     path = tmp_path / "full.toml"
     path.write_text(
         '[github]\nhost = "github.example.test"\nrepository = "unit/repo"\n'
@@ -207,7 +389,15 @@ def test_full_target_can_supply_project_without_changing_diagnostic_gate(tmp_pat
     assert TARGET.load_gitlab_target(path).gitlab.project == "team/repo"
 
 
-def test_gitlab_access_ignores_unavailable_unrelated_kubernetes_settings(tmp_path):
+def test_gitlab_access_ignores_unavailable_unrelated_kubernetes_settings(
+    tmp_path: Path,
+) -> None:
+    """Keep GitLab-only access independent of invalid Kubernetes paths.
+
+    :param tmp_path: Directory receiving a mixed target with missing kubeconfig.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     path = tmp_path / "mixed.toml"
     path.write_text(
         '[github]\nhost = "github.example.test"\nrepository = "unit/repo"\n'
@@ -224,13 +414,25 @@ def test_gitlab_access_ignores_unavailable_unrelated_kubernetes_settings(tmp_pat
     assert selected.source_file == path.resolve()
 
 
-def test_gitlab_access_rejects_unknown_top_level_table(tmp_path):
+def test_gitlab_access_rejects_unknown_top_level_table(tmp_path: Path) -> None:
+    """Reject undeclared target tables even in GitLab-only mode.
+
+    :param tmp_path: Directory receiving the malformed target.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     path = _target(tmp_path, body='project = "team/repo"\n[other]\nvalue = "x"\n')
     with pytest.raises(TARGET.TargetError, match="without extra tables"):
         TARGET.load_gitlab_target(path)
 
 
-def test_explicit_project_overrides_a_selected_default_group(tmp_path):
+def test_explicit_project_overrides_a_selected_default_group(tmp_path: Path) -> None:
+    """Prefer an explicit project argument to a default group in target.
+
+    :param tmp_path: Directory receiving a group-default target.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = TARGET.load_gitlab_target(_target(tmp_path, body='group = "team"\n'))
 
     assert TARGET.select_gitlab_reference(target, project="team/repo") == (
@@ -240,8 +442,15 @@ def test_explicit_project_overrides_a_selected_default_group(tmp_path):
 
 
 def test_relative_file_source_overrides_ambient_tokens_and_reads_exact_project(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resolve a relative token file and reuse it for exact project access.
+
+    :param tmp_path: Scratch target, file token, and unrelated cwd.
+    :param monkeypatch: Pytest fixture setting ambient tokens and cwd.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target_parent = tmp_path / "operator-config"
     target_parent.mkdir()
     token_file = target_parent / "token"
@@ -261,7 +470,7 @@ def test_relative_file_source_overrides_ambient_tokens_and_reads_exact_project(
         target,
         target_kind=kind,
         target_reference=reference,
-        target_source="argv:--target",
+        target_source="env:CI_SKILLS_TARGET",
     )
     assert session.credential_source == f"file:{token_file.resolve()}"
     assert session.credential_digest == (
@@ -320,8 +529,17 @@ def test_relative_file_source_overrides_ambient_tokens_and_reads_exact_project(
     ],
 )
 def test_wrong_project_or_host_blocks_with_sanitized_evidence(
-    tmp_path, monkeypatch, project, reason
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, project: JSONObject, reason: str
+) -> None:
+    """Block a project path or origin mismatch without leaking token data.
+
+    :param tmp_path: Directory receiving the selected project target.
+    :param monkeypatch: Pytest fixture selecting the bound token.
+    :param project: Provider project record with mismatched path or host.
+    :param reason: Expected structured target mismatch reason.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     session = _bound_project(tmp_path, monkeypatch)
     api = FakeAPI(
         {
@@ -340,7 +558,16 @@ def test_wrong_project_or_host_blocks_with_sanitized_evidence(
     assert "selected-token" not in json.dumps(receipt)
 
 
-def test_selected_missing_file_never_falls_back_to_ambient_token(tmp_path, monkeypatch):
+def test_selected_missing_file_never_falls_back_to_ambient_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail closed on a selected missing token file despite ambient token.
+
+    :param tmp_path: Directory holding the target and absent token path.
+    :param monkeypatch: Pytest fixture setting a lower-priority env token.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     _identity(monkeypatch)
     monkeypatch.setenv("GITLAB_TOKEN", "ambient-token")
     target = TARGET.load_gitlab_target(
@@ -353,11 +580,20 @@ def test_selected_missing_file_never_falls_back_to_ambient_token(tmp_path, monke
             target,
             target_kind="project",
             target_reference="team/repo",
-            target_source="argv:--target",
+            target_source="env:CI_SKILLS_TARGET",
         )
 
 
-def test_environment_source_is_pinned_by_precedence(tmp_path, monkeypatch):
+def test_environment_source_is_pinned_by_precedence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Choose GITLAB_TOKEN before lower-priority ambient candidates.
+
+    :param tmp_path: Directory receiving a project target.
+    :param monkeypatch: Pytest fixture setting competing token variables.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     _identity(monkeypatch)
     monkeypatch.setenv("GITLAB_TOKEN", "first-token")
     monkeypatch.setenv("GITLAB_ACCESS_TOKEN", "second-token")
@@ -368,14 +604,23 @@ def test_environment_source_is_pinned_by_precedence(tmp_path, monkeypatch):
         target,
         target_kind="project",
         target_reference="team/repo",
-        target_source="argv:--target",
+        target_source="env:CI_SKILLS_TARGET",
     )
     assert session.credential_source == "env:GITLAB_TOKEN"
     assert session.environment["GITLAB_TOKEN"] == "first-token"
     assert session.environment["GITLAB_ACCESS_TOKEN"] is None
 
 
-def test_bound_session_records_effective_source_and_exact_target(tmp_path, monkeypatch):
+def test_bound_session_records_effective_source_and_exact_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Record selected group, host, target path, and effective token source.
+
+    :param tmp_path: Directory receiving a group target.
+    :param monkeypatch: Pytest fixture selecting GITLAB_ACCESS_TOKEN.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     _identity(monkeypatch)
     _clear_gitlab_env(monkeypatch)
     monkeypatch.setenv("GITLAB_ACCESS_TOKEN", "selected-token")
@@ -403,7 +648,16 @@ def test_bound_session_records_effective_source_and_exact_target(tmp_path, monke
     assert "selected-token" not in repr(session)
 
 
-def test_group_id_readback_requires_the_selected_numeric_id(tmp_path, monkeypatch):
+def test_group_id_readback_requires_the_selected_numeric_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Block a group read-back whose numeric ID differs from selection.
+
+    :param tmp_path: Directory receiving the group-ID target.
+    :param monkeypatch: Pytest fixture selecting the bound token.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     _identity(monkeypatch)
     _clear_gitlab_env(monkeypatch)
     monkeypatch.setenv("GITLAB_TOKEN", "selected-token")
@@ -413,7 +667,7 @@ def test_group_id_readback_requires_the_selected_numeric_id(tmp_path, monkeypatc
         target,
         target_kind=kind,
         target_reference=reference,
-        target_source="argv:--target",
+        target_source="env:CI_SKILLS_TARGET",
     )
     api = FakeAPI(
         {
@@ -435,8 +689,15 @@ def test_group_id_readback_requires_the_selected_numeric_id(tmp_path, monkeypatc
 
 
 def test_malformed_user_response_blocks_with_structured_safe_reason(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Block malformed user identity before making target claims.
+
+    :param tmp_path: Directory receiving the selected project target.
+    :param monkeypatch: Pytest fixture selecting the bound token.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     session = _bound_project(tmp_path, monkeypatch)
     receipt = ACCESS.check_gitlab_operation_access(
         session,
@@ -454,7 +715,16 @@ def test_malformed_user_response_blocks_with_structured_safe_reason(
     assert "selected-token" not in json.dumps(receipt)
 
 
-def test_malformed_target_response_blocks_after_identity_read(tmp_path, monkeypatch):
+def test_malformed_target_response_blocks_after_identity_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retain verified identity but block malformed project read-back.
+
+    :param tmp_path: Directory receiving the selected project target.
+    :param monkeypatch: Pytest fixture selecting the bound token.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     session = _bound_project(tmp_path, monkeypatch)
     receipt = ACCESS.check_gitlab_operation_access(
         session,
@@ -480,15 +750,24 @@ def test_malformed_target_response_blocks_after_identity_read(tmp_path, monkeypa
 
 
 def test_cli_dry_run_never_binds_credentials_or_calls_api(
-    tmp_path, monkeypatch, capsys
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Publish GitLab access intent without binding credentials or API calls.
+
+    :param tmp_path: Directory receiving the project target.
+    :param monkeypatch: Pytest fixture rejecting shared live setup.
+    :param capsys: Pytest fixture capturing dry-run JSON output.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     path = _target(tmp_path, body='project = "team/repo"\n')
+    monkeypatch.setenv("CI_SKILLS_TARGET", str(path))
     monkeypatch.setattr(
         SCRIPT,
         "setup_gitlab_operation",
         lambda *_args, **_kwargs: pytest.fail("dry-run called shared live setup"),
     )
-    result = SCRIPT.main(["check", "--target", str(path), "--dry-run", "--json"])
+    result = SCRIPT.main(["check", "--dry-run", "--json"])
     data = json.loads(capsys.readouterr().out)
     assert result == 0
     assert data["status"] == "DRY_RUN"
@@ -496,8 +775,12 @@ def test_cli_dry_run_never_binds_credentials_or_calls_api(
     assert data["credential_source"] is None
 
 
-def _smoke_target_layout(tmp_path: Path) -> dict[str, object]:
-    """Build one project/home layout for both normal and smoke selections."""
+def _smoke_target_layout(tmp_path: Path) -> MutableMapping[str, JSONValue]:
+    """Create distinct project and home normal/smoke target files.
+
+    :param tmp_path: Scratch root for selected and fallback target tiers.
+    :returns: Layout paths and expected identity/target API records.
+    """
     project = tmp_path / "project"
     project_target_dir = project / ".ci-skills"
     project_target_dir.mkdir(parents=True)
@@ -549,9 +832,20 @@ def _smoke_target_layout(tmp_path: Path) -> dict[str, object]:
 
 @pytest.mark.parametrize("smoke", (False, True), ids=("default", "smoke"))
 def test_smoke_environment_switches_filename_without_fallback_or_provider_drift(
-    tmp_path, monkeypatch, capsys, smoke
-):
-    """The same project chooses target.toml or smoke.toml only by smoke mode."""
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    smoke: bool,
+) -> None:
+    """Select project target or smoke filename without fallback on failure.
+
+    :param tmp_path: Scratch project/home normal and smoke target files.
+    :param monkeypatch: Pytest fixture setting cwd, HOME, and smoke switch.
+    :param capsys: Pytest fixture capturing structured access output.
+    :param smoke: Whether the smoke target filename is selected.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     layout = _smoke_target_layout(tmp_path)
     _identity(monkeypatch)
     monkeypatch.chdir(layout["project"])
@@ -609,8 +903,16 @@ def test_smoke_environment_switches_filename_without_fallback_or_provider_drift(
 
 
 def test_access_check_uses_user_gitlab_target_without_selector(
-    tmp_path, monkeypatch, capsys
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Select the home GitLab target when project and env tiers are absent.
+
+    :param tmp_path: Scratch home target and unrelated project cwd.
+    :param monkeypatch: Pytest fixture setting HOME and clearing selector.
+    :param capsys: Pytest fixture capturing dry-run output.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     home = tmp_path / "home"
     selected = home / ".ci-skills" / "target.toml"
     selected.parent.mkdir(parents=True)
@@ -636,7 +938,17 @@ def test_access_check_uses_user_gitlab_target_without_selector(
     assert data["credential_source"] is None
 
 
-def test_live_receipt_is_portable_redacted_and_parseable(tmp_path, monkeypatch, capsys):
+def test_live_receipt_is_portable_redacted_and_parseable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Write a portable GitLab access receipt without local path/token leaks.
+
+    :param tmp_path: Scratch target, file token, and receipt destination.
+    :param monkeypatch: Pytest fixture selecting token and API client double.
+    :param capsys: Pytest fixture capturing the displayed live receipt.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     token_file = tmp_path / "credential"
     token_file.write_text("file-token\n", encoding="utf-8")
     target_file = _target(
@@ -666,11 +978,10 @@ def test_live_receipt_is_portable_redacted_and_parseable(tmp_path, monkeypatch, 
             session, api_client=api_client or api
         ),
     )
+    monkeypatch.setenv("CI_SKILLS_TARGET", str(target_file))
     result = SCRIPT.main(
         [
             "check",
-            "--target",
-            str(target_file),
             "--receipt-out",
             str(receipt_file),
             "--json",

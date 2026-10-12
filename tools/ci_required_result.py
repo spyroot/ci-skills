@@ -14,15 +14,37 @@ from __future__ import annotations
 
 import argparse
 import json
+import runpy
 import sys
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Final, TypeAlias, Union
 
 import jsonschema
 import yaml
 
 ROOT: Final = Path(__file__).resolve().parents[1]
+SKILL_ROOT: Final = ROOT / "ci-skills"
+runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
+
+from lib.python.core.cli_api import response_decoder
+from lib.python.core.json_types import JSONObject, is_json_value, json_object
+
+YAMLValue: TypeAlias = Union[
+    str,
+    int,
+    float,
+    bool,
+    None,
+    date,
+    datetime,
+    Sequence["YAMLValue"],
+    Mapping[Union[str, int, float, bool], "YAMLValue"],
+]
+YAMLObject: TypeAlias = Mapping[Union[str, int, float, bool], YAMLValue]
+
 SCHEMA_VERSION: Final = "1.0"
 RESULT_SCHEMAS: Final = {
     "ci": ROOT / "schemas" / "ci-result.schema.json",
@@ -34,40 +56,56 @@ class EvidenceError(RuntimeError):
     """Required evidence is missing, malformed, or stale."""
 
 
-def _load_mapping(path: Path, *, yaml_input: bool = False) -> dict[str, Any]:
-    """Load one mapping from JSON or YAML.
+def _load_mapping(path: Path) -> JSONObject:
+    """Load one JSON evidence object with the shared decoding rules.
 
-    :param path: Input document.
-    :param yaml_input: Parse YAML when true, otherwise JSON.
-    :returns: Parsed mapping.
-    :raises EvidenceError: The document is unreadable or is not a mapping.
+    :param path: UTF-8 JSON evidence or schema document.
+    :returns: Read-only decoded object with unique keys and finite values.
+    :raises EvidenceError: If bytes are unreadable, invalid JSON, or the root is not an object.
     """
     try:
-        with path.open(encoding="utf-8") as handle:
-            value = yaml.safe_load(handle) if yaml_input else json.load(handle)
-    except (OSError, ValueError, yaml.YAMLError) as exc:
+        value = response_decoder().decode(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:
         raise EvidenceError(f"unreadable_evidence:{path}") from exc
-    if not isinstance(value, dict):
+    if not isinstance(value, Mapping):
         raise EvidenceError(f"evidence_not_mapping:{path}")
     return value
 
 
-def _inventory(path: Path) -> dict[str, dict[str, Any]]:
+def _load_yaml_mapping(path: Path) -> YAMLObject:
+    """Read a YAML inventory, binding, or workflow without changing YAML scalar rules.
+
+    :param path: UTF-8 configuration document.
+    :returns: Read-only YAML mapping, retaining date values and Boolean keys such as on.
+    :raises EvidenceError: If the file is unreadable, YAML is malformed, or the root is not a mapping.
+    """
+    try:
+        value: YAMLValue = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise EvidenceError(f"unreadable_evidence:{path}") from exc
+    if not isinstance(value, Mapping):
+        raise EvidenceError(f"evidence_not_mapping:{path}")
+    return value
+
+
+def _inventory(path: Path) -> Mapping[str, JSONObject]:
     """Return smoke records indexed by unique required job name.
 
     :param path: Closed-world smoke inventory.
     :returns: Job records by job name.
     :raises EvidenceError: Inventory shape or job names are invalid.
     """
-    value = _load_mapping(path, yaml_input=True)
+    value = _load_yaml_mapping(path)
     records = value.get("jobs")
     if value.get("schemaVersion") != SCHEMA_VERSION or not isinstance(records, list):
         raise EvidenceError("smoke_inventory_invalid")
-    indexed: dict[str, dict[str, Any]] = {}
+    indexed: MutableMapping[str, JSONObject] = {}
     for record in records:
-        if not isinstance(record, dict) or not isinstance(record.get("job"), str):
+        if not is_json_value(record) or not isinstance(record, Mapping):
             raise EvidenceError("smoke_inventory_job_invalid")
-        name = record["job"]
+        name = record.get("job")
+        if not isinstance(name, str):
+            raise EvidenceError("smoke_inventory_job_invalid")
         if name in indexed:
             raise EvidenceError(f"smoke_inventory_duplicate:{name}")
         indexed[name] = record
@@ -86,7 +124,7 @@ def _workflow_jobs(path: Path) -> set[str]:
     :returns: Declared job identifiers.
     :raises EvidenceError: The workflow has no job mapping.
     """
-    jobs = _load_mapping(path, yaml_input=True).get("jobs")
+    jobs = _load_yaml_mapping(path).get("jobs")
     if not isinstance(jobs, dict) or not all(isinstance(name, str) for name in jobs):
         raise EvidenceError("workflow_jobs_invalid")
     return set(jobs)
@@ -99,25 +137,24 @@ def _standards_revision(path: Path) -> str:
     :returns: Forty-character standards commit.
     :raises EvidenceError: The binding does not declare an exact revision.
     """
-    revision = (
-        _load_mapping(path, yaml_input=True)
-        .get("spec", {})
-        .get("source", {})
-        .get("revision")
-    )
+    spec = _load_yaml_mapping(path).get("spec", {})
+    source = spec.get("source", {}) if isinstance(spec, Mapping) else {}
+    revision = source.get("revision") if isinstance(source, Mapping) else None
     if not isinstance(revision, str) or len(revision) != 40:
         raise EvidenceError("standards_revision_invalid")
     return revision
 
 
-def _skip_count(junit_paths: list[Path], tap_paths: list[Path]) -> int:
+def _skip_count(junit_paths: Sequence[Path], tap_paths: Sequence[Path]) -> int:
     """Count skipped required tests in JUnit and TAP evidence.
 
     :param junit_paths: JUnit XML files produced by pytest.
     :param tap_paths: TAP files produced by Bats.
     :returns: Total skipped test count.
-    :raises EvidenceError: A declared test-evidence file is unreadable.
-    """
+    :raises EvidenceError: If a declared XML/TAP evidence file cannot be read or parsed.
+    :raises ValueError: If an XML skipped count is not a decimal integer.
+    :raises UnicodeError: If TAP evidence is not valid UTF-8.
+    """  # noqa: DOC503 - Integer conversion and TAP decoding propagate their failures.
     skipped = 0
     for path in junit_paths:
         try:
@@ -140,13 +177,14 @@ def _skip_count(junit_paths: list[Path], tap_paths: list[Path]) -> int:
     return skipped
 
 
-def _validate(kind: str, value: dict[str, Any]) -> None:
+def _validate(kind: str, value: JSONObject) -> None:
     """Validate one result against its project schema.
 
     :param kind: Result kind, ``ci`` or ``smoke``.
     :param value: Result mapping.
-    :raises EvidenceError: The schema or result is invalid.
-    """
+    :raises EvidenceError: If schema bytes are unreadable or the result violates its schema.
+    :raises KeyError: If kind is neither ci nor smoke.
+    """  # noqa: DOC503 - Schema selection and validator construction can fail.
     schema = _load_mapping(RESULT_SCHEMAS[kind])
     try:
         jsonschema.Draft202012Validator(schema).validate(value)
@@ -154,12 +192,15 @@ def _validate(kind: str, value: dict[str, Any]) -> None:
         raise EvidenceError(f"{kind}_schema_invalid:{exc.json_path}") from exc
 
 
-def _write(path: Path, value: dict[str, Any]) -> None:
+def _write(path: Path, value: JSONObject) -> None:
     """Write deterministic JSON after schema validation.
 
     :param path: Destination path.
     :param value: JSON result.
-    """
+    :raises OSError: If a directory, temporary file, or atomic replacement cannot be written.
+    :raises TypeError: If a supplied value cannot be represented as JSON.
+    :raises ValueError: If supplied containers form a cycle.
+    """  # noqa: DOC502 - Filesystem writes and JSON serialization propagate failures.
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
@@ -168,28 +209,15 @@ def _write(path: Path, value: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-def _shared_cli() -> tuple[Any, Any]:
-    """Return the repository's common argument and logging helpers.
-
-    :returns: ``add_log_arguments`` and ``log_event`` from the shared CLI module.
-    """
-    library = ROOT / "ci-skills" / "lib" / "python"
-    if str(library) not in sys.path:
-        sys.path.insert(0, str(library))
-    from core.cli import add_log_arguments, log_event
-
-    return add_log_arguments, log_event
-
-
 def _artifact_digest() -> str:
     """Return the candidate skill-tree digest using shared provenance code.
 
     :returns: SHA-256-prefixed deterministic artifact digest.
-    """
-    library = ROOT / "ci-skills" / "lib" / "python"
-    if str(library) not in sys.path:
-        sys.path.insert(0, str(library))
-    from core.provenance import tree_digest
+    :raises ImportError: If the installed provenance module cannot be loaded.
+    :raises OSError: If a selected skill-tree file cannot be read.
+    :raises ValueError: If the skill tree is missing or contains no source files.
+    """  # noqa: DOC502 - The provenance import and tree_digest propagate failures.
+    from lib.python.core.provenance import tree_digest
 
     return f"sha256:{tree_digest(ROOT / 'ci-skills')['digest']}"
 
@@ -199,8 +227,11 @@ def emit(args: argparse.Namespace) -> int:
 
     :param args: Parsed emit arguments.
     :returns: Zero for valid evidence, one when the job result must fail.
-    :raises EvidenceError: Inventory or evidence inputs are invalid.
-    """
+    :raises EvidenceError: If inventory, steps, schemas, or evidence inputs are invalid.
+    :raises OSError: If source digest files or output evidence cannot be read/written.
+    :raises ValueError: If a test skip count or source digest cannot be computed.
+    :raises UnicodeError: If TAP input is not valid UTF-8.
+    """  # noqa: DOC503 - Evidence, schema, digest, and output helpers propagate failures.
     inventory = _inventory(args.inventory)
     if args.job not in inventory:
         raise EvidenceError(f"job_not_in_smoke_inventory:{args.job}")
@@ -208,16 +239,18 @@ def emit(args: argparse.Namespace) -> int:
     required_steps = record.get("requiredSteps")
     smoke_steps = record.get("smokeChecks")
     try:
-        outcomes = json.loads(args.step_results)
-    except json.JSONDecodeError as exc:
+        outcomes = response_decoder().decode(args.step_results)
+    except (ValueError, RecursionError) as exc:
         raise EvidenceError("step_results_invalid") from exc
     if not isinstance(required_steps, list) or not all(
         isinstance(item, str) for item in required_steps
     ):
         raise EvidenceError(f"required_steps_invalid:{args.job}")
-    if not isinstance(smoke_steps, dict):
+    if not isinstance(smoke_steps, Mapping) or any(
+        not isinstance(step, str) for step in smoke_steps.values()
+    ):
         raise EvidenceError(f"smoke_checks_invalid:{args.job}")
-    if not isinstance(outcomes, dict) or any(
+    if not isinstance(outcomes, Mapping) or any(
         not isinstance(key, str) or not isinstance(value, str)
         for key, value in outcomes.items()
     ):
@@ -279,8 +312,12 @@ def aggregate(args: argparse.Namespace) -> int:
 
     :param args: Parsed aggregate arguments.
     :returns: Zero only when every inventoried result passes.
-    :raises EvidenceError: Required evidence is invalid.
-    """
+    :raises EvidenceError: If required inventory, identity, or result evidence is invalid.
+    :raises OSError: If candidate source files cannot be read for their digest.
+    :raises ValueError: If the candidate skill tree cannot be fingerprinted.
+    :raises KeyError: If a validated result lacks required cleanup fields.
+    :raises TypeError: If validated cleanup or checks fields are not objects.
+    """  # noqa: DOC503 - Validated-field reads and evidence helpers propagate failures.
     inventory = _inventory(args.inventory)
     if args.job not in inventory or not inventory[args.job].get("aggregationJob"):
         raise EvidenceError(f"aggregation_job_invalid:{args.job}")
@@ -289,8 +326,8 @@ def aggregate(args: argparse.Namespace) -> int:
     standards_revision = _standards_revision(args.binding)
     artifact_digest = _artifact_digest()
     expected_jobs = set(inventory) - {args.job}
-    observed_jobs: dict[str, set[str]] = {}
-    failures: list[str] = []
+    observed_jobs: MutableMapping[str, set[str]] = {}
+    failures: MutableSequence[str] = []
     for kind in ("ci", "smoke"):
         directory = args.input_dir / kind
         try:
@@ -323,9 +360,9 @@ def aggregate(args: argparse.Namespace) -> int:
             if value.get("status") != "passed":
                 failures.append(f"{kind}:{job}:not_passed")
             cleanup_status = (
-                value["cleanup"]["status"]
+                json_object(value["cleanup"])["status"]
                 if kind == "ci"
-                else value["checks"]["cleanup"]
+                else json_object(value["checks"])["cleanup"]
             )
             if cleanup_status != "passed":
                 failures.append(f"{kind}:{job}:cleanup_not_passed")
@@ -340,8 +377,10 @@ def parser() -> argparse.ArgumentParser:
     """Build the command-line parser.
 
     :returns: Configured parser.
-    """
-    add_log_arguments, _ = _shared_cli()
+    :raises ImportError: If shared CLI helpers or their dependencies are unavailable.
+    """  # noqa: DOC502 - Loading shared CLI helpers can raise ImportError.
+    from lib.python.core.cli import add_log_arguments
+
     command = argparse.ArgumentParser(
         description="Emit or aggregate required CI and smoke evidence.",
         epilog=(
@@ -379,11 +418,19 @@ def parser() -> argparse.ArgumentParser:
 def main() -> int:
     """Run evidence emission or aggregation.
 
-    :returns: Zero on success, one for a rejected result, or two for invalid inputs.
-    """
+    :returns: Zero on success, one for a rejected result, or two for invalid evidence.
+    :raises SystemExit: If arguments are invalid or help is requested.
+    :raises ImportError: If shared CLI or provenance helpers cannot be loaded.
+    :raises OSError: If source, evidence, or log files cannot be read/written.
+    :raises ValueError: If skip counts or candidate source cannot be evaluated.
+    :raises UnicodeError: If test evidence cannot be decoded as text.
+    :raises KeyError: If validated evidence lacks a required cleanup field.
+    :raises TypeError: If validated cleanup or checks fields are not objects.
+    """  # noqa: DOC502 - Parsing, evidence helpers, and output propagate failures.
     args = parser().parse_args()
     args.action = args.mode
-    _, log_event = _shared_cli()
+    from lib.python.core.cli import log_event
+
     log_event(args, "ci_required_result", "start", "PASS")
     try:
         status = emit(args) if args.mode == "emit" else aggregate(args)

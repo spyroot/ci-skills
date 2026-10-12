@@ -7,13 +7,19 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from copy import deepcopy
+from collections.abc import Iterable, Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Final
+from typing import Final, Optional
 
-from .kubernetes import KubernetesError, KubernetesService
-from .status import APPLIED, NO_OP
+from lib.python.core.json_types import (
+    JSONObject,
+    JSONValue,
+    copy_json,
+    copy_json_object,
+)
+from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
+from lib.python.core.kubernetes.objects import KubernetesObject
+from lib.python.sys.status import APPLIED, NO_OP
 
 MANAGER_LABEL: Final = "app.kubernetes.io/managed-by"
 MANAGER_VALUE: Final = "ci-skills"
@@ -29,7 +35,7 @@ RESTORABLE_METADATA: Final = frozenset(
 )
 
 
-def matches(expected: Any, observed: Any) -> bool:
+def matches(expected: JSONValue, observed: JSONValue) -> bool:
     """Compare requested fields while allowing provider-defaulted object keys.
 
     :param expected: Exact requested values owned by this operation.
@@ -42,9 +48,10 @@ def matches(expected: Any, observed: Any) -> bool:
             matches(value, observed[key]) if key in observed else value == []
             for key, value in expected.items()
         )
-    if isinstance(expected, list):
+    if isinstance(expected, Sequence) and not isinstance(expected, str):
         return (
-            isinstance(observed, list)
+            isinstance(observed, Sequence)
+            and not isinstance(observed, str)
             and len(expected) == len(observed)
             and all(
                 matches(left, right)
@@ -54,28 +61,30 @@ def matches(expected: Any, observed: Any) -> bool:
     return expected == observed
 
 
-def restorable(document: Mapping[str, Any]) -> dict[str, Any]:
+def restorable(document: JSONObject) -> MutableMapping[str, JSONValue]:
     """Remove provider-owned state from one native object snapshot.
 
     :param document: Independent native read-back of an operation-owned object.
     :returns: Deep-copied desired state accepted by the native apply operation.
     :raises KubernetesError: If the object has no applicable identity metadata.
-    """
+    :raises RecursionError: If native JSON containers contain a cycle or excessive nesting.
+    """  # noqa: DOC503 - Recursive JSON copying propagates nesting errors.
     metadata = document.get("metadata")
     if not isinstance(metadata, Mapping) or not metadata.get("name"):
         raise KubernetesError("resource_snapshot_identity_missing")
     desired = {
-        key: deepcopy(value)
+        key: copy_json(value)
         for key, value in document.items()
         if key != "status" and key != "metadata"
     }
-    desired["metadata"] = {
-        key: deepcopy(value)
+    metadata_copy: MutableMapping[str, JSONValue] = {
+        key: copy_json(value)
         for key, value in metadata.items()
         if key in RESTORABLE_METADATA
     }
-    annotations = desired["metadata"].get("annotations")
-    if isinstance(annotations, dict):
+    desired["metadata"] = metadata_copy
+    annotations = metadata_copy.get("annotations")
+    if isinstance(annotations, MutableMapping):
         for key in PROVIDER_ANNOTATIONS:
             annotations.pop(key, None)
     return desired
@@ -83,53 +92,114 @@ def restorable(document: Mapping[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class ResourceSet:
-    """Track resources created by one atom for read-back and failure cleanup."""
+    """Track one operation's Kubernetes resources for read-back and rollback.
+
+    :param service: Bound Kubernetes service used for apply and read operations.
+    :param namespace: Namespace of this operation's resources.
+    :param operation: Ownership label value assigned to generated resources.
+    :param created: Resources created by this operation for failure cleanup.
+    :param evidence: Applied or no-op read-back records accumulated by the tracker.
+    :ivar _mutations: Prior resource snapshots retained for rollback.
+    :ivar _tracked: Resource keys already recorded in the mutation journal.
+
+    .. attribute :: service
+        :type: KubernetesService
+
+        Bound Kubernetes service used for apply and read operations.
+
+    .. attribute :: namespace
+        :type: str
+
+        Namespace of this operation's resources.
+
+    .. attribute :: operation
+        :type: str
+
+        Ownership label value assigned to generated resources.
+
+    .. attribute :: created
+        :type: MutableSequence[tuple[str, str]]
+
+        Resources created by this operation for failure cleanup.
+
+    .. attribute :: evidence
+        :type: MutableSequence[JSONObject]
+
+        Applied or no-op read-back records accumulated by the tracker.
+    """
 
     service: KubernetesService
     namespace: str
     operation: str
-    created: list[tuple[str, str]] = field(default_factory=list)
-    evidence: list[dict[str, Any]] = field(default_factory=list)
-    _mutations: list[tuple[str, str, dict[str, Any] | None]] = field(
+    created: MutableSequence[tuple[str, str]] = field(default_factory=list)
+    evidence: MutableSequence[JSONObject] = field(default_factory=list)
+    _mutations: MutableSequence[tuple[str, str, Optional[JSONObject]]] = field(
         default_factory=list, init=False, repr=False
     )
     _tracked: set[tuple[str, str]] = field(default_factory=set, init=False, repr=False)
 
-    def managed(self, document: dict[str, Any]) -> dict[str, Any]:
+    def managed(
+        self, document: MutableMapping[str, JSONValue]
+    ) -> MutableMapping[str, JSONValue]:
         """Mark one generated object with its operation ownership.
 
-        :param document: Generated Kubernetes object.
+        :param document: Generated Kubernetes object to label in place.
         :returns: The same object with shared ownership labels.
+        :raises KubernetesError: If metadata or labels are present but are not objects.
         """
-        metadata = document.setdefault("metadata", {})
+        metadata = document.get("metadata", {})
+        if not isinstance(metadata, Mapping):
+            raise KubernetesError("resource_metadata_invalid")
+        labels = metadata.get("labels", {})
+        if not isinstance(labels, Mapping):
+            raise KubernetesError("resource_labels_invalid")
+        owned_metadata = dict(metadata)
         if self.namespace:
-            metadata.setdefault("namespace", self.namespace)
-        metadata.setdefault("labels", {}).update(
-            {MANAGER_LABEL: MANAGER_VALUE, OPERATION_LABEL: self.operation}
-        )
+            owned_metadata.setdefault("namespace", self.namespace)
+        owned_metadata["labels"] = {
+            **labels,
+            MANAGER_LABEL: MANAGER_VALUE,
+            OPERATION_LABEL: self.operation,
+        }
+        document["metadata"] = owned_metadata
         return document
 
-    def owns(self, document: dict[str, Any]) -> bool:
+    def owns(self, document: JSONObject) -> bool:
         """Check the operation labels before changing an existing resource.
 
         :param document: Native resource read-back.
         :returns: Whether this named operation manages the resource.
+        :raises KubernetesError: If metadata or ownership labels are malformed.
         """
-        labels = document.get("metadata", {}).get("labels", {})
+        try:
+            labels = KubernetesObject(document).metadata.object("labels").document
+        except TypeError as exc:
+            raise KubernetesError("resource_labels_invalid") from exc
         return (
             labels.get(MANAGER_LABEL) == MANAGER_VALUE
             and labels.get(OPERATION_LABEL) == self.operation
         )
 
-    def apply(self, document: dict[str, Any]) -> dict[str, Any]:
+    def apply(self, document: JSONObject) -> JSONObject:
         """Apply changed desired fields and prove their independent read-back.
 
-        :param document: Fully selected native Kubernetes resource.
+        :param document: Fully selected native Kubernetes resource, copied before
+            ownership labels are added; the caller's mapping is not mutated.
         :returns: Safe resource identity and applied/no-op status.
-        :raises KubernetesError: If an unrelated resource conflicts or read-back differs.
-        """
-        desired = self.managed(document)
-        kind, name = desired["kind"], desired["metadata"]["name"]
+        :raises KubernetesError: If identity or ownership fields are malformed, an
+            unrelated resource conflicts, provider operations fail, or read-back differs.
+        :raises TargetError: If the bound kubeconfig changes before a provider command.
+        :raises OSError: If a provider process cannot start, its output cannot be read,
+            or its private manifest cannot be created, permissioned, written, or removed.
+        :raises TypeError: If desired containers contain bytes instead of JSON values.
+        :raises RecursionError: If desired JSON containers contain a cycle or excessive nesting.
+        """  # noqa: DOC503 - JSON copying, target binding, and provider I/O propagate errors.
+        desired = self.managed(copy_json_object(document))
+        try:
+            selected = KubernetesObject(desired)
+            kind, name = selected.required_text("kind"), selected.name
+        except TypeError as exc:
+            raise KubernetesError("resource_identity_invalid") from exc
         current = self.service.read(kind, name, self.namespace)
         if current is not None and not self.owns(current):
             raise KubernetesError("resource_not_owned_by_operation")
@@ -146,13 +216,17 @@ class ResourceSet:
                 self.created.append((kind, name))
             self.service.apply(desired)
         observed = self.service.read(kind, name, self.namespace)
-        if not matches(desired, observed):
+        if observed is None or not matches(desired, observed):
             raise KubernetesError("resource_readback_mismatch")
+        try:
+            uid = KubernetesObject(observed).metadata.required_text("uid")
+        except TypeError as exc:
+            raise KubernetesError("resource_readback_identity_missing") from exc
         evidence = {
             "kind": kind,
             "name": name,
             "namespace": self.namespace,
-            "uid": observed["metadata"]["uid"],
+            "uid": uid,
             "action": APPLIED if changed else NO_OP,
         }
         self.evidence.append(evidence)
@@ -165,7 +239,10 @@ class ResourceSet:
         :param name: Exact resource name.
         :returns: Whether deletion was necessary.
         :raises KubernetesError: If ownership or provider deletion/read-back fails.
-        """
+        :raises TargetError: If the bound kubeconfig changes before a provider command.
+        :raises OSError: If a provider process cannot start or its output cannot be read
+            during deletion or read-back.
+        """  # noqa: DOC503 - Provider commands propagate target binding and I/O errors.
         current = self.service.read(kind, name, self.namespace)
         if current is None:
             return False
@@ -178,7 +255,7 @@ class ResourceSet:
         """Delete newly created objects in reverse order, preserving prior resources.
 
         :raises KubernetesError: If any owned resource cannot be removed.
-        """
+        """  # noqa: DOC502 - cleanup_owned propagates unverified deletion failures.
         self.cleanup_owned(reversed(self.created))
         created = {(kind.casefold(), name) for kind, name in self.created}
         self._mutations = [
@@ -197,7 +274,7 @@ class ResourceSet:
 
         :raises KubernetesError: If any prior state cannot be restored or removed.
         """
-        failures: list[str] = []
+        failures: MutableSequence[str] = []
         for kind, name, previous in reversed(self._mutations):
             try:
                 if previous is None:

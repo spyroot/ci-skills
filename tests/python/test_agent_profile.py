@@ -11,13 +11,19 @@ import hashlib
 import json
 import shutil
 import time
+from collections.abc import Sequence
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING, NoReturn, Optional
+
+if TYPE_CHECKING:
+    from tools.agent_profile import AgentProfile
 
 import pytest
 from conftest import REPO_ROOT, load_module
 
 
-def _profile(tmp_path: Path):
+def _profile(tmp_path: Path) -> tuple[ModuleType, AgentProfile]:
     """Create a valid manifest with one declared host and bundled skill.
 
     :param tmp_path: Isolated checkout root.
@@ -59,11 +65,15 @@ def _profile(tmp_path: Path):
     return module, module.AgentProfile(tmp_path, repository_root)
 
 
-def test_missing_glab_uses_brew_then_verifies_installed_skill(tmp_path, monkeypatch):
+def test_missing_glab_uses_brew_then_verifies_installed_skill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Install glab, then require a plan that binds its bundled skill bytes.
 
     :param tmp_path: Isolated checkout root.
     :param monkeypatch: Host command fixture controller.
+
+    :returns: None; assertions in the body validate the regression.
     """
     module, profile = _profile(tmp_path)
     assert profile.destination == tmp_path / "consumer" / ".agents" / "skills"
@@ -80,7 +90,14 @@ def test_missing_glab_uses_brew_then_verifies_installed_skill(tmp_path, monkeypa
         ),
     )
 
-    def run(command, _deadline):
+    def run(command: Sequence[str], _deadline: Optional[float]) -> bytes:
+        """Simulate brew, skill installation, and skill-byte reads.
+
+        :param command: Native command vector issued by the profile.
+        :param _deadline: Profile command deadline; this fake does not consume it.
+        :returns: Current simulated bundled skill bytes for a ``get`` command,
+            otherwise empty bytes.
+        """
         commands.append(command[:4])
         if command[:2] == ["brew", "install"]:
             state["glab"] = True
@@ -119,11 +136,15 @@ def test_missing_glab_uses_brew_then_verifies_installed_skill(tmp_path, monkeypa
     ).read_bytes() == b"bundled skill\n"
 
 
-def test_missing_homebrew_blocks_and_preserves_existing_skill(tmp_path, monkeypatch):
+def test_missing_homebrew_blocks_and_preserves_existing_skill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A missing package manager never changes an existing skill.
 
     :param tmp_path: Isolated checkout root.
     :param monkeypatch: Host command fixture controller.
+
+    :returns: None; assertions in the body validate the regression.
     """
     module, profile = _profile(tmp_path)
     skill = profile.destination / "glab-stack" / "SKILL.md"
@@ -140,11 +161,15 @@ def test_missing_homebrew_blocks_and_preserves_existing_skill(tmp_path, monkeypa
     assert skill.read_text() == "operator copy\n"
 
 
-def test_linux_apt_uses_declared_glab_package(tmp_path, monkeypatch):
+def test_linux_apt_uses_declared_glab_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Linux chooses apt when the host exposes that package manager.
 
     :param tmp_path: Isolated checkout root.
     :param monkeypatch: Host command fixture controller.
+
+    :returns: None; assertions in the body validate the regression.
     """
     module, profile = _profile(tmp_path)
     monkeypatch.setattr(module.platform, "system", lambda: "Linux")
@@ -158,16 +183,28 @@ def test_linux_apt_uses_declared_glab_package(tmp_path, monkeypatch):
     assert profile._host_install_command() == ["apt-get", "install", "-y", "glab"]
 
 
-def test_existing_glab_without_bundled_skill_blocks_plan(tmp_path, monkeypatch):
+def test_existing_glab_without_bundled_skill_blocks_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Detect an incompatible installed glab before asking for confirmation.
 
     :param tmp_path: Isolated checkout root.
     :param monkeypatch: Host command fixture controller.
+
+    :returns: None; assertions in the body validate the regression.
     """
     module, profile = _profile(tmp_path)
     monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/glab")
 
-    def incompatible(_command, _deadline):
+    def incompatible(_command: Sequence[str], _deadline: Optional[float]) -> NoReturn:
+        """Simulate an installed glab whose bundled skill command fails.
+
+        :param _command: Issued command vector, unused by this failure fake.
+        :param _deadline: Command deadline, unused by this failure fake.
+
+        :raises module.AgentProfileError: Always; the fake simulates failure of
+            the installed client's bundled-skill command.
+        """
         raise module.AgentProfileError(module.AgentProfileReason.COMMAND_FAILED)
 
     monkeypatch.setattr(profile, "_run", incompatible)
@@ -179,11 +216,15 @@ def test_existing_glab_without_bundled_skill_blocks_plan(tmp_path, monkeypatch):
     "invalid",
     ("unknown_field", "missing_host", "wrong_skills", "wrong_version"),
 )
-def test_manifest_schema_rejects_invalid_contracts(tmp_path, invalid):
+def test_manifest_schema_rejects_invalid_contracts(
+    tmp_path: Path, invalid: str
+) -> None:
     """Reject unknown, missing, mistyped, and incompatible manifest fields.
 
     :param tmp_path: Isolated checkout root.
     :param invalid: Invalid manifest variant to construct.
+
+    :returns: None; assertions in the body validate the regression.
     """
     module, _ = _profile(tmp_path)
     path = tmp_path / "toolchain-dependencies.json"
@@ -203,11 +244,15 @@ def test_manifest_schema_rejects_invalid_contracts(tmp_path, invalid):
 
 
 @pytest.mark.parametrize("raw", (b'{"a":1,"a":2}', b'{"a":NaN}'))
-def test_strict_json_rejects_duplicate_and_nonfinite_values(tmp_path, raw):
+def test_strict_json_rejects_duplicate_and_nonfinite_values(
+    tmp_path: Path, raw: bytes
+) -> None:
     """Reject JSON accepted by Python's permissive default decoder.
 
     :param tmp_path: Isolated checkout root.
     :param raw: Invalid JSON contract bytes.
+
+    :returns: None; assertions in the body validate the regression.
     """
     module, _ = _profile(tmp_path)
     with pytest.raises(module.AgentProfileError, match="agent_profile_invalid"):

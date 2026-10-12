@@ -80,31 +80,33 @@ response and pointer definitions.
 
 The [callback specification in CI11](docs/phases/CI11-TOOLS.md#callback-workflow-boilerplate) owns the following pattern.
 Each workflow parses its own arguments, constructs typed actions and reusable callbacks, connects their results, runs
-one executor, and emits through the existing report machinery. The shared interface is implemented in
-[core/action.py](ci-skills/lib/python/core/action.py); GitLab action mains use it with the migrated runner and milestone
-callbacks. The following toolbox/Harbor combination shows the pattern for the later delivery rows:
+one executor, and emits through the existing report machinery. Concrete actions implement
+[SkillAction](ci-skills/lib/python/core/abstract/skill_action.py); callbacks require an action at construction and
+share the state bound by the executor. For example, the binary planner accepts caller-supplied `Path` values `spec`
+and `source_repo`, plus strings `source_commit` and `commit_label`:
 
 ```python
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    build = BuildToolbox(action=BuildAction.from_args(args))
-    publish = PublishToolbox(action=PublishAction.from_args(args), build=build)
-    runner = configure_runner(action=RunnerAction.from_args(args), image=publish)
-    result = Executor(
-        context=ExecutionContext.from_args(args),
-        callbacks=[
-            K8SAuth(), build,
-            HarborAuth(), publish,
-            GitLabAuth(), runner, VerifyRunner(runner=runner),
-        ],
-    ).run()
-    return emit_result(result, args)
+from lib.python.core.abstract.callbacks import Callbacks
+from lib.python.core.abstract.skill_exector import WorkflowExecutor
+from lib.python.core.binary_build import BinaryBuildAction, BinaryBuildState, PlanBinaryBuild
+
+action = BinaryBuildAction(
+    spec=spec,
+    source_repo=source_repo,
+    source_commit=source_commit,
+    commit_label=commit_label,
+)
+plan = PlanBinaryBuild(action)
+state = BinaryBuildState()
+WorkflowExecutor(state, Callbacks([plan])).run()
+result = plan.result
 ```
 
-This single combination builds on OpenShift, publishes to Harbor, and configures and verifies the selected runner/CI.
-`AbstractCallback` supplies the lifecycle contract; `GitlabCallback`, `K8SCallback`, and `HarborCallback` own shared
-provider behavior. Concrete callbacks implement only applicable hooks. Existing target resolution, `GlabAPIClient`,
-milestone/runner operations, and report code remain the implementation owners; the
+This callback validates the BuildConfig and exact Git commit, then returns the fingerprinted plan without building
+or publishing an image. Each callback retains its own result mapping, including a valid empty `{}`. Longer workflows
+construct their full callback sequence before execution; later callbacks read the same shared state.
+`AbstractCallback` supplies the lifecycle contract, while provider callbacks reuse target resolution, `GlabAPIClient`,
+milestone/runner operations, and report code. The
 [code-to-abstraction map](docs/phases/CI11-TOOLS.md#ground-the-refactor-in-existing-code) specifies what moves or stays
 shared. New combinations change the callback list rather than duplicate those implementations.
 
@@ -235,9 +237,9 @@ cd ci-skills
 ```
 
 **1. Install the tools.** This setup uses `git`, `conda`, and `jq`. Python 3.11 or newer with PyYAML is required for
-diagnostics; install `gh` and `kubectl` for the authorities you will access. `./install.sh` installs missing `glab`.
-`ci-binary-build` also needs `yq`. Create the `ci-skills` conda environment if absent, then install the repository
-dependencies:
+the installed commands. `ci-api` uses `gh` or `glab` for the selected provider; `ci-binary-build` uses Git and PyYAML.
+Install `kubectl` for Kubernetes diagnostics; `./install.sh` installs missing `glab`. Create the `ci-skills` conda
+environment if absent, then install the repository dependencies:
 
 ```bash
 conda create -n ci-skills python=3.11
@@ -288,6 +290,8 @@ Fill in the sections needed by your commands. GitLab-only commands can use `[git
 Declare `kubernetes.kubeconfigs` when context and credential span files; otherwise the resolver uses a declared
 `kubeconfig`, `KUBECONFIG`, or `~/.kube/config` in that order, then verifies the context and server. For the
 `--publication` check in step 5, declare the repository's actual `github.required_checks` from branch protection.
+The installed commands are Python entrypoints over the bundled reusable library. No source code from another
+repository or skill is loaded at runtime.
 
 Never commit credential values or credential-bearing kubeconfigs. A project may keep its target at
 `./.ci-skills/target.toml`; a pipeline must use paths valid on its own runner. The paths inside are true on one machine
@@ -297,6 +301,19 @@ file or the documented `--binding PATH` protocol for an existing kubeconfig reso
 [project-binding.md](ci-skills/references/project-binding.md). For node diagnostics, declare the selected node and
 existing Pod routes under `[kubernetes.node_diagnostics]`. Provisioning access is the project's job; this skill resolves
 the selected source and reports it.
+The initial commands are `bin/ci-api` for GitHub and GitLab reads, and
+`bin/ci-binary-build` for an exact-commit OpenShift Binary BuildConfig plan.
+`ci-api` resolves its host and token reference from the selected target; `--host` and `--token-file` remain explicit
+overrides. `ci-binary-build` accepts a BuildConfig, source repository, exact commit, and commit-label key. It validates
+the Dockerfile at that commit and returns a fingerprinted plan without contacting a cluster or publishing an image.
+Both default to JSON and support `--yaml`, `--help`, and `--describe`; neither accepts `--target`.
+No credentials belong in tracked files or published artifacts. Token references may point to a local ignored file,
+a CI file variable, or a read-only Secret mount. Without a selected token file, `ci-api` uses the native CLI's existing
+authentication. The skill does not manage that credential store.
+
+Repository development uses separate Bash tooling: the `install.sh` adapter starts the Python copy installer, and
+`bless.sh` and `scripts/ci/static.sh` share the checks in `lib/bash/automation/bless.bash`. The validation workflow
+also runs the declared Python and Bats tests. These development gates are separate from installed skill commands.
 
 **5. Prove access to the authorities you selected.** For a GitLab-only target, read back its configured project and
 administrator identity:
@@ -363,16 +380,17 @@ Either way, each execution host still needs its own credentials and its own targ
 ## Target selection
 
 You supply **one nonsecret file** naming the authorities each command will use. Copy `target.toml.template`, fill it in,
-and put it in one of these places. The first one found wins, and every command reports which it used as `target_source`.
+and put it in one of these places. The first one found wins. Diagnostic and GitLab operation reports identify it as
+`target_source`; `ci-api` returns the selected provider value directly.
 The layout is the one agent tooling already uses — a project `./.ci-skills/` beside a user `~/.ci-skills/`, the same
 shape as `.claude` and `.codex`:
 
-| #   | Scope           | Where                      | Set by                      |
-| --- | --------------- | -------------------------- | --------------------------- |
-| 1   | one command     | `--target PATH`            | the caller                  |
-| 2   | one environment | `$CI_SKILLS_TARGET`        | a shell, a CI job, an agent |
-| 3   | one project     | `./.ci-skills/target.toml` | per repository              |
-| 4   | one user        | `~/.ci-skills/target.toml` | you                         |
+| # | Scope | Where | Set by |
+| --- | --- | --- | --- |
+| 1 | declared CLI override | `--target PATH`, where supported | the caller |
+| 2 | one environment | `$CI_SKILLS_TARGET` | a shell, a CI job, an agent |
+| 3 | one project | `./.ci-skills/target.toml` | per repository |
+| 4 | one user | `~/.ci-skills/target.toml` | you |
 
 Pick the tier that matches how many targets you have. `K8S_ADMIN_DIAGNOSTICS_BINDING` also selects a project binding at
 the environment tier. Setting it together with `CI_SKILLS_TARGET` is an error; the resolver will not guess between them.
@@ -384,6 +402,11 @@ API key living in a user config rather than in every repository.
 you like and select it with `$CI_SKILLS_TARGET`, or put a `.ci-skills/target.toml` in each repository that owns a
 cluster so anyone working there is aimed correctly by default. A CI job sets the variable; an agent can set it per task.
 Tier 1 stays for one-off runs against something unusual.
+
+`ci-api` uses tiers 2–4 and has no `--target` option. For tests and live smoke, `CI_SKILLS_TARGET` repoints resolution
+to an existing file. Setting the `ci-skills-smoke` environment variable instead selects `ci-skills-smoke.toml` in
+the project/user directories; it does not fall back to their ordinary `target.toml`. There is no separate dev-mode
+switch. `ci-binary-build` uses caller-supplied build inputs and does not resolve a cluster target.
 
 Credentials follow the same shape: declared first, environment next, the client's own credential store last. The full
 chain per authority is in `ci-skills` under `access_protocol`, and the resolved source for each is reported in
@@ -527,3 +550,5 @@ cross-provider workflows. It is not this repository's CI or delivery configurati
 not change repository merge requirements. Full publication checks apply when testing that capability; unrelated
 branch-protection, Kubernetes TLS, or other target prerequisites do not gate ordinary code validation. Preserve
 candidate identity, relevant live evidence, and the required GitHub result as distinct proof.
+`standards-binding.yaml` pins the shared Standards contracts. The local agent
+and handoff files are ignored.

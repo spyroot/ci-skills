@@ -6,13 +6,19 @@ mbayramo@cisco.com
 spyroot@gmail.com
 """
 
+from __future__ import annotations
+
 from argparse import ArgumentParser
+from collections.abc import Sequence
+from typing import Optional
 
 import _bootstrap  # noqa: F401
-from core.action import Executor
-from core.kubernetes import K8SAuth
-from core.registry_mirror import HarborAuth
-from core.toolbox_actions import (
+from lib.python.core.abstract.callbacks import Callbacks
+from lib.python.core.abstract.skill_exector import WorkflowExecutor
+from lib.python.core.delivery_state import DeliveryState
+from lib.python.core.harbor.registry_mirror import HarborAuth
+from lib.python.core.kubernetes.kubernetes import K8SAuth
+from lib.python.core.toolbox_actions import (
     ConfirmWorkflow,
     DeleteToolbox,
     EnsureNamespace,
@@ -30,34 +36,30 @@ def build_parser() -> ArgumentParser:
     return workflow_parser("toolbox")
 
 
-def workflow(action: WorkflowAction) -> Executor:
-    """Compose authentication, confirmation and the independent operation.
+def workflow(action: WorkflowAction) -> WorkflowExecutor[DeliveryState]:
+    """Construct the already ordered callbacks for the selected plan or apply mode.
 
-    :param action: Prepared operation inputs.
-    :returns: The existing callback executor.
-    """
-    auth = HarborAuth(
-        target=action.target,
-        repository=action.repository,
-        actions=("pull", "delete")
-        if action.args.action == "delete"
-        else ("pull", "push"),
-        timeout=action.args.timeout,
+    :param action: Prepared runtime target and concrete operation inputs.
+    :returns: Executor sharing one typed state across the declared callback sequence.
+    :raises ValueError: If a callback already belongs to a different workflow state.
+    """  # noqa: DOC502 - Executor construction rejects callbacks bound elsewhere.
+    capabilities = (
+        ("pull", "delete") if action.args.action == "delete" else ("pull", "push")
     )
     callbacks = [
-        K8SAuth(target=action.target, timeout=action.args.timeout),
-        auth,
-        ConfirmWorkflow(action=action),
+        K8SAuth(action.target, action.args.timeout),
+        HarborAuth(action.target, action.repository, capabilities, action.args.timeout),
+        ConfirmWorkflow(action),
     ]
-    callbacks += (
-        [DeleteToolbox(action=action)]
-        if action.args.action == "delete"
-        else [EnsureNamespace(action=action), HarborBuild(workflow=action)]
-    )
-    return Executor(context=action.context, callbacks=callbacks)
+    if action.args.apply:
+        if action.args.action == "delete":
+            callbacks.append(DeleteToolbox(action))
+        else:
+            callbacks.extend((EnsureNamespace(action), HarborBuild(action)))
+    return WorkflowExecutor(context=action.context, callbacks=Callbacks(callbacks))
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
     """Run this operation and emit the shared report envelope.
 
     :param argv: Optional command arguments.

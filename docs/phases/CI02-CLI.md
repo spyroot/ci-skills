@@ -240,7 +240,7 @@ route (CI03-GATES, G0; none as of 2026-10-06, D-GATE).
    exists and is empty). Changed: `ci-skills/lib/python/core/catalog.py` (one help
    text per option; `cilium_status.py` leaves `namespaced` and gains
    `--cilium-namespace`), `ci-skills/lib/python/core/cli.py` and
-   `ci-skills/lib/python/core/node_local_cli.py` (the parsers read the catalog's
+   `../../ci-skills/lib/python/core/kubernetes/node_local_cli.py` (the parsers read the catalog's
    text), `ci-skills/bin/cilium_status.py` and
    `ci-skills/lib/python/core/collect.py:623` (the rename), `ci-skills/tools.json`
    (regenerated), `tests/python/test_cli_contract.py`,

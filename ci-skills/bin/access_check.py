@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Verify explicit GitHub, GitLab, and Kubernetes administrator access."""
+"""Verify explicit GitHub, GitLab, and Kubernetes administrator access.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 import argparse
 
 import _bootstrap  # noqa: F401
-from core.cli import execute, parser
+from lib.python.core.cli import execute_access, parser
 
 
 # The parser is built by its own function so the declared interface can be
@@ -12,7 +17,10 @@ from core.cli import execute, parser
 # several flags as prose, and a text scan cannot tell those apart from the
 # options argparse actually accepts. See tests/test_catalog.py.
 def build_parser() -> argparse.ArgumentParser:
-    """Return this command's parser: the universal tier plus its own options."""
+    """Declare access-check options in addition to the common command tier.
+
+    :returns: Parser for publication, job, Ceph, and receipt selections.
+    """
     cli = parser(
         "Check every selected authority; dry run never counts as access.",
     )
@@ -40,7 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    return execute(build_parser().parse_args(), live_checks=True)
+    """Parse access-check arguments and execute selected live checks.
+
+    :returns: Exit code from the shared command executor.
+    """
+    return execute_access(build_parser().parse_args(), live_checks=True)
 
 
 if __name__ == "__main__":

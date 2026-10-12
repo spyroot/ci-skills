@@ -321,7 +321,7 @@ implementations exist).
 
 1. **Fetch** (checkout only, network). GET the page and the schema at
    `https://gitlab.com/gitlab-org/gitlab/-/raw/<sha>/<path>` with a timeout
-   and a 1 MiB byte bound through `ci-skills/lib/python/core/http.py`, the bounded
+   and a 1 MiB byte bound through `../../ci-skills/lib/python/protocol/http.py`, the bounded
    standard-library HTTP helper this phase adds (CI11-TOOLS reuses it);
    `<sha>` is `--sha`, never a branch name. Modes of `tools/update_reference.py`,
    defined once: the default run prints the plan (URLs, commit, expected

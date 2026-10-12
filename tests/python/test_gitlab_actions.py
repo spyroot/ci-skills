@@ -1,31 +1,38 @@
-"""Offline operation contracts; no GitLab writes or cluster access."""
+"""Offline operation contracts; no GitLab writes or cluster access.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import json
 import stat
+from collections.abc import Mapping, MutableSequence, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 from threading import Event, Lock
 from types import SimpleNamespace
-from typing import Final
+from typing import TYPE_CHECKING, Final, Optional, Union
 
 import pytest
+from conftest import import_script_module
 from jsonschema import Draft202012Validator
 
-from tests.python.conftest import import_script_module
-
-ACTION = import_script_module("core.gitlab_actions")
-CALLBACKS = import_script_module("core.action")
-PORTABLE = import_script_module("core.portable")
-API = import_script_module("core.gitlab_api")
-MILESTONES = import_script_module("core.gitlab_milestones")
-ISSUES = import_script_module("core.gitlab_issues")
-WIKIS = import_script_module("core.gitlab_wikis")
-RUNNERS = import_script_module("core.gitlab_runners")
-REPORT = import_script_module("core.report")
-PROVENANCE = import_script_module("core.provenance")
+ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
+GITLAB_ACTION = import_script_module("lib.python.core.gitlab.gitlab_action")
+GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
+CALLBACKS = import_script_module("lib.python.core.abstract.callback")
+PORTABLE = import_script_module("lib.python.core.portable")
+API = import_script_module("lib.python.core.gitlab.gitlab_api")
+MILESTONES = import_script_module("lib.python.core.gitlab.gitlab_milestones")
+ISSUES = import_script_module("lib.python.core.gitlab.gitlab_issues")
+WIKIS = import_script_module("lib.python.core.gitlab.gitlab_wikis")
+RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
+REPORT = import_script_module("lib.python.core.report")
+PROVENANCE = import_script_module("lib.python.core.provenance")
 ISSUE = import_script_module("gitlab_issue")
 MILESTONE = import_script_module("gitlab_milestone")
 RUNNER = import_script_module("gitlab_runner")
@@ -46,7 +53,16 @@ TAG_VALIDATOR = Draft202012Validator(TAG_SCHEMA)
 FACTORY_FAILURE: Final = "factory failed"
 
 
-def test_committed_runner_tag_receipts_match_live_contract():
+if TYPE_CHECKING:
+    from lib.python.core.gitlab.gitlab_actions import ActionPlan
+    from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+    from lib.python.core.json_types import JSONObject, JSONValue
+
+
+def test_committed_runner_tag_receipts_match_live_contract() -> None:
+    """Match committed runner tag receipts to current skill digest and schema.
+    :returns: None; assertions in the body validate the regression.
+    """
     root = Path(__file__).parents[2]
     receipts = root / "tests/acceptance/runner-tag"
     applied = json.loads((receipts / "runner-tag-applied.json").read_text())
@@ -84,16 +100,61 @@ def test_committed_runner_tag_receipts_match_live_contract():
     assert applied["readback"]["after_tags"] == repeated["readback"]["after_tags"]
 
 
-def _plan(
-    kind,
-    operation,
-    body,
+def _bound_session(
+    plan: ActionPlan,
     *,
-    target_kind="project",
-    resource_id=None,
-    token_out=None,
-    project_ids=None,
-):
+    credential_source: str = "env:GITLAB_TOKEN",
+    credential_digest: str = "sha256:unit",
+    skill: Optional[JSONObject] = None,
+) -> BoundGitLabSession:
+    """Create the concrete session shape used by GitLab workflow failures.
+
+    :param plan: Action plan whose selected target seeds the session.
+    :param credential_source: Nonsecret credential provenance for receipts.
+    :param credential_digest: One-way credential continuity digest.
+    :param skill: Optional installed-skill identity supplied by the test.
+    :returns: Bound GitLab session with nonsecret fixture identity.
+    """
+    selected_skill = skill or {
+        "digest": "unit",
+        "revision": {"value": "a" * 40, "verified": True},
+    }
+    return GITLAB_SESSION.BoundGitLabSession(
+        origin=plan.origin,
+        host="gitlab.example.test",
+        target_kind=plan.target_kind,
+        target_reference=plan.target_reference,
+        target_source=plan.target_source,
+        target_file=Path("/selected/target.toml"),
+        credential_source=credential_source,
+        credential_digest=credential_digest,
+        execution_host="unit-host",
+        skill=selected_skill,
+        environment={},
+    )
+
+
+def _plan(
+    kind: str,
+    operation: str,
+    body: JSONObject,
+    *,
+    target_kind: str = "project",
+    resource_id: Optional[Union[int, str]] = None,
+    token_out: Optional[Path] = None,
+    project_ids: Optional[tuple[int, ...]] = None,
+) -> ActionPlan:
+    """Build a project- or group-scoped GitLab action plan.
+
+    :param kind: Issue, milestone, wiki, or runner resource kind.
+    :param operation: Mutation or read verb for that resource.
+    :param body: Desired resource fields and options.
+    :param target_kind: Project or group scope for the plan.
+    :param resource_id: Existing resource identifier for update/tag actions.
+    :param token_out: Private one-time runner token destination when creating.
+    :param project_ids: Group assignment project IDs when supplied.
+    :returns: Action plan with fixture origin, target, and revision.
+    """
     return ACTION.ActionPlan(
         kind=kind,
         operation=operation,
@@ -101,7 +162,7 @@ def _plan(
         target_kind=target_kind,
         target_reference="team/repo" if target_kind == "project" else "team",
         target_file="/selected/target.toml",
-        target_source="argv:--target;target:gitlab.project",
+        target_source="env:CI_SKILLS_TARGET;target:gitlab.project",
         body=body,
         resource_id=resource_id,
         token_out=str(token_out) if token_out else None,
@@ -110,14 +171,17 @@ def _plan(
     )
 
 
-def _live_action_dependencies(monkeypatch, plan):
-    """Bind one selected action to deterministic access without a provider call."""
-    session = SimpleNamespace(
-        origin=plan.origin,
-        target_reference=plan.target_reference,
-        credential_source="env:GITLAB_TOKEN",
-        credential_digest="sha256:unit",
-        skill={"revision": {"value": None, "verified": False}},
+def _live_action_dependencies(
+    monkeypatch: pytest.MonkeyPatch, plan: ActionPlan
+) -> tuple[BoundGitLabSession, JSONObject]:
+    """Bind a selected plan to deterministic access doubles.
+
+    :param monkeypatch: Pytest fixture replacing target, bind, API, and access.
+    :param plan: Action plan whose origin and scope seed the session.
+    :returns: Bound fixture session and passing access receipt.
+    """
+    session = _bound_session(
+        plan, skill={"revision": {"value": None, "verified": False}}
     )
     access = {
         "status": "PASS",
@@ -125,27 +189,47 @@ def _live_action_dependencies(monkeypatch, plan):
         "target": {"kind": plan.target_kind, "id": 42},
     }
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "resolve_gitlab_target",
         lambda _target, _binding, *, dry_run: (object(), "unit"),
     )
-    monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
+    monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
-        ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
     )
-    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda *, timeout: object())
+    monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: object())
     monkeypatch.setattr(
-        ACTION, "check_gitlab_operation_access", lambda *_args, **_kwargs: access
+        GITLAB_ACTION, "check_gitlab_operation_access", lambda *_args, **_kwargs: access
     )
     return session, access
 
 
 class FakeAPI:
-    def __init__(self, responses):
+    """Serve scripted GitLab reads and writes while recording request order."""
+
+    def __init__(
+        self,
+        responses: Mapping[tuple[str, str], Sequence[Union[JSONValue, BaseException]]],
+    ):
+        """Copy ordered responses into a consumable API request script.
+
+        :param responses: Method/endpoint mapping to successive results or errors.
+        """
         self.responses = {key: list(value) for key, value in responses.items()}
         self.calls = []
 
-    def _next(self, method, endpoint, body=None):
+    def _next(
+        self, method: str, endpoint: str, body: Optional[JSONValue] = None
+    ) -> JSONValue:
+        """Record a request and consume the next scripted API response.
+
+        :param method: HTTP verb used to find the response queue.
+        :param endpoint: Relative GitLab API path used to find the queue.
+        :param body: POST or PUT payload retained in the call journal.
+        :returns: Next provider result for the selected request.
+        :raises AssertionError: No scripted response remains for the request.
+        :raises BaseException: Scripted provider failure supplied by the test.
+        """  # noqa: DOC503 - The dynamic fixture exception is raised verbatim.
         self.calls.append((method, endpoint, body))
         values = self.responses[(method, endpoint)]
         if not values:
@@ -155,16 +239,46 @@ class FakeAPI:
             raise value
         return value
 
-    def get_json(self, session, endpoint):
+    def get_json(self, session: BoundGitLabSession, endpoint: str) -> JSONValue:
+        """Consume a scripted GET response for the selected endpoint.
+
+        :param session: Bound session accepted by the API double.
+        :param endpoint: Relative GitLab read path.
+        :returns: Next scripted GET result.
+        """
         return self._next("GET", endpoint)
 
-    def post_json(self, session, endpoint, body):
+    def post_json(
+        self, session: BoundGitLabSession, endpoint: str, body: JSONValue
+    ) -> JSONValue:
+        """Consume a scripted POST response for a create endpoint.
+
+        :param session: Bound session accepted by the API double.
+        :param endpoint: Relative GitLab create path.
+        :param body: Create payload retained in the call journal.
+        :returns: Next scripted POST result.
+        """
         return self._next("POST", endpoint, body)
 
-    def put_json(self, session, endpoint, body):
+    def put_json(
+        self, session: BoundGitLabSession, endpoint: str, body: JSONValue
+    ) -> JSONValue:
+        """Consume a scripted PUT response for an update endpoint.
+
+        :param session: Bound session accepted by the API double.
+        :param endpoint: Relative GitLab update path.
+        :param body: Update payload retained in the call journal.
+        :returns: Next scripted PUT result.
+        """
         return self._next("PUT", endpoint, body)
 
-    def delete_json(self, session, endpoint):
+    def delete_json(self, session: BoundGitLabSession, endpoint: str) -> JSONValue:
+        """Consume a scripted DELETE response for a resource endpoint.
+
+        :param session: Bound session accepted by the API double.
+        :param endpoint: Relative GitLab delete path.
+        :returns: Next scripted DELETE result.
+        """
         return self._next("DELETE", endpoint)
 
 
@@ -177,21 +291,40 @@ class FakeAPI:
     ),
 )
 def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
-    monkeypatch, capsys, kind, arguments, operation
-):
-    """Issue, wiki, and milestone apply paths have no runner-only ``live_plan``."""
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    kind: str,
+    arguments: Sequence[str],
+    operation: str,
+) -> None:
+    """Apply non-runner callbacks without a runner-only live-plan gate.
+
+    :param monkeypatch: Pytest fixture replacing access and action execution.
+    :param capsys: Pytest fixture capturing the structured action report.
+    :param kind: Issue, wiki, or milestone command selected by the case.
+    :param arguments: CLI subcommand arguments for that kind.
+    :param operation: Operation expected in the final report.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan(kind, operation, {"title": "unit"})
     _live_action_dependencies(monkeypatch, plan)
-    invoked: list[str] = []
+    invoked: MutableSequence[str] = []
 
-    def complete(*_args):
+    def complete(*_args: str) -> JSONObject:
+        """Record the selected operation and return a verified no-op.
+
+        :param *_args: Ignored positional arguments accepted by the fake boundary.
+        :returns: Verified NO_OP action record.
+
+        """
         invoked.append(kind)
         return {"action": "NO_OP", "verified": True, "mutated": False}
 
     if kind == "gitlab_milestone":
         monkeypatch.setattr(MILESTONES.CreateMilestone, "run", lambda _self: complete())
     else:
-        monkeypatch.setattr(ACTION, "apply_plan", complete)
+        monkeypatch.setattr(GITLAB_ACTION, "apply_plan", complete)
 
     result = ENTRYPOINTS[kind].main(
         [*arguments, "--apply", "--confirm-plan", plan.digest, "--json"]
@@ -204,24 +337,55 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     assert report["operation"] == operation
 
 
-def test_cli_failure_preserves_primary_and_every_cleanup_failure(monkeypatch, capsys):
-    """The structured CLI result retains cleanup evidence without replacing failure."""
+def test_cli_failure_preserves_primary_and_every_cleanup_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Keep primary action error and both reverse-cleanup failures.
+
+    :param monkeypatch: Pytest fixture replacing action and auth callbacks.
+    :param capsys: Pytest fixture capturing the blocked result.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_issue", "open-bug", {"title": "unit"})
     _live_action_dependencies(monkeypatch, plan)
     primary = ACTION.ActionError("operation failed")
 
-    class FailingOperation(CALLBACKS.Callback[object, object]):
-        def run(self) -> object:
+    class FailingOperation(GITLAB_ACTION.GitLabOperation):
+        """Raise the primary action error and a later cleanup error."""
+
+        def run(self) -> JSONObject:
+            """Raise the primary action error selected by the test.
+
+
+            :returns: JSON-compatible fixture value consumed by the assertion.
+            :raises ActionError: Always raises the configured primary error.
+            """  # noqa: DOC503 - The dynamic fixture exception is raised verbatim.
             raise primary
 
-        def cleanup(self) -> None:
+        def cleanup(self) -> JSONObject:
+            """Raise a cleanup error after the primary operation failure.
+
+            :returns: JSON-compatible fixture value consumed by the assertion.
+            :raises RuntimeError: Operation cleanup fails.
+
+            """
             raise RuntimeError("operation cleanup")
 
-    def fail_auth_cleanup(_self) -> None:
+    def fail_auth_cleanup(_self: GITLAB_ACTION.GitLabAuth) -> None:
+        """Raise a second cleanup error from the auth callback.
+
+        :param _self: Auth callback instance accepted by the patched method.
+        :returns: None; the helper records behavior through its side effects.
+        :raises RuntimeError: Authentication cleanup fails.
+
+        """
         raise RuntimeError("authentication cleanup")
 
-    monkeypatch.setattr(ISSUE, "operation_callback", lambda _action: FailingOperation())
-    monkeypatch.setattr(ACTION.GitLabAuth, "cleanup", fail_auth_cleanup)
+    monkeypatch.setattr(
+        GITLAB_ACTION, "operation_callback", lambda action: FailingOperation(action)
+    )
+    monkeypatch.setattr(GITLAB_ACTION.GitLabAuth, "cleanup", fail_auth_cleanup)
 
     result = ISSUE.main(
         ["open-bug", "--apply", "--confirm-plan", plan.digest, "--json"]
@@ -238,53 +402,76 @@ def test_cli_failure_preserves_primary_and_every_cleanup_failure(monkeypatch, ca
     ]
 
 
-def test_entrypoint_reports_operation_factory_failure(monkeypatch, capsys):
-    """A callback-construction error keeps the command's structured result."""
+def test_entrypoint_reports_operation_factory_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Render callback-construction failure as a structured usage error.
+
+    :param monkeypatch: Pytest fixture replacing the callback factory.
+    :param capsys: Pytest fixture capturing the blocked result.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    plan = _plan("gitlab_issue", "open-bug", {"title": "unit"})
+    _live_action_dependencies(monkeypatch, plan)
     monkeypatch.setattr(
-        ISSUE,
+        GITLAB_ACTION,
         "operation_callback",
         lambda _action: (_ for _ in ()).throw(ACTION.ActionError(FACTORY_FAILURE)),
     )
 
-    result = ISSUE.main(["open-bug", "--title", "unit", "--json"])
+    result = ISSUE.main(
+        [
+            "open-bug",
+            "--title",
+            "unit",
+            "--apply",
+            "--confirm-plan",
+            plan.digest,
+            "--json",
+        ]
+    )
     report = json.loads(capsys.readouterr().out)
 
     assert result == 2
     assert report["status"] == "BLOCKED"
-    assert report["errors"] == [{"source": "arguments", "reason": FACTORY_FAILURE}]
+    assert report["errors"] == [{"source": "gitlab_action", "reason": FACTORY_FAILURE}]
 
 
 def test_cli_cleanup_failure_blocks_a_completed_report_without_losing_records(
-    monkeypatch, capsys
-):
-    """Cleanup after a completed callback converts the existing PASS report to BLOCKED."""
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Keep completed records while a later cleanup failure blocks status.
+
+    :param monkeypatch: Pytest fixture replacing the operation callback.
+    :param capsys: Pytest fixture capturing the final blocked report.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_issue", "open-bug", {"title": "unit"})
     _live_action_dependencies(monkeypatch, plan)
 
-    class CompletedOperation(CALLBACKS.Callback[object, object]):
-        def __init__(self, action) -> None:
-            self.action = action
+    class CompletedOperation(GITLAB_ACTION.GitLabOperation):
+        """Complete an action and report before a failing cleanup hook."""
 
-        def run(self) -> object:
-            return {"action": "NO_OP", "verified": True}
+        def run(self) -> JSONObject:
+            """Return a verified no-op before constructing the report.
 
-        def update(self) -> None:
-            self.action.report = ACTION._result(
-                plan,
-                "PASS",
-                phase="APPLY",
-                mutated=False,
-                records=[{"id": 42, "action": "NO_OP"}],
-                readback={"verified": True},
-                cleanup={"status": "NOT_APPLICABLE"},
-            )
-            self.context.report = self.action.report
+            :returns: NO_OP action record.
+            """
+            return {"id": 42, "action": "NO_OP", "verified": True}
 
-        def cleanup(self) -> None:
+        def cleanup(self) -> JSONObject:
+            """Fail after the passing report has already been attached.
+
+            :returns: JSON-compatible fixture value consumed by the assertion.
+            :raises RuntimeError: Post-success cleanup fails.
+
+            """
             raise RuntimeError("post-success cleanup")
 
     monkeypatch.setattr(
-        ISSUE, "operation_callback", lambda action: CompletedOperation(action)
+        GITLAB_ACTION, "operation_callback", lambda action: CompletedOperation(action)
     )
 
     result = ISSUE.main(
@@ -294,8 +481,8 @@ def test_cli_cleanup_failure_blocks_a_completed_report_without_losing_records(
 
     assert result == 2
     assert report["status"] == "BLOCKED"
-    assert report["records"] == [{"id": 42, "action": "NO_OP"}]
-    assert report["readback"] == {"verified": True}
+    assert report["records"] == [{"id": 42, "action": "NO_OP", "verified": True}]
+    assert report["readback"] == {"id": 42, "action": "NO_OP", "verified": True}
     assert report["cleanup"]["status"] == "BLOCKED"
     assert report["errors"][-1] == {
         "source": "cleanup.CompletedOperation",
@@ -303,11 +490,16 @@ def test_cli_cleanup_failure_blocks_a_completed_report_without_losing_records(
     }
 
 
-def _list(endpoint):
+def _list(endpoint: str) -> str:
+    """Append the first bounded page query to a GitLab collection path.
+
+    :param endpoint: Collection endpoint with or without existing query text.
+    :returns: Endpoint requesting page one with 100 records per page.
+    """
     return endpoint + ("&" if "?" in endpoint else "?") + "per_page=100&page=1"
 
 
-def _tag_output(plan, record):
+def _tag_output(plan: ActionPlan, record: JSONObject) -> JSONObject:
     """Render one runner-action record through the shared result adapter.
 
     :param plan: Confirmed runner action plan.
@@ -356,7 +548,10 @@ def _tag_output(plan, record):
     return json.loads(REPORT.emit(data, "json"))
 
 
-def test_plan_fingerprint_binds_body_target_and_source():
+def test_plan_fingerprint_binds_body_target_and_source() -> None:
+    """Change plan digest for different body or scope while hiding body text.
+    :returns: None; assertions in the body validate the regression.
+    """
     first = _plan("gitlab_issue", "open-bug", {"title": "one"})
     assert first.digest == _plan("gitlab_issue", "open-bug", {"title": "one"}).digest
     assert first.digest != _plan("gitlab_issue", "open-bug", {"title": "two"}).digest
@@ -370,8 +565,16 @@ def test_plan_fingerprint_binds_body_target_and_source():
 
 
 def test_action_uses_project_target_before_user_target_without_selector(
-    tmp_path: Path, monkeypatch, capsys
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Select project target before home default and bind digest to source.
+
+    :param tmp_path: Scratch project and home target files.
+    :param monkeypatch: Pytest fixture setting cwd, HOME, and selector state.
+    :param capsys: Pytest fixture capturing both offline plans.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     home = tmp_path / "home"
     project = tmp_path / "project"
     user_target = home / ".ci-skills" / "target.toml"
@@ -405,8 +608,16 @@ def test_action_uses_project_target_before_user_target_without_selector(
 
 
 def test_group_action_uses_selected_target_without_group_flag(
-    tmp_path: Path, monkeypatch, capsys
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Use the selected home group without repeating it on CLI.
+
+    :param tmp_path: Scratch home group target and unrelated cwd.
+    :param monkeypatch: Pytest fixture setting HOME and cwd.
+    :param capsys: Pytest fixture capturing the runner plan.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     home = tmp_path / "home"
     target = home / ".ci-skills" / "target.toml"
     target.parent.mkdir(parents=True)
@@ -427,21 +638,28 @@ def test_group_action_uses_selected_target_without_group_flag(
 
 
 def test_declared_project_override_replaces_selected_target_for_one_action(
-    tmp_path: Path, capsys
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Use explicit --project to override the target's stored project.
+
+    :param tmp_path: Directory receiving the selected target file.
+    :param monkeypatch: Pytest monkeypatch fixture used to isolate process state.
+    :param capsys: Pytest fixture capturing the overridden plan.
+    :returns: None; assertions in the body validate the regression.
+    """
     target = tmp_path / "selected.toml"
     target.write_text(
         '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "stored/repo"\n',
         encoding="utf-8",
     )
 
+    monkeypatch.setenv("CI_SKILLS_TARGET", str(target))
+
     result = ISSUE.main(
         [
             "open-bug",
             "--title",
             "selected",
-            "--target",
-            str(target),
             "--project",
             "override/repo",
             "--json",
@@ -451,10 +669,13 @@ def test_declared_project_override_replaces_selected_target_for_one_action(
 
     assert result == 0
     assert plan["target"]["reference"] == "override/repo"
-    assert plan["target_source"] == "argv:--target;argv:--project"
+    assert plan["target_source"] == "env:CI_SKILLS_TARGET;argv:--project"
 
 
-def test_milestone_create_reads_back_numeric_id():
+def test_milestone_create_reads_back_numeric_id() -> None:
+    """Verify milestone creation by independent numeric-ID read-back.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan(
         "gitlab_milestone", "create", {"title": "release", "due_date": "2026-10-31"}
     )
@@ -478,7 +699,10 @@ def test_milestone_create_reads_back_numeric_id():
     assert [call[0] for call in api.calls] == ["GET", "POST", "GET"]
 
 
-def test_milestone_update_blocks_failed_readback():
+def test_milestone_update_blocks_failed_readback() -> None:
+    """Retain mutation evidence when milestone due-date read-back is stale.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan(
         "gitlab_milestone", "adjust-time", {"due_date": "2026-10-31"}, resource_id=5
     )
@@ -499,7 +723,10 @@ def test_milestone_update_blocks_failed_readback():
     assert result["errors"][0]["reason"] == "milestone_readback_mismatch"
 
 
-def test_issue_reuses_exact_open_title_only_after_independent_get():
+def test_issue_reuses_exact_open_title_only_after_independent_get() -> None:
+    """Return issue NO_OP only after exact open-title detail read-back.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_issue", "open-bug", {"title": "broken", "labels": "bug"})
     base = "projects/42/issues"
     query = _list(base + "?state=all&search=broken")
@@ -516,7 +743,10 @@ def test_issue_reuses_exact_open_title_only_after_independent_get():
     assert all(method == "GET" for method, _, _ in api.calls)
 
 
-def test_issue_create_refuses_closed_exact_title_instead_of_duplicating():
+def test_issue_create_refuses_closed_exact_title_instead_of_duplicating() -> None:
+    """Refuse to create a duplicate of a closed exact-title issue.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_issue", "open-bug", {"title": "broken"})
     base = "projects/42/issues"
     api = FakeAPI(
@@ -531,7 +761,10 @@ def test_issue_create_refuses_closed_exact_title_instead_of_duplicating():
     assert [call[0] for call in api.calls] == ["GET"]
 
 
-def test_issue_create_blocks_when_independent_readback_is_not_open():
+def test_issue_create_blocks_when_independent_readback_is_not_open() -> None:
+    """Mark created issue unverified if independent detail is closed.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_issue", "open-bug", {"title": "broken"})
     base = "projects/42/issues"
     api = FakeAPI(
@@ -549,7 +782,10 @@ def test_issue_create_blocks_when_independent_readback_is_not_open():
     assert [call[0] for call in api.calls] == ["GET", "POST", "GET"]
 
 
-def test_wiki_update_reads_back_new_slug():
+def test_wiki_update_reads_back_new_slug() -> None:
+    """Read the new wiki slug after a rename update.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan(
         "gitlab_wiki", "update", {"content": "new", "title": "New"}, resource_id="old"
     )
@@ -565,8 +801,15 @@ def test_wiki_update_reads_back_new_slug():
 
 
 def test_wiki_create_accepts_provider_normalized_title_and_reuses_page(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Accept GitLab title normalization and reuse the created page.
+
+    :param tmp_path: Private directory holding the create guard lock.
+    :param monkeypatch: Pytest fixture selecting that lock directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     plan = _plan(
         "gitlab_wiki",
@@ -593,7 +836,10 @@ def test_wiki_create_accepts_provider_normalized_title_and_reuses_page(
     assert [call[0] for call in api.calls].count("POST") == 1
 
 
-def test_wiki_update_accepts_provider_normalized_title():
+def test_wiki_update_accepts_provider_normalized_title() -> None:
+    """Verify a wiki update despite provider-normalized title text.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan(
         "gitlab_wiki",
         "update",
@@ -620,7 +866,10 @@ def test_wiki_update_accepts_provider_normalized_title():
     assert result["action"] == "APPLIED" and result["verified"] is True
 
 
-def test_runner_group_assign_verifies_each_project_and_marks_partial():
+def test_runner_group_assign_verifies_each_project_and_marks_partial() -> None:
+    """Rollback a partial group assignment after one project fails read-back.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan(
         "gitlab_runner",
         "assign",
@@ -660,8 +909,15 @@ def test_runner_group_assign_verifies_each_project_and_marks_partial():
 
 
 def test_runner_create_saves_token_0600_without_reporting_it(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Persist one-time runner token privately without serializing it.
+
+    :param tmp_path: Private lock and token destination directory.
+    :param monkeypatch: Pytest fixture selecting the lock directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     destination = tmp_path / "one-time.token"
     plan = _plan(
@@ -701,7 +957,10 @@ def test_runner_create_saves_token_0600_without_reporting_it(
     assert result["after_tags"] == ["first", "second"]
 
 
-def test_runner_tag_adds_to_selected_runner_and_reads_back():
+def test_runner_tag_adds_to_selected_runner_and_reads_back() -> None:
+    """Verify additive tag mutation on a runner in the selected project.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_runner", "tag", {"tag_list": ["new"]}, resource_id=23)
     scope = "projects/42/runners"
     runner = {
@@ -758,7 +1017,10 @@ def test_runner_tag_adds_to_selected_runner_and_reads_back():
         assert not TAG_VALIDATOR.is_valid(invalid)
 
 
-def test_runner_tag_uses_only_verified_bound_revision():
+def test_runner_tag_uses_only_verified_bound_revision() -> None:
+    """Ignore a revision claim unless its bound skill evidence is verified.
+    :returns: None; assertions in the body validate the regression.
+    """
     verified = SimpleNamespace(
         skill={"revision": {"verified": True, "value": "a" * 40}}
     )
@@ -769,7 +1031,10 @@ def test_runner_tag_uses_only_verified_bound_revision():
     assert ACTION._verified_skill_revision(unverified) is None
 
 
-def test_runner_tag_is_no_op_when_tag_already_exists():
+def test_runner_tag_is_no_op_when_tag_already_exists() -> None:
+    """Avoid PUT when the selected runner already carries the tag.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_runner", "tag", {"tag_list": ["existing"]}, resource_id=23)
     api = FakeAPI(
         {
@@ -791,7 +1056,10 @@ def test_runner_tag_is_no_op_when_tag_already_exists():
     TAG_VALIDATOR.validate(_tag_output(plan, result))
 
 
-def test_runner_tag_refuses_runner_outside_selected_project():
+def test_runner_tag_refuses_runner_outside_selected_project() -> None:
+    """Refuse tag mutation for a runner outside the selected project.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_runner", "tag", {"tag_list": ["new"]}, resource_id=23)
     api = FakeAPI(
         {
@@ -811,7 +1079,10 @@ def test_runner_tag_refuses_runner_outside_selected_project():
     assert all(call[0] != "PUT" for call in api.calls)
 
 
-def test_runner_tag_partial_output_requires_readback_and_cleanup():
+def test_runner_tag_partial_output_requires_readback_and_cleanup() -> None:
+    """Require partial tag records to include read-back and cleanup state.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_runner", "tag", {"tag_list": ["new"]}, resource_id=23)
     current = {
         "id": 23,
@@ -844,8 +1115,10 @@ def test_runner_tag_partial_output_requires_readback_and_cleanup():
         assert not TAG_VALIDATOR.is_valid(invalid)
 
 
-def test_runner_tag_uncertain_put_and_failed_readback_has_unknown_mutation():
-    """Keep mutation unknown when neither PUT nor GET confirms the outcome."""
+def test_runner_tag_uncertain_put_and_failed_readback_has_unknown_mutation() -> None:
+    """Keep mutation unknown when neither PUT nor GET confirms the outcome.
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_runner", "tag", {"tag_list": ["new"]}, resource_id=23)
     current = {
         "id": 23,
@@ -869,20 +1142,40 @@ def test_runner_tag_uncertain_put_and_failed_readback_has_unknown_mutation():
     TAG_VALIDATOR.validate(_tag_output(plan, result))
 
 
-def test_concurrent_runner_tag_additions_preserve_both_tags(tmp_path, monkeypatch):
+def test_concurrent_runner_tag_additions_preserve_both_tags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Serialize concurrent tag updates so neither requested tag is lost.
+
+    :param tmp_path: Private lock directory for both update workers.
+    :param monkeypatch: Pytest fixture selecting that lock directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     first_write_started = Event()
     release_first_write = Event()
     second_runner_read = Event()
 
     class SharedRunnerAPI:
+        """Synchronize competing runner-tag updates against one mutable tag list."""
+
         def __init__(self):
+            """Seed existing tags, request counters, and a synchronization lock."""
             self.tags = ["existing"]
             self.read_count = 0
             self.write_count = 0
             self.lock = Lock()
 
-        def get_json(self, _session, endpoint):
+        def get_json(
+            self, _session: BoundGitLabSession, endpoint: str
+        ) -> Union[JSONObject, Sequence[JSONValue]]:
+            """Return current runner tags or selected-project assignment.
+
+            :param _session: Bound session accepted by the shared API double.
+            :param endpoint: Runner detail or project runner-list path.
+            :returns: Current runner detail or project assignment list.
+            """
             if endpoint != "runners/23":
                 return [{"id": 23}]
             with self.lock:
@@ -897,7 +1190,16 @@ def test_concurrent_runner_tag_additions_preserve_both_tags(tmp_path, monkeypatc
                 "tag_list": tags,
             }
 
-        def put_json(self, _session, _endpoint, body):
+        def put_json(
+            self, _session: BoundGitLabSession, _endpoint: str, body: JSONValue
+        ) -> JSONObject:
+            """Hold first write until the second worker contests the same lock.
+
+            :param _session: Bound session accepted by the shared API double.
+            :param _endpoint: Runner update path accepted by the double.
+            :param body: New tag list to publish after the first-write barrier.
+            :returns: Updated runner identity.
+            """
             with self.lock:
                 self.write_count += 1
                 first = self.write_count == 1
@@ -923,13 +1225,24 @@ def test_concurrent_runner_tag_additions_preserve_both_tags(tmp_path, monkeypatc
     assert set(api.tags) == {"existing", "alpha", "beta"}
 
 
-def test_runner_tag_dry_run_and_refusal_match_schema(tmp_path, capsys):
+def test_runner_tag_dry_run_and_refusal_match_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Validate runner tag dry-run and missing-tag refusal against schema.
+
+    :param tmp_path: Directory receiving the selected project target.
+    :param monkeypatch: Pytest fixture selecting the target by environment.
+    :param capsys: Pytest fixture capturing plan and refusal reports.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = tmp_path / "target.toml"
     target.write_text(
         '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "team/repo"\n',
         encoding="utf-8",
     )
-    common = ["tag", "--target", str(target), "--runner-id", "23", "--json"]
+    monkeypatch.setenv("CI_SKILLS_TARGET", str(target))
+    common = ["tag", "--runner-id", "23", "--json"]
     assert RUNNER.main([*common, "--tag", "new"]) == 0
     dry_run = json.loads(capsys.readouterr().out)
     TAG_VALIDATOR.validate(dry_run)
@@ -942,8 +1255,15 @@ def test_runner_tag_dry_run_and_refusal_match_schema(tmp_path, capsys):
 
 
 def test_runner_create_uncertain_provider_result_leaves_no_token_file(
-    tmp_path: Path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep uncertain runner create from writing a one-time token file.
+
+    :param tmp_path: Private lock and token destination directory.
+    :param monkeypatch: Pytest fixture selecting the lock directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
     destination = tmp_path / "one-time.token"
     plan = _plan(
@@ -968,7 +1288,13 @@ def test_runner_create_uncertain_provider_result_leaves_no_token_file(
     assert [call[0] for call in api.calls] == ["GET", "POST"]
 
 
-def test_receipt_is_portable_and_has_no_token_out_path(tmp_path: Path):
+def test_receipt_is_portable_and_has_no_token_out_path(tmp_path: Path) -> None:
+    """Redact token destination and credential source in portable receipt.
+
+    :param tmp_path: Scratch token path and receipt destination.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan(
         "gitlab_runner",
         "create",
@@ -989,10 +1315,22 @@ def test_receipt_is_portable_and_has_no_token_out_path(tmp_path: Path):
     assert "file:path:" in saved
 
 
-def test_transport_pins_host_and_sends_body_through_private_file():
+def test_transport_pins_host_and_sends_body_through_private_file() -> None:
+    """Keep write body out of argv and use a mode-0600 input file.
+    :returns: None; assertions in the body validate the regression.
+    """
     captured = {}
 
-    def command(argv, *, timeout, env):
+    def command(
+        argv: Sequence[str], *, timeout: int, env: Optional[Mapping[str, Optional[str]]]
+    ) -> SimpleNamespace:
+        """Inspect selected host, child token, and private JSON input file.
+
+        :param argv: Native glab POST command with ``--input`` path.
+        :param timeout: Bounded request timeout accepted by the double.
+        :param env: Selected child token environment captured for assertions.
+        :returns: Successful provider response containing runner ID 23.
+        """
         captured["argv"] = argv
         captured["env"] = env
         captured["body"] = json.loads(Path(argv[argv.index("--input") + 1]).read_text())
@@ -1018,8 +1356,16 @@ def test_transport_pins_host_and_sends_body_through_private_file():
 
 
 def test_apply_cli_malformed_provider_response_emits_structured_blocked(
-    monkeypatch, tmp_path: Path, capsys
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Render malformed provider list as a blocked issue action report.
+
+    :param monkeypatch: Pytest fixture replacing target, session, and API.
+    :param tmp_path: Unused pytest path fixture; no filesystem effect is asserted.
+    :param capsys: Pytest fixture capturing the structured result.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_issue", "open-bug", {"title": "broken"})
     api = FakeAPI(
         {
@@ -1029,22 +1375,19 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
             ): [{}],
         }
     )
-    session = SimpleNamespace(
-        origin=plan.origin,
-        target_reference=plan.target_reference,
-    )
+    session = _bound_session(plan)
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "resolve_gitlab_target",
         lambda _target, _binding, *, dry_run: (object(), "test"),
     )
-    monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
+    monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
-        ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
     )
-    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda *, timeout: api)
+    monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: api)
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "check_gitlab_operation_access",
         lambda _session, api_client: {
             "status": "PASS",
@@ -1057,8 +1400,6 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
             "open-bug",
             "--title",
             "broken",
-            "--target",
-            str(tmp_path / "target.toml"),
             "--apply",
             "--confirm-plan",
             plan.digest,
@@ -1079,21 +1420,36 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
     (("user", "authentication"), ("target", "target_path_mismatch")),
 )
 def test_action_access_failure_preserves_the_failed_subcheck(
-    monkeypatch, tmp_path: Path, capsys, subcheck, reason
-):
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    subcheck: str,
+    reason: str,
+) -> None:
+    """Keep user or target access refusal and plan digest without applying.
+
+    :param monkeypatch: Pytest fixture replacing access and rejecting apply.
+    :param tmp_path: Unused pytest path fixture; no filesystem effect is asserted.
+    :param capsys: Pytest fixture capturing the blocked report.
+    :param subcheck: User or target access check that fails.
+    :param reason: Structured failure reason from that subcheck.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_issue", "open-bug", {"title": "broken"})
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "resolve_gitlab_target",
         lambda _target, _binding, *, dry_run: (object(), "test"),
     )
-    monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
+    monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
+    session = _bound_session(plan)
     monkeypatch.setattr(
-        ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: object()
+        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
     )
-    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda *, timeout: object())
+    monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: object())
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "check_gitlab_operation_access",
         lambda _session, api_client: {
             "status": "BLOCKED",
@@ -1101,7 +1457,7 @@ def test_action_access_failure_preserves_the_failed_subcheck(
         },
     )
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "apply_plan",
         lambda *_args: pytest.fail("apply ran after access failure"),
     )
@@ -1128,44 +1484,53 @@ def test_action_access_failure_preserves_the_failed_subcheck(
 
 
 def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
-    monkeypatch, tmp_path: Path, capsys
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Write a portable blocked receipt retaining unknown mutation evidence.
+
+    :param monkeypatch: Pytest fixture replacing access and post-write action.
+    :param tmp_path: Directory receiving the blocked receipt.
+    :param capsys: Pytest fixture capturing the displayed report.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     plan = _plan("gitlab_issue", "open-bug", {"title": "broken"})
     receipt_out = tmp_path / "blocked-receipt.json"
-    session = SimpleNamespace(
-        origin=plan.origin,
-        target_reference=plan.target_reference,
-        credential_source="env:GITLAB_TOKEN",
-        credential_digest="sha256:unit",
-        skill={"digest": "unit"},
-    )
+    session = _bound_session(plan, skill={"digest": "unit"})
     access = {
         "status": "PASS",
         "identity": {"username": "operator"},
         "target": {"kind": "project", "id": 42, "full_path": "team/repo"},
     }
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "resolve_gitlab_target",
         lambda _target, _binding, *, dry_run: (object(), "test"),
     )
-    monkeypatch.setattr(ACTION, "make_plan", lambda *_args: plan)
+    monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
-        ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
     )
-    monkeypatch.setattr(ACTION, "GlabAPIClient", lambda *, timeout: object())
+    monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: object())
     monkeypatch.setattr(
-        ACTION,
+        GITLAB_ACTION,
         "check_gitlab_operation_access",
         lambda _session, api_client: access,
     )
 
-    def fail_after_write(*_args):
+    def fail_after_write(*_args: str) -> None:
+        """Raise an uncertain create error after the selected write attempt.
+
+        :param *_args: Ignored positional arguments accepted by the fake boundary.
+        :returns: None; the helper records behavior through its side effects.
+        :raises ACTION.ActionError: Write outcome needs independent title read-back.
+
+        """
         raise ACTION.ActionError(
             "issue_create_outcome_uncertain_check_title_before_retry"
         )
 
-    monkeypatch.setattr(ACTION, "apply_plan", fail_after_write)
+    monkeypatch.setattr(GITLAB_ACTION, "apply_plan", fail_after_write)
 
     result = ISSUE.main(
         [
@@ -1204,8 +1569,16 @@ def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
 
 @pytest.mark.parametrize("dry_run_flag", ([], ["--dry-run"]))
 def test_action_plan_rejects_output_paths_without_creating_files(
-    tmp_path: Path, capsys, dry_run_flag
-):
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], dry_run_flag: Sequence[str]
+) -> None:
+    """Reject output directory writes in offline plan or explicit dry-run.
+
+    :param tmp_path: Scratch report directory that must remain absent.
+    :param capsys: Pytest fixture capturing the usage failure.
+    :param dry_run_flag: Optional explicit dry-run flag for this case.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     output = tmp_path / "reports"
     result = ISSUE.main(
         [
@@ -1227,7 +1600,16 @@ def test_action_plan_rejects_output_paths_without_creating_files(
     assert not output.exists()
 
 
-def test_action_plan_rejects_log_file_without_creating_it(tmp_path: Path, capsys):
+def test_action_plan_rejects_log_file_without_creating_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Reject a log file in offline plan mode before creating it.
+
+    :param tmp_path: Scratch log destination that must remain absent.
+    :param capsys: Pytest fixture capturing the blocked report.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     output = tmp_path / "audit.jsonl"
     result = ISSUE.main(
         [
@@ -1250,20 +1632,27 @@ def test_action_plan_rejects_log_file_without_creating_it(tmp_path: Path, capsys
 
 
 def test_action_plan_json_diagnostic_is_separate_from_machine_result(
-    tmp_path: Path, capsys
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Keep JSON diagnostics on stderr separate from plan JSON on stdout.
+
+    :param monkeypatch: Pytest fixture selecting the target by environment.
+    :param tmp_path: Directory receiving the selected project target.
+    :param capsys: Pytest fixture capturing both output streams.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     target = tmp_path / "target.toml"
     target.write_text(
         '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
         encoding="utf-8",
     )
+    monkeypatch.setenv("CI_SKILLS_TARGET", str(target))
     result = ISSUE.main(
         [
             "open-bug",
             "--title",
             "planned",
-            "--target",
-            str(target),
             "--log-format",
             "json",
             "--run-id",

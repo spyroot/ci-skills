@@ -1,17 +1,34 @@
-"""Deterministic tests for selected Rook Ceph cluster evidence collection."""
+"""Deterministic tests for selected Rook Ceph cluster evidence collection.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
-from typing import Any
+from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from typing import TYPE_CHECKING, Union
 
 import pytest
 from conftest import import_script_module
 
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONValue
+    from lib.python.core.runtime import CommandResult
+    from lib.python.core.target import Target
 
-def _target(tmp_path):
-    target_mod = import_script_module("core.target")
+
+def _target(tmp_path: Path) -> Target:
+    """Build a full fixture target with a selected kubeconfig path.
+
+    :param tmp_path: Directory receiving the synthetic kubeconfig.
+    :returns: Three-surface target pinned to the fixture cluster.
+    """
+    target_mod = import_script_module("lib.python.core.target")
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     return target_mod.Target(
@@ -31,7 +48,13 @@ def _target(tmp_path):
     )
 
 
-def _args(**overrides: Any) -> SimpleNamespace:
+def _args(**overrides: JSONValue) -> SimpleNamespace:
+    """Build Ceph collector options with selected filter overrides.
+
+    :param **overrides: Field overrides applied to the default test namespace.
+    :returns: Namespace-shaped arguments passed to the collector.
+
+    """
     values = {
         "namespace": "rook-ceph",
         "operator": "rook-ceph-operator",
@@ -45,6 +68,12 @@ def _args(**overrides: Any) -> SimpleNamespace:
 
 
 def _command_source(command: tuple[str, ...]) -> str:
+    """Classify a selected Ceph native command for response dispatch.
+
+    :param command: Exact oc command issued by the collector.
+    :returns: Status, OSD tree, inactive PG, or Pod fixture key.
+    :raises AssertionError: Command is outside the expected four probes.
+    """
     if "get" in command and command[command.index("get") + 1] == "pods":
         return "pods"
     if "exec" in command and "-s" in command:
@@ -56,7 +85,20 @@ def _command_source(command: tuple[str, ...]) -> str:
     raise AssertionError(f"unexpected command: {command}")
 
 
-def _result(runtime, command: tuple[str, ...], payload: Any, returncode: int = 0):
+def _result(
+    runtime: ModuleType,
+    command: tuple[str, ...],
+    payload: JSONValue,
+    returncode: int = 0,
+) -> CommandResult:
+    """Build a native Ceph command result from text or JSON payload.
+
+    :param runtime: Module providing the command-result class.
+    :param command: Native argv recorded in the result.
+    :param payload: Raw text or JSON-serializable provider response.
+    :param returncode: Simulated process status, including denied cases.
+    :returns: Command result with response body and safe failure text.
+    """
     stdout = payload if isinstance(payload, str) else json.dumps(payload)
     stderr = "forbidden" if returncode else ""
     return runtime.CommandResult(command, returncode, stdout, stderr)
@@ -69,7 +111,16 @@ def _pod(
     node: str = "worker-a",
     ready: str = "True",
     scheduled: str = "True",
-) -> dict[str, Any]:
+) -> MutableMapping[str, JSONValue]:
+    """Build a Rook Pod with selectable node and condition states.
+
+    :param name: Pod name exposed in collector records.
+    :param role: Rook app label used by Pod filtering.
+    :param node: Kubernetes node hosting the Pod.
+    :param ready: Ready condition status string.
+    :param scheduled: PodScheduled condition status string.
+    :returns: Minimal Kubernetes Pod mapping.
+    """
     return {
         "metadata": {
             "namespace": "rook-ceph",
@@ -87,8 +138,13 @@ def _pod(
     }
 
 
-def test_ceph_health_checks_preserve_exact_findings_and_reject_malformed_detail():
-    ceph_cluster = import_script_module("core.ceph_cluster")
+def test_ceph_health_checks_preserve_exact_findings_and_reject_malformed_detail() -> (
+    None
+):
+    """Keep exact health-check findings and reject wrong detail envelopes.
+    :returns: None; assertions in the body validate the regression.
+    """
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
     health = {
         "status": "HEALTH_WARN",
         "checks": {
@@ -117,12 +173,18 @@ def test_ceph_health_checks_preserve_exact_findings_and_reject_malformed_detail(
 
 
 def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
-    monkeypatch,
-    tmp_path,
-):
-    """Every Ceph query is bound to the selected kubeconfig, context, namespace."""
-    ceph_cluster = import_script_module("core.ceph_cluster")
-    runtime = import_script_module("core.runtime")
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Pin four Ceph probes to target context/file and preserve tree evidence.
+
+    :param monkeypatch: Pytest fixture replacing bounded native commands.
+    :param tmp_path: Directory receiving the target kubeconfig.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
+    runtime = import_script_module("lib.python.core.runtime")
     target = _target(tmp_path)
     kubeconfig = str(target.kubernetes.kubeconfig)
     responses = {
@@ -139,10 +201,20 @@ def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
         "inactive_pgs": {"pg_stats": [{"pgid": "1.2", "state": "stale+inactive"}]},
         "pods": {"items": [_pod("rook-ceph-osd-0"), _pod("rook-ceph-mon-a")]},
     }
-    calls: list[tuple[str, ...]] = []
-    kwargs_seen: list[dict[str, Any]] = []
+    calls: MutableSequence[tuple[str, ...]] = []
+    kwargs_seen: MutableSequence[Mapping[str, JSONValue]] = []
 
-    def fake_run_tail(argv, **kwargs):
+    def fake_run_tail(
+        argv: Sequence[str],
+        **kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> CommandResult:
+        """Record bounded oc argv and return the matching Ceph fixture.
+
+        :param argv: Selected oc command issued by the collector.
+        :param **kwargs: Keyword arguments forwarded to the fake command boundary.
+        :returns: Simulated native response for the command class.
+
+        """
         command = tuple(str(part) for part in argv)
         calls.append(command)
         kwargs_seen.append(kwargs)
@@ -232,7 +304,7 @@ def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
             ],
         }
     ]
-    rendered = import_script_module("core.report").human(result)
+    rendered = import_script_module("lib.python.core.report").human(result)
     assert rendered.index("default (root") < rendered.index("rack-a (rack")
     assert rendered.index("rack-a (rack") < rendered.index("worker-a (host")
     assert rendered.index("worker-a (host") < rendered.index("osd.1 (osd")
@@ -251,12 +323,18 @@ def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
 
 
 def test_ceph_cluster_filters_pods_by_node_ready_and_condition(
-    monkeypatch,
-    tmp_path,
-):
-    """Pod rows honor the node, Ready, and condition filters together."""
-    ceph_cluster = import_script_module("core.ceph_cluster")
-    runtime = import_script_module("core.runtime")
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Combine node, Ready, and PodScheduled filters in Ceph rows.
+
+    :param monkeypatch: Pytest fixture replacing bounded native commands.
+    :param tmp_path: Directory receiving the target kubeconfig.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
+    runtime = import_script_module("lib.python.core.runtime")
     target = _target(tmp_path)
     responses = {
         "status": {"health": {"status": "HEALTH_OK"}},
@@ -277,7 +355,17 @@ def test_ceph_cluster_filters_pods_by_node_ready_and_condition(
         },
     }
 
-    def fake_run_tail(argv, **_kwargs):
+    def fake_run_tail(
+        argv: Sequence[str],
+        **_kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> CommandResult:
+        """Return Ceph probe fixtures including mixed-readiness Pods.
+
+        :param argv: Selected oc command issued by the collector.
+        :param **_kwargs: Ignored keyword arguments accepted by the fake boundary.
+        :returns: Simulated native response for the command class.
+
+        """
         command = tuple(str(part) for part in argv)
         return _result(runtime, command, responses[_command_source(command)])
 
@@ -297,9 +385,11 @@ def test_ceph_cluster_filters_pods_by_node_ready_and_condition(
     assert result["actions"] == ["inspect_unready_ceph_pods"]
 
 
-def test_ceph_cluster_parses_live_dump_stuck_envelope():
-    """Ceph pg dump_stuck returns stuck_pg_stats rather than pg_stats."""
-    ceph_cluster = import_script_module("core.ceph_cluster")
+def test_ceph_cluster_parses_live_dump_stuck_envelope() -> None:
+    """Ceph pg dump_stuck returns stuck_pg_stats rather than pg_stats.
+    :returns: None; assertions in the body validate the regression.
+    """
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
 
     assert ceph_cluster._inactive_pgs(
         {
@@ -325,8 +415,16 @@ def test_ceph_cluster_parses_live_dump_stuck_envelope():
         ],
     ),
 )
-def test_ceph_tree_rejects_missing_duplicate_or_cyclic_hierarchy(nodes):
-    ceph_cluster = import_script_module("core.ceph_cluster")
+def test_ceph_tree_rejects_missing_duplicate_or_cyclic_hierarchy(
+    nodes: Sequence[str],
+) -> None:
+    """Reject OSD trees with missing children, duplicate IDs, or cycles.
+
+    :param nodes: Invalid Ceph tree node sequence under test.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
     with pytest.raises(TypeError, match="osd_tree:"):
         ceph_cluster._osd_tree({"nodes": nodes})
 
@@ -349,16 +447,26 @@ def test_ceph_tree_rejects_missing_duplicate_or_cyclic_hierarchy(nodes):
     ),
 )
 def test_ceph_cluster_records_malformed_response_and_denied_command(
-    monkeypatch,
-    tmp_path,
-    bad_source,
-    payload,
-    returncode,
-    expected,
-):
-    """Malformed JSON shapes and denied commands become structured errors."""
-    ceph_cluster = import_script_module("core.ceph_cluster")
-    runtime = import_script_module("core.runtime")
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bad_source: str,
+    payload: JSONValue,
+    returncode: int,
+    expected: Mapping[str, str],
+) -> None:
+    """Render invalid Ceph shapes or denied Pod query as partial evidence.
+
+    :param monkeypatch: Pytest fixture replacing bounded native commands.
+    :param tmp_path: Directory receiving the target kubeconfig.
+    :param bad_source: Probe whose response or exit status is invalid.
+    :param payload: Malformed JSON shape or denied-command output.
+    :param returncode: Native status for the selected bad probe.
+    :param expected: Structured source/reason pair expected in errors.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
+    runtime = import_script_module("lib.python.core.runtime")
     target = _target(tmp_path)
     responses = {
         "status": {"health": {"status": "HEALTH_OK"}},
@@ -368,7 +476,17 @@ def test_ceph_cluster_records_malformed_response_and_denied_command(
     }
     responses[bad_source] = payload
 
-    def fake_run_tail(argv, **_kwargs):
+    def fake_run_tail(
+        argv: Sequence[str],
+        **_kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> CommandResult:
+        """Return one bad Ceph probe while preserving other responses.
+
+        :param argv: Selected oc command issued by the collector.
+        :param **_kwargs: Ignored keyword arguments accepted by the fake boundary.
+        :returns: Native result with selected payload and failure status.
+
+        """
         command = tuple(str(part) for part in argv)
         source = _command_source(command)
         return _result(

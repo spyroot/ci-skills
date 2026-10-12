@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Read one GitLab job or list bounded jobs from the selected project."""
+"""Read one GitLab job or list bounded jobs from the selected project.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 import argparse
 
 import _bootstrap  # noqa: F401
-from core.cli import execute_gitlab_job, parser
+from lib.python.core.cli import execute_gitlab_job, parser
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,6 +55,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Parse an exact GitLab job read or bounded project job listing.
+
+    :returns: Exit code from the shared GitLab job executor.
+    """
     return execute_gitlab_job(build_parser().parse_args())
 
 

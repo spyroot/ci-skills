@@ -8,7 +8,6 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import platform
 import re
@@ -16,12 +15,21 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Mapping, MutableMapping, Sequence
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Optional
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
+from lib.python.core.cli_api import response_decoder
+from lib.python.core.json_types import (
+    JSONObject,
+    json_object,
+    json_objects,
+    json_string,
+    json_strings,
+)
 
 
 class AgentProfileReason(StrEnum):
@@ -48,8 +56,8 @@ class AgentProfileError(ValueError):
     def __init__(
         self,
         reason: AgentProfileReason,
-        command: list[str] | None = None,
-        exit_code: int | None = None,
+        command: Optional[Sequence[str]] = None,
+        exit_code: Optional[int] = None,
     ):
         """Store a classified failure without copying host command output.
 
@@ -73,7 +81,7 @@ class AgentProfile:
         :param repository_root: Root of the repository invoking the installer.
         :raises AgentProfileError: If the contract or destination is invalid.
         :raises OSError: If the manifest or schema cannot be read.
-        """  # noqa: DOC503
+        """  # noqa: DOC503 - Manifest and schema file reads propagate OSError.
         self.root = root.resolve()
         self.repository_root = repository_root.resolve()
         self.manifest = self.root / "toolchain-dependencies.json"
@@ -90,76 +98,58 @@ class AgentProfile:
             Draft202012Validator(schema).validate(data)
         except (SchemaError, ValidationError) as exc:
             raise AgentProfileError(AgentProfileReason.PROFILE_INVALID) from exc
-        profile = data["profiles"]["agent"]
-        hosts = profile["host"]
-        skills = profile["skills"]
-        relative = Path(profile["skillsDirectory"])
-        if hosts != ["glab"] or not isinstance(skills, list) or not skills:
+        try:
+            profile = json_object(json_object(data["profiles"])["agent"])
+            hosts = json_strings(profile["host"])
+            skills = json_strings(profile["skills"])
+            relative = Path(json_string(profile["skillsDirectory"]))
+            dependencies = [
+                entry
+                for entry in json_objects(data["dependencies"])
+                if entry.get("name") == "glab"
+            ]
+            if len(dependencies) != 1:
+                raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
+            dependency = dependencies[0]
+            commands = json_strings(dependency.get("commands"))
+            packages = {
+                manager: json_strings(dependency.get(manager, []))
+                for manager in ("brew", "apt", "yum")
+            }
+            probe = json_strings(dependency.get("probe"))
+        except (KeyError, TypeError) as exc:
+            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID) from exc
+        if tuple(hosts) != ("glab",) or not skills:
             raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
-        if any(
-            not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", name)
-            for name in skills
-        ):
+        if any(not re.fullmatch(r"[a-z][a-z0-9-]*", name) for name in skills):
             raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
         if relative.is_absolute() or any(
             part in {"", ".", ".."} for part in relative.parts
         ):
             raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
-        dependencies = [
-            entry for entry in data["dependencies"] if entry.get("name") == "glab"
-        ]
-        if len(dependencies) != 1 or dependencies[0].get("commands") != ["glab"]:
+        if tuple(commands) != ("glab",) or any(
+            tuple(names) != ("glab",) for names in packages.values()
+        ):
             raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
-        self.packages = {
-            manager: dependencies[0].get(manager, [])
-            for manager in ("brew", "apt", "yum")
-        }
-        if any(packages != ["glab"] for packages in self.packages.values()):
+        if tuple(probe) != ("glab", "skills", "get", skills[0]):
             raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
-        if dependencies[0].get("probe") != ["glab", "skills", "get", skills[0]]:
-            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
-        self.skills = skills
+        self.skills: Sequence[str] = skills
+        self.packages: Mapping[str, Sequence[str]] = packages
         self.destination = self.repository_root / relative
         self._check_destination()
 
     @staticmethod
-    def _load_json(raw: bytes) -> dict[str, Any]:
-        """Parse one JSON contract without duplicate keys or nonfinite values.
+    def _load_json(raw: bytes) -> JSONObject:
+        """Read a JSON contract using the shared finite, unique-key decoder.
 
-        :param raw: UTF-8 JSON bytes.
-        :returns: Decoded JSON object.
-        :raises AgentProfileError: If the contract is malformed.
-        """  # noqa: DOC502
-
-        def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-            """Reject duplicate object keys during JSON decoding.
-
-            :param pairs: Ordered object members from the decoder.
-            :returns: Object with unique keys.
-            :raises AgentProfileError: If a key occurs twice.
-            """
-            result: dict[str, Any] = {}
-            for key, value in pairs:
-                if key in result:
-                    raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
-                result[key] = value
-            return result
-
-        def nonfinite(_value: str) -> None:
-            """Reject a nonfinite JSON constant.
-
-            :param _value: Nonfinite token supplied by the decoder.
-            :raises AgentProfileError: Every invocation rejects the token.
-            """
-            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
-
+        :param raw: UTF-8 manifest or schema bytes.
+        :returns: Decoded object with finite JSON values and unique keys.
+        :raises AgentProfileError: If encoding, nesting, keys, constants, or root shape is invalid.
+        """
         try:
-            parsed = json.loads(raw, object_pairs_hook=unique, parse_constant=nonfinite)
-        except (UnicodeError, ValueError) as exc:
+            return json_object(response_decoder().decode(raw.decode("utf-8")))
+        except (UnicodeError, ValueError, TypeError, RecursionError) as exc:
             raise AgentProfileError(AgentProfileReason.PROFILE_INVALID) from exc
-        if not isinstance(parsed, dict):
-            raise AgentProfileError(AgentProfileReason.PROFILE_INVALID)
-        return parsed
 
     def _check_destination(self) -> None:
         """Reject symlinks in the caller repository's destination chain.
@@ -173,7 +163,7 @@ class AgentProfile:
                 raise AgentProfileError(AgentProfileReason.DESTINATION_UNSAFE)
 
     @staticmethod
-    def _run(command: list[str], deadline: float) -> bytes:
+    def _run(command: Sequence[str], deadline: float) -> bytes:
         """Run one bounded host command and return its stdout.
 
         :param command: Program and arguments to execute.
@@ -209,7 +199,7 @@ class AgentProfile:
         """  # noqa: DOC502
         return self._run(["glab", "skills", "get", name], deadline)
 
-    def _host_install_command(self) -> list[str]:
+    def _host_install_command(self) -> Sequence[str]:
         """Select the manifest's package for the current host.
 
         :returns: Noninteractive package-manager command for ``glab``.
@@ -235,22 +225,25 @@ class AgentProfile:
             command = ["sudo", "-n", *command]
         return command
 
-    def plan(self, deadline: float | None = None) -> dict[str, Any]:
+    def plan(self, deadline: Optional[float] = None) -> JSONObject:
         """Describe the host and skill actions without changing either.
 
         :param deadline: Optional monotonic deadline for bundled skill reads.
         :returns: A machine-readable plan bound to the manifest digest.
-        :raises AgentProfileError: If a current skill conflicts with the bundle.
-        """
+        :raises AgentProfileError: If destination paths are unsafe, glab is incompatible,
+            a skill conflicts, or the host lacks a supported package manager.
+        :raises OSError: If an existing bundled-skill file cannot be read.
+        """  # noqa: DOC503 - Existing skill-file reads propagate OSError.
         self._check_destination()
         glab = shutil.which("glab")
-        actions: dict[str, str] = {}
-        bundled: dict[str, str] = {}
+        actions: MutableMapping[str, str] = {}
+        bundled: MutableMapping[str, str] = {}
         for name in self.skills:
             if glab:
                 try:
                     content = self._bundled_skill(
-                        name, deadline or time.monotonic() + 10
+                        name,
+                        deadline if deadline is not None else time.monotonic() + 10,
                     )
                 except AgentProfileError as exc:
                     raise AgentProfileError(
@@ -282,14 +275,16 @@ class AgentProfile:
             "bundled": bundled,
         }
 
-    def apply(self, expected_plan: dict[str, Any], deadline: float) -> dict[str, Any]:
+    def apply(self, expected_plan: JSONObject, deadline: float) -> JSONObject:
         """Bootstrap glab or install previously planned bundled skills.
 
         :param expected_plan: Agent state from the confirmed plan.
         :param deadline: Monotonic deadline for all host commands.
         :returns: Verified host and skill states.
-        :raises AgentProfileError: If the plan changed or an install fails.
-        """
+        :raises AgentProfileError: If the plan changed, glab bootstrap requires a new plan,
+            or command, path, bundle-content, or deadline validation fails.
+        :raises OSError: If a bundle read, staging directory, rename, or final readback fails.
+        """  # noqa: DOC503 - Planning and installation filesystem helpers propagate OSError.
         if self.plan(deadline) != expected_plan:
             raise AgentProfileError(AgentProfileReason.FINGERPRINT_CHANGED)
         self._check_destination()
@@ -298,45 +293,53 @@ class AgentProfile:
             if not shutil.which("glab"):
                 raise AgentProfileError(AgentProfileReason.GLAB_UNAVAILABLE)
             raise AgentProfileError(AgentProfileReason.GLAB_REPLAN_REQUIRED)
-        installed: dict[str, str] = {}
-        for name in self.skills:
-            expected = self._bundled_skill(name, deadline)
-            target = self.destination / name
-            skill_file = target / "SKILL.md"
-            if target.is_symlink() or skill_file.is_symlink():
-                raise AgentProfileError(AgentProfileReason.DESTINATION_UNSAFE)
-            if target.exists():
-                if not skill_file.is_file() or skill_file.read_bytes() != expected:
-                    raise AgentProfileError(AgentProfileReason.SKILL_CONFLICT)
-                installed[name] = "ready"
-                continue
-            self.destination.mkdir(parents=True, exist_ok=True)
-            self._check_destination()
-            with tempfile.TemporaryDirectory(
-                prefix=f".ci-skills-{name}-", dir=self.destination
-            ) as temporary:
-                stage = Path(temporary)
-                self._run(
-                    ["glab", "skills", "install", name, "--path", str(stage)], deadline
-                )
-                staged = stage / name
-                staged_file = staged / "SKILL.md"
-                if (
-                    staged.is_symlink()
-                    or staged_file.is_symlink()
-                    or not staged_file.is_file()
-                ):
-                    raise AgentProfileError(AgentProfileReason.SKILL_INVALID)
-                if staged_file.read_bytes() != expected:
-                    raise AgentProfileError(AgentProfileReason.SKILL_INVALID)
-                if target.exists() or target.is_symlink():
-                    raise AgentProfileError(AgentProfileReason.SKILL_CONFLICT)
-                os.rename(staged, target)
-            if skill_file.read_bytes() != expected:
-                raise AgentProfileError(AgentProfileReason.SKILL_INVALID)
-            installed[name] = "installed"
+        installed = {name: self._install_skill(name, deadline) for name in self.skills}
         return {
             "host": "ready",
             "skills": installed,
             "destination": str(self.destination),
         }
+
+    def _install_skill(self, name: str, deadline: float) -> str:
+        """Install one missing declared bundle and independently compare its bytes.
+
+        :param name: Skill name already validated against the source profile.
+        :param deadline: Monotonic deadline shared by all native installation commands.
+        :returns: ready for an existing matching skill, or installed after verified promotion.
+        :raises AgentProfileError: If commands fail, paths conflict, or staged/final bytes differ.
+        :raises OSError: If staging, file reads, directory creation, or rename fails.
+        """  # noqa: DOC503 - Staging, file reads, and rename propagate OSError.
+        expected = self._bundled_skill(name, deadline)
+        target = self.destination / name
+        skill_file = target / "SKILL.md"
+        if target.is_symlink() or skill_file.is_symlink():
+            raise AgentProfileError(AgentProfileReason.DESTINATION_UNSAFE)
+        if target.exists():
+            if not skill_file.is_file() or skill_file.read_bytes() != expected:
+                raise AgentProfileError(AgentProfileReason.SKILL_CONFLICT)
+            return "ready"
+        self.destination.mkdir(parents=True, exist_ok=True)
+        self._check_destination()
+        with tempfile.TemporaryDirectory(
+            prefix=f".ci-skills-{name}-", dir=self.destination
+        ) as temporary:
+            stage = Path(temporary)
+            self._run(
+                ["glab", "skills", "install", name, "--path", str(stage)], deadline
+            )
+            staged = stage / name
+            staged_file = staged / "SKILL.md"
+            if (
+                staged.is_symlink()
+                or staged_file.is_symlink()
+                or not staged_file.is_file()
+            ):
+                raise AgentProfileError(AgentProfileReason.SKILL_INVALID)
+            if staged_file.read_bytes() != expected:
+                raise AgentProfileError(AgentProfileReason.SKILL_INVALID)
+            if target.exists() or target.is_symlink():
+                raise AgentProfileError(AgentProfileReason.SKILL_CONFLICT)
+            os.rename(staged, target)
+        if skill_file.read_bytes() != expected:
+            raise AgentProfileError(AgentProfileReason.SKILL_INVALID)
+        return "installed"

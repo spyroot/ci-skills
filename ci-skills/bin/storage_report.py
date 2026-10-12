@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""Collect one correlated storage inventory from concurrent Kubernetes reads."""
+"""Collect one correlated storage inventory from concurrent Kubernetes reads.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 import argparse
 
 import _bootstrap  # noqa: F401
-from core.cli import execute, parser
-from core.collect import collect_storage
+from lib.python.core.cli import execute, parser
+from lib.python.core.collect import collect_storage
 
 
 # The parser is built by its own function so the declared interface can be
@@ -13,7 +18,10 @@ from core.collect import collect_storage
 # several flags as prose, and a text scan cannot tell those apart from the
 # options argparse actually accepts. See tests/test_catalog.py.
 def build_parser() -> argparse.ArgumentParser:
-    """Return this command's parser: the universal tier plus its own options."""
+    """Declare namespace, node, storage-class, phase, and text filters.
+
+    :returns: Parser for the correlated storage inventory command.
+    """
     cli = parser("Report PVC, PV, node, workload, CSI, and attachment state.")
     cli.add_argument(
         "--namespace",
@@ -34,6 +42,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """Parse storage filters and execute the correlated inventory collector.
+
+    :returns: Exit code from the shared command executor.
+    """
     return execute(build_parser().parse_args(), collect_storage)
 
 

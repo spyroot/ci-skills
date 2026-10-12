@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Report one GitLab pipeline's bounded job and stage progress."""
+"""Report one GitLab pipeline's bounded job and stage progress.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
@@ -7,25 +12,37 @@ import argparse
 import json
 import sys
 import time
+from collections.abc import Sequence
+from typing import Optional
 
 import _bootstrap  # noqa: F401
-from core.access import check_gitlab_operation_access
-from core.catalog import describe, missing_required_options
-from core.cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
-from core.credentials import bind_gitlab_session
-from core.gitlab_pipelines import MAX_JOB_PAGES, PAGE_SIZE, read_pipeline
-from core.report import emit, report
-from core.status import BLOCKED, DRY_RUN, PASS, exit_code
-from core.target import TargetError, select_gitlab_reference
+from lib.python.access.access import check_gitlab_operation_access
+from lib.python.access.credentials import bind_gitlab_session
+from lib.python.core.catalog import describe, missing_required_options
+from lib.python.core.cli import (
+    _failure,
+    log_event,
+    output_mode,
+    parser,
+    resolve_gitlab_target,
+)
+from lib.python.core.gitlab.gitlab_pipelines import (
+    MAX_JOB_PAGES,
+    PAGE_SIZE,
+    read_pipeline,
+)
+from lib.python.core.report import emit, report
+from lib.python.core.target import TargetError, select_gitlab_reference
+from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
 
 KIND = "gitlab_pipeline"
 SCRIPT = "gitlab_pipeline.py"
 
 
-def build_parser(
-) -> argparse.ArgumentParser:
-    """Expose the common output tier with an exact pipeline selection.
-    :return:
+def build_parser() -> argparse.ArgumentParser:
+    """Declare exact project and pipeline selection with common output options.
+
+    :returns: Parser for a bounded GitLab pipeline read.
     """
     cli = parser(
         "Read one selected GitLab pipeline and summarize job progress by stage.",
@@ -45,8 +62,13 @@ def build_parser(
     return cli
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Bind once, prove project access, then use that same session for reads."""
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Bind one GitLab target, verify project access, and report pipeline jobs.
+
+    :param argv: Optional command arguments; defaults to process arguments.
+    :returns: Status-derived command exit code or structured failure code.
+    :raises SystemExit: If argparse handles help or rejects invalid arguments.
+    """  # noqa: DOC503 - Target errors are caught; argparse exits propagate.
     args = build_parser().parse_args(argv)
     if args.describe:
         sys.stdout.write(json.dumps(describe(SCRIPT), indent=2, sort_keys=True) + "\n")

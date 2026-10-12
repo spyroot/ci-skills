@@ -1,18 +1,69 @@
-"""Offline tests for project target selection and kubeconfig binding."""
+"""Offline tests for project target selection and kubeconfig binding.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping, MutableSequence, Sequence
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import TYPE_CHECKING, Optional, TypedDict, Union, Unpack
 
 import pytest
-from tests.python.conftest import import_script_module
+from conftest import import_script_module
+
+if TYPE_CHECKING:
+    from lib.python.core.runtime import CommandResult
+    from lib.python.core.target import Target
 
 
-def _toml_string(value: str | Path) -> str:
-    """Return one TOML basic string for a synthetic path or name."""
+class _CommandTailOptions(TypedDict, total=False):
+    """Keyword options accepted by ``run_command_tail`` fixture doubles.
+
+    .. attribute :: timeout
+        :type: int
+
+        Maximum command runtime in seconds.
+
+    .. attribute :: max_bytes
+        :type: int
+
+        Maximum stdout bytes retained by the tail helper.
+
+    .. attribute :: max_lines
+        :type: int
+
+        Maximum stdout lines retained by the tail helper.
+
+    .. attribute :: env
+        :type: Optional[Mapping[str, Optional[str]]]
+
+        Child environment overrides; None values remove ambient variables.
+
+    .. attribute :: cwd
+        :type: Optional[Union[str, Path]]
+
+        Child working directory; None retains the parent directory.
+    """
+
+    timeout: int
+    max_bytes: int
+    max_lines: int
+    env: Optional[Mapping[str, Optional[str]]]
+    cwd: Optional[Union[str, Path]]
+
+
+def _toml_string(value: Union[str, Path]) -> str:
+    """Encode a fixture path or name as a TOML basic string.
+
+    :param value: Synthetic path or identifier to quote.
+    :returns: JSON-escaped text valid as a TOML basic string.
+    """
     return json.dumps(str(value))
 
 
@@ -26,7 +77,17 @@ def _write_target(
     context: str = "unit-context",
     server: str = "https://api.cluster.example.test:6443",
 ) -> Path:
-    """Write a target file with exact nonsecret authorities."""
+    """Write a target with explicit nonsecret provider authorities.
+
+    :param directory: Destination directory for the target file.
+    :param filename: Target file basename in that directory.
+    :param github_host: GitHub host recorded in the target.
+    :param repository: GitHub repository path recorded in the target.
+    :param gitlab_url: GitLab base URL recorded in the target.
+    :param context: Kubernetes context pinned by the target.
+    :param server: Kubernetes API URL pinned by the target.
+    :returns: Path to the written target TOML file.
+    """
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / filename
     path.write_text(
@@ -48,33 +109,54 @@ def _write_target(
 
 
 def _write_invalid_target(path: Path) -> Path:
-    """Write a syntactically valid TOML file with an invalid target shape."""
+    """Write parseable TOML with a deliberately invalid target shape.
+
+    :param path: Destination for the invalid target.
+    :returns: Path to the written fixture file.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text('schema_version = "not-a-target"\n', encoding="utf-8")
     return path
 
 
 def _write_kubeconfig(path: Path) -> Path:
-    """Write a nonempty synthetic kubeconfig placeholder."""
+    """Write a nonempty kubeconfig placeholder for source selection tests.
+
+    :param path: Destination file whose parent directories are created.
+    :returns: Path to the written placeholder.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("apiVersion: v1\nkind: Config\n", encoding="utf-8")
     return path
 
 
-def _file_source(path: str | Path) -> str:
-    """Return one file source table for a project binding."""
+def _file_source(path: Union[str, Path]) -> str:
+    """Render a file-backed Kubernetes source table for a binding.
+
+    :param path: Kubeconfig path encoded in the source entry.
+    :returns: TOML table text for a file source.
+    """
     return f'[[kubernetes.sources]]\nkind = "file"\npath = {_toml_string(path)}\n'
 
 
 def _environment_source(name: str) -> str:
-    """Return one environment source table for a project binding."""
+    """Render an environment-backed Kubernetes source table.
+
+    :param name: Variable name containing a kubeconfig path.
+    :returns: TOML table text for an environment source.
+    """
     return (
         f'[[kubernetes.sources]]\nkind = "environment"\nname = {_toml_string(name)}\n'
     )
 
 
 def _command_source(*argv: str) -> str:
-    """Return one command source table for a project binding."""
+    """Render a command-backed Kubernetes source table.
+
+    :param *argv: Command argument vector supplied to the helper under test.
+    :returns: TOML table text for a command source.
+
+    """
     return (
         "[[kubernetes.sources]]\n"
         'kind = "command"\n'
@@ -82,8 +164,13 @@ def _command_source(*argv: str) -> str:
     )
 
 
-def _argv_digest(*argv: str | Path) -> str:
-    """Return the command provenance digest used by project bindings."""
+def _argv_digest(*argv: Union[str, Path]) -> str:
+    """Hash the exact command argument vector used in source provenance.
+
+    :param *argv: Command argument vector supplied to the helper under test.
+    :returns: SHA-256 hex digest of compact JSON-encoded argv.
+
+    """
     return hashlib.sha256(
         json.dumps([str(part) for part in argv], separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -92,10 +179,16 @@ def _argv_digest(*argv: str | Path) -> str:
 def _write_binding(
     path: Path,
     *,
-    target: str | Path,
+    target: Union[str, Path],
     sources: str,
 ) -> Path:
-    """Write one schema-versioned project binding file."""
+    """Write a versioned project binding with selected source entries.
+
+    :param path: Destination binding TOML file.
+    :param target: Target path recorded in the binding.
+    :param sources: Rendered Kubernetes source tables.
+    :returns: Path to the written binding.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         (
@@ -110,33 +203,55 @@ def _write_binding(
     return path
 
 
-def _project_binding() -> Any:
-    """Import the module under test from the skill script tree."""
-    return import_script_module("core.project_binding")
+def _project_binding() -> ModuleType:
+    """Load the project binding module from the skill script tree.
+
+    :returns: Imported module under test.
+    """
+    return import_script_module("lib.python.core.project_binding")
 
 
-def _access() -> Any:
-    """Import access helpers that render target_selection receipts."""
-    return import_script_module("core.access")
+def _access() -> ModuleType:
+    """Load access receipt helpers from the skill script tree.
+
+    :returns: Imported access module under test.
+    """
+    return import_script_module("lib.python.access.access")
 
 
 def _clear_target_selectors(
-    project_binding: Any, monkeypatch: pytest.MonkeyPatch
+    project_binding: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Remove selector env vars so each test declares its selection inputs."""
+    """Remove target and binding selectors before precedence checks.
+
+    :param project_binding: Module supplying the two selector variable names.
+    :param monkeypatch: Pytest environment fixture removing those variables.
+
+    :returns: None; the helper records behavior through its side effects.
+    """
     monkeypatch.delenv(project_binding.TARGET_ENV, raising=False)
     monkeypatch.delenv(project_binding.BINDING_ENV, raising=False)
 
 
-def _reported_target_selection(target: Any) -> str:
-    """Return the machine-readable target_selection a dry-run receipt reports."""
+def _reported_target_selection(target: Target) -> str:
+    """Read the target-selection source from a dry-run access receipt.
+
+    :param target: Resolved target passed to the access planner.
+    :returns: Machine-readable selection reference in the receipt.
+    """
     return _access().dry_run_access(target)["target_selection"]
 
 
 def test_explicit_target_has_highest_precedence_and_reports_cli_selection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Tier 1, --target, wins over env, project, and user targets."""
+    """Keep explicit target selection ahead of environment and default files.
+
+    :param tmp_path: Scratch directory containing target choices and kubeconfig.
+    :param monkeypatch: Fixture controlling environment selectors and home lookup.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     explicit = _write_target(tmp_path / "explicit", context="tier-1")
     env_target = _write_target(tmp_path / "env", context="tier-2")
@@ -162,7 +277,13 @@ def test_explicit_target_has_highest_precedence_and_reports_cli_selection(
 def test_ci_skills_target_precedes_project_and_user_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Tier 2, CI_SKILLS_TARGET, wins over cwd and home defaults."""
+    """Require the environment target tier to outrank project and user files.
+
+    :param tmp_path: Scratch targets for the three selection tiers.
+    :param monkeypatch: Pytest fixture setting selector, cwd, and HOME.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     _clear_target_selectors(project_binding, monkeypatch)
     env_target = _write_target(tmp_path / "env", context="tier-2")
@@ -186,6 +307,13 @@ def test_ci_skills_target_precedes_project_and_user_defaults(
 def test_declared_environment_target_missing_does_not_use_project_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Fail closed when the selected environment target path is absent.
+
+    :param tmp_path: Scratch absent env path and valid project target.
+    :param monkeypatch: Pytest fixture setting cwd and target selector.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     _clear_target_selectors(project_binding, monkeypatch)
     project = tmp_path / "project"
@@ -200,7 +328,13 @@ def test_declared_environment_target_missing_does_not_use_project_default(
 def test_project_target_precedes_user_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Tier 3, ./.ci-skills/target.toml, wins over the home target."""
+    """Require the cwd project target to outrank the home target.
+
+    :param tmp_path: Scratch project and home target files.
+    :param monkeypatch: Pytest fixture setting cwd and HOME.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     _clear_target_selectors(project_binding, monkeypatch)
     project = tmp_path / "project"
@@ -224,7 +358,13 @@ def test_project_target_precedes_user_default(
 def test_user_target_is_last_declared_target_tier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Tier 4, ~/.ci-skills/target.toml, is used only when higher tiers are absent."""
+    """Select the home target only when earlier target tiers are absent.
+
+    :param tmp_path: Scratch home target and project without a target.
+    :param monkeypatch: Pytest fixture setting cwd and HOME.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     _clear_target_selectors(project_binding, monkeypatch)
     project = tmp_path / "project-without-target"
@@ -246,7 +386,13 @@ def test_user_target_is_last_declared_target_tier(
 def test_environment_selector_conflict_blocks_resolution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The two env selectors cannot silently race or choose one side."""
+    """Reject simultaneous environment target and binding selectors.
+
+    :param tmp_path: Scratch target, kubeconfig, and binding files.
+    :param monkeypatch: Pytest fixture setting both selector variables.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     target = _write_target(tmp_path / "target")
     binding = _write_binding(
@@ -267,7 +413,14 @@ def test_environment_selector_conflict_blocks_resolution(
 def test_invalid_higher_tier_blocks_lower_target_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid_tier: str
 ) -> None:
-    """A present but invalid higher tier fails closed instead of falling back."""
+    """Fail closed on an invalid environment or project target.
+
+    :param tmp_path: Scratch invalid higher tier and valid user fallback.
+    :param monkeypatch: Pytest fixture selecting cwd, HOME, and optional env file.
+    :param invalid_tier: Higher-priority tier deliberately made invalid.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     _clear_target_selectors(project_binding, monkeypatch)
     project = tmp_path / "project"
@@ -293,9 +446,15 @@ def test_invalid_higher_tier_blocks_lower_target_fallback(
 def test_explicit_binding_arg_resolves_exact_target_context_and_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An explicit --binding path selects the exact target and source receipt."""
+    """Resolve a selected binding and report its exact target/source provenance.
+
+    :param tmp_path: Scratch target, relative kubeconfig, and binding.
+    :param monkeypatch: Pytest fixture clearing ambient selectors.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
-    cli = import_script_module("core.cli")
+    cli = import_script_module("lib.python.core.cli")
     _clear_target_selectors(project_binding, monkeypatch)
     target = _write_target(
         tmp_path,
@@ -330,7 +489,12 @@ def test_explicit_binding_arg_resolves_exact_target_context_and_source(
 
 
 def test_binding_rejects_target_with_declared_kubeconfig_path(tmp_path: Path) -> None:
-    """A binding must not mix its selected source with a target search path."""
+    """Reject a binding that conflicts with target-owned kubeconfig paths.
+
+    :param tmp_path: Scratch target and binding with competing sources.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     target = _write_target(tmp_path)
     target.write_text(
@@ -353,7 +517,13 @@ def test_binding_rejects_target_with_declared_kubeconfig_path(tmp_path: Path) ->
 def test_binding_sources_fall_through_only_when_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Ordered sources advance past absent entries and select the first present one."""
+    """Select the first present file after absent file and env sources.
+
+    :param tmp_path: Scratch binding and final valid kubeconfig.
+    :param monkeypatch: Pytest fixture removing the intermediate env source.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     monkeypatch.delenv("UNIT_ABSENT_KUBECONFIG", raising=False)
     target = _write_target(tmp_path)
@@ -378,7 +548,12 @@ def test_binding_sources_fall_through_only_when_absent(
 
 
 def test_present_invalid_source_blocks_later_fallback(tmp_path: Path) -> None:
-    """A present-but-invalid source fails closed instead of trying another source."""
+    """Reject a present empty kubeconfig before trying later valid sources.
+
+    :param tmp_path: Scratch empty and valid kubeconfigs plus ordered binding.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     target = _write_target(tmp_path)
     empty_kubeconfig = tmp_path / "empty-kubeconfig"
@@ -401,27 +576,46 @@ def test_present_invalid_source_blocks_later_fallback(tmp_path: Path) -> None:
 def test_command_source_returns_absolute_path_and_records_provenance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A command source must run from the binding directory and return one path."""
+    """Require bounded command resolution and exact argv provenance.
+
+    :param tmp_path: Scratch binding, generated kubeconfig, and command path.
+    :param monkeypatch: Pytest fixture replacing command lookup and execution.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
-    runtime = import_script_module("core.runtime")
+    runtime = import_script_module("lib.python.core.runtime")
     target = _write_target(tmp_path)
     kubeconfig = _write_kubeconfig(tmp_path / "generated" / "kubeconfig")
     executable = tmp_path / "bin" / "unit-kubeconfig-source"
     executable.parent.mkdir()
-    which_calls: list[str] = []
+    which_calls: MutableSequence[str] = []
     binding = _write_binding(
         tmp_path / "binding.toml",
         target=target.name,
         sources=_command_source("unit-kubeconfig-source", "--project", "alpha"),
     )
-    calls: list[tuple[tuple[str, ...], dict[str, Any]]] = []
+    calls: MutableSequence[tuple[tuple[str, ...], _CommandTailOptions]] = []
 
-    def fake_which(command: str) -> str | None:
+    def fake_which(command: str) -> Optional[str]:
+        """Record executable lookup and return its absolute fixture path.
+
+        :param command: Program named by the binding source.
+        :returns: Path to the fake executable.
+        """
         which_calls.append(command)
         return str(executable)
 
-    def fake_run_command_tail(argv: list[str], **kwargs: Any) -> Any:
-        calls.append((tuple(argv), kwargs))
+    def fake_run_command_tail(
+        argv: Sequence[str], **kwargs: Unpack[_CommandTailOptions]
+    ) -> CommandResult:
+        """Return one generated kubeconfig path from the command source.
+
+        :param argv: Absolute executable and arguments being invoked.
+        :param **kwargs: Keyword arguments forwarded to the fake command boundary.
+        :returns: Successful result containing the kubeconfig path.
+        """
+        calls.append((tuple(argv), dict(kwargs)))
         return runtime.CommandResult(tuple(argv), 0, f"{kubeconfig}\n", "")
 
     monkeypatch.setattr(project_binding.shutil, "which", fake_which)
@@ -449,7 +643,13 @@ def test_command_source_returns_absolute_path_and_records_provenance(
 def test_command_source_digest_changes_when_argv_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The command source digest covers the full argument vector."""
+    """Require source provenance digests to cover differing arguments.
+
+    :param tmp_path: Scratch bindings with alpha and beta command arguments.
+    :param monkeypatch: Pytest fixture resolving the fake executable.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     target = _write_target(tmp_path)
     executable = tmp_path / "bin" / "unit-kubeconfig-source"
@@ -486,7 +686,13 @@ def test_command_source_digest_changes_when_argv_changes(
 def test_dry_run_never_executes_project_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Dry-run reports the command source without executing it."""
+    """Report a command source in dry-run without executing its program.
+
+    :param tmp_path: Scratch binding and unexecuted source command path.
+    :param monkeypatch: Pytest fixture replacing lookup and execution.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     target = _write_target(tmp_path)
     executable = tmp_path / "scripts" / "project-cluster"
@@ -495,14 +701,28 @@ def test_dry_run_never_executes_project_command(
         target=target.name,
         sources=_command_source("./scripts/project-cluster"),
     )
-    run_calls: list[tuple[Any, ...]] = []
+    run_calls: MutableSequence[tuple[str, ...]] = []
 
-    def fake_which(command: str) -> str | None:
+    def fake_which(command: str) -> Optional[str]:
+        """Confirm lookup uses the binding-relative executable path.
+
+        :param command: Absolute program path requested by source resolution.
+        :returns: Fixture executable path.
+        """
         assert command == str(executable.resolve())
         return str(executable)
 
-    def unexpected_command(*_args: Any, **_kwargs: Any) -> Any:
-        run_calls.append(_args)
+    def unexpected_command(
+        argv: Sequence[str], **_kwargs: Unpack[_CommandTailOptions]
+    ) -> CommandResult:
+        """Expose any accidental command execution in dry-run mode.
+
+        :param argv: Command vector that must not be executed in dry-run mode.
+        :param **_kwargs: Ignored keyword arguments accepted by the fake boundary.
+        :returns: This function never returns because command execution is a failure.
+        :raises AssertionError: Dry-run invokes the command source.
+        """
+        run_calls.append(tuple(argv))
         raise AssertionError("dry run executed credential resolver")
 
     monkeypatch.setattr(project_binding.shutil, "which", fake_which)
@@ -520,10 +740,75 @@ def test_dry_run_never_executes_project_command(
     )
 
 
+def test_dry_run_deferred_command_stops_after_missing_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep a dry-run command source distinct from absent earlier sources.
+
+    :param tmp_path: Scratch binding, deferred command, and fallback file.
+    :param monkeypatch: Fixture replacing command lookup and execution.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    project_binding = _project_binding()
+    target = _write_target(tmp_path)
+    executable = tmp_path / "scripts" / "project-cluster"
+    fallback = _write_kubeconfig(tmp_path / "fallback" / "kubeconfig")
+    binding = _write_binding(
+        tmp_path / "binding.toml",
+        target=target.name,
+        sources=(
+            _file_source("missing-file")
+            + _command_source("./scripts/project-cluster", "--project", "unit")
+            + _file_source("fallback/kubeconfig")
+        ),
+    )
+
+    def fake_which(command: str) -> Optional[str]:
+        """Resolve the deferred command without permitting fallback selection.
+
+        :param command: Command path looked up by the resolver.
+        :returns: Fixture executable path.
+        """
+        assert command == str(executable.resolve())
+        return str(executable)
+
+    def unexpected_command(
+        argv: Sequence[str], **_kwargs: Unpack[_CommandTailOptions]
+    ) -> CommandResult:
+        """Expose command execution in dry-run source selection.
+
+        :param argv: Command vector that must remain deferred in dry-run mode.
+        :param **_kwargs: Ignored keyword arguments accepted by the fake boundary.
+        :returns: This function never returns because command execution is a failure.
+        :raises AssertionError: A dry-run command source is executed.
+        """
+        raise AssertionError("dry run executed deferred kubeconfig source")
+
+    monkeypatch.setattr(project_binding.shutil, "which", fake_which)
+    monkeypatch.setattr(project_binding, "run_command_tail", unexpected_command)
+
+    resolved = project_binding.load_project_binding(binding, dry_run=True)
+
+    digest = _argv_digest(executable.resolve(), "--project", "unit")
+    assert fallback.exists()
+    assert resolved.kubernetes.kubeconfig is None
+    assert resolved.kubernetes_source_reference == (
+        f"binding:{binding.resolve()}#2:"
+        f"command:{executable.resolve()}#argv-sha256:{digest}"
+    )
+
+
 def test_missing_declared_target_and_ambient_kubeconfig_do_not_select_target(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Ambient kubeconfig files do not create an implicit fifth target tier."""
+    """Reject ambient kubeconfig files as a substitute for a target.
+
+    :param tmp_path: Scratch kubeconfigs without any declared target.
+    :param monkeypatch: Pytest fixture setting cwd, HOME, and KUBECONFIG.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
     _clear_target_selectors(project_binding, monkeypatch)
     home = tmp_path / "home-without-ci-skills"
@@ -545,9 +830,15 @@ def test_missing_declared_target_and_ambient_kubeconfig_do_not_select_target(
 def test_explicit_target_without_kubeconfig_uses_environment_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A target pins the context/server while KUBECONFIG supplies the files."""
+    """Resolve ambient kubeconfig paths for an explicitly selected target.
+
+    :param tmp_path: Scratch target and ordered kubeconfig source files.
+    :param monkeypatch: Fixture selecting KUBECONFIG and isolating the home directory.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
-    credentials = import_script_module("core.credentials")
+    credentials = import_script_module("lib.python.access.credentials")
     target = _write_target(tmp_path)
     config = _write_kubeconfig(tmp_path / "global")
     monkeypatch.setenv("KUBECONFIG", str(config))
@@ -562,8 +853,15 @@ def test_explicit_target_without_kubeconfig_uses_environment_source(
 def test_target_without_kubeconfig_uses_user_kubectl_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Use the user's kubectl default when target and environment omit files.
+
+    :param tmp_path: Scratch target and home kubeconfig.
+    :param monkeypatch: Pytest fixture setting HOME and clearing KUBECONFIG.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     project_binding = _project_binding()
-    credentials = import_script_module("core.credentials")
+    credentials = import_script_module("lib.python.access.credentials")
     target = _write_target(tmp_path)
     user_home = tmp_path / "user"
     config = _write_kubeconfig(user_home / ".kube" / "config")

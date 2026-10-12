@@ -4,6 +4,10 @@
 The allowed keys are declared once in `ci-skills/lib/python/core/endpoints.py`
 (`TARGET_CONTRACT`); the rules are in docs/phases/CI03-GATES.md, section
 gate-ci-skills-endpoints. Exit codes: 0 PASS, 1 FAIL, 2 the gate could not run.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
@@ -12,7 +16,9 @@ import argparse
 import json
 import runpy
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 # The skill's one library locator puts `core` on the path; the gate's own
@@ -29,6 +35,11 @@ except ImportError as exc:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Declare working-tree or staged endpoint-contract gate options.
+
+    :returns: Parser for repository root, template base revision, staged source,
+        and human, JSON, or YAML output.
+    """
     parser = argparse.ArgumentParser(
         prog="gate-ci-skills-endpoints",
         description=__doc__.splitlines()[0],
@@ -59,7 +70,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Check target key provenance against the declared endpoint contract.
+
+    :param argv: Explicit CLI arguments, or ``None`` for process arguments.
+    :returns: Gate exit code: zero for PASS, one for FAIL, two when unreadable.
+    :raises SystemExit: ``argparse`` rejects options or displays help.
+    """  # noqa: DOC502 - ArgumentParser raises SystemExit for help or invalid options.
     args = build_parser().parse_args(argv)
     root = args.root.resolve()
     source = StagedIndex(root) if args.staged else WorkingTree(root)

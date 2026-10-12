@@ -4,19 +4,52 @@ Three rules are pinned here. A DENIAL always blocks. A failure to READ blocks a
 single-shot collector. For Cilium, which reads per agent, one agent's failure is
 that agent's state when another answered -- but a failed LIST read is not, since
 it means the report itself is incomplete.
+
+Author Mustafa Bayramov
+mbayramo@cisco.com
+spyroot@gmail.com
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableSequence, Sequence
+from types import ModuleType
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject
+    from lib.python.core.target import Target
+
 import pytest
-from tests.python.conftest import import_script_module
+from conftest import import_script_module
 
 
-def _live():
-    return import_script_module("core.live"), import_script_module("core.status")
+def _live() -> tuple[ModuleType, ModuleType]:
+    """Load live-check gate and shared status modules.
+
+    :returns: Imported live module and status constants module.
+    """
+    return import_script_module("lib.python.core.live"), import_script_module(
+        "lib.python.sys.status"
+    )
 
 
-def _cilium(status, errors, passed, total=3, records=3):
+def _cilium(
+    status: str,
+    errors: Sequence[Mapping[str, str]],
+    passed: int,
+    total: int = 3,
+    records: int = 3,
+) -> JSONObject:
+    """Build Cilium evidence with bounded per-agent health counts.
+
+    :param status: Collector PASS, PARTIAL, or blocked state.
+    :param errors: Per-agent or list-read failure records.
+    :param passed: Number of agents whose health probe answered.
+    :param total: Total discovered Cilium agents.
+    :param records: Number of retained collector records.
+    :returns: Cilium report fragment for access-proven checks.
+    """
     return {
         "status": status,
         "record_count": records,
@@ -28,8 +61,10 @@ def _cilium(status, errors, passed, total=3, records=3):
     }
 
 
-def test_a_read_failure_blocks_the_gate():
-    """Authentication, authorization, transport and timeout are access failures."""
+def test_a_read_failure_blocks_the_gate() -> None:
+    """Authentication, authorization, transport and timeout are access failures.
+    :returns: None; assertions in the body validate the regression.
+    """
     live, status = _live()
 
     for reason in (
@@ -49,8 +84,10 @@ def test_a_read_failure_blocks_the_gate():
         assert live._access_proven("event_trace", evidence) is False, reason
 
 
-def test_an_unhealthy_component_does_not_block_a_proven_read():
-    """A down agent is cluster state, not a denial, once health was read once."""
+def test_an_unhealthy_component_does_not_block_a_proven_read() -> None:
+    """A down agent is cluster state, not a denial, once health was read once.
+    :returns: None; assertions in the body validate the regression.
+    """
     live, status = _live()
     evidence = _cilium(
         status.PARTIAL,
@@ -64,8 +101,10 @@ def test_an_unhealthy_component_does_not_block_a_proven_read():
     assert live._access_proven("cilium_status", evidence) is True
 
 
-def test_an_unhealthy_component_blocks_when_nothing_proved_the_capability():
-    """If no agent answered health, the exec capability is unproven."""
+def test_an_unhealthy_component_blocks_when_nothing_proved_the_capability() -> None:
+    """If no agent answered health, the exec capability is unproven.
+    :returns: None; assertions in the body validate the regression.
+    """
     live, status = _live()
     evidence = _cilium(
         status.PARTIAL,
@@ -76,8 +115,10 @@ def test_an_unhealthy_component_blocks_when_nothing_proved_the_capability():
     assert live._access_proven("cilium_status", evidence) is False
 
 
-def test_a_mixed_error_set_blocks():
-    """One read failure alongside a health state still blocks."""
+def test_a_mixed_error_set_blocks() -> None:
+    """One read failure alongside a health state still blocks.
+    :returns: None; assertions in the body validate the regression.
+    """
     live, status = _live()
     evidence = _cilium(
         status.PARTIAL,
@@ -92,8 +133,13 @@ def test_a_mixed_error_set_blocks():
 
 
 @pytest.mark.parametrize("state", ("BLOCKED", "UNKNOWN"))
-def test_only_pass_or_partial_can_prove_access(state):
-    """A collector that did not complete cannot prove anything."""
+def test_only_pass_or_partial_can_prove_access(state: str) -> None:
+    """Reject BLOCKED and UNKNOWN collector states as proof of access.
+
+    :param state: Unproven status supplied to the live gate.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     live, _status = _live()
 
     assert (
@@ -101,8 +147,10 @@ def test_only_pass_or_partial_can_prove_access(state):
     )
 
 
-def test_a_partial_with_no_errors_blocks():
-    """PARTIAL without a recorded reason is unexplained, so it is not accepted."""
+def test_a_partial_with_no_errors_blocks() -> None:
+    """PARTIAL without a recorded reason is unexplained, so it is not accepted.
+    :returns: None; assertions in the body validate the regression.
+    """
     live, status = _live()
 
     assert (
@@ -114,8 +162,15 @@ def test_a_partial_with_no_errors_blocks():
     )
 
 
-def test_the_receipt_records_which_checks_blocked(monkeypatch):
-    """The receipt names the blocking checks rather than only a status."""
+def test_the_receipt_records_which_checks_blocked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Name the failed event trace while preserving proven other checks.
+
+    :param monkeypatch: Pytest fixture replacing live collectors.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     live, status = _live()
     results = {
         "storage_report": {
@@ -152,7 +207,15 @@ def test_the_receipt_records_which_checks_blocked(monkeypatch):
     assert receipt["live_checks"]["storage_report"]["access_proven"] is True
 
 
-def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(monkeypatch):
+def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use selected Ceph namespace and block denied status query.
+
+    :param monkeypatch: Pytest fixture replacing live collector functions.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     live, status = _live()
     monkeypatch.setattr(
         live,
@@ -186,7 +249,13 @@ def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(monkeypa
     )
     selected = []
 
-    def fake_ceph(_target, options):
+    def fake_ceph(_target: Target, options: Sequence[str]) -> JSONObject:
+        """Return a denied Ceph status query in the requested namespace.
+
+        :param _target: Selected target accepted by the fake collector.
+        :param options: Ceph filter options carrying the selected namespace.
+        :returns: Partial Ceph record with authorization failure.
+        """
         selected.append(options.namespace)
         return {
             "kind": "ceph_cluster",
@@ -207,13 +276,32 @@ def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(monkeypa
     assert receipt["live_checks"]["ceph_cluster"]["namespace"] == "selected-ceph"
 
 
-def test_cluster_wide_list_reads_use_a_bound_sized_for_a_real_cluster(monkeypatch):
-    """A slow but healthy list must not be reported as a timeout."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
-    seen: list[int] = []
+def test_cluster_wide_list_reads_use_a_bound_sized_for_a_real_cluster(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the collector's extended list timeout for cluster-wide reads.
 
-    def fake_run(argv, *, env=None, timeout=None):
+    :param monkeypatch: Pytest fixture replacing native command execution.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
+    seen: MutableSequence[int] = []
+
+    def fake_run(
+        argv: Sequence[str],
+        *,
+        env: Optional[Mapping[str, Optional[str]]] = None,
+        timeout: Optional[int] = None,
+    ) -> runtime.CommandResult:
+        """Capture the timeout passed to a cluster-wide kubectl list.
+
+        :param argv: Native list command requested by the collector.
+        :param env: Child environment accepted by the fake runner.
+        :param timeout: Request timeout captured for the assertion.
+        :returns: Successful empty JSON response.
+        """
         seen.append(timeout)
         return runtime.CommandResult(tuple(argv), 0, "{}", "")
 
@@ -234,8 +322,15 @@ def test_cluster_wide_list_reads_use_a_bound_sized_for_a_real_cluster(monkeypatc
         "command_failed",
     ),
 )
-def test_a_per_agent_failure_is_excused_when_another_agent_answered(reason):
-    """Per-agent redundancy is the whole basis of the Cilium exemption."""
+def test_a_per_agent_failure_is_excused_when_another_agent_answered(
+    reason: str,
+) -> None:
+    """Accept one failed Cilium agent when another proved health access.
+
+    :param reason: Per-agent read or probe failure under test.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     live, status = _live()
     evidence = _cilium(
         status.PARTIAL, [{"source": "cilium-abc", "reason": reason}], passed=1
@@ -246,11 +341,15 @@ def test_a_per_agent_failure_is_excused_when_another_agent_answered(reason):
 
 @pytest.mark.parametrize("source", ("daemonsets", "pods", "operators", "ciliumnodes"))
 @pytest.mark.parametrize("reason", ("transport", "timeout", "invalid_json"))
-def test_a_failed_list_read_still_blocks_however_many_agents_answered(source, reason):
-    """A list read has no redundancy: the report is simply incomplete.
+def test_a_failed_list_read_still_blocks_however_many_agents_answered(
+    source: str, reason: str
+) -> None:
+    """Block incomplete Cilium discovery despite healthy agent probes.
 
-    Without this, a failed `ciliumnodes` read certifies access while the
-    receipt reports `ciliumnode_count: 0`.
+    :param source: DaemonSet, Pod, operator, or CiliumNode list that failed.
+    :param reason: Transport, timeout, or malformed JSON failure class.
+
+    :returns: None; assertions in the body validate the regression.
     """
     live, status = _live()
     evidence = _cilium(
@@ -261,8 +360,13 @@ def test_a_failed_list_read_still_blocks_however_many_agents_answered(source, re
 
 
 @pytest.mark.parametrize("reason", ("authentication", "authorization", "missing_tool"))
-def test_a_denial_is_never_excused_by_a_successful_agent(reason):
-    """The owner's specific fear: one good agent masking a denial."""
+def test_a_denial_is_never_excused_by_a_successful_agent(reason: str) -> None:
+    """Keep auth or missing-tool denial blocking despite healthy peers.
+
+    :param reason: Authentication, authorization, or missing-tool failure.
+
+    :returns: None; assertions in the body validate the regression.
+    """
     live, status = _live()
     evidence = _cilium(
         status.PARTIAL, [{"source": "cilium-abc", "reason": reason}], passed=7
