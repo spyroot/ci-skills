@@ -15,12 +15,12 @@ from types import MappingProxyType
 import pytest
 from conftest import import_script_module
 
-CALLBACK = import_script_module("core.abstract.callback")
-CALLBACKS = import_script_module("core.abstract.callbacks")
-CONTEXT = import_script_module("core.abstract.context")
-EXECUTOR = import_script_module("core.abstract.skill_exector")
-SKILL_ACTION = import_script_module("core.abstract.skill_action")
-SKILL_STATE = import_script_module("core.abstract.skill_state")
+CALLBACK = import_script_module("lib.python.core.abstract.callback")
+CALLBACKS = import_script_module("lib.python.core.abstract.callbacks")
+CONTEXT = import_script_module("lib.python.core.abstract.context")
+EXECUTOR = import_script_module("lib.python.core.abstract.skill_exector")
+SKILL_ACTION = import_script_module("lib.python.core.abstract.skill_action")
+SKILL_STATE = import_script_module("lib.python.core.abstract.skill_state")
 
 
 @dataclass(frozen=True)

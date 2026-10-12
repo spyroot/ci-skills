@@ -23,10 +23,10 @@ import pytest
 
 from tests.python.conftest import SCRIPT_ROOT, import_script_module
 
-CLI = import_script_module("core.cli")
-CATALOG = import_script_module("core.catalog")
-TARGET = import_script_module("core.target")
-PROJECT_BINDING = import_script_module("core.project_binding")
+CLI = import_script_module("lib.python.core.cli")
+CATALOG = import_script_module("lib.python.core.catalog")
+TARGET = import_script_module("lib.python.core.target")
+PROJECT_BINDING = import_script_module("lib.python.core.project_binding")
 
 TARGET_BODY = (
     "[github]\n"

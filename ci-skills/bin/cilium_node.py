@@ -2,7 +2,7 @@
 """Read Cilium daemon and health JSON from the local CRI agent container."""
 
 import _bootstrap  # noqa: F401
-from core.node_local_cli import parser, run
+from lib.python.core.kubernetes.node_local_cli import parser, run
 
 
 def main() -> int:

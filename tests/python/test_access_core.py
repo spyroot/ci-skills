@@ -18,20 +18,20 @@ def _load_target(
 ) -> Any:
     """Load the nonsecret target used by access tests."""
     if required_surfaces is None:
-        return import_script_module("core.target").load_target(path)
-    return import_script_module("core.target").load_target(
+        return import_script_module("lib.python.core.target").load_target(path)
+    return import_script_module("lib.python.core.target").load_target(
         path, required_surfaces=required_surfaces
     )
 
 
 def _access_modules() -> tuple[Any, Any]:
     """Load access and runtime modules through the script package path."""
-    return import_script_module("core.access"), import_script_module("core.runtime")
+    return import_script_module("lib.python.access.access"), import_script_module("lib.python.core.runtime")
 
 
 def _bind_target(path: Path) -> Any:
     """Load a target and freeze its credential sources with a test SHA."""
-    credentials = import_script_module("core.credentials")
+    credentials = import_script_module("lib.python.access.credentials")
     return credentials.bind_sources(_load_target(path), revision=TEST_REVISION)
 
 
@@ -62,9 +62,9 @@ def test_github_file_token_uses_gh_host_class_and_clears_ambient_tokens(
     monkeypatch, tmp_path, host, selected
 ):
     """The child gh process must use the selected file, not an ambient token."""
-    catalog = import_script_module("core.catalog")
-    credentials = import_script_module("core.credentials")
-    runtime = import_script_module("core.runtime")
+    catalog = import_script_module("lib.python.core.catalog")
+    credentials = import_script_module("lib.python.access.credentials")
+    runtime = import_script_module("lib.python.core.runtime")
     token_file = tmp_path / "github.token"
     token_file.write_text("selected-file-token\n", encoding="utf-8")
     for name in catalog.GITHUB_TOKEN_VARIABLES:
@@ -88,9 +88,9 @@ def test_github_file_token_uses_gh_host_class_and_clears_ambient_tokens(
 
 
 def test_ghe_cloud_uses_gh_token_over_lower_priority_and_server_tokens(monkeypatch):
-    catalog = import_script_module("core.catalog")
-    credentials = import_script_module("core.credentials")
-    runtime = import_script_module("core.runtime")
+    catalog = import_script_module("lib.python.core.catalog")
+    credentials = import_script_module("lib.python.access.credentials")
+    runtime = import_script_module("lib.python.core.runtime")
     monkeypatch.setenv("GH_TOKEN", "selected-cloud-token")
     monkeypatch.setenv("GITHUB_TOKEN", "lower-priority-token")
     monkeypatch.setenv("GH_ENTERPRISE_TOKEN", "unrelated-server-token")
@@ -364,7 +364,7 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
 ):
     """Absent Cilium cannot block Ceph; a Cilium request must still prove exec."""
     access, runtime = _access_modules()
-    cli = import_script_module("core.cli")
+    cli = import_script_module("lib.python.core.cli")
     runner, calls = _fake_access_runner(runtime, "k8s_cilium_missing")
     monkeypatch.setattr(access, "run_command", runner)
     monkeypatch.setattr(
@@ -893,7 +893,7 @@ def test_gitlab_access_blocks_missing_or_empty_token_file(
 def test_kubectl_argv_binds_context_and_optional_kubeconfig(tmp_path, target_file):
     """Every Kubernetes probe stays pinned to the selected context and file."""
     access, _runtime = _access_modules()
-    target_mod = import_script_module("core.target")
+    target_mod = import_script_module("lib.python.core.target")
     base = _load_target(target_file)
     target = target_mod.Target(
         github=base.github,

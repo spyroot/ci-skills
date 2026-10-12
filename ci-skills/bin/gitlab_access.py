@@ -12,8 +12,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import _bootstrap  # noqa: F401
-from core.catalog import describe
-from core.cli import (
+from lib.python.core.catalog import describe
+from lib.python.core.cli import (
     _failure,
     log_event,
     output_mode,
@@ -21,10 +21,10 @@ from core.cli import (
     resolve_gitlab_target,
     setup_gitlab_operation,
 )
-from core.portable import write_portable_receipt
-from core.report import emit
-from core.status import DRY_RUN, exit_code
-from core.target import TargetError, select_gitlab_reference
+from lib.python.core.portable import write_portable_receipt
+from lib.python.core.report import emit
+from lib.python.sys.status import DRY_RUN, exit_code
+from lib.python.core.target import TargetError, select_gitlab_reference
 
 
 def build_parser() -> argparse.ArgumentParser:

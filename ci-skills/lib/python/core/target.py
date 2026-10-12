@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .catalog import AUTHORITIES, DEFAULT_AUTHORITIES
-from .endpoints import TARGET_CONTRACT
-from .paths import SKILL_ROOT
+from lib.python.core.catalog import AUTHORITIES, DEFAULT_AUTHORITIES
+from lib.python.core.endpoints import TARGET_CONTRACT
+from lib.python.core.paths import SKILL_ROOT
 
 
 class TargetError(ValueError):
@@ -21,7 +22,7 @@ class TargetError(ValueError):
 class GitHubTarget:
     host: str
     repository: str
-    token_file: Path | None = None
+    token_file: Path
     # Which status checks protection must require. Declared by the operator,
     # because the expected check name is project-specific and this skill is
     # deliberately project-neutral.
@@ -35,20 +36,19 @@ class HarborTarget:
     url: str
     host: str
     project: str
-    credential_file: Path | None = None
-    username_file: Path | None = None
-    password_file: Path | None = None
+    credential_file: Path
+    username_file: Path
+    password_file: Path
 
 
 @dataclass(frozen=True)
 class GitLabTarget:
     url: str
     host: str
-    token_file: Path | None = None
-    project: str | None = None
-    group: str | None = None
-    runner_id: int | None = None
-
+    token_file: Path
+    project: str
+    group: str
+    runner_id: int
 
 @dataclass(frozen=True)
 class GitLabOperationTarget:
@@ -81,43 +81,45 @@ class NodeDiagnosticsTarget:
     """Exact node and existing Pod routes for nonmutating node reads."""
 
     node: str
-    cilium: NodePodRoute | None
-    journal: JournalPodRoute | None
+    cilium: NodePodRoute
+    journal: JournalPodRoute
 
 
 @dataclass(frozen=True)
 class KubernetesTarget:
     context: str
     server: str
-    kubeconfig: Path | None
+    kubeconfig: Path
     # The full search path, in kubectl's own order. A credential and the context
     # that selects it often live in different files -- a CA-verified overlay
     # plus the file holding the token, for instance -- and requiring the
     # operator to export KUBECONFIG for that is a trap: the default kubeconfig
     # is usually a DIFFERENT cluster, so a cold run silently aims elsewhere.
     kubeconfigs: tuple[Path, ...] = ()
-    node_diagnostics: NodeDiagnosticsTarget | None = None
+    node_diagnostics: NodeDiagnosticsTarget
 
 
 @dataclass(frozen=True)
 class Target:
-    github: GitHubTarget | None
-    gitlab: GitLabTarget | None
-    kubernetes: KubernetesTarget | None
+    github: GitHubTarget
+    gitlab: GitLabTarget
+    kubernetes: KubernetesTarget
     active_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES
-    sources: object | None = field(default=None, repr=False, compare=False)
-    tested_revision: str | None = None
+    sources: object = field(default=None, repr=False, compare=False)
+    tested_revision: str
     # Which declared source supplied this target, so a report can say where it
     # came from rather than leaving the reader to guess the search order.
-    source_file: Path | None = None
-    source_kind: str | None = None
-    skill: dict[str, Any] | None = None
-    kubernetes_source_reference: str | None = None
-    target_reference: str | None = None
-    harbor: HarborTarget | None = None
+    source_file: Path
+    source_kind: str
+    skill: dict[str, Any]
+    kubernetes_source_reference: str
+    target_reference: str
+    harbor: HarborTarget
 
 
-def _table(value: object, name: str, keys: frozenset[str]) -> dict[str, object]:
+def _table(
+        value: object, name: str, keys: frozenset[str]
+)-> Mapping[str, object]:
     """Return one table after rejecting undeclared fields, including credentials."""
     if not isinstance(value, dict):
         raise TargetError(f"{name} must be a TOML table")
@@ -130,15 +132,26 @@ def _table(value: object, name: str, keys: frozenset[str]) -> dict[str, object]:
 
 
 def _string(table: dict[str, object], key: str) -> str:
-    """Read a required nonempty string without guessing a default."""
+    """
+
+    :param table:
+    :param key:
+    :return:
+    :raises TargetError:
+    """
     value = table.get(key)
     if not isinstance(value, str) or not value.strip():
         raise TargetError(f"{key} must be a nonempty string")
     return value.strip()
 
 
-def _https_url(value: str, key: str) -> tuple[str, str]:
-    """Require an HTTPS authority URL with a fully qualified hostname."""
+def _https_url(value: str, key: str) -> tuple[str, str | bytes]:
+    """Require an HTTPS authority URL with a fully qualified hostname.
+    :param value:
+    :param key:
+    :return:
+    :raise
+    """
     parsed = urlsplit(value)
     if (
         parsed.scheme != "https"

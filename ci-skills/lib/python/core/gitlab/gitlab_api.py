@@ -17,17 +17,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
-from .cli_api import (
+from lib.python.core.cli_api import (
     MAX_RESPONSE_BYTES as MAX_RESPONSE_BYTES,  # noqa: PLC0414 - compatibility export
 )
-from .cli_api import (
+from lib.python.core.cli_api import (
     MAX_RETRY_AFTER_SECONDS as MAX_RETRY_AFTER_SECONDS,  # noqa: PLC0414 - compatibility export
 )
-from .cli_api import (
+from lib.python.core.cli_api import (
     READ_ATTEMPTS as READ_ATTEMPTS,  # noqa: PLC0414 - compatibility export
 )
-from .cli_api import APIError as GitLabAPIError
-from .cli_api import CLIAPIClient, _endpoint
+from lib.python.core.cli_api import APIError as GitLabAPIError
+from lib.python.core.cli_api import CLIAPIClient, _endpoint
 
 CREATE_LOCK_WAIT_SECONDS = 30
 _UNCERTAIN_WRITE = frozenset(

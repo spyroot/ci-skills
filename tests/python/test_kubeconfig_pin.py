@@ -24,9 +24,9 @@ REWRITTEN = "apiVersion: v1\nkind: Config\nchanged: true\n"
 
 def _modules():
     return (
-        import_script_module("core.credentials"),
-        import_script_module("core.access"),
-        import_script_module("core.target"),
+        import_script_module("lib.python.access.credentials"),
+        import_script_module("lib.python.access.access"),
+        import_script_module("lib.python.core.target"),
     )
 
 
@@ -108,7 +108,7 @@ def test_a_changed_kubeconfig_blocks_the_collector_rather_than_degrading_it(
 ):
     """A PARTIAL report with missing resources reads as an empty cluster."""
     _credentials, _access, _target_module = _modules()
-    collect = import_script_module("core.collect")
+    collect = import_script_module("lib.python.core.collect")
     bound = _target(tmp_path, kubeconfig)
 
     kubeconfig.write_text(REWRITTEN, encoding="utf-8")

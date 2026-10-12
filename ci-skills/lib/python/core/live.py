@@ -6,12 +6,12 @@ import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Mapping, MutableMapping
 
-from .ceph_cluster import collect_ceph_cluster
-from .collect import collect_cilium, collect_events, collect_gitlab_job, collect_storage
-from .status import BLOCKED, PARTIAL, PASS
-from .target import Target
+from lib.python.core.kubernetes.ceph_cluster import collect_ceph_cluster
+from lib.python.core.collect import collect_cilium, collect_events, collect_gitlab_job, collect_storage
+from lib.python.sys.status import BLOCKED, PARTIAL, PASS
+from lib.python.core.target import Target
 
 # An access gate proves access, not cluster health. This skill exists to be run
 # ON a degraded cluster, so a component that is itself unhealthy must not block
@@ -76,9 +76,10 @@ def _access_proven(
     return evidence.get("record_count", 0) >= 1
 
 
-def _evidence(result: dict[str, Any]) -> dict[str, Any]:
+def _evidence(
+        result: Mapping[str, Any]
+) -> Mapping[str, Any]:
     """
-
     :param result:
     :return:
     """
@@ -117,12 +118,13 @@ def _evidence(result: dict[str, Any]) -> dict[str, Any]:
         evidence["osd_count"] = len(result.get("osds", []))
         evidence["inactive_pg_count"] = len(result.get("inactive_pgs", []))
         evidence["pod_count"] = result.get("pod_count")
+
     return evidence
 
 
 def collect_live_checks(
-    target: Target, args: Any, receipt: dict[str, Any]
-) -> dict[str, Any]:
+    target: Target, args: Any, receipt: MutableMapping[str, Any]
+) -> Mapping[str, Any]:
     """Run independent collectors concurrently using the same bound sources."""
     tasks = {
         "storage_report": (
@@ -153,6 +155,7 @@ def collect_live_checks(
             collect_gitlab_job,
             SimpleNamespace(job_url=args.job_url, search=None),
         )
+
     if getattr(args, "ceph_namespace", None):
         tasks["ceph_cluster"] = (
             collect_ceph_cluster,
@@ -165,16 +168,20 @@ def collect_live_checks(
                 condition=None,
             ),
         )
-    checks: dict[str, dict[str, Any]] = {}
+
+    checks: MutableMapping[str, dict[str, Any]] = {}
+
     with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
         futures = {
             pool.submit(function, target, options): name
             for name, (function, options) in tasks.items()
         }
+
         for future in as_completed(futures):
             name = futures[future]
             try:
                 checks[name] = _evidence(future.result())
+
             except Exception:  # noqa: BLE001 - isolate one failed live collector in the receipt
                 checks[name] = {
                     "status": BLOCKED,
@@ -183,13 +190,11 @@ def collect_live_checks(
                     "errors": [{"source": name, "reason": "collector_runtime_failure"}],
                     "readback_sha256": None,
                 }
+
     for name, evidence in checks.items():
         evidence["access_proven"] = _access_proven(name, evidence)
+
     receipt["live_checks"] = checks
-    receipt["status"] = (
-        PASS if all(check["access_proven"] for check in checks.values()) else BLOCKED
-    )
-    receipt["blocking_live_checks"] = sorted(
-        name for name, check in checks.items() if not check["access_proven"]
-    )
+    receipt["status"] = (PASS if all(check["access_proven"] for check in checks.values()) else BLOCKED)
+    receipt["blocking_live_checks"] = sorted(name for name, check in checks.items() if not check["access_proven"])
     return receipt

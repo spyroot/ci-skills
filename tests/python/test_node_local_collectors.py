@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 import pytest
 from tests.python.conftest import import_script_module
 
-NODE = import_script_module("core.node_local")
-RUNTIME = import_script_module("core.runtime")
-REPORT = import_script_module("core.report")
+NODE = import_script_module("lib.python.core.kubernetes.node_local")
+RUNTIME = import_script_module("lib.python.core.runtime")
+REPORT = import_script_module("lib.python.core.report")
 
 
 @dataclass

@@ -15,10 +15,10 @@ from jsonschema.exceptions import ValidationError
 
 from tests.python.conftest import import_script_module
 
-ACTION = import_script_module("core.gitlab_actions")
-API = import_script_module("core.gitlab_api")
-RUNNERS = import_script_module("core.gitlab_runners")
-REPORT = import_script_module("core.report")
+ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
+API = import_script_module("lib.python.core.gitlab.gitlab_api")
+RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
+REPORT = import_script_module("lib.python.core.report")
 RUNNER = import_script_module("gitlab_runner")
 ROOT = Path(__file__).parents[2]
 VERIFIED_SKILL = {

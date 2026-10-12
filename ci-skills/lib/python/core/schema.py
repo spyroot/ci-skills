@@ -15,7 +15,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 from referencing import Registry, Resource
 
-from .paths import SKILL_ROOT
+from lib.python.core.paths import SKILL_ROOT
 
 SCHEMA_DIRECTORY: Final = SKILL_ROOT / "schemas"
 TOOLBOX_SCHEMA: Final = "toolbox.schema.json"

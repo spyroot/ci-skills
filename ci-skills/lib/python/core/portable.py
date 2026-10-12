@@ -23,10 +23,11 @@ import hashlib
 import json
 import os
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from .runtime import redact_tree
+from lib.python.core.runtime import redact_tree
 
 DIGEST_LENGTH = 12
 # Fields that carry an absolute path on the execution host. Each is rewritten
@@ -83,7 +84,10 @@ def portable_reference(value: str) -> str:
 
 
 def portable_command(argv: list[Any]) -> list[Any]:
-    """Hide the host kubeconfig path in a recorded command argument vector."""
+    """Hide the host kubeconfig path in a recorded command argument vector.
+    :param argv:
+    :return:
+    """
     result = list(argv)
     for index, item in enumerate(result[:-1]):
         if item == "--kubeconfig" and isinstance(result[index + 1], str):
@@ -91,8 +95,13 @@ def portable_command(argv: list[Any]) -> list[Any]:
     return result
 
 
-def portable(value: Any, *, key: str | None = None) -> Any:
-    """Render a receipt, or any part of one, in committable form."""
+def portable(value: Any, *, key: str) -> Any:
+    """Render a receipt, or any part of one, in committable form.
+
+    :param value:
+    :param key:
+    :return:
+    """
     if isinstance(value, str):
         return portable_reference(value) if key in PATH_VALUE_FIELDS else value
     if isinstance(value, dict):
@@ -113,8 +122,15 @@ def portable(value: Any, *, key: str | None = None) -> Any:
     return value
 
 
-def write_portable_receipt(data: dict[str, Any], selected: str) -> None:
-    """Atomically write redacted evidence to a caller-selected 0600 file."""
+def write_portable_receipt(
+        data: Mapping[str, Any],
+        selected: str
+) -> None:
+    """ Atomically write redacted evidence to a caller-selected 0600 file.
+    :param data:
+    :param selected:
+    :return:
+    """
     destination = Path(selected).expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
     body = json.dumps(portable(redact_tree(data)), indent=2, sort_keys=True) + "\n"

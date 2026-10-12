@@ -4,8 +4,8 @@
 import argparse
 
 import _bootstrap  # noqa: F401
-from core.cli import execute, parser
-from core.collect import collect_events
+from lib.python.core.cli import execute, parser
+from lib.python.core.collect import collect_events
 
 
 # The parser is built by its own function so the declared interface can be

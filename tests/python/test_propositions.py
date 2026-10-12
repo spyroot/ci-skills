@@ -16,7 +16,7 @@ from conftest import (
 )
 from jsonschema import Draft202012Validator
 
-CATALOG = import_script_module("core.catalog")
+CATALOG = import_script_module("lib.python.core.catalog")
 PROPOSITION_SCHEMA = json.loads(
     (REPO_ROOT / "schemas" / "reference-next.schema.json").read_text(encoding="utf-8")
 )

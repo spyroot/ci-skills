@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .gitlab_api import GlabAPIClient
+from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 
 
 @dataclass(frozen=True)

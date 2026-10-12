@@ -6,7 +6,7 @@ from argparse import Namespace
 from typing import Any
 from urllib.parse import urlencode
 
-from .gitlab_actions import (
+from lib.python.core.gitlab.gitlab_actions import (
     ActionError,
     ActionPlan,
     _fields,
@@ -18,7 +18,7 @@ from .gitlab_actions import (
     _required_text,
     _same,
 )
-from .gitlab_api import (
+from lib.python.core.gitlab.gitlab_api import (
     GitLabAPIError,
     create_guard,
     uncertain_write,

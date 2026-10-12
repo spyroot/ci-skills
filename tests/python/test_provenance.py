@@ -20,7 +20,7 @@ FOREIGN_SHA = "b" * 40
 
 
 def _provenance():
-    return import_script_module("core.provenance")
+    return import_script_module("lib.python.core.provenance")
 
 
 @pytest.fixture

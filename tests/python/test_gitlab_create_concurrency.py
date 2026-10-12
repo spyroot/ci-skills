@@ -8,11 +8,11 @@ from types import SimpleNamespace
 import pytest
 from tests.python.conftest import import_script_module
 
-API = import_script_module("core.gitlab_api")
-ACTION = import_script_module("core.gitlab_actions")
-ISSUES = import_script_module("core.gitlab_issues")
-MILESTONES = import_script_module("core.gitlab_milestones")
-WIKIS = import_script_module("core.gitlab_wikis")
+API = import_script_module("lib.python.core.gitlab.gitlab_api")
+ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
+ISSUES = import_script_module("lib.python.core.gitlab.gitlab_issues")
+MILESTONES = import_script_module("lib.python.core.gitlab.gitlab_milestones")
+WIKIS = import_script_module("lib.python.core.gitlab.gitlab_wikis")
 
 
 class ScriptedAPI:

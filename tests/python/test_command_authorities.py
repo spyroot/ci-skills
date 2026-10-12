@@ -39,9 +39,9 @@ def _unexpected(*_args, **_kwargs):
 
 def test_ceph_collector_uses_only_kubernetes_authority(tmp_path, monkeypatch, capsys):
     """A project with no GitHub or GitLab target can read Ceph through Kubernetes."""
-    cli = import_script_module("core.cli")
-    access = import_script_module("core.access")
-    credentials = import_script_module("core.credentials")
+    cli = import_script_module("lib.python.core.cli")
+    access = import_script_module("lib.python.access.access")
+    credentials = import_script_module("lib.python.access.credentials")
     path = _target(
         tmp_path,
         '[kubernetes]\ncontext = "unit"\n'
@@ -86,9 +86,9 @@ def test_ceph_collector_uses_only_kubernetes_authority(tmp_path, monkeypatch, ca
 
 def test_gitlab_job_does_not_require_cluster_or_github(tmp_path, monkeypatch, capsys):
     """A GitLab-only target does not resolve a kubeconfig or GitHub token."""
-    cli = import_script_module("core.cli")
-    access = import_script_module("core.access")
-    credentials = import_script_module("core.credentials")
+    cli = import_script_module("lib.python.core.cli")
+    access = import_script_module("lib.python.access.access")
+    credentials = import_script_module("lib.python.access.credentials")
     path = _target(tmp_path, '[gitlab]\nurl = "https://gitlab.example.test"\n')
     monkeypatch.setattr(access, "github_access", _unexpected)
     monkeypatch.setattr(access, "kubernetes_access", _unexpected)
@@ -129,7 +129,7 @@ def test_gitlab_job_does_not_require_cluster_or_github(tmp_path, monkeypatch, ca
 
 def test_selected_target_malformed_blocks_without_fallback(tmp_path, capsys):
     """A bad selected Kubernetes origin cannot fall back to another target."""
-    cli = import_script_module("core.cli")
+    cli = import_script_module("lib.python.core.cli")
     path = _target(
         tmp_path,
         '[kubernetes]\ncontext = "unit"\n'
@@ -153,7 +153,7 @@ def test_selected_target_malformed_blocks_without_fallback(tmp_path, capsys):
 
 def test_full_access_check_still_requires_all_three_targets(tmp_path):
     """The three-surface receipt cannot pass from a Kubernetes-only target."""
-    target = import_script_module("core.target")
+    target = import_script_module("lib.python.core.target")
     path = _target(
         tmp_path,
         '[kubernetes]\ncontext = "unit"\n'

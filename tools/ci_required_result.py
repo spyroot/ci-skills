@@ -23,6 +23,9 @@ import jsonschema
 import yaml
 
 ROOT: Final = Path(__file__).resolve().parents[1]
+SKILL_ROOT: Final = ROOT / "ci-skills"
+if str(SKILL_ROOT) not in sys.path:
+    sys.path.insert(0, str(SKILL_ROOT))
 SCHEMA_VERSION: Final = "1.0"
 RESULT_SCHEMAS: Final = {
     "ci": ROOT / "schemas" / "ci-result.schema.json",
@@ -173,10 +176,7 @@ def _shared_cli() -> tuple[Any, Any]:
 
     :returns: ``add_log_arguments`` and ``log_event`` from the shared CLI module.
     """
-    library = ROOT / "ci-skills" / "lib" / "python"
-    if str(library) not in sys.path:
-        sys.path.insert(0, str(library))
-    from core.cli import add_log_arguments, log_event
+    from lib.python.core.cli import add_log_arguments, log_event
 
     return add_log_arguments, log_event
 
@@ -186,10 +186,7 @@ def _artifact_digest() -> str:
 
     :returns: SHA-256-prefixed deterministic artifact digest.
     """
-    library = ROOT / "ci-skills" / "lib" / "python"
-    if str(library) not in sys.path:
-        sys.path.insert(0, str(library))
-    from core.provenance import tree_digest
+    from lib.python.core.provenance import tree_digest
 
     return f"sha256:{tree_digest(ROOT / 'ci-skills')['digest']}"
 

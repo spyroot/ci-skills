@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from tests.python.conftest import import_script_module
 
-PIPELINES = import_script_module("core.gitlab_pipelines")
+PIPELINES = import_script_module("lib.python.core.gitlab.gitlab_pipelines")
 SCRIPT = import_script_module("gitlab_pipeline")
 
 

@@ -13,7 +13,7 @@ from tests.python.conftest import import_script_module
 
 
 def _live():
-    return import_script_module("core.live"), import_script_module("core.status")
+    return import_script_module("lib.python.core.live"), import_script_module("lib.python.sys.status")
 
 
 def _cilium(status, errors, passed, total=3, records=3):
@@ -209,8 +209,8 @@ def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(monkeypa
 
 def test_cluster_wide_list_reads_use_a_bound_sized_for_a_real_cluster(monkeypatch):
     """A slow but healthy list must not be reported as a timeout."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     seen: list[int] = []
 
     def fake_run(argv, *, env=None, timeout=None):

@@ -20,10 +20,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
-from .access import kubectl_argv, kubernetes_env, oc_argv
-from .action import K8SCallback
-from .credentials import Sources, bind_sources
-from .runtime import (
+from lib.python.access.access import kubectl_argv, kubernetes_env, oc_argv
+from lib.python.core.action import K8SCallback
+from lib.python.access.credentials import Sources, bind_sources
+from lib.python.core.runtime import (
     CommandResult,
     error_class,
     run_command_bounded,
@@ -32,7 +32,7 @@ from .runtime import (
     trace_enabled,
     trace_event,
 )
-from .target import Target, TargetError
+from lib.python.core.target import Target, TargetError
 
 DEFAULT_COMMAND_TIMEOUT: Final = 30
 KUBERNETES_SERVICE_KEY: Final = "kubernetes"

@@ -9,11 +9,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
-from .cilium import daemon_findings, health_detail, health_findings, valid_health
-from .node_pod import NodePodReader
-from .report import report
-from .runtime import CommandResult, error_class, sanitize
-from .status import BLOCKED, PARTIAL, PASS, UNKNOWN
+from lib.python.core.kubernetes.cilium import daemon_findings, health_detail, health_findings, valid_health
+from lib.python.core.kubernetes.node_pod import NodePodReader
+from lib.python.core.report import report
+from lib.python.core.runtime import CommandResult, error_class, sanitize
+from lib.python.sys.status import BLOCKED, PARTIAL, PASS, UNKNOWN
 
 CEPH_PATTERN = re.compile(r"libceph|rbd|ceph")
 CEPH_ACTIONS = (

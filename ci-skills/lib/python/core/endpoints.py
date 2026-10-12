@@ -74,6 +74,10 @@ class TargetContract:
     """The allowed tables and keys of a target file, by dotted path."""
 
     def __init__(self, authorities: tuple[Table, ...]) -> None:
+        """
+
+        :param authorities:
+        """
         self._authorities = authorities
         self._paths: dict[str, Table | Field] = {}
         for authority in authorities:
@@ -81,9 +85,18 @@ class TargetContract:
 
     @property
     def authorities(self) -> tuple[str, ...]:
+        """
+
+        :return:
+        """
         return tuple(table.name for table in self._authorities)
 
     def names(self, path: str) -> frozenset[str]:
+        """
+
+        :param path:
+        :return:
+        """
         """What the table at `path` accepts; `core/target.py` rejects the rest."""
         table = self._paths.get(path)
         if not isinstance(table, Table):
@@ -91,10 +104,19 @@ class TargetContract:
         return table.names()
 
     def declares(self, path: str) -> bool:
+        """
+
+        :param path:
+        :return:
+        """
         return path in self._paths
 
-    def role(self, path: str) -> Role | None:
-        """The role of a declared key; None for a table or an undeclared path."""
+    def role(self, path: str) -> Role:
+        """The role of a declared key; None for a table.
+        :param path:
+        :return:
+        """
+        """"""
         item = self._paths.get(path)
         return item.role if isinstance(item, Field) else None
 
@@ -102,9 +124,17 @@ class TargetContract:
         return tuple(self._paths)
 
     def value_keys(self) -> tuple[str, ...]:
+        """
+
+        :return:
+        """
         return tuple(path for path in self._paths if self.role(path) is Role.VALUE)
 
     def unpaired(self) -> tuple[str, ...]:
+        """
+
+        :return:
+        """
         """Authorities that do not declare both an endpoint and its access."""
         missing: list[str] = []
         for authority in self._authorities:

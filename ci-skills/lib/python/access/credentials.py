@@ -20,11 +20,11 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final
 
-from .catalog import GITHUB_TOKEN_VARIABLES, GITLAB_VARIABLES, github_variables
-from .gitlab_session import BoundGitLabSession
-from .paths import SKILL_ROOT
-from .provenance import ProvenanceError, skill_identity
-from .target import (
+from lib.python.core.catalog import GITHUB_TOKEN_VARIABLES, GITLAB_VARIABLES, github_variables
+from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+from lib.python.core.paths import SKILL_ROOT
+from lib.python.core.provenance import ProvenanceError, skill_identity
+from lib.python.core.target import (
     GitLabOperationTarget,
     HarborTarget,
     Target,

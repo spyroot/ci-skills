@@ -11,11 +11,11 @@ import base64
 from dataclasses import dataclass, field
 from typing import Any, Final, cast
 
-from .action import AbstractCallback, K8SCallback
-from .kubernetes import KubernetesError, KubernetesService
-from .resources import ResourceSet
-from .status import APPLIED, NO_OP, VERIFIED
-from .toolbox import DOCTOR_PATH
+from lib.python.core.action import AbstractCallback, K8SCallback
+from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
+from lib.python.core.resources import ResourceSet
+from lib.python.sys.status import APPLIED, NO_OP, VERIFIED
+from lib.python.core.toolbox import DOCTOR_PATH
 
 POD_API: Final = "v1"
 DEPLOYMENT_API: Final = "apps/v1"

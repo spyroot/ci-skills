@@ -11,13 +11,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Final, cast
 
-from .access import github_env
-from .action import GitHubCallback
-from .catalog import github_variables
-from .cli_api import APIError, CLIAPIClient
-from .credentials import Sources, bind_sources
-from .runtime import run_command_bounded
-from .target import Target, TargetError
+from lib.python.access.access import github_env
+from lib.python.core.action import GitHubCallback
+from lib.python.core.catalog import github_variables
+from lib.python.core.cli_api import APIError, CLIAPIClient
+from lib.python.access.credentials import Sources, bind_sources
+from lib.python.core.runtime import run_command_bounded
+from lib.python.core.target import Target, TargetError
 
 GITHUB_SERVICE_KEY: Final = "github"
 GITHUB_PAGE_SIZE: Final = 100
@@ -28,7 +28,8 @@ RUNNER_ONLINE: Final = "online"
 class GitHubAPIClient(CLIAPIClient):
     """Use GitHub's native CLI with the existing shared transport."""
 
-    def argv(self, host: str, method: str, endpoint: str) -> list[str]:
+    @staticmethod
+    def argv(host: str, method: str, endpoint: str) -> list[str]:
         """Build an exact-host native GitHub API request.
 
         :param host: Configured GitHub hostname.

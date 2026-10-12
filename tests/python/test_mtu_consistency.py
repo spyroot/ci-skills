@@ -8,9 +8,9 @@ from types import SimpleNamespace
 import pytest
 from tests.python.conftest import import_script_module
 
-MTU = import_script_module("core.mtu_consistency")
-RUNTIME = import_script_module("core.runtime")
-TARGET = import_script_module("core.target")
+MTU = import_script_module("lib.python.core.kubernetes.mtu_consistency")
+RUNTIME = import_script_module("lib.python.core.runtime")
+TARGET = import_script_module("lib.python.core.target")
 
 
 def _link(name: str, mtu: int, *, bus: str = "pci", family: str = "inet"):

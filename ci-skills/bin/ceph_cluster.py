@@ -4,8 +4,8 @@
 import argparse
 
 import _bootstrap  # noqa: F401
-from core.ceph_cluster import collect_ceph_cluster
-from core.cli import execute, parser
+from lib.python.core.kubernetes.ceph_cluster import collect_ceph_cluster
+from lib.python.core.cli import execute, parser
 
 
 def build_parser() -> argparse.ArgumentParser:

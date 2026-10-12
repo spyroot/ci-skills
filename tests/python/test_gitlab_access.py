@@ -11,12 +11,12 @@ import pytest
 
 from tests.python.conftest import import_script_module
 
-ACCESS = import_script_module("core.access")
-CLI = import_script_module("core.cli")
-CREDENTIALS = import_script_module("core.credentials")
-TARGET = import_script_module("core.target")
+ACCESS = import_script_module("lib.python.access.access")
+CLI = import_script_module("lib.python.core.cli")
+CREDENTIALS = import_script_module("lib.python.access.credentials")
+TARGET = import_script_module("lib.python.core.target")
 SCRIPT = import_script_module("gitlab_access")
-PROJECT_BINDING = import_script_module("core.project_binding")
+PROJECT_BINDING = import_script_module("lib.python.core.project_binding")
 
 REVISION: Final = "a" * 40
 

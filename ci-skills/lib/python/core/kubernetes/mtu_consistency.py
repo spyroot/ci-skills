@@ -18,14 +18,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .access import check_access, kubectl_argv, kubernetes_env, oc_argv
-from .cli import _failure, output_mode
-from .credentials import Sources, bind_sources
-from .project_binding import resolve_target
-from .report import emit, report
-from .runtime import CommandResult, error_class, run_command_tail, sanitize
-from .status import BLOCKED, DRY_RUN, PARTIAL, PASS, PROFILE_BASE, exit_code
-from .target import Target, TargetError, kubernetes_label
+from lib.python.access.access import check_access, kubectl_argv, kubernetes_env, oc_argv
+from lib.python.core.cli import _failure, output_mode
+from lib.python.access.credentials import Sources, bind_sources
+from lib.python.core.project_binding import resolve_target
+from lib.python.core.report import emit, report
+from lib.python.core.runtime import CommandResult, error_class, run_command_tail, sanitize
+from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, PROFILE_BASE, exit_code
+from lib.python.core.target import Target, TargetError, kubernetes_label
 
 KIND = "k8s_verify_mtu_consistency"
 MAX_OUTPUT_BYTES = 1_048_576
@@ -555,7 +555,7 @@ def _signal_interrupt(_signum: int, _frame: Any) -> None:
 def run(args: Any) -> int:
     """Plan by default; apply only the exact confirmed fingerprint."""
     if args.describe:
-        from .catalog import describe
+        from lib.python.core.catalog import describe
 
         sys.stdout.write(
             json.dumps(

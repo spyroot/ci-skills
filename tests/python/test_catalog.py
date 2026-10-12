@@ -21,9 +21,9 @@ import sys
 import pytest
 from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module, load_module
 
-CATALOG = import_script_module("core.catalog")
-CLI = import_script_module("core.cli")
-PROJECT_BINDING = import_script_module("core.project_binding")
+CATALOG = import_script_module("lib.python.core.catalog")
+CLI = import_script_module("lib.python.core.cli")
+PROJECT_BINDING = import_script_module("lib.python.core.project_binding")
 RENDER = load_module("render_manifest", REPO_ROOT / "tools" / "render_manifest.py")
 MANIFEST_PATH = SCRIPT_ROOT.parent / "tools.json"
 PYTHON_COMMANDS = tuple(
@@ -58,7 +58,7 @@ def test_runner_actions_declare_mutation_and_readback():
 def _parser_for(script: str) -> argparse.ArgumentParser:
     """Return the parser behind one catalogued Python command."""
     if script in CATALOG.NODE_LOCAL_COMMANDS:
-        node_cli = import_script_module("core.node_local_cli")
+        node_cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
         return node_cli.parser(script.removesuffix(".py"))
     module = load_module(
         f"entrypoint_{script.removesuffix('.py')}", SCRIPT_ROOT / script
@@ -216,7 +216,7 @@ def test_python_parsers_reject_direct_credential_values_before_resolution(
 @pytest.mark.parametrize("script", sorted(CATALOG.NODE_LOCAL_COMMANDS))
 def test_node_local_commands_publish_their_distinct_interface(script):
     """A node read publishes its selected API target and Pod route."""
-    node_cli = import_script_module("core.node_local_cli")
+    node_cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
     kind = script.removesuffix(".py")
     actual = {
         option
@@ -306,8 +306,8 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
     read only `GH_ENTERPRISE_TOKEN` there, so a caller could set exactly the
     variable the manifest named and still be told the credential store was used.
     """
-    credentials = import_script_module("core.credentials")
-    target_mod = import_script_module("core.target")
+    credentials = import_script_module("lib.python.access.credentials")
+    target_mod = import_script_module("lib.python.core.target")
     target = target_mod.load_target(target_file)  # host: github.example.test
 
     declared = {
@@ -330,8 +330,8 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(target_file):
 
 def test_the_declared_gitlab_variables_are_the_ones_resolved():
     """One list, consumed by the binder and published by the manifest."""
-    credentials = import_script_module("core.credentials")
-    access = import_script_module("core.access")
+    credentials = import_script_module("lib.python.access.credentials")
+    access = import_script_module("lib.python.access.access")
     declared = [step["source"] for step in CATALOG.ACCESS_PROTOCOL["gitlab"]]
 
     for name in CATALOG.GITLAB_VARIABLES:

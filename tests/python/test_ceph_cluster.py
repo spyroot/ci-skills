@@ -11,7 +11,7 @@ from conftest import import_script_module
 
 
 def _target(tmp_path):
-    target_mod = import_script_module("core.target")
+    target_mod = import_script_module("lib.python.core.target")
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     return target_mod.Target(
@@ -88,7 +88,7 @@ def _pod(
 
 
 def test_ceph_health_checks_preserve_exact_findings_and_reject_malformed_detail():
-    ceph_cluster = import_script_module("core.ceph_cluster")
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
     health = {
         "status": "HEALTH_WARN",
         "checks": {
@@ -121,8 +121,8 @@ def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
     tmp_path,
 ):
     """Every Ceph query is bound to the selected kubeconfig, context, namespace."""
-    ceph_cluster = import_script_module("core.ceph_cluster")
-    runtime = import_script_module("core.runtime")
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
+    runtime = import_script_module("lib.python.core.runtime")
     target = _target(tmp_path)
     kubeconfig = str(target.kubernetes.kubeconfig)
     responses = {
@@ -232,7 +232,7 @@ def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
             ],
         }
     ]
-    rendered = import_script_module("core.report").human(result)
+    rendered = import_script_module("lib.python.core.report").human(result)
     assert rendered.index("default (root") < rendered.index("rack-a (rack")
     assert rendered.index("rack-a (rack") < rendered.index("worker-a (host")
     assert rendered.index("worker-a (host") < rendered.index("osd.1 (osd")
@@ -255,8 +255,8 @@ def test_ceph_cluster_filters_pods_by_node_ready_and_condition(
     tmp_path,
 ):
     """Pod rows honor the node, Ready, and condition filters together."""
-    ceph_cluster = import_script_module("core.ceph_cluster")
-    runtime = import_script_module("core.runtime")
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
+    runtime = import_script_module("lib.python.core.runtime")
     target = _target(tmp_path)
     responses = {
         "status": {"health": {"status": "HEALTH_OK"}},
@@ -299,7 +299,7 @@ def test_ceph_cluster_filters_pods_by_node_ready_and_condition(
 
 def test_ceph_cluster_parses_live_dump_stuck_envelope():
     """Ceph pg dump_stuck returns stuck_pg_stats rather than pg_stats."""
-    ceph_cluster = import_script_module("core.ceph_cluster")
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
 
     assert ceph_cluster._inactive_pgs(
         {
@@ -326,7 +326,7 @@ def test_ceph_cluster_parses_live_dump_stuck_envelope():
     ),
 )
 def test_ceph_tree_rejects_missing_duplicate_or_cyclic_hierarchy(nodes):
-    ceph_cluster = import_script_module("core.ceph_cluster")
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
     with pytest.raises(TypeError, match="osd_tree:"):
         ceph_cluster._osd_tree({"nodes": nodes})
 
@@ -357,8 +357,8 @@ def test_ceph_cluster_records_malformed_response_and_denied_command(
     expected,
 ):
     """Malformed JSON shapes and denied commands become structured errors."""
-    ceph_cluster = import_script_module("core.ceph_cluster")
-    runtime = import_script_module("core.runtime")
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
+    runtime = import_script_module("lib.python.core.runtime")
     target = _target(tmp_path)
     responses = {
         "status": {"health": {"status": "HEALTH_OK"}},

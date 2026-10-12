@@ -9,10 +9,10 @@ from math import isfinite
 from typing import Any, Final, TypedDict
 from urllib.parse import urlencode, urlsplit
 
-from .collect import _timestamp, parse_window
-from .gitlab_api import GitLabAPIError, GlabAPIClient, next_keyset_endpoint
-from .gitlab_job_fields import FILTERABLE_JOB_STATUSES, GitLabJobFields
-from .gitlab_session import BoundGitLabSession
+from lib.python.core.collect import _timestamp, parse_window
+from lib.python.core.gitlab.gitlab_api import GitLabAPIError, GlabAPIClient, next_keyset_endpoint
+from lib.python.core.gitlab.gitlab_job_fields import FILTERABLE_JOB_STATUSES, GitLabJobFields
+from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
 
 PAGE_SIZE: Final = 100
 SCAN_PAGES: Final = 20

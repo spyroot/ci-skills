@@ -187,8 +187,8 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
     loader,
 ):
     """Collector validation failures keep the declared output contract."""
-    cli = import_script_module("core.cli")
-    status = import_script_module("core.status")
+    cli = import_script_module("lib.python.core.cli")
+    status = import_script_module("lib.python.sys.status")
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     target_file = tmp_path / "target.toml"

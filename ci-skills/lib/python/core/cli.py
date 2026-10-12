@@ -13,13 +13,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .access import (
+from lib.python.access.access import (
     access_evidence,
     check_access,
     check_gitlab_operation_access,
     dry_run_access,
 )
-from .catalog import (
+from lib.python.core.catalog import (
     COMMAND_BY_KIND,
     COMMANDS,
     DEFAULT_AUTHORITIES,
@@ -28,15 +28,15 @@ from .catalog import (
     describe,
     missing_required_options,
 )
-from .credentials import bind_gitlab_session, bind_sources
-from .gitlab_api import GlabAPIClient
-from .gitlab_session import BoundGitLabSession
-from .portable import portable
-from .project_binding import BINDING_ENV, resolve_target_file
-from .project_binding import resolve_target as resolve_project_target
-from .report import emit, report
-from .runtime import redact_tree, sanitize
-from .status import (
+from lib.python.access.credentials import bind_gitlab_session, bind_sources
+from lib.python.core.gitlab.gitlab_api import GlabAPIClient
+from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+from lib.python.core.portable import portable
+from lib.python.core.project_binding import BINDING_ENV, resolve_target_file
+from lib.python.core.project_binding import resolve_target as resolve_project_target
+from lib.python.core.report import emit, report
+from lib.python.core.runtime import redact_tree, sanitize
+from lib.python.sys.status import (
     BLOCKED,
     DRY_RUN,
     PASS,
@@ -45,7 +45,7 @@ from .status import (
     PROFILE_FULL,
     exit_code,
 )
-from .target import GitLabOperationTarget, Target, TargetError, select_gitlab_reference
+from lib.python.core.target import GitLabOperationTarget, Target, TargetError, select_gitlab_reference
 
 # The documented per-host location. Keeping it here rather than in each script
 # means one answer to "where does the target live", and the script-interface
@@ -553,7 +553,7 @@ def execute(
             else (PROFILE_FULL if live_checks else PROFILE_BASE)
         )
         if live_checks and not args.dry_run and gate["status"] == PASS:
-            from .live import collect_live_checks
+            from lib.python.core.live import collect_live_checks
 
             data = collect_live_checks(target, args, gate)
         elif collect is None or args.dry_run or gate["status"] != PASS:
@@ -603,7 +603,7 @@ def execute_gitlab_job(args: argparse.Namespace) -> int:
     :param args: Parsed job command and universal output options.
     :returns: Shared status exit code.
     """
-    from .collect import collect_gitlab_job, gitlab_job_reference
+    from lib.python.core.collect import collect_gitlab_job, gitlab_job_reference
 
     kind = "gitlab_job"
     if args.describe:
@@ -697,8 +697,8 @@ def execute_gitlab_job_list(args: argparse.Namespace) -> int:
     :param args: Parsed list filters and universal output options.
     :returns: Shared status exit code.
     """
-    from .gitlab_jobs import JobQuery, list_jobs
-    from .target import select_gitlab_reference
+    from lib.python.core.gitlab.gitlab_jobs import JobQuery, list_jobs
+    from lib.python.core.target import select_gitlab_reference
 
     kind = "gitlab_job"
     if args.job_url:

@@ -15,8 +15,9 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_ROOT = REPO_ROOT / "ci-skills" / "bin"
-LIB_ROOT = REPO_ROOT / "ci-skills" / "lib" / "python"
+SKILL_ROOT = REPO_ROOT / "ci-skills"
+SCRIPT_ROOT = SKILL_ROOT / "bin"
+LIB_ROOT = SKILL_ROOT / "lib" / "python"
 CORE_ROOT = LIB_ROOT / "core"
 
 
@@ -37,7 +38,7 @@ def load_module(module_name: str, path: Path) -> ModuleType:
 
 def import_script_module(module_name: str) -> ModuleType:
     """Import a module from the diagnostics script tree."""
-    for root in (str(LIB_ROOT), str(SCRIPT_ROOT)):
+    for root in (str(SKILL_ROOT), str(SCRIPT_ROOT)):
         if root not in sys.path:
             sys.path.insert(0, root)
     return import_module(module_name)
@@ -106,7 +107,7 @@ def run_script(
     if not script.exists():
         pytest.fail(f"missing script under test: {script.relative_to(REPO_ROOT)}")
     environment = os.environ.copy()
-    python_path = os.pathsep.join((str(SCRIPT_ROOT), str(LIB_ROOT)))
+    python_path = os.pathsep.join((str(SCRIPT_ROOT), str(SKILL_ROOT)))
     if environment.get("PYTHONPATH"):
         python_path = python_path + os.pathsep + environment["PYTHONPATH"]
     environment.update(

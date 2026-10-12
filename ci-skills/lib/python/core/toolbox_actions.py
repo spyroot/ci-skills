@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Final, cast
 
-from .action import (
+from lib.python.core.action import (
     Callback,
     ExecutionContext,
     ExecutionResult,
@@ -21,21 +21,21 @@ from .action import (
     emit_result,
     plan_digest,
 )
-from .catalog import COMMAND_BY_KIND, COMMANDS, describe, missing_required_options
-from .cli import parser
-from .cli_api import APIError
-from .credentials import bind_sources
-from .github import GitHubService
-from .kubernetes import KubernetesError, KubernetesService
-from .project_binding import resolve_target
-from .registry_mirror import HarborService, TagSnapshot
-from .report import report
-from .resources import ResourceSet
-from .runner import RunnerAction
-from .schema import SCHEMA_DIRECTORY, TOOLBOX_SCHEMA
-from .status import APPLIED, BLOCKED, DRY_RUN, NO_OP, PASS, PLANNED
-from .target import Target
-from .toolbox import (
+from lib.python.core.catalog import COMMAND_BY_KIND, COMMANDS, describe, missing_required_options
+from lib.python.core.cli import parser
+from lib.python.core.cli_api import APIError
+from lib.python.access.credentials import bind_sources
+from lib.python.core.gitlab.github import GitHubService
+from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
+from lib.python.core.project_binding import resolve_target
+from lib.python.core.harbor.registry_mirror import HarborService, TagSnapshot
+from lib.python.core.report import report
+from lib.python.core.resources import ResourceSet
+from lib.python.core.gitlab.gitlab_runner import RunnerAction
+from lib.python.core.schema import SCHEMA_DIRECTORY, TOOLBOX_SCHEMA
+from lib.python.sys.status import APPLIED, BLOCKED, DRY_RUN, NO_OP, PASS, PLANNED
+from lib.python.core.target import Target
+from lib.python.core.toolbox import (
     BuildAction,
     BuildToolbox,
     ToolboxBuildResult,
@@ -443,7 +443,7 @@ class DeleteToolbox(Callback[WorkflowAction, dict[str, Any]]):
         spec = workflow.spec
         harbor = cast(HarborService, self.context.services["harbor"])
         service = cast(KubernetesService, self.context.services["kubernetes"])
-        from .toolbox import MANAGED_VALUE
+        from lib.python.core.toolbox import MANAGED_VALUE
 
         resources = ResourceSet(service, spec.namespace, MANAGED_VALUE)
         changed = resources.delete("BuildConfig", spec.app)

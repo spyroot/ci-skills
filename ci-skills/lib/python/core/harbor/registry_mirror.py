@@ -14,16 +14,16 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Any, Final, cast, Union, Mapping
 from urllib.parse import quote, urlencode
 
-from .action import AbstractCallback, HarborCallback
-from .cli_api import APIError
-from .credentials import RegistryCredential, resolve_harbor_credential
-from .http import HTTPClient
-from .runtime import error_class, run_command_bounded
-from .status import APPLIED, NO_OP
-from .target import HarborTarget, Target, TargetError
+from lib.python.core.action import AbstractCallback, HarborCallback
+from lib.python.core.cli_api import APIError
+from lib.python.access.credentials import RegistryCredential, resolve_harbor_credential
+from lib.python.protocol.http import HTTPClient
+from lib.python.core.runtime import error_class, run_command_bounded
+from lib.python.sys.status import APPLIED, NO_OP
+from lib.python.core.target import HarborTarget, Target, TargetError
 
 HARBOR_SERVICE_KEY: Final = "harbor"
 REGISTRY_SCHEME: Final = "docker://"
@@ -85,13 +85,15 @@ class HarborService:
         name = quote(quote(repository, safe=""), safe="")
         return f"{HARBOR_API}/projects/{project}/repositories/{name}/artifacts/{quote(reference, safe='')}"
 
-    def digest(self, repository: str, reference: str) -> str | None:
+    def digest(
+            self, repository:
+            str, reference: str
+    ) -> Union[str, None]:
         """Read the registry's artifact digest, preserving an actual absence.
-
+        
         :param repository: Project-relative repository.
         :param reference: Tag or digest to read back.
-        :returns: Provider digest, or None for HTTP 404.
-        :raises APIError: If access fails or the returned digest is malformed.
+        :return: Provider digest, or None for HTTP 404.
         """
         try:
             result = self.api.request("GET", self.artifact_path(repository, reference))
@@ -173,7 +175,11 @@ class HarborService:
             raise APIError("tag_delete_incomplete")
         return True
 
-    def authorize(self, repository: str, actions: tuple[str, ...]) -> dict[str, Any]:
+    def authorize(
+            self,
+            repository: str,
+            actions: tuple[str, ...]
+    ) -> Mapping[str, Any]:
         """Read the authenticated registry grant for the requested operation.
 
         :param repository: Selected project-relative repository.
@@ -228,7 +234,12 @@ class TagSnapshot:
     prior_digest: str | None
 
     @classmethod
-    def capture(cls, service: HarborService, repository: str, tag: str) -> TagSnapshot:
+    def capture(
+            cls,
+            service: HarborService,
+            repository: str,
+            tag: str
+    ) -> TagSnapshot:
         """Read and retain the exact current state of one registry tag.
 
         :param service: Authenticated registry service.
@@ -262,7 +273,9 @@ class TagSnapshot:
         return True
 
 
-class HarborAuth(HarborCallback[None, HarborService]):
+class HarborAuth(
+    HarborCallback[None, HarborService]
+):
     """Resolve existing Harbor credentials once and prove requested access."""
 
     def __init__(
@@ -280,8 +293,8 @@ class HarborAuth(HarborCallback[None, HarborService]):
         self.repository = repository
         self.actions = actions
         self.timeout = timeout
-        self._path: Path | None = None
-        self.evidence: dict[str, Any] = {}
+        self._path: Path
+        self.evidence: Mapping[str, Any] = {}
 
     def run(self) -> HarborService:
         """Create one private native auth file and verify the selected grant.
@@ -297,12 +310,15 @@ class HarborAuth(HarborCallback[None, HarborService]):
         descriptor, name = tempfile.mkstemp(
             prefix="ci-skills-registry-", suffix=".json"
         )
+
         self._path = Path(name)
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(credential.dockerconfig(self.target.harbor.host))
+
         service = HarborService(
             self.target.harbor, credential, self._path, self.timeout
         )
+
         self.evidence = service.authorize(self.repository, self.actions)
         self.context.services[HARBOR_SERVICE_KEY] = service
         return service
@@ -330,9 +346,10 @@ class HarborPush(HarborCallback[PushAction, dict[str, Any]]):
 
     def collect(self) -> None:
         """Initialize destination recovery before publication can change a tag."""
-        self._tag_snapshot: TagSnapshot | None = None
+        self._tag_snapshot: TagSnapshot
         if self.action is None:
             raise ValueError("push_action_required")
+
         service = cast(HarborService, self.harbor)
         self._tag_snapshot = TagSnapshot.capture(
             service, self.action.repository, self.action.tag

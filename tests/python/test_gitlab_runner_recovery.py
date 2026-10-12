@@ -10,9 +10,9 @@ import pytest
 
 from tests.python.conftest import import_script_module
 
-ACTION = import_script_module("core.gitlab_actions")
-API = import_script_module("core.gitlab_api")
-RUNNERS = import_script_module("core.gitlab_runners")
+ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
+API = import_script_module("lib.python.core.gitlab.gitlab_api")
+RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
 RUNNER = import_script_module("gitlab_runner")
 
 

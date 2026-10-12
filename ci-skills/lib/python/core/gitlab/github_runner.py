@@ -9,18 +9,18 @@ from __future__ import annotations
 
 from typing import Any, Final, cast
 
-from .action import AbstractCallback, GitHubCallback
-from .catalog import github_variables
-from .cli_api import APIError
-from .github import GitHubService
-from .paths import SKILL_ROOT
-from .runner import (
+from lib.python.core.action import AbstractCallback, GitHubCallback
+from lib.python.core.catalog import github_variables
+from lib.python.core.cli_api import APIError
+from lib.python.core.gitlab.github import GitHubService
+from lib.python.core.paths import SKILL_ROOT
+from lib.python.core.gitlab.gitlab_runner import (
     REGISTRATION_SECRET_SUFFIX,
     RUNTIME_ROOT,
     RunnerAction,
     RunnerRuntime,
 )
-from .status import APPLIED, NO_OP
+from lib.python.sys.status import APPLIED, NO_OP
 
 GITHUB_INIT_SCRIPT: Final = SKILL_ROOT / "lib/bash/runner/github-init.bash"
 REGISTRATION_KEY: Final = "github-token"

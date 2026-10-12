@@ -11,8 +11,8 @@ import json
 import sys
 
 import _bootstrap  # noqa: F401
-from core.catalog import describe, proposition
-from core.cli import MachineArgumentParser, add_log_arguments, log_event
+from lib.python.core.catalog import describe, proposition
+from lib.python.core.cli import MachineArgumentParser, add_log_arguments, log_event
 
 
 def build_parser() -> argparse.ArgumentParser:

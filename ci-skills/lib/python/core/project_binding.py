@@ -12,9 +12,9 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Final
 
-from .catalog import DEFAULT_AUTHORITIES, PROJECT_DIR, TARGET_FILENAME
-from .runtime import error_class, run_command_tail
-from .target import Target, TargetError, load_target
+from lib.python.core.catalog import DEFAULT_AUTHORITIES, PROJECT_DIR, TARGET_FILENAME
+from lib.python.core.runtime import error_class, run_command_tail
+from lib.python.core.target import Target, TargetError, load_target
 
 BINDING_ENV = "K8S_ADMIN_DIAGNOSTICS_BINDING"
 TARGET_ENV = "CI_SKILLS_TARGET"

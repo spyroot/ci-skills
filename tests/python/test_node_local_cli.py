@@ -28,8 +28,8 @@ def _selected_existing_pods(monkeypatch, target_file):
         + 'directory = "/host-journal"\nhost_path = "/var/log/journal"\n',
         encoding="utf-8",
     )
-    cli = import_script_module("core.node_local_cli")
-    load_target = import_script_module("core.target").load_target
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
+    load_target = import_script_module("lib.python.core.target").load_target
     monkeypatch.setattr(
         cli,
         "resolve_project_target",
@@ -58,8 +58,8 @@ def _args(**overrides: Any) -> SimpleNamespace:
 
 
 def _patch_collectors(monkeypatch, report: dict[str, Any] | BaseException) -> None:
-    node_local = import_script_module("core.node_local")
-    cli = import_script_module("core.node_local_cli")
+    node_local = import_script_module("lib.python.core.kubernetes.node_local")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
 
     def collect(*_args, **_kwargs):
         if isinstance(report, BaseException):
@@ -74,7 +74,7 @@ def _patch_collectors(monkeypatch, report: dict[str, Any] | BaseException) -> No
 
 def test_node_adapter_uses_the_selected_project_binding(monkeypatch, capsys):
     """Node reads pass the project binding to the shared target resolver."""
-    cli = import_script_module("core.node_local_cli")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
     selected = cli.resolve_project_target
     calls = []
 
@@ -110,7 +110,7 @@ def test_node_local_cli_emits_machine_readable_ceph_reports(
     loader,
 ):
     """The shared adapter renders Ceph reports as JSON or YAML."""
-    cli = import_script_module("core.node_local_cli")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
     monkeypatch.setattr(cli.sys, "platform", "linux")
     report = {
         "schema_version": "1.0",
@@ -139,7 +139,7 @@ def test_node_local_cli_returns_blocked_envelope_for_collector_exceptions(
     capsys,
 ):
     """Collector exceptions in JSON mode still produce a structured report."""
-    cli = import_script_module("core.node_local_cli")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
     monkeypatch.setattr(cli.sys, "platform", "linux")
     _patch_collectors(monkeypatch, ValueError("invalid_crictl_response"))
 
@@ -161,7 +161,7 @@ def test_node_local_cli_filters_ceph_records_by_search_and_classification(
     capsys,
 ):
     """Ceph node-local output can be narrowed by text and classification."""
-    cli = import_script_module("core.node_local_cli")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
     monkeypatch.setattr(cli.sys, "platform", "linux")
     report = {
         "schema_version": "1.0",
@@ -218,7 +218,7 @@ def test_node_local_cli_search_no_match_preserves_collection_status(
     capsys,
 ):
     """A filter miss does not turn a partial Cilium read into a health pass."""
-    cli = import_script_module("core.node_local_cli")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
     monkeypatch.setattr(cli.sys, "platform", "linux")
     report = {
         "schema_version": "1.0",
@@ -263,7 +263,7 @@ def test_node_local_cli_dry_run_json_does_not_call_collectors(
     probe_fragment,
 ):
     """Dry run is handled by the adapter without invoking node-local commands."""
-    cli = import_script_module("core.node_local_cli")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
 
     def fail_if_called(*_args, **_kwargs):
         pytest.fail("dry-run called collector")
@@ -283,7 +283,7 @@ def test_node_local_cli_dry_run_json_does_not_call_collectors(
 
 def test_node_local_cli_dry_run_records_requested_filters(capsys):
     """Dry-run keeps filter intent machine-readable without invoking collectors."""
-    cli = import_script_module("core.node_local_cli")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
 
     exit_status = cli.run(
         "ceph_kernel",
@@ -307,7 +307,7 @@ def test_node_local_parser_invalid_args_emit_structured_stdout(
     loader,
 ):
     """Argument errors keep the machine-readable stdout contract."""
-    cli = import_script_module("core.node_local_cli")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
     parser = cli.parser("cilium_node")
 
     with pytest.raises(SystemExit) as exc:
@@ -325,7 +325,7 @@ def test_node_local_parser_invalid_args_emit_structured_stdout(
 
 def test_node_local_parser_invalid_classification_is_structured_json(capsys):
     """Unknown Ceph classifications fail in the same machine-readable envelope."""
-    cli = import_script_module("core.node_local_cli")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
     parser = cli.parser("ceph_kernel")
 
     with pytest.raises(SystemExit) as exc:
@@ -343,7 +343,7 @@ def test_node_local_parser_invalid_classification_is_structured_json(capsys):
 
 @pytest.mark.parametrize("kind", ("cilium_node", "ceph_kernel"))
 def test_node_local_describe_needs_no_linux_runtime_or_credentials(capsys, kind):
-    cli = import_script_module("core.node_local_cli")
+    cli = import_script_module("lib.python.core.kubernetes.node_local_cli")
 
     exit_status = cli.run(kind, SimpleNamespace(describe=True))
     contract = json.loads(capsys.readouterr().out)

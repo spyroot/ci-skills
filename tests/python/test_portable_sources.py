@@ -6,7 +6,7 @@ from tests.python.conftest import import_script_module
 
 
 def test_project_source_and_recorded_query_paths_are_portable() -> None:
-    portable = import_script_module("core.portable")
+    portable = import_script_module("lib.python.core.portable")
     argv_digest = "a" * 64
     local = {
         "target_selection": "env:CI_SKILLS_TARGET -> file:/private/project/target.toml",

@@ -11,12 +11,12 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from typing import Generic
 
-from ..signals import recoverable_signals
-from .callbacks import AbstractCallbacks, Callbacks
-from .context import ExecutionContext
-from .skill_action import SkillAction
-from .skill_result import SkillResult
-from .skill_state import SkillState, StateT
+from lib.python.sys.signals import recoverable_signals
+from lib.python.core.abstract.callbacks import AbstractCallbacks, Callbacks
+from lib.python.core.abstract.context import ExecutionContext
+from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.abstract.skill_result import SkillResult
+from lib.python.core.abstract.skill_state import SkillState, StateT
 
 
 class SkillExecutor(ABC, Generic[StateT]):
@@ -66,7 +66,7 @@ class SkillExecutor(ABC, Generic[StateT]):
         for callback in self.callbacks:
             entered.append(callback)
             self._invoke(callback.collect)
-            self._invoke(callback.run)
+            self.state.results[callback] = self._invoke(callback.run)
             self._invoke(callback.update)
             if not callback.complete:
                 self.state.failed = True
@@ -126,3 +126,23 @@ class Executor(SkillExecutor[ExecutionContext]):
         :returns: A fresh command context with an empty result dictionary.
         """
         return ExecutionContext()
+
+
+class WorkflowExecutor(SkillExecutor[ExecutionContext]):
+    """Bind a command's explicit context through the shared executor lifecycle."""
+
+    def __init__(self, *, context: ExecutionContext, callbacks: Callbacks[ExecutionContext]) -> None:
+        """Retain the command context before the base binds every callback.
+
+        :param context: Concrete state owned by this workflow invocation.
+        :param callbacks: Ordered callbacks that share this context.
+        """
+        self._context = context
+        super().__init__(callbacks)
+
+    def create_state(self) -> ExecutionContext:
+        """Supply the concrete context selected by the workflow.
+
+        :returns: The invocation's one shared context.
+        """
+        return self._context

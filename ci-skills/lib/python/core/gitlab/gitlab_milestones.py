@@ -6,10 +6,10 @@ from argparse import Namespace
 from typing import Any
 from urllib.parse import urlencode
 
-from .gitlab_actions import (
+from lib.python.core.gitlab.gitlab_action import GitLabOperation
+from lib.python.core.gitlab.gitlab_actions import (
     ActionError,
     ActionPlan,
-    GitLabOperation,
     _date,
     _fields,
     _file_text,
@@ -20,14 +20,14 @@ from .gitlab_actions import (
     _required_text,
     _same,
 )
-from .gitlab_api import (
+from lib.python.core.gitlab.gitlab_api import (
     GitLabAPIError,
     GlabAPIClient,
     create_guard,
     uncertain_write,
     unverified_write,
 )
-from .gitlab_session import BoundGitLabSession
+from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
 
 
 def prepare(args: Namespace) -> tuple[dict[str, Any], int | None, None]:

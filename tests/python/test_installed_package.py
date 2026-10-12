@@ -512,6 +512,46 @@ def _install_skill(tmp_path: Path) -> Path:
     return installed
 
 
+def _installed_python_entrypoints(installed: Path) -> tuple[Path, ...]:
+    """Return installed Python commands that are public entrypoints."""
+    excluded = {"__init__.py", "_bootstrap.py"}
+    return tuple(
+        path
+        for path in sorted((installed / "bin").glob("*.py"))
+        if path.name not in excluded
+    )
+
+
+def test_installed_python_entrypoints_import_from_unrelated_directory(
+    tmp_path: Path,
+) -> None:
+    """Every installed Python command loads its package namespace for ``--help``."""
+    installed = _install_skill(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+
+    for entrypoint in _installed_python_entrypoints(installed):
+        result = subprocess.run(
+            [sys.executable, str(entrypoint), "--help"],
+            check=False,
+            capture_output=True,
+            cwd=unrelated,
+            env=environment,
+            text=True,
+            timeout=10,
+        )
+
+        assert result.returncode == 0, (
+            f"{entrypoint.name} failed to import\n"
+            f"stdout={result.stdout}\n"
+            f"stderr={result.stderr}"
+        )
+        assert str(REPO_ROOT) not in result.stdout
+        assert str(REPO_ROOT) not in result.stderr
+
+
 def test_installed_bash_entrypoints_run_from_unrelated_directory(tmp_path: Path):
     """Copied Bash commands resolve their own libraries, not checkout libraries."""
     installed = _install_skill(tmp_path)

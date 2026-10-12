@@ -15,8 +15,8 @@ import pytest
 
 from tests.python.conftest import import_script_module
 
-JOBS = import_script_module("core.gitlab_jobs")
-API = import_script_module("core.gitlab_api")
+JOBS = import_script_module("lib.python.core.gitlab.gitlab_jobs")
+API = import_script_module("lib.python.core.gitlab.gitlab_api")
 SCRIPT = import_script_module("gitlab_job")
 
 

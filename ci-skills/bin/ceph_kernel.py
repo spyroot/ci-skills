@@ -2,7 +2,7 @@
 """Classify recent local kernel Ceph/RBD journal entries into actions."""
 
 import _bootstrap  # noqa: F401
-from core.node_local_cli import parser, run
+from lib.python.core.kubernetes.node_local_cli import parser, run
 
 
 def main() -> int:

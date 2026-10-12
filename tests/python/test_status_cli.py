@@ -11,7 +11,7 @@ from tests.python.conftest import import_script_module
 
 def test_status_tokens_have_single_exit_mapping():
     """Only PASS and DRY_RUN are successful CLI outcomes."""
-    status = import_script_module("core.status")
+    status = import_script_module("lib.python.sys.status")
 
     assert status.exit_code(status.PASS) == 0
     assert status.exit_code(status.DRY_RUN) == 0
@@ -31,8 +31,8 @@ def test_cli_execute_uses_shared_exit_mapping(
     expected_exit,
 ):
     """CLI adapters return the shared exit code for collector statuses."""
-    cli = import_script_module("core.cli")
-    status = import_script_module("core.status")
+    cli = import_script_module("lib.python.core.cli")
+    status = import_script_module("lib.python.sys.status")
     args = argparse.Namespace(
         target=str(target_file),
         json=True,
@@ -58,8 +58,8 @@ def test_cli_execute_uses_shared_exit_mapping(
 
 def test_cli_execute_maps_dry_run_to_success(monkeypatch, target_file):
     """DRY_RUN is explicit evidence of no live probes and exits successfully."""
-    cli = import_script_module("core.cli")
-    status = import_script_module("core.status")
+    cli = import_script_module("lib.python.core.cli")
+    status = import_script_module("lib.python.sys.status")
     args = argparse.Namespace(
         target=str(target_file),
         json=True,

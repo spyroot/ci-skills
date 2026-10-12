@@ -10,7 +10,7 @@ from argparse import Namespace
 from dataclasses import dataclass, field
 from typing import Self
 
-from .skill_state import SkillState
+from lib.python.core.abstract.skill_state import SkillState
 
 
 @dataclass
@@ -22,6 +22,8 @@ class ExecutionContext(SkillState, ABC):
     """
 
     args: Namespace = field(default_factory=Namespace)
+    services: dict[str, object] = field(default_factory=dict, repr=False)
+    report: dict[str, object] = field(default_factory=dict)
 
     @classmethod
     def from_args(cls, args: Namespace) -> Self:

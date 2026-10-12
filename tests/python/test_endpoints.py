@@ -20,9 +20,9 @@ import pytest
 import yaml
 from conftest import REPO_ROOT, git, import_script_module, load_module
 
-ENDPOINTS = import_script_module("core.endpoints")
-CATALOG = import_script_module("core.catalog")
-TARGET = import_script_module("core.target")
+ENDPOINTS = import_script_module("lib.python.core.endpoints")
+CATALOG = import_script_module("lib.python.core.catalog")
+TARGET = import_script_module("lib.python.core.target")
 GATE_LIB = load_module(
     "skillkit_endpoint_gate", REPO_ROOT / "tools" / "skillkit" / "endpoint_gate.py"
 )

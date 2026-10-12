@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
-from .access import kubectl_argv, kubernetes_env
-from .runtime import CommandResult, error_class, run_command, run_command_tail
-from .target import JournalPodRoute, NodePodRoute, Target, TargetError
+from lib.python.access.access import kubectl_argv, kubernetes_env
+from lib.python.core.runtime import CommandResult, error_class, run_command, run_command_tail
+from lib.python.core.target import JournalPodRoute, NodePodRoute, Target, TargetError
 
 
 class NodePodError(RuntimeError):

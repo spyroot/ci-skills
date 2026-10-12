@@ -7,11 +7,11 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from .access import kubernetes_env, oc_argv
-from .report import report
-from .runtime import CommandResult, error_class, run_command_tail
-from .status import PARTIAL, PASS
-from .target import Target, kubernetes_label
+from lib.python.access.access import kubernetes_env, oc_argv
+from lib.python.core.report import report
+from lib.python.core.runtime import CommandResult, error_class, run_command_tail
+from lib.python.sys.status import PARTIAL, PASS
+from lib.python.core.target import Target, kubernetes_label
 
 MAX_OUTPUT_BYTES = 1_048_576
 MAX_OUTPUT_LINES = 20_000

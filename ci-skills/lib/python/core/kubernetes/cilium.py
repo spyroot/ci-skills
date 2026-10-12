@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .runtime import sanitize
+from lib.python.core.runtime import sanitize
 
 HEALTH_COMMAND = ("cilium-health", "status", "-o", "json")
 AGENT_DAEMONSET = "cilium"

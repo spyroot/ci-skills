@@ -31,6 +31,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
+SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
+if str(SKILL_ROOT) not in sys.path:
+    sys.path.insert(0, str(SKILL_ROOT))
+
 SCHEMA_VERSION = "1.0"
 RECEIPT_KIND = "access_check"
 GITLAB_RECEIPT_KINDS = {
@@ -188,7 +192,7 @@ def check_candidate_identity(
     if _redactor() is None:
         return ["candidate_digest_unavailable"]
     try:
-        from core.provenance import tree_digest
+        from lib.python.core.provenance import tree_digest
 
         current = tree_digest(skill_root)
     except (ImportError, OSError, ValueError):
@@ -250,7 +254,7 @@ def _check_receipt(
     now: datetime,
 ) -> list[str]:
     """Validate the publication setup's own live access and read-back evidence."""
-    from core.catalog import DEFAULT_AUTHORITIES
+    from lib.python.core.catalog import DEFAULT_AUTHORITIES
 
     problems = _check_common(name, receipt, digest, now, MAX_RECEIPT_AGE_DAYS)
     if receipt.get("kind") != RECEIPT_KIND:
@@ -595,12 +599,8 @@ def _runner_smoke_cleanup_verified(
 
 def _redactor():
     """Return the skill's own redactor, so one rule covers capture and review."""
-    root = Path(__file__).resolve().parents[1]
-    library = root / "ci-skills" / "lib" / "python"
-    if str(library) not in sys.path:
-        sys.path.insert(0, str(library))
     try:
-        from core.runtime import redact_tree
+        from lib.python.core.runtime import redact_tree
     except ImportError:
         return None
     return redact_tree
@@ -633,7 +633,7 @@ def evaluate(
     :param repository_root: Git checkout for exact source commit verification.
     :returns: Acceptance status, accepted receipts, and stable problem reasons.
     """
-    from core.provenance import tree_digest
+    from lib.python.core.provenance import tree_digest
 
     now = now or datetime.now(UTC)
     digest = tree_digest(skill_root)["digest"]

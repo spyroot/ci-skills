@@ -21,7 +21,7 @@ SECRET = "unit-value-should-not-survive"
 
 
 def _runtime():
-    return import_script_module("core.runtime")
+    return import_script_module("lib.python.core.runtime")
 
 
 @pytest.mark.parametrize(
@@ -161,7 +161,7 @@ def test_redact_tree_covers_keys_values_and_nesting():
 @pytest.mark.parametrize("mode", ("json", "yaml", "human"))
 def test_every_output_path_redacts(tmp_path, mode):
     """The returned text AND both persisted files must be covered."""
-    report = import_script_module("core.report")
+    report = import_script_module("lib.python.core.report")
     data = {
         "schema_version": "1.0",
         "kind": "gitlab_job",
@@ -191,7 +191,7 @@ def test_every_output_path_redacts(tmp_path, mode):
 
 def test_emit_leaves_no_partial_file_behind(tmp_path):
     """Each report is replaced atomically, so a reader never sees half of one."""
-    report = import_script_module("core.report")
+    report = import_script_module("lib.python.core.report")
     data = {
         "schema_version": "1.0",
         "kind": "storage_report",
@@ -218,7 +218,7 @@ def test_emit_leaves_no_partial_file_behind(tmp_path):
 
 def test_concurrent_same_kind_reports_publish_distinct_matching_pairs(tmp_path):
     """Concurrent collectors cannot replace another run's JSON or text."""
-    report = import_script_module("core.report")
+    report = import_script_module("lib.python.core.report")
 
     def emit_one(index):
         data = {
@@ -256,7 +256,7 @@ def test_concurrent_same_kind_reports_publish_distinct_matching_pairs(tmp_path):
 
 def test_failed_pair_write_does_not_publish_partial_report(tmp_path, monkeypatch):
     """A failed text write leaves no visible run directory or partial file."""
-    report = import_script_module("core.report")
+    report = import_script_module("lib.python.core.report")
     original_write_text = Path.write_text
 
     def fail_text(path, content, *args, **kwargs):

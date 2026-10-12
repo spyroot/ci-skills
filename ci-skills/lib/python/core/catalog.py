@@ -24,7 +24,7 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import Any, Final
 
-from .endpoints import TARGET_CONTRACT
+from lib.python.core.endpoints import TARGET_CONTRACT
 
 SCHEMA_VERSION = "1.0"
 SKILL_NAME = "ci-skills"

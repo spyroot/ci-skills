@@ -14,7 +14,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from .cli_api import (
+from lib.python.core.cli_api import (
     MAX_RESPONSE_BYTES,
     READ_ATTEMPTS,
     APIError,
@@ -22,7 +22,7 @@ from .cli_api import (
     http_failure,
     read_retry_delay,
 )
-from .runtime import trace_event
+from lib.python.core.runtime import trace_event
 
 
 class _NoRedirect(HTTPRedirectHandler):

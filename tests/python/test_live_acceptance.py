@@ -26,13 +26,13 @@ from tests.python.conftest import (
 ACCEPTANCE = load_module(
     "proposed_check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
 )
-PORTABLE = import_script_module("core.portable")
+PORTABLE = import_script_module("lib.python.core.portable")
 SKILL_ROOT = SCRIPT_ROOT.parent
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
 
 
 def _digest() -> str:
-    from core.provenance import tree_digest
+    from lib.python.core.provenance import tree_digest
 
     return tree_digest(SKILL_ROOT)["digest"]
 
@@ -423,8 +423,8 @@ def test_access_setup_receipts_cannot_be_replaced_in_the_operation_set():
 
 
 def test_real_operation_envelope_keeps_cleanup_shape(tmp_path):
-    actions = import_script_module("core.gitlab_actions")
-    portable = import_script_module("core.portable")
+    actions = import_script_module("lib.python.core.gitlab.gitlab_actions")
+    portable = import_script_module("lib.python.core.portable")
     plan = actions.ActionPlan(
         kind="gitlab_runner",
         operation="create",
@@ -503,7 +503,7 @@ def _commit_current_index(repository: Path, message: str) -> str:
 
 
 def _candidate_identity_receipt(revision: str, skill_root: Path) -> dict:
-    from core.provenance import tree_digest
+    from lib.python.core.provenance import tree_digest
 
     return {
         "tested_revision": revision,

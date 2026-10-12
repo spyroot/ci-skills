@@ -4,8 +4,8 @@
 import argparse
 
 import _bootstrap  # noqa: F401
-from core.cli import parser
-from core.mtu_consistency import run
+from lib.python.core.cli import parser
+from lib.python.core.kubernetes.mtu_consistency import run
 
 
 def build_parser() -> argparse.ArgumentParser:

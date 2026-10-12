@@ -20,11 +20,11 @@ from tests.python.conftest import (
     load_module,
 )
 
-HTTP = import_script_module("core.http")
-SCHEMA = import_script_module("core.schema")
-STATUS = import_script_module("core.status")
-TARGET = import_script_module("core.target")
-WORKFLOWS = import_script_module("core.toolbox_actions")
+HTTP = import_script_module("lib.python.protocol.http")
+SCHEMA = import_script_module("lib.python.core.schema")
+STATUS = import_script_module("lib.python.sys.status")
+TARGET = import_script_module("lib.python.core.target")
+WORKFLOWS = import_script_module("lib.python.core.toolbox_actions")
 CALLBACKS = import_script_module("core.action")
 
 

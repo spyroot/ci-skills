@@ -14,13 +14,13 @@ from jsonschema import Draft202012Validator
 
 from tests.python.conftest import import_script_module
 
-CLI = import_script_module("core.cli")
-COLLECT = import_script_module("core.collect")
-REPORT = import_script_module("core.report")
-RUNTIME = import_script_module("core.runtime")
-JOBS = import_script_module("core.gitlab_jobs")
+CLI = import_script_module("lib.python.core.cli")
+COLLECT = import_script_module("lib.python.core.collect")
+REPORT = import_script_module("lib.python.core.report")
+RUNTIME = import_script_module("lib.python.core.runtime")
+JOBS = import_script_module("lib.python.core.gitlab.gitlab_jobs")
 SCRIPT = import_script_module("gitlab_job")
-TARGET = import_script_module("core.target")
+TARGET = import_script_module("lib.python.core.target")
 
 JOB_URL = "https://gitlab.example.test/unit/repo/-/jobs/123"
 

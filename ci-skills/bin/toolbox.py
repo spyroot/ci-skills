@@ -9,10 +9,10 @@ spyroot@gmail.com
 from argparse import ArgumentParser
 
 import _bootstrap  # noqa: F401
-from core.action import Executor
-from core.kubernetes import K8SAuth
-from core.registry_mirror import HarborAuth
-from core.toolbox_actions import (
+from lib.python.core.action import Executor
+from lib.python.core.kubernetes.kubernetes import K8SAuth
+from lib.python.core.harbor.registry_mirror import HarborAuth
+from lib.python.core.toolbox_actions import (
     ConfirmWorkflow,
     DeleteToolbox,
     EnsureNamespace,

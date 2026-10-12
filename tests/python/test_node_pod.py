@@ -8,9 +8,9 @@ from copy import deepcopy
 import pytest
 from tests.python.conftest import import_script_module
 
-PODS = import_script_module("core.node_pod")
-TARGET = import_script_module("core.target")
-RUNTIME = import_script_module("core.runtime")
+PODS = import_script_module("lib.python.core.kubernetes.node_pod")
+TARGET = import_script_module("lib.python.core.target")
+RUNTIME = import_script_module("lib.python.core.runtime")
 
 
 @pytest.fixture

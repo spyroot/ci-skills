@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import os
 from argparse import Namespace
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Final, TypedDict
+from typing import Any, Final, TypedDict, Sequence, MutableSequence
 
-from .gitlab_actions import (
+from lib.python.core.gitlab.gitlab_action import GitLabOperation
+from lib.python.core.gitlab.gitlab_actions import (
     ActionError,
     ActionPlan,
-    GitLabOperation,
     _fields,
     _id,
     _object,
@@ -19,7 +20,7 @@ from .gitlab_actions import (
     _positive,
     _required_text,
 )
-from .gitlab_api import (
+from lib.python.core.gitlab.gitlab_api import (
     GitLabAPIError,
     GlabAPIClient,
     create_guard,
@@ -27,8 +28,8 @@ from .gitlab_api import (
     uncertain_write,
     unverified_write,
 )
-from .gitlab_session import BoundGitLabSession
-from .target import GitLabOperationTarget
+from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+from lib.python.core.target import GitLabOperationTarget
 
 MAX_TAG_UPDATE_ATTEMPTS: Final[int] = 2
 
@@ -437,6 +438,8 @@ class AttachToProject(GitLabOperation):
         plan, target_id = self.plan, self.gitlab.target_id
         runner_id = _positive(plan.resource_id, "runner_id")
         _direct_projects(api, session, runner_id)
+
+
         if plan.target_kind == "project":
             identifiers = (target_id,)
         else:
@@ -445,10 +448,14 @@ class AttachToProject(GitLabOperation):
                 raise ActionError("group_assignment_requires_live_plan")
             if identifiers != plan.project_ids:
                 raise ActionError("group_projects_changed_rerun_live_plan")
+
         baseline = _membership_snapshot(api, session, runner_id, identifiers)
-        results: list[dict[str, Any]] = []
-        errors: list[dict[str, Any]] = []
-        attempted: list[int] = []
+
+        results: MutableSequence[Mapping[str, Any]] = []
+        errors: MutableSequence[Mapping[str, Any]] = []
+        attempted: MutableSequence[int] = []
+
+
         for project_id in identifiers:
             if baseline[project_id]:
                 results.append(
@@ -556,6 +563,8 @@ def _record(observed: dict[str, Any]) -> RunnerRecord:
     projects = observed.get("projects")
     if projects is not None and not isinstance(projects, list):
         raise ActionError("runner_projects_invalid_shape")
+
+
     project_ids = (
         [
             _id(_object(item, "runner_project", "id")["id"], "runner_project")
@@ -564,14 +573,19 @@ def _record(observed: dict[str, Any]) -> RunnerRecord:
         if projects is not None
         else None
     )
+
     if project_ids is not None and len(project_ids) != len(set(project_ids)):
         raise ActionError("runner_projects_duplicate_id")
+
     description = observed.get("description")
+
     if description is not None and not isinstance(description, str):
         raise ActionError("runner_description_invalid")
+
     for field in ("online", "paused", "is_shared"):
         if observed.get(field) is not None and not isinstance(observed[field], bool):
             raise ActionError(f"runner_{field}_invalid")
+
     for field in (
         "status",
         "access_level",
@@ -583,6 +597,7 @@ def _record(observed: dict[str, Any]) -> RunnerRecord:
     ):
         if observed.get(field) is not None and not isinstance(observed[field], str):
             raise ActionError(f"runner_{field}_invalid")
+
     return {
         "id": identifier,
         "description": description,
@@ -625,7 +640,7 @@ def _matches_filters(record: RunnerRecord, filters: list[str]) -> bool:
 class ReadRunner(GitLabOperation):
     """Read scoped runner records through the bound provider service."""
 
-    def run(self) -> RunnerReadResult:
+    def run(self) -> dict[str, object]:
         """Collect the selected runner records and optional job relation.
 
         :returns: Public runner records, truncation, and selected job relation.

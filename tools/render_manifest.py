@@ -30,12 +30,13 @@ LIBRARY_RELATIVE = SKILL_RELATIVE / "lib" / "python"
 
 def load_catalog(root: Path) -> Any:
     """Import the catalog module from the skill tree, uninstalled."""
+    skill_root = root / SKILL_RELATIVE
     library = root / LIBRARY_RELATIVE
     if not (library / "core" / "catalog.py").is_file():
         raise FileNotFoundError(f"no catalog module under {library}")
-    sys.path.insert(0, str(library))
+    sys.path.insert(0, str(skill_root))
     # Imported after sys.path is set up, which is the point of this function.
-    from core import catalog
+    from lib.python.core import catalog
 
     return catalog
 

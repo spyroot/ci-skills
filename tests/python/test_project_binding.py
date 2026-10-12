@@ -112,12 +112,12 @@ def _write_binding(
 
 def _project_binding() -> Any:
     """Import the module under test from the skill script tree."""
-    return import_script_module("core.project_binding")
+    return import_script_module("lib.python.core.project_binding")
 
 
 def _access() -> Any:
     """Import access helpers that render target_selection receipts."""
-    return import_script_module("core.access")
+    return import_script_module("lib.python.access.access")
 
 
 def _clear_target_selectors(
@@ -295,7 +295,7 @@ def test_explicit_binding_arg_resolves_exact_target_context_and_source(
 ) -> None:
     """An explicit --binding path selects the exact target and source receipt."""
     project_binding = _project_binding()
-    cli = import_script_module("core.cli")
+    cli = import_script_module("lib.python.core.cli")
     _clear_target_selectors(project_binding, monkeypatch)
     target = _write_target(
         tmp_path,
@@ -403,7 +403,7 @@ def test_command_source_returns_absolute_path_and_records_provenance(
 ) -> None:
     """A command source must run from the binding directory and return one path."""
     project_binding = _project_binding()
-    runtime = import_script_module("core.runtime")
+    runtime = import_script_module("lib.python.core.runtime")
     target = _write_target(tmp_path)
     kubeconfig = _write_kubeconfig(tmp_path / "generated" / "kubeconfig")
     executable = tmp_path / "bin" / "unit-kubeconfig-source"
@@ -547,7 +547,7 @@ def test_explicit_target_without_kubeconfig_uses_environment_source(
 ) -> None:
     """A target pins the context/server while KUBECONFIG supplies the files."""
     project_binding = _project_binding()
-    credentials = import_script_module("core.credentials")
+    credentials = import_script_module("lib.python.access.credentials")
     target = _write_target(tmp_path)
     config = _write_kubeconfig(tmp_path / "global")
     monkeypatch.setenv("KUBECONFIG", str(config))
@@ -563,7 +563,7 @@ def test_target_without_kubeconfig_uses_user_kubectl_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project_binding = _project_binding()
-    credentials = import_script_module("core.credentials")
+    credentials = import_script_module("lib.python.access.credentials")
     target = _write_target(tmp_path)
     user_home = tmp_path / "user"
     config = _write_kubeconfig(user_home / ".kube" / "config")

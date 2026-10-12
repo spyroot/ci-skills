@@ -10,8 +10,8 @@ from types import SimpleNamespace
 import pytest
 from tests.python.conftest import import_script_module
 
-API = import_script_module("core.gitlab_api")
-RUNTIME = import_script_module("core.runtime")
+API = import_script_module("lib.python.core.gitlab.gitlab_api")
+RUNTIME = import_script_module("lib.python.core.runtime")
 
 
 def _session():

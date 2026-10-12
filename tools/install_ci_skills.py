@@ -30,11 +30,11 @@ JOURNAL_NAME = f".{SKILL_NAME}.install-transaction.json"
 LOCK_NAME = f".{SKILL_NAME}.install.lock"
 LOCK_WAIT_SECONDS = 30
 SOURCE = Path(__file__).resolve().parents[1] / SKILL_NAME
-sys.path.insert(0, str(SOURCE / "lib" / "python"))
+sys.path.insert(0, str(SOURCE))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agent_profile import AgentProfile, AgentProfileError, AgentProfileReason
-from core.provenance import (
+from lib.python.core.provenance import (
     INSTALLATION_IDENTITY_KIND,
     INSTALLATION_IDENTITY_NAME,
     INSTALLATION_IDENTITY_SCHEMA_VERSION,
@@ -44,7 +44,7 @@ from core.provenance import (
     skill_identity,
     tree_digest,
 )
-from core.signals import recoverable_signals as _recoverable_signals
+from lib.python.sys.signals import recoverable_signals as _recoverable_signals
 
 RECOVERY = {
     "skill_manifest_missing": "Use a checkout containing ci-skills/SKILL.md.",
@@ -742,7 +742,7 @@ def main() -> int:
             result["source_revision"] = result.get("revision", {}).get("value")
             result["mutable_link"] = False
     if explicit_logging:
-        from core.cli import log_event
+        from lib.python.core.cli import log_event
 
         try:
             log_event(

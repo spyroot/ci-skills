@@ -8,8 +8,8 @@ import socket
 import sys
 from datetime import datetime, timezone
 
-from .report import emit
-from .status import BLOCKED
+from lib.python.core.report import emit
+from lib.python.sys.status import BLOCKED
 
 
 class StructuredParser(argparse.ArgumentParser):

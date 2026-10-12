@@ -100,18 +100,20 @@ jobs:
             --arg-type-hints-in-docstring=False --check-return-types=False \
             --allow-init-docstring=True \
             ci-skills/lib/python/core/abstract \
-            ci-skills/lib/python/core/gitlab_runners.py \
-            ci-skills/lib/python/core/gitlab_actions.py \
-            ci-skills/lib/python/core/action.py \
-            ci-skills/lib/python/core/gitlab_milestones.py \
-            ci-skills/lib/python/core/gitlab_api.py \
+            ci-skills/lib/python/core/gitlab/abstract_github_callback.py \
+            ci-skills/lib/python/core/gitlab/gitlab_action.py \
+            ci-skills/lib/python/core/gitlab/gitlab_runners.py \
+            ci-skills/lib/python/core/gitlab/gitlab_actions.py \
+            ci-skills/lib/python/core/gitlab/gitlab_milestones.py \
+            ci-skills/lib/python/core/gitlab/gitlab_api.py \
             ci-skills/lib/python/core/catalog.py \
             ci-skills/lib/python/core/report.py \
             ci-skills/bin/gitlab_runner.py
           pydoclint --style=sphinx --skip-checking-short-docstrings=False \
             --arg-type-hints-in-docstring=False --check-return-types=False \
             --allow-init-docstring=True \
-            ci-skills/lib/python/core/gitlab_runners.py ci-skills/bin/gitlab_runner.py
+            ci-skills/lib/python/core/gitlab/gitlab_runners.py \
+            ci-skills/bin/gitlab_runner.py
           pydoclint --style=sphinx --skip-checking-short-docstrings=False \
             --skip-checking-private-functions=True --check-class-attributes=False \
             --arg-type-hints-in-docstring=False --check-return-types=False \

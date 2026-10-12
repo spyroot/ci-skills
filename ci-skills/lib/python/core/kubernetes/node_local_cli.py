@@ -9,21 +9,21 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from .access import access_evidence, check_access
-from .catalog import NODE_LOCAL_COMMANDS, describe_node
-from .credentials import bind_sources
-from .node_local import (
+from lib.python.access.access import access_evidence, check_access
+from lib.python.core.catalog import NODE_LOCAL_COMMANDS, describe_node
+from lib.python.access.credentials import bind_sources
+from lib.python.core.kubernetes.node_local import (
     CEPH_CLASSIFICATIONS,
     JOURNAL_SINCE,
     collect_ceph_kernel,
     collect_cilium_node,
 )
-from .node_pod import NodePodError, select_node_pod
-from .project_binding import resolve_target as resolve_project_target
-from .report import emit
-from .runtime import sanitize
-from .status import BLOCKED, DRY_RUN, PASS, exit_code
-from .target import TargetError
+from lib.python.core.kubernetes.node_pod import NodePodError, select_node_pod
+from lib.python.core.project_binding import resolve_target as resolve_project_target
+from lib.python.core.report import emit
+from lib.python.core.runtime import sanitize
+from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
+from lib.python.core.target import TargetError
 
 
 class NodeParser(argparse.ArgumentParser):

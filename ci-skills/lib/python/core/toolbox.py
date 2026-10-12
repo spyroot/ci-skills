@@ -18,11 +18,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Final, cast
 from urllib.parse import urlsplit
 
-from .action import K8SCallback
-from .kubernetes import KubernetesError, KubernetesService
-from .resources import ResourceSet
-from .runtime import error_class
-from .schema import TOOLBOX_SCHEMA, SpecificationError, validate_specification
+from lib.python.core.action import K8SCallback
+from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
+from lib.python.core.resources import ResourceSet
+from lib.python.core.runtime import error_class
+from lib.python.core.schema import TOOLBOX_SCHEMA, SpecificationError, validate_specification
 
 MANAGED_ANNOTATION: Final = "ci-skills.spyroot.dev/managed-by"
 MANAGED_VALUE: Final = "toolbox-build"

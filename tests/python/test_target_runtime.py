@@ -48,7 +48,7 @@ def harbor_target_case(tmp_path, monkeypatch, request):
 
 def test_load_target_accepts_exact_nonsecret_authorities(target_file):
     """A target file supplies all live authorities without secret material."""
-    target = import_script_module("core.target").load_target(target_file)
+    target = import_script_module("lib.python.core.target").load_target(target_file)
 
     assert target.github.host == "github.example.test"
     assert target.github.repository == "unit/repo"
@@ -107,7 +107,7 @@ def test_load_target_resolves_token_files_from_declared_location(
         encoding="utf-8",
     )
 
-    target = import_script_module("core.target").load_target(target_path)
+    target = import_script_module("lib.python.core.target").load_target(target_path)
 
     assert target.github.token_file == github_token_file.resolve()
     assert target.gitlab.token_file == gitlab_token_file.resolve()
@@ -119,8 +119,8 @@ def test_harbor_credentials_resolve_beside_target_without_altering_files(
 ):
     """Combined and paired Harbor files are resolved and consumed read-only."""
     target_path, selected, before = harbor_target_case
-    target_mod = import_script_module("core.target")
-    credentials = import_script_module("core.credentials")
+    target_mod = import_script_module("lib.python.core.target")
+    credentials = import_script_module("lib.python.access.credentials")
 
     target = target_mod.load_target(target_path, required_surfaces=("harbor",))
     credential = credentials.resolve_harbor_credential(target.harbor)
@@ -139,7 +139,7 @@ def test_load_target_rejects_relative_token_file_resolved_inside_installed_skill
     tmp_path, monkeypatch
 ):
     """Target-relative credential paths retain the installed-skill exclusion."""
-    target_mod = import_script_module("core.target")
+    target_mod = import_script_module("lib.python.core.target")
     skill_root = tmp_path / "installed-skill"
     skill_root.mkdir()
     (skill_root / "credential").write_text("unit-token\n", encoding="utf-8")
@@ -169,8 +169,8 @@ def test_load_target_rejects_relative_token_file_resolved_inside_installed_skill
 
 
 def test_skill_root_is_the_folder_that_holds_skill_md():
-    """core.paths declares the skill root once; the boundary tests below rely on it."""
-    skill_root = import_script_module("core.paths").SKILL_ROOT
+    """lib.python.core.paths declares the skill root once; the boundary tests below rely on it."""
+    skill_root = import_script_module("lib.python.core.paths").SKILL_ROOT
 
     assert skill_root == REPO_ROOT / "ci-skills"
     assert (skill_root / "SKILL.md").is_file()
@@ -178,9 +178,9 @@ def test_skill_root_is_the_folder_that_holds_skill_md():
 
 def test_ambient_kubeconfig_cannot_point_into_installed_skill(monkeypatch, target_file):
     """An environment override cannot bypass the declared file boundary."""
-    target_mod = import_script_module("core.target")
-    credentials = import_script_module("core.credentials")
-    skill_root = import_script_module("core.paths").SKILL_ROOT
+    target_mod = import_script_module("lib.python.core.target")
+    credentials = import_script_module("lib.python.access.credentials")
+    skill_root = import_script_module("lib.python.core.paths").SKILL_ROOT
     monkeypatch.setenv("KUBECONFIG", str(skill_root / "inside.kubeconfig"))
 
     with pytest.raises(target_mod.TargetError, match="stored outside"):
@@ -189,9 +189,9 @@ def test_ambient_kubeconfig_cannot_point_into_installed_skill(monkeypatch, targe
 
 def test_default_kubeconfig_cannot_point_into_installed_skill(monkeypatch, target_file):
     """The kubectl default obeys the same selected-file boundary."""
-    target_mod = import_script_module("core.target")
-    credentials = import_script_module("core.credentials")
-    skill_root = import_script_module("core.paths").SKILL_ROOT
+    target_mod = import_script_module("lib.python.core.target")
+    credentials = import_script_module("lib.python.access.credentials")
+    skill_root = import_script_module("lib.python.core.paths").SKILL_ROOT
     monkeypatch.delenv("KUBECONFIG", raising=False)
     monkeypatch.setenv("HOME", str(skill_root))
 
@@ -272,7 +272,7 @@ def test_load_target_rejects_ambiguous_or_secret_authorities(
     """Bad target files fail before any live command can use the wrong surface."""
     path = tmp_path / "target.toml"
     path.write_text(content, encoding="utf-8")
-    target_mod = import_script_module("core.target")
+    target_mod = import_script_module("lib.python.core.target")
 
     with pytest.raises(target_mod.TargetError, match=message):
         target_mod.load_target(path)
@@ -280,7 +280,7 @@ def test_load_target_rejects_ambiguous_or_secret_authorities(
 
 def test_runtime_sanitizes_secret_like_output_and_bounds_text():
     """External command output is redacted before it enters diagnostics."""
-    runtime = import_script_module("core.runtime")
+    runtime = import_script_module("lib.python.core.runtime")
     private_key = "-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----"
     text = (
         "Authorization: Bearer abc.def\n"
@@ -301,7 +301,7 @@ def test_runtime_sanitizes_secret_like_output_and_bounds_text():
 
 def test_run_command_uses_argument_vector_and_noninteractive_environment(monkeypatch):
     """Command execution disables prompts and avoids shell expansion."""
-    runtime = import_script_module("core.runtime")
+    runtime = import_script_module("lib.python.core.runtime")
     captured = {}
 
     def fake_run(argv, **kwargs):
@@ -323,7 +323,7 @@ def test_run_command_uses_argument_vector_and_noninteractive_environment(monkeyp
 
 def test_run_command_tail_keeps_only_bounded_stdout_tail():
     """Trace collection keeps recent lines without retaining full command output."""
-    runtime = import_script_module("core.runtime")
+    runtime = import_script_module("lib.python.core.runtime")
 
     result = runtime.run_command_tail(
         [
@@ -347,7 +347,7 @@ def test_run_command_tail_keeps_only_bounded_stdout_tail():
 
 def test_run_command_tail_rejects_unbounded_limits():
     """Tail limits must stay positive so a trace cannot request full output."""
-    runtime = import_script_module("core.runtime")
+    runtime = import_script_module("lib.python.core.runtime")
 
     with pytest.raises(ValueError, match="tail limits"):
         runtime.run_command_tail(["tool"], max_lines=0)
@@ -355,7 +355,7 @@ def test_run_command_tail_rejects_unbounded_limits():
 
 def test_run_command_tail_times_out_after_child_closes_pipes_then_lingers():
     """A child that closes output pipes must still be reaped by the deadline."""
-    runtime = import_script_module("core.runtime")
+    runtime = import_script_module("lib.python.core.runtime")
     start = time.monotonic()
 
     result = runtime.run_command_tail(
@@ -386,7 +386,7 @@ def test_run_command_tail_times_out_after_child_closes_pipes_then_lingers():
 )
 def test_error_class_maps_command_failures(returncode, stderr, expected):
     """Gate output classifies common external failures for safe next steps."""
-    runtime = import_script_module("core.runtime")
+    runtime = import_script_module("lib.python.core.runtime")
     result = runtime.CommandResult(("tool",), returncode, "", stderr)
 
     assert runtime.error_class(result) == expected

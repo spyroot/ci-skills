@@ -16,18 +16,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from .catalog import GITLAB_VARIABLES, github_variables
-from .cilium import (
-    HEALTH_COMMAND,
-    agent_selector,
-    ready_agent_pods,
-    valid_health,
-)
-from .credentials import Sources, assert_kubeconfig_unchanged
-from .gitlab_session import BoundGitLabSession
-from .runtime import CommandResult, error_class, run_command
-from .status import BLOCKED, DRY_RUN, PASS
-from .target import GitLabOperationTarget, Target
+from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+from lib.python.core.kubernetes.cilium import HEALTH_COMMAND, agent_selector, ready_agent_pods, valid_health
+from lib.python.core.catalog import GITLAB_VARIABLES, github_variables
+from lib.python.access.credentials import Sources, assert_kubeconfig_unchanged
+from lib.python.core.runtime import CommandResult, error_class, run_command
+from lib.python.sys.status import BLOCKED, DRY_RUN, PASS
+from lib.python.core.target import GitLabOperationTarget, Target
 
 
 @dataclass(frozen=True)
@@ -445,7 +440,7 @@ def check_gitlab_operation_access(
     source = "user"
     try:
         if api_client is None:
-            from .gitlab_api import GlabAPIClient
+            from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 
             api_client = GlabAPIClient()
         user = api_client.get_json(session, "user")
@@ -590,8 +585,12 @@ def _auth_mechanism(user: dict[str, Any], target: Target) -> dict[str, str]:
     return options[0]
 
 
-def _cilium_access(target: Target) -> tuple[list[str], dict[str, Any]]:
-    """Prove the Cilium-specific exec path after base cluster access succeeds."""
+def _cilium_access(
+        target: Target) -> tuple[list[str], dict[str, Any]]:
+    """Prove the Cilium-specific exec path after base cluster access succeeds.
+    :param target:
+    :return:
+    """
     observed: list[str] = []
     namespace, agent_pod_selector = cilium_discovery(target)
     observed.append("cilium_namespace:" + namespace)
@@ -603,6 +602,7 @@ def _cilium_access(target: Target) -> tuple[list[str], dict[str, Any]]:
     )
     if result.returncode:
         raise ValueError("pods_exec_denied")
+
     observed.append("cilium_pods_exec")
     pods = _json(
         run_command(
@@ -612,6 +612,7 @@ def _cilium_access(target: Target) -> tuple[list[str], dict[str, Any]]:
     )
     if not isinstance(pods, dict) or not isinstance(pods.get("items"), list):
         raise TypeError("invalid_cilium_pod_list")
+
     ready = ready_agent_pods(pods["items"], agent_pod_selector, namespace)
     if not ready:
         raise ValueError("cilium_ready_pod_missing")
@@ -629,7 +630,15 @@ def _cilium_access(target: Target) -> tuple[list[str], dict[str, Any]]:
     return observed, {"cilium_health_pod": pod_name}
 
 
-def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
+def kubernetes_access(
+        target: Target, *, cilium: bool = False
+) -> Surface:
+    """
+
+    :param target:
+    :param cilium:
+    :return:
+    """
     name = target.kubernetes.context
     server = target.kubernetes.server
     observed: list[str] = []
@@ -638,6 +647,7 @@ def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
         if isinstance(target.sources, Sources)
         else None
     )
+
     details: dict[str, Any] = {}
     try:
         if target.kubernetes.kubeconfig:
@@ -671,21 +681,26 @@ def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
             for item in config.get("clusters", [])
             if item.get("name") == cluster_name
         ]
+
         actual = (
             clusters[0].get("cluster", {}).get("server") if len(clusters) == 1 else None
         )
         if actual != server:
             raise ValueError("api_server_mismatch")
+
         if clusters[0].get("cluster", {}).get("insecure-skip-tls-verify") is True:
             raise ValueError("tls_verification_disabled")
+
         if isinstance(target.sources, Sources):
             users = [
                 item
                 for item in config.get("users", [])
                 if item.get("name") == user_name
             ]
+
             if len(users) != 1 or not isinstance(users[0].get("user"), dict):
                 raise ValueError("kubeconfig_user_unresolved")
+
             details = {
                 "context": name,
                 "user_entry": user_name,
@@ -857,16 +872,19 @@ def check_access(
     checks = {
         "github": github_publication_access if publication else github_access,
         "gitlab": gitlab_access,
-        "kubernetes": lambda selected: kubernetes_access(selected, cilium=cilium),
+        "kubernetes": lambda _selected: kubernetes_access(_selected, cilium=cilium),
     }
-    selected = target.active_surfaces
-    if not selected or any(name not in checks for name in selected):
+    _selected = target.active_surfaces
+
+    if not _selected or any(name not in checks for name in _selected):
         raise ValueError("required_target_surfaces_invalid")
-    if publication and "github" not in selected:
+
+    if publication and "github" not in _selected:
         raise ValueError("publication_requires_github")
-    with ThreadPoolExecutor(max_workers=len(selected)) as pool:
-        futures = [pool.submit(checks[name], target) for name in selected]
+    with ThreadPoolExecutor(max_workers=len(_selected)) as pool:
+        futures = [pool.submit(checks[name], target) for name in _selected]
         surfaces = [future.result() for future in futures]
+
     receipt = {
         "schema_version": "1.0",
         "kind": "access_check",
@@ -880,18 +898,19 @@ def check_access(
             "gitlab": target.sources.gitlab,
             "kubernetes": target.sources.kubernetes,
         }
-        if any(source_by_name[name] is None for name in selected):
+        if any(source_by_name[name] is None for name in _selected):
             raise ValueError("required_credential_source_missing")
         targets = {}
-        if "github" in selected:
+        if "github" in _selected:
             targets["github"] = f"{target.github.host}/{target.github.repository}"
-        if "gitlab" in selected:
+        if "gitlab" in _selected:
             targets["gitlab"] = target.gitlab.url
-        if "kubernetes" in selected:
+        if "kubernetes" in _selected:
             targets["kubernetes"] = {
                 "context": target.kubernetes.context,
                 "server": target.kubernetes.server,
             }
+
         receipt.update(
             {
                 "execution_host": target.sources.execution_host,
@@ -902,7 +921,7 @@ def check_access(
                 "skill": target.skill,
                 "consuming_project": (target.skill or {}).get("consuming_project"),
                 "credential_sources": {
-                    name: source_by_name[name].reference for name in selected
+                    name: source_by_name[name].reference for name in _selected
                 },
                 "target_selection": target.target_reference,
                 "targets": targets,

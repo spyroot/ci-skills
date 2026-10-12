@@ -81,7 +81,7 @@ response and pointer definitions.
 The [callback specification in CI11](docs/phases/CI11-TOOLS.md#callback-workflow-boilerplate) owns the following pattern.
 Each workflow parses its own arguments, constructs typed actions and reusable callbacks, connects their results, runs
 one executor, and emits through the existing report machinery. The shared interface is implemented in
-[core/action.py](ci-skills/lib/python/core/action.py); GitLab action mains use it with the migrated runner and milestone
+[core/action.py](ci-skills/lib/python/core/abstract/action.py); GitLab action mains use it with the migrated runner and milestone
 callbacks. The following toolbox/Harbor combination shows the pattern for the later delivery rows:
 
 ```python

@@ -12,8 +12,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from .kubernetes import KubernetesError, KubernetesService
-from .status import APPLIED, NO_OP
+from lib.python.core.kubernetes.kubernetes import KubernetesError, KubernetesService
+from lib.python.sys.status import APPLIED, NO_OP
 
 MANAGER_LABEL: Final = "app.kubernetes.io/managed-by"
 MANAGER_VALUE: Final = "ci-skills"

@@ -4,7 +4,7 @@
 import argparse
 
 import _bootstrap  # noqa: F401
-from core.cli import execute_gitlab_job, parser
+from lib.python.core.cli import execute_gitlab_job, parser
 
 
 def build_parser() -> argparse.ArgumentParser:

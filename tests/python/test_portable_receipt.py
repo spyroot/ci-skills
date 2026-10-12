@@ -8,7 +8,7 @@ from tests.python.conftest import import_script_module
 
 
 def test_write_portable_receipt_redacts_and_replaces_atomically(tmp_path):
-    portable = import_script_module("core.portable")
+    portable = import_script_module("lib.python.core.portable")
     destination = tmp_path / "receipt.json"
     destination.write_text("stale", encoding="utf-8")
 

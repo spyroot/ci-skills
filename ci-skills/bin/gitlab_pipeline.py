@@ -9,14 +9,14 @@ import sys
 import time
 
 import _bootstrap  # noqa: F401
-from core.access import check_gitlab_operation_access
-from core.catalog import describe, missing_required_options
-from core.cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
-from core.credentials import bind_gitlab_session
-from core.gitlab_pipelines import MAX_JOB_PAGES, PAGE_SIZE, read_pipeline
-from core.report import emit, report
-from core.status import BLOCKED, DRY_RUN, PASS, exit_code
-from core.target import TargetError, select_gitlab_reference
+from lib.python.access.access import check_gitlab_operation_access
+from lib.python.core.catalog import describe, missing_required_options
+from lib.python.core.cli import _failure, log_event, output_mode, parser, resolve_gitlab_target
+from lib.python.access.credentials import bind_gitlab_session
+from lib.python.core.gitlab.gitlab_pipelines import MAX_JOB_PAGES, PAGE_SIZE, read_pipeline
+from lib.python.core.report import emit, report
+from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
+from lib.python.core.target import TargetError, select_gitlab_reference
 
 KIND = "gitlab_pipeline"
 SCRIPT = "gitlab_pipeline.py"

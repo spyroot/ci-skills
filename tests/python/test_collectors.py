@@ -13,7 +13,7 @@ from conftest import import_script_module
 
 def _target(path: Path) -> Any:
     """Load the neutral test target."""
-    return import_script_module("core.target").load_target(path)
+    return import_script_module("lib.python.core.target").load_target(path)
 
 
 def _write_gitlab_token_target(tmp_path: Path, token_file: Path) -> Path:
@@ -67,8 +67,8 @@ def test_storage_report_records_malformed_list_envelopes_as_errors(
     target_file,
 ):
     """Malformed Kubernetes list envelopes must not become an empty PASS."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
     payloads.update(
         {
@@ -107,8 +107,8 @@ def test_storage_report_records_malformed_pv_and_pvc_fields_as_errors(
     target_file,
 ):
     """Malformed nested API fields produce source errors instead of exceptions."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
     payloads["persistentvolumeclaims"] = {
         "items": [
@@ -157,8 +157,8 @@ def test_storage_report_includes_orphaned_pvs_for_phase_filters(
     expected_volume,
 ):
     """Standalone PVs without remaining PVCs are still first-class records."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
     payloads["persistentvolumes"] = {
         "items": [
@@ -208,8 +208,8 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
     target_file,
 ):
     """Storage collection returns only matching PVCs with correlated consumers."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     inventory = {
         "nodes": [{"metadata": {"name": "worker-a"}}],
         "pods": [
@@ -317,8 +317,8 @@ def test_storage_controller_lookup_uses_kind_namespace_and_daemonset_counters(
     monkeypatch, target_file
 ):
     """Same-named controllers remain distinct and use their API replica fields."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
     payloads["persistentvolumeclaims"] = {
         "items": [
@@ -426,8 +426,8 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
     target_file,
 ):
     """Event collection keeps the requested object window in timestamp order."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     events = {
         "events": [
             {
@@ -533,7 +533,7 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
 
 def test_event_trace_rejects_naive_and_reversed_time_bounds(target_file):
     """Time bounds must be unambiguous before Kubernetes data is read."""
-    collect = import_script_module("core.collect")
+    collect = import_script_module("lib.python.core.collect")
     target = _target(target_file)
     base = {
         "namespace": "all",
@@ -568,8 +568,8 @@ def test_event_trace_uses_series_last_observed_time_inside_window(
     target_file,
 ):
     """A repeated event stays visible when its series update is in the window."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     events = {
         "events": [],
         "events.events.k8s.io": [
@@ -629,8 +629,8 @@ def test_event_trace_keeps_first_observation_in_window_after_later_repeat(
     target_file,
 ):
     """An Event first seen in the window remains visible after a later repeat."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
 
     def repeated(name: str, first: str) -> dict[str, Any]:
         return {
@@ -680,8 +680,8 @@ def test_event_trace_prefers_deprecated_count_before_core_count(
     target_file,
 ):
     """Event count preserves events.k8s.io deprecatedCount before generic count."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     event = {
         "metadata": {
             "namespace": "jobs",
@@ -730,8 +730,8 @@ def test_event_trace_reports_malformed_event_items_as_partial(
     target_file,
 ):
     """Malformed event list items must be recorded as evidence errors."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     events = {
         "events": [
             {
@@ -794,8 +794,8 @@ def test_event_trace_reports_malformed_nested_fields_as_partial(
     invalid_field,
 ):
     """Bad nested Event evidence must not escape the structured report."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     event = {
         "metadata": {"name": "runner-pod.abc", "namespace": "jobs"},
         "regarding": {"kind": "Pod", "name": "runner-pod", "namespace": "jobs"},
@@ -832,8 +832,8 @@ def test_event_trace_reports_malformed_nested_fields_as_partial(
 
 def test_event_trace_accepts_reference_without_optional_kind(monkeypatch, target_file):
     """A live Event API reference can have a name and UID but no kind."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     event = {
         "metadata": {"namespace": "jobs", "name": "runner-pod.abc"},
         "regarding": {"namespace": "jobs", "name": "runner-pod", "uid": "pod-1"},
@@ -879,8 +879,8 @@ def test_event_trace_does_not_fallback_on_preferred_api_server_failure(
     expected_reason,
 ):
     """Generic preferred API failures and throttling are not compatibility gaps."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     calls: list[str] = []
 
     def fake_run(argv, **_kwargs):
@@ -915,8 +915,8 @@ def test_event_trace_falls_back_and_records_compatibility_reason(
     target_file,
 ):
     """Exact preferred resource absence may use the compatible core API once."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     calls: list[str] = []
     core_event = {
         "metadata": {
@@ -981,8 +981,8 @@ def test_event_trace_does_not_hide_preferred_api_access_denial(
     target_file,
 ):
     """Authentication and authorization failures block without substitution."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     calls: list[str] = []
 
     def fake_run(argv, **_kwargs):
@@ -1013,8 +1013,8 @@ def test_event_trace_reports_both_errors_when_fallback_is_malformed(
     target_file,
 ):
     """An unavailable preferred API and malformed fallback both remain visible."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     calls: list[str] = []
 
     def fake_run(argv, **_kwargs):
@@ -1056,8 +1056,8 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
     target_file,
 ):
     """Agent health stays read-only and non-interactive, even on exec failure."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     exec_calls: list[tuple[str, ...]] = []
     resources = {
         "daemonsets": [
@@ -1154,8 +1154,8 @@ def test_cilium_status_uses_daemonset_selector_for_agent_pods(
     target_file,
 ):
     """Agent discovery follows the DaemonSet selector, not a fixed label."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     resources = {
         "daemonsets": [
             {
@@ -1214,9 +1214,9 @@ def test_cilium_status_exposes_failed_peer_but_proves_successful_read(
     monkeypatch, target_file
 ):
     """A failed endpoint probe is a finding, while its exec still proves access."""
-    collect = import_script_module("core.collect")
-    live = import_script_module("core.live")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    live = import_script_module("lib.python.core.live")
+    runtime = import_script_module("lib.python.core.runtime")
     resources = {
         "daemonsets": [
             {
@@ -1273,8 +1273,8 @@ def test_cilium_status_reports_partial_for_explicit_namespace_with_zero_pods(
     target_file,
 ):
     """An explicit namespace with no agent Pods is a diagnostic error."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     resources = {
         "daemonsets": [
             {
@@ -1321,7 +1321,7 @@ def test_cilium_status_reports_partial_for_explicit_namespace_with_zero_pods(
 
 def test_gitlab_job_rejects_job_url_from_different_fqdn(target_file):
     """A job URL from another host cannot reuse the selected target access."""
-    collect = import_script_module("core.collect")
+    collect = import_script_module("lib.python.core.collect")
     args = SimpleNamespace(
         job_url="https://other.example.test/unit/repo/-/jobs/123",
         search=None,
@@ -1336,8 +1336,8 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
     tmp_path,
 ):
     """Job collection keeps only a bounded sanitized trace tail."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     token = "unit-token-value"
     token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
     token_file.parent.mkdir(parents=True)
@@ -1413,8 +1413,8 @@ def test_gitlab_job_records_malformed_nested_api_responses(
     target_file,
 ):
     """Pipeline and runner detail responses must be schema-checked."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
 
     def fake_run(argv, **_kwargs):
         command = tuple(str(part) for part in argv)
@@ -1464,9 +1464,9 @@ def test_gitlab_job_uses_effective_gitlab_env_token_for_all_reads(
     tmp_path,
 ):
     """Ambient GitLab tokens must be resolved and reused for every job read."""
-    collect = import_script_module("core.collect")
-    credentials = import_script_module("core.credentials")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    credentials = import_script_module("lib.python.access.credentials")
+    runtime = import_script_module("lib.python.core.runtime")
     token = "env-gitlab-token-value"
     for name in (
         "GH_TOKEN",
@@ -1553,8 +1553,8 @@ def test_a_kubernetes_report_identifies_the_api_server_not_only_the_context(
     monkeypatch, target_file
 ):
     """A context name alone does not say which cluster was read."""
-    collect = import_script_module("core.collect")
-    runtime = import_script_module("core.runtime")
+    collect = import_script_module("lib.python.core.collect")
+    runtime = import_script_module("lib.python.core.runtime")
     monkeypatch.setattr(
         runtime,
         "run_command",
@@ -1575,7 +1575,7 @@ def test_a_kubernetes_report_identifies_the_api_server_not_only_the_context(
 
 def test_access_evidence_carries_what_a_reader_needs_to_check_the_run():
     """A collector report used to keep none of this."""
-    access = import_script_module("core.access")
+    access = import_script_module("lib.python.access.access")
     gate = {
         "status": "PASS",
         "profile": "base_access_check",
@@ -1609,7 +1609,7 @@ def test_access_evidence_carries_what_a_reader_needs_to_check_the_run():
 
 def test_the_receipt_digest_identifies_the_gate_it_came_from():
     """Two different gates must not share a correlator."""
-    access = import_script_module("core.access")
+    access = import_script_module("lib.python.access.access")
     first = access.access_evidence({"status": "PASS", "execution_host": "a"})
     again = access.access_evidence({"status": "PASS", "execution_host": "a"})
     other = access.access_evidence({"status": "PASS", "execution_host": "b"})
@@ -1630,7 +1630,7 @@ def test_the_receipt_digest_identifies_the_gate_it_came_from():
 )
 def test_parse_window_reads_a_relative_duration(value, expected_seconds):
     """`--last 15m` is the form an operator asks for, so it must parse exactly."""
-    collect = import_script_module("core.collect")
+    collect = import_script_module("lib.python.core.collect")
 
     assert collect.parse_window(value).total_seconds() == expected_seconds
 
@@ -1644,7 +1644,7 @@ def test_parse_window_refuses_anything_it_cannot_mean_exactly(value):
     The refusals matter more than the accepts here: a misread window returns
     evidence from the wrong interval, which correlates against the wrong job.
     """
-    collect = import_script_module("core.collect")
+    collect = import_script_module("lib.python.core.collect")
 
     with pytest.raises(ValueError, match="--last"):
         collect.parse_window(value)
@@ -1666,7 +1666,7 @@ def test_event_trace_refuses_a_relative_window_combined_with_bounds(
     The empty row is deliberate: `--last ""` was supplied, so it is an input
     error. Treating it as absent silently returned the default hour.
     """
-    collect = import_script_module("core.collect")
+    collect = import_script_module("lib.python.core.collect")
     args = SimpleNamespace(
         last=last,
         from_time=from_time,

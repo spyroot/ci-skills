@@ -10,24 +10,24 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Generic
 
-from .skill_action import ActionT_co, SkillAction
-from .skill_result import SkillResult
-from .skill_state import SkillState, StateT
+from lib.python.core.abstract.skill_action import ActionT_co, SkillAction
+from lib.python.core.abstract.skill_result import SkillResult
+from lib.python.core.abstract.skill_state import SkillState, StateT
 
 
 class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
     """Require an action and bind to the executor-owned state."""
 
     @abstractmethod
-    def __init__(self, skill_action: ActionT_co) -> None:
+    def __init__(self, action: ActionT_co) -> None:
         """Retain the required action before the executor binds shared state.
 
-        :param skill_action: Required read, authentication, or mutation inputs.
+        :param action: Required read, authentication, or mutation inputs.
         :raises TypeError: If the supplied value is not a SkillAction.
         """
-        if not isinstance(skill_action, SkillAction):
+        if not isinstance(action, SkillAction):
             raise TypeError("skill_action must implement SkillAction")
-        self._action: ActionT_co = skill_action
+        self._action: ActionT_co = action
 
     @property
     def action(self) -> ActionT_co:
@@ -35,7 +35,7 @@ class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
 
         :returns: The required operation inputs supplied at construction.
         """
-        return self._action
+        return self._skill_action
 
     @property
     @abstractmethod
@@ -73,7 +73,7 @@ class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
 
         :returns: The shared JSON result, including an empty dictionary.
         """
-        return self.state.result
+        return self.state.results[self]
 
     @property
     def complete(self) -> bool:
@@ -123,12 +123,12 @@ class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
 class Callback(AbstractCallback[StateT, ActionT_co]):
     """Provide state access and defaults for hooks a callback does not need."""
 
-    def __init__(self, skill_action: ActionT_co) -> None:
+    def __init__(self, action: ActionT_co) -> None:
         """Retain the required action; the collection supplies state through bind.
 
-        :param skill_action: Required inputs for this callback's operation.
+        :param action: Required inputs for this callback's operation.
         """
-        super().__init__(skill_action)
+        super().__init__(action)
 
     @property
     def state(self) -> StateT:
@@ -151,6 +151,7 @@ class Callback(AbstractCallback[StateT, ActionT_co]):
         if hasattr(self, "_state") and self._state is not value:
             raise ValueError("callback already belongs to a different state")
         self._state: StateT = value
+        value.results.setdefault(self, {})
 
     def bind(self, state: StateT) -> None:
         """Retain the collection's shared state before any hook runs.
@@ -165,25 +166,25 @@ class Callback(AbstractCallback[StateT, ActionT_co]):
 
         :returns: The existing state-owned JSON dictionary.
         """
-        return self.result
+        return self.state.result
 
     def run(self) -> SkillResult:
         """Keep the state result when this callback uses other hooks only.
 
         :returns: The existing state-owned JSON dictionary.
         """
-        return self.result
+        return self.state.result
 
     def update(self) -> SkillResult:
         """Keep the state result when post-run work is unnecessary.
 
         :returns: The existing state-owned JSON dictionary.
         """
-        return self.result
+        return self.state.result
 
     def cleanup(self) -> SkillResult:
         """Keep the state result when no resources need releasing.
 
         :returns: The existing state-owned JSON dictionary.
         """
-        return self.result
+        return self.state.result

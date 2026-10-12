@@ -2,11 +2,12 @@
 """Plan, apply, and verify a selected GitLab milestone change."""
 
 import _bootstrap  # noqa: F401
-from core.action import ExecutionContext, Executor
-from core.gitlab_actions import (
+from lib.python.core.abstract.callbacks import Callbacks
+from lib.python.core.abstract.skill_exector import WorkflowExecutor
+from lib.python.core.gitlab.gitlab_actions import action_parser
+from lib.python.core.gitlab.gitlab_action import (
     GitLabAction,
     GitLabAuth,
-    action_parser,
     operation_callback,
 )
 
@@ -25,9 +26,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     action = GitLabAction.from_args(args)
     return action.execute(
-        lambda: Executor(
-            context=ExecutionContext.from_args(args),
-            callbacks=[GitLabAuth(action=action), operation_callback(action)],
+        lambda: WorkflowExecutor(
+            context=action,
+            callbacks=Callbacks([GitLabAuth(action=action), operation_callback(action)]),
         )
     )
 

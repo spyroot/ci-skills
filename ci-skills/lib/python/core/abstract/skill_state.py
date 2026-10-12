@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import ClassVar, Self, TypeVar
 
-from .skill_result import SkillResult
+from lib.python.core.abstract.skill_result import SkillResult
 
 
 @dataclass
@@ -26,6 +26,7 @@ class SkillState:
 
     result: SkillResult = field(default_factory=dict)
     records: Sequence[SkillResult] = field(default_factory=list)
+    results: dict[object, SkillResult] = field(default_factory=dict, repr=False)
     failed: bool = False
     name: str = ""
     debug: bool = False

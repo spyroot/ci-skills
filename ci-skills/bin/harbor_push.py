@@ -9,9 +9,9 @@ spyroot@gmail.com
 from argparse import ArgumentParser
 
 import _bootstrap  # noqa: F401
-from core.action import Executor
-from core.registry_mirror import HarborAuth, HarborPush, PushAction
-from core.toolbox_actions import ConfirmWorkflow, WorkflowAction, workflow_parser
+from lib.python.core.action import Executor
+from lib.python.core.harbor.registry_mirror import HarborAuth, HarborPush, PushAction
+from lib.python.core.toolbox_actions import ConfirmWorkflow, WorkflowAction, workflow_parser
 
 
 def build_parser() -> ArgumentParser:

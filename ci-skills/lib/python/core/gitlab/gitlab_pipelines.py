@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from .gitlab_api import GlabAPIClient
-from .gitlab_job_fields import TERMINAL_JOB_STATUSES, GitLabJobFields
-from .gitlab_session import BoundGitLabSession
+from lib.python.core.gitlab.gitlab_api import GlabAPIClient
+from lib.python.core.gitlab.gitlab_job_fields import TERMINAL_JOB_STATUSES, GitLabJobFields
+from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
 
 PAGE_SIZE = 100
 MAX_JOB_PAGES = 5

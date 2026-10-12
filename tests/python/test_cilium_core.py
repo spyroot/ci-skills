@@ -18,7 +18,7 @@ AGENT_LABELS = {"k8s-app": "cilium"}
 
 
 def _cilium():
-    return import_script_module("core.cilium")
+    return import_script_module("lib.python.core.kubernetes.cilium")
 
 
 def _pod(name, labels, status=None, namespace="cilium", node="n1"):

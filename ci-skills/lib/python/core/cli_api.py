@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from .runtime import CommandResult, error_class, run_command_bounded, trace_event
+from lib.python.core.runtime import CommandResult, error_class, run_command_bounded, trace_event
 
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 READ_ATTEMPTS = 3

@@ -15,9 +15,9 @@ from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from pathlib import Path
 
-from core import status
-from core.endpoints import TARGET_CONTRACT, Role, TargetContract
-from core.runtime import run_command
+from lib.python.core.endpoints import TARGET_CONTRACT, Role, TargetContract
+from lib.python.core.runtime import run_command
+from lib.python.sys import status
 
 SCHEMA_VERSION = "1.0"
 REPORT_KIND = "ci_skills_endpoints"

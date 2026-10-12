@@ -8,9 +8,9 @@ spyroot@gmail.com
 from collections.abc import Iterable, Iterator
 from typing import Generic, Self, TypeAlias
 
-from .callback import AbstractCallback
-from .skill_action import ActionT_co, SkillAction
-from .skill_state import StateT
+from lib.python.core.abstract.callback import AbstractCallback
+from lib.python.core.abstract.skill_action import ActionT_co, SkillAction
+from lib.python.core.abstract.skill_state import StateT
 
 AbstractCallbacks: TypeAlias = list[AbstractCallback[StateT, ActionT_co]]
 
