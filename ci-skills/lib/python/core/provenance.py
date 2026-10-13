@@ -32,13 +32,14 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import subprocess
 from collections.abc import Mapping, MutableSequence, Sequence
 from pathlib import Path
 from typing import NotRequired, Optional, TypedDict
+
+from lib.python.core.cli_api import response_decoder
 
 SHA_PATTERN = re.compile(r"\A[0-9a-fA-F]{40}\Z")
 DIGEST_ALGORITHM = "sha256-tree-v1"
@@ -285,7 +286,7 @@ def _installed_revision(skill_root: Path, digest: TreeDigest) -> Optional[Revisi
     try:
         if not path.is_file() or path.is_symlink():
             return None
-        record: object = json.loads(path.read_text(encoding="utf-8"))
+        record = response_decoder().decode(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, ValueError):
         return None
     if not isinstance(record, dict):

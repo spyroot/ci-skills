@@ -26,10 +26,10 @@ from typing import Final, Optional, TypeGuard, TypeVar
 from urllib.parse import urlsplit
 
 from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.cli_api import response_decoder
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
-    is_json_value,
     json_integer,
     json_object,
     json_objects,
@@ -157,11 +157,12 @@ def _toolbox_document(source: Path) -> JSONObject:
     :raises SchemaError: An installed schema fails its meta-schema.
     :raises RecursionError: A document exceeds supported nesting depth.
     """  # noqa: DOC503 - file and installed-schema validation errors propagate
+    text = source.read_text(encoding="utf-8")
     try:
-        document: object = json.loads(source.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+        document = response_decoder().decode(text)
+    except ValueError as exc:
         raise SpecificationError("invalid_specification:/:json") from exc
-    if not is_json_value(document) or not isinstance(document, Mapping):
+    if not isinstance(document, Mapping):
         raise SpecificationError("invalid_specification:/:type")
     validate_specification(document, TOOLBOX_SCHEMA)
     return document

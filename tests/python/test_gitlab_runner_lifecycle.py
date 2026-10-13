@@ -49,13 +49,21 @@ VERIFIED_TARGET = {
     "web_url": "https://gitlab.example.test/team/repo",
 }
 READ_VALIDATOR = Draft202012Validator(
-    json.loads((ROOT / "schemas/results/gitlab-runner-read.schema.json").read_text())
+    json.loads(
+        (ROOT / "ci-skills/schemas/results/gitlab-runner-read.schema.json").read_text()
+    )
 )
 DELETE_VALIDATOR = Draft202012Validator(
-    json.loads((ROOT / "schemas/results/gitlab-runner-delete.schema.json").read_text())
+    json.loads(
+        (
+            ROOT / "ci-skills/schemas/results/gitlab-runner-delete.schema.json"
+        ).read_text()
+    )
 )
 TAG_VALIDATOR = Draft202012Validator(
-    json.loads((ROOT / "schemas/results/gitlab-runner-tag.schema.json").read_text())
+    json.loads(
+        (ROOT / "ci-skills/schemas/results/gitlab-runner-tag.schema.json").read_text()
+    )
 )
 
 

@@ -15,6 +15,10 @@ describes this installed shape. [CI09-REFERENCE](phases/CI09-REFERENCE.md) and
 [CI08-ROUTING](phases/CI08-ROUTING.md) retain the broader reference and routing design; planned verbs remain
 unavailable until an installed command implements them.
 
+The `offline` cluster offers commands that need no provider credentials, including the binary-build planner and
+reference navigation. `bin/ci-api` is offered in both GitHub and GitLab clusters; its `--provider` selects one.
+Command keys beginning with `bin/` are relative to the installed skill root; other tool names are in its `bin/` directory.
+
 ## Work backward from an observed effect
 
 An operational command should compose the usual reads needed to answer one question. For a stuck GitLab job, the

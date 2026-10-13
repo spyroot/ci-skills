@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Mapping, MutableMapping
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -119,6 +120,50 @@ def _alter(path: Path, field: str, value: JSONValue) -> None:
     )
     record[field] = value
     path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+
+def test_yaml_loader_rejects_duplicate_explicit_mapping_keys(tmp_path: Path) -> None:
+    """Refuse YAML whose repeated key would overwrite prior evidence.
+
+    :param tmp_path: Scratch directory receiving the malformed YAML document.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    source = tmp_path / "duplicate.yaml"
+    source.write_text("job: first\njob: second\n", encoding="utf-8")
+
+    with pytest.raises(GATE.EvidenceError, match="unreadable_evidence"):
+        GATE._load_yaml_mapping(source)
+
+
+def test_yaml_loader_keeps_valid_merges_boolean_keys_and_date_scalars(
+    tmp_path: Path,
+) -> None:
+    """Retain the supported SafeLoader behavior around unique explicit keys.
+
+    :param tmp_path: Scratch directory receiving the accepted YAML document.
+
+    :returns: None; assertions in the body validate the preservation contract.
+    """
+    source = tmp_path / "supported.yaml"
+    source.write_text(
+        "defaults: &defaults\n"
+        "  enabled: true\n"
+        "  release: 2026-10-13\n"
+        "job:\n"
+        "  <<: *defaults\n"
+        "  enabled: false\n"
+        "on: true\n",
+        encoding="utf-8",
+    )
+
+    loaded = GATE._load_yaml_mapping(source)
+    job = loaded["job"]
+
+    assert isinstance(job, Mapping)
+    assert job["enabled"] is False
+    assert job["release"] == date(2026, 10, 13)
+    assert loaded[True] is True
 
 
 def test_complete_required_evidence_aggregates_only_when_every_job_matches(

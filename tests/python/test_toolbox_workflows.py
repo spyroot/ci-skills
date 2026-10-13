@@ -41,6 +41,7 @@ DELIVERY_STATE = import_script_module("lib.python.core.delivery_state")
 EXECUTOR = import_script_module("lib.python.core.executor")
 REGISTRY = import_script_module("lib.python.core.harbor.registry_mirror")
 RUNTIME = import_script_module("lib.python.core.runtime")
+TOOLBOX = import_script_module("lib.python.core.toolbox")
 
 
 if TYPE_CHECKING:
@@ -378,14 +379,81 @@ def test_toolbox_schema_accepts_complete_selected_installation_routes(
     )
 
 
+@pytest.mark.parametrize(
+    "raw",
+    (
+        '{"$id":"https://example.test/unit","type":"object","type":"object"}',
+        '{"$id":"https://example.test/unit","maximum":NaN}',
+    ),
+)
+def test_load_schema_rejects_ambiguous_or_nonfinite_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: str
+) -> None:
+    """Reject a malformed installed schema before it can enter the registry.
+
+    :param monkeypatch: Fixture selecting the isolated installed schema directory.
+    :param tmp_path: Scratch directory receiving the schema fixture.
+    :param raw: Duplicate-key or nonfinite JSON schema bytes.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    schema_directory = tmp_path / "schemas"
+    schema_directory.mkdir()
+    (schema_directory / "unit.schema.json").write_text(raw, encoding="utf-8")
+    monkeypatch.setattr(SCHEMA, "SCHEMA_DIRECTORY", schema_directory)
+
+    with pytest.raises(ValueError, match="duplicate_json_field|nonfinite_json_number"):
+        SCHEMA.load_schema("unit.schema.json")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    (
+        (
+            '{"apiVersion":"ci-skills/v1","apiVersion":"ci-skills/v1",'
+            '"kind":"ToolboxSpec","metadata":{"name":"unit"},"spec":'
+            '{"baseImage":"registry.example.test/base:unit","image":'
+            '{"repository":"toolbox","tag":"unit"},"build":'
+            '{"namespace":"unit","app":"unit"},"dependencies":'
+            '[{"name":"tool","commands":["tool"],"linux":'
+            '{"method":"go","module":"example.test/tool@v1.0.0"}}],'
+            '"requiredCommands":["tool"]}}'
+        ),
+        (
+            '{"apiVersion":"ci-skills/v1","kind":"ToolboxSpec",'
+            '"metadata":{"name":"unit","unused":NaN},"spec":{}}'
+        ),
+    ),
+)
+def test_toolbox_spec_rejects_ambiguous_or_nonfinite_json(
+    tmp_path: Path, raw: str
+) -> None:
+    """Reject invalid JSON before toolbox schema or local input processing.
+
+    :param tmp_path: Scratch directory receiving the selected toolbox specification.
+    :param raw: Duplicate-key or nonfinite JSON specification bytes.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    source = tmp_path / "toolbox.json"
+    source.write_text(raw, encoding="utf-8")
+
+    with pytest.raises(SCHEMA.SpecificationError, match="invalid_specification:/:json"):
+        TOOLBOX.ToolboxSpec.from_path(source)
+
+
 def test_workflow_records_accept_only_shared_action_outcomes() -> None:
     """Callback records use the one shared applied/no-op/verified vocabulary.
     :returns: None; assertions in the body validate the regression.
     """
     schema = json.loads(
-        (REPO_ROOT / "schemas" / "results" / "toolbox-workflow.schema.json").read_text(
-            encoding="utf-8"
-        )
+        (
+            REPO_ROOT
+            / "ci-skills"
+            / "schemas"
+            / "results"
+            / "toolbox-workflow.schema.json"
+        ).read_text(encoding="utf-8")
     )["properties"]["records"]["items"]
     validator = Draft202012Validator(schema)
 
@@ -827,7 +895,11 @@ def test_workflow_dry_run_emits_schema_valid_plan_without_constructing_mutations
     Draft202012Validator(
         json.loads(
             (
-                REPO_ROOT / "schemas" / "results" / "toolbox-workflow.schema.json"
+                REPO_ROOT
+                / "ci-skills"
+                / "schemas"
+                / "results"
+                / "toolbox-workflow.schema.json"
             ).read_text(encoding="utf-8")
         )
     ).validate(captured)
@@ -911,7 +983,11 @@ def test_workflow_failure_emits_schema_valid_blocked_result(
     Draft202012Validator(
         json.loads(
             (
-                REPO_ROOT / "schemas" / "results" / "toolbox-workflow.schema.json"
+                REPO_ROOT
+                / "ci-skills"
+                / "schemas"
+                / "results"
+                / "toolbox-workflow.schema.json"
             ).read_text(encoding="utf-8")
         )
     ).validate(captured)
@@ -919,3 +995,44 @@ def test_workflow_failure_emits_schema_valid_blocked_result(
     assert captured["errors"] == [
         {"source": "harbor_push", "reason": "unit_input_failure"}
     ]
+
+
+def test_generated_workflow_report_resolves_nested_result_schema_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validate a generated report through its installed nested result schema.
+
+    :param monkeypatch: Pytest fixture replacing preparation and report emission.
+
+    :returns: None; assertions require offline sibling ``$ref`` resolution.
+    """
+    revision = "a" * 40
+    action = _workflow_action(
+        target=_workflow_target(
+            revision=revision,
+            skill={
+                "algorithm": "sha256-tree-v1",
+                "digest": "b" * 64,
+                "file_count": 1,
+                "revision": {
+                    "value": revision,
+                    "source": "unit",
+                    "verified": True,
+                },
+                "consuming_project": {"commit": None, "source": None},
+            },
+        ),
+        source="harbor.example.test/unit/source:latest",
+    )
+    action.args.describe = False
+    action.args.dry_run = True
+    action.args.log_level = "info"
+    action.args.log_file = None
+    captured = _captured_report(monkeypatch)
+    monkeypatch.setattr(action, "prepare", lambda: None)
+
+    assert (
+        action.execute(lambda: pytest.fail("dry-run must not construct callbacks")) == 0
+    )
+    assert captured["tested_revision"] == revision
+    SCHEMA.validate_specification(captured, "results/toolbox-workflow.schema.json")

@@ -173,7 +173,7 @@ Make the installed command usable from help and its schema without requiring the
    [validate_specification()](../ci-skills/lib/python/core/schema.py). The toolbox example is
    [toolbox.schema.json](../ci-skills/schemas/toolbox.schema.json). Help must point to the accepted input schema.
    A new input shape needs its own paired schema only when an existing one cannot describe it.
-4. Reuse the applicable result schema under [schemas/results](../schemas/results/). Extend the owning schema when the
+4. Reuse the applicable [installed result schema](../ci-skills/schemas/results/). Extend the owning schema when the
    declared result changes. Keep the existing report envelope and shared emitter.
 5. Add relevant `related` commands or reference pointers to the existing catalogue. `reference.py` derives its compact
    offerings from that catalogue; it does not need a second inventory or embedded reference documents. Regenerate

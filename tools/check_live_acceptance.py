@@ -37,7 +37,13 @@ SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
 runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
 
 from lib.python.core.cli_api import response_decoder
-from lib.python.core.json_types import JSONObject, JSONValue, json_integer, json_string
+from lib.python.core.json_types import (
+    JSONObject,
+    JSONValue,
+    json_integer,
+    json_string,
+    json_strings,
+)
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
 ReceiptPairKey: TypeAlias = tuple[str, str, str, str, str, int, str]
@@ -431,7 +437,7 @@ def _check_receipt(
     if receipt.get("blocking_live_checks"):
         problems.append(f"{name}:live_checks_blocking")
     github = _mapping(surfaces.get("github"))
-    if "required_checks_read" not in (
+    if "required_checks_read" not in json_strings(
         github.get("observed_capability") or []
     ) or not _mapping(github.get("details")).get("required_checks"):
         problems.append(f"{name}:required_checks_readback_missing")
@@ -529,9 +535,10 @@ def _check_gitlab_receipt(
     ):
         problems.append(f"{name}:target_mismatch")
     operation = required.get("operation") if kind != "gitlab_access" else None
+    readback = receipt.get("readback")
     if kind == "gitlab_access":
         if not {"identity_read", "target_read"} <= set(
-            receipt.get("observed_capability") or []
+            json_strings(receipt.get("observed_capability") or [])
         ):
             problems.append(f"{name}:access_readback_missing")
     elif (kind, operation) in READ_ONLY_GITLAB_OPERATIONS:
@@ -541,9 +548,9 @@ def _check_gitlab_receipt(
         or receipt.get("mutated") is not (required.get("result_action") == "APPLIED")
         or receipt.get("operation") != operation
         or receipt.get("result_action") != required.get("result_action")
-        or not isinstance(receipt.get("readback"), dict)
-        or receipt["readback"].get("verified") is not True
-        or receipt["readback"].get("action") != required.get("result_action")
+        or not isinstance(readback, dict)
+        or readback.get("verified") is not True
+        or readback.get("action") != required.get("result_action")
         or receipt.get("errors")
     ):
         problems.append(f"{name}:operation_readback_missing")

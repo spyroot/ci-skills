@@ -46,7 +46,8 @@ ENTRYPOINTS = {
 
 TAG_SCHEMA = json.loads(
     (
-        Path(__file__).parents[2] / "schemas/results/gitlab-runner-tag.schema.json"
+        Path(__file__).parents[2]
+        / "ci-skills/schemas/results/gitlab-runner-tag.schema.json"
     ).read_text(encoding="utf-8")
 )
 TAG_VALIDATOR = Draft202012Validator(TAG_SCHEMA)

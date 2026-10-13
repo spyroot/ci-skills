@@ -1216,6 +1216,38 @@ def test_gitlab_access_without_token_file_uses_glab_host_profile(
 
 
 @pytest.mark.parametrize(
+    "payload",
+    (
+        '{"username":"robot$unit","username":"robot$other","password":"secret"}',
+        '{"username":"robot$unit","password":"secret","unused":NaN}',
+    ),
+)
+def test_harbor_credential_file_rejects_ambiguous_or_nonfinite_json(
+    tmp_path: Path, payload: str
+) -> None:
+    """Reject invalid JSON before a Harbor credential can be selected.
+
+    :param tmp_path: Scratch directory receiving the selected credential file.
+    :param payload: Duplicate-key or nonfinite JSON credential input.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    credentials = import_script_module("lib.python.access.harbor_credentials")
+    target_module = import_script_module("lib.python.core.target")
+    credential_file = tmp_path / "harbor.credentials.json"
+    credential_file.write_text(payload, encoding="utf-8")
+    target = target_module.HarborTarget(
+        url="https://harbor.example.test",
+        host="harbor.example.test",
+        project="unit",
+        credential_file=credential_file,
+    )
+
+    with pytest.raises(target_module.TargetError, match="credential_file_invalid"):
+        credentials.resolve_harbor_credential(target)
+
+
+@pytest.mark.parametrize(
     ("token_body", "expected_reason"),
     (
         (None, "credential_file_unavailable"),

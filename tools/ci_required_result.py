@@ -17,7 +17,7 @@ import json
 import runpy
 import sys
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from collections.abc import Hashable, Mapping, MutableMapping, MutableSequence, Sequence
 from datetime import date, datetime
 from pathlib import Path
 from typing import Final, TypeAlias, Union
@@ -30,7 +30,12 @@ SKILL_ROOT: Final = ROOT / "ci-skills"
 runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
 
 from lib.python.core.cli_api import response_decoder
-from lib.python.core.json_types import JSONObject, is_json_value, json_object
+from lib.python.core.json_types import (
+    JSONObject,
+    is_json_value,
+    json_object,
+    json_string,
+)
 
 YAMLValue: TypeAlias = Union[
     str,
@@ -45,11 +50,41 @@ YAMLValue: TypeAlias = Union[
 ]
 YAMLObject: TypeAlias = Mapping[Union[str, int, float, bool], YAMLValue]
 
+YAML_MERGE_TAG: Final = "tag:yaml.org,2002:merge"
 SCHEMA_VERSION: Final = "1.0"
 RESULT_SCHEMAS: Final = {
     "ci": ROOT / "schemas" / "ci-result.schema.json",
     "smoke": ROOT / "schemas" / "smoke-result.schema.json",
 }
+
+
+class UniqueKeySafeLoader(yaml.SafeLoader):
+    """Reject explicit duplicate mapping keys while retaining SafeLoader semantics."""
+
+    def construct_mapping(
+        self, node: yaml.nodes.MappingNode, deep: bool = False
+    ) -> dict[Hashable, object]:
+        """Check explicit keys before PyYAML expands valid merge references.
+
+        :param node: Mapping node supplied by the YAML constructor.
+        :param deep: Whether nested values are constructed immediately.
+        :returns: Mapping with existing scalar, alias, and merge behavior.
+        :raises yaml.constructor.ConstructorError: Explicit keys repeat, a key
+            is unhashable, or the supplied node is not a mapping.
+        """  # noqa: DOC503 - SafeLoader retains its existing construction errors.
+        if isinstance(node, yaml.nodes.MappingNode):
+            seen: set[Hashable] = set()
+            for key_node, _value_node in node.value:
+                if key_node.tag == YAML_MERGE_TAG:
+                    continue
+                key: object = self.construct_object(key_node, deep=deep)
+                if isinstance(key, Hashable):
+                    if key in seen:
+                        raise yaml.constructor.ConstructorError(
+                            None, None, "duplicate_yaml_key", key_node.start_mark
+                        )
+                    seen.add(key)
+        return super().construct_mapping(node, deep=deep)
 
 
 class EvidenceError(RuntimeError):
@@ -73,14 +108,17 @@ def _load_mapping(path: Path) -> JSONObject:
 
 
 def _load_yaml_mapping(path: Path) -> YAMLObject:
-    """Read a YAML inventory, binding, or workflow without changing YAML scalar rules.
+    """Read a YAML inventory, binding, or workflow with unique explicit keys.
 
     :param path: UTF-8 configuration document.
     :returns: Read-only YAML mapping, retaining date values and Boolean keys such as on.
-    :raises EvidenceError: If the file is unreadable, YAML is malformed, or the root is not a mapping.
+    :raises EvidenceError: The file is unreadable, YAML is malformed or repeats
+        explicit keys, or the root is not a mapping.
     """
     try:
-        value: YAMLValue = yaml.safe_load(path.read_text(encoding="utf-8"))
+        value: YAMLValue = yaml.load(
+            path.read_text(encoding="utf-8"), Loader=UniqueKeySafeLoader
+        )
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise EvidenceError(f"unreadable_evidence:{path}") from exc
     if not isinstance(value, Mapping):
@@ -284,7 +322,7 @@ def emit(args: argparse.Namespace) -> int:
         "evidence_sanitized": True,
     }
     checks = {
-        name: "passed" if outcomes.get(step) == "success" else "failed"
+        name: "passed" if outcomes.get(json_string(step)) == "success" else "failed"
         for name, step in smoke_steps.items()
     }
     ci_result = {

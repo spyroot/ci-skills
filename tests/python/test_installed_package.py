@@ -585,6 +585,48 @@ def _installed_python_entrypoints(installed: Path) -> tuple[Path, ...]:
     )
 
 
+def _result_schema_pointers(value: object) -> tuple[str, ...]:
+    """Collect every declared result-schema pointer from a manifest value.
+
+    :param value: Manifest mapping, sequence, or scalar to inspect recursively.
+    :returns: Declared relative result-schema paths in discovery order.
+    :raises TypeError: A result-schema declaration is not a string path.
+    """
+    if isinstance(value, Mapping):
+        pointers = ()
+        for key, child in value.items():
+            if key == "result_schema":
+                if not isinstance(child, str):
+                    raise TypeError("result_schema must be a string")
+                pointers += (child,)
+            else:
+                pointers += _result_schema_pointers(child)
+        return pointers
+    if isinstance(value, Sequence) and not isinstance(value, str):
+        return tuple(
+            pointer for child in value for pointer in _result_schema_pointers(child)
+        )
+    return ()
+
+
+def test_installed_manifest_result_schemas_are_shipped_with_the_skill(
+    tmp_path: Path,
+) -> None:
+    """Require every manifest result-schema pointer to resolve after installation.
+
+    :param tmp_path: Isolated production installation destination.
+    :returns: None; assertions prove declared result schemas are installed bytes.
+    """
+    installed = _install_skill(tmp_path)
+    manifest = json.loads((installed / "tools.json").read_text(encoding="utf-8"))
+    pointers = _result_schema_pointers(manifest["commands"])
+
+    assert pointers
+    for pointer in pointers:
+        assert not Path(pointer).is_absolute()
+        assert (installed / pointer).is_file(), pointer
+
+
 def test_installed_python_entrypoints_import_from_unrelated_directory(
     tmp_path: Path,
 ) -> None:

@@ -409,6 +409,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "purpose": "filter newest jobs of one verified project",
                 "required_options": [],
                 "read_back": "GitLab project jobs keyset API; at most 20 pages of 100",
+                "result_schema": "schemas/results/gitlab-job-list.schema.json",
             },
         },
         "returns": (
@@ -457,6 +458,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "Confirmed apply may create or update the selected milestone.",
         "options": {
             "--project": "exact project path or numeric ID",
             "--group": "exact group path or numeric ID",
@@ -494,6 +496,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "Confirmed apply may create the selected bug issue.",
         "options": {
             "--project": "exact project path or numeric ID",
             "--title": "bug title",
@@ -524,6 +527,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "Confirmed apply may create or update the selected wiki page.",
         "options": {
             "--project": "exact project path or numeric ID",
             "--title": "page title for create",
@@ -914,51 +918,76 @@ DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
 }
 
 
-def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
-    """Offer one graph node from the existing installed-command catalogue.
+def command_authorities(script: str) -> Sequence[str]:
+    """Resolve provider choices from the registered command's access contract.
 
-    :param node: Cluster name or installed filename; None selects the root.
-    :returns: Versioned root or selected tools/reference node.
+    :param script: Installed command key from one of the four catalogues.
+    :returns: Provider names, or an empty sequence for an offline command.
+        ``ci-api`` offers either Git provider; it does not require both.
+    :raises KeyError: If the command is not registered.
+    """  # noqa: DOC502 - Dictionary lookup rejects unknown command keys.
+    if script in COMMANDS:
+        return COMMANDS[script]["requires"]
+    if script in NODE_LOCAL_COMMANDS:
+        return NODE_LOCAL_COMMANDS[script]["requires"]
+    if script == "bin/ci-api":
+        return ("github", "gitlab")
+    if script in READ_COMMANDS:
+        return READ_COMMANDS[script]["requires_authorities"]
+    return DISCOVERY_COMMANDS[script]["requires_authorities"]
+
+
+def _proposition_offering(scripts: Sequence[str]) -> MutableMapping[str, JSONValue]:
+    """Offer installed commands with references for their declared providers.
+
+    :param scripts: Command keys selected for a cluster or related-command node.
+    :returns: Compact tools and optional reference mappings.
+    """
+    authorities = {name for script in scripts for name in command_authorities(script)}
+    names = ["access", "project binding"] if authorities else []
+    if "gitlab" in authorities:
+        names.append("mcp")
+    if "harbor" in authorities:
+        names.append("toolbox specification")
+    return {
+        "tools": {script: {} for script in sorted(scripts)},
+        "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
+    }
+
+
+def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
+    """Offer one graph node from every installed-command catalogue.
+
+    :param node: Cluster name or installed command key; None selects the root.
+    :returns: Versioned root or selected tools/reference node. Commands without
+        a provider requirement appear in the offline cluster.
     :raises ValueError: If the selected node is not in the catalogue.
     """
-    commands = {**COMMANDS, **NODE_LOCAL_COMMANDS}
-
-    def offering(
-        scripts: list[str], authority: Optional[str]
-    ) -> MutableMapping[str, JSONValue]:
-        names = ["access", "project binding"]
-        if authority == "gitlab":
-            names.append("mcp")
-        if authority == "harbor" or any(
-            "harbor" in commands[script]["requires"] for script in scripts
-        ):
-            names.append("toolbox specification")
-        return {
-            "tools": {script: {} for script in sorted(scripts)},
-            "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
-        }
-
+    commands: Mapping[str, Mapping[str, object]] = {
+        **COMMANDS,
+        **NODE_LOCAL_COMMANDS,
+        **READ_COMMANDS,
+        **DISCOVERY_COMMANDS,
+    }
+    authorities = {script: command_authorities(script) for script in commands}
     clusters = {
-        cluster: offering(
-            [
-                script
-                for script, entry in commands.items()
-                if authority in entry["requires"]
-            ],
-            authority,
+        cluster: _proposition_offering(
+            [script for script, names in authorities.items() if authority in names]
         )
         for cluster, authority in PROPOSITION_CLUSTERS.items()
     }
+    clusters["offline"] = _proposition_offering(
+        [script for script, names in authorities.items() if not names]
+    )
     if node is None:
         return {"schema_version": PROPOSITION_VERSION, **clusters}
     if node in clusters:
         return {"schema_version": PROPOSITION_VERSION, **clusters[node]}
     if node not in commands:
         raise ValueError("path_unknown")
-    entry = commands[node]
-    scripts = [node, *entry.get("related", ())]
-    authority = "gitlab" if "gitlab" in entry["requires"] else None
-    return {"schema_version": PROPOSITION_VERSION, **offering(scripts, authority)}
+    entry = copy_json_object(commands[node])
+    scripts = [node, *json_strings(entry.get("related", ()))]
+    return {"schema_version": PROPOSITION_VERSION, **_proposition_offering(scripts)}
 
 
 STATUS_MEANING = {
@@ -1033,7 +1062,7 @@ def describe(script: str) -> MutableMapping[str, JSONValue]:
     authorities = json_strings(
         entry.get("requires", entry.get("requires_authorities", ()))
     )
-    access = ("github", "gitlab") if script == "bin/ci-api" else authorities
+    access = command_authorities(script)
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "command_contract",

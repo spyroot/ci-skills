@@ -39,12 +39,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agent_profile import AgentProfile, AgentProfileError, AgentProfileReason
 from lib.python.core.cli_api import response_decoder
-from lib.python.core.json_types import JSONObject, JSONValue
+from lib.python.core.json_types import (
+    JSONObject,
+    JSONValue,
+    copy_json_object,
+    json_string,
+)
 from lib.python.core.provenance import (
     INSTALLATION_IDENTITY_KIND,
     INSTALLATION_IDENTITY_NAME,
     INSTALLATION_IDENTITY_SCHEMA_VERSION,
     INSTALLATION_IDENTITY_STATUS,
+    Revision,
+    TreeDigest,
     _git,
     _included,
     skill_identity,
@@ -176,7 +183,7 @@ def package_files(source: Path) -> Sequence[Path]:
 
 
 def _write_installation_identity(
-    staging: Path, digest: JSONObject, revision: JSONObject
+    staging: Path, digest: TreeDigest, revision: Revision
 ) -> None:
     """Write the verified source identity beside staged skill bytes.
 
@@ -209,8 +216,8 @@ def _write_installation_identity(
 
 def _installed_matches(
     destination: Path,
-    expected_digest: JSONObject,
-    expected_revision: JSONObject,
+    expected_digest: TreeDigest,
+    expected_revision: Revision,
 ) -> bool:
     """Check installed bytes and verified revision before an idempotent upgrade.
 
@@ -489,7 +496,10 @@ def _install_unlocked(
         if require_verified and identity["revision"].get("verified") is not True:
             raise ValueError("source_revision_unverified")
         expected_digest = tree_digest(source)
-        result.update(**expected_digest, revision=identity["revision"])
+        result.update(
+            copy_json_object(expected_digest),
+            revision=copy_json_object(identity["revision"]),
+        )
         if (
             expected_fingerprint is not None
             and plan_fingerprint(result) != expected_fingerprint
@@ -558,7 +568,10 @@ def _install_unlocked(
                         "source": str(source.resolve()),
                         "destination": str(destination),
                     }
-                    if plan_fingerprint(current) != expected_fingerprint:
+                    if (
+                        plan_fingerprint(copy_json_object(current))
+                        != expected_fingerprint
+                    ):
                         raise ValueError("installation_fingerprint_changed")
                 if deadline is not None and time.monotonic() >= deadline:
                     raise ValueError("install_deadline_expired")
@@ -1042,11 +1055,13 @@ class InstallerCLI:
         try:
             log_event(
                 self.args,
-                result.get("kind", "skill_install"),
+                json_string(result.get("kind", "skill_install")),
                 "finished",
-                result["status"],
+                json_string(result["status"]),
                 elapsed=time.monotonic() - self.started,
-                error_class=result.get("reason"),
+                error_class=json_string(result["reason"])
+                if "reason" in result
+                else None,
             )
         except OSError:
             result.update(

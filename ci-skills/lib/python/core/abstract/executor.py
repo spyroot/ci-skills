@@ -32,7 +32,8 @@ class SkillExecutor(ABC, Generic[StateT]):
         :param callbacks: Ordered callback collection owned by this workflow.
         :raises TypeError: If create_state does not return a concrete SkillState,
             or a configuration hook returns a non-mapping value.
-        :raises ValueError: If a callback already belongs to a different state.
+        :raises ValueError: If a callback belongs to another state or its required
+            plugin configuration is unavailable.
         """  # noqa: DOC503 - callback binding can reject existing ownership.
         state = self.create_state()
         if not isinstance(state, SkillState):

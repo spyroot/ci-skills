@@ -124,6 +124,47 @@ def test_matching_installer_record_verifies_an_installed_copy(installed: Path) -
     }
 
 
+@pytest.mark.parametrize(
+    "record_suffix",
+    (
+        ',"status":"PASS","status":"PASS"}',
+        ',"unused":NaN}',
+    ),
+)
+def test_installer_identity_rejects_ambiguous_or_nonfinite_json(
+    installed: Path, record_suffix: str
+) -> None:
+    """Ignore an installer record whose JSON decoder cannot preserve its meaning.
+
+    :param installed: Copied skill tree receiving an invalid root identity record.
+    :param record_suffix: Duplicate-key or nonfinite JSON suffix for the record.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    provenance = _provenance()
+    digest = provenance.tree_digest(installed)
+    record = {
+        "schema_version": "1.0",
+        "kind": "skill_install",
+        "status": "PASS",
+        **digest,
+        "revision": {
+            "value": "a" * 40,
+            "source": "git_head",
+            "verified": True,
+        },
+    }
+    encoded = json.dumps(record, separators=(",", ":"))
+    (installed / provenance.INSTALLATION_IDENTITY_NAME).write_text(
+        encoded[:-1] + record_suffix,
+        encoding="utf-8",
+    )
+
+    identity = provenance.skill_identity(installed, None)
+
+    assert identity["revision"] == {"value": None, "source": None, "verified": False}
+
+
 def test_installer_record_with_different_bytes_fails_closed(installed: Path) -> None:
     """Reject installer identity after executed script bytes change.
 

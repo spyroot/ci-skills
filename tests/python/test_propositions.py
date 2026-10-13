@@ -38,11 +38,27 @@ if TYPE_CHECKING:
 
 
 def _commands() -> Mapping[str, JSONObject]:
-    """Combine installed command declarations used by proposition nodes.
+    """Combine every command registry exposed through the proposition graph.
 
-    :returns: Mapping of regular and node-local command names to catalogue data.
+    :returns: Mapping of every installed command name to catalogue data.
     """
-    return {**CATALOG.COMMANDS, **CATALOG.NODE_LOCAL_COMMANDS}
+    return {
+        **CATALOG.COMMANDS,
+        **CATALOG.NODE_LOCAL_COMMANDS,
+        **CATALOG.READ_COMMANDS,
+        **CATALOG.DISCOVERY_COMMANDS,
+    }
+
+
+def _installed_command_path(command: str) -> Path:
+    """Resolve one manifest command name within the installed skill layout.
+
+    :param command: Catalogue key, either a bin-prefixed path or bin filename.
+    :returns: Installed command path beneath the skill root.
+    """
+    if command.startswith("bin/"):
+        return SCRIPT_ROOT.parent / command
+    return SCRIPT_ROOT / command
 
 
 def _validate(payload: JSONObject) -> None:
@@ -55,30 +71,63 @@ def _validate(payload: JSONObject) -> None:
     Draft202012Validator(PROPOSITION_SCHEMA).validate(payload)
 
 
-def test_root_clusters_are_derived_from_declared_command_authorities() -> None:
-    """Discovery offers only actual installed filenames for each authority cluster.
-    :returns: None; assertions in the body validate the regression.
+def test_root_clusters_offer_every_manifest_command_by_declared_authority() -> None:
+    """Require root discovery to retain every installed command registry.
+
+    :returns: None; assertions prove each manifest command is offered once or more.
     """
     root = CATALOG.proposition()
     commands = _commands()
 
     _validate(root)
     assert root["schema_version"] == "2.0"
-    assert set(root) == {"schema_version", *CATALOG.PROPOSITION_CLUSTERS}
+    assert set(root) == {
+        "schema_version",
+        *CATALOG.PROPOSITION_CLUSTERS,
+        "offline",
+    }
+
+    offered = set()
     for cluster, authority in CATALOG.PROPOSITION_CLUSTERS.items():
         node = root[cluster]
         expected = sorted(
-            script
-            for script, entry in commands.items()
-            if authority in entry["requires"]
+            command
+            for command in commands
+            if authority in CATALOG.command_authorities(command)
         )
         assert set(node) == {"tools", "reference"}
-        assert node["tools"] == {script: {} for script in expected}
-        for script, metadata in node["tools"].items():
+        assert node["tools"] == {command: {} for command in expected}
+        offered.update(node["tools"])
+        for command, metadata in node["tools"].items():
             assert metadata == {}
-            assert (SCRIPT_ROOT / script).is_file()
+            assert _installed_command_path(command).is_file()
         for reference in node["reference"].values():
             assert (SCRIPT_ROOT.parent / reference["pointer"]).is_file()
+
+    offline = root["offline"]
+    expected_offline = sorted(
+        command for command in commands if not CATALOG.command_authorities(command)
+    )
+    assert set(offline) == {"tools", "reference"}
+    assert offline["tools"] == {command: {} for command in expected_offline}
+    offered.update(offline["tools"])
+    for reference in offline["reference"].values():
+        assert (SCRIPT_ROOT.parent / reference["pointer"]).is_file()
+    assert offered == set(commands)
+
+
+def test_every_manifest_command_expands_to_a_reachable_proposition() -> None:
+    """Require each manifest key to expand from the root proposition graph.
+
+    :returns: None; assertions prove no manifest command is unreachable.
+    """
+    manifest_commands = CATALOG.manifest()["commands"]
+    assert set(manifest_commands) == set(_commands())
+
+    for command in manifest_commands:
+        selected = CATALOG.proposition(command)
+        _validate(selected)
+        assert command in selected["tools"]
 
 
 def test_selected_cluster_and_command_are_small_schema_valid_propositions() -> None:

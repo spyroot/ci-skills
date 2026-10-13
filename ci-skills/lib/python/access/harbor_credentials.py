@@ -16,6 +16,8 @@ from typing import Final
 from lib.python.access.sources import (
     read_token_file,
 )
+from lib.python.core.cli_api import response_decoder
+from lib.python.core.json_types import json_object, json_string
 from lib.python.core.target import (
     HarborTarget,
     TargetError,
@@ -83,14 +85,16 @@ def resolve_harbor_credential(target: HarborTarget) -> RegistryCredential:
             raise TargetError("credential_file_unavailable")
         raw = path.read_text(encoding="utf-8").strip()
         if raw.startswith("{"):
-            value = json.loads(raw)
+            value = json_object(response_decoder().decode(raw))
             if "auths" in value:
-                entries = value["auths"]
+                entries = json_object(value["auths"])
                 selected = entries.get(target.host, entries.get(target.url))
                 if not isinstance(selected, dict):
                     raise TargetError("registry_credential_host_missing")
                 if "auth" in selected:
-                    raw = base64.b64decode(selected["auth"], validate=True).decode()
+                    raw = base64.b64decode(
+                        json_string(selected["auth"]), validate=True
+                    ).decode()
                 else:
                     raw = f"{selected['username']}:{selected['password']}"
             else:

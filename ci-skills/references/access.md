@@ -176,11 +176,8 @@ wrong-target, or unauthorized credentials block. A mock, file-existence
 check, login-status message, dry run, or receipt from another host is not
 live acceptance evidence.
 
-Cluster-wide list reads carry their own bound, `core.collection.LIST_TIMEOUT_SECONDS`.
-Measured on one target cluster, a whole-cluster event list was 7.7 MB and
-about 20 seconds on its own with up to ten such reads running concurrently;
-the default per-command bound reported that healthy cluster as a timeout, and
-the gate then read the timeout as a denial.
+Cluster-wide list reads carry their own bound, `core.collection.LIST_TIMEOUT_SECONDS`, defined in
+[`collection.py`](../lib/python/core/collection.py).
 
 ## Automated gates
 

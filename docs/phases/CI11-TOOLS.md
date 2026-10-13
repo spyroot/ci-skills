@@ -312,14 +312,14 @@ Combination). Authorities are the catalog's (`gitlab`, `kubernetes`, `harbor`);
 | cluster health, one view | `cluster_health.py` | `core/cluster_health.py` | kubernetes | no | new | generic |
 | Ceph benchmark | `ceph_bench.py` | `core/ceph_bench.py` | kubernetes | yes | port | generic |
 | Ceph NFS check | `ceph_nfs.py` | `core/ceph_nfs.py` | kubernetes | no | port | visibility |
-| toolbox build | `toolbox_build.py plan\|apply` | `core/toolbox.py` | kubernetes, harbor | yes | port | toolchain |
-| push to Harbor | `harbor_push.py plan\|apply` | `core/registry_mirror.py` | harbor | yes | port | toolchain |
+| toolbox build | `toolbox.py create\|update\|delete` | `core/toolbox.py` | kubernetes,harbor | yes | port | toolchain |
+| push to Harbor | `harbor_push.py push` | `core/harbor/registry_mirror.py` | harbor | yes | port | toolchain |
 | Harbor robot | `harbor_robot.py create` | `core/harbor_api.py` | harbor | yes | new | toolchain |
 | Harbor sanity | `harbor_sanity.py` | `core/harbor_api.py` | harbor | no | port | visibility |
 | Harbor charts | `harbor_charts.py` | `core/harbor_charts.py` | harbor | no | port | visibility |
 | pull secret | `harbor_pull_secret.py` | `core/harbor_pull_secret.py` | kubernetes, harbor | yes | port | toolchain |
 
-Library modules without a main: `core/registry_mirror.py` (`mirror_one`,
+Library modules without a main: `core/harbor/registry_mirror.py` (`HarborService.copy`,
 shared by the toolbox push, `harbor_push.py` and the runner images) and
 `core/k8s_lifecycle.py` (UID-precondition delete and absence read-back, used
 by the ISO `delete` and temporary Pods). `mutates` is declared per verb in the
@@ -395,10 +395,12 @@ with config keys and concurrency:
   named when the row lands; the apply flags (the benchmarks write).
   `ceph_nfs.py`: `--ceph-namespace`; read-only by default, the write test
   behind the apply flags; `[kubernetes]`.
-- `toolbox_build.py plan|apply`: `--tag`, `--builder openshift|podman`;
-  caller-selected build inputs, `[kubernetes]` and `[harbor]` access; one build.
-- `harbor_push.py plan|apply`: `--image`, `--tag`, `--authfile PATH`;
-  `[harbor]`; one copy per image, a bounded pool across images.
+- `toolbox.py create|update|delete`: `--spec` selects the installed toolbox schema;
+  `[kubernetes]` and `[harbor]` supply access. The default returns a plan;
+  `--apply --confirm-plan SHA256` executes that exact plan.
+- `harbor_push.py push`: `--source-image`, `--repository`, `--tag`;
+  `[harbor]` supplies credentials through the target resolver. The default returns a plan;
+  `--apply --confirm-plan SHA256` copies that image and reads its digest back.
 - `harbor_robot.py create`: `--name` (the robot's exact name), `--permission`
   (repeatable), `--token-out PATH`; the apply flags; `[harbor]`
   `admin_credential_file`; one create.
@@ -1096,10 +1098,12 @@ configuration. Relative credential filenames resolve beside the selected file.
 - `ceph_nfs.py`: the export list read back. `ceph_bench.py`: the plan; its
   apply writes and needs an operator-selected pool as a smoke input, resolved
   through live setup; until one is selected, this row is not delivered (rule below).
-- `toolbox_build.py apply --tag <declared>`: the image digest reported by the
-  build equals the digest read back from Harbor; second apply `NO_OP`.
-- `harbor_push.py apply --image <declared> --tag <declared>`: artifact digest
-  read back equals the pushed digest.
+- `toolbox.py create --spec <declared> --apply --confirm-plan <SHA256>`:
+  use the preceding plan fingerprint; the image digest reported by the build
+  equals the digest read back from Harbor; second apply `NO_OP`.
+- `harbor_push.py push --source-image <declared> --repository <declared>
+  --tag <declared> --apply --confirm-plan <SHA256>`: use the preceding plan
+  fingerprint; artifact digest read back equals the pushed digest.
 - `harbor_robot.py create --name <declared> --token-out <declared path>`:
   GET robot by name equals the request, `sink_persisted` true, the token is
   not in the report, second apply `NO_OP`.
@@ -1425,7 +1429,11 @@ no paging past 100), `GET /api/v2.0/users/current` and `GET /api/v2.0/projects`
 (`automation/lib/access/registry_sanity.bash:194-200`, password on `curl -u`
 argv). Pushes go through `skopeo` and `helm` over the OCI transport.
 
-### `toolbox_build.py plan`, `apply`
+### Toolbox build: historical `toolbox_build.py plan`, `apply` proposal
+
+The installed command is now `toolbox.py create|update|delete`; its current inputs
+and confirmation flags are under [the catalogue](#the-catalogue).
+The following inventory retains the original source and port proposal.
 
 - Source: `automation/lib/access/toolbox_image.bash` (1,126 lines): config from
   the spec with env overrides `:63-159`; build context copied from the working
@@ -1463,7 +1471,11 @@ argv). Pushes go through `skopeo` and `helm` over the OCI transport.
   beside the BuildConfig calls (`:1083-1090`); build, push, read-back stay
   serial (`:1091-1106`); version then `:latest` stays serial (`:685-693`).
 
-### `harbor_push.py plan`, `apply` and the generic mirror
+### Harbor push: historical `plan`, `apply` proposal and generic mirror
+
+The installed command is now `harbor_push.py push`; its current inputs and
+confirmation flags are under [the catalogue](#the-catalogue).
+The following inventory retains the original source and port proposal.
 
 - Source: digest-pinned plan, copy and read-back for one image
   `automation/lib/access/bootstrap_runner_images.bash:22-66` (`skopeo inspect`

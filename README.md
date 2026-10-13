@@ -60,18 +60,7 @@ CI_SKILLS_ROOT="${CODEX_HOME:-$HOME/.codex}/skills/ci-skills"
 Keep the consumer repository as the working directory. `CI_SKILLS_ROOT` names the default installed copy; if you chose
 a different skills directory, set it to that copy. All command examples below invoke that installed root.
 
-`install.sh` forwards to [the copy installer](tools/install_ci_skills.py). It installs at
-`$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The installed copy is
-independent of the checkout. The staged copy includes `INSTALLATION.json`, an installer-owned record of the clean
-source revision and measured skill digest; installed commands accept it only while the current bytes still match.
-It also installs the bundled `glab-stack` skill under `$REPO_ROOT/.agents/skills` in the
-repository where you run the installer.
-When `glab` is missing, it installs the declared package with Homebrew on macOS or `apt-get`, `dnf`, or `yum` on Linux.
-If Homebrew is missing, the installer points to its installation instructions. The package's
-[SKILL.md](ci-skills/SKILL.md) routes agent requests to its tools.
 If `glab` was missing, the first apply installs it and requests a new dry-run fingerprint before installing its skill.
-Agent lifecycle hooks are not installed yet; their short [delivery design](docs/skill-session-hook.md) explains how
-Codex and Claude can show CI Skills activity when an agent calls an installed command.
 
 **3. Authenticate, as yourself.** The skill ships no credentials and grants no access. Provide the identity needed by
 the commands you run: a Kubernetes administrator for cluster diagnostics, a GitLab instance administrator for GitLab
@@ -113,10 +102,6 @@ No credentials belong in tracked files or published artifacts. Token references 
 a CI file variable, or a read-only Secret mount. Without a selected token file, `ci-api` uses the native CLI's existing
 authentication. The skill does not manage that credential store.
 
-Repository development uses separate Bash tooling: the `install.sh` adapter starts the Python copy installer, and
-`bless.sh` and `scripts/ci/static.sh` share the checks in `lib/bash/automation/bless.bash`. The validation workflow
-also runs the declared Python and Bats tests. These development gates are separate from installed skill commands.
-
 **5. Prove access to the authorities you selected.** For a GitLab-only target, read back its configured project and
 administrator identity:
 
@@ -137,6 +122,18 @@ effective source and identity. That is the answer to "which credential am I usin
 host.
 
 ### Installer reference
+
+`install.sh` forwards to [the copy installer](tools/install_ci_skills.py). It installs at
+`$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The installed copy is
+independent of the checkout. The staged copy includes `INSTALLATION.json`, an installer-owned record of the clean
+source revision and measured skill digest; installed commands accept it only while the current bytes still match.
+It also installs the bundled `glab-stack` skill under `$REPO_ROOT/.agents/skills` in the
+repository where you run the installer.
+When `glab` is missing, it installs the declared package with Homebrew on macOS or `apt-get`, `dnf`, or `yum` on Linux.
+If Homebrew is missing, the installer points to its installation instructions. The package's
+[SKILL.md](ci-skills/SKILL.md) routes agent requests to its tools.
+Agent lifecycle hooks are not installed yet; their short [delivery design](docs/skill-session-hook.md) explains how
+Codex and Claude can show CI Skills activity when an agent calls an installed command.
 
 The repository's [`toolchain-dependencies.json`](toolchain-dependencies.json) declares the `agent` profile and package
 names. Its version 1.0 contract is checked against the [toolchain schema](schemas/configuration/toolchain-dependencies.schema.json)
@@ -329,7 +326,7 @@ Their `--help` output serves people, while `--json`, `--yaml`, and `--describe` 
 contracts. The generated
 [tools.json](ci-skills/tools.json) records options, access protocols, and target protocols. GitLab writes start with a
 dry-run plan and require a confirmed plan digest to apply. Their subcommand contracts point to the applicable
-[result schema](schemas/results/). Parser-to-catalog checks reject undeclared arguments and abbreviated flag names;
+[result schema](ci-skills/schemas/results/). Parser-to-catalog checks reject undeclared arguments and abbreviated flag names;
 authentication continues through the shared target and credential resolvers.
 Live validation uses the runtime setup and read-back described in the
 [smoke cases](docs/phases/CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back).
@@ -540,6 +537,10 @@ not, as long as the capability it proves was demonstrated at least once. Each li
 its own `status`.
 
 ## Validation
+
+Repository development uses separate Bash tooling: the `install.sh` adapter starts the Python copy installer, and
+`bless.sh` and `scripts/ci/static.sh` share the checks in `lib/bash/automation/bless.bash`. The validation workflow
+also runs the declared Python and Bats tests. These development gates are separate from installed skill commands.
 
 Local `bless.sh` runs static checks before commit. GitHub runs the same shared lint checks, including ShellCheck,
 workflow/YAML and Markdown checks, schemas, diff hygiene, secrets, and Ruff lint/format. Existing GitHub jobs also

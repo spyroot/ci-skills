@@ -32,7 +32,8 @@ class WorkflowExecutor(SkillExecutor[StateT]):
         :param callbacks: Ordered callbacks sharing this exact state instance.
         :raises TypeError: The supplied context does not implement SkillState,
             or a configuration hook returns a non-mapping value.
-        :raises ValueError: A callback already belongs to another state.
+        :raises ValueError: A callback belongs to another state or its required
+            plugin configuration is unavailable.
         """  # noqa: DOC502 - SkillExecutor validates state and callback ownership.
         self._context = context
         super().__init__(callbacks)

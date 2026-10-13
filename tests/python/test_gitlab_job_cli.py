@@ -27,6 +27,7 @@ COLLECT = import_script_module("lib.python.core.gitlab.job_read")
 REPORT = import_script_module("lib.python.core.report")
 RUNTIME = import_script_module("lib.python.core.runtime")
 JOBS = import_script_module("lib.python.core.gitlab.gitlab_jobs")
+JOB_FIELDS = import_script_module("lib.python.core.gitlab.gitlab_job_fields")
 SCRIPT = import_script_module("gitlab_job")
 TARGET = import_script_module("lib.python.core.target")
 
@@ -83,6 +84,30 @@ def _list_session() -> SimpleNamespace:
             "consuming_project": {"commit": None, "source": None},
         },
     )
+
+
+def test_shared_job_fields_convert_one_gitlab_api_record() -> None:
+    """Expose fields common to project job and pipeline job responses.
+
+    :returns: None; assertions in the body validate the direct conversion contract.
+    """
+    fields = JOB_FIELDS.GitLabJobFields.from_api(
+        {
+            "id": 123,
+            "name": "build",
+            "stage": "test",
+            "status": "success",
+            "failure_reason": None,
+        }
+    )
+
+    assert fields.public() == {
+        "id": 123,
+        "name": "build",
+        "stage": "test",
+        "status": "success",
+        "failure_reason": None,
+    }
 
 
 def test_live_job_uses_exact_gitlab_project_access_and_bound_token(
@@ -432,7 +457,8 @@ def test_list_uses_bound_project_and_emits_schema_valid_output(
     data = json.loads(output) if mode == "--json" else yaml.safe_load(output)
     schema = json.loads(
         (
-            Path(__file__).parents[2] / "schemas/results/gitlab-job-list.schema.json"
+            Path(__file__).parents[2]
+            / "ci-skills/schemas/results/gitlab-job-list.schema.json"
         ).read_text(encoding="utf-8")
     )
     Draft202012Validator(schema).validate(data)
