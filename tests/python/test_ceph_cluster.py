@@ -322,6 +322,83 @@ def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
     assert result["condition"] == "ATTENTION"
 
 
+def test_ceph_cluster_discovers_default_operator_by_name_without_metadata_label(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Discover the default Rook Deployment by its exact namespace and name.
+
+    :param monkeypatch: Pytest fixture replacing the bounded deployment read.
+    :param tmp_path: Directory receiving the selected kubeconfig.
+    :returns: None; assertions prove omitted operator discovery is label-independent.
+    """
+    ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
+    kubernetes = import_script_module("lib.python.core.kubernetes.kubernetes")
+    runtime = import_script_module("lib.python.core.runtime")
+    target = _target(tmp_path)
+    namespace = "openshift-storage"
+    operator = "rook-ceph-operator"
+    calls: MutableSequence[tuple[str, ...]] = []
+
+    def fake_run_bounded(
+        argv: Sequence[str],
+        **_kwargs: Union[str, int, bool, Path, Sequence[str], Mapping[str, str], None],
+    ) -> CommandResult:
+        """Return the live-shaped default operator Deployment.
+
+        :param argv: Native discovery command issued by the Ceph reader.
+        :param **_kwargs: Unused bounded-command options.
+        :returns: Deployment list with no metadata ``app`` label.
+        """
+        command = tuple(str(part) for part in argv)
+        calls.append(command)
+        return _result(
+            runtime,
+            command,
+            {
+                "items": [
+                    {
+                        "metadata": {
+                            "namespace": namespace,
+                            "name": operator,
+                            "labels": {"app.kubernetes.io/name": "rook-ceph"},
+                        },
+                        "spec": {"selector": {"matchLabels": {"app": operator}}},
+                        "status": {"readyReplicas": 1},
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(kubernetes, "run_command_bounded", fake_run_bounded)
+
+    reader = ceph_cluster.CephClusterRead(
+        target,
+        _args(namespace=namespace, operator=None),
+    )
+
+    assert calls == [
+        (
+            "oc",
+            "--kubeconfig",
+            str(target.kubernetes.kubeconfig),
+            "--context",
+            "unit-context",
+            "-n",
+            namespace,
+            "get",
+            "deployments",
+            "--field-selector",
+            f"metadata.name={operator}",
+            "-o",
+            "json",
+        )
+    ]
+    status = reader.commands["status"]
+    assert status[status.index("exec") + 1] == f"deploy/{operator}"
+    assert f"--conf=/var/lib/rook/{namespace}/{namespace}.config" in status
+
+
 def test_ceph_cluster_filters_pods_by_node_ready_and_condition(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

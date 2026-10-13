@@ -284,16 +284,18 @@ if tool == "kubectl":
             resource == "deployments"
             and "-n" in kargs
             and kargs[kargs.index("-n") + 1] == "rook-ceph"
-            and "-l" in kargs
-            and kargs[kargs.index("-l") + 1] == "app=rook-ceph-operator"
+            and "--field-selector" in kargs
+            and kargs[kargs.index("--field-selector") + 1]
+            == "metadata.name=rook-ceph-operator"
         ):
             emit({
                 "items": [{
                     "metadata": {
                         "namespace": "rook-ceph",
                         "name": "rook-ceph-operator",
-                        "labels": {"app": "rook-ceph-operator"},
+                        "labels": {"app.kubernetes.io/name": "rook-ceph"},
                     },
+                    "spec": {"selector": {"matchLabels": {"app": "rook-ceph-operator"}}},
                     "status": {"readyReplicas": 1},
                 }],
             })
