@@ -115,9 +115,10 @@ A revision is reported `verified` when it came from a clean tracked skill
 subtree, or when the installer's `INSTALLATION.json` records that clean source
 revision and its package checksum still matches the installed bytes.
 `--revision` remains a claim. The invoking project's `CI_COMMIT_SHA` is recorded
-separately in `consuming_project`. The repository acceptance checker resolves
-the recorded source commit and compares the receipt's functional checksum with
-its own calculation for the candidate. A documentation or test edit can change
+separately in `consuming_project`. The repository acceptance checker validates
+the recorded revision fields and compares the receipt's functional checksum with
+its own calculation for the candidate. The original commit need not remain in
+the candidate's Git history. A documentation or test edit can change
 the package checksum without invalidating live proof of unchanged runtime files.
 
 ## Full three-authority live receipt

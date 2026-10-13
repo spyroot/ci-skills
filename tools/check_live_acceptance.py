@@ -27,7 +27,6 @@ import argparse
 import json
 import re
 import runpy
-import subprocess
 from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -222,14 +221,12 @@ def _load_receipt_dirs(paths: Sequence[Path]) -> Mapping[str, JSONObject]:
     return receipts
 
 
-def _check_source_revision(receipt: JSONObject, repository_root: Path) -> Sequence[str]:
-    """Check the receipt's verified revision without equating whole package trees.
+def _check_source_revision(receipt: JSONObject) -> Sequence[str]:
+    """Validate recorded source provenance independently of local Git history.
 
     :param receipt: Live receipt retaining its original tested source revision.
-    :param repository_root: Git checkout containing the recorded source commit.
-    :returns: Stable reasons when the revision is unverified or unavailable.
-    :raises UnicodeError: If Git output cannot be decoded using the process encoding.
-    """  # noqa: DOC502 - The Git process decodes text and can raise UnicodeError.
+    :returns: Stable reasons when the revision is unverified or inconsistent.
+    """
     skill = _mapping(receipt.get("skill"))
     source = _mapping(skill.get("revision"))
     revision = receipt.get("tested_revision")
@@ -243,40 +240,17 @@ def _check_source_revision(receipt: JSONObject, repository_root: Path) -> Sequen
         or source.get("value") != revision
     ):
         return ["candidate_revision_unverified"]
-
-    try:
-        source_commit = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repository_root),
-                "cat-file",
-                "-e",
-                f"{revision}^{{commit}}",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return ["candidate_revision_unavailable"]
-    if source_commit.returncode != 0:
-        return ["candidate_revision_unavailable"]
     return []
 
 
-def check_candidate_identity(
-    receipt: JSONObject, repository_root: Path, skill_root: Path
-) -> Sequence[str]:
+def check_candidate_identity(receipt: JSONObject, skill_root: Path) -> Sequence[str]:
     """Compare recorded functional bytes with the candidate runtime and schemas.
 
     :param receipt: Live receipt with a verified source and functional checksum.
-    :param repository_root: Git checkout containing the recorded source commit.
     :param skill_root: Candidate's ``ci-skills`` directory.
     :returns: Stable reasons when the source or functional checksum cannot match.
-    :raises UnicodeError: If Git output cannot be decoded using the process encoding.
-    """  # noqa: DOC502 - Source revision verification decodes subprocess output.
-    problems = _check_source_revision(receipt, repository_root)
+    """
+    problems = _check_source_revision(receipt)
     if problems:
         return problems
     try:
@@ -774,7 +748,6 @@ class AcceptanceReview:
         receipts: Mapping[str, JSONObject],
         skill_root: Path,
         now: datetime,
-        repository_root: Optional[Path],
     ):
         """Retain receipt views and initialize candidate-bound evaluation state.
 
@@ -782,7 +755,6 @@ class AcceptanceReview:
         :param receipts: Setup and operation receipt objects keyed by unique name.
         :param skill_root: Candidate skill tree whose current bytes are fingerprinted.
         :param now: Timezone-aware reference time for receipt freshness.
-        :param repository_root: Checkout for exact source verification, or None to omit it.
         :raises ImportError: If shared provenance code cannot be loaded.
         :raises OSError: If a candidate skill source file cannot be read.
         :raises ValueError: If the candidate source tree cannot be fingerprinted.
@@ -793,7 +765,6 @@ class AcceptanceReview:
         self.receipts = receipts
         self.skill_root = skill_root
         self.now = now
-        self.repository_root = repository_root
         self.digest = tree_digest(skill_root)["digest"]
         self.functional_digest = functional_digest(skill_root)
         self.problems: MutableSequence[str] = []
@@ -845,13 +816,9 @@ class AcceptanceReview:
                         found.append(f"{name}:setup_context_incomplete")
                 else:
                     found = [f"{name}:setup_kind_unexpected"]
-                if self.repository_root is not None:
-                    found.extend(
-                        f"{name}:{reason}"
-                        for reason in _check_source_revision(
-                            receipt, self.repository_root
-                        )
-                    )
+                found.extend(
+                    f"{name}:{reason}" for reason in _check_source_revision(receipt)
+                )
             except (AttributeError, KeyError, TypeError, ValueError):
                 found = [f"{name}:receipt_invalid_shape"]
             self.problems.extend(found)
@@ -908,13 +875,9 @@ class AcceptanceReview:
                 found = _check_gitlab_receipt(
                     name, receipt, required, self.functional_digest, self.now
                 )
-                if self.repository_root is not None:
-                    found.extend(
-                        f"{name}:{reason}"
-                        for reason in _check_source_revision(
-                            receipt, self.repository_root
-                        )
-                    )
+                found.extend(
+                    f"{name}:{reason}" for reason in _check_source_revision(receipt)
+                )
             except (AttributeError, KeyError, TypeError, ValueError):
                 found = [f"{name}:receipt_invalid_shape"]
             self.problems.extend(found)
@@ -988,7 +951,6 @@ def evaluate(
     receipts: Mapping[str, JSONObject],
     skill_root: Path,
     now: Optional[datetime] = None,
-    repository_root: Optional[Path] = None,
 ) -> AcceptanceResult:
     """Compare action receipts with the initial authenticated runtime setup.
 
@@ -996,7 +958,6 @@ def evaluate(
     :param receipts: Parsed operation and setup receipts keyed by file name.
     :param skill_root: Candidate skill tree used for digest comparison.
     :param now: Reference time for freshness, or None to read the current UTC time.
-    :param repository_root: Checkout for source verification, or None to omit it.
     :returns: Acceptance status, accepted receipts, and stable problem reasons.
     :raises ImportError: If shared provenance or authority modules cannot be loaded.
     :raises OSError: If a candidate source file cannot be read for its digest.
@@ -1008,7 +969,6 @@ def evaluate(
         receipts,
         skill_root,
         now if now is not None else datetime.now(UTC),
-        repository_root,
     )
     review.setup_receipts()
     review.operation_receipts()
@@ -1068,7 +1028,6 @@ def main() -> int:
             setup,
             receipts,
             skill_path,
-            repository_root=root,
         )
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {

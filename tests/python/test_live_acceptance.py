@@ -196,6 +196,7 @@ def _base_operation(
     :returns: Synthetic receipt with matching target, identity, and read-back.
     """
     context = _context(setup)
+    revision = deepcopy(setup["gitlab-access.json"]["skill"]["revision"])
     receipt = {
         "schema_version": "1.0",
         "kind": kind,
@@ -203,10 +204,11 @@ def _base_operation(
         "execution_host": context["execution_host"],
         "origin": context["origin"],
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
+        "tested_revision": revision["value"],
         "skill": {
             "digest": _digest(),
             "functional_digest": _functional_digest(),
-            "revision": {"value": "a" * 40, "verified": True},
+            "revision": revision,
         },
         "identity": {"username": context["username"], "id": context["identity_id"]},
         "credential_source": context["credential_source"],
@@ -257,7 +259,7 @@ def _runner_create(setup: Mapping[str, JSONObject]) -> MutableMapping[str, JSONV
         "origin": context["origin"],
         "credential_source": context["credential_source"],
         "skill_digest": _digest(),
-        "tested_revision": "a" * 40,
+        "tested_revision": receipt["tested_revision"],
         "runner_id": runner_id,
         "before": {"id": runner_id, "project_ids": [context["target_id"]]},
         "delete": {
@@ -588,7 +590,7 @@ def test_real_operation_envelope_keeps_cleanup_shape(tmp_path: Path) -> None:
 
     assert receipt["plan"]["one_time_sink_required"] is True
     assert ACCEPTANCE._check_gitlab_receipt(
-        path.name, receipt, required, _digest(), datetime.now(UTC)
+        path.name, receipt, required, _functional_digest(), datetime.now(UTC)
     ) == ["runner.json:runner_smoke_cleanup_unproven"]
 
 
@@ -697,7 +699,7 @@ def test_candidate_identity_accepts_document_change_from_nonancestor_commit(
         ).returncode
         == 1
     )
-    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == []
+    assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == []
     (skill_root / "SKILL.md").write_text("different\n", encoding="utf-8")
     test_file = skill_root / "tests" / "python" / "test_fixture.py"
     test_file.parent.mkdir(parents=True)
@@ -711,13 +713,13 @@ def test_candidate_identity_accepts_document_change_from_nonancestor_commit(
     subprocess.run(
         ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
     )
-    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == []
+    assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == []
 
 
-def test_candidate_identity_rejects_runtime_change_and_unavailable_source(
+def test_candidate_identity_rejects_runtime_change(
     tmp_path: Path,
 ) -> None:
-    """Reject changed functional input and an unavailable tested commit.
+    """Reject changed functional input even with valid recorded provenance.
 
     :param tmp_path: Pytest directory holding divergent fixture commits.
 
@@ -739,13 +741,80 @@ def test_candidate_identity_rejects_runtime_change_and_unavailable_source(
     subprocess.run(
         ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
     )
-    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
+    assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == [
         "candidate_functional_digest_mismatch"
     ]
-    receipt["tested_revision"] = "0" * 40
-    receipt["skill"]["revision"]["value"] = "0" * 40
-    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
-        "candidate_revision_unavailable"
+
+
+def test_candidate_identity_accepts_source_absent_from_fresh_clone(
+    tmp_path: Path,
+) -> None:
+    """Keep equal functional evidence usable after squash source refs disappear.
+
+    :param tmp_path: Pytest directory holding source and fresh candidate clones.
+    :returns: None; assertions validate absent source and accepted evidence.
+    """
+    repository, skill_root, tested, _candidate = _sibling_skill_commits(tmp_path)
+    receipt = _candidate_identity_receipt(tested, skill_root)
+    candidate_repository = tmp_path / "candidate"
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "--quiet",
+            "--no-local",
+            "--single-branch",
+            "--branch",
+            "main",
+            str(repository),
+            str(candidate_repository),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(candidate_repository),
+                "cat-file",
+                "-e",
+                f"{tested}^{{commit}}",
+            ],
+            capture_output=True,
+            check=False,
+        ).returncode
+        != 0
+    )
+
+    assert (
+        ACCEPTANCE.check_candidate_identity(receipt, candidate_repository / "ci-skills")
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "revision_fields",
+    [{"value": "not-a-full-sha"}, {"verified": False}, {"value": "0" * 40}],
+    ids=["malformed", "unverified", "inconsistent"],
+)
+def test_candidate_identity_rejects_invalid_recorded_revision(
+    tmp_path: Path,
+    revision_fields: JSONObject,
+) -> None:
+    """Reject malformed, unverified or inconsistent revision provenance.
+
+    :param tmp_path: Pytest directory containing the candidate skill tree.
+    :param revision_fields: Invalid fields overriding valid source provenance.
+    :returns: None; assertions validate rejection without changing runtime bytes.
+    """
+    _repository, skill_root, tested, _candidate = _sibling_skill_commits(tmp_path)
+    receipt = _candidate_identity_receipt(tested, skill_root)
+    receipt["skill"]["revision"].update(revision_fields)
+
+    assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == [
+        "candidate_revision_unverified"
     ]
 
 
