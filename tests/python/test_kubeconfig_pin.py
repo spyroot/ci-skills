@@ -37,9 +37,17 @@ def _modules() -> tuple[ModuleType, ModuleType, ModuleType]:
     """
     return (
         import_script_module("lib.python.access.credentials"),
-        import_script_module("lib.python.access.access"),
+        import_script_module("lib.python.access.kubernetes"),
         import_script_module("lib.python.core.target"),
     )
+
+
+def _kubernetes_credentials() -> ModuleType:
+    """Load the Kubernetes credential module that owns kubeconfig pinning.
+
+    :returns: Credential source and digest verification module.
+    """
+    return import_script_module("lib.python.access.kubernetes_credentials")
 
 
 def _target(tmp_path: Path, kubeconfig: Path) -> Target:
@@ -90,12 +98,12 @@ def test_binding_records_a_digest_for_every_kubeconfig(
 
     :returns: None; assertions in the body validate the regression.
     """
-    credentials, _access, _target_module = _modules()
+    _credentials, _access, _target_module = _modules()
     bound = _target(tmp_path, kubeconfig)
 
     assert len(bound.sources.kubeconfig_digests) == len(bound.sources.kubeconfig_files)
     assert all(len(digest) == 64 for digest in bound.sources.kubeconfig_digests)
-    credentials.assert_kubeconfig_unchanged(bound.sources)
+    _kubernetes_credentials().assert_kubeconfig_unchanged(bound.sources)
 
 
 def test_an_untouched_kubeconfig_does_not_block(
@@ -108,12 +116,12 @@ def test_an_untouched_kubeconfig_does_not_block(
 
     :returns: None; assertions in the body validate the regression.
     """
-    credentials, access, _target_module = _modules()
+    _credentials, access, _target_module = _modules()
     bound = _target(tmp_path, kubeconfig)
 
     kubeconfig.read_bytes()
 
-    credentials.assert_kubeconfig_unchanged(bound.sources)
+    _kubernetes_credentials().assert_kubeconfig_unchanged(bound.sources)
     assert "--kubeconfig" in access.kubectl_argv(bound, "get", "nodes")
 
 
@@ -127,15 +135,15 @@ def test_a_kubeconfig_rewritten_after_verification_blocks(
 
     :returns: None; assertions in the body validate the regression.
     """
-    credentials, _access, _target_module = _modules()
+    _credentials, _access, target_module = _modules()
     bound = _target(tmp_path, kubeconfig)
 
     kubeconfig.write_text(REWRITTEN, encoding="utf-8")
 
     with pytest.raises(
-        credentials.TargetError, match="kubeconfig_changed_during_invocation"
+        target_module.TargetError, match="kubeconfig_changed_during_invocation"
     ):
-        credentials.assert_kubeconfig_unchanged(bound.sources)
+        _kubernetes_credentials().assert_kubeconfig_unchanged(bound.sources)
 
 
 def test_every_kubernetes_command_rechecks_before_it_is_built(
@@ -170,7 +178,7 @@ def test_a_changed_kubeconfig_blocks_the_collector_rather_than_degrading_it(
     :returns: None; assertions in the body validate the regression.
     """
     _credentials, _access, _target_module = _modules()
-    collect = import_script_module("lib.python.core.collect")
+    collect = import_script_module("lib.python.core.kubernetes.storage")
     bound = _target(tmp_path, kubeconfig)
 
     kubeconfig.write_text(REWRITTEN, encoding="utf-8")
@@ -196,7 +204,7 @@ def test_an_unbound_target_is_not_checked(tmp_path: Path, kubeconfig: Path) -> N
 
     :returns: None; assertions in the body validate the regression.
     """
-    credentials, _access, target_module = _modules()
+    _credentials, _access, target_module = _modules()
     path = tmp_path / "target.toml"
     path.write_text(
         "[github]\n"
@@ -214,7 +222,7 @@ def test_an_unbound_target_is_not_checked(tmp_path: Path, kubeconfig: Path) -> N
     )
     unbound = target_module.load_target(path)
 
-    credentials.assert_kubeconfig_unchanged(unbound.sources)
+    _kubernetes_credentials().assert_kubeconfig_unchanged(unbound.sources)
 
 
 def _target_with_search_path(tmp_path: Path, entries: str) -> tuple[ModuleType, Path]:

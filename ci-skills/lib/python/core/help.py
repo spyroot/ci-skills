@@ -66,12 +66,14 @@ class CommandHelp:
         :raises TypeError: If the field is not a mapping of text keys to text values.
         """
         value = self.document.get(name, {})
-        if not isinstance(value, Mapping) or any(
-            not isinstance(key, str) or not isinstance(item, str)
-            for key, item in value.items()
-        ):
+        if not isinstance(value, Mapping):
             raise TypeError(f"catalogue field {name} must map text to text")
-        return {key: item for key, item in value.items()}
+        labels: dict[str, str] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not isinstance(item, str):
+                raise TypeError(f"catalogue field {name} must map text to text")
+            labels[key] = item
+        return labels
 
     def examples(self, program: str) -> Sequence[str]:
         """Read the command's examples with a discovery example as the default.

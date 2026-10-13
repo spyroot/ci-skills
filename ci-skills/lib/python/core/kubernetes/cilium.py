@@ -241,7 +241,7 @@ def health_findings(value: JSONValue) -> Sequence[JSONObject]:
     """
     if not isinstance(value, Mapping):
         return []
-    findings = [
+    findings: MutableSequence[JSONObject] = [
         {
             "component": "local",
             "path": path,

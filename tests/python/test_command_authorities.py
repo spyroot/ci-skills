@@ -73,6 +73,18 @@ def _unexpected() -> Mock:
     return Mock(side_effect=AssertionError("unselected authority was contacted"))
 
 
+def _skill_identity() -> JSONObject:
+    """Return the minimum complete installed-skill identity for access receipts.
+
+    :returns: Identity with the revision and consuming-project provenance required
+        by the shared access reporter.
+    """
+    return {
+        "revision": {"value": "a" * 40},
+        "consuming_project": {"commit": None, "source": None},
+    }
+
+
 def test_ceph_collector_uses_only_kubernetes_authority(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -86,7 +98,9 @@ def test_ceph_collector_uses_only_kubernetes_authority(
     """
     cli = import_script_module("lib.python.core.cli")
     access = import_script_module("lib.python.access.access")
+    shared = import_script_module("lib.python.access.shared")
     credentials = import_script_module("lib.python.access.credentials")
+    sources = import_script_module("lib.python.access.sources")
     path = _target(
         tmp_path,
         '[kubernetes]\ncontext = "unit"\n'
@@ -98,17 +112,17 @@ def test_ceph_collector_uses_only_kubernetes_authority(
     monkeypatch.setattr(
         credentials,
         "_kubernetes_source",
-        lambda _target: (credentials.CredentialSource("file:/unit/kubeconfig", {}), ()),
+        lambda _target: (sources.CredentialSource("file:/unit/kubeconfig", {}), ()),
     )
     monkeypatch.setattr(
         credentials,
         "resolve_skill_identity",
-        lambda _revision: {"revision": {"value": "a" * 40}},
+        lambda _revision: _skill_identity(),
     )
     monkeypatch.setattr(
         access,
         "kubernetes_access",
-        lambda _target, *, cilium=False: access.Surface(
+        lambda _target, *, cilium=False: shared.Surface(
             "kubernetes", "PASS", "unit-admin", "unit -> api", ["live-read"], None
         ),
     )
@@ -148,7 +162,9 @@ def test_gitlab_job_does_not_require_cluster_or_github(
     """
     cli = import_script_module("lib.python.core.cli")
     access = import_script_module("lib.python.access.access")
+    shared = import_script_module("lib.python.access.shared")
     credentials = import_script_module("lib.python.access.credentials")
+    sources = import_script_module("lib.python.access.sources")
     path = _target(tmp_path, '[gitlab]\nurl = "https://gitlab.example.test"\n')
     monkeypatch.setattr(access, "github_access", _unexpected())
     monkeypatch.setattr(access, "kubernetes_access", _unexpected())
@@ -156,17 +172,17 @@ def test_gitlab_job_does_not_require_cluster_or_github(
     monkeypatch.setattr(
         credentials,
         "_token_source",
-        lambda *_args, **_kwargs: credentials.CredentialSource("env:GITLAB_TOKEN", {}),
+        lambda *_args, **_kwargs: sources.CredentialSource("env:GITLAB_TOKEN", {}),
     )
     monkeypatch.setattr(
         credentials,
         "resolve_skill_identity",
-        lambda _revision: {"revision": {"value": "a" * 40}},
+        lambda _revision: _skill_identity(),
     )
     monkeypatch.setattr(
         access,
         "gitlab_access",
-        lambda _target: access.Surface(
+        lambda _target: shared.Surface(
             "gitlab", "PASS", "unit-admin", "gitlab.example.test", ["live-read"], None
         ),
     )

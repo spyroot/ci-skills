@@ -26,10 +26,10 @@ from typing import Final, Optional, TypeGuard, TypeVar
 from urllib.parse import urlsplit
 
 from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.cli_api import response_decoder
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
-    is_json_value,
     json_integer,
     json_object,
     json_objects,
@@ -41,7 +41,7 @@ from lib.python.core.kubernetes.kubernetes import (
     KubernetesError,
     KubernetesService,
 )
-from lib.python.core.resources import ResourceSet
+from lib.python.core.kubernetes.resources import ResourceSet
 from lib.python.core.runtime import error_class
 from lib.python.core.schema import (
     TOOLBOX_SCHEMA,
@@ -157,11 +157,12 @@ def _toolbox_document(source: Path) -> JSONObject:
     :raises SchemaError: An installed schema fails its meta-schema.
     :raises RecursionError: A document exceeds supported nesting depth.
     """  # noqa: DOC503 - file and installed-schema validation errors propagate
+    text = source.read_text(encoding="utf-8")
     try:
-        document: object = json.loads(source.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+        document = response_decoder().decode(text)
+    except ValueError as exc:
         raise SpecificationError("invalid_specification:/:json") from exc
-    if not is_json_value(document) or not isinstance(document, Mapping):
+    if not isinstance(document, Mapping):
         raise SpecificationError("invalid_specification:/:type")
     validate_specification(document, TOOLBOX_SCHEMA)
     return document
@@ -1262,7 +1263,7 @@ class BuildToolbox(K8SCallback[BuildAction]):
             != action.fingerprint
         ):
             raise ToolboxError("secret_ownership_conflict")
-        secret = {
+        secret: JSONObject = {
             "apiVersion": "v1",
             "data": {
                 ".dockerconfigjson": base64.b64encode(action.dockerconfig).decode(

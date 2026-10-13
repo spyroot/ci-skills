@@ -1,0 +1,68 @@
+{
+  "access": {
+    "harbor": {
+      "credential_source": "file:path:1f8b6bf528f9",
+      "granted_actions": [
+        "delete",
+        "pull",
+        "push"
+      ],
+      "identity": "spyroot",
+      "origin": "https://harbor.dcloud.run",
+      "repository": "hott/ci-skills-toolbox"
+    },
+    "kubernetes": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "captured_at": "2026-10-13T06:46:19.185845+00:00",
+  "cleanup": {
+    "failures": [],
+    "status": "PASS"
+  },
+  "errors": [],
+  "filters": {},
+  "kind": "harbor_pull",
+  "operation": "pull",
+  "plan_digest": "4b839898ca1a0d986fbf790a17394b1d4145bf63ce4428973f2ab298e54a700e",
+  "records": [
+    {
+      "action": "VERIFIED",
+      "callback": "PullImage",
+      "image": "harbor.dcloud.run/hott/ci-skills-toolbox@sha256:64af6d5d876e3520cdd2f00fe6af74c64cfed296b4edd103d44e31d2344df1dd",
+      "pods": [
+        {
+          "image_id": "harbor.dcloud.run/hott/ci-skills-toolbox@sha256:64af6d5d876e3520cdd2f00fe6af74c64cfed296b4edd103d44e31d2344df1dd",
+          "name": "ci-skills-pull-pr67-pull-vqvdl"
+        }
+      ],
+      "verified": true
+    }
+  ],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
+    "file_count": 139,
+    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+    "revision": {
+      "source": "installer_record",
+      "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": "path:5e5380df1eda",
+  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+  "trace_artifact": "../traces/30.jsonl"
+}

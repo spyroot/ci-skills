@@ -1,0 +1,2 @@
+{"component": "k8s_verify_mtu_consistency", "level": "info", "operation": "apply", "result": "STARTED", "run_id": "ci-skills-pr67-a9ef7ff4", "timestamp": "2026-10-13T06:28:24.631225+00:00"}
+{"component": "k8s_verify_mtu_consistency", "level": "info", "operation": "apply", "result": "PASS", "run_id": "ci-skills-pr67-a9ef7ff4", "timestamp": "2026-10-13T06:28:30.789282+00:00"}

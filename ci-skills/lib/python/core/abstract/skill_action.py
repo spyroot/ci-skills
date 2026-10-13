@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
-from lib.python.core.target import Target
+if TYPE_CHECKING:
+    from lib.python.core.target import Target
 
 
 class SkillAction(ABC):

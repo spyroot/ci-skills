@@ -100,7 +100,8 @@ jobs:
             --arg-type-hints-in-docstring=False --check-return-types=False \
             --allow-init-docstring=True \
             ci-skills/lib/python/core/abstract \
-            ci-skills/lib/python/core/gitlab/abstract_github_callback.py \
+            ci-skills/lib/python/core/executor.py \
+            ci-skills/lib/python/core/gitlab/callback.py \
             ci-skills/lib/python/core/gitlab/gitlab_action.py \
             ci-skills/lib/python/core/gitlab/gitlab_runners.py \
             ci-skills/lib/python/core/gitlab/gitlab_actions.py \
@@ -125,22 +126,24 @@ jobs:
           check-jsonschema --check-metaschema \
             schemas/ci-result.schema.json \
             schemas/smoke-result.schema.json \
-            schemas/results/gitlab-action.schema.json \
-            schemas/results/gitlab-runner-tag.schema.json \
-            schemas/results/gitlab-runner-read.schema.json \
-            schemas/results/gitlab-runner-delete.schema.json
-          check-jsonschema --schemafile schemas/results/gitlab-runner-tag.schema.json \
+            ci-skills/schemas/results/gitlab-action.schema.json \
+            ci-skills/schemas/results/gitlab-job-list.schema.json \
+            ci-skills/schemas/results/toolbox-workflow.schema.json \
+            ci-skills/schemas/results/gitlab-runner-tag.schema.json \
+            ci-skills/schemas/results/gitlab-runner-read.schema.json \
+            ci-skills/schemas/results/gitlab-runner-delete.schema.json
+          check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             tests/acceptance/runner-tag/*.json
           if compgen -G 'tests/acceptance/runner-lifecycle/*-get.json' >/dev/null; then
-            check-jsonschema --schemafile schemas/results/gitlab-runner-read.schema.json \
+            check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-read.schema.json \
               tests/acceptance/runner-lifecycle/*-get.json
           fi
           if compgen -G 'tests/acceptance/runner-lifecycle/*-list.json' >/dev/null; then
-            check-jsonschema --schemafile schemas/results/gitlab-runner-read.schema.json \
+            check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-read.schema.json \
               tests/acceptance/runner-lifecycle/*-list.json
           fi
           if compgen -G 'tests/acceptance/runner-lifecycle/*-delete-*.json' >/dev/null; then
-            check-jsonschema --schemafile schemas/results/gitlab-runner-delete.schema.json \
+            check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-delete.schema.json \
               tests/acceptance/runner-lifecycle/*-delete-*.json
           fi
       - name: Exercise callback, target, install, and command contracts
@@ -148,25 +151,21 @@ jobs:
         run: |
           mkdir -p reports/raw
           python -W error -m pytest -q --junitxml=reports/raw/validate-pytest.xml \
-            tests/python/test_target_runtime.py \
-            tests/python/test_target_resolution.py \
-            tests/python/test_gitlab_access.py \
-            tests/python/test_installed_package.py \
-            tests/python/test_gitlab_actions.py \
-            tests/python/test_gitlab_runner_recovery.py \
-            tests/python/test_gitlab_runner_lifecycle.py \
-            tests/python/test_catalog.py \
-            tests/python/test_callback_interface.py \
-            tests/python/test_callbacks.py \
-            tests/python/test_toolbox_workflows.py \
-            tests/python/test_propositions.py \
-            tests/python/test_ci_required_result.py \
-            tests/python/test_validate_workflow_policy.py
+            --ignore=tests/python/test_endpoints.py \
+            --ignore=tests/python/test_agent_profile.py \
+            --ignore=tests/python/test_installer.py \
+            --ignore=tests/python/test_installed_package.py \
+            --ignore=tests/python/test_live_acceptance.py \
+            tests/python
       - name: Exercise static-gate negative paths
         id: bats
         run: |
           mkdir -p reports/raw
-          bats --tap tests/bash/bless.bats | tee reports/raw/validate-bats.tap
+          bats --tap \
+            tests/bash/api.bats \
+            tests/bash/binary_build.bats \
+            tests/bash/bless.bats \
+            | tee reports/raw/validate-bats.tap
       - name: Exercise offline acceptance receipt evaluation
         id: acceptance
         run: |
@@ -304,7 +303,9 @@ jobs:
         run: |
           mkdir -p reports/raw
           python -W error -m pytest -q --junitxml=reports/raw/install-pytest.xml \
-            tests/python/test_agent_profile.py tests/python/test_installer.py
+            tests/python/test_agent_profile.py \
+            tests/python/test_installer.py \
+            tests/python/test_installed_package.py
           bats --tap tests/bash/install.bats | tee reports/raw/install-bats.tap
       - name: Check reStructuredText API documentation
         id: docs

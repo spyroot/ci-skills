@@ -26,8 +26,10 @@ from pathlib import Path
 from types import FrameType
 from typing import Optional
 
-from lib.python.access.access import check_access, kubectl_argv, kubernetes_env, oc_argv
-from lib.python.access.credentials import Sources, bind_sources
+from lib.python.access.access import check_access
+from lib.python.access.credentials import bind_sources
+from lib.python.access.kubernetes import kubectl_argv, kubernetes_env, oc_argv
+from lib.python.access.sources import Sources
 from lib.python.core.cli import _failure, output_mode
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.json_types import JSONObject, JSONValue
@@ -264,10 +266,11 @@ def _read_nodes(target: Target, selected: Optional[str]) -> tuple[str, ...]:
         ),
         "nodes",
     )
-    if not isinstance(payload, Mapping) or not isinstance(payload.get("items"), list):
+    items = payload.get("items") if isinstance(payload, Mapping) else None
+    if not isinstance(items, list):
         raise TypeError("nodes:invalid_list_response")
     names = []
-    for item in payload["items"]:
+    for item in items:
         metadata = item.get("metadata") if isinstance(item, Mapping) else None
         name = metadata.get("name") if isinstance(metadata, Mapping) else None
         if not isinstance(name, str) or not DNS_NAME.fullmatch(name) or len(name) > 253:
@@ -425,10 +428,11 @@ def _marked_pods(target: Target, namespace: str, marker: str) -> Sequence[str]:
         ),
         "cleanup_pods",
     )
-    if not isinstance(payload, Mapping) or not isinstance(payload.get("items"), list):
+    items = payload.get("items") if isinstance(payload, Mapping) else None
+    if not isinstance(items, list):
         raise TypeError("cleanup_pods:invalid_list_response")
     found = []
-    for item in payload["items"]:
+    for item in items:
         if not isinstance(item, Mapping):
             raise TypeError("cleanup_pods:invalid_item")
         spec = item.get("spec")
@@ -604,7 +608,7 @@ class MtuRead:
             and verified
             and not any(len(values) > 1 for values in mtu_by_interface.values()),
         }
-        findings = [
+        findings: Sequence[JSONObject] = [
             {
                 "code": "physical_mtu_mismatch",
                 "action": "inspect_node_physical_nic_mtu",

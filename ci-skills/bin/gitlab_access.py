@@ -19,15 +19,10 @@ from typing import Optional
 
 import _bootstrap  # noqa: F401
 from lib.python.core.catalog import describe
-from lib.python.core.cli import (
-    _failure,
-    log_event,
-    output_mode,
-    parser,
-    resolve_gitlab_target,
-    setup_gitlab_operation,
-)
-from lib.python.core.json_types import JSONObject
+from lib.python.core.cli import _failure, output_mode, parser
+from lib.python.core.gitlab.cli import resolve_gitlab_target, setup_gitlab_operation
+from lib.python.core.json_types import JSONObject, json_string
+from lib.python.core.logging import log_event
 from lib.python.core.portable import write_portable_receipt
 from lib.python.core.report import emit
 from lib.python.core.target import TargetError, select_gitlab_reference
@@ -133,15 +128,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             source = "receipt"
             write_portable_receipt(result, args.receipt_out)
         rendered = emit(result, output_mode(args), args.output_dir)
+        status = json_string(result["status"])
         log_event(
             args,
             "gitlab_access",
             "result",
-            result["status"],
+            status,
             elapsed=time.monotonic() - started,
         )
         sys.stdout.write(rendered)
-        return exit_code(result["status"])
+        return exit_code(status)
     except (TargetError, OSError, RuntimeError, ValueError, TypeError) as exc:
         source = getattr(exc, "gitlab_setup_source", source)
         return _failure(args, "gitlab_access", source, str(exc))

@@ -1,0 +1,133 @@
+{
+  "access": {
+    "captured_at": "2026-10-13T06:24:53.100939+00:00",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "credential_sources": {
+      "kubernetes": "target:kubernetes.kubeconfigs"
+    },
+    "execution_host": "spyroots-mbp.lan",
+    "identities": {
+      "kubernetes": "kube:admin"
+    },
+    "profile": null,
+    "receipt_sha256": "a3912db6b94779336e9da6d749afd28eed4642cb1a9e99e6886f21d3f179f740",
+    "skill": {
+      "algorithm": "sha256-tree-v1",
+      "consuming_project": {
+        "commit": null,
+        "source": null
+      },
+      "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
+      "file_count": 139,
+      "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+      "revision": {
+        "source": "installer_record",
+        "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+        "verified": true
+      }
+    },
+    "status": "PASS",
+    "target_file": "path:eeeb86ebf5ef",
+    "target_selection": "project:path:eeeb86ebf5ef",
+    "target_source": "project",
+    "targets": {
+      "kubernetes": {
+        "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+        "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+      }
+    }
+  },
+  "captured_at": "2026-10-13T06:24:59.541971+00:00",
+  "commands": [
+    [
+      "kubectl",
+      "--kubeconfig",
+      "path:f73adaea0685",
+      "--context",
+      "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "-n",
+      "cilium",
+      "exec",
+      "pod/cilium-976b7",
+      "-c",
+      "cilium-agent",
+      "--",
+      "cilium-dbg",
+      "status",
+      "--verbose",
+      "--output",
+      "json"
+    ],
+    [
+      "kubectl",
+      "--kubeconfig",
+      "path:f73adaea0685",
+      "--context",
+      "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "-n",
+      "cilium",
+      "exec",
+      "pod/cilium-976b7",
+      "-c",
+      "cilium-agent",
+      "--",
+      "cilium-health",
+      "status",
+      "--verbose",
+      "--output",
+      "json"
+    ]
+  ],
+  "errors": [],
+  "execution_host": "spyroots-mbp.lan",
+  "filters": {},
+  "kind": "cilium_node",
+  "kubernetes": {
+    "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+    "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+  },
+  "records": [
+    {
+      "daemon": {
+        "components": {
+          "auth-certificate-provider": "Disabled",
+          "cilium": "Ok",
+          "cni-file": "Ok",
+          "hubble": "Ok",
+          "hubble-metrics": "Ok",
+          "kubernetes": "Ok",
+          "kvstore": "Disabled"
+        }
+      },
+      "findings": [],
+      "health": {
+        "local_node": "node-ue-4",
+        "peer_count": 9
+      },
+      "name": "cilium-976b7",
+      "pod_uid": "27ba3943-a130-4728-939e-749d1fd403fb",
+      "status": "PASS"
+    }
+  ],
+  "safe_next_step": null,
+  "schema_version": "1.0",
+  "selected_pod": {
+    "container": "cilium-agent",
+    "namespace": "cilium",
+    "node": "node-ue-4",
+    "pod": "cilium-976b7",
+    "pod_uid": "27ba3943-a130-4728-939e-749d1fd403fb",
+    "selector": "k8s-app=cilium"
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": "node-ue-4",
+  "target_file": "path:eeeb86ebf5ef",
+  "target_source": "project"
+}

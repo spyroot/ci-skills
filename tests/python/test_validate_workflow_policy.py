@@ -8,7 +8,7 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import yaml
-from conftest import REPO_ROOT
+from conftest import REPO_ROOT, selected_test_paths
 
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
 
@@ -45,7 +45,8 @@ def test_acceptance_evaluator_is_offline_and_unconditional() -> None:
     matching = [
         step
         for step in steps
-        if "tests/python/test_live_acceptance.py" in str(step.get("run", ""))
+        if "tests/python/test_live_acceptance.py"
+        in selected_test_paths(str(step.get("run", "")))
     ]
     assert len(matching) == 1, "exactly one offline acceptance evaluator must run"
     step = matching[0]

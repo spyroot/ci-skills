@@ -1,12 +1,12 @@
 {
-  "captured_at": "2026-10-10T19:34:05.228144+00:00",
+  "captured_at": "2026-10-13T06:27:30.125321+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
-  "execution_host": "1.0.0.127.in-addr.arpa",
+  "execution_host": "spyroots-mbp.lan",
   "identity": {
     "id": 6,
     "username": "spyroot",
@@ -18,7 +18,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "4dde3727e9c19e58d1a279e81555b82cab64f64889bc6be761ed24947399ddc0",
+    "body_sha256": "15de3c273f349a0bf60e50f8b2ee868332c3ed123e34a30ae778c0cb463e7386",
     "confirmation_ready": true,
     "fields": [
       "due_date",
@@ -26,22 +26,22 @@
     ],
     "one_time_sink_required": false,
     "operation": "adjust-time",
-    "plan_digest": "2f6b45eca5236bf6eac99d7ed3cb93b0a78bc81b01cebc114a82ae7158706332",
+    "plan_digest": "8c8957097a5530555c540e4a5f11d1e4d1390e0255699718dcbb53c91da84b04",
     "project_ids": null,
-    "resource_id": 82,
+    "resource_id": 88,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "2f6b45eca5236bf6eac99d7ed3cb93b0a78bc81b01cebc114a82ae7158706332",
+  "plan_digest": "8c8957097a5530555c540e4a5f11d1e4d1390e0255699718dcbb53c91da84b04",
   "readback": {
     "action": "NO_OP",
-    "id": 82,
+    "id": 88,
     "verified": true
   },
   "records": [
     {
       "action": "NO_OP",
-      "id": 82,
+      "id": 88,
       "verified": true
     }
   ],
@@ -53,11 +53,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "8c46a5f57d78b48ed234595eb822cfc181a2b092a243b8ada55508ed0b635cac",
-    "file_count": 70,
+    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
+    "file_count": 139,
+    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
     "revision": {
       "source": "installer_record",
-      "value": "db88be6e1a1397c72a15cbf493e9ac913b64cb89",
+      "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
       "verified": true
     }
   },
@@ -72,7 +73,7 @@
   },
   "target_file": "path:5e5380df1eda",
   "target_source": "user;argv:--project",
-  "tested_revision": "db88be6e1a1397c72a15cbf493e9ac913b64cb89",
+  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

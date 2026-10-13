@@ -530,7 +530,7 @@
         "gitlab"
       ],
       "returns": "A sanitized plan or verified issue IID and independent GET evidence.",
-      "side_effects": "none",
+      "side_effects": "Confirmed apply may create the selected bug issue.",
       "subcommands": {
         "create-bug": {
           "required_options": [
@@ -603,7 +603,8 @@
         "list": {
           "purpose": "filter newest jobs of one verified project",
           "read_back": "GitLab project jobs keyset API; at most 20 pages of 100",
-          "required_options": []
+          "required_options": [],
+          "result_schema": "schemas/results/gitlab-job-list.schema.json"
         }
       },
       "use_when": "You need exact job facts or a filtered view of recent jobs."
@@ -646,7 +647,7 @@
         "gitlab"
       ],
       "returns": "A sanitized plan or verified milestone record and independent GET evidence.",
-      "side_effects": "none",
+      "side_effects": "Confirmed apply may create or update the selected milestone.",
       "subcommands": {
         "adjust-time": {
           "required_options": [
@@ -840,7 +841,7 @@
         "gitlab"
       ],
       "returns": "A sanitized plan or verified wiki slug and independent GET evidence.",
-      "side_effects": "none",
+      "side_effects": "Confirmed apply may create or update the selected wiki page.",
       "subcommands": {
         "create": {
           "required_options": [

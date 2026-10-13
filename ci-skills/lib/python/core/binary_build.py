@@ -16,7 +16,7 @@ from typing import Optional
 
 import yaml
 
-from lib.python.core.abstract.callback import Callback
+from lib.python.core.abstract.callback import LocalCallback
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.cli_api import CommandRunner
@@ -28,6 +28,19 @@ from lib.python.core.runtime import run_command_bounded
 
 class BuildConfigLoader(yaml.SafeLoader):
     """Keep YAML names and timestamps as strings, as the former yq reader did."""
+
+    def timestamp_text(self, node: yaml.nodes.Node) -> str:
+        """Preserve an explicitly tagged timestamp as its original scalar text.
+
+        :param node: YAML scalar node supplied by the constructor registry.
+        :returns: Scalar text without conversion to a Python date or datetime.
+        :raises yaml.constructor.ConstructorError: The tagged node is not a scalar.
+        """  # noqa: DOC502 - SafeLoader validates scalar nodes.
+        if isinstance(node, (yaml.nodes.ScalarNode, yaml.nodes.MappingNode)):
+            return self.construct_scalar(node)
+        raise yaml.constructor.ConstructorError(
+            None, None, "expected a scalar timestamp", node.start_mark
+        )
 
 
 # PyYAML's default YAML 1.1 resolver treats names such as "on" and "off" as
@@ -47,7 +60,7 @@ BuildConfigLoader.add_implicit_resolver(
     list("tTfF"),
 )
 BuildConfigLoader.add_constructor(
-    "tag:yaml.org,2002:timestamp", yaml.SafeLoader.construct_scalar
+    "tag:yaml.org,2002:timestamp", BuildConfigLoader.timestamp_text
 )
 
 
@@ -350,7 +363,7 @@ class BinaryBuildState(ExecutionContext):
     build_plan: BinaryBuildPlan = field(init=False)
 
 
-class PlanBinaryBuild(Callback[BinaryBuildState, BinaryBuildAction]):
+class PlanBinaryBuild(LocalCallback[BinaryBuildState, BinaryBuildAction]):
     """Publish one validated build plan to shared state without executing a build."""
 
     def __init__(

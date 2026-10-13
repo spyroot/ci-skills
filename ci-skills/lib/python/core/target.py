@@ -19,7 +19,7 @@ from lib.python.core.endpoints import TARGET_CONTRACT
 from lib.python.core.paths import SKILL_ROOT
 
 if TYPE_CHECKING:
-    from lib.python.access.credentials import Sources
+    from lib.python.access.sources import Sources
     from lib.python.core.provenance import SkillIdentity
 
 
@@ -416,6 +416,46 @@ class Target:
     target_reference: Optional[str] = None
     harbor: Optional[HarborTarget] = None
 
+    def require_github(self) -> GitHubTarget:
+        """Select the concrete github settings required by a caller.
+
+        :returns: This target's configured github settings.
+        :raises TargetError: The optional github section is absent.
+        """
+        if self.github is None:
+            raise TargetError("github_target_required")
+        return self.github
+
+    def require_gitlab(self) -> GitLabTarget:
+        """Select the concrete gitlab settings required by a caller.
+
+        :returns: This target's configured gitlab settings.
+        :raises TargetError: The optional gitlab section is absent.
+        """
+        if self.gitlab is None:
+            raise TargetError("gitlab_target_required")
+        return self.gitlab
+
+    def require_kubernetes(self) -> KubernetesTarget:
+        """Select the concrete kubernetes settings required by a caller.
+
+        :returns: This target's configured kubernetes settings.
+        :raises TargetError: The optional kubernetes section is absent.
+        """
+        if self.kubernetes is None:
+            raise TargetError("kubernetes_target_required")
+        return self.kubernetes
+
+    def require_harbor(self) -> HarborTarget:
+        """Select the concrete harbor settings required by a caller.
+
+        :returns: This target's configured harbor settings.
+        :raises TargetError: The optional harbor section is absent.
+        """
+        if self.harbor is None:
+            raise TargetError("harbor_target_required")
+        return self.harbor
+
 
 def _table(value: object, name: str, keys: frozenset[str]) -> Mapping[str, object]:
     """Validate one authority table against its declared keys.
@@ -487,8 +527,10 @@ def kubernetes_label(target: Target) -> str:
 
     :param target: Validated target containing Kubernetes settings.
     :returns: Context and server identifying the selected cluster.
-    """
-    return f"{target.kubernetes.context} -> {target.kubernetes.server}"
+    :raises TargetError: The optional Kubernetes section is absent.
+    """  # noqa: DOC502 - target selection validates the required section.
+    kubernetes = target.require_kubernetes()
+    return f"{kubernetes.context} -> {kubernetes.server}"
 
 
 def assert_external_path(path: Path, skill_root: Path, key: str) -> None:
@@ -786,6 +828,85 @@ def _absolute_path(value: str, key: str) -> str:
     return value
 
 
+def _parse_github(
+    value: object, skill_root: Path, *, target_directory: Path
+) -> GitHubTarget:
+    """Validate only the github table selected by the command.
+
+    :param value: Parsed ``github`` TOML table.
+    :param skill_root: Installed skill directory excluded from runtime inputs.
+    :param target_directory: Selected target directory anchoring relative credential paths.
+    :returns: Concrete github configuration with its declared optional fields.
+    :raises TargetError: A required field, selector, path, or table entry is invalid.
+    """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
+    github = _table(value, "github", TARGET_CONTRACT.names("github"))
+    github_host = _string(github, "host").lower()
+    if "." not in github_host or "/" in github_host or ":" in github_host:
+        raise TargetError("github.host must be a full hostname")
+    repository = _string(github, "repository")
+    if len(repository.split("/")) != 2 or any(
+        not part for part in repository.split("/")
+    ):
+        raise TargetError("github.repository must be owner/repository")
+    return GitHubTarget(
+        host=github_host,
+        repository=repository,
+        token_file=_optional_file(
+            github, "token_file", skill_root, target_directory=target_directory
+        ),
+        required_checks=_optional_names(github, "required_checks"),
+    )
+
+
+def _parse_harbor(
+    value: object, skill_root: Path, *, target_directory: Path
+) -> HarborTarget:
+    """Validate only the harbor table selected by the command.
+
+    :param value: Parsed ``harbor`` TOML table.
+    :param skill_root: Installed skill directory excluded from runtime inputs.
+    :param target_directory: Selected target directory anchoring relative credential paths.
+    :returns: Concrete harbor configuration with its declared optional fields.
+    :raises TargetError: A required field, selector, path, or table entry is invalid.
+    """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
+    harbor = _table(value, "harbor", TARGET_CONTRACT.names("harbor"))
+    url, host = _https_url(_string(harbor, "url"), "harbor.url")
+    files = {
+        key: _optional_file(harbor, key, skill_root, target_directory=target_directory)
+        for key in ("credential_file", "username_file", "password_file")
+    }
+    combined = files["credential_file"] is not None
+    paired = files["username_file"] is not None and files["password_file"] is not None
+    if combined == paired or (
+        combined and any(files[key] for key in ("username_file", "password_file"))
+    ):
+        raise TargetError("harbor_credential_selection_invalid")
+    return HarborTarget(url, host, _string(harbor, "project"), **files)
+
+
+def _parse_kubernetes(value: object, skill_root: Path) -> KubernetesTarget:
+    """Validate only the kubernetes table selected by the command.
+
+    :param value: Parsed ``kubernetes`` TOML table.
+    :param skill_root: Installed skill directory excluded from runtime inputs.
+    :returns: Concrete kubernetes configuration with its declared optional fields.
+    :raises TargetError: A required field, selector, path, or table entry is invalid.
+    """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
+    kubernetes = _table(value, "kubernetes", TARGET_CONTRACT.names("kubernetes"))
+    server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
+    kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
+    kubeconfigs = _optional_files(kubernetes, "kubeconfigs", skill_root)
+    if kubeconfig and kubeconfigs:
+        raise TargetError("declare kubernetes.kubeconfig or kubeconfigs, not both")
+    return KubernetesTarget(
+        context=_string(kubernetes, "context"),
+        server=server,
+        kubeconfig=kubeconfig,
+        kubeconfigs=kubeconfigs,
+        node_diagnostics=_node_diagnostics(kubernetes.get("node_diagnostics")),
+    )
+
+
 def load_target(
     path: Union[str, Path], *, required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES
 ) -> Target:
@@ -815,67 +936,26 @@ def load_target(
             + ", ".join(required_surfaces)
         )
 
-    github_target = None
-    if "github" in required_surfaces:
-        github = _table(data["github"], "github", TARGET_CONTRACT.names("github"))
-        github_host = _string(github, "host").lower()
-        if "." not in github_host or "/" in github_host or ":" in github_host:
-            raise TargetError("github.host must be a full hostname")
-        repository = _string(github, "repository")
-        if len(repository.split("/")) != 2 or any(
-            not part for part in repository.split("/")
-        ):
-            raise TargetError("github.repository must be owner/repository")
-        github_target = GitHubTarget(
-            host=github_host,
-            repository=repository,
-            token_file=_optional_file(
-                github, "token_file", skill_root, target_directory=source.parent
-            ),
-            required_checks=_optional_names(github, "required_checks"),
-        )
-
-    gitlab_target = None
-    if "gitlab" in required_surfaces:
-        gitlab_target = _parse_gitlab(
-            data["gitlab"], skill_root, target_directory=source.parent
-        )
-
-    harbor_target = None
-    if "harbor" in required_surfaces:
-        harbor = _table(data["harbor"], "harbor", TARGET_CONTRACT.names("harbor"))
-        url, host = _https_url(_string(harbor, "url"), "harbor.url")
-        files = {
-            key: _optional_file(harbor, key, skill_root, target_directory=source.parent)
-            for key in ("credential_file", "username_file", "password_file")
-        }
-        combined = files["credential_file"] is not None
-        paired = (
-            files["username_file"] is not None and files["password_file"] is not None
-        )
-        if combined == paired or (
-            combined and any(files[key] for key in ("username_file", "password_file"))
-        ):
-            raise TargetError("harbor_credential_selection_invalid")
-        harbor_target = HarborTarget(url, host, _string(harbor, "project"), **files)
-
-    kubernetes_target = None
-    if "kubernetes" in required_surfaces:
-        kubernetes = _table(
-            data["kubernetes"], "kubernetes", TARGET_CONTRACT.names("kubernetes")
-        )
-        server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
-        kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
-        kubeconfigs = _optional_files(kubernetes, "kubeconfigs", skill_root)
-        if kubeconfig and kubeconfigs:
-            raise TargetError("declare kubernetes.kubeconfig or kubeconfigs, not both")
-        kubernetes_target = KubernetesTarget(
-            context=_string(kubernetes, "context"),
-            server=server,
-            kubeconfig=kubeconfig,
-            kubeconfigs=kubeconfigs,
-            node_diagnostics=_node_diagnostics(kubernetes.get("node_diagnostics")),
-        )
+    github_target = (
+        _parse_github(data["github"], skill_root, target_directory=source.parent)
+        if "github" in required_surfaces
+        else None
+    )
+    gitlab_target = (
+        _parse_gitlab(data["gitlab"], skill_root, target_directory=source.parent)
+        if "gitlab" in required_surfaces
+        else None
+    )
+    harbor_target = (
+        _parse_harbor(data["harbor"], skill_root, target_directory=source.parent)
+        if "harbor" in required_surfaces
+        else None
+    )
+    kubernetes_target = (
+        _parse_kubernetes(data["kubernetes"], skill_root)
+        if "kubernetes" in required_surfaces
+        else None
+    )
     return Target(
         github=github_target,
         gitlab=gitlab_target,

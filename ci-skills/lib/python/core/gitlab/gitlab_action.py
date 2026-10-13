@@ -12,14 +12,15 @@ from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal, Optional
 
-from lib.python.access.access import check_gitlab_operation_access
-from lib.python.access.credentials import bind_gitlab_session
+from lib.python.access.gitlab import check_gitlab_operation_access
+from lib.python.access.gitlab_credentials import bind_gitlab_session
 from lib.python.core.abstract.callback import AbstractCallback
 from lib.python.core.abstract.callbacks import Callbacks
 from lib.python.core.abstract.skill_action import SkillAction
-from lib.python.core.abstract.skill_exector import WorkflowExecutor
-from lib.python.core.cli import _failure, resolve_gitlab_target
-from lib.python.core.gitlab.abstract_github_callback import GitlabCallback, GitLabState
+from lib.python.core.cli import _failure
+from lib.python.core.executor import WorkflowExecutor
+from lib.python.core.gitlab.callback import GitlabCallback, GitLabState
+from lib.python.core.gitlab.cli import resolve_gitlab_target
 from lib.python.core.gitlab.gitlab_actions import (
     ActionError,
     ActionPlan,
@@ -35,7 +36,7 @@ from lib.python.core.gitlab.gitlab_actions import (
 )
 from lib.python.core.gitlab.gitlab_api import GitLabAPIError, GlabAPIClient
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession, GitLabService
-from lib.python.core.json_types import JSONObject, JSONValue
+from lib.python.core.json_types import JSONObject, JSONValue, copy_json
 from lib.python.core.report import emit_result
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import GitLabOperationTarget, TargetError
@@ -174,6 +175,16 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
             raise ActionError("skill_revision_unverified")
         return session
 
+    def read_config(self) -> JSONObject:
+        """Resolve credentials once before any workflow lifecycle hook runs.
+
+        :returns: Empty setup evidence; private credentials remain in shared state.
+        :raises TargetError: The selected credential or target cannot be resolved.
+        :raises ActionError: Required skill revision evidence is unavailable.
+        """  # noqa: DOC502 - _bind validates credentials and revision provenance.
+        self.state.configured_session = self._bind()
+        return {}
+
     def _snapshot(self, service: GitLabService) -> ActionPlan:
         """Add live target membership or runner before-state to the plan.
 
@@ -211,7 +222,7 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
         :raises ActionError: Revision, access, target binding, or snapshot checks fail.
         :raises GitLabAPIError: Live preflight cannot read selected provider resources.
         """  # noqa: DOC503 - binding and snapshot reads propagate their domain errors.
-        session = self._bind()
+        session = self.state.configured_session
         api = GlabAPIClient(timeout=self.action.timeout)
         access = check_gitlab_operation_access(session, api_client=api)
         self.state.access = access
@@ -395,7 +406,7 @@ def _operation_report(state: GitLabState) -> MutableMapping[str, JSONValue]:
         "verified_target": state.access.get("target"),
         "credential_source": session.credential_source,
         "credential_digest": session.credential_digest,
-        "skill": session.skill,
+        "skill": copy_json(session.skill),
     }
     status = PASS
     if state.phase == "READ":
@@ -520,7 +531,7 @@ class GitLabWorkflow:
             verified_target=state.access.get("target"),
             credential_source=session.credential_source,
             credential_digest=session.credential_digest,
-            skill=session.skill,
+            skill=copy_json(session.skill),
             readback={"verified": True, **snapshot},
         )
         state.report["tested_revision"] = _verified_skill_revision(session)

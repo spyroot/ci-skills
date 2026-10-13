@@ -45,6 +45,8 @@ force-exclude = true
 
 [tool.ruff.lint]
 external = ["DOC"]
+# Keep explicit Optional and Union annotations used by the callback contracts.
+ignore = ["UP007", "UP045"]
 
 [tool.ruff.format]
 # The formatter is not run over the demos tree. It does not only move

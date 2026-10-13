@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="per-node oc debug timeout, 10–300 seconds (default 90)",
     )
-    cli.epilog += (
+    cli.epilog = (cli.epilog or "") + (
         " This command reads the selected node inventory by default and returns "
         "a plan_digest. --apply --confirm-plan SHA256 creates temporary oc debug "
         "Pods, reads host links, then verifies their cleanup. Example: "

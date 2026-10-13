@@ -1,0 +1,1 @@
+{"attempt": 1, "component": "gitlab_access", "elapsed_time_ms": 2659, "error_class": null, "event": "result", "level": "info", "mode": "live", "operation": "check", "resource": "gitlab_access", "result": "PASS", "run_id": "", "timestamp": "2026-10-13T06:37:56.266413+00:00"}

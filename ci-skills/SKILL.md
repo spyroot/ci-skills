@@ -11,11 +11,26 @@ metadata:
 
 The directory containing this file is the installed skill root. Keep the
 working directory at the calling project root so its `.ci-skills/target.toml`
-can be selected. Run Python entrypoints under `bin/` with Python 3.11 or
-newer; the documented environment uses `conda run -n ci-skills python`.
-This includes the extensionless `bin/ci-api` and `bin/ci-binary-build`.
+can be selected. All command paths below are relative to the **installed skill
+root**, not the working directory. Set `CI_SKILLS_ROOT` to that directory and
+invoke its Python entrypoints with Python 3.11 or newer. Prepare that interpreter
+with PyYAML and `jsonschema`, which installs `referencing`; the repository
+`requirements.txt` supplies these dependencies. The copy installer does not
+create a Python environment or install Python packages. For a default Codex
+installation using the prepared `ci-skills` conda environment:
+
+```bash
+CI_SKILLS_ROOT="${CODEX_HOME:-$HOME/.codex}/skills/ci-skills"
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/reference.py" --json
+```
+
+This also applies to the extensionless `bin/ci-api` and `bin/ci-binary-build`.
 Use these commands for supported operations instead of rebuilding them with
-one-off CLI parsing.
+one-off CLI parsing. The selected command's `--describe` lists its native
+`required_tools`. GitLab uses `glab`,
+GitHub uses `gh`, Kubernetes uses `kubectl`, OpenShift builds and MTU checks
+also use `oc`, and registry image inspection/publication uses `skopeo`.
+Installing the skill does not install all of those native clients.
 
 Diagnose a Kubernetes-backed CI, storage, or network symptom, or act on an
 explicit GitLab request. GitLab operation commands default to an offline
@@ -36,7 +51,9 @@ reads back GitLab identity and target before applying a change.
 
 For one receipt proving all three authorities, run:
 
-    bin/access_check.py --json
+```bash
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/access_check.py" --json
+```
 
 Add `--publication` when repository administration and required-check read-back
 are part of the requested proof. Add `--ceph-namespace NAME` when the receipt
@@ -73,7 +90,8 @@ or minted first, that belongs to the calling project's own instructions.
 `tools.json` beside this file is the machine-readable contract for API and
 node commands: their purpose, when to use them, required authorities or
 execution surface, options, and symptom routing. `<command> --describe` prints
-one command's contract as JSON and needs no credentials.
+one command's contract as JSON and needs no credentials. Read its `required_tools` and
+`requires_authorities` before choosing a live operation.
 
 Routing, in short:
 
@@ -103,13 +121,14 @@ Routing, in short:
 ## 3. One target and output interface
 
 Use `<command> --describe` for its exact options. Diagnostic commands share
-`--target`, `--json`, `--yaml`, `--human`, `--dry-run`, and `--revision`, and
-accept `--binding` for a project-selected kubeconfig source. Use native
+`--json`, `--yaml`, `--human`, `--dry-run`, and `--revision`, and accept
+`--binding` for a project-selected target and kubeconfig source. Otherwise
+they use the target-resolution chain in [references/access.md](references/access.md). Use native
 filters such as `--namespace`, `--node`, or `--last` where the command declares
 them.
 
-`ci-api` and `ci-binary-build` have no `--target` option. Their defaults and
-output contracts are described in section 9.
+The defaults and output contracts for `ci-api` and `ci-binary-build` are
+described in section 9.
 
 For a GitLab operation, select the exact project or group in the target file or
 with `--project`/`--group`. Run the action without `--apply` to get a
@@ -139,23 +158,10 @@ authorize apply. Run `gitlab_runner.py assign --group GROUP --runner-id ID
 --live-plan` to read the exact project IDs and obtain an apply-ready digest.
 Apply re-reads that set and blocks if it changed before any assignment.
 
-`--target` resolves in four declared places — the argument, then
-`$CI_SKILLS_TARGET`, then `./.ci-skills/target.toml`, then
-`~/.ci-skills/target.toml` — and live reports and GitLab operation plans name
-the selected source as `target_source`. One cluster means setting the last
-one once; many clusters mean the environment variable or a per-project file.
-The common case takes no arguments at all. Output needs no flag either: a
-terminal gets the human summary, a pipe or file gets versioned JSON.
-
-For `ci-api`, resolution starts with `CI_SKILLS_TARGET`, then the project
-file, then the user file. Tests and live smoke can set that environment
-variable to an existing file. Setting the `ci-skills-smoke` environment
-variable selects `ci-skills-smoke.toml` in the project/user directories
-instead of `target.toml`; there is no separate dev-mode switch.
-
-`--binding PATH` or `K8S_ADMIN_DIAGNOSTICS_BINDING` names a project target and
-ordered file, environment, or command sources for its kubeconfig. The receipt
-records the selected source; see the binding protocol before using it.
+Target selection and credential precedence are defined in [references/access.md](references/access.md).
+Keep the consumer project as the working directory; project configuration takes precedence over the user target.
+Use [the binding reference](references/project-binding.md) only for a project-supplied kubeconfig resolver.
+A terminal gets a human summary; a pipe or file gets versioned JSON unless an output flag selects another mode.
 
 Prefer a native filter over a shell pipeline — `--namespace`, `--node`,
 `--reason`, `--search`, `--last` — because a pipeline discards the identity and
@@ -220,8 +226,8 @@ selected `.ci-skills/target.toml` (see the template). Run
 `bin/cilium_node.py --json` to execute `cilium-dbg` and `cilium-health`
 inside that agent Pod without a TTY. Run `bin/ceph_kernel.py --json` to
 classify recent host journal messages through a selected existing Pod whose
-host journal mount is read back first. Both accept `--target` or `--binding`
-and use the same pinned kubeconfig/context/server and Kubernetes access gate
+host journal mount is read back first. Both accept `--binding` and otherwise
+use the shared target-resolution chain, pinned kubeconfig/context/server and Kubernetes access gate
 as the cluster collectors;
 neither creates a Pod or repairs a node. Both accept `--search TEXT`;
 `ceph_kernel.py` also accepts `--classification NAME`.
@@ -282,6 +288,53 @@ affected node. `tools.json` describes every command and its filters.
 specification. `target.toml` supplies the Harbor endpoint/project and either its existing combined `credential_file`
 or paired `username_file` and `password_file`. Paths resolve beside the selected target file; commands do not accept
 credential values as arguments. GitHub and Kubernetes retain their existing access resolution.
+
+A toolbox specification supplies build inputs and the commands its generated doctor must find. This minimal runner
+example assumes a base image that already contains a working GitHub Actions runner, `bash` and `gh`. Replace the example
+image, Harbor repository/tag and build namespace/app with your selected values, then save it as `toolbox.json`:
+
+```json
+{
+  "apiVersion": "ci-skills/v1",
+  "kind": "ToolboxSpec",
+  "metadata": {"name": "runner-toolbox"},
+  "spec": {
+    "baseImage": "registry.example.com/team/runner-base:version",
+    "image": {"repository": "runner-toolbox", "tag": "candidate"},
+    "build": {"namespace": "ci-tools", "app": "runner-toolbox"},
+    "dependencies": [],
+    "requiredCommands": ["bash", "gh"]
+  }
+}
+```
+
+The example image is caller-supplied, not a bundled fixture. `dependencies` is empty because that image already contains
+its runtime. To install additional packages or archives, use the dependency definitions linked by
+[schemas/toolbox.schema.json](schemas/toolbox.schema.json); archive/download inputs include their declared checksum.
+The runner's `--runner-root` must name the image directory containing its working `config.sh` and `run.sh`, with that
+runtime's libraries installed. This directory is copied into the runner's writable runtime during registration.
+Host `gh` and the image's `gh` are separate prerequisites.
+
+From the consumer project, plan the runner using your specification and image's actual runtime directory:
+
+```bash
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/create_selfhosted_runner.py" create \
+  --spec ./toolbox.json --name example-runner --runner-root /opt/actions-runner \
+  --label ci-skills --json
+```
+
+A successful live plan returns `status: PLANNED` and `plan_digest`; it reads provider identities and resolves image
+digests without building or deploying. Repeat the same inputs with `--apply --confirm-plan DIGEST` using that digest.
+Successful apply returns `status: PASS`, verified callback records including the online GitHub registration, and
+`cleanup.status: PASS` for temporary resources. Missing configuration, tools, runtime or read-back produces a blocked
+result; a schema-valid specification alone does not prove its selected image works. To check the input shape without
+provider calls, add `--dry-run`; its `DRY_RUN` result does not authorize apply.
+
+The independent build uses the same file:
+
+```bash
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/toolbox.py" create --spec ./toolbox.json --json
+```
 
 Use `--help` for the selected operation. Planning reads current provider identity and resolves image references;
 `--dry-run` stays offline. Mutation requires `--apply --confirm-plan` with the exact returned digest. Runner deletion

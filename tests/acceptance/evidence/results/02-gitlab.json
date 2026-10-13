@@ -1,0 +1,7 @@
+{
+  "authenticated": true,
+  "host": "gitlab.dcloud.run",
+  "id": 6,
+  "provider": "gitlab",
+  "user": "spyroot"
+}

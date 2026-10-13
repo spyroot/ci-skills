@@ -15,14 +15,16 @@ import os
 import stat
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final, Optional
 
-from lib.python.access.access import kubectl_argv, kubernetes_env, oc_argv
-from lib.python.access.credentials import Sources, bind_sources
+from lib.python.access.credentials import bind_sources
+from lib.python.access.kubernetes import kubectl_argv, kubernetes_env, oc_argv
+from lib.python.access.sources import Sources
 from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.skill_action import ActionT_co
+from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
 from lib.python.core.json_types import (
@@ -40,10 +42,10 @@ from lib.python.core.runtime import (
     trace_enabled,
     trace_event,
 )
-from lib.python.core.target import Target, TargetError
+from lib.python.core.target import KubernetesTarget, Target, TargetError
 
 DEFAULT_COMMAND_TIMEOUT: Final = 30
-KUBERNETES_SERVICE_KEY: Final = "kubernetes"
+KUBERNETES_SERVICE_KEY: Final = SkillPluginType.KUBERNETES.value
 BUILD_COMPLETE_PHASE: Final = "Complete"
 BUILD_FAILED_PHASES: Final = frozenset({"Failed", "Error", "Cancelled"})
 BUILD_POLL_SECONDS: Final = 5
@@ -62,6 +64,7 @@ class KubernetesService:
     :param target: Selected context, server, and bound credential sources.
     :param timeout: Per-command runtime bound in seconds.
     :ivar identity: Cluster username read after target verification.
+    :ivar configuration: Concrete Kubernetes selection retained at construction.
 
     .. attribute :: target
         :type: Target
@@ -77,11 +80,17 @@ class KubernetesService:
         :type: str
 
         Cluster username read after target verification.
+
+    .. attribute :: configuration
+        :type: KubernetesTarget
+
+        Concrete Kubernetes selection retained at construction.
     """
 
     target: Target
     timeout: int = DEFAULT_COMMAND_TIMEOUT
     identity: str = field(init=False, repr=False)
+    configuration: KubernetesTarget = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Reject an unusable service before any provider command is built.
@@ -91,8 +100,10 @@ class KubernetesService:
         """
         if self.timeout <= 0:
             raise ValueError("kubernetes_timeout_invalid")
-        if self.target.kubernetes is None:
+        selected = self.target.kubernetes
+        if selected is None:
             raise TargetError("kubernetes_target_missing")
+        self.configuration = selected
 
     def command(self, *args: str, openshift: bool = False) -> CommandResult:
         """Run one bounded ``kubectl`` or ``oc`` command without a shell.
@@ -350,14 +361,12 @@ class KubernetesService:
 
         :returns: Username reported by native ``kubectl auth whoami``.
         :raises KubernetesError: If context, server, or identity read-back differs.
-        :raises TargetError: If the target is missing or its kubeconfig changed.
-        """
+        :raises TargetError: If the bound kubeconfig changed.
+        """  # noqa: DOC503 - Native command setup checks the bound kubeconfig.
         configuration = self.json("config", "view", "--minify", "-o", "json")
         if not isinstance(configuration, dict):
             raise KubernetesError("invalid_context_response")
-        expected = self.target.kubernetes
-        if expected is None:
-            raise TargetError("kubernetes_target_missing")
+        expected = self.configuration
         contexts = configuration.get("contexts")
         if not isinstance(contexts, list):
             raise KubernetesError("invalid_context_response")
@@ -444,6 +453,34 @@ class K8SCallback(Callback[DeliveryState, ActionT_co]):
     """Read the verified Kubernetes service from the shared delivery state."""
 
     @property
+    def plugin_type(self) -> SkillPluginType:
+        """Identify the configuration shared by this plugin's callbacks.
+
+        :returns: The kubernetes plugin's configuration cache key.
+        """
+        return SkillPluginType.KUBERNETES
+
+    def read_config(self) -> JSONObject:
+        """Reuse the concrete target from a caller-bound Kubernetes service.
+
+        :returns: Empty evidence after retaining the already bound configuration.
+        :raises TargetError: Authentication or the caller supplied no service.
+        """  # noqa: DOC502 - Direct library callers provide the existing service.
+        if not hasattr(self.state, "kubernetes"):
+            raise TargetError(
+                f"{SkillPluginType.KUBERNETES.value}_configuration_missing"
+            )
+        self.state.kubernetes_target = self.kubernetes.target
+        return {}
+
+    def is_configured(self) -> bool:
+        """Check that shared state holds a credential-bound Kubernetes target.
+
+        :returns: Whether target and credential selection completed for this invocation.
+        """
+        return hasattr(self.state, "kubernetes_target")
+
+    @property
     def kubernetes(self) -> KubernetesService:
         """Read the service established by the preceding authentication action.
 
@@ -464,18 +501,32 @@ class K8SAuth(K8SCallback[ProviderAuthAction]):
         """
         super().__init__(ProviderAuthAction(target, timeout))
 
-    def collect(self) -> JSONObject:
-        """Validate the selected authority before invoking native commands.
+    def read_config(self) -> JSONObject:
+        """Validate and bind this plugin's declared kubeconfig before execution.
 
-        :returns: Empty evidence after local input validation.
-        :raises TargetError: If the target does not select Kubernetes.
-        :raises ValueError: If the command timeout is not positive.
-        """
-        target = self.action.target
-        if target.kubernetes is None or "kubernetes" not in target.active_surfaces:
+        :returns: Empty setup evidence after retaining the credential-bound target.
+        :raises TargetError: The selected Kubernetes target or credential is unavailable.
+        :raises ValueError: The command timeout is not positive.
+        """  # noqa: DOC503 - Credential binding validates configured file sources.
+        selected = self.action.target
+        if (
+            selected.kubernetes is None
+            or self.plugin_type.value not in selected.active_surfaces
+        ):
             raise TargetError("kubernetes_target_missing")
         if self.action.timeout <= 0:
             raise ValueError("kubernetes_timeout_invalid")
+        target = (
+            selected
+            if isinstance(selected.sources, Sources)
+            else bind_sources(
+                replace(selected, active_surfaces=(SkillPluginType.KUBERNETES.value,))
+            )
+        )
+        if target.sources is None:
+            raise TargetError("kubernetes_credential_unresolved")
+        target.sources.require(SkillPluginType.KUBERNETES)
+        self.state.kubernetes_target = target
         return {}
 
     def run(self) -> JSONObject:
@@ -486,19 +537,14 @@ class K8SAuth(K8SCallback[ProviderAuthAction]):
         :raises TargetError: If target or credential source binding is invalid.
         :raises OSError: If configured credential inputs cannot be read.
         """  # noqa: DOC502 - Credential binding and service verification can fail.
-        selected = self.action.target
-        target = (
-            selected
-            if isinstance(selected.sources, Sources)
-            else bind_sources(selected)
-        )
+        target = self.state.kubernetes_target
         service = KubernetesService(target, self.action.timeout)
         identity = service.verify()
         self.state.kubernetes = service
         evidence = {
             "identity": identity,
-            "context": target.kubernetes.context,
-            "server": target.kubernetes.server,
+            "context": service.configuration.context,
+            "server": service.configuration.server,
         }
         self.state.access_evidence[KUBERNETES_SERVICE_KEY] = evidence
         return evidence

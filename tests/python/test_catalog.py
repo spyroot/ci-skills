@@ -374,7 +374,6 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(
 
     :returns: None; assertions in the body validate the regression.
     """
-    credentials = import_script_module("lib.python.access.credentials")
     target_mod = import_script_module("lib.python.core.target")
     target = target_mod.load_target(target_file)  # host: github.example.test
 
@@ -393,15 +392,14 @@ def test_the_declared_github_chain_is_the_chain_the_code_resolves(
     assert CATALOG.github_variables(CATALOG.GITHUB_DOTCOM_HOST) == (
         CATALOG.GITHUB_CLOUD_VARIABLES
     )
-    assert credentials.github_variables is CATALOG.github_variables
 
 
 def test_the_declared_gitlab_variables_are_the_ones_resolved() -> None:
     """One list, consumed by the binder and published by the manifest.
     :returns: None; assertions in the body validate the regression.
     """
-    credentials = import_script_module("lib.python.access.credentials")
-    access = import_script_module("lib.python.access.access")
+    credentials = import_script_module("lib.python.access.gitlab_credentials")
+    access = import_script_module("lib.python.access.gitlab")
     declared = [step["source"] for step in CATALOG.ACCESS_PROTOCOL["gitlab"]]
 
     for name in CATALOG.GITLAB_VARIABLES:

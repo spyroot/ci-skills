@@ -15,9 +15,8 @@ from pathlib import Path
 from typing import Final, Optional
 
 from lib.python.access.credentials import bind_sources
-from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.skill_action import SkillAction
-from lib.python.core.abstract.skill_exector import WorkflowExecutor
+from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import (
     COMMAND_BY_KIND,
     COMMANDS,
@@ -27,18 +26,25 @@ from lib.python.core.catalog import (
 from lib.python.core.cli import parser
 from lib.python.core.cli_api import APIError
 from lib.python.core.delivery_state import DeliveryState
-from lib.python.core.gitlab.gitlab_runner import RunnerAction, published_image
-from lib.python.core.harbor.registry_mirror import TagSnapshot
+from lib.python.core.executor import WorkflowExecutor
+from lib.python.core.harbor.registry_mirror import (
+    HarborCallback,
+    TagSnapshot,
+    image_at_digest,
+)
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
+    copy_json,
     is_json_value,
     json_object,
 )
-from lib.python.core.kubernetes.kubernetes import KubernetesError
+from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
+from lib.python.core.kubernetes.resources import ResourceSet
+from lib.python.core.kubernetes.runner import published_image
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import emit_result, plan_digest, report
-from lib.python.core.resources import ResourceSet
+from lib.python.core.runner import RunnerAction
 from lib.python.core.schema import SCHEMA_DIRECTORY, TOOLBOX_SCHEMA
 from lib.python.core.target import Target
 from lib.python.core.toolbox import (
@@ -232,7 +238,7 @@ class WorkflowAction(SkillAction):
             {
                 "kind": self.args.kind,
                 "operation": self.args.action,
-                "skill": self.target.skill,
+                "skill": copy_json(self.target.skill),
                 "tested_revision": self.target.tested_revision,
                 "target_file": str(self.target.source_file),
                 "target_source": self.target.source_kind,
@@ -320,7 +326,7 @@ class WorkflowAction(SkillAction):
         self.prepare()
         output["target"] = str(self.target.source_file)
         if self.target.skill is not None:
-            output["skill"] = self.target.skill
+            output["skill"] = copy_json(self.target.skill)
             output["tested_revision"] = self.target.tested_revision
         if self.args.dry_run:
             self.digest = self.fingerprint()
@@ -367,13 +373,42 @@ class WorkflowAction(SkillAction):
         if executed or self.context.results:
             output["cleanup"] = {
                 "status": BLOCKED if self.context.cleanup_failures else PASS,
-                "failures": list(self.context.cleanup_failures),
+                "failures": copy_json(self.context.cleanup_failures),
             }
         return emit_result(output, args)
 
 
-class ConfirmWorkflow(Callback[DeliveryState, WorkflowAction]):
+class ConfirmWorkflow(HarborCallback[WorkflowAction]):
     """Resolve live plan inputs before any composed mutation callback starts."""
+
+    @property
+    def plugin_type(self) -> SkillPluginType:
+        """Select registry configuration only when the plan reads image identity.
+
+        :returns: Harbor for registry reads, otherwise the local planning identity.
+        """
+        if self.action.spec is not None or bool(
+            getattr(self.action.args, "source_image", "")
+        ):
+            return SkillPluginType.HARBOR
+        return SkillPluginType.LOCAL
+
+    def read_config(self) -> JSONObject:
+        """Reuse registry configuration when the plan needs a live image read.
+
+        :returns: Empty evidence after retaining any required registry configuration.
+        :raises TargetError: Required registry configuration is unavailable.
+        """  # noqa: DOC502 - The Harbor callback owns configuration validation.
+        if self.plugin_type == SkillPluginType.HARBOR:
+            return super().read_config()
+        return {}
+
+    def is_configured(self) -> bool:
+        """Check only the provider used by this plan's selected operation.
+
+        :returns: Whether the plan has all configuration needed for its reads.
+        """
+        return self.plugin_type == SkillPluginType.LOCAL or super().is_configured()
 
     def run(self) -> JSONObject:
         """Resolve immutable image inputs and validate any requested plan confirmation.
@@ -385,13 +420,11 @@ class ConfirmWorkflow(Callback[DeliveryState, WorkflowAction]):
         workflow = self.action
         if workflow.spec is not None and workflow.resolved_base is None:
             digest = self.state.harbor.inspect(workflow.spec.base_image)
-            workflow.resolved_base = (
-                workflow.spec.base_image.rsplit("@", 1)[0] + "@" + digest
-            )
+            workflow.resolved_base = image_at_digest(workflow.spec.base_image, digest)
         source = getattr(workflow.args, "source_image", "")
         if source:
             digest = self.state.harbor.inspect(source)
-            workflow.resolved_source = source.rsplit("@", 1)[0] + "@" + digest
+            workflow.resolved_source = image_at_digest(source, digest)
             self.state.source_image = workflow.resolved_source
         image = getattr(workflow.args, "image", "")
         if image:
@@ -405,7 +438,7 @@ class ConfirmWorkflow(Callback[DeliveryState, WorkflowAction]):
         return result
 
 
-class EnsureNamespace(Callback[DeliveryState, WorkflowAction]):
+class EnsureNamespace(K8SCallback[WorkflowAction]):
     """Create absent selected namespaces while preserving existing namespaces."""
 
     def __init__(self, action: WorkflowAction):
@@ -454,12 +487,39 @@ class EnsureNamespace(Callback[DeliveryState, WorkflowAction]):
                 )
             else:
                 records.append(
-                    {"name": name, "uid": observed["metadata"]["uid"], "action": NO_OP}
+                    {
+                        "name": name,
+                        "uid": json_object(observed["metadata"])["uid"],
+                        "action": NO_OP,
+                    }
                 )
         return {"verified": True, "namespaces": records}
 
 
-class HarborBuild(Callback[DeliveryState, WorkflowAction]):
+class RegistryToolboxCallback(
+    K8SCallback[WorkflowAction], HarborCallback[WorkflowAction]
+):
+    """Compose the existing Kubernetes and Harbor configuration owners."""
+
+    def read_config(self) -> JSONObject:
+        """Reuse caller-bound services when no authentication callbacks precede this one.
+
+        :returns: Empty setup evidence after both provider owners retain their inputs.
+        :raises TargetError: Kubernetes or Harbor configuration is unavailable.
+        """  # noqa: DOC502 - Each provider callback validates its own configuration.
+        K8SCallback.read_config(self)
+        HarborCallback.read_config(self)
+        return {}
+
+    def is_configured(self) -> bool:
+        """Require both provider configurations before the workflow can execute.
+
+        :returns: Whether the existing Kubernetes and Harbor owners are configured.
+        """
+        return K8SCallback.is_configured(self) and HarborCallback.is_configured(self)
+
+
+class HarborBuild(RegistryToolboxCallback):
     """Construct the generic build action from preceding plan and registry state."""
 
     def __init__(self, workflow: WorkflowAction):
@@ -532,7 +592,7 @@ class HarborBuild(Callback[DeliveryState, WorkflowAction]):
         return {}
 
 
-class DeleteToolbox(Callback[DeliveryState, WorkflowAction]):
+class DeleteToolbox(RegistryToolboxCallback):
     """Delete explicitly selected owned build configuration and registry tags."""
 
     def run(self) -> JSONObject:

@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Optional
 
-from lib.python.access.access import kubernetes_env, oc_argv
+from lib.python.access.kubernetes import kubernetes_env, oc_argv
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.json_types import JSONObject, JSONValue, json_object, json_objects
 from lib.python.core.kubernetes.kubernetes import KubernetesService
@@ -26,6 +26,7 @@ from lib.python.sys.status import PARTIAL, PASS
 
 MAX_OUTPUT_BYTES = 1_048_576
 MAX_OUTPUT_LINES = 20_000
+DEFAULT_OPERATOR = "rook-ceph-operator"
 POD_SELECTOR = "app in (rook-ceph-osd,rook-ceph-mon)"
 POD_ROLES = {"rook-ceph-osd", "rook-ceph-mon"}
 MAX_CRUSH_DEPTH = 128
@@ -389,9 +390,9 @@ def discover_ceph_operator(target: Target, namespace: str) -> str:
 
     :param target: Bound Kubernetes authority for the read-only Deployment query.
     :param namespace: Caller-selected Ceph namespace used to scope discovery.
-    :returns: Exact live Deployment name bearing Rook's operator app label.
-    :raises ValueError: If discovery yields zero/multiple Deployments or a name,
-        namespace, or label does not match the requested selection.
+    :returns: Live Deployment name matching the established default operator.
+    :raises ValueError: If the default Deployment is absent or ambiguous,
+        or its name or namespace does not match the requested selection.
     :raises TypeError: If the native List envelope or resource fields are malformed.
     :raises KubernetesError: If the bounded Deployment query fails or returns invalid JSON.
     :raises TargetError: If the target lacks Kubernetes authority or bound sources change.
@@ -402,8 +403,8 @@ def discover_ceph_operator(target: Target, namespace: str) -> str:
         namespace,
         "get",
         "deployments",
-        "-l",
-        "app=rook-ceph-operator",
+        "--field-selector",
+        f"metadata.name={DEFAULT_OPERATOR}",
         "-o",
         "json",
     )
@@ -411,13 +412,15 @@ def discover_ceph_operator(target: Target, namespace: str) -> str:
     if "items" not in envelope:
         raise TypeError("ceph_operator:invalid_list_response")
     items = json_objects(envelope["items"])
+    if not items:
+        raise ValueError("ceph_operator:not_found")
     if len(items) != 1:
         raise ValueError("ceph_operator:not_unique")
     deployment = KubernetesObject(items[0])
     name = deployment.name
     if (
         deployment.namespace != namespace
-        or deployment.metadata.object("labels").text("app") != "rook-ceph-operator"
+        or name != DEFAULT_OPERATOR
         or not KUBERNETES_NAME.fullmatch(name)
         or len(name) > 63
     ):
@@ -433,7 +436,7 @@ class CephClusterRead:
 
         :param target: Bound Kubernetes authority used by every oc command.
         :param args: Namespace, optional operator, config path, node and Pod filters.
-            An omitted operator is discovered by its Rook app label; an omitted
+            An omitted operator resolves the default Deployment by name; an omitted
             config path follows /var/lib/rook/<namespace>/<namespace>.config.
         :raises ValueError: If namespace, operator, config path, or condition is invalid.
         :raises TypeError: If operator discovery returns malformed resource fields.

@@ -12,6 +12,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from types import ModuleType
@@ -41,9 +42,15 @@ def installed(tmp_path: Path) -> Path:
     root = tmp_path / "installed"
     root.mkdir()
     (root / "SKILL.md").write_text("---\nname: unit\n---\n", encoding="utf-8")
-    scripts = root / "scripts" / "core"
-    scripts.mkdir(parents=True)
-    (scripts / "thing.py").write_text("value = 1\n", encoding="utf-8")
+    bin_root = root / "bin"
+    lib_root = root / "lib" / "python"
+    schema_root = root / "schemas"
+    bin_root.mkdir(parents=True)
+    lib_root.mkdir(parents=True)
+    schema_root.mkdir()
+    (bin_root / "thing.sh").write_text("#!/bin/sh\necho unit\n", encoding="utf-8")
+    (lib_root / "thing.py").write_text("value = 1\n", encoding="utf-8")
+    (schema_root / "thing.json").write_text('{"type":"object"}\n', encoding="utf-8")
     return root
 
 
@@ -117,11 +124,53 @@ def test_matching_installer_record_verifies_an_installed_copy(installed: Path) -
     identity = provenance.skill_identity(installed, None)
 
     assert identity["digest"] == digest["digest"]
+    assert identity["functional_digest"] == provenance.functional_digest(installed)
     assert identity["revision"] == {
         "value": "a" * 40,
         "source": "installer_record",
         "verified": True,
     }
+
+
+@pytest.mark.parametrize(
+    "record_suffix",
+    (
+        ',"status":"PASS","status":"PASS"}',
+        ',"unused":NaN}',
+    ),
+)
+def test_installer_identity_rejects_ambiguous_or_nonfinite_json(
+    installed: Path, record_suffix: str
+) -> None:
+    """Ignore an installer record whose JSON decoder cannot preserve its meaning.
+
+    :param installed: Copied skill tree receiving an invalid root identity record.
+    :param record_suffix: Duplicate-key or nonfinite JSON suffix for the record.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    provenance = _provenance()
+    digest = provenance.tree_digest(installed)
+    record = {
+        "schema_version": "1.0",
+        "kind": "skill_install",
+        "status": "PASS",
+        **digest,
+        "revision": {
+            "value": "a" * 40,
+            "source": "git_head",
+            "verified": True,
+        },
+    }
+    encoded = json.dumps(record, separators=(",", ":"))
+    (installed / provenance.INSTALLATION_IDENTITY_NAME).write_text(
+        encoded[:-1] + record_suffix,
+        encoding="utf-8",
+    )
+
+    identity = provenance.skill_identity(installed, None)
+
+    assert identity["revision"] == {"value": None, "source": None, "verified": False}
 
 
 def test_installer_record_with_different_bytes_fails_closed(installed: Path) -> None:
@@ -147,7 +196,7 @@ def test_installer_record_with_different_bytes_fails_closed(installed: Path) -> 
     (installed / provenance.INSTALLATION_IDENTITY_NAME).write_text(
         json.dumps(record), encoding="utf-8"
     )
-    (installed / "scripts" / "core" / "thing.py").write_text(
+    (installed / "lib" / "python" / "thing.py").write_text(
         "value = 2\n", encoding="utf-8"
     )
 
@@ -237,6 +286,7 @@ def test_an_installed_copy_inside_an_unrelated_repository_claims_nothing(
     identity = provenance.skill_identity(copy, None)
 
     assert identity["revision"]["value"] is None
+    assert identity["functional_digest"] == hashlib.sha256(b"").hexdigest()
 
 
 def test_the_digest_changes_when_one_executed_byte_changes(installed: Path) -> None:
@@ -249,7 +299,7 @@ def test_the_digest_changes_when_one_executed_byte_changes(installed: Path) -> N
     provenance = _provenance()
     before = provenance.tree_digest(installed)["digest"]
 
-    (installed / "scripts" / "core" / "thing.py").write_text(
+    (installed / "lib" / "python" / "thing.py").write_text(
         "value = 2\n", encoding="utf-8"
     )
 
@@ -265,7 +315,7 @@ def test_the_digest_ignores_bytecode_caches(installed: Path) -> None:
     """
     provenance = _provenance()
     before = provenance.tree_digest(installed)
-    cache = installed / "scripts" / "core" / "__pycache__"
+    cache = installed / "lib" / "python" / "__pycache__"
     cache.mkdir()
     (cache / "thing.cpython-311.pyc").write_bytes(b"\x00\x01")
 
@@ -288,7 +338,7 @@ def test_only_the_root_installer_record_is_excluded_from_the_digest(
     )
     assert provenance.tree_digest(installed) == before
 
-    nested = installed / "scripts" / provenance.INSTALLATION_IDENTITY_NAME
+    nested = installed / "lib" / provenance.INSTALLATION_IDENTITY_NAME
     nested.write_text("ordinary nested payload\n", encoding="utf-8")
     assert provenance.tree_digest(installed) != before
 
@@ -302,10 +352,82 @@ def test_the_digest_covers_the_path_not_only_the_content(installed: Path) -> Non
     """
     provenance = _provenance()
     before = provenance.tree_digest(installed)["digest"]
-    source = installed / "scripts" / "core" / "thing.py"
+    source = installed / "lib" / "python" / "thing.py"
     source.rename(source.with_name("renamed.py"))
 
     assert provenance.tree_digest(installed)["digest"] != before
+
+
+@pytest.mark.parametrize(
+    ("relative", "content", "package_changes"),
+    (
+        ("references/guide.md", "documentation\n", True),
+        (
+            "tests/python/test_fixture.py",
+            "def test_fixture() -> None:\n    pass\n",
+            True,
+        ),
+        ("lib/python/__pycache__/thing.pyc", "cache\n", False),
+    ),
+)
+def test_functional_digest_excludes_documents_tests_and_caches(
+    installed: Path,
+    relative: str,
+    content: str,
+    package_changes: bool,
+) -> None:
+    """Keep non-runtime paths out of functional identity but not package integrity.
+
+    :param installed: Copied skill tree receiving the excluded path.
+    :param relative: Excluded path created under the copied skill tree.
+    :param content: Deterministic bytes written to the excluded path.
+    :param package_changes: Whether the full package digest must observe the path.
+    :returns: None; assertions in the body validate the regression.
+    """
+    provenance = _provenance()
+    functional_before = provenance.functional_digest(installed)
+    package_before = provenance.tree_digest(installed)["digest"]
+    path = installed / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+    assert provenance.functional_digest(installed) == functional_before
+    assert (
+        provenance.tree_digest(installed)["digest"] != package_before
+    ) is package_changes
+
+
+@pytest.mark.parametrize(
+    "operation", ("python", "bash_add", "schema", "delete", "mode")
+)
+def test_functional_digest_tracks_runtime_bytes_and_shapes(
+    installed: Path, operation: str
+) -> None:
+    """Change functional identity when a declared runtime root changes shape.
+
+    :param installed: Copied skill tree receiving a runtime-root mutation.
+    :param operation: Byte, add, remove, or mode change under a runtime root.
+    :returns: None; assertions in the body validate the regression.
+    """
+    provenance = _provenance()
+    before = provenance.functional_digest(installed)
+    bin_file = installed / "bin" / "thing.sh"
+    lib_file = installed / "lib" / "python" / "thing.py"
+    schema_file = installed / "schemas" / "thing.json"
+    if operation == "python":
+        lib_file.write_text("value = 2\n", encoding="utf-8")
+    elif operation == "bash_add":
+        (installed / "bin" / "added.sh").write_text(
+            "#!/bin/sh\necho added\n", encoding="utf-8"
+        )
+    elif operation == "schema":
+        schema_file.write_text('{"type":"string"}\n', encoding="utf-8")
+    elif operation == "delete":
+        lib_file.unlink()
+    else:
+        bin_file.chmod(bin_file.stat().st_mode | 0o100)
+
+    assert provenance.functional_digest(installed) != before
 
 
 def test_an_empty_or_missing_tree_blocks(tmp_path: Path) -> None:

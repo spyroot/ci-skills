@@ -6,12 +6,18 @@ tool or stop whenever ci-skills does not answer the task at hand.
 
 ## Choose the shortest useful path
 
-The planned `ci-skills/bin/reference.py` navigator advertises capabilities separately from executing them. A call
-such as `reference.py next gitlab milestone` returns a small choice of **run** and **read** paths. Following **run**
-narrows to a verb, its exact command and required inputs; optional inputs load only on request. Following **read**
-leads to a pinned reference section and its subsections. Each choice carries its next invocation. Planned verbs must
-remain visibly unavailable until an installed command implements them. [CI09-REFERENCE](phases/CI09-REFERENCE.md)
-owns the navigation grammar and output; [CI08-ROUTING](phases/CI08-ROUTING.md) owns routing and lazy loading.
+The installed `ci-skills/bin/reference.py` advertises capabilities separately from executing them. Call
+`reference.py --json` for the root, `reference.py glab --json` for GitLab tools, then
+`reference.py gitlab_milestone.py --json` for one command's connections. Each node returns compact `tools` and
+`reference` mappings. Use a tool's `--help` or `--describe` for its exact verb and inputs; follow a reference pointer
+only when the task needs that document. The [CI11 proposition interface](phases/CI11-TOOLS.md#proposition-interface)
+describes this installed shape. [CI09-REFERENCE](phases/CI09-REFERENCE.md) and
+[CI08-ROUTING](phases/CI08-ROUTING.md) retain the broader reference and routing design; planned verbs remain
+unavailable until an installed command implements them.
+
+The `offline` cluster offers commands that need no provider credentials, including the binary-build planner and
+reference navigation. `bin/ci-api` is offered in both GitHub and GitLab clusters; its `--provider` selects one.
+Command keys beginning with `bin/` are relative to the installed skill root; other tool names are in its `bin/` directory.
 
 ## Work backward from an observed effect
 

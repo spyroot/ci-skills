@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from tools.agent_profile import AgentProfile
 
 import pytest
-from conftest import REPO_ROOT, load_module
+from conftest import REPO_ROOT, import_script_module, load_module
 
 
 def _profile(tmp_path: Path) -> tuple[ModuleType, AgentProfile]:
@@ -59,6 +59,7 @@ def _profile(tmp_path: Path) -> tuple[ModuleType, AgentProfile]:
         REPO_ROOT / "schemas/configuration/toolchain-dependencies.schema.json",
         schema / "toolchain-dependencies.schema.json",
     )
+    import_script_module("_bootstrap")
     module = load_module("agent_profile", REPO_ROOT / "tools" / "agent_profile.py")
     repository_root = tmp_path / "consumer"
     repository_root.mkdir()

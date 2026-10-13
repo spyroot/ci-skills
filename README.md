@@ -3,6 +3,182 @@
 CI Skills provides project-neutral commands for GitLab, GitHub, and Kubernetes/OpenShift. Each command selects its
 target from caller input or the configured binding and returns evidence that an operator or agent can inspect.
 
+## Install and first run
+
+Five steps. The fourth sets a default target, so later commands need no target argument.
+
+Start from a clean checkout, or enter an existing clean checkout:
+
+```bash
+git clone https://github.com/spyroot/ci-skills.git
+cd ci-skills
+```
+
+**1. Install the tools.** This setup uses `git`, `conda`, and `jq`. Installed commands require Python 3.11 or newer;
+[requirements.txt](requirements.txt) declares their Python dependencies, including PyYAML and JSON Schema support.
+Create the `ci-skills` conda environment if absent, then install those dependencies:
+
+```bash
+conda create -n ci-skills python=3.11
+conda run -n ci-skills python -m pip install -r requirements.txt
+```
+
+Install the native clients for the capabilities you intend to use. The command's `--describe` output declares its
+`required_tools`; [catalog.py](ci-skills/lib/python/core/catalog.py) owns that declaration.
+
+| Capability | Native clients on the calling machine |
+| --- | --- |
+| GitLab operations | `glab` |
+| GitHub API reads | `gh` |
+| Kubernetes diagnostics | `kubectl` |
+| OpenShift MTU checks | `kubectl`, `oc`; `ip` must be present on the selected node |
+| Toolbox create/update/delete | `kubectl`, `oc`, `skopeo` |
+| Harbor publication | `skopeo` |
+| Harbor pull verification | `kubectl` |
+| GitHub self-hosted runner create/update | `gh`, `kubectl`, `oc`, `skopeo` |
+| Local binary build planning | `git` |
+
+The installer's [agent profile](toolchain-dependencies.json) provisions `glab` and the bundled `glab-stack` skill;
+it does not install the other native clients. For example, before using the runner workflow, check the selected
+clients with `command -v gh kubectl oc skopeo`. Commands such as `cilium-health` and `journalctl` run in their declared
+Pod, not on the calling machine.
+
+**2. Install the `ci-skills` skill.** Activate the `ci-skills` conda environment. From the repository where
+Codex should find `glab-stack`, point to a clean committed ci-skills checkout, inspect the plan, then install:
+
+```bash
+conda activate ci-skills
+CI_SKILLS_CHECKOUT="$PWD"
+CI_SKILLS_INSTALLER="$CI_SKILLS_CHECKOUT/install.sh"
+cd /path/to/consumer-repository
+"$CI_SKILLS_INSTALLER" --dry-run
+FINGERPRINT="$("$CI_SKILLS_INSTALLER" --dry-run | jq -r '.fingerprint')"
+"$CI_SKILLS_INSTALLER" --apply --confirm-install "$FINGERPRINT" --timeout 600s
+CI_SKILLS_ROOT="${CODEX_HOME:-$HOME/.codex}/skills/ci-skills"
+```
+
+Keep the consumer repository as the working directory. `CI_SKILLS_ROOT` names the default installed copy; if you chose
+a different skills directory, set it to that copy. All command examples below invoke that installed root.
+
+If `glab` was missing, the first apply installs it and requests a new dry-run fingerprint before installing its skill.
+
+**3. Authenticate, as yourself.** The skill ships no credentials and grants no access. Provide the identity needed by
+the commands you run: a Kubernetes administrator for cluster diagnostics, a GitLab instance administrator for GitLab
+diagnostics, and a GitHub identity for the full access receipt. `gh auth login`, `glab auth login`, and your cluster's
+existing login mechanism are supported. A declared token file takes precedence over ambient token variables; the report
+names the effective source.
+
+**4. Create your target file.** This is the step that makes everything else argument-free:
+
+```bash
+mkdir -p ~/.ci-skills
+cp "$CI_SKILLS_CHECKOUT/target.toml.template" ~/.ci-skills/target.toml
+$EDITOR ~/.ci-skills/target.toml
+```
+
+Fill in the sections needed by your commands. GitLab-only commands can use `[gitlab]` alone, while the full
+`access_check.py` receipt needs all three sections. Kubernetes commands need the selected context and exact API server.
+Declare `kubernetes.kubeconfigs` when context and credential span files; otherwise the resolver uses a declared
+`kubeconfig`, `KUBECONFIG`, or `~/.kube/config` in that order, then verifies the context and server. For the
+`--publication` check in step 5, declare the repository's actual `github.required_checks` from branch protection.
+The installed commands are Python entrypoints over the bundled reusable library. No source code from another
+repository or skill is loaded at runtime.
+
+Never commit credential values or credential-bearing kubeconfigs. A project may keep its target at
+`./.ci-skills/target.toml`; a pipeline must use paths valid on its own runner. The paths inside are true on one machine
+only; a pipeline aimed at a path under someone's home directory fails the moment it runs on a runner, and the failure
+reads like a credential problem rather than the wiring mistake it is. A consuming project can provide its own target
+file or the documented `--binding PATH` protocol for an existing kubeconfig resolver; see
+[project-binding.md](ci-skills/references/project-binding.md). For node diagnostics, declare the selected node and
+existing Pod routes under `[kubernetes.node_diagnostics]`. Provisioning access is the project's job; this skill resolves
+the selected source and reports it.
+The initial commands are `bin/ci-api` for GitHub and GitLab reads, and
+`bin/ci-binary-build` for an exact-commit OpenShift Binary BuildConfig plan.
+`ci-api` resolves its host and token reference from the selected target; `--host` and `--token-file` remain explicit
+overrides. `ci-binary-build` accepts a BuildConfig, source repository, exact commit, and commit-label key. It validates
+the Dockerfile at that commit and returns a fingerprinted plan without contacting a cluster or publishing an image.
+Both default to JSON and support `--yaml`, `--help`, and `--describe`.
+No credentials belong in tracked files or published artifacts. Token references may point to a local ignored file,
+a CI file variable, or a read-only Secret mount. Without a selected token file, `ci-api` uses the native CLI's existing
+authentication. The skill does not manage that credential store.
+
+**5. Prove access to the authorities you selected.** For a GitLab-only target, read back its configured project and
+administrator identity:
+
+```bash
+conda run -n ci-skills python \
+  "$CI_SKILLS_ROOT/bin/gitlab_access.py" check --json
+```
+
+When testing publication access against the selected runtime target, run the full publication check:
+
+```bash
+conda run -n ci-skills python \
+  "$CI_SKILLS_ROOT/bin/access_check.py" --publication
+```
+
+Its `PASS` means every selected authority was reached and each required live read succeeded, and the receipt names the
+effective source and identity. That is the answer to "which credential am I using" — read it rather than searching the
+host.
+
+### Installer reference
+
+`install.sh` forwards to [the copy installer](tools/install_ci_skills.py). It installs at
+`$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The installed copy is
+independent of the checkout. The staged copy includes `INSTALLATION.json`, an installer-owned record of the clean
+source revision and measured skill digest; installed commands accept it only while the current bytes still match.
+It also installs the bundled `glab-stack` skill under `$REPO_ROOT/.agents/skills` in the
+repository where you run the installer.
+When `glab` is missing, it installs the declared package with Homebrew on macOS or `apt-get`, `dnf`, or `yum` on Linux.
+If Homebrew is missing, the installer points to its installation instructions. The package's
+[SKILL.md](ci-skills/SKILL.md) routes agent requests to its tools.
+Agent lifecycle hooks are not installed yet; their short [delivery design](docs/skill-session-hook.md) explains how
+Codex and Claude can show CI Skills activity when an agent calls an installed command.
+
+The repository's [`toolchain-dependencies.json`](toolchain-dependencies.json) declares the `agent` profile and package
+names. Its version 1.0 contract is checked against the [toolchain schema](schemas/configuration/toolchain-dependencies.schema.json)
+before installation; unknown fields and malformed JSON block the plan.
+
+For a different skills directory, use the Python installer:
+
+```bash
+conda run -n ci-skills python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
+  --skills-dir ~/.claude/skills --dry-run --json
+```
+
+To upgrade an existing copy or checkout link, make a new plan and use its fingerprint:
+
+```bash
+FINGERPRINT="$("$CI_SKILLS_INSTALLER" --upgrade --dry-run | jq -r '.fingerprint')"
+"$CI_SKILLS_INSTALLER" --upgrade --apply --confirm-upgrade "$FINGERPRINT" --timeout 600s
+```
+
+Interrupted installations have a separate recovery path:
+
+```bash
+conda run -n ci-skills python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
+  --recover --json
+conda run -n ci-skills python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
+  --recover --apply --confirm-recover --timeout 10s --json
+```
+
+An upgrade preserves the previous copy or link as a hidden sibling and reads back the installed digest. Installation,
+upgrade, and recovery default to dry-run. The installer requires a clean committed skill subtree; compare its reported
+digest with `skill.digest` in later reports. It accepts `--json`, `--yaml`, and `--help`.
+
+A Codex session can install the merged skill straight from GitHub instead:
+
+```text
+Install the skill from https://github.com/spyroot/ci-skills/tree/main/ci-skills
+```
+
+The direct GitHub skill install skips the Python/native dependency and `glab-stack` setup. Prepare the runtime in
+step 1 separately, and use the checkout installer in step 2 when you also need `glab-stack`.
+
+Either way, each execution host still needs its own credentials and its own target file — installation grants nothing.
+
+## Design and composition
+
 An agent can perform these operations through existing clients such as `glab` and `oc`. The value of CI Skills is
 deterministic, tested execution: construct requests, parse JSON, normalize and reduce the result, and perform the
 required read-back. This avoids repeated `jq` construction, missed response keys, and corrective reads. It consumes
@@ -12,12 +188,17 @@ justify another coordination layer or test family.
 The discovery design reduces context too: offer the actions available here and small pointers to relevant references.
 A broad cluster returns little information; a selected smaller cluster can return more detail within that scope.
 
-To use the installed commands, go directly to [Install and first run](#install-and-first-run).
-
 ## Proposition interface
 
-Run `ci-skills/bin/reference.py` for the root, `reference.py glab` for GitLab tools, or
-`reference.py gitlab_job.py` for that command's connections. `--json` and `--yaml` select output; no credentials are needed.
+With the installed root selected above, run:
+
+```bash
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/reference.py" --json
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/reference.py" glab --json
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/reference.py" gitlab_job.py --json
+```
+
+These select the root, GitLab tools, and one command's connections. `--yaml` is also supported; no credentials are needed.
 
 A proposition is a compact offering of the tools and references at one node. The entrypoint proposes the main clusters;
 each selected node proposes its own relevant tools and references. Nodes form a graph: related job, pipeline, runner,
@@ -87,7 +268,7 @@ and `source_repo`, plus strings `source_commit` and `commit_label`:
 
 ```python
 from lib.python.core.abstract.callbacks import Callbacks
-from lib.python.core.abstract.skill_exector import WorkflowExecutor
+from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.binary_build import BinaryBuildAction, BinaryBuildState, PlanBinaryBuild
 
 action = BinaryBuildAction(
@@ -112,10 +293,12 @@ shared. New combinations change the callback list rather than duplicate those im
 
 The runner workflow is `create_selfhosted_runner.py create|update|delete`. Start with
 `reference.py harbor` to find the installed toolbox schema and the independent `toolbox.py`, `harbor_push.py`, and
-`harbor_pull.py` operations. Supply the toolbox specification, runner name, runtime directory, and labels through the
-command's `--help` interface. The default invocation returns a plan; repeat it with `--apply --confirm-plan DIGEST`.
+`harbor_pull.py` operations. The installed
+[toolbox and runner example](ci-skills/SKILL.md#toolbox-and-runner-workflows) shows the input shape, caller-selected
+runtime and exact plan command. Use the command's `--help` for its complete interface. The default invocation returns
+a plan; repeat it with `--apply --confirm-plan DIGEST`.
 The combo builds on OpenShift, publishes to Harbor, verifies the pulled toolbox, and registers the deployed GitHub
-runner. GitHub Actions runs tests and linting on that image. Runtime access comes from the selected `target.toml`.
+runner. Runtime access comes from the selected `target.toml`; repository GitHub validation tests the code separately.
 For a compact execution trace, use `--log-level debug --log-format json --log-file PATH`. These shared diagnostic
 options record callback outcomes, API methods/status codes, and command exit codes without provider payloads or secrets.
 The result's `trace_artifact` points to that file; smoke reports link the artifact alongside verified read-back results.
@@ -143,7 +326,7 @@ Their `--help` output serves people, while `--json`, `--yaml`, and `--describe` 
 contracts. The generated
 [tools.json](ci-skills/tools.json) records options, access protocols, and target protocols. GitLab writes start with a
 dry-run plan and require a confirmed plan digest to apply. Their subcommand contracts point to the applicable
-[result schema](schemas/results/). Parser-to-catalog checks reject undeclared arguments and abbreviated flag names;
+[result schema](ci-skills/schemas/results/). Parser-to-catalog checks reject undeclared arguments and abbreviated flag names;
 authentication continues through the shared target and credential resolvers.
 Live validation uses the runtime setup and read-back described in the
 [smoke cases](docs/phases/CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back).
@@ -178,7 +361,9 @@ Four patterns describe what a tool does. They can overlap: a combined report may
   placement groups, and Pods; [Ceph kernel diagnostics](ci-skills/bin/ceph_kernel.py) adds selected node events.
 - **Toolchain Combination:** [ci-binary-build](ci-skills/bin/ci-binary-build) plans an exact-commit OpenShift build, and
   [gitlab_runner.py](ci-skills/bin/gitlab_runner.py) plans and applies runner creation, assignment, tagging, or deletion.
-  The complete example workflows above remain proposed.
+  [toolbox.py](ci-skills/bin/toolbox.py), [harbor_push.py](ci-skills/bin/harbor_push.py),
+  [harbor_pull.py](ci-skills/bin/harbor_pull.py), and
+  [create_selfhosted_runner.py](ci-skills/bin/create_selfhosted_runner.py) provide the installed toolbox/runner workflows.
 
 ## Required next delivery
 
@@ -225,201 +410,19 @@ come from caller input, the selected binding, or GitLab; reusable code must not 
 Pipeline and job actions must support status and output read-back; schedules need equivalent state read-back after
 changes.
 
-## Install and first run
-
-Five steps. The fourth sets a default target, so later commands need no target argument.
-
-Start from a clean checkout, or enter an existing clean checkout:
-
-```bash
-git clone https://github.com/spyroot/ci-skills.git
-cd ci-skills
-```
-
-**1. Install the tools.** This setup uses `git`, `conda`, and `jq`. Python 3.11 or newer with PyYAML is required for
-the installed commands. `ci-api` uses `gh` or `glab` for the selected provider; `ci-binary-build` uses Git and PyYAML.
-Install `kubectl` for Kubernetes diagnostics; `./install.sh` installs missing `glab`. Create the `ci-skills` conda
-environment if absent, then install the repository dependencies:
-
-```bash
-conda create -n ci-skills python=3.11
-conda run -n ci-skills python -m pip install -r requirements.txt
-```
-
-**2. Install the `ci-skills` skill.** Activate the `ci-skills` conda environment. From the repository where
-Codex should find `glab-stack`, point to a clean committed ci-skills checkout, inspect the plan, then install:
-
-```bash
-conda activate ci-skills
-CI_SKILLS_INSTALLER="$PWD/install.sh"
-cd /path/to/consumer-repository
-"$CI_SKILLS_INSTALLER" --dry-run
-FINGERPRINT="$("$CI_SKILLS_INSTALLER" --dry-run | jq -r '.fingerprint')"
-"$CI_SKILLS_INSTALLER" --apply --confirm-install "$FINGERPRINT" --timeout 600s
-```
-
-`install.sh` forwards to [the copy installer](tools/install_ci_skills.py). It installs at
-`$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The installed copy is
-independent of the checkout. The staged copy includes `INSTALLATION.json`, an installer-owned record of the clean
-source revision and measured skill digest; installed commands accept it only while the current bytes still match.
-It also installs the bundled `glab-stack` skill under `$REPO_ROOT/.agents/skills` in the
-repository where you run the installer.
-When `glab` is missing, it installs the declared package with Homebrew on macOS or `apt-get`, `dnf`, or `yum` on Linux.
-If Homebrew is missing, the installer points to its installation instructions. The package's
-[SKILL.md](ci-skills/SKILL.md) routes agent requests to its tools.
-If `glab` was missing, the first apply installs it and requests a new dry-run fingerprint before installing its skill.
-Agent lifecycle hooks are not installed yet; their short [delivery design](docs/skill-session-hook.md) explains how
-Codex and Claude can show CI Skills activity when an agent calls an installed command.
-
-**3. Authenticate, as yourself.** The skill ships no credentials and grants no access. Provide the identity needed by
-the commands you run: a Kubernetes administrator for cluster diagnostics, a GitLab instance administrator for GitLab
-diagnostics, and a GitHub identity for the full access receipt. `gh auth login`, `glab auth login`, and your cluster's
-existing login mechanism are supported. A declared token file takes precedence over ambient token variables; the report
-names the effective source.
-
-**4. Create your target file.** This is the step that makes everything else argument-free:
-
-```bash
-mkdir -p ~/.ci-skills
-cp target.toml.template ~/.ci-skills/target.toml
-$EDITOR ~/.ci-skills/target.toml
-```
-
-Fill in the sections needed by your commands. GitLab-only commands can use `[gitlab]` alone, while the full
-`access_check.py` receipt needs all three sections. Kubernetes commands need the selected context and exact API server.
-Declare `kubernetes.kubeconfigs` when context and credential span files; otherwise the resolver uses a declared
-`kubeconfig`, `KUBECONFIG`, or `~/.kube/config` in that order, then verifies the context and server. For the
-`--publication` check in step 5, declare the repository's actual `github.required_checks` from branch protection.
-The installed commands are Python entrypoints over the bundled reusable library. No source code from another
-repository or skill is loaded at runtime.
-
-Never commit credential values or credential-bearing kubeconfigs. A project may keep its target at
-`./.ci-skills/target.toml`; a pipeline must use paths valid on its own runner. The paths inside are true on one machine
-only; a pipeline aimed at a path under someone's home directory fails the moment it runs on a runner, and the failure
-reads like a credential problem rather than the wiring mistake it is. A consuming project can provide its own target
-file or the documented `--binding PATH` protocol for an existing kubeconfig resolver; see
-[project-binding.md](ci-skills/references/project-binding.md). For node diagnostics, declare the selected node and
-existing Pod routes under `[kubernetes.node_diagnostics]`. Provisioning access is the project's job; this skill resolves
-the selected source and reports it.
-The initial commands are `bin/ci-api` for GitHub and GitLab reads, and
-`bin/ci-binary-build` for an exact-commit OpenShift Binary BuildConfig plan.
-`ci-api` resolves its host and token reference from the selected target; `--host` and `--token-file` remain explicit
-overrides. `ci-binary-build` accepts a BuildConfig, source repository, exact commit, and commit-label key. It validates
-the Dockerfile at that commit and returns a fingerprinted plan without contacting a cluster or publishing an image.
-Both default to JSON and support `--yaml`, `--help`, and `--describe`; neither accepts `--target`.
-No credentials belong in tracked files or published artifacts. Token references may point to a local ignored file,
-a CI file variable, or a read-only Secret mount. Without a selected token file, `ci-api` uses the native CLI's existing
-authentication. The skill does not manage that credential store.
-
-Repository development uses separate Bash tooling: the `install.sh` adapter starts the Python copy installer, and
-`bless.sh` and `scripts/ci/static.sh` share the checks in `lib/bash/automation/bless.bash`. The validation workflow
-also runs the declared Python and Bats tests. These development gates are separate from installed skill commands.
-
-**5. Prove access to the authorities you selected.** For a GitLab-only target, read back its configured project and
-administrator identity:
-
-```bash
-conda run -n ci-skills python \
-  ci-skills/bin/gitlab_access.py check --json
-```
-
-When testing publication access against the selected runtime target, run the full publication check:
-
-```bash
-conda run -n ci-skills python \
-  ci-skills/bin/access_check.py --publication
-```
-
-Its `PASS` means every selected authority was reached and each required live read succeeded, and the receipt names the
-effective source and identity. That is the answer to "which credential am I using" — read it rather than searching the
-host.
-
-### Installer reference
-
-The repository's [`toolchain-dependencies.json`](toolchain-dependencies.json) declares the `agent` profile and package
-names. Its version 1.0 contract is checked against the [toolchain schema](schemas/configuration/toolchain-dependencies.schema.json)
-before installation; unknown fields and malformed JSON block the plan.
-
-For a different skills directory, use the Python installer:
-
-```bash
-conda run -n ci-skills python tools/install_ci_skills.py \
-  --skills-dir ~/.claude/skills --dry-run --json
-```
-
-To upgrade an existing copy or checkout link, make a new plan and use its fingerprint:
-
-```bash
-FINGERPRINT="$(./install.sh --upgrade --dry-run | jq -r '.fingerprint')"
-./install.sh --upgrade --apply --confirm-upgrade "$FINGERPRINT" --timeout 600s
-```
-
-Interrupted installations have a separate recovery path:
-
-```bash
-conda run -n ci-skills python tools/install_ci_skills.py \
-  --recover --json
-conda run -n ci-skills python tools/install_ci_skills.py \
-  --recover --apply --confirm-recover --timeout 10s --json
-```
-
-An upgrade preserves the previous copy or link as a hidden sibling and reads back the installed digest. Installation,
-upgrade, and recovery default to dry-run. The installer requires a clean committed skill subtree; compare its reported
-digest with `skill.digest` in later reports. It accepts `--json`, `--yaml`, and `--help`.
-
-A Codex session can install the merged skill straight from GitHub instead:
-
-```text
-Install the skill from https://github.com/spyroot/ci-skills/tree/main/ci-skills
-```
-
-The direct GitHub skill install skips the `glab` and `glab-stack` setup. Use the checkout installer in step 2 for both.
-
-Either way, each execution host still needs its own credentials and its own target file — installation grants nothing.
-
 ## Target selection
 
-You supply **one nonsecret file** naming the authorities each command will use. Copy `target.toml.template`, fill it in,
-and put it in one of these places. The first one found wins. Diagnostic and GitLab operation reports identify it as
-`target_source`; `ci-api` returns the selected provider value directly.
-The layout is the one agent tooling already uses — a project `./.ci-skills/` beside a user `~/.ci-skills/`, the same
-shape as `.claude` and `.codex`:
-
-| # | Scope | Where | Set by |
-| --- | --- | --- | --- |
-| 1 | declared CLI override | `--target PATH`, where supported | the caller |
-| 2 | one environment | `$CI_SKILLS_TARGET` | a shell, a CI job, an agent |
-| 3 | one project | `./.ci-skills/target.toml` | per repository |
-| 4 | one user | `~/.ci-skills/target.toml` | you |
-
-Pick the tier that matches how many targets you have. `K8S_ADMIN_DIAGNOSTICS_BINDING` also selects a project binding at
-the environment tier. Setting it together with `CI_SKILLS_TARGET` is an error; the resolver will not guess between them.
-
-**One GitLab and one cluster** — put the file at tier 4 once and never pass an argument again. Same shape as a single
-API key living in a user config rather than in every repository.
-
-**Many clusters** — tier 4 stops being useful, and tiers 2 and 3 are the answer. Keep one target per cluster wherever
-you like and select it with `$CI_SKILLS_TARGET`, or put a `.ci-skills/target.toml` in each repository that owns a
-cluster so anyone working there is aimed correctly by default. A CI job sets the variable; an agent can set it per task.
-Tier 1 stays for one-off runs against something unusual.
-
-`ci-api` uses tiers 2–4 and has no `--target` option. For tests and live smoke, `CI_SKILLS_TARGET` repoints resolution
-to an existing file. Setting the `ci-skills-smoke` environment variable instead selects `ci-skills-smoke.toml` in
-the project/user directories; it does not fall back to their ordinary `target.toml`. There is no separate dev-mode
-switch. `ci-binary-build` uses caller-supplied build inputs and does not resolve a cluster target.
-
-Credentials follow the same shape: declared first, environment next, the client's own credential store last. The full
-chain per authority is in `ci-skills` under `access_protocol`, and the resolved source for each is reported in
-`credential_sources`.
-
-**This skill resolves; it does not provision.** It will not create a target file, mint a token, or fetch a kubeconfig.
-Somebody has to put them there — you, or an explicit step in the calling project's own instructions. If nothing is
-found, the error names every path it searched and the template to copy.
+Use only the provider sections your command needs. Without an explicit binding, target selection uses
+`CI_SKILLS_TARGET`, the consumer project's `.ci-skills/target.toml`, then the user's `~/.ci-skills/target.toml`.
+The selected file does not inherit missing sections or credentials from another tier. Reports identify the selected
+source. See the installed [access reference](ci-skills/references/access.md#where-the-target-file-comes-from) for
+command exceptions, smoke filename selection and credential resolution, and the
+[project binding](ci-skills/references/project-binding.md) for an existing kubeconfig resolver.
 
 ## GitLab operations
 
 For GitLab-only work, the selected target file may contain only `[gitlab]` with its exact `url`. Set `gitlab.project` or
-`gitlab.group` for the intended operation. `gitlab_job.py` selects its project from `--job-url`. The same four-tier
+`gitlab.group` for the intended operation. `gitlab_job.py` selects its project from `--job-url`. The same
 target selection above applies. Storage, event, and Cilium diagnostics need only `[kubernetes]`; the full
 `access_check.py` needs all three authorities. Set `gitlab.project` in the selected target for the commands below. The
 declared `--project` flag overrides it for one invocation.
@@ -428,10 +431,10 @@ The operation access check reads back the effective GitLab identity and exact nu
 
 ```bash
 conda run -n ci-skills python \
-  ci-skills/bin/gitlab_access.py check \
+  "$CI_SKILLS_ROOT/bin/gitlab_access.py" check \
   --json
 conda run -n ci-skills python \
-  ci-skills/bin/gitlab_milestone.py create \
+  "$CI_SKILLS_ROOT/bin/gitlab_milestone.py" create \
   --title "Release checkpoint" --json
 ```
 
@@ -520,7 +523,7 @@ The kernel classifier emits action codes for observed blocklisting, auth failure
 Other priority 0–3 entries receive `review_ceph_kernel_event`; informational entries have no action. The action code is
 a prompt for investigation, not a claimed root cause.
 
-Both accept `--target` or `--binding`, `--yaml`, `--dry-run`, and `--help`. Exit code 0 means the node read succeeded or
+Both accept `--binding`, `--yaml`, `--dry-run`, and `--help`. Exit code 0 means the node read succeeded or
 a dry run was requested; code 2 means incomplete evidence. An absent, ambiguous, or wrong-node Pod blocks;
 `ceph_kernel.py` also blocks when the declared host journal directory is not mounted in its container.
 
@@ -534,6 +537,10 @@ not, as long as the capability it proves was demonstrated at least once. Each li
 its own `status`.
 
 ## Validation
+
+Repository development uses separate Bash tooling: the `install.sh` adapter starts the Python copy installer, and
+`bless.sh` and `scripts/ci/static.sh` share the checks in `lib/bash/automation/bless.bash`. The validation workflow
+also runs the declared Python and Bats tests. These development gates are separate from installed skill commands.
 
 Local `bless.sh` runs static checks before commit. GitHub runs the same shared lint checks, including ShellCheck,
 workflow/YAML and Markdown checks, schemas, diff hygiene, secrets, and Ruff lint/format. Existing GitHub jobs also

@@ -8,6 +8,7 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import argparse
+import shlex
 import subprocess
 import sys
 from collections.abc import MutableSequence
@@ -16,7 +17,8 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
 import pytest
-from conftest import REPO_ROOT
+import yaml
+from conftest import REPO_ROOT, selected_test_paths
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject, JSONValue
@@ -591,8 +593,23 @@ def test_run_classifies_harness_digest_mismatch_before_sampling(
 
 def test_existing_ci_test_step_collects_benchmark_contract_tests() -> None:
     """Keep benchmark contract tests in the repository's existing pytest step."""
-    workflow = (REPO_ROOT / ".github" / "workflows" / "validate.yml").read_text(
-        encoding="utf-8"
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "validate.yml").read_text(
+            encoding="utf-8"
+        )
     )
-    assert "pytest -q --ignore=tests/test_installed_package.py" in workflow
-    assert "tests/test_event_trace_benchmark.py" not in workflow
+    unit = next(
+        step
+        for step in workflow["jobs"]["validate"]["steps"]
+        if step.get("id") == "unit"
+    )
+    command = str(unit["run"])
+    benchmark = "tests/python/test_event_trace_benchmark.py"
+
+    assert "tests/python" in selected_test_paths(command)
+    tokens = shlex.split(command)
+    assert f"--ignore={benchmark}" not in tokens
+    assert all(
+        tokens[index : index + 2] != ["--ignore", benchmark]
+        for index in range(len(tokens) - 1)
+    )

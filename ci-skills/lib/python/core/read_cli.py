@@ -11,10 +11,9 @@ import argparse
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Optional
+from typing import NoReturn, Optional
 
 from lib.python.core.abstract.callbacks import Callbacks
-from lib.python.core.abstract.skill_exector import WorkflowExecutor
 from lib.python.core.api_read import (
     ApiCheckAction,
     ApiOutput,
@@ -29,9 +28,11 @@ from lib.python.core.api_read import (
     SelectAPI,
 )
 from lib.python.core.catalog import describe
-from lib.python.core.cli import MachineArgumentParser, add_log_arguments, log_event
+from lib.python.core.cli import MachineArgumentParser
 from lib.python.core.cli_api import APIError
-from lib.python.core.json_types import JSONValue
+from lib.python.core.executor import WorkflowExecutor
+from lib.python.core.json_types import JSONValue, json_string
+from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.read_tools import ReadExit, ReadToolError, read_failure_message
 from lib.python.core.report import render_value
 from lib.python.core.runtime import sanitize
@@ -42,7 +43,7 @@ from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, PLANNED
 class ReadArgumentParser(MachineArgumentParser):
     """Preserve native read exit codes without echoing rejected input values."""
 
-    def error(self, message: str) -> None:
+    def error(self, message: str) -> NoReturn:
         """Report invalid arguments without exposing a supplied credential.
 
         :param message: Argparse diagnostic, intentionally not reproduced.
@@ -62,7 +63,7 @@ def _parser(script: str) -> ReadArgumentParser:
     contract = describe(script)
     result = ReadArgumentParser(
         prog=Path(script).name,
-        report_kind=contract["report_kind"],
+        report_kind=json_string(contract["report_kind"]),
         help_contract=contract,
     )
     result.add_argument("--describe", action="store_true")
@@ -150,7 +151,13 @@ def _output(
                 if args.dry_run
                 else (PLANNED if getattr(args, "live_plan", False) else PASS)
             )
-            log_event(args, contract["report_kind"], "result", status, persist=persist)
+            log_event(
+                args,
+                json_string(contract["report_kind"]),
+                "result",
+                status,
+                persist=persist,
+            )
         sys.stdout.write(rendered)
         return ReadExit.SUCCESS
     except ReadToolError as exc:
@@ -176,7 +183,7 @@ def _output(
     try:
         log_event(
             args,
-            contract["report_kind"],
+            json_string(contract["report_kind"]),
             "result",
             BLOCKED,
             error_class=sanitize(reason, 160),

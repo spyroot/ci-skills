@@ -7,12 +7,13 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import hashlib
 import json
 from argparse import Namespace
 from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from email.message import Message
 from pathlib import Path
-from types import TracebackType
+from types import ModuleType, TracebackType
 from typing import TYPE_CHECKING, Optional, Self, Union
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
@@ -37,7 +38,10 @@ CALLBACKS = import_script_module("lib.python.core.abstract.callback")
 CALLBACK_COLLECTIONS = import_script_module("lib.python.core.abstract.callbacks")
 SKILL_ACTION = import_script_module("lib.python.core.abstract.skill_action")
 DELIVERY_STATE = import_script_module("lib.python.core.delivery_state")
-EXECUTOR = import_script_module("lib.python.core.abstract.skill_exector")
+EXECUTOR = import_script_module("lib.python.core.executor")
+REGISTRY = import_script_module("lib.python.core.harbor.registry_mirror")
+RUNTIME = import_script_module("lib.python.core.runtime")
+TOOLBOX = import_script_module("lib.python.core.toolbox")
 
 
 if TYPE_CHECKING:
@@ -375,14 +379,81 @@ def test_toolbox_schema_accepts_complete_selected_installation_routes(
     )
 
 
+@pytest.mark.parametrize(
+    "raw",
+    (
+        '{"$id":"https://example.test/unit","type":"object","type":"object"}',
+        '{"$id":"https://example.test/unit","maximum":NaN}',
+    ),
+)
+def test_load_schema_rejects_ambiguous_or_nonfinite_json(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, raw: str
+) -> None:
+    """Reject a malformed installed schema before it can enter the registry.
+
+    :param monkeypatch: Fixture selecting the isolated installed schema directory.
+    :param tmp_path: Scratch directory receiving the schema fixture.
+    :param raw: Duplicate-key or nonfinite JSON schema bytes.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    schema_directory = tmp_path / "schemas"
+    schema_directory.mkdir()
+    (schema_directory / "unit.schema.json").write_text(raw, encoding="utf-8")
+    monkeypatch.setattr(SCHEMA, "SCHEMA_DIRECTORY", schema_directory)
+
+    with pytest.raises(ValueError, match="duplicate_json_field|nonfinite_json_number"):
+        SCHEMA.load_schema("unit.schema.json")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    (
+        (
+            '{"apiVersion":"ci-skills/v1","apiVersion":"ci-skills/v1",'
+            '"kind":"ToolboxSpec","metadata":{"name":"unit"},"spec":'
+            '{"baseImage":"registry.example.test/base:unit","image":'
+            '{"repository":"toolbox","tag":"unit"},"build":'
+            '{"namespace":"unit","app":"unit"},"dependencies":'
+            '[{"name":"tool","commands":["tool"],"linux":'
+            '{"method":"go","module":"example.test/tool@v1.0.0"}}],'
+            '"requiredCommands":["tool"]}}'
+        ),
+        (
+            '{"apiVersion":"ci-skills/v1","kind":"ToolboxSpec",'
+            '"metadata":{"name":"unit","unused":NaN},"spec":{}}'
+        ),
+    ),
+)
+def test_toolbox_spec_rejects_ambiguous_or_nonfinite_json(
+    tmp_path: Path, raw: str
+) -> None:
+    """Reject invalid JSON before toolbox schema or local input processing.
+
+    :param tmp_path: Scratch directory receiving the selected toolbox specification.
+    :param raw: Duplicate-key or nonfinite JSON specification bytes.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    source = tmp_path / "toolbox.json"
+    source.write_text(raw, encoding="utf-8")
+
+    with pytest.raises(SCHEMA.SpecificationError, match="invalid_specification:/:json"):
+        TOOLBOX.ToolboxSpec.from_path(source)
+
+
 def test_workflow_records_accept_only_shared_action_outcomes() -> None:
     """Callback records use the one shared applied/no-op/verified vocabulary.
     :returns: None; assertions in the body validate the regression.
     """
     schema = json.loads(
-        (REPO_ROOT / "schemas" / "results" / "toolbox-workflow.schema.json").read_text(
-            encoding="utf-8"
-        )
+        (
+            REPO_ROOT
+            / "ci-skills"
+            / "schemas"
+            / "results"
+            / "toolbox-workflow.schema.json"
+        ).read_text(encoding="utf-8")
     )["properties"]["records"]["items"]
     validator = Draft202012Validator(schema)
 
@@ -446,6 +517,54 @@ def _workflow_action(
     )
     action.target = target
     return action
+
+
+class _RecordingWorkflowExecutor:
+    """Retain entrypoint callback composition without binding providers."""
+
+    def __init__(
+        self,
+        context: DELIVERY_STATE.DeliveryState,
+        callbacks: CALLBACK_COLLECTIONS.Callbacks,
+    ) -> None:
+        """Store the context and declared callbacks supplied by an entrypoint.
+
+        :param context: State selected by the workflow action.
+        :param callbacks: Declared callbacks before lifecycle binding.
+        """
+        self.context = context
+        self.callbacks = callbacks
+
+
+def _record_workflow_executors(
+    monkeypatch: pytest.MonkeyPatch,
+    module: ModuleType,
+) -> MutableSequence[_RecordingWorkflowExecutor]:
+    """Replace one entrypoint executor with a composition-recording factory.
+
+    :param monkeypatch: Pytest fixture replacing the entrypoint executor class.
+    :param module: Entrypoint module whose composition factory is under test.
+    :returns: Executors built by the entrypoint factory in call order.
+    """
+    recorded: MutableSequence[_RecordingWorkflowExecutor] = []
+
+    def build(
+        *,
+        context: DELIVERY_STATE.DeliveryState,
+        callbacks: CALLBACK_COLLECTIONS.Callbacks,
+    ) -> _RecordingWorkflowExecutor:
+        """Record one entrypoint composition without provider configuration.
+
+        :param context: State selected by the workflow action.
+        :param callbacks: Declared callbacks before lifecycle binding.
+        :returns: Executor double retaining the supplied composition.
+        """
+        executor = _RecordingWorkflowExecutor(context, callbacks)
+        recorded.append(executor)
+        return executor
+
+    monkeypatch.setattr(module, "WorkflowExecutor", build)
+    return recorded
 
 
 def test_workflow_fingerprint_binds_installed_identity_revision_and_resolved_source() -> (
@@ -524,12 +643,86 @@ def test_confirm_workflow_resolves_source_digest_and_requires_its_exact_plan(
     callback.bind(state)
     result = callback.run()
 
-    assert result["image"] == source + "@" + digest
+    assert result["image"] == "harbor.example.test/unit/source@" + digest
     assert result["plan_digest"] == action.fingerprint()
     action.args.apply = True
     action.args.confirm_plan = confirmation
     with pytest.raises(ValueError, match="confirm_plan_mismatch_rerun_plan"):
         callback.run()
+
+
+def test_registry_copy_uses_digest_only_native_references_with_registry_ports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Render portable Skopeo references for tagged digest-pinned images.
+
+    :param monkeypatch: Pytest fixture replacing the bounded native transport.
+    :param tmp_path: Scratch directory supplying an authfile path to the service.
+    :returns: None; assertions prove inspect and copy remove tags but retain ports.
+    """
+    source = "registry.example.test:5443/unit/source:latest@sha256:" + "a" * 64
+    destination = "registry.example.test:5443/unit/destination:unit@sha256:" + "a" * 64
+    native_source = "docker://registry.example.test:5443/unit/source@sha256:" + "a" * 64
+    native_destination = (
+        "docker://registry.example.test:5443/unit/destination@sha256:" + "a" * 64
+    )
+    service = REGISTRY.HarborService(
+        target=TARGET.HarborTarget(
+            url="https://registry.example.test:5443",
+            host="registry.example.test:5443",
+            project="unit",
+        ),
+        credential=REGISTRY.RegistryCredential("unit", "secret", "fixture"),
+        authfile=tmp_path / "auth.json",
+        timeout=30,
+    )
+    raw_manifest = '{"schemaVersion":2}'
+    expected_digest = "sha256:" + hashlib.sha256(raw_manifest.encode()).hexdigest()
+    calls: MutableSequence[tuple[str, ...]] = []
+
+    def fake_transport(argv: Sequence[str], **_kwargs: object) -> RUNTIME.CommandResult:
+        """Record native registry argv and return the matching success fixture.
+
+        :param argv: Complete native command vector built by the registry service.
+        :param _kwargs: Bounded transport options accepted by the fake.
+        :returns: Successful inspect output or successful copy completion.
+        """
+        command = tuple(argv)
+        calls.append(command)
+        stdout = raw_manifest if command[1] == "inspect" else ""
+        return RUNTIME.CommandResult(command, 0, stdout, "")
+
+    monkeypatch.setattr(REGISTRY, "run_command_bounded", fake_transport)
+
+    assert service.copy(source, destination) == expected_digest
+    assert calls == [
+        (
+            "skopeo",
+            "inspect",
+            "--raw",
+            "--authfile",
+            str(service.authfile),
+            native_source,
+        ),
+        (
+            "skopeo",
+            "copy",
+            "--all",
+            "--preserve-digests",
+            "--authfile",
+            str(service.authfile),
+            native_source,
+            native_destination,
+        ),
+        (
+            "skopeo",
+            "inspect",
+            "--raw",
+            "--authfile",
+            str(service.authfile),
+            native_destination,
+        ),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -609,6 +802,7 @@ def test_entrypoint_main_composes_declared_callbacks_without_provider_access(
     """
     module = load_module(f"workflow_entrypoint_{script[:-3]}", SCRIPT_ROOT / script)
     captured: MutableSequence[SKILL_ACTION.SkillAction] = []
+    executors = _record_workflow_executors(monkeypatch, module)
 
     class FakeWorkflowAction(SKILL_ACTION.SkillAction):
         """Capture callbacks composed by each public workflow entrypoint."""
@@ -640,6 +834,7 @@ def test_entrypoint_main_composes_declared_callbacks_without_provider_access(
 
     assert module.main(argv) == 0
     action = captured[0]
+    assert executors[0].context is action.context
     assert [type(callback).__name__ for callback in action.callbacks] == list(
         expected_callbacks
     )
@@ -700,7 +895,11 @@ def test_workflow_dry_run_emits_schema_valid_plan_without_constructing_mutations
     Draft202012Validator(
         json.loads(
             (
-                REPO_ROOT / "schemas" / "results" / "toolbox-workflow.schema.json"
+                REPO_ROOT
+                / "ci-skills"
+                / "schemas"
+                / "results"
+                / "toolbox-workflow.schema.json"
             ).read_text(encoding="utf-8")
         )
     ).validate(captured)
@@ -709,11 +908,14 @@ def test_workflow_dry_run_emits_schema_valid_plan_without_constructing_mutations
     assert captured["records"] == []
 
 
-def test_plan_callback_stops_before_a_dependent_mutation() -> None:
+def test_plan_callback_stops_before_a_dependent_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Construct only auth and confirmation callbacks for an unconfirmed plan.
     :returns: None; assertions in the body validate the regression.
     """
     module = load_module("workflow_plan_toolbox", SCRIPT_ROOT / "toolbox.py")
+    executors = _record_workflow_executors(monkeypatch, module)
     action = _workflow_action(
         target=_workflow_target(
             revision="a" * 40,
@@ -730,10 +932,11 @@ def test_plan_callback_stops_before_a_dependent_mutation() -> None:
         app="runner",
     )
 
-    callbacks = [
-        type(callback).__name__ for callback in module.workflow(action).callbacks
-    ]
+    executor = module.workflow(action)
+    callbacks = [type(callback).__name__ for callback in executor.callbacks]
 
+    assert executors == [executor]
+    assert executor.context is action.context
     assert callbacks == ["K8SAuth", "HarborAuth", "ConfirmWorkflow"]
     assert "EnsureNamespace" not in callbacks
     assert "HarborBuild" not in callbacks
@@ -780,7 +983,11 @@ def test_workflow_failure_emits_schema_valid_blocked_result(
     Draft202012Validator(
         json.loads(
             (
-                REPO_ROOT / "schemas" / "results" / "toolbox-workflow.schema.json"
+                REPO_ROOT
+                / "ci-skills"
+                / "schemas"
+                / "results"
+                / "toolbox-workflow.schema.json"
             ).read_text(encoding="utf-8")
         )
     ).validate(captured)
@@ -788,3 +995,44 @@ def test_workflow_failure_emits_schema_valid_blocked_result(
     assert captured["errors"] == [
         {"source": "harbor_push", "reason": "unit_input_failure"}
     ]
+
+
+def test_generated_workflow_report_resolves_nested_result_schema_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Validate a generated report through its installed nested result schema.
+
+    :param monkeypatch: Pytest fixture replacing preparation and report emission.
+
+    :returns: None; assertions require offline sibling ``$ref`` resolution.
+    """
+    revision = "a" * 40
+    action = _workflow_action(
+        target=_workflow_target(
+            revision=revision,
+            skill={
+                "algorithm": "sha256-tree-v1",
+                "digest": "b" * 64,
+                "file_count": 1,
+                "revision": {
+                    "value": revision,
+                    "source": "unit",
+                    "verified": True,
+                },
+                "consuming_project": {"commit": None, "source": None},
+            },
+        ),
+        source="harbor.example.test/unit/source:latest",
+    )
+    action.args.describe = False
+    action.args.dry_run = True
+    action.args.log_level = "info"
+    action.args.log_file = None
+    captured = _captured_report(monkeypatch)
+    monkeypatch.setattr(action, "prepare", lambda: None)
+
+    assert (
+        action.execute(lambda: pytest.fail("dry-run must not construct callbacks")) == 0
+    )
+    assert captured["tested_revision"] == revision
+    SCHEMA.validate_specification(captured, "results/toolbox-workflow.schema.json")

@@ -19,10 +19,11 @@ from pathlib import Path
 from typing import Optional, Union
 
 from lib.python.core.abstract.skill_action import SkillAction
-from lib.python.core.cli import log_event, output_mode, parser
+from lib.python.core.cli import output_mode, parser
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
-from lib.python.core.json_types import JSONObject, JSONValue, is_json_value
+from lib.python.core.json_types import JSONObject, JSONValue, copy_json, is_json_value
+from lib.python.core.logging import log_event
 from lib.python.core.portable import write_portable_receipt
 from lib.python.core.report import emit, plan_digest
 from lib.python.core.runtime import sanitize
@@ -423,9 +424,9 @@ def make_plan(
 
         prepared = prepare(args)
     elif kind == "gitlab_runner":
-        from lib.python.core.gitlab.gitlab_runners import prepare
+        from lib.python.core.gitlab.gitlab_runners import prepare as prepare_runner
 
-        prepared = prepare(args, target, target_kind)
+        prepared = prepare_runner(args, target, target_kind)
     else:
         raise ActionError("unsupported_gitlab_action_kind")
     return ActionPlan(
@@ -553,7 +554,8 @@ def _same(current: JSONObject, body: JSONObject) -> bool:
     :param current: Resource returned by GitLab after a write or read.
     :param body: Fields expected by the planned action.
     :returns: Whether every expected field matches, including normalized state,
-        label set, and milestone ID fields.
+        label set, milestone IDs, and terminal newlines removed by GitLab from
+        descriptions. Other whitespace and content must match exactly.
     """
     for field, expected in body.items():
         labels = current.get("labels")
@@ -572,6 +574,12 @@ def _same(current: JSONObject, body: JSONObject) -> bool:
             actual = milestone.get("id")
         else:
             actual = current.get(field)
+        if (
+            field == "description"
+            and isinstance(actual, str)
+            and isinstance(expected, str)
+        ):
+            actual, expected = (text.rstrip("\r\n") for text in (actual, expected))
         if actual != expected:
             return False
     return True
@@ -868,7 +876,7 @@ def _retain_failure_identity(
         data["tested_revision"] = _verified_skill_revision(session)
         data["credential_source"] = session.credential_source
         data["credential_digest"] = session.credential_digest
-        data["skill"] = session.skill
+        data["skill"] = copy_json(session.skill)
     if access is not None and access.get("status") == PASS:
         data["identity"] = access.get("identity")
         data["verified_target"] = access.get("target")

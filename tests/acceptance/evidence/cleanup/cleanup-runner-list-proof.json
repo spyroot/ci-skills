@@ -1,0 +1,75 @@
+{
+  "captured_at": "2026-10-13T06:33:28.001848+00:00",
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:29f247d18d3c",
+  "errors": [],
+  "execution_host": "spyroots-mbp.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_runner",
+  "mutated": false,
+  "operation": "list",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "READ",
+  "plan": {
+    "body_sha256": "d1a5f22122ce07e7724b14bd1333c8020551c4817a5a3d9f09fc0e3845cf968c",
+    "confirmation_ready": true,
+    "fields": [
+      "description",
+      "filters",
+      "limit"
+    ],
+    "one_time_sink_required": false,
+    "operation": "list",
+    "plan_digest": "b6e6f275f3b01d85527a375b2a4930d605dcf45ee70182f511757815eb6eb7b9",
+    "project_ids": null,
+    "resource_id": null,
+    "target_kind": "project",
+    "target_reference": "hott/ci-skills-runner-proof"
+  },
+  "plan_digest": "b6e6f275f3b01d85527a375b2a4930d605dcf45ee70182f511757815eb6eb7b9",
+  "readback": {
+    "record_count": 0,
+    "truncated": false,
+    "verified": true
+  },
+  "records": [],
+  "related_job": null,
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
+    "file_count": 139,
+    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+    "revision": {
+      "source": "installer_record",
+      "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 0
+  },
+  "target": {
+    "kind": "project",
+    "reference": "hott/ci-skills-runner-proof"
+  },
+  "target_file": "path:5e5380df1eda",
+  "target_source": "user;argv:--project",
+  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+  "verified_target": {
+    "full_path": "hott/ci-skills-runner-proof",
+    "id": 124,
+    "kind": "project",
+    "web_url": "https://gitlab.dcloud.run/hott/ci-skills-runner-proof"
+  }
+}

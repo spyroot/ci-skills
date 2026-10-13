@@ -50,6 +50,16 @@ def _digest() -> str:
     return tree_digest(SKILL_ROOT)["digest"]
 
 
+def _functional_digest() -> str:
+    """Read the current command-input digest used in synthetic receipts.
+
+    :returns: SHA-256 digest of the checkout's bin, lib, and schemas inputs.
+    """
+    from lib.python.core.provenance import functional_digest
+
+    return functional_digest(SKILL_ROOT)
+
+
 def _access_setup() -> Mapping[str, JSONObject]:
     """Create matching publication and GitLab access receipts for one runtime.
 
@@ -71,6 +81,7 @@ def _access_setup() -> Mapping[str, JSONObject]:
         "tested_revision": "a" * 40,
         "skill": {
             "digest": _digest(),
+            "functional_digest": _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
         "targets": {
@@ -147,6 +158,7 @@ def _access_setup() -> Mapping[str, JSONObject]:
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
         "skill": {
             "digest": _digest(),
+            "functional_digest": _functional_digest(),
             "revision": {"value": "a" * 40, "verified": True},
         },
         "identity": {"username": "runtime-gl", "id": 31},
@@ -184,6 +196,7 @@ def _base_operation(
     :returns: Synthetic receipt with matching target, identity, and read-back.
     """
     context = _context(setup)
+    revision = deepcopy(setup["gitlab-access.json"]["skill"]["revision"])
     receipt = {
         "schema_version": "1.0",
         "kind": kind,
@@ -191,9 +204,11 @@ def _base_operation(
         "execution_host": context["execution_host"],
         "origin": context["origin"],
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
+        "tested_revision": revision["value"],
         "skill": {
             "digest": _digest(),
-            "revision": {"value": "a" * 40, "verified": True},
+            "functional_digest": _functional_digest(),
+            "revision": revision,
         },
         "identity": {"username": context["username"], "id": context["identity_id"]},
         "credential_source": context["credential_source"],
@@ -244,7 +259,7 @@ def _runner_create(setup: Mapping[str, JSONObject]) -> MutableMapping[str, JSONV
         "origin": context["origin"],
         "credential_source": context["credential_source"],
         "skill_digest": _digest(),
-        "tested_revision": "a" * 40,
+        "tested_revision": receipt["tested_revision"],
         "runner_id": runner_id,
         "before": {"id": runner_id, "project_ids": [context["target_id"]]},
         "delete": {
@@ -538,7 +553,11 @@ def test_real_operation_envelope_keeps_cleanup_shape(tmp_path: Path) -> None:
         phase="APPLY",
         mutated=True,
         result_action="APPLIED",
-        skill={"digest": _digest(), "revision": {"value": "a" * 40, "verified": True}},
+        skill={
+            "digest": _digest(),
+            "functional_digest": _functional_digest(),
+            "revision": {"value": "a" * 40, "verified": True},
+        },
         identity={"username": "runtime-gl", "id": 31},
         verified_target={
             "kind": "project",
@@ -571,7 +590,7 @@ def test_real_operation_envelope_keeps_cleanup_shape(tmp_path: Path) -> None:
 
     assert receipt["plan"]["one_time_sink_required"] is True
     assert ACCEPTANCE._check_gitlab_receipt(
-        path.name, receipt, required, _digest(), datetime.now(UTC)
+        path.name, receipt, required, _functional_digest(), datetime.now(UTC)
     ) == ["runner.json:runner_smoke_cleanup_unproven"]
 
 
@@ -610,12 +629,13 @@ def _candidate_identity_receipt(revision: str, skill_root: Path) -> JSONObject:
     :param skill_root: Skill directory whose tree digest is recorded.
     :returns: Receipt fragment containing commit and skill digest identity.
     """
-    from lib.python.core.provenance import tree_digest
+    from lib.python.core.provenance import functional_digest, tree_digest
 
     return {
         "tested_revision": revision,
         "skill": {
             **tree_digest(skill_root),
+            "functional_digest": functional_digest(skill_root),
             "revision": {"value": revision, "verified": True},
         },
     }
@@ -629,12 +649,18 @@ def _sibling_skill_commits(tmp_path: Path) -> tuple[Path, Path, str, str]:
     """
     repository = tmp_path / "repository"
     skill_root = repository / "ci-skills"
-    skill_root.mkdir(parents=True)
+    bin_root = skill_root / "bin"
+    lib_root = skill_root / "lib" / "python"
+    schema_root = skill_root / "schemas"
+    bin_root.mkdir(parents=True)
+    lib_root.mkdir(parents=True)
+    schema_root.mkdir()
     (skill_root / "SKILL.md").write_text("fixture skill\n", encoding="utf-8")
+    (bin_root / "fixture.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (lib_root / "fixture.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (schema_root / "fixture.json").write_text('{"type":"object"}\n', encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
-    subprocess.run(
-        ["git", "-C", str(repository), "add", "ci-skills/SKILL.md"], check=True
-    )
+    subprocess.run(["git", "-C", str(repository), "add", "ci-skills"], check=True)
     tested = _commit_current_index(repository, "tested skill")
     candidate = _commit_current_index(repository, "squash candidate")
     subprocess.run(
@@ -647,10 +673,10 @@ def _sibling_skill_commits(tmp_path: Path) -> tuple[Path, Path, str, str]:
     return repository, skill_root, tested, candidate
 
 
-def test_candidate_identity_accepts_same_skill_tree_from_nonancestor_commit(
+def test_candidate_identity_accepts_document_change_from_nonancestor_commit(
     tmp_path: Path,
 ) -> None:
-    """Accept a squash-like sibling commit with equal skill tree and digest.
+    """Accept a documentation-only sibling commit with equal functional inputs.
 
     :param tmp_path: Pytest directory holding sibling fixture commits.
 
@@ -673,17 +699,27 @@ def test_candidate_identity_accepts_same_skill_tree_from_nonancestor_commit(
         ).returncode
         == 1
     )
-    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == []
+    assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == []
     (skill_root / "SKILL.md").write_text("different\n", encoding="utf-8")
-    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
-        "candidate_skill_digest_mismatch"
-    ]
+    test_file = skill_root / "tests" / "python" / "test_fixture.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_fixture() -> None:\n    pass\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "ci-skills"], check=True)
+    candidate = _commit_current_index(repository, "documentation and test updates")
+    subprocess.run(
+        ["git", "-C", str(repository), "update-ref", "refs/heads/main", candidate],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
+    )
+    assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == []
 
 
-def test_candidate_identity_rejects_different_tree_and_unavailable_source(
+def test_candidate_identity_rejects_runtime_change(
     tmp_path: Path,
 ) -> None:
-    """Reject changed candidate tree and an unavailable tested commit.
+    """Reject changed functional input even with valid recorded provenance.
 
     :param tmp_path: Pytest directory holding divergent fixture commits.
 
@@ -691,9 +727,11 @@ def test_candidate_identity_rejects_different_tree_and_unavailable_source(
     """
     repository, skill_root, tested, _candidate = _sibling_skill_commits(tmp_path)
     receipt = _candidate_identity_receipt(tested, skill_root)
-    (skill_root / "SKILL.md").write_text("different fixture skill\n", encoding="utf-8")
+    (skill_root / "bin" / "fixture.sh").write_text(
+        "#!/bin/sh\necho different\n", encoding="utf-8"
+    )
     subprocess.run(
-        ["git", "-C", str(repository), "add", "ci-skills/SKILL.md"], check=True
+        ["git", "-C", str(repository), "add", "ci-skills/bin/fixture.sh"], check=True
     )
     candidate = _commit_current_index(repository, "different skill")
     subprocess.run(
@@ -703,14 +741,95 @@ def test_candidate_identity_rejects_different_tree_and_unavailable_source(
     subprocess.run(
         ["git", "-C", str(repository), "checkout", "-q", candidate], check=True
     )
-    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
-        "candidate_skill_tree_mismatch"
+    assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == [
+        "candidate_functional_digest_mismatch"
     ]
-    receipt["tested_revision"] = "0" * 40
-    receipt["skill"]["revision"]["value"] = "0" * 40
-    assert ACCEPTANCE.check_candidate_identity(receipt, repository, skill_root) == [
-        "candidate_revision_unavailable"
+
+
+def test_candidate_identity_accepts_source_absent_from_fresh_clone(
+    tmp_path: Path,
+) -> None:
+    """Keep equal functional evidence usable after squash source refs disappear.
+
+    :param tmp_path: Pytest directory holding source and fresh candidate clones.
+    :returns: None; assertions validate absent source and accepted evidence.
+    """
+    repository, skill_root, tested, _candidate = _sibling_skill_commits(tmp_path)
+    receipt = _candidate_identity_receipt(tested, skill_root)
+    candidate_repository = tmp_path / "candidate"
+    subprocess.run(
+        [
+            "git",
+            "clone",
+            "--quiet",
+            "--no-local",
+            "--single-branch",
+            "--branch",
+            "main",
+            str(repository),
+            str(candidate_repository),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(candidate_repository),
+                "cat-file",
+                "-e",
+                f"{tested}^{{commit}}",
+            ],
+            capture_output=True,
+            check=False,
+        ).returncode
+        != 0
+    )
+
+    assert (
+        ACCEPTANCE.check_candidate_identity(receipt, candidate_repository / "ci-skills")
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "revision_fields",
+    [{"value": "not-a-full-sha"}, {"verified": False}, {"value": "0" * 40}],
+    ids=["malformed", "unverified", "inconsistent"],
+)
+def test_candidate_identity_rejects_invalid_recorded_revision(
+    tmp_path: Path,
+    revision_fields: JSONObject,
+) -> None:
+    """Reject malformed, unverified or inconsistent revision provenance.
+
+    :param tmp_path: Pytest directory containing the candidate skill tree.
+    :param revision_fields: Invalid fields overriding valid source provenance.
+    :returns: None; assertions validate rejection without changing runtime bytes.
+    """
+    _repository, skill_root, tested, _candidate = _sibling_skill_commits(tmp_path)
+    receipt = _candidate_identity_receipt(tested, skill_root)
+    receipt["skill"]["revision"].update(revision_fields)
+
+    assert ACCEPTANCE.check_candidate_identity(receipt, skill_root) == [
+        "candidate_revision_unverified"
     ]
+
+
+def test_acceptance_requires_recorded_functional_digest() -> None:
+    """Block a live receipt without a measured functional digest.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    del setup["access.json"]["skill"]["functional_digest"]
+
+    result = _evaluate(setup, receipts)
+
+    assert "access.json:functional_digest_absent" in result["problems"]
 
 
 def test_cli_reports_receipt_loading_shape_without_an_expectations_file(

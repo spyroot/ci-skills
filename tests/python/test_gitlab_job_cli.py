@@ -22,11 +22,13 @@ from jsonschema import Draft202012Validator
 
 JobReadObservation: TypeAlias = tuple[SimpleNamespace, int, Optional[int]]
 
-CLI = import_script_module("lib.python.core.cli")
-COLLECT = import_script_module("lib.python.core.collect")
+CLI = import_script_module("lib.python.core.gitlab.cli")
+COLLECT = import_script_module("lib.python.core.gitlab.job_read")
+COLLECTION = import_script_module("lib.python.core.collection")
 REPORT = import_script_module("lib.python.core.report")
 RUNTIME = import_script_module("lib.python.core.runtime")
 JOBS = import_script_module("lib.python.core.gitlab.gitlab_jobs")
+JOB_FIELDS = import_script_module("lib.python.core.gitlab.gitlab_job_fields")
 SCRIPT = import_script_module("gitlab_job")
 TARGET = import_script_module("lib.python.core.target")
 
@@ -85,6 +87,30 @@ def _list_session() -> SimpleNamespace:
     )
 
 
+def test_shared_job_fields_convert_one_gitlab_api_record() -> None:
+    """Expose fields common to project job and pipeline job responses.
+
+    :returns: None; assertions in the body validate the direct conversion contract.
+    """
+    fields = JOB_FIELDS.GitLabJobFields.from_api(
+        {
+            "id": 123,
+            "name": "build",
+            "stage": "test",
+            "status": "success",
+            "failure_reason": None,
+        }
+    )
+
+    assert fields.public() == {
+        "id": 123,
+        "name": "build",
+        "stage": "test",
+        "status": "success",
+        "failure_reason": None,
+    }
+
+
 def test_live_job_uses_exact_gitlab_project_access_and_bound_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -102,12 +128,8 @@ def test_live_job_uses_exact_gitlab_project_access_and_bound_token(
     with pytest.raises(TARGET.TargetError):
         TARGET.load_target(path)
     observed = {}
-    session = SimpleNamespace(
-        environment={"GITLAB_TOKEN": "selected-token"},
-        execution_host="worker.example.test",
-        target_source="env:CI_SKILLS_TARGET;argv:--job-url",
-        skill={"revision": {"value": "a" * 40}},
-    )
+    session = _list_session()
+    session.target_source = "env:CI_SKILLS_TARGET;argv:--job-url"
 
     def bind(
         _target: Target,
@@ -147,12 +169,6 @@ def test_live_job_uses_exact_gitlab_project_access_and_bound_token(
         },
     )
     monkeypatch.setattr(COLLECT, "collect_gitlab_job", collect)
-    monkeypatch.setattr(
-        CLI, "bind_sources", lambda *_args, **_kwargs: pytest.fail("full bind used")
-    )
-    monkeypatch.setattr(
-        CLI, "check_access", lambda *_args, **_kwargs: pytest.fail("full gate used")
-    )
 
     result = CLI.execute_gitlab_job(_args(path))
     data = json.loads(capsys.readouterr().out)
@@ -180,12 +196,8 @@ def test_job_access_failure_preserves_failed_subcheck_and_skips_collection(
     """
     path = _target(tmp_path)
     monkeypatch.setenv("CI_SKILLS_TARGET", str(path))
-    session = SimpleNamespace(
-        environment={"GITLAB_TOKEN": "selected-token"},
-        execution_host="worker.example.test",
-        target_source="env:CI_SKILLS_TARGET;argv:--job-url",
-        skill={"revision": {"value": "a" * 40}},
-    )
+    session = _list_session()
+    session.target_source = "env:CI_SKILLS_TARGET;argv:--job-url"
     monkeypatch.setattr(CLI, "bind_gitlab_session", lambda *_args, **_kwargs: session)
     monkeypatch.setattr(
         CLI,
@@ -330,7 +342,7 @@ def test_bound_job_collector_checks_runner_on_exact_host(
         calls.append((tuple(argv), kwargs["env"]))
         return RUNTIME.CommandResult(tuple(argv), 0, "trace line\n", "")
 
-    monkeypatch.setattr(COLLECT, "run_command", read)
+    monkeypatch.setattr(COLLECTION, "run_command", read)
     monkeypatch.setattr(COLLECT, "run_command_tail", trace)
     result = COLLECT.collect_gitlab_job(
         target,
@@ -432,7 +444,8 @@ def test_list_uses_bound_project_and_emits_schema_valid_output(
     data = json.loads(output) if mode == "--json" else yaml.safe_load(output)
     schema = json.loads(
         (
-            Path(__file__).parents[2] / "schemas/results/gitlab-job-list.schema.json"
+            Path(__file__).parents[2]
+            / "ci-skills/schemas/results/gitlab-job-list.schema.json"
         ).read_text(encoding="utf-8")
     )
     Draft202012Validator(schema).validate(data)

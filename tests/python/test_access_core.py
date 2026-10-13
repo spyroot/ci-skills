@@ -121,6 +121,31 @@ def _access_modules() -> tuple[ModuleType, ModuleType]:
     )
 
 
+def _provider_modules() -> tuple[ModuleType, ModuleType, ModuleType]:
+    """Load provider-owned command boundaries used by aggregate access checks.
+
+    :returns: GitHub, GitLab, and Kubernetes provider access modules.
+    """
+    return (
+        import_script_module("lib.python.access.github"),
+        import_script_module("lib.python.access.gitlab"),
+        import_script_module("lib.python.access.kubernetes"),
+    )
+
+
+def _patch_provider_commands(
+    monkeypatch: pytest.MonkeyPatch, runner: _CommandRunner
+) -> None:
+    """Replace the native command boundary in every provider access module.
+
+    :param monkeypatch: Pytest fixture applying the temporary replacements.
+    :param runner: Synthetic command boundary shared by all selected providers.
+    :returns: None; each provider module receives the same command runner.
+    """
+    for provider in _provider_modules():
+        monkeypatch.setattr(provider, "run_command", runner)
+
+
 def _bind_target(path: Path) -> Target:
     """Bind a fixture target to credential sources with a test revision.
 
@@ -161,7 +186,7 @@ def test_read_token_file_accepts_declared_path_protocols(
 
     :returns: None; assertions in the body validate the regression.
     """
-    credentials = import_script_module("lib.python.access.credentials")
+    sources = import_script_module("lib.python.access.sources")
     token = tmp_path / "provider.token"
     token.write_text("unit-token\n", encoding="utf-8")
     if selector == "string":
@@ -171,17 +196,17 @@ def test_read_token_file_accepts_declared_path_protocols(
     else:
         selected = _TokenPath(token)
 
-    assert credentials.read_token_file(selected) == "unit-token"
+    assert sources.read_token_file(selected) == "unit-token"
 
 
 def test_read_token_file_rejects_none_before_filesystem_access() -> None:
     """Reject a missing path without consulting any live credential location.
     :returns: None; assertions in the body validate the regression.
     """
-    credentials = import_script_module("lib.python.access.credentials")
+    sources = import_script_module("lib.python.access.sources")
 
     with pytest.raises(TypeError):
-        credentials.read_token_file(None)
+        sources.read_token_file(None)
 
 
 @pytest.mark.parametrize(
@@ -206,14 +231,14 @@ def test_github_file_token_uses_gh_host_class_and_clears_ambient_tokens(
     :returns: None; assertions in the body validate the regression.
     """
     catalog = import_script_module("lib.python.core.catalog")
-    credentials = import_script_module("lib.python.access.credentials")
+    sources = import_script_module("lib.python.access.sources")
     runtime = import_script_module("lib.python.core.runtime")
     token_file = tmp_path / "github.token"
     token_file.write_text("selected-file-token\n", encoding="utf-8")
     for name in catalog.GITHUB_TOKEN_VARIABLES:
         monkeypatch.setenv(name, f"ambient-{name}")
 
-    source = credentials._token_source(
+    source = sources._token_source(
         token_file,
         catalog.github_variables(host),
         "unused-store",
@@ -240,13 +265,13 @@ def test_ghe_cloud_uses_gh_token_over_lower_priority_and_server_tokens(
     :returns: None; assertions in the body validate the regression.
     """
     catalog = import_script_module("lib.python.core.catalog")
-    credentials = import_script_module("lib.python.access.credentials")
+    sources = import_script_module("lib.python.access.sources")
     runtime = import_script_module("lib.python.core.runtime")
     monkeypatch.setenv("GH_TOKEN", "selected-cloud-token")
     monkeypatch.setenv("GITHUB_TOKEN", "lower-priority-token")
     monkeypatch.setenv("GH_ENTERPRISE_TOKEN", "unrelated-server-token")
 
-    source = credentials._token_source(
+    source = sources._token_source(
         None,
         catalog.github_variables("tenant.ghe.com"),
         "unused-store",
@@ -559,10 +584,10 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
 
     :returns: None; assertions in the body validate the regression.
     """
-    access, runtime = _access_modules()
+    _access, runtime = _access_modules()
     cli = import_script_module("lib.python.core.cli")
     runner, calls = _fake_access_runner(runtime, "k8s_cilium_missing")
-    monkeypatch.setattr(access, "run_command", runner)
+    _patch_provider_commands(monkeypatch, runner)
     monkeypatch.setattr(
         cli,
         "resolve_project_target",
@@ -630,7 +655,7 @@ def test_check_access_passes_when_all_three_authorities_are_admin(
     """
     access, runtime = _access_modules()
     runner, calls = _fake_access_runner(runtime, "success")
-    monkeypatch.setattr(access, "run_command", runner)
+    _patch_provider_commands(monkeypatch, runner)
 
     report = access.check_access(_load_target(target_file))
 
@@ -655,14 +680,18 @@ def test_check_access_passes_when_all_three_authorities_are_admin(
     assert any("exec" in call and "cilium-health" in call for call in calls)
 
 
+@pytest.mark.parametrize("scenario", ("success", "k8s_tls_skip_verify"))
 def test_check_access_receipt_records_metadata_and_resolved_sources(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    scenario: str,
 ) -> None:
     """Require PASS provenance and effective nonsecret credential sources.
 
     :param monkeypatch: Pytest fixture clearing token env and stubbing commands.
     :param tmp_path: Scratch target and kubeconfig path used by the receipt.
+    :param scenario: Fixture Kubernetes configuration with or without the
+        insecure-skip-tls-verify setting.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -670,8 +699,8 @@ def test_check_access_receipt_records_metadata_and_resolved_sources(
     _clear_token_env(monkeypatch)
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
-    runner, _calls = _fake_access_runner(runtime, "success")
-    monkeypatch.setattr(access, "run_command", runner)
+    runner, _calls = _fake_access_runner(runtime, scenario)
+    _patch_provider_commands(monkeypatch, runner)
 
     report = access.check_access(
         _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig)),
@@ -743,7 +772,7 @@ def test_check_access_resolves_ambient_token_environment_sources(
     monkeypatch.setenv("GH_ENTERPRISE_TOKEN", token)
     monkeypatch.setenv("GITLAB_ACCESS_TOKEN", token)
     runner, _calls = _fake_access_runner(runtime, "success")
-    monkeypatch.setattr(access, "run_command", runner)
+    _patch_provider_commands(monkeypatch, runner)
 
     report = access.check_access(
         _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig)),
@@ -793,7 +822,7 @@ def test_check_access_prefers_explicit_token_files_over_ambient_env(
         observed_envs.append(kwargs.get("env"))
         return runner(argv, **kwargs)
 
-    monkeypatch.setattr(access, "run_command", fake_run)
+    _patch_provider_commands(monkeypatch, fake_run)
     target = _bind_target(
         _write_full_target(
             tmp_path,
@@ -925,7 +954,7 @@ def test_check_access_records_kubernetes_auth_mechanism_without_secret_values(
                 )
         return runner(argv, **kwargs)
 
-    monkeypatch.setattr(access, "run_command", fake_run)
+    _patch_provider_commands(monkeypatch, fake_run)
     report = access.check_access(
         _bind_target(_write_full_target(tmp_path, kubeconfig=kubeconfig)),
     )
@@ -955,7 +984,7 @@ def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
 
     :returns: None; assertions in the body validate the regression.
     """
-    access, _runtime = _access_modules()
+    _access, _runtime = _access_modules()
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
     token_file = tmp_path / "admin.token"
@@ -983,7 +1012,7 @@ def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
 
     monkeypatch.setattr(Path, "open", denied_open)
     with pytest.raises(ValueError, match="token_file_unavailable"):
-        access._auth_mechanism(
+        import_script_module("lib.python.access.kubernetes")._auth_mechanism(
             {"tokenFile": str(token_file), "token": "stale-secret"}, target
         )
 
@@ -998,7 +1027,6 @@ def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
         ("gitlab_identity_wrong_host", "gitlab", "host_mismatch"),
         ("gitlab_runner_denied", "gitlab", "authorization"),
         ("k8s_wrong_server", "kubernetes", "api_server_mismatch"),
-        ("k8s_tls_skip_verify", "kubernetes", "tls_verification_disabled"),
         ("k8s_not_admin", "kubernetes", "cluster_wildcard_denied"),
         ("k8s_exec_denied", "kubernetes", "pods_exec_denied"),
         ("k8s_health_failed", "kubernetes", "cilium_health_exec_failed"),
@@ -1023,7 +1051,7 @@ def test_check_access_blocks_each_required_surface(
     """
     access, runtime = _access_modules()
     runner, _calls = _fake_access_runner(runtime, scenario)
-    monkeypatch.setattr(access, "run_command", runner)
+    _patch_provider_commands(monkeypatch, runner)
 
     report = access.check_access(_load_target(target_file))
 
@@ -1058,8 +1086,7 @@ def test_dry_run_access_lists_probes_without_calling_live_tools(
         """
         pytest.fail(f"dry-run called a live tool: {argv}")
 
-    monkeypatch.setattr(access, "run_command", fail_if_called)
-
+    _patch_provider_commands(monkeypatch, fail_if_called)
     report = access.dry_run_access(_load_target(target_file))
 
     assert report["status"] == "DRY_RUN"
@@ -1082,7 +1109,7 @@ def test_gitlab_access_uses_token_file_only_as_subprocess_environment(
 
     :returns: None; assertions in the body validate the regression.
     """
-    access, runtime = _access_modules()
+    _access, runtime = _access_modules()
     _clear_token_env(monkeypatch)
     token = "unit-token-value"
     token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
@@ -1125,9 +1152,10 @@ def test_gitlab_access_uses_token_file_only_as_subprocess_environment(
             return runtime.CommandResult(command, 0, json.dumps([{"id": 1}]), "")
         return runtime.CommandResult(command, 99, "", "unexpected call")
 
-    monkeypatch.setattr(access, "run_command", fake_run)
+    gitlab = import_script_module("lib.python.access.gitlab")
+    monkeypatch.setattr(gitlab, "run_command", fake_run)
 
-    surface = access.gitlab_access(target)
+    surface = gitlab.gitlab_access(target)
 
     assert surface.status == "PASS"
     assert observed_envs
@@ -1145,7 +1173,7 @@ def test_gitlab_access_without_token_file_uses_glab_host_profile(
 
     :returns: None; assertions in the body validate the regression.
     """
-    access, runtime = _access_modules()
+    _access, runtime = _access_modules()
     _clear_token_env(monkeypatch)
     observed_envs: MutableSequence[Optional[Mapping[str, str]]] = []
 
@@ -1181,12 +1209,45 @@ def test_gitlab_access_without_token_file_uses_glab_host_profile(
             return runtime.CommandResult(command, 0, json.dumps([{"id": 1}]), "")
         return runtime.CommandResult(command, 99, "", "unexpected call")
 
-    monkeypatch.setattr(access, "run_command", fake_run)
+    gitlab = import_script_module("lib.python.access.gitlab")
+    monkeypatch.setattr(gitlab, "run_command", fake_run)
 
-    surface = access.gitlab_access(_load_target(target_file))
+    surface = gitlab.gitlab_access(_load_target(target_file))
 
     assert surface.status == "PASS"
     assert all(not env or "GITLAB_TOKEN" not in env for env in observed_envs)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        '{"username":"robot$unit","username":"robot$other","password":"secret"}',
+        '{"username":"robot$unit","password":"secret","unused":NaN}',
+    ),
+)
+def test_harbor_credential_file_rejects_ambiguous_or_nonfinite_json(
+    tmp_path: Path, payload: str
+) -> None:
+    """Reject invalid JSON before a Harbor credential can be selected.
+
+    :param tmp_path: Scratch directory receiving the selected credential file.
+    :param payload: Duplicate-key or nonfinite JSON credential input.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    credentials = import_script_module("lib.python.access.harbor_credentials")
+    target_module = import_script_module("lib.python.core.target")
+    credential_file = tmp_path / "harbor.credentials.json"
+    credential_file.write_text(payload, encoding="utf-8")
+    target = target_module.HarborTarget(
+        url="https://harbor.example.test",
+        host="harbor.example.test",
+        project="unit",
+        credential_file=credential_file,
+    )
+
+    with pytest.raises(target_module.TargetError, match="credential_file_invalid"):
+        credentials.resolve_harbor_credential(target)
 
 
 @pytest.mark.parametrize(
@@ -1212,7 +1273,7 @@ def test_gitlab_access_blocks_missing_or_empty_token_file(
 
     :returns: None; assertions in the body validate the regression.
     """
-    access, _runtime = _access_modules()
+    _access, _runtime = _access_modules()
     _clear_token_env(monkeypatch)
     token_file = tmp_path / ".config" / "ci-skills" / "gitlab.example.test.token"
     token_file.parent.mkdir(parents=True)
@@ -1235,9 +1296,10 @@ def test_gitlab_access_blocks_missing_or_empty_token_file(
         calls.append(tuple(str(part) for part in argv))
         pytest.fail("missing or empty token_file must block before glab runs")
 
-    monkeypatch.setattr(access, "run_command", fake_run)
+    gitlab = import_script_module("lib.python.access.gitlab")
+    monkeypatch.setattr(gitlab, "run_command", fake_run)
 
-    surface = access.gitlab_access(target)
+    surface = gitlab.gitlab_access(target)
 
     assert surface.status == "BLOCKED"
     assert surface.reason == expected_reason
@@ -1255,7 +1317,7 @@ def test_kubectl_argv_binds_context_and_optional_kubeconfig(
 
     :returns: None; assertions in the body validate the regression.
     """
-    access, _runtime = _access_modules()
+    _access, _runtime = _access_modules()
     target_mod = import_script_module("lib.python.core.target")
     base = _load_target(target_file)
     target = target_mod.Target(
@@ -1268,7 +1330,8 @@ def test_kubectl_argv_binds_context_and_optional_kubeconfig(
         ),
     )
 
-    argv = access.kubectl_argv(target, "auth", "can-i", "*", "*")
+    kubernetes = import_script_module("lib.python.access.kubernetes")
+    argv = kubernetes.kubectl_argv(target, "auth", "can-i", "*", "*")
 
     assert argv == [
         "kubectl",

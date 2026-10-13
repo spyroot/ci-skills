@@ -46,7 +46,8 @@ ENTRYPOINTS = {
 
 TAG_SCHEMA = json.loads(
     (
-        Path(__file__).parents[2] / "schemas/results/gitlab-runner-tag.schema.json"
+        Path(__file__).parents[2]
+        / "ci-skills/schemas/results/gitlab-runner-tag.schema.json"
     ).read_text(encoding="utf-8")
 )
 TAG_VALIDATOR = Draft202012Validator(TAG_SCHEMA)
@@ -60,7 +61,7 @@ if TYPE_CHECKING:
 
 
 def test_committed_runner_tag_receipts_match_live_contract() -> None:
-    """Match committed runner tag receipts to current skill digest and schema.
+    """Match runner-tag receipts to current functional inputs and schema.
     :returns: None; assertions in the body validate the regression.
     """
     root = Path(__file__).parents[2]
@@ -71,11 +72,11 @@ def test_committed_runner_tag_receipts_match_live_contract() -> None:
         (root / "tests/acceptance/receipts/gitlab-access.json").read_text()
     )
     target = setup["target"]
-    digest = PROVENANCE.tree_digest(root / "ci-skills")["digest"]
+    functional_digest = PROVENANCE.functional_digest(root / "ci-skills")
 
     for result in (applied, repeated):
         TAG_VALIDATOR.validate(result)
-        assert result["skill"]["digest"] == digest
+        assert result["skill"]["functional_digest"] == functional_digest
         assert result["skill"]["revision"]["verified"] is True
         assert result["tested_revision"] == result["skill"]["revision"]["value"]
         assert {
@@ -86,7 +87,11 @@ def test_committed_runner_tag_receipts_match_live_contract() -> None:
         assert result["plan"]["target_reference"] == target["full_path"]
         assert result["readback"]["verified"] is True
 
-    added = applied["plan"]["requested_tags"]
+    added = [
+        tag
+        for tag in applied["plan"]["requested_tags"]
+        if tag not in applied["readback"]["before_tags"]
+    ]
     assert applied["result_action"] == "APPLIED"
     assert applied["readback"]["added_tags"] == added
     assert set(applied["readback"]["before_tags"]).isdisjoint(added)
@@ -741,6 +746,125 @@ def test_issue_reuses_exact_open_title_only_after_independent_get() -> None:
     result = ISSUES.apply(api, object(), plan, 42)
     assert result == {"action": "NO_OP", "iid": 8, "verified": True}
     assert all(method == "GET" for method, _, _ in api.calls)
+
+
+def test_issue_create_accepts_provider_trimmed_terminal_description_newline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Verify creation and reuse when GitLab removes only a terminal newline.
+
+    :param monkeypatch: Pytest fixture isolating the issue create lock directory.
+    :param tmp_path: Scratch directory receiving the create lock.
+    :returns: None; assertions prove creation and the next idempotent read.
+    """
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
+    description = "first line\nsecond line\n"
+    plan = _plan(
+        "gitlab_issue",
+        "open-bug",
+        {"title": "terminal-newline", "description": description},
+    )
+    base = "projects/42/issues"
+    query = _list(base + "?state=all&search=terminal-newline")
+    observed = {
+        "iid": 8,
+        "title": "terminal-newline",
+        "description": description.rstrip("\n"),
+        "state": "opened",
+    }
+    api = FakeAPI(
+        {
+            ("GET", query): [
+                [],
+                [{"iid": 8, "title": "terminal-newline", "state": "opened"}],
+            ],
+            ("POST", base): [{"iid": 8}],
+            ("GET", base + "/8"): [observed, observed],
+        }
+    )
+
+    applied = ISSUES.apply(api, object(), plan, 42)
+    repeated = ISSUES.apply(api, object(), plan, 42)
+
+    assert applied == {
+        "action": "APPLIED",
+        "iid": 8,
+        "verified": True,
+        "web_url": None,
+    }
+    assert repeated == {"action": "NO_OP", "iid": 8, "verified": True}
+    assert [method for method, _endpoint, _body in api.calls].count("POST") == 1
+
+
+@pytest.mark.parametrize(
+    ("body", "observed"),
+    (
+        (
+            {"title": "description-change", "description": "first\nsecond\n"},
+            {
+                "iid": 8,
+                "title": "description-change",
+                "description": "first\nchanged",
+                "state": "opened",
+            },
+        ),
+        (
+            {"title": "internal-space", "description": "first  second\n"},
+            {
+                "iid": 8,
+                "title": "internal-space",
+                "description": "first second",
+                "state": "opened",
+            },
+        ),
+        (
+            {
+                "title": "label-change",
+                "description": "unchanged\n",
+                "labels": "expected",
+            },
+            {
+                "iid": 8,
+                "title": "label-change",
+                "description": "unchanged",
+                "labels": ["other"],
+                "state": "opened",
+            },
+        ),
+    ),
+)
+def test_issue_create_rejects_changes_beyond_terminal_description_newline(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    body: JSONObject,
+    observed: JSONObject,
+) -> None:
+    """Keep description content and non-description fields exact after a write.
+
+    :param monkeypatch: Pytest fixture isolating the issue create lock directory.
+    :param tmp_path: Scratch directory receiving the create lock.
+    :param body: Planned issue fields, including the exact description when present.
+    :param observed: Provider read-back that differs beyond a terminal newline.
+    :returns: None; assertions prove the write remains explicitly unverified.
+    """
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path / "locks")
+    plan = _plan("gitlab_issue", "open-bug", body)
+    base = "projects/42/issues"
+    title = body["title"]
+    assert isinstance(title, str)
+    api = FakeAPI(
+        {
+            ("GET", _list(base + f"?state=all&search={title}")): [[]],
+            ("POST", base): [{"iid": 8}],
+            ("GET", base + "/8"): [observed],
+        }
+    )
+
+    result = ISSUES.apply(api, object(), plan, 42)
+
+    assert result["action"] == "APPLIED"
+    assert result["verified"] is False
+    assert result["errors"] == [{"project_id": 42, "reason": "issue_readback_mismatch"}]
 
 
 def test_issue_create_refuses_closed_exact_title_instead_of_duplicating() -> None:

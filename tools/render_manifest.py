@@ -27,7 +27,7 @@ import runpy
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
-from typing import Optional
+from typing import Optional, Union
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 SKILL_RELATIVE = Path("ci-skills")
@@ -85,7 +85,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.check:
         stale = current != rendered
-        result = {
+        result: dict[str, Union[str, int]] = {
             "kind": "manifest_check",
             "manifest": str(path.relative_to(root)),
             "status": "STALE" if stale else "CURRENT",

@@ -92,23 +92,23 @@ def json_strings(value: JSONValue) -> Sequence[str]:
     return tuple(result)
 
 
-def copy_json_object(document: JSONObject) -> MutableMapping[str, JSONValue]:
+def copy_json_object(document: Mapping[str, object]) -> MutableMapping[str, JSONValue]:
     """Create an operation-owned mutable copy of a JSON object.
 
     :param document: Read-only source mapping whose nested containers may be immutable.
     :returns: Independent mutable mapping with copied nested objects and arrays.
-    :raises TypeError: If a nested value contains bytes instead of a JSON value.
+    :raises TypeError: If a nested value is not a JSON scalar, mapping or array.
     :raises RecursionError: If the input contains a container cycle or excessive nesting.
     """  # noqa: DOC502 - Nested traversal propagates depth and value errors.
     return {key: copy_json(value) for key, value in document.items()}
 
 
-def copy_json(value: JSONValue) -> JSONValue:
+def copy_json(value: object) -> JSONValue:
     """Copy JSON containers while preserving their scalar values.
 
-    :param value: JSON scalar, mapping, or ordered array to copy.
+    :param value: Candidate JSON scalar, mapping, or ordered array to validate and copy.
     :returns: Equal JSON value using new dictionaries and lists for every container.
-    :raises TypeError: If a bytes value is supplied in place of a JSON array or string.
+    :raises TypeError: If a supplied value is not a JSON scalar, mapping or array.
     :raises RecursionError: If the input contains a container cycle or excessive nesting.
     """  # noqa: DOC503 - Recursive container copying can exceed nesting limits.
     if isinstance(value, (bytes, bytearray)):
@@ -117,7 +117,9 @@ def copy_json(value: JSONValue) -> JSONValue:
         return copy_json_object(value)
     if isinstance(value, Sequence) and not isinstance(value, str):
         return [copy_json(item) for item in value]
-    return value
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise TypeError("JSON scalar, object or array required")
 
 
 def is_json_value(value: object) -> TypeGuard[JSONValue]:

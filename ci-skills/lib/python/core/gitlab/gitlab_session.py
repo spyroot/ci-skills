@@ -14,6 +14,7 @@ from typing import Optional
 
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.json_types import JSONObject
+from lib.python.core.provenance import SkillIdentity
 
 
 @dataclass(frozen=True)
@@ -78,7 +79,7 @@ class BoundGitLabSession:
         Runtime host identity recorded in receipts.
 
     .. attribute :: skill
-        :type: JSONObject
+        :type: SkillIdentity
 
         Installed skill identity bound to the session.
 
@@ -97,7 +98,7 @@ class BoundGitLabSession:
     credential_source: str
     credential_digest: str
     execution_host: str
-    skill: JSONObject
+    skill: SkillIdentity
     environment: Mapping[str, Optional[str]] = field(repr=False, compare=False)
 
 

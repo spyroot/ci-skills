@@ -21,11 +21,24 @@ the real one is a test failure rather than a surprise at runtime.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from argparse import Namespace
+from collections.abc import Mapping, MutableMapping, Sequence
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Final, Optional, Union
 
+from lib.python.core.catalog_types import (
+    CommandDefinition,
+    DiscoveryDefinition,
+    NodeDefinition,
+    ReadDefinition,
+)
 from lib.python.core.endpoints import TARGET_CONTRACT
+from lib.python.core.json_types import (
+    JSONValue,
+    copy_json_object,
+    json_object,
+    json_strings,
+)
 
 SCHEMA_VERSION = "1.0"
 SKILL_NAME = "ci-skills"
@@ -100,7 +113,7 @@ def github_variables(host: str) -> tuple[str, ...]:
 # reported back in `credential_sources`, so a caller resolves credentials by
 # making one call and reading the answer -- never by searching the host in
 # several places and guessing which one applied.
-ACCESS_PROTOCOL: dict[str, Any] = {
+ACCESS_PROTOCOL: Mapping[str, Union[str, Sequence[Mapping[str, str]]]] = {
     "rule": "first match wins; the resolved source is reported in credential_sources",
     "no_search": (
         "Do not hunt for credentials. Run the diagnostic you need: its access "
@@ -207,7 +220,7 @@ TARGET_PROTOCOL: list[dict[str, str]] = [
 TARGET_FILENAME = "target.toml"
 PROJECT_DIR = ".ci-skills"
 
-COMMANDS: dict[str, dict[str, Any]] = {
+COMMANDS: Mapping[str, CommandDefinition] = {
     "create_selfhosted_runner.py": {
         "kind": "create_selfhosted_runner",
         "purpose": "Build, publish, deploy and register a toolbox-backed GitHub runner.",
@@ -396,6 +409,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
                 "purpose": "filter newest jobs of one verified project",
                 "required_options": [],
                 "read_back": "GitLab project jobs keyset API; at most 20 pages of 100",
+                "result_schema": "schemas/results/gitlab-job-list.schema.json",
             },
         },
         "returns": (
@@ -444,6 +458,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "Confirmed apply may create or update the selected milestone.",
         "options": {
             "--project": "exact project path or numeric ID",
             "--group": "exact group path or numeric ID",
@@ -481,6 +496,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "Confirmed apply may create the selected bug issue.",
         "options": {
             "--project": "exact project path or numeric ID",
             "--title": "bug title",
@@ -511,6 +527,7 @@ COMMANDS: dict[str, dict[str, Any]] = {
         "requires": ("gitlab",),
         "capabilities": (),
         "mutates": True,
+        "side_effects": "Confirmed apply may create or update the selected wiki page.",
         "options": {
             "--project": "exact project path or numeric ID",
             "--title": "page title for create",
@@ -704,7 +721,7 @@ NODE_LOCAL_OPTIONS: dict[str, str] = {
     "--describe": "this command's machine-readable contract, then exit",
 }
 
-NODE_LOCAL_COMMANDS: dict[str, dict[str, Any]] = {
+NODE_LOCAL_COMMANDS: Mapping[str, NodeDefinition] = {
     "cilium_node.py": {
         "kind": "cilium_node",
         "requires": ("kubernetes",),
@@ -746,7 +763,7 @@ READ_EXIT_CODES: Final[Mapping[str, str]] = {
     "66": "missing input file or directory",
     "69": "provider, credential or required tool unavailable",
 }
-READ_COMMANDS: Final[Mapping[str, Mapping[str, Any]]] = {
+READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
     "bin/ci-api": {
         "report_kind": "ci_api",
         "purpose": "Read one caller-selected GitHub or GitLab API endpoint with bounded output.",
@@ -864,7 +881,7 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         },
     }
 )
-DISCOVERY_COMMANDS: Final = {
+DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
     "reference.py": {
         "report_kind": "reference_next",
         "purpose": "Offer the current node's installed tools and optional reference pointers.",
@@ -901,49 +918,76 @@ DISCOVERY_COMMANDS: Final = {
 }
 
 
-def proposition(node: str | None = None) -> dict[str, Any]:
-    """Offer one graph node from the existing installed-command catalogue.
+def command_authorities(script: str) -> Sequence[str]:
+    """Resolve provider choices from the registered command's access contract.
 
-    :param node: Cluster name or installed filename; None selects the root.
-    :returns: Versioned root or selected tools/reference node.
+    :param script: Installed command key from one of the four catalogues.
+    :returns: Provider names, or an empty sequence for an offline command.
+        ``ci-api`` offers either Git provider; it does not require both.
+    :raises KeyError: If the command is not registered.
+    """  # noqa: DOC502 - Dictionary lookup rejects unknown command keys.
+    if script in COMMANDS:
+        return COMMANDS[script]["requires"]
+    if script in NODE_LOCAL_COMMANDS:
+        return NODE_LOCAL_COMMANDS[script]["requires"]
+    if script == "bin/ci-api":
+        return ("github", "gitlab")
+    if script in READ_COMMANDS:
+        return READ_COMMANDS[script]["requires_authorities"]
+    return DISCOVERY_COMMANDS[script]["requires_authorities"]
+
+
+def _proposition_offering(scripts: Sequence[str]) -> MutableMapping[str, JSONValue]:
+    """Offer installed commands with references for their declared providers.
+
+    :param scripts: Command keys selected for a cluster or related-command node.
+    :returns: Compact tools and optional reference mappings.
+    """
+    authorities = {name for script in scripts for name in command_authorities(script)}
+    names = ["access", "project binding"] if authorities else []
+    if "gitlab" in authorities:
+        names.append("mcp")
+    if "harbor" in authorities:
+        names.append("toolbox specification")
+    return {
+        "tools": {script: {} for script in sorted(scripts)},
+        "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
+    }
+
+
+def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
+    """Offer one graph node from every installed-command catalogue.
+
+    :param node: Cluster name or installed command key; None selects the root.
+    :returns: Versioned root or selected tools/reference node. Commands without
+        a provider requirement appear in the offline cluster.
     :raises ValueError: If the selected node is not in the catalogue.
     """
-    commands = {**COMMANDS, **NODE_LOCAL_COMMANDS}
-
-    def offering(scripts: list[str], authority: str | None) -> dict[str, Any]:
-        names = ["access", "project binding"]
-        if authority == "gitlab":
-            names.append("mcp")
-        if authority == "harbor" or any(
-            "harbor" in commands[script]["requires"] for script in scripts
-        ):
-            names.append("toolbox specification")
-        return {
-            "tools": {script: {} for script in sorted(scripts)},
-            "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
-        }
-
+    commands: Mapping[str, Mapping[str, object]] = {
+        **COMMANDS,
+        **NODE_LOCAL_COMMANDS,
+        **READ_COMMANDS,
+        **DISCOVERY_COMMANDS,
+    }
+    authorities = {script: command_authorities(script) for script in commands}
     clusters = {
-        cluster: offering(
-            [
-                script
-                for script, entry in commands.items()
-                if authority in entry["requires"]
-            ],
-            authority,
+        cluster: _proposition_offering(
+            [script for script, names in authorities.items() if authority in names]
         )
         for cluster, authority in PROPOSITION_CLUSTERS.items()
     }
+    clusters["offline"] = _proposition_offering(
+        [script for script, names in authorities.items() if not names]
+    )
     if node is None:
         return {"schema_version": PROPOSITION_VERSION, **clusters}
     if node in clusters:
         return {"schema_version": PROPOSITION_VERSION, **clusters[node]}
     if node not in commands:
         raise ValueError("path_unknown")
-    entry = commands[node]
-    scripts = [node, *entry.get("related", ())]
-    authority = "gitlab" if "gitlab" in entry["requires"] else None
-    return {"schema_version": PROPOSITION_VERSION, **offering(scripts, authority)}
+    entry = copy_json_object(commands[node])
+    scripts = [node, *json_strings(entry.get("related", ()))]
+    return {"schema_version": PROPOSITION_VERSION, **_proposition_offering(scripts)}
 
 
 STATUS_MEANING = {
@@ -967,7 +1011,7 @@ COMMAND_BY_KIND: dict[str, str] = {
 }
 
 
-def missing_required_options(script: str, args: Any) -> list[str]:
+def missing_required_options(script: str, args: Namespace) -> list[str]:
     """Return missing options from the selected verb or default command.
 
     :param script: Command name in the catalog.
@@ -1000,7 +1044,7 @@ def options_for(script: str) -> dict[str, str]:
     return merged
 
 
-def describe(script: str) -> dict[str, Any]:
+def describe(script: str) -> MutableMapping[str, JSONValue]:
     """Build one command contract for ``--describe``.
 
     :param script: Command filename registered in the catalog.
@@ -1008,15 +1052,17 @@ def describe(script: str) -> dict[str, Any]:
     """
     discovery = script in DISCOVERY_COMMANDS
     read = script in READ_COMMANDS
-    entry = (
+    entry = copy_json_object(
         READ_COMMANDS[script]
         if read
         else DISCOVERY_COMMANDS[script]
         if discovery
         else COMMANDS[script]
     )
-    authorities = entry.get("requires", entry.get("requires_authorities", ()))
-    access = ("github", "gitlab") if script == "bin/ci-api" else authorities
+    authorities = json_strings(
+        entry.get("requires", entry.get("requires_authorities", ()))
+    )
+    access = command_authorities(script)
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": "command_contract",
@@ -1027,12 +1073,15 @@ def describe(script: str) -> dict[str, Any]:
         "use_when": entry["use_when"],
         "requires_authorities": list(authorities),
         "access_protocol": {name: ACCESS_PROTOCOL[name] for name in access},
-        "capabilities": list(entry.get("capabilities", ())),
-        "required_options": list(entry.get("required_options", ())),
+        "capabilities": list(json_strings(entry.get("capabilities", ()))),
+        "required_options": list(json_strings(entry.get("required_options", ()))),
         "options": (
-            {option: UNIVERSAL_OPTIONS[option] for option in entry["options"]}
+            {
+                option: UNIVERSAL_OPTIONS[option]
+                for option in json_strings(entry["options"])
+            }
             if discovery
-            else dict(entry["options"])
+            else dict(json_object(entry["options"]))
             if read
             else options_for(script)
         ),
@@ -1041,7 +1090,7 @@ def describe(script: str) -> dict[str, Any]:
         "subcommands": entry.get("subcommands", {}),
         "side_effects": entry.get("side_effects", "none"),
         "execution_surface": entry.get("execution_surface", "selected authority API"),
-        "required_tools": list(entry.get("required_tools", ())),
+        "required_tools": list(json_strings(entry.get("required_tools", ()))),
         "status_values": STATUS_MEANING,
         "exit_codes": dict(READ_EXIT_CODES) if read else EXIT_CODES,
         "default_output": (
@@ -1066,7 +1115,7 @@ def describe(script: str) -> dict[str, Any]:
     }
 
 
-def describe_node(script: str) -> dict[str, Any]:
+def describe_node(script: str) -> MutableMapping[str, JSONValue]:
     """Build the contract for a node read through a selected Pod.
 
     :param script: Registered node-local command filename.
@@ -1096,107 +1145,113 @@ def describe_node(script: str) -> dict[str, Any]:
     }
 
 
-def manifest() -> dict[str, Any]:
+def manifest() -> MutableMapping[str, JSONValue]:
     """Build the complete skill manifest for ``tools.json``.
 
     :returns: Command and authority catalog for installed agents.
     """
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "kind": "skill_manifest",
-        "skill": SKILL_NAME,
-        "read_only": not any(
-            entry.get("mutates", False) for entry in COMMANDS.values()
-        ),
-        "default_output": "json when stdout is not a terminal, human when it is",
-        "universal_options": UNIVERSAL_OPTIONS,
-        "node_local_options": NODE_LOCAL_OPTIONS,
-        "capability_options": CAPABILITY_OPTIONS,
-        "authorities": list(AUTHORITIES),
-        "access_protocol": ACCESS_PROTOCOL,
-        "target_protocol": TARGET_PROTOCOL,
-        "status_values": STATUS_MEANING,
-        "exit_codes": EXIT_CODES,
-        "commands": {
-            **{
-                script: {
-                    "report_kind": entry["kind"],
-                    "purpose": entry["purpose"],
-                    "use_when": entry["use_when"],
-                    "requires_authorities": list(entry["requires"]),
-                    "capabilities": list(entry["capabilities"]),
-                    "required_options": list(entry.get("required_options", ())),
-                    "options": sorted(options_for(script)),
-                    "returns": entry["returns"],
-                    "read_only": not entry.get("mutates", False),
-                    "subcommands": entry.get("subcommands", {}),
-                    "side_effects": entry.get("side_effects", "none"),
-                    "execution_surface": entry.get(
-                        "execution_surface", "selected authority API"
-                    ),
-                    "required_tools": list(entry.get("required_tools", ())),
-                }
-                for script, entry in COMMANDS.items()
+    return copy_json_object(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "kind": "skill_manifest",
+            "skill": SKILL_NAME,
+            "read_only": not any(
+                entry.get("mutates", False) for entry in COMMANDS.values()
+            ),
+            "default_output": "json when stdout is not a terminal, human when it is",
+            "universal_options": UNIVERSAL_OPTIONS,
+            "node_local_options": NODE_LOCAL_OPTIONS,
+            "capability_options": CAPABILITY_OPTIONS,
+            "authorities": list(AUTHORITIES),
+            "access_protocol": ACCESS_PROTOCOL,
+            "target_protocol": TARGET_PROTOCOL,
+            "status_values": STATUS_MEANING,
+            "exit_codes": EXIT_CODES,
+            "commands": {
+                **{
+                    script: {
+                        "report_kind": entry["kind"],
+                        "purpose": entry["purpose"],
+                        "use_when": entry["use_when"],
+                        "requires_authorities": list(entry["requires"]),
+                        "capabilities": list(entry["capabilities"]),
+                        "required_options": list(
+                            json_strings(entry.get("required_options", ()))
+                        ),
+                        "options": sorted(options_for(script)),
+                        "returns": entry["returns"],
+                        "read_only": not entry.get("mutates", False),
+                        "subcommands": entry.get("subcommands", {}),
+                        "side_effects": entry.get("side_effects", "none"),
+                        "execution_surface": entry.get(
+                            "execution_surface", "selected authority API"
+                        ),
+                        "required_tools": list(
+                            json_strings(entry.get("required_tools", ()))
+                        ),
+                    }
+                    for script, entry in COMMANDS.items()
+                },
+                **{
+                    script: {
+                        "report_kind": entry["kind"],
+                        "purpose": entry["purpose"],
+                        "use_when": entry["use_when"],
+                        "requires_authorities": list(entry["requires"]),
+                        "execution_surface": "Kubernetes API and one existing Pod on the selected node",
+                        "required_tools": list(entry["required_tools"]),
+                        "capabilities": [],
+                        "required_options": [],
+                        "options": sorted(
+                            {**NODE_LOCAL_OPTIONS, **entry.get("options", {})}
+                        ),
+                        "returns": entry["returns"],
+                    }
+                    for script, entry in NODE_LOCAL_COMMANDS.items()
+                },
+                **{
+                    script: {
+                        **{
+                            key: value
+                            for key, value in entry.items()
+                            if key
+                            not in {
+                                "description",
+                                "examples",
+                                "output_modes",
+                                "usage",
+                                "options",
+                            }
+                        },
+                        "options": sorted(entry["options"]),
+                    }
+                    for script, entry in READ_COMMANDS.items()
+                },
+                **DISCOVERY_COMMANDS,
             },
-            **{
-                script: {
-                    "report_kind": entry["kind"],
-                    "purpose": entry["purpose"],
-                    "use_when": entry["use_when"],
-                    "requires_authorities": list(entry["requires"]),
-                    "execution_surface": "Kubernetes API and one existing Pod on the selected node",
-                    "required_tools": list(entry["required_tools"]),
-                    "capabilities": [],
-                    "required_options": [],
-                    "options": sorted(
-                        {**NODE_LOCAL_OPTIONS, **entry.get("options", {})}
-                    ),
-                    "returns": entry["returns"],
-                }
-                for script, entry in NODE_LOCAL_COMMANDS.items()
+            "routing": {
+                "build or delete a toolbox": "toolbox.py",
+                "publish an image to Harbor": "harbor_push.py",
+                "verify a Harbor toolbox pull": "harbor_pull.py",
+                "create or delete a GitHub runner": "create_selfhosted_runner.py",
+                "browse tools and references": "reference.py",
+                "prove all three authorities": "access_check.py",
+                "a named CI job failed": "gitlab_job.py",
+                "check GitLab pipeline progress": "gitlab_pipeline.py",
+                "GitLab operation access": "gitlab_access.py",
+                "create or change a GitLab milestone": "gitlab_milestone.py",
+                "open a GitLab bug": "gitlab_issue.py",
+                "create or change a GitLab wiki page": "gitlab_wiki.py",
+                "read or manage a GitLab runner": "gitlab_runner.py",
+                "a volume or claim is stuck": "storage_report.py",
+                "what the cluster said during an interval": "event_trace.py",
+                "connectivity or CNI health": "cilium_status.py",
+                "Cilium daemon and health on a selected node": "cilium_node.py",
+                "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
+                "Ceph cluster health and OSD/monitor Pods": "ceph_cluster.py",
+                "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
+                "read a caller-selected Git API resource": "bin/ci-api",
+                "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
             },
-            **{
-                script: {
-                    **{
-                        key: value
-                        for key, value in entry.items()
-                        if key
-                        not in {
-                            "description",
-                            "examples",
-                            "output_modes",
-                            "usage",
-                            "options",
-                        }
-                    },
-                    "options": sorted(entry["options"]),
-                }
-                for script, entry in READ_COMMANDS.items()
-            },
-            **DISCOVERY_COMMANDS,
-        },
-        "routing": {
-            "build or delete a toolbox": "toolbox.py",
-            "publish an image to Harbor": "harbor_push.py",
-            "verify a Harbor toolbox pull": "harbor_pull.py",
-            "create or delete a GitHub runner": "create_selfhosted_runner.py",
-            "browse tools and references": "reference.py",
-            "prove all three authorities": "access_check.py",
-            "a named CI job failed": "gitlab_job.py",
-            "check GitLab pipeline progress": "gitlab_pipeline.py",
-            "GitLab operation access": "gitlab_access.py",
-            "create or change a GitLab milestone": "gitlab_milestone.py",
-            "open a GitLab bug": "gitlab_issue.py",
-            "create or change a GitLab wiki page": "gitlab_wiki.py",
-            "read or manage a GitLab runner": "gitlab_runner.py",
-            "a volume or claim is stuck": "storage_report.py",
-            "what the cluster said during an interval": "event_trace.py",
-            "connectivity or CNI health": "cilium_status.py",
-            "Cilium daemon and health on a selected node": "cilium_node.py",
-            "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
-            "Ceph cluster health and OSD/monitor Pods": "ceph_cluster.py",
-            "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
-            "read a caller-selected Git API resource": "bin/ci-api",
-            "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
-        },
-    }
+        }
+    )

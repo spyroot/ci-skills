@@ -1,0 +1,155 @@
+{
+  "access": {
+    "captured_at": "2026-10-13T06:28:21.204558+00:00",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "credential_sources": {
+      "kubernetes": "target:kubernetes.kubeconfigs"
+    },
+    "execution_host": "spyroots-mbp.lan",
+    "kind": "access_check",
+    "profile": "base_access_check",
+    "publication": false,
+    "schema_version": "1.0",
+    "skill": {
+      "algorithm": "sha256-tree-v1",
+      "consuming_project": {
+        "commit": null,
+        "source": null
+      },
+      "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
+      "file_count": 139,
+      "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+      "revision": {
+        "source": "installer_record",
+        "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+        "verified": true
+      }
+    },
+    "status": "PASS",
+    "surfaces": {
+      "kubernetes": {
+        "credential_source": "target:kubernetes.kubeconfigs",
+        "details": {
+          "api_server": "https://api.ww-cai-cisco-live.dcloud.local:6443",
+          "auth_mechanism": {
+            "source": "selected kubeconfig user entry",
+            "type": "embedded-token"
+          },
+          "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+          "kubeconfig_files": [
+            "path:f73adaea0685"
+          ],
+          "user_entry": "kube:admin/api-ww-cai-cisco-live-dcloud-local:6443"
+        },
+        "identity": "kube:admin",
+        "name": "kubernetes",
+        "next_step": null,
+        "observed_capability": [
+          "context_server_match",
+          "tls_api_reachable",
+          "effective_identity",
+          "cluster_wildcard",
+          "clusterrolebinding_create",
+          "clusterrolebinding_update",
+          "clusterrolebinding_delete",
+          "clusterrole_bind"
+        ],
+        "reason": null,
+        "status": "PASS",
+        "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin -> https://api.ww-cai-cisco-live.dcloud.local:6443"
+      }
+    },
+    "target_file": "path:5e5380df1eda",
+    "target_selection": "user:path:5e5380df1eda",
+    "target_source": "user",
+    "targets": {
+      "kubernetes": {
+        "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+        "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+      }
+    },
+    "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7"
+  },
+  "access_proven": true,
+  "captured_at": "2026-10-13T06:28:30.772869+00:00",
+  "cleanup": {
+    "delete_failures": [],
+    "observed_pods": [],
+    "remaining_pods": [],
+    "status": "PASS",
+    "verified": true
+  },
+  "condition": "CONSISTENT",
+  "debug_marker": "ci-skills-pr67-a9ef7ff4-e433398a894d",
+  "errors": [],
+  "execution_host": "spyroots-mbp.lan",
+  "filters": {
+    "node": "node-ue-4",
+    "selection": "PCI Ethernet with nonempty parentdev and no virtual kind"
+  },
+  "findings": [],
+  "kind": "k8s_verify_mtu_consistency",
+  "mtu_values": [
+    9000
+  ],
+  "namespace": "default",
+  "plan_digest": "234b1cf85fffed874539aef1ce749131d66b7feee50e8725b29cb0da8ec0d349",
+  "planned_nodes": [
+    "node-ue-4"
+  ],
+  "records": [
+    {
+      "interface": "eno1",
+      "ipv4_addresses": [
+        "198.18.196.83"
+      ],
+      "mtu": 9000,
+      "node": "node-ue-4",
+      "oper_state": "UP",
+      "parent_bus": "pci",
+      "pci_device": "0000:0a:00.0"
+    },
+    {
+      "interface": "eno2",
+      "ipv4_addresses": [
+        "198.18.196.65"
+      ],
+      "mtu": 9000,
+      "node": "node-ue-4",
+      "oper_state": "UP",
+      "parent_bus": "pci",
+      "pci_device": "0000:0a:00.1"
+    }
+  ],
+  "run_id": "ci-skills-pr67-a9ef7ff4",
+  "schema_version": "1.0",
+  "side_effects": [
+    "temporary_oc_debug_pods"
+  ],
+  "status": "PASS",
+  "summary": {
+    "consistent": true,
+    "error_count": 0,
+    "mtu_by_interface": {
+      "eno1": [
+        9000
+      ],
+      "eno2": [
+        9000
+      ]
+    },
+    "mtu_values": [
+      9000
+    ],
+    "nodes_read": 1,
+    "nodes_selected": 1,
+    "record_count": 2
+  },
+  "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin -> https://api.ww-cai-cisco-live.dcloud.local:6443",
+  "target_file": "path:5e5380df1eda",
+  "target_source": "user",
+  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7"
+}

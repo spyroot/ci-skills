@@ -13,7 +13,7 @@ How an agent uses ci-skills, at a high level. Commands are in `ci-skills/bin/`; 
 - A command returns facts in one compact record (`--json`, `--yaml`, or a human summary); the agent and the user
   decide what to do next.
 - When the agent does not know where to look, it follows small pointers one level at a time instead of reading big
-  files (planned: `reference.py next`).
+  files (`reference.py`, then `reference.py glab` or a returned command name).
 
 ## Use cases
 
@@ -26,26 +26,26 @@ arguments. An under-development route may expose only part of the use case; next
 | UC-02 | Select endpoints and access | `~/.ci-skills/target.toml` | current |
 | UC-03 | Discover platform locations beyond the target | CI11-TOOLS | planned in next delivery |
 | UC-04 | Install at the requested skill scope | `install.sh`; CI01-CATALOG | under development |
-| UC-05 | Discover one reference level per call | `reference.py next`; CI09-REFERENCE | planned in next delivery |
-| UC-06 | Follow bounded reference pointers | `reference.py next`; CI09-REFERENCE | planned in next delivery |
+| UC-05 | Discover one reference level per call | `reference.py [NODE]`; CI09-REFERENCE | current |
+| UC-06 | Follow bounded reference pointers | `reference.py [NODE]`; CI09-REFERENCE | current |
 | UC-07 | Find tools by short names | CI09-REFERENCE navigator | under development |
 | UC-08 | See what exists and what is planned | `ci-skills/tools.json`; this table | current |
-| UC-09 | Run GitLab work through glab | `core/gitlab_api.py` | under development |
+| UC-09 | Run GitLab work through glab | `core/gitlab/gitlab_api.py` | under development |
 | UC-10 | Read one job by URL | `gitlab_job.py --job-url URL` | current |
 | UC-11 | Find jobs by state and time | `gitlab_job.py list` | current |
 | UC-12 | Correlate the last failed job and events | CI11-TOOLS | under development |
 | UC-13 | Select last pipeline, named jobs and schedules | `gitlab_pipeline.py`; CI11-TOOLS | under development |
 | UC-14 | Watch a pipeline and descendants | `gitlab_pipeline.py watch`; CI11-TOOLS | under development |
-| UC-15 | Read a quick runner view | CI11-TOOLS | planned in next delivery |
+| UC-15 | Read a quick runner view | `gitlab_runner.py get\|list` | current |
 | UC-16 | Check an MR like gh-fix-ci | `gitlab_mr.py check`; CI11-TOOLS | planned in next delivery |
 | UC-17 | Combine milestone, labels and MR checks | CI11-TOOLS | under development |
 | UC-18 | See cluster health in one record | `cluster_health.py`; CI11-TOOLS | planned in next delivery |
 | UC-19 | Diagnose a stuck volume or claim | `storage_report.py` | current |
 | UC-20 | Read events over a chosen window | `event_trace.py --last 2h` | current |
 | UC-21 | Read Cilium health | `cilium_status.py`, `cilium_node.py` | current |
-| UC-22 | Collect independent facts in parallel | `core/collect.py`; CI11-TOOLS | under development |
+| UC-22 | Collect independent facts in parallel | `core/kubernetes/collect.py`; CI11-TOOLS | under development |
 | UC-23 | View and act on OpenShift state | `ocp_*.py`; CI11-TOOLS | planned in next delivery |
-| UC-24 | Build toolbox; push to Harbor | `toolbox_build.py`, `harbor_push.py`; CI11-TOOLS | planned in next delivery |
+| UC-24 | Build toolbox; push to Harbor | `toolbox.py create\|update`; `harbor_push.py push` | current |
 | UC-25 | Read one upstream section on demand | CI09-REFERENCE | planned in next delivery |
 | UC-26 | Explain one label family | CI09-REFERENCE | planned in next delivery |
 | UC-27 | Answer from MCP reference nodes | CI09-REFERENCE | planned in next delivery |
@@ -57,7 +57,9 @@ arguments. An under-development route may expose only part of the use case; next
 | UC-33 | Prove live smoke by read-back | `tools/check_live_acceptance.py` | under development |
 | UC-34 | Read merge and review state before locking | pr-coordinator; CI11-TOOLS | under development |
 
-No shipped command checks GitLab and Kubernetes together. `access_check.py` currently also requires GitHub.
+`access_check.py` checks GitHub, GitLab and Kubernetes together. GitLab-only and Kubernetes-only commands select
+only their own provider. `create_selfhosted_runner.py` composes Kubernetes, Harbor and GitHub for a runner;
+`harbor_pull.py pull` verifies a published toolbox in Kubernetes.
 
 Current individual writes use `gitlab_milestone.py create`, `gitlab_issue.py open-bug`, `gitlab_wiki.py create`, and
 `gitlab_runner.py assign|create|tag`. They plan first and require `--apply --confirm-plan` to write. The current MTU

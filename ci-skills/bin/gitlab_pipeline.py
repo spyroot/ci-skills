@@ -16,21 +16,24 @@ from collections.abc import Sequence
 from typing import Optional
 
 import _bootstrap  # noqa: F401
-from lib.python.access.access import check_gitlab_operation_access
-from lib.python.access.credentials import bind_gitlab_session
+from lib.python.access.gitlab import check_gitlab_operation_access
+from lib.python.access.gitlab_credentials import bind_gitlab_session
 from lib.python.core.catalog import describe, missing_required_options
-from lib.python.core.cli import (
-    _failure,
-    log_event,
-    output_mode,
-    parser,
-    resolve_gitlab_target,
-)
+from lib.python.core.cli import _failure, output_mode, parser
+from lib.python.core.gitlab.cli import resolve_gitlab_target
 from lib.python.core.gitlab.gitlab_pipelines import (
     MAX_JOB_PAGES,
     PAGE_SIZE,
     read_pipeline,
 )
+from lib.python.core.json_types import (
+    copy_json,
+    json_integer,
+    json_object,
+    json_objects,
+    json_string,
+)
+from lib.python.core.logging import log_event
 from lib.python.core.report import emit, report
 from lib.python.core.target import TargetError, select_gitlab_reference
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
@@ -121,25 +124,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             source = "access"
             gate = check_gitlab_operation_access(session)
             if gate["status"] != PASS:
-                data = report(KIND, target.gitlab.url, filters, [], gate["errors"])
+                data = report(
+                    KIND, target.gitlab.url, filters, [], json_objects(gate["errors"])
+                )
                 data["status"] = BLOCKED
             else:
                 source = "pipeline"
                 record, errors = read_pipeline(
-                    session, gate["target"]["id"], args.pipeline_id
+                    session,
+                    json_integer(json_object(gate["target"])["id"]),
+                    args.pipeline_id,
                 )
                 data = report(KIND, target.gitlab.url, filters, [record], errors)
             data["access"] = gate
             data["execution_host"] = session.execution_host
             data["tested_revision"] = session.skill["revision"]["value"]
-            data["skill"] = session.skill
+            data["skill"] = copy_json(session.skill)
             data["target_source"] = session.target_source
         rendered = emit(data, output_mode(args), args.output_dir)
-        log_event(
-            args, KIND, "result", data["status"], elapsed=time.monotonic() - started
-        )
+        status = json_string(data["status"])
+        log_event(args, KIND, "result", status, elapsed=time.monotonic() - started)
         sys.stdout.write(rendered)
-        return exit_code(data["status"])
+        return exit_code(status)
     except (TargetError, RuntimeError, ValueError, OSError, TypeError, KeyError) as exc:
         return _failure(args, KIND, source, str(exc))
     except Exception:  # noqa: BLE001 - keep unexpected failures machine-readable

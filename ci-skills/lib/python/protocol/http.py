@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable, Mapping
-from http.client import HTTPMessage, HTTPResponse
-from typing import Optional
+from http.client import HTTPMessage
+from typing import IO, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -33,7 +33,7 @@ class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(
         self,
         req: Request,
-        fp: HTTPResponse,
+        fp: IO[bytes],
         code: int,
         msg: str,
         headers: HTTPMessage,

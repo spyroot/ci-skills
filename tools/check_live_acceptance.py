@@ -6,11 +6,11 @@ Mocked CI proves code behavior. It cannot prove access, because the fake `gh`,
 the receipt a real host produced and refuses it when it is missing, stale, from
 a different authenticated setup, or produced by different code.
 
-The candidate check pairs the exact source commit with the skill tree digest.
-The receipt commit cannot contain its own SHA, so acceptance verifies that the
-tested source commit's skill tree equals the checked-out candidate before
-comparing the recomputed digest. Squash merges may change commit ancestry
-without changing the tested code.
+The candidate check compares the recorded functional checksum with ``bin/``,
+``lib/``, and ``schemas/`` using the installed skill's shared implementation.
+The whole-package checksum remains evidence of the original installed package;
+documentation-only changes may alter that checksum without changing runtime
+behavior. The receipt keeps its original source revision and package identity.
 
 The initial access receipts hold the selected targets and API-read identities.
 Later operation receipts are compared with that setup; no checked-in environment
@@ -27,7 +27,6 @@ import argparse
 import json
 import re
 import runpy
-import subprocess
 from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,7 +36,13 @@ SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
 runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
 
 from lib.python.core.cli_api import response_decoder
-from lib.python.core.json_types import JSONObject, JSONValue, json_integer, json_string
+from lib.python.core.json_types import (
+    JSONObject,
+    JSONValue,
+    json_integer,
+    json_string,
+    json_strings,
+)
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
 ReceiptPairKey: TypeAlias = tuple[str, str, str, str, str, int, str]
@@ -49,7 +54,8 @@ class AcceptanceResult(TypedDict, total=False):
     :param schema_version: Stable live-acceptance evidence version.
     :param kind: Existing live_acceptance report identifier.
     :param status: PASS when every required receipt passes, otherwise BLOCKED.
-    :param skill_digest: Measured candidate source digest when available.
+    :param skill_digest: Measured whole-package digest of the candidate.
+    :param functional_digest: Candidate runtime and schema digest used for acceptance.
     :param accepted: Sorted names of accepted setup and operation receipts.
     :param problems: Sorted classified acceptance failures, or a loading diagnostic.
 
@@ -71,7 +77,12 @@ class AcceptanceResult(TypedDict, total=False):
     .. attribute :: skill_digest
         :type: str
 
-        Measured candidate source digest when available.
+        Measured whole-package digest of the candidate.
+
+    .. attribute :: functional_digest
+        :type: str
+
+        Candidate runtime and schema digest used for acceptance.
 
     .. attribute :: accepted
         :type: Sequence[str]
@@ -88,6 +99,7 @@ class AcceptanceResult(TypedDict, total=False):
     kind: str
     status: str
     skill_digest: str
+    functional_digest: str
     accepted: Sequence[str]
     problems: Sequence[str]
 
@@ -209,17 +221,12 @@ def _load_receipt_dirs(paths: Sequence[Path]) -> Mapping[str, JSONObject]:
     return receipts
 
 
-def check_candidate_identity(
-    receipt: JSONObject, repository_root: Path, skill_root: Path
-) -> Sequence[str]:
-    """Verify a committed receipt against the exact candidate skill tree.
+def _check_source_revision(receipt: JSONObject) -> Sequence[str]:
+    """Validate recorded source provenance independently of local Git history.
 
-    :param receipt: Live receipt with a verified tested source revision.
-    :param repository_root: Git checkout containing the candidate HEAD.
-    :param skill_root: Candidate's ``ci-skills`` directory.
-    :returns: Stable reasons when source, tree identity, or digest differs.
-    :raises UnicodeError: If Git output cannot be decoded using the process encoding.
-    """  # noqa: DOC502 - The nested Git process decodes text and can raise UnicodeError.
+    :param receipt: Live receipt retaining its original tested source revision.
+    :returns: Stable reasons when the revision is unverified or inconsistent.
+    """
     skill = _mapping(receipt.get("skill"))
     source = _mapping(skill.get("revision"))
     revision = receipt.get("tested_revision")
@@ -233,49 +240,27 @@ def check_candidate_identity(
         or source.get("value") != revision
     ):
         return ["candidate_revision_unverified"]
+    return []
 
-    def git(*args: str) -> Optional[subprocess.CompletedProcess[str]]:
-        """Run one Git query within the candidate checkout without raising on I/O.
 
-        :param *args: Git arguments following the selected repository root.
-        :returns: Captured Git process result, or None if Git could not start.
-        :raises UnicodeError: If Git output cannot be decoded using the process encoding.
-        """  # noqa: DOC502 - subprocess.run propagates output decoding failures.
-        try:
-            return subprocess.run(
-                ["git", "-C", str(repository_root), *args],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError:
-            return None
+def check_candidate_identity(receipt: JSONObject, skill_root: Path) -> Sequence[str]:
+    """Compare recorded functional bytes with the candidate runtime and schemas.
 
-    source_commit = git("cat-file", "-e", f"{revision}^{{commit}}")
-    if source_commit is None or source_commit.returncode != 0:
-        return ["candidate_revision_unavailable"]
-    tested_tree = git("rev-parse", f"{revision}:ci-skills")
-    current_tree = git("rev-parse", "HEAD:ci-skills")
-    if (
-        tested_tree is None
-        or current_tree is None
-        or tested_tree.returncode != 0
-        or current_tree.returncode != 0
-        or tested_tree.stdout.strip() != current_tree.stdout.strip()
-    ):
-        return ["candidate_skill_tree_mismatch"]
-    if _redactor() is None:
-        return ["candidate_digest_unavailable"]
+    :param receipt: Live receipt with a verified source and functional checksum.
+    :param skill_root: Candidate's ``ci-skills`` directory.
+    :returns: Stable reasons when the source or functional checksum cannot match.
+    """
+    problems = _check_source_revision(receipt)
+    if problems:
+        return problems
     try:
-        from lib.python.core.provenance import tree_digest
+        from lib.python.core.provenance import functional_digest
 
-        current = tree_digest(skill_root)
+        current = functional_digest(skill_root)
     except (ImportError, OSError, ValueError):
         return ["candidate_digest_unavailable"]
-    if any(
-        skill.get(key) != current[key] for key in ("algorithm", "digest", "file_count")
-    ):
-        return ["candidate_skill_digest_mismatch"]
+    if _mapping(receipt.get("skill")).get("functional_digest") != current:
+        return ["candidate_functional_digest_mismatch"]
     return []
 
 
@@ -301,11 +286,11 @@ def _check_common(
     now: datetime,
     max_age_days: int,
 ) -> MutableSequence[str]:
-    """Check schema, status, digest, freshness, and sanitization evidence.
+    """Check schema, status, functional identity, freshness, and sanitization.
 
     :param name: Receipt file name prefixed to each reported problem.
     :param receipt: Parsed diagnostic or GitLab operation receipt.
-    :param digest: Expected digest of the candidate skill tree.
+    :param digest: Expected functional digest of the candidate runtime and schemas.
     :param now: Reference time used for freshness and future-date checks.
     :param max_age_days: Maximum accepted age of the receipt in whole days.
     :returns: Mutable problem list owned by the caller for additional checks.
@@ -317,11 +302,14 @@ def _check_common(
         problems.append(f"{name}:schema_version_unexpected")
     if receipt.get("status") != "PASS":
         problems.append(f"{name}:status_not_pass")
-    reported = _mapping(receipt.get("skill")).get("digest")
-    if not reported:
+    skill = _mapping(receipt.get("skill"))
+    if not skill.get("digest"):
         problems.append(f"{name}:skill_digest_absent")
+    reported = skill.get("functional_digest")
+    if not reported:
+        problems.append(f"{name}:functional_digest_absent")
     elif reported != digest:
-        problems.append(f"{name}:skill_digest_mismatch")
+        problems.append(f"{name}:functional_digest_mismatch")
     captured = _parse_time(receipt.get("captured_at"))
     if captured is None:
         problems.append(f"{name}:captured_at_unreadable")
@@ -347,7 +335,7 @@ def _check_receipt(
 
     :param name: Receipt file name prefixed to each reported problem.
     :param receipt: Parsed publication access receipt to inspect.
-    :param digest: Expected digest of the candidate skill tree.
+    :param digest: Expected functional digest of the candidate runtime and schemas.
     :param now: Reference time used for receipt freshness.
     :returns: Mutable problem list for missing identity, target, or live proof.
     :raises ImportError: If the shared command-authority catalogue cannot be loaded.
@@ -431,7 +419,7 @@ def _check_receipt(
     if receipt.get("blocking_live_checks"):
         problems.append(f"{name}:live_checks_blocking")
     github = _mapping(surfaces.get("github"))
-    if "required_checks_read" not in (
+    if "required_checks_read" not in json_strings(
         github.get("observed_capability") or []
     ) or not _mapping(github.get("details")).get("required_checks"):
         problems.append(f"{name}:required_checks_readback_missing")
@@ -488,7 +476,7 @@ def _check_gitlab_receipt(
     :param name: Receipt file name prefixed to each reported problem.
     :param receipt: Parsed GitLab access, read, or mutation receipt.
     :param required: Expected host, credential, target, kind, and operation fields.
-    :param digest: Expected digest of the candidate skill tree.
+    :param digest: Expected functional digest of the candidate runtime and schemas.
     :param now: Reference time used for receipt freshness.
     :returns: Mutable problem list for context or read-back mismatch.
     :raises KeyError: If the required context lacks its kind field.
@@ -529,9 +517,10 @@ def _check_gitlab_receipt(
     ):
         problems.append(f"{name}:target_mismatch")
     operation = required.get("operation") if kind != "gitlab_access" else None
+    readback = receipt.get("readback")
     if kind == "gitlab_access":
         if not {"identity_read", "target_read"} <= set(
-            receipt.get("observed_capability") or []
+            json_strings(receipt.get("observed_capability") or [])
         ):
             problems.append(f"{name}:access_readback_missing")
     elif (kind, operation) in READ_ONLY_GITLAB_OPERATIONS:
@@ -541,9 +530,9 @@ def _check_gitlab_receipt(
         or receipt.get("mutated") is not (required.get("result_action") == "APPLIED")
         or receipt.get("operation") != operation
         or receipt.get("result_action") != required.get("result_action")
-        or not isinstance(receipt.get("readback"), dict)
-        or receipt["readback"].get("verified") is not True
-        or receipt["readback"].get("action") != required.get("result_action")
+        or not isinstance(readback, dict)
+        or readback.get("verified") is not True
+        or readback.get("action") != required.get("result_action")
         or receipt.get("errors")
     ):
         problems.append(f"{name}:operation_readback_missing")
@@ -551,7 +540,7 @@ def _check_gitlab_receipt(
         kind == "gitlab_runner"
         and required.get("operation") == "create"
         and required.get("result_action") == "APPLIED"
-        and not _runner_smoke_cleanup_verified(receipt, required, digest, now)
+        and not _runner_smoke_cleanup_verified(receipt, required, now)
     ):
         problems.append(f"{name}:runner_smoke_cleanup_unproven")
     if (
@@ -657,14 +646,12 @@ def _runner_delete_readback_verified(receipt: JSONObject, required: JSONObject) 
 def _runner_smoke_cleanup_verified(
     receipt: JSONObject,
     required: JSONObject,
-    digest: str,
     now: datetime,
 ) -> bool:
     """Verify a disposable runner's deletion and independent absence read-back.
 
     :param receipt: Runner creation receipt containing smoke cleanup evidence.
     :param required: Expected project target identity from setup access.
-    :param digest: Expected skill digest in the cleanup evidence.
     :param now: Reference time bounding cleanup receipt freshness.
     :returns: True only when the exact created runner is absent afterward.
     :raises TypeError: If now is naive while receipt timestamps are timezone-aware.
@@ -686,7 +673,7 @@ def _runner_smoke_cleanup_verified(
         or cleanup.get("execution_host") != receipt.get("execution_host")
         or cleanup.get("origin") != receipt.get("origin")
         or cleanup.get("credential_source") != receipt.get("credential_source")
-        or cleanup.get("skill_digest") != digest
+        or cleanup.get("skill_digest") != _mapping(receipt.get("skill")).get("digest")
         or revision.get("verified") is not True
         or not isinstance(revision.get("value"), str)
         or not revision["value"]
@@ -761,7 +748,6 @@ class AcceptanceReview:
         receipts: Mapping[str, JSONObject],
         skill_root: Path,
         now: datetime,
-        repository_root: Optional[Path],
     ):
         """Retain receipt views and initialize candidate-bound evaluation state.
 
@@ -769,19 +755,18 @@ class AcceptanceReview:
         :param receipts: Setup and operation receipt objects keyed by unique name.
         :param skill_root: Candidate skill tree whose current bytes are fingerprinted.
         :param now: Timezone-aware reference time for receipt freshness.
-        :param repository_root: Checkout for exact source verification, or None to omit it.
         :raises ImportError: If shared provenance code cannot be loaded.
         :raises OSError: If a candidate skill source file cannot be read.
         :raises ValueError: If the candidate source tree cannot be fingerprinted.
         """  # noqa: DOC502 - The provenance import and tree_digest propagate failures.
-        from lib.python.core.provenance import tree_digest
+        from lib.python.core.provenance import functional_digest, tree_digest
 
         self.setup = setup
         self.receipts = receipts
         self.skill_root = skill_root
         self.now = now
-        self.repository_root = repository_root
         self.digest = tree_digest(skill_root)["digest"]
+        self.functional_digest = functional_digest(skill_root)
         self.problems: MutableSequence[str] = []
         self.accepted: MutableSequence[str] = []
         self.contexts: MutableSequence[JSONObject] = []
@@ -801,7 +786,9 @@ class AcceptanceReview:
             kind = receipt.get("kind")
             try:
                 if kind == RECEIPT_KIND:
-                    found = _check_receipt(name, receipt, self.digest, self.now)
+                    found = _check_receipt(
+                        name, receipt, self.functional_digest, self.now
+                    )
                     host = receipt.get("execution_host")
                     if not isinstance(host, str):
                         found.append(f"{name}:receipt_invalid_shape")
@@ -812,7 +799,11 @@ class AcceptanceReview:
                 elif kind == "gitlab_access":
                     context = _gitlab_context(receipt)
                     found = _check_gitlab_receipt(
-                        name, receipt, {**context, "kind": kind}, self.digest, self.now
+                        name,
+                        receipt,
+                        {**context, "kind": kind},
+                        self.functional_digest,
+                        self.now,
                     )
                     if (
                         any(not value for value in context.values())
@@ -825,13 +816,9 @@ class AcceptanceReview:
                         found.append(f"{name}:setup_context_incomplete")
                 else:
                     found = [f"{name}:setup_kind_unexpected"]
-                if self.repository_root is not None:
-                    found.extend(
-                        f"{name}:{reason}"
-                        for reason in check_candidate_identity(
-                            receipt, self.repository_root, self.skill_root
-                        )
-                    )
+                found.extend(
+                    f"{name}:{reason}" for reason in _check_source_revision(receipt)
+                )
             except (AttributeError, KeyError, TypeError, ValueError):
                 found = [f"{name}:receipt_invalid_shape"]
             self.problems.extend(found)
@@ -886,15 +873,11 @@ class AcceptanceReview:
             }
             try:
                 found = _check_gitlab_receipt(
-                    name, receipt, required, self.digest, self.now
+                    name, receipt, required, self.functional_digest, self.now
                 )
-                if self.repository_root is not None:
-                    found.extend(
-                        f"{name}:{reason}"
-                        for reason in check_candidate_identity(
-                            receipt, self.repository_root, self.skill_root
-                        )
-                    )
+                found.extend(
+                    f"{name}:{reason}" for reason in _check_source_revision(receipt)
+                )
             except (AttributeError, KeyError, TypeError, ValueError):
                 found = [f"{name}:receipt_invalid_shape"]
             self.problems.extend(found)
@@ -957,6 +940,7 @@ class AcceptanceReview:
             "kind": "live_acceptance",
             "status": "PASS" if not self.problems else "BLOCKED",
             "skill_digest": self.digest,
+            "functional_digest": self.functional_digest,
             "accepted": sorted(self.accepted),
             "problems": sorted(self.problems),
         }
@@ -967,7 +951,6 @@ def evaluate(
     receipts: Mapping[str, JSONObject],
     skill_root: Path,
     now: Optional[datetime] = None,
-    repository_root: Optional[Path] = None,
 ) -> AcceptanceResult:
     """Compare action receipts with the initial authenticated runtime setup.
 
@@ -975,7 +958,6 @@ def evaluate(
     :param receipts: Parsed operation and setup receipts keyed by file name.
     :param skill_root: Candidate skill tree used for digest comparison.
     :param now: Reference time for freshness, or None to read the current UTC time.
-    :param repository_root: Checkout for source verification, or None to omit it.
     :returns: Acceptance status, accepted receipts, and stable problem reasons.
     :raises ImportError: If shared provenance or authority modules cannot be loaded.
     :raises OSError: If a candidate source file cannot be read for its digest.
@@ -987,7 +969,6 @@ def evaluate(
         receipts,
         skill_root,
         now if now is not None else datetime.now(UTC),
-        repository_root,
     )
     review.setup_receipts()
     review.operation_receipts()
@@ -1047,7 +1028,6 @@ def main() -> int:
             setup,
             receipts,
             skill_path,
-            repository_root=root,
         )
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {

@@ -13,18 +13,19 @@ from collections.abc import Sequence
 from typing import Optional
 
 import _bootstrap  # noqa: F401
-from lib.python.core.abstract.callbacks import Callbacks
-from lib.python.core.abstract.skill_exector import WorkflowExecutor
+from lib.python.core.abstract.callbacks import AbstractCallbacks, Callbacks
+from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.delivery_state import DeliveryState
-from lib.python.core.gitlab.github import GitHubAuth
-from lib.python.core.gitlab.github_runner import (
+from lib.python.core.executor import WorkflowExecutor
+from lib.python.core.github.github import GitHubAuth
+from lib.python.core.github.runner import (
     CreateGitHubRunner,
     DeleteGitHubRunner,
     GitHubRunnerRuntime,
 )
-from lib.python.core.gitlab.gitlab_runner import DeleteRunner, DeployRunner, PullImage
 from lib.python.core.harbor.registry_mirror import HarborAuth, HarborPush, PushAction
 from lib.python.core.kubernetes.kubernetes import K8SAuth
+from lib.python.core.kubernetes.runner import DeleteRunner, DeployRunner, PullImage
 from lib.python.core.toolbox_actions import (
     ConfirmWorkflow,
     EnsureNamespace,
@@ -47,9 +48,10 @@ def workflow(action: WorkflowAction) -> WorkflowExecutor[DeliveryState]:
 
     :param action: Prepared runtime target and concrete operation inputs.
     :returns: Executor sharing one typed state across the declared callback sequence.
-    :raises ValueError: If a callback already belongs to a different workflow state.
+    :raises ValueError: If a build has no specification or a callback already
+        belongs to a different workflow state.
     """  # noqa: DOC502 - Executor construction rejects callbacks bound elsewhere.
-    callbacks = [
+    callbacks: AbstractCallbacks[DeliveryState, SkillAction] = [
         K8SAuth(action.target, action.args.timeout),
         GitHubAuth(action.target, action.args.timeout),
     ]
@@ -72,11 +74,14 @@ def workflow(action: WorkflowAction) -> WorkflowExecutor[DeliveryState]:
             )
         )
         if action.args.apply:
+            spec = action.spec
+            if spec is None:
+                raise ValueError("toolbox_spec_missing")
             callbacks.extend(
                 (
                     EnsureNamespace(action),
                     HarborBuild(action),
-                    HarborPush(PushAction(action.repository, action.spec.image_tag)),
+                    HarborPush(PushAction(action.repository, spec.image_tag)),
                     PullImage(action.runner),
                     GitHubRunnerRuntime(action.runner),
                     DeployRunner(action.runner),
