@@ -61,7 +61,7 @@ if TYPE_CHECKING:
 
 
 def test_committed_runner_tag_receipts_match_live_contract() -> None:
-    """Match committed runner tag receipts to current skill digest and schema.
+    """Match runner-tag receipts to current functional inputs and schema.
     :returns: None; assertions in the body validate the regression.
     """
     root = Path(__file__).parents[2]
@@ -72,11 +72,11 @@ def test_committed_runner_tag_receipts_match_live_contract() -> None:
         (root / "tests/acceptance/receipts/gitlab-access.json").read_text()
     )
     target = setup["target"]
-    digest = PROVENANCE.tree_digest(root / "ci-skills")["digest"]
+    functional_digest = PROVENANCE.functional_digest(root / "ci-skills")
 
     for result in (applied, repeated):
         TAG_VALIDATOR.validate(result)
-        assert result["skill"]["digest"] == digest
+        assert result["skill"]["functional_digest"] == functional_digest
         assert result["skill"]["revision"]["verified"] is True
         assert result["tested_revision"] == result["skill"]["revision"]["value"]
         assert {

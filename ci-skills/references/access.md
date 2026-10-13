@@ -96,6 +96,30 @@ server = "https://api.cluster.example.com:6443"
 # kubeconfig = "/home/operator/.kube/config"
 ```
 
+## Package and functional identity
+
+The shared [`core/provenance.py`](../lib/python/core/provenance.py) supplies two
+checksums to live receipts that carry a `skill` identity:
+
+- `skill.digest` identifies the installer-checked skill file tree, including
+  documentation. The installer uses it to verify copied files. Its own record,
+  symlinks, bytecode caches, and platform metadata are excluded.
+- `skill.functional_digest` identifies files under `bin/`, `lib/`, and `schemas/`.
+  Live reports and the GitHub acceptance checker use the same calculation over
+  sorted relative paths, executable bits, and file contents. Documentation,
+  tests, and bytecode caches are excluded. Matching checksums bind the captured
+  live results to the candidate's unchanged runtime files; they do not establish
+  that an operation passed without its result and read-back evidence.
+
+A revision is reported `verified` when it came from a clean tracked skill
+subtree, or when the installer's `INSTALLATION.json` records that clean source
+revision and its package checksum still matches the installed bytes.
+`--revision` remains a claim. The invoking project's `CI_COMMIT_SHA` is recorded
+separately in `consuming_project`. The repository acceptance checker resolves
+the recorded source commit and compares the receipt's functional checksum with
+its own calculation for the candidate. A documentation or test edit can change
+the package checksum without invalidating live proof of unchanged runtime files.
+
 ## Full three-authority live receipt
 
 When accepting the full access capability, run
@@ -129,16 +153,6 @@ Agents are discovered through the `cilium` DaemonSet's own selector, resolved
 from the one cluster-wide listing that also resolves the namespace. A name
 prefix would also match `cilium-operator-*` and `cilium-envoy-*`, which carry
 no health endpoint.
-
-The executed code is identified by a content digest of the skill tree, not by a
-commit SHA alone. A revision is reported `verified` when it came from a clean
-subtree in the repository that tracks this skill, or when the repository
-installer's `INSTALLATION.json` records that clean source revision and its
-measured digest still matches the installed bytes. `--revision` remains a
-claim, and the invoking project's `CI_COMMIT_SHA` is kept in its own
-`consuming_project` field so it can never be mistaken for the skill's. The
-repository acceptance checker independently resolves the recorded commit and
-compares its tree and digest.
 
 Publication mode compares required status checks with `github.required_checks`
 in the selected target file. Every declared name must appear in the branch

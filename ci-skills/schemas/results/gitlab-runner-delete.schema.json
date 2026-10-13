@@ -324,6 +324,7 @@
       "properties": {
         "algorithm": {"const":"sha256-tree-v1"},
         "digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "functional_digest": {"type":"string","pattern":"^[0-9a-f]{64}$"},
         "file_count": {"type":"integer","minimum":1},
         "revision": {
           "type": "object",

@@ -198,9 +198,15 @@ Follow the existing [validation surfaces](../README.md#validation) and
 [installer procedure](../README.md#install-and-first-run). Extend the relevant
 [callback tests](../tests/python/test_callbacks.py), [workflow tests](../tests/python/test_toolbox_workflows.py) and
 [catalogue tests](../tests/python/test_catalog.py) with fake services for the changed behavior and its concrete failure
-path. Install the candidate, use discovery and help as a consumer would, then execute the affected live operation,
-read back the result, repeat applicable no-op checks and verify cleanup of smoke-owned resources.
+path.
 
-Keep the PR candidate identity, installed skill identity, result and cleanup evidence in the smoke report. Point to the
-compact execution trace through `trace_artifact`; do not copy or parse the entire trace into another report. If code
-changes the exercised behavior, reinstall and repeat that affected live check before claiming it is proved.
+After QA approves the candidate, install it and use discovery and help as a consumer would. Execute the affected live
+operations, read back their results, repeat applicable no-op checks, and verify cleanup of smoke-owned resources. Keep
+the PR candidate identity and installed skill identity in the smoke report. Point to the compact execution trace through
+`trace_artifact`; do not copy or parse the entire trace into another report.
+
+The shared [provenance calculation](../ci-skills/references/access.md#package-and-functional-identity) records
+both the package checksum and the functional checksum of `bin/`, `lib/`, and `schemas/`. GitHub compares the
+recorded functional checksum with the candidate's checksum. If live use exposes a code defect, fix it, obtain
+review, then collect live evidence for the corrected candidate. Documentation and test edits do not require
+live reruns when the functional checksum is unchanged.
