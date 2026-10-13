@@ -1,0 +1,39 @@
+{
+  "fingerprint": "bd577d5997a812ab16c5243d6d1d03e463ab8bbe73946c2f009e0d0b93bd882d",
+  "mode": "dry-run",
+  "plan": {
+    "context": "",
+    "manifest": {
+      "apiVersion": "build.openshift.io/v1",
+      "kind": "BuildConfig",
+      "metadata": {
+        "labels": {
+          "ci-skills.spyroot.dev/source-commit": "e044da1dab34cfa0da098ed8ac380538263fa921"
+        },
+        "name": "ci-skills-pr67-binary-plan",
+        "namespace": "ci-skills-pr67-a9ef7ff4"
+      },
+      "spec": {
+        "output": {
+          "to": {
+            "kind": "DockerImage",
+            "name": "harbor.dcloud.run/hott/ci-skills-binary-plan:a9ef7ff4"
+          }
+        },
+        "source": {
+          "type": "Binary"
+        },
+        "strategy": {
+          "dockerStrategy": {
+            "dockerfilePath": "Dockerfile"
+          },
+          "type": "Docker"
+        }
+      }
+    },
+    "sourceCommit": "e044da1dab34cfa0da098ed8ac380538263fa921",
+    "sourceDockerfilePath": "Dockerfile",
+    "sourceRepo": "path:96d91efc6d94",
+    "sourceTree": "762ca286b26b458769790955505fef0a9743b961"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "access": {},
+  "captured_at": "2026-10-13T06:38:45.135805+00:00",
+  "errors": [
+    {
+      "reason": "harbor_image_target_mismatch",
+      "source": "harbor_pull"
+    }
+  ],
+  "filters": {},
+  "kind": "harbor_pull",
+  "operation": "pull",
+  "plan_digest": null,
+  "records": [],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
+    "file_count": 139,
+    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+    "revision": {
+      "source": "installer_record",
+      "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+      "verified": true
+    }
+  },
+  "status": "BLOCKED",
+  "summary": {
+    "error_count": 1,
+    "record_count": 0
+  },
+  "target": "path:5e5380df1eda",
+  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7"
+}

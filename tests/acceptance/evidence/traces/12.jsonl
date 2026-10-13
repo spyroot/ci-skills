@@ -1,0 +1,1 @@
+{"attempt": 1, "component": "event_trace", "elapsed_time_ms": 64410, "error_class": null, "event": "result", "level": "info", "mode": "live", "operation": "check", "resource": "event_trace", "result": "PASS", "run_id": "", "timestamp": "2026-10-13T06:24:41.309776+00:00"}

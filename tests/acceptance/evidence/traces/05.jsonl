@@ -1,0 +1,1 @@
+{"attempt": 1, "component": "ceph_cluster", "elapsed_time_ms": 64833, "error_class": null, "event": "result", "level": "info", "mode": "live", "operation": "check", "resource": "ceph_cluster", "result": "PASS", "run_id": "", "timestamp": "2026-10-13T06:24:41.265891+00:00"}
