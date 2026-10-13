@@ -73,6 +73,18 @@ def _unexpected() -> Mock:
     return Mock(side_effect=AssertionError("unselected authority was contacted"))
 
 
+def _skill_identity() -> JSONObject:
+    """Return the minimum complete installed-skill identity for access receipts.
+
+    :returns: Identity with the revision and consuming-project provenance required
+        by the shared access reporter.
+    """
+    return {
+        "revision": {"value": "a" * 40},
+        "consuming_project": {"commit": None, "source": None},
+    }
+
+
 def test_ceph_collector_uses_only_kubernetes_authority(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -105,7 +117,7 @@ def test_ceph_collector_uses_only_kubernetes_authority(
     monkeypatch.setattr(
         credentials,
         "resolve_skill_identity",
-        lambda _revision: {"revision": {"value": "a" * 40}},
+        lambda _revision: _skill_identity(),
     )
     monkeypatch.setattr(
         access,
@@ -165,7 +177,7 @@ def test_gitlab_job_does_not_require_cluster_or_github(
     monkeypatch.setattr(
         credentials,
         "resolve_skill_identity",
-        lambda _revision: {"revision": {"value": "a" * 40}},
+        lambda _revision: _skill_identity(),
     )
     monkeypatch.setattr(
         access,

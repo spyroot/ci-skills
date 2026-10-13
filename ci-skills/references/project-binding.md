@@ -45,6 +45,6 @@ different project selections cannot share indistinguishable provenance.
 
 The local receipt records the selected source and absolute path, never token
 values or kubeconfig contents. The access gate verifies that the context
-resolves to the selected server with TLS verification; collectors receive the
-same kubeconfig and context. The skill does not assume a project helper name,
-token file, or global profile.
+resolves to the selected server; collectors receive the same kubeconfig and
+context, preserving the TLS settings chosen in that kubeconfig. The skill does
+not assume a project helper name, token file, or global profile.

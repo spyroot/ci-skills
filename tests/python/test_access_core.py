@@ -680,14 +680,18 @@ def test_check_access_passes_when_all_three_authorities_are_admin(
     assert any("exec" in call and "cilium-health" in call for call in calls)
 
 
+@pytest.mark.parametrize("scenario", ("success", "k8s_tls_skip_verify"))
 def test_check_access_receipt_records_metadata_and_resolved_sources(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    scenario: str,
 ) -> None:
     """Require PASS provenance and effective nonsecret credential sources.
 
     :param monkeypatch: Pytest fixture clearing token env and stubbing commands.
     :param tmp_path: Scratch target and kubeconfig path used by the receipt.
+    :param scenario: Fixture Kubernetes configuration with or without the
+        insecure-skip-tls-verify setting.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -695,7 +699,7 @@ def test_check_access_receipt_records_metadata_and_resolved_sources(
     _clear_token_env(monkeypatch)
     kubeconfig = tmp_path / "kubeconfig"
     kubeconfig.write_text("apiVersion: v1\n", encoding="utf-8")
-    runner, _calls = _fake_access_runner(runtime, "success")
+    runner, _calls = _fake_access_runner(runtime, scenario)
     _patch_provider_commands(monkeypatch, runner)
 
     report = access.check_access(
@@ -1023,7 +1027,6 @@ def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
         ("gitlab_identity_wrong_host", "gitlab", "host_mismatch"),
         ("gitlab_runner_denied", "gitlab", "authorization"),
         ("k8s_wrong_server", "kubernetes", "api_server_mismatch"),
-        ("k8s_tls_skip_verify", "kubernetes", "tls_verification_disabled"),
         ("k8s_not_admin", "kubernetes", "cluster_wildcard_denied"),
         ("k8s_exec_denied", "kubernetes", "pods_exec_denied"),
         ("k8s_health_failed", "kubernetes", "cilium_health_exec_failed"),

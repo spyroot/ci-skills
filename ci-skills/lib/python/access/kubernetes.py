@@ -315,10 +315,10 @@ class KubernetesAccessProbe:
         return selected
 
     def check_context(self) -> None:
-        """Verify the selected context's API server and TLS configuration.
+        """Verify the selected context's API server using its kubeconfig settings.
 
-        :raises ValueError: If configuration cannot identify the selected server,
-            TLS verification is disabled, or bound credentials are unresolved.
+        :raises ValueError: If configuration cannot identify the selected server
+            or bound credentials are unresolved.
         :raises TypeError: If kubectl configuration or its entries have an invalid shape.
         :raises TargetError: If pinned kubeconfig files changed or are unreadable.
         :raises OSError: If the native process cannot be started.
@@ -333,8 +333,6 @@ class KubernetesAccessProbe:
         cluster = self.entry(config, "clusters", cluster_name, "cluster")
         if cluster.get("server") != self.kubernetes.server:
             raise ValueError("api_server_mismatch")
-        if cluster.get("insecure-skip-tls-verify") is True:
-            raise ValueError("tls_verification_disabled")
         if isinstance(self.target.sources, Sources):
             self.describe_credentials(config, context)
         self.observed.append("context_server_match")

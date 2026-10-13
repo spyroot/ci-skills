@@ -554,7 +554,8 @@ def _same(current: JSONObject, body: JSONObject) -> bool:
     :param current: Resource returned by GitLab after a write or read.
     :param body: Fields expected by the planned action.
     :returns: Whether every expected field matches, including normalized state,
-        label set, and milestone ID fields.
+        label set, milestone IDs, and terminal newlines removed by GitLab from
+        descriptions. Other whitespace and content must match exactly.
     """
     for field, expected in body.items():
         labels = current.get("labels")
@@ -573,6 +574,12 @@ def _same(current: JSONObject, body: JSONObject) -> bool:
             actual = milestone.get("id")
         else:
             actual = current.get(field)
+        if (
+            field == "description"
+            and isinstance(actual, str)
+            and isinstance(expected, str)
+        ):
+            actual, expected = (text.rstrip("\r\n") for text in (actual, expected))
         if actual != expected:
             return False
     return True

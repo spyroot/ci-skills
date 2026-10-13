@@ -643,7 +643,7 @@ def test_confirm_workflow_resolves_source_digest_and_requires_its_exact_plan(
     callback.bind(state)
     result = callback.run()
 
-    assert result["image"] == source + "@" + digest
+    assert result["image"] == "harbor.example.test/unit/source@" + digest
     assert result["plan_digest"] == action.fingerprint()
     action.args.apply = True
     action.args.confirm_plan = confirmation
