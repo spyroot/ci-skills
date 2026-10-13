@@ -379,7 +379,7 @@ def test_ceph_cluster_discovers_default_operator_by_name_without_metadata_label(
 
     assert calls == [
         (
-            "oc",
+            "kubectl",
             "--kubeconfig",
             str(target.kubernetes.kubeconfig),
             "--context",

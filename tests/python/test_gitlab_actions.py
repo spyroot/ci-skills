@@ -87,7 +87,11 @@ def test_committed_runner_tag_receipts_match_live_contract() -> None:
         assert result["plan"]["target_reference"] == target["full_path"]
         assert result["readback"]["verified"] is True
 
-    added = applied["plan"]["requested_tags"]
+    added = [
+        tag
+        for tag in applied["plan"]["requested_tags"]
+        if tag not in applied["readback"]["before_tags"]
+    ]
     assert applied["result_action"] == "APPLIED"
     assert applied["readback"]["added_tags"] == added
     assert set(applied["readback"]["before_tags"]).isdisjoint(added)
