@@ -111,8 +111,8 @@ and individual results.
 - GitLab: authenticate the exact origin, read back an identity with
   `is_admin: true` and matching host, and read the instance runner API.
   A selected job also requires the job, pipeline, runner, and trace reads.
-- Kubernetes: match the context to the exact HTTPS API server with TLS
-  verification, read back the effective identity, check administrator
+- Kubernetes: match the context to the exact HTTPS API server using the selected
+  kubeconfig settings, read back the effective identity, check administrator
   permissions, and perform the storage and event resource reads. Cilium
   diagnostics require a real non-TTY `cilium-health` command on a ready agent.
 
