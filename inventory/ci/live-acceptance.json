@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0",
+  "maxReceiptAgeDays": 30,
+  "receiptDirectories": [
+    "tests/acceptance/receipts",
+    "tests/acceptance/runner-tag",
+    "tests/acceptance/runner-lifecycle"
+  ],
+  "historicalDirectory": "tests/acceptance/historical",
+  "scheduledCheck": {
+    "workflow": ".github/workflows/validate.yml",
+    "cron": "0 6 * * 1"
+  },
+  "rerunProcedure": "README.md#live-acceptance-reruns"
+}

@@ -80,7 +80,8 @@ The Harbor source image was retained; only the created copy tag was deleted.
 
 The [assignment-project authentication receipt](../receipts/gitlab-access-assignment.json) was captured
 after assignment, so it is later read-back, not pre-write setup. The primary setup preceded mutations.
-The historical `operator-laptop.json` publication receipt is not current proof for this run.
+The historical `operator-laptop.json` publication receipt, kept under `../historical/` where the acceptance
+checker does not evaluate it, is not current proof for this run.
 
 ## Published artifacts
 

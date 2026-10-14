@@ -29,13 +29,14 @@ jobs:
     evidencePath: reports/smoke/validate.json
     cleanupPolicy: test-directory-only
     releaseBlocking: true
-    requiredSteps: [tools, static, style, schema, unit, bats, acceptance, whitespace]
+    requiredSteps:
+      [tools, static, style, schema, unit, bats, acceptance, live_acceptance, whitespace]
     smokeChecks:
       startup: tools
       tools: tools
       entrypoint: static
       negative_path: unit
-      read_back: acceptance
+      read_back: live_acceptance
       cleanup: acceptance
   - job: gate-ci-skills-endpoints
     class: wiring

@@ -7,10 +7,14 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import json
+
 import yaml
 from conftest import REPO_ROOT, selected_test_paths
 
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
+POLICY = REPO_ROOT / "inventory" / "ci" / "live-acceptance.json"
+CHECKER_COMMAND = "python tools/check_live_acceptance.py --root . --json"
 
 
 def _workflow_text() -> str:
@@ -54,4 +58,30 @@ def test_acceptance_evaluator_is_offline_and_unconditional() -> None:
     assert "if" not in step
     assert step.get("continue-on-error") in (None, False)
     assert "|| true" not in str(step.get("run"))
-    assert "python tools/check_live_acceptance.py" not in _workflow_text()
+
+
+def test_validate_workflow_evaluates_committed_receipts_unconditionally() -> None:
+    """GitHub runs the committed-receipt checker as one unconditional step."""
+    workflow = yaml.safe_load(_workflow_text())
+    steps = workflow["jobs"]["validate"]["steps"]
+
+    matching = [step for step in steps if CHECKER_COMMAND in str(step.get("run", ""))]
+    assert len(matching) == 1, "exactly one committed-receipt evaluation must run"
+    step = matching[0]
+    assert step.get("id") == "live_acceptance"
+    assert "if" not in step
+    assert step.get("continue-on-error") in (None, False)
+    assert "|| true" not in str(step.get("run"))
+
+
+def test_validate_workflow_schedules_the_declared_freshness_check() -> None:
+    """The workflow's schedule matches the tracked live-acceptance policy."""
+    workflow = yaml.safe_load(_workflow_text())
+    policy = json.loads(POLICY.read_text(encoding="utf-8"))
+    triggers = workflow["on"]
+
+    assert policy["scheduledCheck"]["workflow"] == ".github/workflows/validate.yml"
+    assert [entry["cron"] for entry in triggers["schedule"]] == [
+        policy["scheduledCheck"]["cron"]
+    ]
+    assert "workflow_dispatch" in triggers

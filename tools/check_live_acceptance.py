@@ -8,6 +8,8 @@ a different authenticated setup, or produced by different code.
 
 The candidate check compares the recorded functional checksum with ``bin/``,
 ``lib/``, and ``schemas/`` using the installed skill's shared implementation.
+The receipt directories and the freshness window are declared once in the
+tracked ``inventory/ci/live-acceptance.json`` policy; nothing here hardcodes them.
 The whole-package checksum remains evidence of the original installed package;
 documentation-only changes may alter that checksum without changing runtime
 behavior. The receipt keeps its original source revision and package identity.
@@ -113,8 +115,20 @@ GITLAB_RECEIPT_KINDS = {
     "gitlab_wiki",
     "gitlab_runner",
 }
-# Preserve the existing acceptance window and operation coverage in one place.
-MAX_RECEIPT_AGE_DAYS: Final = 30
+# The acceptance window and receipt locations come from the tracked policy file.
+POLICY_FILE: Final = Path("inventory") / "ci" / "live-acceptance.json"
+POLICY_SCHEMA_VERSION: Final = "1.0"
+POLICY_KEYS: Final = frozenset(
+    {
+        "schemaVersion",
+        "maxReceiptAgeDays",
+        "receiptDirectories",
+        "historicalDirectory",
+        "scheduledCheck",
+        "rerunProcedure",
+    }
+)
+POLICY_CRON_FIELDS: Final = 5
 REQUIRED_LIVE_CHECKS: Final = (
     "storage_report",
     "event_trace",
@@ -154,15 +168,129 @@ REQUIRED_GITLAB_OPERATIONS = (
     }
     | {(kind, operation, None) for kind, operation in READ_ONLY_GITLAB_OPERATIONS}
 )
-DEFAULT_RECEIPT_DIRECTORIES = (
-    "receipts",
-    "runner-tag",
-    "runner-lifecycle",
-)
 
 
 class AcceptanceError(RuntimeError):
     """Acceptance inputs could not be read."""
+
+
+class AcceptancePolicy(TypedDict):
+    """Declared receipt locations and freshness window for live acceptance.
+
+    :param max_receipt_age_days: Whole days after which a receipt is stale.
+    :param receipt_directories: Repository-relative directories holding receipts.
+    :param historical_directory: Repository-relative directory never evaluated.
+    :param scheduled_workflow: Workflow that re-evaluates receipts on a schedule.
+    :param scheduled_cron: Cron expression declared for that workflow.
+    :param rerun_procedure: Document anchor describing how receipts are refreshed.
+
+    .. attribute :: max_receipt_age_days
+        :type: int
+
+        Whole days after which a receipt is stale.
+
+    .. attribute :: receipt_directories
+        :type: Sequence[str]
+
+        Repository-relative directories holding receipts.
+
+    .. attribute :: historical_directory
+        :type: str
+
+        Repository-relative directory never evaluated.
+
+    .. attribute :: scheduled_workflow
+        :type: str
+
+        Workflow that re-evaluates receipts on a schedule.
+
+    .. attribute :: scheduled_cron
+        :type: str
+
+        Cron expression declared for that workflow.
+
+    .. attribute :: rerun_procedure
+        :type: str
+
+        Document anchor describing how receipts are refreshed.
+    """
+
+    max_receipt_age_days: int
+    receipt_directories: Sequence[str]
+    historical_directory: str
+    scheduled_workflow: str
+    scheduled_cron: str
+    rerun_procedure: str
+
+
+def _policy_path(value: JSONValue, field: str) -> str:
+    """Require a bounded repository-relative POSIX path from the policy.
+
+    :param value: Untrusted policy field.
+    :param field: Field name used in the failure reason.
+    :returns: The validated relative path.
+    :raises AcceptanceError: If the value is empty, absolute, has a trailing
+        separator, or contains an empty, ``.`` or ``..`` segment.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise AcceptanceError(f"policy_invalid:{field}")
+    if value.startswith("/") or any(
+        part in ("", ".", "..") for part in value.split("/")
+    ):
+        raise AcceptanceError(f"policy_invalid:{field}")
+    return value
+
+
+def load_policy(path: Path) -> AcceptancePolicy:
+    """Read the tracked live-acceptance policy and reject unsafe values.
+
+    :param path: Policy file selected by the caller or the repository default.
+    :returns: Validated freshness window, receipt directories, and schedule.
+    :raises AcceptanceError: If the file is missing, unreadable, not an object,
+        carries an unexpected schema version or key set, or a field is invalid.
+    """
+    if not path.is_file():
+        raise AcceptanceError(f"policy_missing:{path}")
+    try:
+        document = response_decoder().decode(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:
+        raise AcceptanceError(f"policy_unreadable:{path}") from exc
+    if not isinstance(document, dict) or set(document) != POLICY_KEYS:
+        raise AcceptanceError("policy_invalid:keys")
+    if document["schemaVersion"] != POLICY_SCHEMA_VERSION:
+        raise AcceptanceError("policy_invalid:schemaVersion")
+    age = document["maxReceiptAgeDays"]
+    if type(age) is not int or age < 1:
+        raise AcceptanceError("policy_invalid:maxReceiptAgeDays")
+    directories = document["receiptDirectories"]
+    if not isinstance(directories, list) or not directories:
+        raise AcceptanceError("policy_invalid:receiptDirectories")
+    receipt_directories = [
+        _policy_path(item, "receiptDirectories") for item in directories
+    ]
+    if len(set(receipt_directories)) != len(receipt_directories):
+        raise AcceptanceError("policy_invalid:receiptDirectories")
+    historical = _policy_path(document["historicalDirectory"], "historicalDirectory")
+    if historical in receipt_directories:
+        raise AcceptanceError("policy_invalid:historicalDirectory")
+    scheduled = document["scheduledCheck"]
+    if not isinstance(scheduled, dict) or set(scheduled) != {"workflow", "cron"}:
+        raise AcceptanceError("policy_invalid:scheduledCheck")
+    workflow = _policy_path(scheduled["workflow"], "scheduledCheck.workflow")
+    cron = scheduled["cron"]
+    if not isinstance(cron, str) or len(cron.split()) != POLICY_CRON_FIELDS:
+        raise AcceptanceError("policy_invalid:scheduledCheck.cron")
+    procedure = document["rerunProcedure"]
+    if not isinstance(procedure, str) or not procedure.strip():
+        raise AcceptanceError("policy_invalid:rerunProcedure")
+    return {
+        "max_receipt_age_days": age,
+        "receipt_directories": receipt_directories,
+        "historical_directory": historical,
+        "scheduled_workflow": workflow,
+        "scheduled_cron": cron,
+        "rerun_procedure": procedure,
+    }
 
 
 def _mapping(value: JSONValue) -> JSONObject:
@@ -330,6 +458,7 @@ def _check_receipt(
     receipt: JSONObject,
     digest: str,
     now: datetime,
+    max_age_days: int,
 ) -> MutableSequence[str]:
     """Validate the initial publication access receipt and live read-backs.
 
@@ -337,6 +466,7 @@ def _check_receipt(
     :param receipt: Parsed publication access receipt to inspect.
     :param digest: Expected functional digest of the candidate runtime and schemas.
     :param now: Reference time used for receipt freshness.
+    :param max_age_days: Maximum accepted receipt age in whole days.
     :returns: Mutable problem list for missing identity, target, or live proof.
     :raises ImportError: If the shared command-authority catalogue cannot be loaded.
     :raises TypeError: If a nested readback has an incompatible type or now is naive
@@ -345,7 +475,7 @@ def _check_receipt(
     """  # noqa: DOC502 - Shared validators and catalogue import propagate failures.
     from lib.python.core.catalog import DEFAULT_AUTHORITIES
 
-    problems = _check_common(name, receipt, digest, now, MAX_RECEIPT_AGE_DAYS)
+    problems = _check_common(name, receipt, digest, now, max_age_days)
     if receipt.get("kind") != RECEIPT_KIND:
         problems.append(f"{name}:kind_unexpected")
     if receipt.get("publication") is not True:
@@ -470,6 +600,7 @@ def _check_gitlab_receipt(
     required: JSONObject,
     digest: str,
     now: datetime,
+    max_age_days: int,
 ) -> MutableSequence[str]:
     """Validate one GitLab receipt against selected access and operation proof.
 
@@ -478,13 +609,14 @@ def _check_gitlab_receipt(
     :param required: Expected host, credential, target, kind, and operation fields.
     :param digest: Expected functional digest of the candidate runtime and schemas.
     :param now: Reference time used for receipt freshness.
+    :param max_age_days: Maximum accepted receipt age in whole days.
     :returns: Mutable problem list for context or read-back mismatch.
     :raises KeyError: If the required context lacks its kind field.
     :raises TypeError: If nested evidence has an incompatible type or now is naive
         while receipt timestamps are timezone-aware.
     :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
     """  # noqa: DOC502 - Context indexing and shared validators propagate failures.
-    problems = _check_common(name, receipt, digest, now, MAX_RECEIPT_AGE_DAYS)
+    problems = _check_common(name, receipt, digest, now, max_age_days)
     kind = required["kind"]
     if kind not in GITLAB_RECEIPT_KINDS or receipt.get("kind") != kind:
         problems.append(f"{name}:kind_unexpected")
@@ -540,7 +672,7 @@ def _check_gitlab_receipt(
         kind == "gitlab_runner"
         and required.get("operation") == "create"
         and required.get("result_action") == "APPLIED"
-        and not _runner_smoke_cleanup_verified(receipt, required, now)
+        and not _runner_smoke_cleanup_verified(receipt, required, now, max_age_days)
     ):
         problems.append(f"{name}:runner_smoke_cleanup_unproven")
     if (
@@ -647,12 +779,14 @@ def _runner_smoke_cleanup_verified(
     receipt: JSONObject,
     required: JSONObject,
     now: datetime,
+    max_age_days: int,
 ) -> bool:
     """Verify a disposable runner's deletion and independent absence read-back.
 
     :param receipt: Runner creation receipt containing smoke cleanup evidence.
     :param required: Expected project target identity from setup access.
     :param now: Reference time bounding cleanup receipt freshness.
+    :param max_age_days: Maximum accepted cleanup receipt age in whole days.
     :returns: True only when the exact created runner is absent afterward.
     :raises TypeError: If now is naive while receipt timestamps are timezone-aware.
     """  # noqa: DOC502 - Datetime comparisons reject mixed timezone awareness.
@@ -684,7 +818,7 @@ def _runner_smoke_cleanup_verified(
         or captured is None
         or created is None
         or not created <= captured <= now
-        or (now - captured).days > MAX_RECEIPT_AGE_DAYS
+        or (now - captured).days > max_age_days
         or not isinstance(before, dict)
         or before.get("id") != runner_id
         or not isinstance(deletion, dict)
@@ -748,6 +882,7 @@ class AcceptanceReview:
         receipts: Mapping[str, JSONObject],
         skill_root: Path,
         now: datetime,
+        max_age_days: int,
     ):
         """Retain receipt views and initialize candidate-bound evaluation state.
 
@@ -755,6 +890,7 @@ class AcceptanceReview:
         :param receipts: Setup and operation receipt objects keyed by unique name.
         :param skill_root: Candidate skill tree whose current bytes are fingerprinted.
         :param now: Timezone-aware reference time for receipt freshness.
+        :param max_age_days: Declared maximum receipt age in whole days.
         :raises ImportError: If shared provenance code cannot be loaded.
         :raises OSError: If a candidate skill source file cannot be read.
         :raises ValueError: If the candidate source tree cannot be fingerprinted.
@@ -765,6 +901,7 @@ class AcceptanceReview:
         self.receipts = receipts
         self.skill_root = skill_root
         self.now = now
+        self.max_age_days = max_age_days
         self.digest = tree_digest(skill_root)["digest"]
         self.functional_digest = functional_digest(skill_root)
         self.problems: MutableSequence[str] = []
@@ -787,7 +924,11 @@ class AcceptanceReview:
             try:
                 if kind == RECEIPT_KIND:
                     found = _check_receipt(
-                        name, receipt, self.functional_digest, self.now
+                        name,
+                        receipt,
+                        self.functional_digest,
+                        self.now,
+                        self.max_age_days,
                     )
                     host = receipt.get("execution_host")
                     if not isinstance(host, str):
@@ -804,6 +945,7 @@ class AcceptanceReview:
                         {**context, "kind": kind},
                         self.functional_digest,
                         self.now,
+                        self.max_age_days,
                     )
                     if (
                         any(not value for value in context.values())
@@ -873,7 +1015,12 @@ class AcceptanceReview:
             }
             try:
                 found = _check_gitlab_receipt(
-                    name, receipt, required, self.functional_digest, self.now
+                    name,
+                    receipt,
+                    required,
+                    self.functional_digest,
+                    self.now,
+                    self.max_age_days,
                 )
                 found.extend(
                     f"{name}:{reason}" for reason in _check_source_revision(receipt)
@@ -951,6 +1098,8 @@ def evaluate(
     receipts: Mapping[str, JSONObject],
     skill_root: Path,
     now: Optional[datetime] = None,
+    *,
+    max_age_days: int,
 ) -> AcceptanceResult:
     """Compare action receipts with the initial authenticated runtime setup.
 
@@ -958,6 +1107,7 @@ def evaluate(
     :param receipts: Parsed operation and setup receipts keyed by file name.
     :param skill_root: Candidate skill tree used for digest comparison.
     :param now: Reference time for freshness, or None to read the current UTC time.
+    :param max_age_days: Declared maximum receipt age from the acceptance policy.
     :returns: Acceptance status, accepted receipts, and stable problem reasons.
     :raises ImportError: If shared provenance or authority modules cannot be loaded.
     :raises OSError: If a candidate source file cannot be read for its digest.
@@ -969,6 +1119,7 @@ def evaluate(
         receipts,
         skill_root,
         now if now is not None else datetime.now(UTC),
+        max_age_days,
     )
     review.setup_receipts()
     review.operation_receipts()
@@ -992,9 +1143,14 @@ def main() -> int:
     )
     cli.add_argument("--root", required=True, metavar="PATH", help="repository root")
     cli.add_argument(
+        "--policy",
+        metavar="PATH",
+        help=f"acceptance policy file (default: <root>/{POLICY_FILE.as_posix()})",
+    )
+    cli.add_argument(
         "--receipts",
         metavar="PATH",
-        help="one receipt directory (default: all configured acceptance directories)",
+        help="one receipt directory (default: the directories the policy declares)",
     )
     cli.add_argument(
         "--skill",
@@ -1007,17 +1163,15 @@ def main() -> int:
     args = cli.parse_args()
 
     root = Path(args.root).resolve()
-    receipts_paths = (
-        [Path(args.receipts)]
-        if args.receipts
-        else [
-            root / "tests" / "acceptance" / directory
-            for directory in DEFAULT_RECEIPT_DIRECTORIES
-        ]
-    )
     skill_path = Path(args.skill) if args.skill else root / "ci-skills"
     _redactor()
     try:
+        policy = load_policy(Path(args.policy) if args.policy else root / POLICY_FILE)
+        receipts_paths = (
+            [Path(args.receipts)]
+            if args.receipts
+            else [root / directory for directory in policy["receipt_directories"]]
+        )
         receipts = _load_receipt_dirs(receipts_paths)
         setup = {
             name: receipt
@@ -1028,6 +1182,7 @@ def main() -> int:
             setup,
             receipts,
             skill_path,
+            max_age_days=policy["max_receipt_age_days"],
         )
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {

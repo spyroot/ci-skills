@@ -27,6 +27,7 @@ from conftest import (
     import_script_module,
     load_module,
 )
+from jsonschema import Draft202012Validator
 
 ACCEPTANCE = load_module(
     "proposed_check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
@@ -34,6 +35,10 @@ ACCEPTANCE = load_module(
 PORTABLE = import_script_module("lib.python.core.portable")
 SKILL_ROOT = SCRIPT_ROOT.parent
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
+POLICY_FILE = REPO_ROOT / "inventory" / "ci" / "live-acceptance.json"
+POLICY_SCHEMA = REPO_ROOT / "schemas" / "live-acceptance-policy.schema.json"
+POLICY = ACCEPTANCE.load_policy(POLICY_FILE)
+MAX_AGE_DAYS = POLICY["max_receipt_age_days"]
 
 
 if TYPE_CHECKING:
@@ -346,6 +351,7 @@ def _evaluate(
         receipts or _complete_receipts(initial),
         SKILL_ROOT,
         now=NOW,
+        max_age_days=MAX_AGE_DAYS,
     )
 
 
@@ -590,7 +596,12 @@ def test_real_operation_envelope_keeps_cleanup_shape(tmp_path: Path) -> None:
 
     assert receipt["plan"]["one_time_sink_required"] is True
     assert ACCEPTANCE._check_gitlab_receipt(
-        path.name, receipt, required, _functional_digest(), datetime.now(UTC)
+        path.name,
+        receipt,
+        required,
+        _functional_digest(),
+        datetime.now(UTC),
+        MAX_AGE_DAYS,
     ) == ["runner.json:runner_smoke_cleanup_unproven"]
 
 
@@ -832,10 +843,10 @@ def test_acceptance_requires_recorded_functional_digest() -> None:
     assert "access.json:functional_digest_absent" in result["problems"]
 
 
-def test_cli_reports_receipt_loading_shape_without_an_expectations_file(
+def test_cli_blocks_without_the_tracked_policy_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Emit a blocked JSON result when the required receipt directory is absent.
+    """Emit a blocked JSON result when the acceptance policy is absent.
 
     :param tmp_path: Empty fixture repository root supplied to the CLI.
     :param monkeypatch: Pytest fixture replacing process arguments.
@@ -852,8 +863,132 @@ def test_cli_reports_receipt_loading_shape_without_an_expectations_file(
     assert report["status"] == "BLOCKED"
     assert report["kind"] == "live_acceptance"
     assert report["problems"] == [
-        f"receipt_directory_missing:{tmp_path / 'tests/acceptance/receipts'}"
+        f"policy_missing:{tmp_path / 'inventory/ci/live-acceptance.json'}"
     ]
+
+
+def test_cli_reports_receipt_loading_shape_without_an_expectations_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Emit a blocked JSON result when the policy's first receipt directory is absent.
+
+    :param tmp_path: Fixture repository root holding only the policy file.
+    :param monkeypatch: Pytest fixture replacing process arguments.
+    :param capsys: Pytest fixture capturing the CLI's JSON output.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    policy = tmp_path / "inventory" / "ci" / "live-acceptance.json"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(POLICY_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(
+        sys, "argv", ["check_live_acceptance.py", "--root", str(tmp_path), "--json"]
+    )
+
+    assert ACCEPTANCE.main() == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "BLOCKED"
+    assert report["kind"] == "live_acceptance"
+    assert report["problems"] == [
+        f"receipt_directory_missing:{tmp_path / POLICY['receipt_directories'][0]}"
+    ]
+
+
+def test_committed_policy_matches_its_schema_and_repository_layout() -> None:
+    """The tracked policy validates against its schema and names real locations.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    schema = json.loads(POLICY_SCHEMA.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    Draft202012Validator(schema).validate(
+        json.loads(POLICY_FILE.read_text(encoding="utf-8"))
+    )
+
+    for directory in POLICY["receipt_directories"]:
+        assert (REPO_ROOT / directory).is_dir(), directory
+    assert (REPO_ROOT / POLICY["historical_directory"]).is_dir()
+    assert POLICY["historical_directory"] not in POLICY["receipt_directories"]
+    assert (REPO_ROOT / POLICY["scheduled_workflow"]).is_file()
+    assert POLICY["max_receipt_age_days"] >= 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("schemaVersion", "2.0", "policy_invalid:schemaVersion"),
+        ("maxReceiptAgeDays", 0, "policy_invalid:maxReceiptAgeDays"),
+        ("maxReceiptAgeDays", True, "policy_invalid:maxReceiptAgeDays"),
+        ("receiptDirectories", [], "policy_invalid:receiptDirectories"),
+        ("receiptDirectories", ["a", "a"], "policy_invalid:receiptDirectories"),
+        ("receiptDirectories", ["../x"], "policy_invalid:receiptDirectories"),
+        ("historicalDirectory", "/abs", "policy_invalid:historicalDirectory"),
+        (
+            "historicalDirectory",
+            "tests/acceptance/receipts",
+            "policy_invalid:historicalDirectory",
+        ),
+        ("scheduledCheck", {"workflow": "w.yml"}, "policy_invalid:scheduledCheck"),
+        (
+            "scheduledCheck",
+            {"workflow": ".github/workflows/validate.yml", "cron": "0 6 * *"},
+            "policy_invalid:scheduledCheck.cron",
+        ),
+        ("rerunProcedure", "", "policy_invalid:rerunProcedure"),
+        ("extra", True, "policy_invalid:keys"),
+    ],
+)
+def test_policy_rejects_undeclared_or_unsafe_values(
+    tmp_path: Path, field: str, value: JSONValue, reason: str
+) -> None:
+    """Block acceptance when the policy carries an invalid or undeclared field.
+
+    :param tmp_path: Pytest directory receiving the altered policy copy.
+    :param field: Policy key overwritten or added for this case.
+    :param value: Invalid replacement value.
+    :param reason: Stable classified failure expected from the loader.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    document = json.loads(POLICY_FILE.read_text(encoding="utf-8"))
+    document[field] = value
+    altered = tmp_path / "live-acceptance.json"
+    altered.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ACCEPTANCE.AcceptanceError, match=reason):
+        ACCEPTANCE.load_policy(altered)
+
+
+def test_receipt_older_than_the_policy_window_is_stale() -> None:
+    """Block a setup receipt captured outside the declared freshness window.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    setup["access.json"]["captured_at"] = (
+        NOW - timedelta(days=MAX_AGE_DAYS + 1)
+    ).isoformat()
+
+    result = _evaluate(setup, receipts)
+
+    assert "access.json:receipt_stale" in result["problems"]
+
+
+def test_receipt_inside_the_policy_window_is_fresh() -> None:
+    """Accept a setup receipt captured exactly at the declared window.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    setup["access.json"]["captured_at"] = (
+        NOW - timedelta(days=MAX_AGE_DAYS)
+    ).isoformat()
+
+    result = _evaluate(setup, receipts)
+
+    assert "access.json:receipt_stale" not in result["problems"]
 
 
 def test_no_committed_receipt_carries_a_host_path() -> None:
