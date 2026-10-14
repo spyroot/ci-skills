@@ -341,3 +341,29 @@ EOF
   run "${repo_root}/bless.sh" --nope
   [ "$status" -eq 64 ]
 }
+
+# shellcheck disable=SC2016 # "$schema" is a literal JSON key inside the fixture documents
+@test 'a JSON document that names a local schema is checked against it' {
+  mkdir -p "${BATS_TEST_TMPDIR}/index/schemas" "${BATS_TEST_TMPDIR}/index/inventory"
+  printf '%s\n' '{"type":"object","required":["name"],"additionalProperties":false,"properties":{"name":{"type":"string"}}}' \
+    >"${BATS_TEST_TMPDIR}/index/schemas/doc.schema.json"
+  printf '%s\n' '{"$schema":"../schemas/doc.schema.json","name":"ok"}' >"${BATS_TEST_TMPDIR}/index/inventory/good.json"
+  printf 'inventory/good.json\0' >"$list"
+  run bless_check_json "$fixture" "${BATS_TEST_TMPDIR}/index" "$list" ''
+  [ "$status" -eq 0 ]
+  printf '%s\n' '{"$schema":"../schemas/doc.schema.json","name":7}' >"${BATS_TEST_TMPDIR}/index/inventory/bad.json"
+  printf 'inventory/bad.json\0' >"$list"
+  run bless_check_json "$fixture" "${BATS_TEST_TMPDIR}/index" "$list" ''
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'does not satisfy'* ]]
+  printf '%s\n' '{"$schema":"../schemas/missing.schema.json"}' >"${BATS_TEST_TMPDIR}/index/inventory/dangling.json"
+  printf 'inventory/dangling.json\0' >"$list"
+  run bless_check_json "$fixture" "${BATS_TEST_TMPDIR}/index" "$list" ''
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'does not exist'* ]]
+  printf '%s\n' '{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}' \
+    >"${BATS_TEST_TMPDIR}/index/schemas/remote.schema.json"
+  printf 'schemas/remote.schema.json\0' >"$list"
+  run bless_check_json "$fixture" "${BATS_TEST_TMPDIR}/index" "$list" ''
+  [ "$status" -eq 0 ]
+}

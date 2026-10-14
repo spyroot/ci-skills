@@ -34,6 +34,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Optional, TypeAlias, TypedDict
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
+
 SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
 runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
 
@@ -45,6 +48,7 @@ from lib.python.core.json_types import (
     json_string,
     json_strings,
 )
+from lib.python.core.logging import add_log_arguments, log_event
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
 ReceiptPairKey: TypeAlias = tuple[str, str, str, str, str, int, str]
@@ -106,29 +110,21 @@ class AcceptanceResult(TypedDict, total=False):
     problems: Sequence[str]
 
 
-SCHEMA_VERSION = "1.0"
-RECEIPT_KIND = "access_check"
-GITLAB_RECEIPT_KINDS = {
-    "gitlab_access",
-    "gitlab_milestone",
-    "gitlab_issue",
-    "gitlab_wiki",
-    "gitlab_runner",
-}
-# The acceptance window and receipt locations come from the tracked policy file.
-POLICY_FILE: Final = Path("inventory") / "ci" / "live-acceptance.json"
-POLICY_SCHEMA_VERSION: Final = "1.0"
-POLICY_KEYS: Final = frozenset(
+SCHEMA_VERSION: Final = "1.0"
+RECEIPT_KIND: Final = "access_check"
+GITLAB_RECEIPT_KINDS: Final = frozenset(
     {
-        "schemaVersion",
-        "maxReceiptAgeDays",
-        "receiptDirectories",
-        "historicalDirectory",
-        "scheduledCheck",
-        "rerunProcedure",
+        "gitlab_access",
+        "gitlab_milestone",
+        "gitlab_issue",
+        "gitlab_wiki",
+        "gitlab_runner",
     }
 )
-POLICY_CRON_FIELDS: Final = 5
+# The acceptance window and receipt locations come from the tracked policy file.
+POLICY_FILE: Final = Path("inventory") / "ci" / "live-acceptance.json"
+POLICY_SCHEMA_FILE: Final = Path("schemas") / "live-acceptance-policy.schema.json"
+DRY_RUN_STATUS: Final = "DRY_RUN"
 REQUIRED_LIVE_CHECKS: Final = (
     "storage_report",
     "event_trace",
@@ -136,8 +132,8 @@ REQUIRED_LIVE_CHECKS: Final = (
     "ceph_cluster",
     "gitlab_job",
 )
-SETUP_RECEIPT_KINDS: Final = {RECEIPT_KIND, "gitlab_access"}
-REPEATABLE_GITLAB_OPERATIONS = (
+SETUP_RECEIPT_KINDS: Final = frozenset({RECEIPT_KIND, "gitlab_access"})
+REPEATABLE_GITLAB_OPERATIONS: Final = (
     ("gitlab_milestone", "create"),
     ("gitlab_milestone", "update"),
     ("gitlab_milestone", "adjust-time"),
@@ -147,15 +143,15 @@ REPEATABLE_GITLAB_OPERATIONS = (
     ("gitlab_runner", "assign"),
     ("gitlab_runner", "tag"),
 )
-READ_ONLY_GITLAB_OPERATIONS = (
+READ_ONLY_GITLAB_OPERATIONS: Final = (
     ("gitlab_runner", "get"),
     ("gitlab_runner", "list"),
 )
-RUNNER_DELETE_OPERATIONS = (
+RUNNER_DELETE_OPERATIONS: Final = (
     ("gitlab_runner", "delete", "APPLIED"),
     ("gitlab_runner", "delete", "NO_OP"),
 )
-REQUIRED_GITLAB_OPERATIONS = (
+REQUIRED_GITLAB_OPERATIONS: Final = frozenset(
     {
         ("gitlab_access", None, None),
         ("gitlab_runner", "create", "APPLIED"),
@@ -223,73 +219,48 @@ class AcceptancePolicy(TypedDict):
     rerun_procedure: str
 
 
-def _policy_path(value: JSONValue, field: str) -> str:
-    """Require a bounded repository-relative POSIX path from the policy.
+def load_policy(path: Path, schema_path: Path) -> AcceptancePolicy:
+    """Read the tracked live-acceptance policy and validate it against its schema.
 
-    :param value: Untrusted policy field.
-    :param field: Field name used in the failure reason.
-    :returns: The validated relative path.
-    :raises AcceptanceError: If the value is empty, absolute, has a trailing
-        separator, or contains an empty, ``.`` or ``..`` segment.
-    """
-    if not isinstance(value, str) or not value.strip():
-        raise AcceptanceError(f"policy_invalid:{field}")
-    if value.startswith("/") or any(
-        part in ("", ".", "..") for part in value.split("/")
-    ):
-        raise AcceptanceError(f"policy_invalid:{field}")
-    return value
-
-
-def load_policy(path: Path) -> AcceptancePolicy:
-    """Read the tracked live-acceptance policy and reject unsafe values.
+    The JSON Schema owns every field rule; this loader adds only the relation the
+    schema cannot express, that the historical directory is never evaluated.
 
     :param path: Policy file selected by the caller or the repository default.
+    :param schema_path: Schema file that defines the policy document.
     :returns: Validated freshness window, receipt directories, and schedule.
-    :raises AcceptanceError: If the file is missing, unreadable, not an object,
-        carries an unexpected schema version or key set, or a field is invalid.
+    :raises AcceptanceError: If the policy or schema is missing or unreadable, the
+        schema is invalid, the policy violates the schema, or the historical
+        directory is also a receipt directory.
     """
     if not path.is_file():
         raise AcceptanceError(f"policy_missing:{path}")
+    if not schema_path.is_file():
+        raise AcceptanceError(f"policy_schema_missing:{schema_path}")
     try:
         document = response_decoder().decode(path.read_text(encoding="utf-8"))
+        schema = response_decoder().decode(schema_path.read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError) as exc:
         raise AcceptanceError(f"policy_unreadable:{path}") from exc
-    if not isinstance(document, dict) or set(document) != POLICY_KEYS:
-        raise AcceptanceError("policy_invalid:keys")
-    if document["schemaVersion"] != POLICY_SCHEMA_VERSION:
-        raise AcceptanceError("policy_invalid:schemaVersion")
-    age = document["maxReceiptAgeDays"]
-    if type(age) is not int or age < 1:
-        raise AcceptanceError("policy_invalid:maxReceiptAgeDays")
-    directories = document["receiptDirectories"]
-    if not isinstance(directories, list) or not directories:
-        raise AcceptanceError("policy_invalid:receiptDirectories")
-    receipt_directories = [
-        _policy_path(item, "receiptDirectories") for item in directories
-    ]
-    if len(set(receipt_directories)) != len(receipt_directories):
-        raise AcceptanceError("policy_invalid:receiptDirectories")
-    historical = _policy_path(document["historicalDirectory"], "historicalDirectory")
+    try:
+        Draft202012Validator.check_schema(schema)
+        Draft202012Validator(schema).validate(document)
+    except SchemaError as exc:
+        raise AcceptanceError(f"policy_schema_invalid:{schema_path}") from exc
+    except ValidationError as exc:
+        location = ".".join(str(part) for part in exc.absolute_path) or "keys"
+        raise AcceptanceError(f"policy_invalid:{location}") from exc
+    receipt_directories = [str(item) for item in document["receiptDirectories"]]
+    historical = str(document["historicalDirectory"])
     if historical in receipt_directories:
         raise AcceptanceError("policy_invalid:historicalDirectory")
     scheduled = document["scheduledCheck"]
-    if not isinstance(scheduled, dict) or set(scheduled) != {"workflow", "cron"}:
-        raise AcceptanceError("policy_invalid:scheduledCheck")
-    workflow = _policy_path(scheduled["workflow"], "scheduledCheck.workflow")
-    cron = scheduled["cron"]
-    if not isinstance(cron, str) or len(cron.split()) != POLICY_CRON_FIELDS:
-        raise AcceptanceError("policy_invalid:scheduledCheck.cron")
-    procedure = document["rerunProcedure"]
-    if not isinstance(procedure, str) or not procedure.strip():
-        raise AcceptanceError("policy_invalid:rerunProcedure")
     return {
-        "max_receipt_age_days": age,
+        "max_receipt_age_days": int(document["maxReceiptAgeDays"]),
         "receipt_directories": receipt_directories,
         "historical_directory": historical,
-        "scheduled_workflow": workflow,
-        "scheduled_cron": cron,
-        "rerun_procedure": procedure,
+        "scheduled_workflow": str(scheduled["workflow"]),
+        "scheduled_cron": str(scheduled["cron"]),
+        "rerun_procedure": str(document["rerunProcedure"]),
     }
 
 
@@ -329,17 +300,15 @@ def _load_receipts(directory: Path) -> Mapping[str, JSONObject]:
 def _load_receipt_dirs(paths: Sequence[Path]) -> Mapping[str, JSONObject]:
     """Load committed acceptance receipts from one or more directories.
 
-    :param paths: Candidate receipt directories in priority order.
+    :param paths: Declared receipt directories in priority order.
     :returns: Mapping of unique file names to parsed receipt objects.
-    :raises AcceptanceError: If a required directory is unreadable, a receipt
-        is malformed, or two directories contain the same receipt name.
+    :raises AcceptanceError: If a declared directory is absent or unreadable, a
+        receipt is malformed, or two directories contain the same receipt name.
     """
     receipts: MutableMapping[str, JSONObject] = {}
-    for index, directory in enumerate(paths):
-        if not directory.exists():
-            if index == 0:
-                raise AcceptanceError(f"receipt_directory_missing:{directory}")
-            continue
+    for directory in paths:
+        if not directory.is_dir():
+            raise AcceptanceError(f"receipt_directory_missing:{directory}")
         for name, receipt in _load_receipts(directory).items():
             if name in receipts:
                 raise AcceptanceError(f"receipt_duplicate:{name}")
@@ -883,7 +852,7 @@ class AcceptanceReview:
         skill_root: Path,
         now: datetime,
         max_age_days: int,
-    ):
+    ) -> None:
         """Retain receipt views and initialize candidate-bound evaluation state.
 
         :param setup: Existing access receipts captured before writes, keyed by name.
@@ -1157,16 +1126,25 @@ def main() -> int:
         metavar="PATH",
         help="skill root (default: <root>/ci-skills)",
     )
+    cli.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list the policy and the receipts that would be evaluated, then exit",
+    )
     modes = cli.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print JSON")
     modes.add_argument("--yaml", action="store_true", help="print YAML")
+    add_log_arguments(cli)
     args = cli.parse_args()
 
     root = Path(args.root).resolve()
     skill_path = Path(args.skill) if args.skill else root / "ci-skills"
     _redactor()
     try:
-        policy = load_policy(Path(args.policy) if args.policy else root / POLICY_FILE)
+        policy = load_policy(
+            Path(args.policy) if args.policy else root / POLICY_FILE,
+            root / POLICY_SCHEMA_FILE,
+        )
         receipts_paths = (
             [Path(args.receipts)]
             if args.receipts
@@ -1178,12 +1156,23 @@ def main() -> int:
             for name, receipt in receipts.items()
             if receipt.get("kind") in SETUP_RECEIPT_KINDS
         }
-        data = evaluate(
-            setup,
-            receipts,
-            skill_path,
-            max_age_days=policy["max_receipt_age_days"],
-        )
+        if args.dry_run:
+            data = {
+                "schema_version": SCHEMA_VERSION,
+                "kind": "live_acceptance",
+                "status": DRY_RUN_STATUS,
+                "policy": dict(policy),
+                "receipts": sorted(receipts),
+                "accepted": [],
+                "problems": [],
+            }
+        else:
+            data = evaluate(
+                setup,
+                receipts,
+                skill_path,
+                max_age_days=policy["max_receipt_age_days"],
+            )
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {
             "schema_version": SCHEMA_VERSION,
@@ -1205,7 +1194,9 @@ def main() -> int:
             print(f"  accepted {name}")
         for problem in data["problems"]:
             print(f"  problem  {problem}")
-    return 0 if data["status"] == "PASS" else 2
+    status = json_string(data["status"])
+    log_event(args, "live_acceptance", "result", status, persist=not args.dry_run)
+    return 0 if status in ("PASS", DRY_RUN_STATUS) else 2
 
 
 if __name__ == "__main__":

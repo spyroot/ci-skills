@@ -291,20 +291,40 @@ bless_check_yaml() {
     return "$BLESS_FAILED"
 }
 
-# Summary: Refuse selected JSON that does not parse as one document.
+# Summary: Refuse selected JSON that does not parse as one document, or that
+# names a local JSON Schema in "$schema" it does not satisfy.
 # Arguments: $1 root; $2 snapshot; $3 path list; $4 interpreter; $5 scope.
-# Stderr: failing path and jq diagnostics.
-# Returns: 0, 1 for invalid JSON, or CI_EXIT_BLOCKED for a missing tool.
+# Stderr: failing path with jq or schema diagnostics.
+# Returns: 0, 1 for invalid JSON, a missing named schema, or a schema mismatch,
+#   or CI_EXIT_BLOCKED for a missing tool.
 bless_check_json() {
-  local snap=$2 list=$3 jq path failed=0
+  local snap=$2 list=$3 python=$4 jq checker='' path schema directory failed=0
   bless_read_files < <(bless_select "$list" '*.json')
   ((${#BLESS_FILES[@]})) || return 0
   jq=$(bless_tool jq) || return
   for path in "${BLESS_FILES[@]}"; do
-    "$jq" -e -s 'length == 1' "$snap/$path" >/dev/null || {
+    if ! "$jq" -e -s 'length == 1' "$snap/$path" >/dev/null; then
       printf 'json: %s does not parse\n' "$path" >&2
       failed=$BLESS_FAILED
-    }
+      continue
+    fi
+    # A document names its own schema; a remote URL is a draft identifier, not a pair.
+    # shellcheck disable=SC2016 # "$schema" is a JSON key inside the jq program, not a shell variable
+    schema=$("$jq" -r '.["$schema"] | strings | select(startswith("http") | not)' "$snap/$path")
+    [[ -n $schema ]] || continue
+    directory=$(dirname "$path")
+    if [[ ! -f $snap/$directory/$schema ]]; then
+      printf 'json: %s names a schema that does not exist: %s\n' "$path" "$schema" >&2
+      failed=$BLESS_FAILED
+      continue
+    fi
+    if [[ -z $checker ]]; then
+      checker=$(bless_tool check-jsonschema "$python") || return
+    fi
+    if ! "$checker" --schemafile "$snap/$directory/$schema" "$snap/$path"; then
+      printf 'json: %s does not satisfy %s\n' "$path" "$schema" >&2
+      failed=$BLESS_FAILED
+    fi
   done
   return "$failed"
 }

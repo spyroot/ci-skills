@@ -7,14 +7,20 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-import json
+from typing import Final
 
 import yaml
-from conftest import REPO_ROOT, selected_test_paths
+from conftest import REPO_ROOT, load_module, selected_test_paths
 
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
-POLICY = REPO_ROOT / "inventory" / "ci" / "live-acceptance.json"
-CHECKER_COMMAND = "python tools/check_live_acceptance.py --root . --json"
+WORKFLOW: Final = REPO_ROOT / ".github" / "workflows" / "validate.yml"
+ACCEPTANCE: Final = load_module(
+    "workflow_policy_check_live_acceptance",
+    REPO_ROOT / "tools" / "check_live_acceptance.py",
+)
+POLICY: Final = ACCEPTANCE.load_policy(
+    REPO_ROOT / ACCEPTANCE.POLICY_FILE, REPO_ROOT / ACCEPTANCE.POLICY_SCHEMA_FILE
+)
+CHECKER_COMMAND: Final = "python tools/check_live_acceptance.py --root . --json"
 
 
 def _workflow_text() -> str:
@@ -72,16 +78,22 @@ def test_validate_workflow_evaluates_committed_receipts_unconditionally() -> Non
     assert "if" not in step
     assert step.get("continue-on-error") in (None, False)
     assert "|| true" not in str(step.get("run"))
+    named = [step.get("id") for step in steps if step.get("id")]
+    assert named.index("live_acceptance") > named.index("whitespace"), (
+        "the live-acceptance step runs after every other check step"
+    )
 
 
 def test_validate_workflow_schedules_the_declared_freshness_check() -> None:
     """The workflow's schedule matches the tracked live-acceptance policy."""
     workflow = yaml.safe_load(_workflow_text())
-    policy = json.loads(POLICY.read_text(encoding="utf-8"))
     triggers = workflow["on"]
 
-    assert policy["scheduledCheck"]["workflow"] == ".github/workflows/validate.yml"
+    assert POLICY["scheduled_workflow"] == ".github/workflows/validate.yml"
     assert [entry["cron"] for entry in triggers["schedule"]] == [
-        policy["scheduledCheck"]["cron"]
+        POLICY["scheduled_cron"]
     ]
     assert "workflow_dispatch" in triggers
+    concurrency = workflow["concurrency"]
+    assert concurrency["cancel-in-progress"] is False
+    assert "github.sha" in concurrency["group"]

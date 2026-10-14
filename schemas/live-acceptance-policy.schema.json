@@ -14,6 +14,7 @@
     "rerunProcedure"
   ],
   "properties": {
+    "$schema": {"type": "string", "minLength": 1},
     "schemaVersion": {"const": "1.0"},
     "maxReceiptAgeDays": {"type": "integer", "minimum": 1},
     "receiptDirectories": {
@@ -35,7 +36,7 @@
         "cron": {"type": "string", "pattern": "^\\S+ \\S+ \\S+ \\S+ \\S+$"}
       }
     },
-    "rerunProcedure": {"type": "string", "minLength": 1}
+    "rerunProcedure": {"type": "string", "minLength": 1, "pattern": "\\S"}
   },
   "$defs": {
     "relativePath": {

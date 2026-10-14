@@ -30,7 +30,7 @@ jobs:
     cleanupPolicy: test-directory-only
     releaseBlocking: true
     requiredSteps:
-      [tools, static, style, schema, unit, bats, acceptance, live_acceptance, whitespace]
+      [tools, static, style, schema, unit, bats, acceptance, whitespace, live_acceptance]
     smokeChecks:
       startup: tools
       tools: tools
