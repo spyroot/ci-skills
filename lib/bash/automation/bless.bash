@@ -294,6 +294,7 @@ bless_check_yaml() {
 # Summary: Refuse selected JSON that does not parse as one document, or that
 # names a local JSON Schema in "$schema" it does not satisfy.
 # Arguments: $1 root; $2 snapshot; $3 path list; $4 interpreter; $5 scope.
+# Stdout: check-jsonschema output for each paired document.
 # Stderr: failing path with jq or schema diagnostics.
 # Returns: 0, 1 for invalid JSON, a missing named schema, or a schema mismatch,
 #   or CI_EXIT_BLOCKED for a missing tool.
@@ -310,7 +311,7 @@ bless_check_json() {
     fi
     # A document names its own schema; a remote URL is a draft identifier, not a pair.
     # shellcheck disable=SC2016 # "$schema" is a JSON key inside the jq program, not a shell variable
-    schema=$("$jq" -r '.["$schema"] | strings | select(startswith("http") | not)' "$snap/$path")
+    schema=$("$jq" -r 'if type == "object" then .["$schema"] else empty end | strings | select(startswith("http") | not)' "$snap/$path")
     [[ -n $schema ]] || continue
     directory=$(dirname "$path")
     if [[ ! -f $snap/$directory/$schema ]]; then

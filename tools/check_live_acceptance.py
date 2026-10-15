@@ -49,6 +49,7 @@ from lib.python.core.json_types import (
     json_strings,
 )
 from lib.python.core.logging import add_log_arguments, log_event
+from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
 ReceiptPairKey: TypeAlias = tuple[str, str, str, str, str, int, str]
@@ -64,6 +65,8 @@ class AcceptanceResult(TypedDict, total=False):
     :param functional_digest: Candidate runtime and schema digest used for acceptance.
     :param accepted: Sorted names of accepted setup and operation receipts.
     :param problems: Sorted classified acceptance failures, or a loading diagnostic.
+    :param policy: Declared policy values, present only in a dry run.
+    :param receipts: Sorted receipt names that would be evaluated, dry run only.
 
     .. attribute :: schema_version
         :type: str
@@ -99,6 +102,16 @@ class AcceptanceResult(TypedDict, total=False):
         :type: Sequence[str]
 
         Sorted classified acceptance failures, or a loading diagnostic.
+
+    .. attribute :: policy
+        :type: AcceptancePolicy
+
+        Declared policy values, present only in a dry run.
+
+    .. attribute :: receipts
+        :type: Sequence[str]
+
+        Sorted receipt names that would be evaluated, dry run only.
     """
 
     schema_version: str
@@ -108,6 +121,8 @@ class AcceptanceResult(TypedDict, total=False):
     functional_digest: str
     accepted: Sequence[str]
     problems: Sequence[str]
+    policy: AcceptancePolicy
+    receipts: Sequence[str]
 
 
 SCHEMA_VERSION: Final = "1.0"
@@ -124,7 +139,6 @@ GITLAB_RECEIPT_KINDS: Final = frozenset(
 # The acceptance window and receipt locations come from the tracked policy file.
 POLICY_FILE: Final = Path("inventory") / "ci" / "live-acceptance.json"
 POLICY_SCHEMA_FILE: Final = Path("schemas") / "live-acceptance-policy.schema.json"
-DRY_RUN_STATUS: Final = "DRY_RUN"
 REQUIRED_LIVE_CHECKS: Final = (
     "storage_report",
     "event_trace",
@@ -228,9 +242,9 @@ def load_policy(path: Path, schema_path: Path) -> AcceptancePolicy:
     :param path: Policy file selected by the caller or the repository default.
     :param schema_path: Schema file that defines the policy document.
     :returns: Validated freshness window, receipt directories, and schedule.
-    :raises AcceptanceError: If the policy or schema is missing or unreadable, the
-        schema is invalid, the policy violates the schema, or the historical
-        directory is also a receipt directory.
+    :raises AcceptanceError: If the policy or schema is missing or unreadable (each
+        failure names its own file), the schema is invalid, the policy violates the
+        schema, or the historical directory is also a receipt directory.
     """
     if not path.is_file():
         raise AcceptanceError(f"policy_missing:{path}")
@@ -238,9 +252,12 @@ def load_policy(path: Path, schema_path: Path) -> AcceptancePolicy:
         raise AcceptanceError(f"policy_schema_missing:{schema_path}")
     try:
         document = response_decoder().decode(path.read_text(encoding="utf-8"))
-        schema = response_decoder().decode(schema_path.read_text(encoding="utf-8"))
     except (OSError, ValueError, RecursionError) as exc:
         raise AcceptanceError(f"policy_unreadable:{path}") from exc
+    try:
+        schema = response_decoder().decode(schema_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:
+        raise AcceptanceError(f"policy_schema_unreadable:{schema_path}") from exc
     try:
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(document)
@@ -1054,7 +1071,7 @@ class AcceptanceReview:
         return {
             "schema_version": SCHEMA_VERSION,
             "kind": "live_acceptance",
-            "status": "PASS" if not self.problems else "BLOCKED",
+            "status": PASS if not self.problems else BLOCKED,
             "skill_digest": self.digest,
             "functional_digest": self.functional_digest,
             "accepted": sorted(self.accepted),
@@ -1099,7 +1116,7 @@ def evaluate(
 def main() -> int:
     """Evaluate committed live receipts and render the selected output format.
 
-    :returns: Zero for accepted evidence, or two for blocked acceptance.
+    :returns: Zero for accepted evidence or a dry run, or two for blocked acceptance.
     :raises SystemExit: If arguments are invalid or help is requested.
     :raises ImportError: If required shared modules or requested YAML support are absent.
     :raises OSError: If final output cannot be written.
@@ -1160,7 +1177,7 @@ def main() -> int:
             data = {
                 "schema_version": SCHEMA_VERSION,
                 "kind": "live_acceptance",
-                "status": DRY_RUN_STATUS,
+                "status": DRY_RUN,
                 "policy": dict(policy),
                 "receipts": sorted(receipts),
                 "accepted": [],
@@ -1177,7 +1194,7 @@ def main() -> int:
         data = {
             "schema_version": SCHEMA_VERSION,
             "kind": "live_acceptance",
-            "status": "BLOCKED",
+            "status": BLOCKED,
             "accepted": [],
             "problems": [str(exc)],
         }
@@ -1190,13 +1207,20 @@ def main() -> int:
         print(yaml.safe_dump(data, sort_keys=True), end="")
     else:
         print(f"Live acceptance: {data['status']}")
+        if data["status"] == DRY_RUN:
+            policy = data["policy"]
+            print(f"  window    {policy['max_receipt_age_days']} days")
+            for directory in policy["receipt_directories"]:
+                print(f"  directory {directory}")
+            for name in data["receipts"]:
+                print(f"  receipt   {name}")
         for name in data["accepted"]:
             print(f"  accepted {name}")
         for problem in data["problems"]:
             print(f"  problem  {problem}")
     status = json_string(data["status"])
     log_event(args, "live_acceptance", "result", status, persist=not args.dry_run)
-    return 0 if status in ("PASS", DRY_RUN_STATUS) else 2
+    return exit_code(status)
 
 
 if __name__ == "__main__":

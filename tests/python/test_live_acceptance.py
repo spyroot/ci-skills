@@ -1047,6 +1047,13 @@ def test_policy_schema_must_exist_and_be_valid(tmp_path: Path) -> None:
     with pytest.raises(ACCEPTANCE.AcceptanceError, match="policy_schema_invalid"):
         ACCEPTANCE.load_policy(policy, broken)
 
+    malformed = tmp_path / "malformed.schema.json"
+    malformed.write_text("{", encoding="utf-8")
+    with pytest.raises(
+        ACCEPTANCE.AcceptanceError, match=f"policy_schema_unreadable:{malformed}"
+    ):
+        ACCEPTANCE.load_policy(policy, malformed)
+
 
 def test_cli_dry_run_lists_policy_and_receipts_without_evaluating(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -1075,6 +1082,33 @@ def test_cli_dry_run_lists_policy_and_receipts_without_evaluating(
     assert report["receipts"] == ["stale.json"]
     assert report["policy"]["max_receipt_age_days"] == MAX_AGE_DAYS
     assert report["problems"] == []
+
+
+def test_cli_dry_run_text_mode_lists_window_directories_and_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Show a human the window, directories and receipt names in a text dry run.
+
+    :param tmp_path: Fixture repository root holding the policy and one receipt.
+    :param monkeypatch: Pytest fixture replacing process arguments.
+    :param capsys: Pytest fixture capturing the CLI's text output.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    receipts = tmp_path / POLICY["receipt_directories"][0]
+    _write_policy(tmp_path, 7, directories=POLICY["receipt_directories"][:1])
+    receipts.mkdir(parents=True)
+    (receipts / "one.json").write_text(json.dumps({"kind": "gitlab_access"}))
+    monkeypatch.setattr(
+        sys, "argv", ["check_live_acceptance.py", "--root", str(tmp_path), "--dry-run"]
+    )
+
+    assert ACCEPTANCE.main() == 0
+    text = capsys.readouterr().out
+    assert "Live acceptance: DRY_RUN" in text
+    assert "window    7 days" in text
+    assert f"directory {POLICY['receipt_directories'][0]}" in text
+    assert "receipt   one.json" in text
 
 
 @pytest.mark.parametrize(("window", "stale"), [(1, True), (3, False)])
