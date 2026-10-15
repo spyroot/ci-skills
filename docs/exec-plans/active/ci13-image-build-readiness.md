@@ -60,24 +60,33 @@ admission message for a refused privileged Pod and the backing filesystem the em
   gate behaviour are the owner's to approve; a review finding on any of them becomes an open question in the
   phase document, not a decision. The spec shows how the agent invokes the command and the JSON it reads.
 - 2026-10-15, the owner's direction: this combo is specified as its own phase, CI13, separate from CI12.
-- 2026-10-15, mechanism: the Pod's terminated exit code read from the API is the probe's result; every marker line
-  is a row and a missing marker is a row; the probe never grants a constraint and reports `scc_required` with the
-  exact account; a tag without a digest is refused; node selection without an argument is the first Ready worker
-  by name order, named in the result.
+- 2026-10-15, the owner's direction in chain 11: the Pod's terminated exit code read from the API is the probe's
+  result; every marker line is a row and a missing marker is a row; the probe reports the constraint it lacks
+  and never grants it.
+- 2026-10-15, mechanism: `scc_required` names the exact account and constraint; a reference without a digest is
+  refused by the existing `published_image` check. (An earlier version of this entry also decided an auto-pick of
+  the first Ready worker; that is withdrawn and left to open question 1.)
 - 2026-10-15, mechanism, from the CI12 reviews: the scope identifier is generated after confirmation and is not
-  part of the plan digest, which binds the kind, the verb, the node, both digests, the timeout, the bounds, the
-  evidence directory and the resolved target; the live plan runs the reads only, with no confirm callback; the
+  part of the plan digest, which binds the kind, the verb, the node, both digests, the timeout, the bounds and the
+  resolved target; the live plan runs the reads only, with no confirm callback; the
   mode rules are one shared validator in `core/action_modes.py` with one canonical reason per rule, and the
   GitLab adapter switches to it in the same pull request.
 - 2026-10-15, mechanism, from this spec's first review: the JSON the agent reads is the existing envelope exactly
   (`summary` an object of counts, `errors` entries of `source` and `reason`, `plan_digest` bare hex); the Job
   wait returns on `Complete` or `Failed` through a terminal wait added to the Kubernetes service, because
-  `wait_job` raises on anything but `Complete`; a never-created Pod is classified from the Job's `FailedCreate`
-  condition; an interrupt is converted at the adapter boundary into a rendered `BLOCKED` result with reason
-  `interrupted`, as the MTU check does; `--node` is required for an apply so the digest binds it, with the
-  auto-pick left to open question 1; `--run-id` keeps its existing logging meaning and the scope identifier is
-  reported as `scope_id`; a reference without a digest is refused by the existing `published_image` check; the
+  `wait_job` raises on anything but `Complete`; a never-created Pod is classified from the Job's events; an
+  interrupt is converted at the adapter boundary into a rendered `BLOCKED` result with reason `interrupted`, as
+  the MTU check does; `--node` is required for `probe` in every mode so every digest binds it, with the auto-pick
+  left to open question 1; `--run-id` keeps its existing logging meaning and the scope identifier is reported as
+  `readback.run_id`; a reference without a digest is refused by the existing `published_image` check; the
   existing receipt set is refreshed on each pull request head.
+- 2026-10-15, mechanism, from this spec's second review: output paths (`--output-dir`, `--evidence-dir`,
+  `--receipt-out`, `--log-file`) are outside the plan digest, so the dry run's digest is reproduced by an apply
+  that writes them; the Job wait is bounded by the deadline plus a margin and ends early on a creation failure
+  seen in the Job's events; the shared validator also carries the confirm-plan and timeout rules under one
+  reason each; the result carries `skill` with the functional checksum and `tested_revision`, attached by the
+  adapter; the existing reason `immutable_image_required` is reused; a documentation, test or receipt-only head
+  change does not invalidate functional proof.
 
 ## Outcomes & Retrospective
 
@@ -112,8 +121,8 @@ the one-shot privileged Job that runs podman on the selected node; the probe ima
 by digest; the inner image is the small image the probe runs inside podman, pinned by digest; a marker line is one
 line the probe script prints per step, which the combo parses into a row; the scope identifier is the random value the
 apply generates after confirmation, from which the namespace, the Job name and the labels derive, reported as
-`scope_id`; the envelope is the shared JSON result every installed command prints, declared by the paired result
-schema; a receipt is the sanitized copy of it the portable writer produces with `--receipt-out`; the evidence
+`readback.run_id`; the envelope is the shared JSON result every installed command prints, declared by the paired
+result schema; a receipt is the sanitized copy of it the portable writer produces with `--receipt-out`; the evidence
 directory is the optional place the agent names for the Job log and the rows to persist; the installed candidate is
 the skill installed from the pull request head as the README's live smoke setup describes; the constraint is the
 `privileged` security context constraint an OpenShift administrator grants to a service account.
@@ -182,15 +191,15 @@ run the same with `--live-plan` and expect `PLANNED` in phase `LIVE_PLAN` with t
 the same digest. Push and read the validate workflow back green on the exact head. Install the candidate as the
 README's live smoke setup describes and run the remaining steps from the installed copy against the live cluster:
 `probe --node <NODE> --apply --confirm-plan <digest> --json --receipt-out <RECEIPT> --evidence-dir <EVIDENCE>` and
-expect `PASS` with eight rows each `ok`, `exit_code` 0, `scope_id` under `readback`, `namespace_absent` and
-`job_absent` true, and the log and the rows under `<EVIDENCE>`; if the cluster refuses the Pod, expect `BLOCKED` with
-reason `scc_required` and `readback.scc_required` naming `system:serviceaccount:<namespace>:default` and the
-constraint, with the same absence read-back, and record it under Surprises & Discoveries with the exact `FailedCreate`
-message. Then run the apply again and interrupt it while the Job runs; expect a rendered `BLOCKED` with reason
-`interrupted`, exit code 2, and `namespace_absent` and `job_absent` true. Then run the README rerun procedure on this
-head from the installed candidate so every existing committed receipt carries this checksum, run `python
-tools/check_live_acceptance.py --root . --json` and expect `PASS` with no `functional_digest_mismatch`. Attach the
-probe results to the pull request, commit the refreshed set, push the head they came from and expect the validate
+expect `PASS` with eight rows each `ok`, `exit_code` 0, `run_id` under `readback`, `namespace_absent` and `job_absent`
+true, and the log and the rows under `<EVIDENCE>`; if the cluster refuses the Pod, expect `BLOCKED` with reason
+`scc_required` and `readback.scc_required` naming `system:serviceaccount:<namespace>:default` and the constraint, with
+the same absence read-back, and record it under Surprises & Discoveries with the exact creation-failure event and
+where the API recorded it. Then run the apply again and interrupt it while the Job runs; expect a rendered `BLOCKED`
+with reason `interrupted`, exit code 2, and `namespace_absent` and `job_absent` true. Then run the README rerun
+procedure on this head from the installed candidate so every existing committed receipt carries this checksum, run
+`python tools/check_live_acceptance.py --root . --json` and expect `PASS` with no `functional_digest_mismatch`. Attach
+the probe results to the pull request, commit the refreshed set, push the head they came from and expect the validate
 workflow green on it; that head is the one that merges. The report of every live step is its receipt, produced the
 same way as every other live run in this repository: `--receipt-out` on the installed command, sanitized by the
 portable writer, bound to the functional checksum, with the rows that prove the outcome quoted in the pull request
@@ -203,13 +212,14 @@ exist.
 
 Milestone 1 is accepted when `tests/python/test_action_modes.py` shows the shared validator reproducing every rule the
 existing copies enforce today (apply against dry-run, the live-plan exclusions, `--receipt-out` needing a live run,
-the dry-run output rule) under one canonical reason each, with the GitLab adapter's own cases still passing; when
-`tests/python/test_run_scope.py` shows names derive from the identifier and removal deletes exactly the owned set;
-when `tests/python/test_image_build_probe.py` shows the node check (a named node Ready, absent, not Ready), the Job
-document (privileged, pinned node, no token, both emptyDirs with limits, the bounds, deadline, TTL, both images as
-digests, a tag refused before any plan), a dry-run digest confirming a later apply with the same inputs, node and
-target and rejecting another node or target, the terminal wait (Complete, Failed and deadline, with the rows read in
-each case), the classification of a Job's `FailedCreate` condition as `scc_required` with the account named, a
+the dry-run output rule, the confirm-plan rules, the timeout range) under one canonical reason each, with the GitLab
+adapter's own cases still passing; when `tests/python/test_run_scope.py` shows names derive from the identifier and
+removal deletes exactly the owned set; when `tests/python/test_image_build_probe.py` shows the node check (a named
+node Ready, absent, not Ready), the Job document (privileged, pinned node, no token, both emptyDirs with limits, the
+bounds, deadline, TTL, both images as digests, a tag refused before any plan), a dry-run digest confirming a later
+apply with the same inputs, node and target, with any output paths added, and rejecting another node or target, the
+terminal wait (Complete, Failed, the deadline, and an absent Pod with a creation-failure event ending the wait early,
+with the rows read in each case), the classification of that event as `scc_required` with the account named, a
 workflow-level interrupt test asserting a rendered `BLOCKED` result with the read-back fields, a schema test of the
 sketched DRY_RUN, PASS, PARTIAL and BLOCKED documents against the paired schema, the parser against fixture logs (all
 markers, one missing marker as a row, exit propagation 7 and not 7, remaining containers non-empty), and the verdict
@@ -247,21 +257,22 @@ rows, the Pod's exit code, the scope identifier, the absence read-back.
 ## Interfaces and Dependencies
 
 `ReadinessAction(SkillAction)`: `node` (required for an apply), `probe_image`, `inner_image` (digests), `timeout`,
-`evidence_dir` (optional), the resource bounds `cpu`, `memory`, `storage` (with defaults, flags `--cpu`,
-`--memory`, `--storage`), and the shared mode flags `dry_run`, `live_plan`, `apply`, `confirm_plan`.
+`evidence_dir` (optional), the resource bounds `cpu`, `memory`, `storage` (with defaults, flags `--cpu`, `--memory`,
+`--storage`), and the shared mode flags `dry_run`, `live_plan`, `apply`, `confirm_plan`.
 `ReadinessState(DeliveryState)`: `node`, `run_scope`, `job`, `log`, `exit_code`, `rows`, `verdict`. `RunScope`: a
 frozen dataclass with `run_id`, `namespace`, `labels`; `RunScope.new()`, `RunScope.from_id(run_id)`,
 `scope.name(kind)`, `scope.resources(service) -> ResourceSet`, `scope.cluster_resources(service) -> ResourceSet`;
 `RunScopeAction(SkillAction)`: `scope`, `role` (optional); `OpenRunScope`, a `K8SCallback[RunScopeAction]`. The
-Kubernetes service gains `wait_job_terminal(name, namespace) -> JSONObject`, returning the Job once its `Complete`
-or `Failed` condition is true, bounded by the service timeout, and raising on absence or deadline. The shared
-validator: `resolve_mode(args, policy) -> Mode` in `core/action_modes.py`, where `policy` names the adapter's read
-operations and which options need a live run, returning one of `describe`, `offline`, `live-plan`, `read`,
-`apply`, and raising one canonical reason per rule. `ReadinessWorkflow`: `prepare()`, `callbacks() ->
-Callbacks[ReadinessState]`, `execute() -> int`, mirroring `GitLabWorkflow`; `ConfirmReadinessOperation`, mirroring
-`ConfirmGitLabOperation`. Callbacks: `SelectNode`, `OpenRunScope`, `RunProbeJob`, `ReadProbeResult`,
-`ParseMarkers` (local), each `K8SCallback[ReadinessAction]` except the scope callback and the local parser.
-Dependencies: the existing `K8SAuth`, `ResourceSet`, the temporary Job pattern, `published_image`, the service's
-`command`, `json`, `apply` and `delete` calls and the new terminal wait, the report renderer, the portable receipt
-writer and the provenance checksum; the podman image and the inner image by digest; no new third-party dependency
-on the agent's machine.
+Kubernetes service gains `wait_job_terminal(name, namespace) -> JSONObject`, returning the Job once its `Complete` or
+`Failed` condition is true, bounded by the Job deadline plus a margin, ending early with the creation-failure event
+when the Pod stays absent, and raising on absence of the Job. The shared validator: `resolve_mode(args, policy) ->
+Mode` in `core/action_modes.py`, where `policy` names the adapter's read operations, its timeout range and which
+options need a live run, returning one of `describe`, `offline`, `live-plan`, `read`, `apply`, and raising one
+canonical reason per rule, the confirm-plan and timeout rules included. `ReadinessWorkflow`: `prepare()`, `callbacks()
+-> Callbacks[ReadinessState]`, `execute() -> int`, mirroring `GitLabWorkflow`; `ConfirmReadinessOperation`, mirroring
+`ConfirmGitLabOperation`. Callbacks: `SelectNode`, `OpenRunScope`, `RunProbeJob`, `ReadProbeResult`, `ParseMarkers`
+(local), each `K8SCallback[ReadinessAction]` except the scope callback and the local parser. Dependencies: the
+existing `K8SAuth`, `ResourceSet`, the temporary Job pattern, `published_image`, the service's `command`, `json`,
+`apply` and `delete` calls and the new terminal wait, the report renderer, the portable receipt writer and the
+provenance checksum; the podman image and the inner image by digest; no new third-party dependency on the agent's
+machine.

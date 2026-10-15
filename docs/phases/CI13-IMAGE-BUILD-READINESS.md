@@ -48,7 +48,7 @@ blocker in `Open Decisions and Scope Boundary`, and this document plans only fro
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: The node is the agent's argument and is read back Ready before an apply is confirmed; the plan lists the Job the apply would create (node, images by digest, limits, the name pattern) and its digest binds the kind, the verb, the node, both digests, the timeout, the bounds, the evidence directory and the resolved target.
+        deliverable: The node is the agent's argument and is read back Ready before an apply is confirmed; the plan lists the Job the apply would create (node, images by digest, limits, the name pattern) and its digest binds the kind, the verb, the node, both digests, the timeout, the bounds and the resolved target; output paths are outside it.
         owner: ci-skills/lib/python/core/kubernetes/image_build_probe.py
         preserve: [The target and credential resolver, the result envelope, the exit-code contract]
         prIds: [PR-CI13-1]
@@ -100,7 +100,7 @@ blocker in `Open Decisions and Scope Boundary`, and this document plans only fro
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: Every temporary name (namespace, Job, labels) derives from one random scope identifier generated after confirmation and reported as scope_id; the namespace and the Job are removed on every exit, success, failure and interrupt, with absence read-back; when the agent names an evidence directory the Job log and the parsed rows persist there, otherwise nothing persists beyond the result.
+        deliverable: Every temporary name (namespace, Job, labels) derives from one random scope identifier generated after confirmation and reported as readback.run_id; the namespace and the Job are removed on every exit, success, failure and interrupt, with absence read-back; when the agent names an evidence directory the Job log and the parsed rows persist there, otherwise nothing persists beyond the result.
         owner: ci-skills/lib/python/core/kubernetes/run_scope.py
         preserve: [ResourceSet ownership semantics and its operation label; the executor's reverse cleanup and recoverable signals; the shared --run-id option's existing meaning]
         prIds: [PR-CI13-1]
@@ -177,7 +177,7 @@ blocker in `Open Decisions and Scope Boundary`, and this document plans only fro
 
 The consumer is an agent, a Codex or Claude session, acting for a user who installed ci-skills and asked for help
 preparing CI so their project's container tests and image builds run in GitLab jobs on their cluster. The agent
-calls the installed command with a node, or lets the combo pick one, and reads the shared result envelope: one
+calls the installed command with a node and reads the shared result envelope: one
 row per thing the probe proved on that node, the probe's exit code from the Pod, and either `PASS` or a named
 reason such as `scc_required`. The exact invocations and the JSON the agent reads are under "Invocation and the
 result the agent reads". The downstream consumer is chain 11's later steps: a runner with the same setup on that
@@ -204,7 +204,7 @@ and a pushed digest.
 
 ## Diagram
 
-    agent ─ image_build_readiness.py probe [--node N] ──► ReadinessWorkflow (prepare → callbacks → execute)
+    agent ─ image_build_readiness.py probe --node N ──► ReadinessWorkflow (prepare → callbacks → execute)
                                                               │ mode: --dry-run | --live-plan | --apply --confirm-plan
               ReadinessState(DeliveryState), bound once; prepare() compares the digest, then state.run_scope = RunScope.new()
                                                               │
@@ -317,37 +317,44 @@ One concrete state. `ReadinessState(DeliveryState)` adds the named fields the di
 `job`, `log`, `exit_code`, `rows`, `verdict`. Every callback reads earlier fields and writes its own; the fields
 are the only hand-off.
 
-One action. `ReadinessAction(SkillAction)` is a frozen dataclass with `node` (required for an apply, so the digest
-binds it; whether the combo may pick one is open question 1), `probe_image` and `inner_image` (digests; the
-shipped defaults are pinned in the pull request, and a reference without a digest is refused by the existing
-`published_image` check before any plan), `timeout` (the Job's active deadline and the bound of the wait for it),
-`evidence_dir` (optional; where the Job log and the rows persist), the resource bounds `cpu`, `memory` and
-`storage` with defaults, and the shared mode flags. The shared `--run-id` keeps its existing meaning, a
-correlation value for diagnostic logs; the scope identifier is generated and reported as `scope_id`. Every
-environment specific arrives here as an argument or through the target resolver; none is hardcoded.
+One action. `ReadinessAction(SkillAction)` is a frozen dataclass with `node` (required for `probe` in every mode,
+so every digest binds it; whether the combo may pick one instead is open question 1), `probe_image` and
+`inner_image` (digests; the shipped defaults are pinned in the pull request, and a reference without a digest is
+refused by the existing `published_image` check with its existing reason `immutable_image_required` before any
+plan), `timeout` (the Job's active deadline; the wait for the Job is bounded by that value plus a margin),
+`evidence_dir` (optional; an output path, like `--output-dir`, where the Job log and the rows persist; outside the
+digest and accepted only on an apply), the resource bounds `cpu`, `memory` and `storage` with defaults, and the
+shared mode flags. The shared `--run-id` keeps its existing meaning, a correlation value for diagnostic logs, and
+is not this command's scope key; the scope identifier is generated after confirmation and reported as
+`readback.run_id`, the name the shared `RunScope` interface gives it. Every environment specific arrives here as
+an argument or through the target resolver; none is hardcoded.
 
-One adapter. `ReadinessWorkflow` in `core/image_build_action.py` mirrors `GitLabWorkflow`: `prepare()` validates
-the mode, resolves the Kubernetes target (offline for `--dry-run`), builds the plan and its digest from the
-caller's inputs and the resolved target, the fields the GitLab plan binds plus this command's own: the kind, the
-verb, the node, both image digests, the timeout, the bounds, the evidence directory, the target file and source,
-the revision, and the resolved context and server. For an apply it compares `--confirm-plan` with that digest
-before any callback runs; only then does it generate the scope identifier (`RunScope.new()`), so the identifier
-is never part of the digest and a dry run's digest is reproduced by the apply. The modes are explicit per
-callback sequence: a live plan runs `K8SAuth` and `SelectNode` only and returns `PLANNED` with the node read
-back, no confirm callback and no mutation; an apply runs `K8SAuth`, then `ConfirmReadinessOperation` (re-verifies
-the target against the plan, as `ConfirmGitLabOperation` does), then `SelectNode` and the probe sequence. The
-mode-by-option table: `--dry-run` refuses `--receipt-out`, `--output-dir`, `--log-file` and `--evidence-dir`;
-`--live-plan` refuses `--receipt-out` and `--evidence-dir`; an apply accepts all of them. The mode rules are not
-copied again: `prepare()` calls one shared validator, `core/action_modes.py`, which carries one canonical reason
-per rule (the apply-against-dry-run conflict, the live-plan exclusions, the receipt rule, the dry-run output rule)
-and a per-adapter policy naming the adapter's read operations and which options need a live run; the GitLab
-adapter switches to it in the same pull request, and the toolbox, MTU and command-level copies follow as their own
-change. `execute()` runs the executor inside the recoverable-signal guard and renders the shared report; a signal
-exit raised by the guard after cleanup is converted at the boundary into a `BLOCKED` result with reason
-`interrupted`, the absence read-back and the receipt, exit code 2, as the MTU check converts its interrupt, which
-the GitLab adapter's boundary does not do today; the result validates against
-`schemas/results/image-build-readiness.schema.json`. The toolbox adapter `WorkflowAction` is not reused, for the
-reason the contribution guide states: it requires a toolbox catalogue kind and parses a toolbox specification.
+One adapter. `ReadinessWorkflow` in `core/image_build_action.py` mirrors `GitLabWorkflow`: `prepare()` validates the
+mode, resolves the Kubernetes target (offline for `--dry-run`), builds the plan and its digest from the caller's
+inputs and the resolved target, the fields the GitLab plan binds plus this command's own: the kind, the verb, the
+node, both image digests, the timeout, the bounds, the target file and source, the revision, and the resolved context
+and server; output paths (`--output-dir`, `--evidence-dir`, `--receipt-out`, `--log-file`) are outside it, so a dry
+run's digest is reproduced by the apply whatever outputs the apply writes. For an apply it compares `--confirm-plan`
+with that digest before any callback runs; only then does it generate the scope identifier (`RunScope.new()`), so the
+identifier is never part of the digest. The modes are explicit per callback sequence: a live plan runs `K8SAuth` and
+`SelectNode` only and returns `PLANNED` with the node read back, no confirm callback and no mutation; an apply runs
+`K8SAuth`, then `ConfirmReadinessOperation` (re-verifies the target against the plan, as `ConfirmGitLabOperation`
+does), then `SelectNode` and the probe sequence. The mode-by-option table: `--dry-run` refuses `--receipt-out`,
+`--output-dir`, `--log-file` and `--evidence-dir`; `--live-plan` accepts `--output-dir` and `--log-file` and refuses
+`--receipt-out` and `--evidence-dir`; an apply accepts all of them. The mode rules are not copied again: `prepare()`
+calls one shared validator, `core/action_modes.py`, which carries one canonical reason per rule: the
+apply-against-dry-run conflict (two spellings today), the live-plan exclusions, the receipt rule, the dry-run output
+rule (two reasons today, of which the shared CLI's `dry_run_cannot_write_output` becomes canonical), the confirm-plan
+rules (`--confirm-plan` needs `--apply` in all three copies, a live plan with a snapshot needs it in the MTU copy, and
+the mismatch reason has two spellings) and the timeout range rule (three spellings today); a per-adapter policy names
+the adapter's read operations, its timeout range and which options need a live run. The GitLab adapter switches to it
+in the same pull request, and the toolbox, MTU and command-level copies follow as their own change. `execute()` runs
+the executor inside the recoverable-signal guard and renders the shared report; a signal exit raised by the guard
+after cleanup is converted at the boundary into a `BLOCKED` result with reason `interrupted`, the absence read-back
+and the receipt, exit code 2, as the MTU check converts its interrupt, which the GitLab adapter's boundary does not do
+today; the result validates against `schemas/results/image-build-readiness.schema.json`. The toolbox adapter
+`WorkflowAction` is not reused, for the reason the contribution guide states: it requires a toolbox catalogue kind and
+parses a toolbox specification.
 
 Callbacks, each a `K8SCallback[ReadinessAction]` unless stated, each owning its hooks only, with their module:
 
@@ -363,18 +370,23 @@ Callbacks, each a `K8SCallback[ReadinessAction]` unless stated, each owning its 
   service-account token, the storage and evidence emptyDirs with size limits, the bounds, and the probe script as
   the container command, which runs podman with the overlay driver and the cgroupfs manager, runs the inner
   container with limits, writes and reads back through the bind mount, runs the second inner container that exits
-  7, removes both and lists what remains, printing one marker line per step, with a TTL longer than the deadline
-  plus the read window so the log is still there when it is read; `run` applies the Job through the scope's
+  7, removes both and lists what remains, printing one marker line per step, with a TTL after completion longer
+  than the read window so the log is still there when it is read; `run` applies the Job through the scope's
   namespaced set and waits for it through a terminal Job wait that returns on `Complete` or `Failed`, a poll of
-  the Job's conditions through `json` shaped like `wait_build` and bounded by `timeout`, added to the Kubernetes
-  service in this pull request because `wait_job` raises on anything but `Complete`; a Job whose Pod was never
-  created is classified from its `FailedCreate` condition and events, read through `json`, as `scc_required` with
-  the namespace's service account and the constraint named; `update` reads the Job back and writes `state.job`;
-  `cleanup` deletes the Job on every exit with absence read-back, the pattern of `PullImage`.
+  the Job's conditions through `json` shaped like `wait_build`, bounded by `timeout` plus a margin so the Job's
+  own deadline is observed before the wait gives up, added to the Kubernetes service in this pull request because
+  `wait_job` raises on anything but `Complete`; within that poll, a Job whose Pod is absent after a bounded
+  interval is checked through its events, read through `json`, and a creation failure (reason `FailedCreate`)
+  naming the constraint ends the wait early as `scc_required` with the namespace's service account and the
+  constraint named; whether the API records that failure on the Job or only in its events, and whether the Pod
+  is still readable after the deadline, are the first entries for Surprises & Discoveries; `update` reads the
+  Job back and writes `state.job`; `cleanup` deletes the Job on every exit with absence read-back, the pattern
+  of `PullImage`.
 - `ReadProbeResult` (`core/kubernetes/image_build_probe.py`): runs after the Job reached `Complete` or `Failed`;
   `run` reads the Job's Pod through the service's `json` call and takes the container's terminated exit code as
-  `state.exit_code`, then reads the log through the service's `command` call into `state.log`; when the agent
-  named an evidence directory, `update` writes the log there.
+  `state.exit_code`, then reads the log through the service's `command` call into `state.log`; a Pod the
+  controller already removed after the deadline leaves every row `missing` and the reason
+  `job_deadline_exceeded`; when the agent named an evidence directory, `update` writes the log there.
 - `ParseMarkers` (`LocalCallback`, `core/kubernetes/image_build_probe.py`): `run` parses `state.log` into
   `state.rows`, one per marker: host kernel, podman version, storage driver with graph root and cgroup version,
   backing filesystem, inner run, bind-mount read-back, exit propagation (expected 7, observed), remaining
@@ -390,8 +402,8 @@ portable receipt writer in `core/portable.py`; the catalogue declaration and ren
 Lifetime, decided as mechanism: nothing of the probe is kept. The namespace and the Job are owned by the run
 identifier and removed by their creators' cleanup hooks on success, on failure and on interrupt, each with absence
 read-back; a cleanup hook that raises is rendered as `BLOCKED` with `cleanup.status` `BLOCKED`, the scope
-identifier and, under `readback.recovery`, the exact label selector that identifies what remains; whether a
-recovery verb should exist is open question 8. A new run never changes or deletes
+identifier under `readback.run_id` and, under `readback.recovery`, the exact label selector that identifies what
+remains; whether a recovery verb should exist is open question 8. A new run never changes or deletes
 another run's objects, because `ResourceSet` refuses to modify an existing object whose operation label differs.
 
 Concrete statuses, from the shared validator: `--dry-run` returns `DRY_RUN` in phase `OFFLINE_PLAN` with the plan
@@ -399,8 +411,9 @@ digest and no API call; `--live-plan` returns `PLANNED` in phase `LIVE_PLAN` aft
 and `SelectNode` reads the node, with no confirm callback; `--apply --confirm-plan <digest>` returns `PASS` when the
 Pod exited 0 and every row is present and passed, `PARTIAL` when the Job ended, `Complete` or `Failed`, but the exit
 code is not 0 or a row is missing or failed, and `BLOCKED` with a classified reason (`scc_required`,
-`job_deadline_exceeded`, `node_not_ready`, `image_not_pinned`, `interrupted`) when the probe could not run or was
-interrupted; the exit code is 0 for `PASS`, `DRY_RUN` and `PLANNED`, and 2 for `PARTIAL` and `BLOCKED`.
+`job_deadline_exceeded`, `node_not_ready`, the existing `immutable_image_required`, `interrupted`) when the probe
+could not run or was interrupted; the exit code is 0 for `PASS`, `DRY_RUN` and `PLANNED`, and 2 for `PARTIAL` and
+`BLOCKED`.
 
 #### Invocation and the result the agent reads
 
@@ -414,15 +427,17 @@ angle brackets are placeholders, never examples.
 
     conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/image_build_readiness.py" --describe
 
-returns the command contract as every installed command does: `kind: command_contract`, `command`, `purpose`,
-`use_when`, `execution_surface`, `required_tools: [kubectl]` (read before any live operation, as SKILL.md says),
-`requires_authorities: [kubernetes]`, `mutates: true`, `options` with one line each (`--node`, `--probe-image`,
-`--inner-image`, `--timeout`, `--cpu`, `--memory`, `--storage`, `--evidence-dir`, and the shared ones),
-`required_options`, `subcommands` with each verb's `result_schema` and `required_options` (`--node` for `probe`
-on apply), `returns`, `default_output`, `target_protocol`, `access_protocol`, `status_values`, `exit_codes` (`0`
-for `PASS`, `DRY_RUN` and `PLANNED`; `2` for `BLOCKED` and `PARTIAL`), `report_kind: image_build_readiness`,
-`side_effects`. The verb is a positional argument, shown in the `--help` usage line as `{probe}` (and
-`{probe,chain}` after PR-CI13-2) the way the GitLab runner command shows its actions.
+returns the command contract as every installed command does: `schema_version`, `skill`, `kind:
+command_contract`, `command`, `purpose`, `use_when`, `execution_surface`, `required_tools: [kubectl]` (read
+before any live operation, as SKILL.md says), `requires_authorities: [kubernetes]`, `capabilities:
+[node_scoped]`, `mutates: true`, `options` with one line each (`--node`, `--probe-image`, `--inner-image`,
+`--timeout`, `--cpu`, `--memory`, `--storage`, `--evidence-dir`, and the shared ones), `required_options:
+[--node]` (a plain list; it cannot vary by mode, so `--node` is required for `probe` in every mode),
+`subcommands` with each verb's `result_schema` and `required_options`, `returns`, `default_output`,
+`target_protocol`, `access_protocol`, `status_values`, `exit_codes` (`0` for `PASS`, `DRY_RUN` and `PLANNED`;
+`2` for `BLOCKED` and `PARTIAL`), `report_kind: image_build_readiness`, `side_effects`. The verb is a positional
+argument, shown in `--help` as `{probe}` (and `{probe,chain}` after PR-CI13-2) the way the GitLab runner command
+shows its actions among its options.
 
     conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/image_build_readiness.py" probe --node <NODE> --dry-run --json
 
@@ -431,8 +446,8 @@ for `PASS`, `DRY_RUN` and `PLANNED`; `2` for `BLOCKED` and `PARTIAL`), `report_k
       "operation": "probe", "mutated": false,
       "plan": { "node": "<NODE>", "probe_image": "<registry>/<image>@sha256:<...>", "inner_image": "<registry>/<image>@sha256:<...>",
                 "timeout": <seconds>, "bounds": { "cpu": "<...>", "memory": "<...>", "storage": "<...>" },
-                "evidence_dir": "<EVIDENCE or null>", "target": "<context> -> <server>",
-                "names": "<pattern derived from the scope identifier>", "objects": ["Namespace", "Job"] },
+                "target": "<context> -> <server>", "names": "<pattern derived from the scope identifier>",
+                "objects": ["Namespace", "Job"] },
       "plan_digest": "<64 hex characters>",
       "summary": { "record_count": 0, "error_count": 0 }, "errors": [], "captured_at": "<time>"
     }
@@ -444,7 +459,8 @@ for `PASS`, `DRY_RUN` and `PLANNED`; `2` for `BLOCKED` and `PARTIAL`), `report_k
       "schema_version": "1.0", "kind": "image_build_readiness", "status": "PASS", "phase": "APPLY",
       "operation": "probe", "result_action": "APPLIED", "mutated": true,
       "plan_digest": "<64 hex characters>", "verified_target": { "context": "<context>", "server": "<server>" },
-      "identity": { "<the identity K8SAuth read back>": "..." },
+      "identity": "<the identity K8SAuth read back>", "tested_revision": "<40 hex characters>",
+      "skill": { "functional_digest": "<64 hex characters>", "<the rest the adapter attaches>": "..." },
       "records": [ { "step": "SelectNode", "verified": true, "node": "<NODE>", "ready": true,
                      "api_kernel": "<version>", "os_image": "<name>" },
                    { "step": "RunProbeJob", "action": "APPLIED", "verified": true, "namespace": "<name>", "job": "<name>",
@@ -459,7 +475,7 @@ for `PASS`, `DRY_RUN` and `PLANNED`; `2` for `BLOCKED` and `PARTIAL`), `report_k
                                { "row": "bind_mount_readback","observed": "<content>",          "ok": true },
                                { "row": "exit_propagation",   "expected": 7, "observed": 7,     "ok": true },
                                { "row": "remaining_containers","observed": [],                  "ok": true } ] } ],
-      "readback": { "verified": true, "scope_id": "<scope identifier>", "node": "<NODE>", "exit_code": 0,
+      "readback": { "verified": true, "run_id": "<scope identifier>", "node": "<NODE>", "exit_code": 0,
                     "namespace_absent": true, "job_absent": true },
       "cleanup": { "status": "PASS" },
       "summary": { "record_count": 4, "error_count": 0 }, "errors": [], "captured_at": "<time>"
@@ -471,8 +487,13 @@ A Job that ended `Failed`, or a row that fails or is missing, turns the verdict 
     {
       "schema_version": "1.0", "kind": "image_build_readiness", "status": "BLOCKED", "phase": "APPLY",
       "operation": "probe", "mutated": true,
+      "plan": { "<the confirmed plan>": "..." }, "plan_digest": "<64 hex characters>",
+      "verified_target": { "context": "<context>", "server": "<server>" }, "identity": "<the identity K8SAuth read back>",
+      "tested_revision": "<40 hex characters>", "skill": { "functional_digest": "<64 hex characters>", "<...>": "..." },
       "errors": [ { "source": "RunProbeJob", "reason": "scc_required" } ],
-      "readback": { "verified": true, "scope_id": "<scope identifier>",
+      "records": [ { "step": "SelectNode", "verified": true, "node": "<NODE>", "ready": true },
+                   { "step": "RunProbeJob", "action": "APPLIED", "verified": false, "namespace": "<name>", "job": "<name>" } ],
+      "readback": { "verified": true, "run_id": "<scope identifier>",
                     "scc_required": { "service_account": "system:serviceaccount:<namespace>:default", "constraint": "privileged" },
                     "namespace_absent": true, "job_absent": true },
       "cleanup": { "status": "PASS" },
@@ -481,10 +502,11 @@ A Job that ended `Failed`, or a row that fails or is missing, turns the verdict 
 
 The agent reports that reason to the user; granting the constraint is the cluster administrator's action, outside
 the skill. An interrupted apply returns the same shape with `errors: [ { "source": "run", "reason":
-"interrupted" } ]`, the absence read-back and exit code 2, after cleanup ran. Every verb also accepts `--live-plan`
-(`status: PLANNED`, identity and node read back, no mutation, no receipt), `--yaml`, `--human`, `--output-dir`
-for paired reports and `--evidence-dir` for the persisted log and rows (both only on an apply), and the shared
-diagnostic options.
+"interrupted" } ]`, the absence read-back and exit code 2, after cleanup ran. The adapter attaches `skill` with the
+functional checksum and `tested_revision` as the GitLab adapter does; the portable writer then redacts and copies
+the result into the receipt. Every verb also accepts `--live-plan` (`status: PLANNED`, identity and node read
+back, no mutation, no receipt), `--yaml`, `--human`, `--output-dir` for paired reports (on a live plan or an
+apply), `--evidence-dir` for the persisted log and rows (only on an apply), and the shared diagnostic options.
 
 #### When to Decompose
 
@@ -536,8 +558,8 @@ owner decides; the document records the options and the finding that raised each
    catalogue entry can be written): the command name `image_build_readiness.py`, the verb `probe` (and `chain`
    later), and the options `--node`, `--probe-image`, `--inner-image`, `--timeout`, `--cpu`, `--memory`,
    `--storage` and `--evidence-dir`, as "Invocation and the result the agent reads" shows them. Options the
-   owner may prefer: `--node` required for an apply (the proposal, so the digest binds it) or an auto-pick of
-   the first Ready worker, named in the result; one combined bounds option instead of three. The shipped
+   owner may prefer: `--node` required for `probe` in every mode (the proposal, so every digest binds it) or an
+   auto-pick of the first Ready worker, named in the result; one combined bounds option instead of three. The shipped
    default digests for the probe image and the inner image are pinned in the pull request and listed in its body
    for approval.
 2. How this command's live evidence enters the gate (affects `R-CI13-006` and `G-CI13-GATE`; owner: the project
@@ -564,11 +586,13 @@ owner decides; the document records the options and the finding that raised each
 5. Which pull request delivers the shared pieces first (affects `R-CI13-005`; owner: the project owner; until
    answered, both proposals list the same files). `core/kubernetes/run_scope.py` is specified in the CI12
    proposal and owned by its first pull request there and by PR-CI13-1 here, with the interface inlined below
-   under "When to Introduce Abstraction"; the shared mode validator `core/action_modes.py` is proposed here and
-   not yet in the CI12 proposal, which would consume it; the two first pull requests also both own
-   `core/catalog.py`, `tools.json`, `SKILL.md`, the validate workflow, the local gate script and
-   `tests/python/test_run_scope.py`. Whichever merges first delivers the shared pieces to the stated interface
-   and the other rebases and consumes them.
+   under "When to Introduce Abstraction"; the shared mode validator `core/action_modes.py` is owned by both
+   first pull requests; and those two pull requests also both own `core/catalog.py`, `tools.json`, `SKILL.md`,
+   the validate workflow, the local gate script and `tests/python/test_run_scope.py`. One interface divergence
+   to settle with it: the CI12 proposal overloads the shared `--run-id` option as its scope key for `join` and
+   `remove` (its own open question), while this phase keeps `--run-id` for logs and takes no caller scope key;
+   both report the scope as `run_id`, the shared interface's name. Whichever merges first delivers the shared
+   pieces to the stated interface and the other rebases and consumes them.
 6. Chain 11's later steps (affects `R-CI13-007`; owner: the project owner; until answered, PR-CI13-2 waits):
    the runner with the same setup, the build-and-push job and the digest read-back depend on chain 1's runner
    manager and block 7's registration and test job, which are not delivered; its verb, `chain`, is a proposal.
@@ -576,29 +600,33 @@ owner decides; the document records the options and the finding that raised each
    repository's approval lock for contracts and JSON; until answered, the rows and reasons below are sketches):
    the row names (`host_kernel`, `podman_version`, `storage`, `backing_filesystem`, `inner_run`,
    `bind_mount_readback`, `exit_propagation`, `remaining_containers`), the reason tokens (`scc_required`,
-   `job_deadline_exceeded`, `node_not_ready`, `image_not_pinned`, `interrupted`) and the `readback` fields
-   (`scope_id`, `exit_code`, `scc_required`, `recovery`, `namespace_absent`, `job_absent`), to be approved as
+   `job_deadline_exceeded`, `node_not_ready`, the existing `immutable_image_required`, `interrupted`) and the
+   `readback` fields (`run_id`, `exit_code`, `scc_required`, `recovery`, `namespace_absent`, `job_absent`), to be
+   approved as
    the exact schema in the pull request.
 8. Recovery after a failed cleanup (affects `R-CI13-005`; owner: the project owner; until answered, the recovery
-   is the label selector the result prints): a `remove --scope-id` verb that deletes everything carrying the
+   is the label selector the result prints): a `remove --run-id` verb that deletes everything carrying the
    identifier, as the CI12 proposal has, or no verb and the printed selector only.
 
 Decided as mechanism inside the library, recorded so no step hides a choice:
 
 - The Pod's terminated exit code, read from the API, is the probe's result; the marker lines fill the rows; a
   missing marker is a row, never a silent gap.
-- The Job wait returns on `Complete` or `Failed` and the rows are always read afterwards; a never-created Pod is
-  classified from the Job's `FailedCreate` condition and events.
+- The Job wait returns on `Complete` or `Failed`, bounded by the deadline plus a margin, and the rows are always
+  read afterwards; a Pod absent after a bounded interval is checked through the Job's events, and a creation
+  failure ends the wait early as `scc_required`.
 - An interrupt is converted at the adapter boundary, after cleanup, into a rendered `BLOCKED` result with reason
   `interrupted`, as the MTU check does, so the receipt and the absence read-back exist.
-- `--run-id` keeps its existing meaning, a correlation value for logs; the scope identifier is generated after
-  confirmation and reported as `scope_id`.
+- `--run-id` keeps its existing meaning, a correlation value for logs, and is not this command's scope key; the
+  scope identifier is generated after confirmation and reported as `readback.run_id`, the shared interface's
+  name for it. Output paths (`--output-dir`, `--evidence-dir`, `--receipt-out`, `--log-file`) are outside the
+  plan digest.
 - The probe runs under the namespace's default service account with no token mounted; no ServiceAccount or
   binding is created, because the only right it needs is the constraint an administrator grants.
 - The Job log is read through the service's `command` call and the Pod status through `json`, because the service
   has no dedicated log call; adding one is not needed for one consumer.
 - Image references are digests; a reference without a digest is refused by the existing `published_image` check
-  before any plan is produced.
+  with its existing reason `immutable_image_required` before any plan is produced.
 - Nothing persists beyond the result unless the agent names an evidence directory; the namespace and the Job are
   removed on every exit.
 
@@ -606,18 +634,19 @@ The boundary is the two slices above. The runner manager and block 7 stay their 
 
 ## PR Order
 
-PR-CI13-1 (wave W-CI13-1) delivers the run scope (or consumes CI12's, per open question 5), the node selection,
-the probe Job and its script, the result and log read-back, the marker parser, the adapter and the thin main with
-the `probe` verb, the catalogue declaration with its regenerated `tools.json` and result schema, the schema entry
-in the validate workflow per the existing pairing rule, and the routing; its live proof is the probe run from
-the installed candidate on one node of the live cluster with every row present and the Pod exited 0, and the
-namespace and the Job absent afterwards, or a `scc_required` result naming the account until the constraint is
-granted. PR-CI13-2 (wave W-CI13-2) depends on it and on chain 1 and block 7, and delivers the `chain` verb that
-composes the probe with the runner, the build-and-push job and the digest read-back; its live proof needs the
-test project and Harbor. Per the owner's rule, each pull request is live-tested on its own head from the
-installed candidate before it merges, and a head change invalidates the proof. What each pull request commits
-into the gate follows the owner's answer to open question 2; until then the evidence is attached to the pull
-request. Each pull request leaves the installed command coherent under the existing gates, with the
+PR-CI13-1 (wave W-CI13-1) delivers the run scope (or consumes CI12's, per open question 5), the node selection, the
+probe Job and its script, the result and log read-back, the marker parser, the adapter and the thin main with the
+`probe` verb, the catalogue declaration with its regenerated `tools.json` and result schema, the schema entry in the
+validate workflow per the existing pairing rule, and the routing; its live proof is the probe run from the installed
+candidate on one node of the live cluster with every row present and the Pod exited 0, and the namespace and the Job
+absent afterwards, or a `scc_required` result naming the account until the constraint is granted. PR-CI13-2 (wave
+W-CI13-2) depends on it and on chain 1 and block 7, and delivers the `chain` verb that composes the probe with the
+runner, the build-and-push job and the digest read-back; its live proof needs the test project and Harbor. Per the
+owner's rule, each pull request is live-tested on its own head from the installed candidate before it merges; a change
+under `ci-skills/bin`, `lib` or `schemas` invalidates the proof, because the functional checksum covers those paths,
+while the receipt-only commit after the live run and any documentation or test-only change do not. What each pull
+request commits into the gate follows the owner's answer to open question 2; until then the evidence is attached to
+the pull request. Each pull request leaves the installed command coherent under the existing gates, with the
 unimplemented verb absent from the catalogue rather than stubbed.
 
 ## Gates
@@ -638,12 +667,11 @@ deadline, TTL longer than the deadline plus the read window, digests only, a tag
 live Job's read-back; `R-CI13-003` a terminal-wait test (Complete, Failed, deadline) with the rows read in each case,
 a parser test against fixture logs (all markers, one missing, exit propagation 7 and not 7, remaining containers
 non-empty), a schema test of the sketched DRY_RUN, PASS, PARTIAL and BLOCKED documents against the paired schema, and
-the live rows with the Pod's exit code; `R-CI13-004` a classification test on a Job's `FailedCreate` condition and
-events and, if the bench refuses, the live `scc_required` result; `R-CI13-005` a scope test (names derive from the
-identifier, removal deletes exactly the owned set), a workflow-level interrupt test asserting a rendered `BLOCKED`
-result with the read-back fields, and the live absence read-back, including an interrupted run; `R-CI13-006` the
-catalogue consistency test, the render check and `--describe` without credentials; `R-CI13-007` nothing until chain 1
-and block 7 exist.
+the live rows with the Pod's exit code; `R-CI13-004` a classification test on a Job's creation-failure event and, if
+the bench refuses, the live `scc_required` result; `R-CI13-005` a scope test (names derive from the identifier,
+removal deletes exactly the owned set), a workflow-level interrupt test asserting a rendered `BLOCKED` result with the
+read-back fields, and the live absence read-back, including an interrupted run; `R-CI13-006` the catalogue consistency
+test, the render check and `--describe` without credentials; `R-CI13-007` nothing until chain 1 and block 7 exist.
 
 ## Live Smoke Evidence
 
@@ -651,13 +679,13 @@ Planned, not observed. `probe`: the command run from the installed candidate aga
 agent names, after the cluster administrator grants the constraint per open question 4; evidence is the result's rows
 with the Pod's terminated exit code, the node, the scope identifier, and the namespace and the Job absent afterwards;
 a `scc_required` result is recorded but does not count as this proof. A second run interrupted during the Job proves
-cleanup on interrupt by the same absence read-back. Each receipt is sanitized with the portable writer and carries the
-functional checksum of the installed candidate; where it is committed is open question 2. The chain's evidence
-(runner, job, digest) waits for PR-CI13-2.
+cleanup on interrupt by the same absence read-back. The adapter attaches the functional checksum of the installed
+candidate to each result and the portable writer redacts and copies it into the receipt; where it is committed is open
+question 2. The chain's evidence (runner, job, digest) waits for PR-CI13-2.
 
 ## End-to-End Test
 
-The consumer journey: the agent names a node (or not), runs `probe`, and reads back every row passed with the
+The consumer journey: the agent names a node, runs `probe`, and reads back every row passed with the
 Pod exited 0 and nothing left in the cluster carrying the scope identifier; later, `chain` carries the same node
 through a runner, a build-and-push job and a pushed digest. The proposed test is the probe's live receipt bound to
 the functional checksum, then, after PR-CI13-2, the chain's receipts linked by the same scope identifier; its
