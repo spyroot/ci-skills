@@ -18,6 +18,8 @@ Start with [Install and first run](../README.md#install-and-first-run) to use th
 | [CI08-ROUTING](phases/CI08-ROUTING.md) | routing, lazy loading and compact representation |
 | [CI09-REFERENCE](phases/CI09-REFERENCE.md) | references, tool operations, upstream knowledge and the navigator |
 | [CI11-TOOLS](phases/CI11-TOOLS.md) | the tool catalogue and the port of the source repo's scripts |
+| [CI12-NODE-ONBOARDING](phases/CI12-NODE-ONBOARDING.md) | proposed phase: onboard a host into OpenShift from one machine specification |
+| [Node onboarding ExecPlan](exec-plans/active/ci12-node-onboarding.md) | the executable plan for CI12, milestone by milestone |
 | [GitLab tool belt](gitlab-toolbelt-plan.md) | delivery plan of the GitLab operations tool belt |
 | [Field notes](field-notes.md) | observations from the first deliveries |
 | [Use cases](use-cases.md) | the behaviour we want, use case by use case, in our own words |
