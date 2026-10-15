@@ -32,12 +32,13 @@ with the runner manager deployment planned (block 7; CI11 "Toolbox build, publis
 never reached a runner, and that read-back is block 7's proof → `gitlab_runner.py delete`, exists [24], with
 deployment removal planned.
 
-## 2. OpenShift ignition for a new machine (proposed)
+## 2. OpenShift node from one spec (proposed)
 
-`read machine spec → use pull secret → read spec for ignition → build ignition → verify`
+`read spec → pull secret → ignition → build ISO → serve ISO → boot node → approve CSRs → node Ready`
 
-Goal: produce the Ignition document a new node or VM needs from the cluster's own sources, so the agent never
-assembles it by hand from several `oc` reads.
+Goal: the agent passes one machine specification and the combo carries it to a joined node: the Ignition document
+from the cluster's own sources, a bootable ISO that embeds it, the ISO served where the machine can fetch it, and
+the join completed, so the agent never assembles any of it by hand from several `oc` reads.
 
 - Read machine spec: the target pool's machine objects and their role, image, and network settings.
 - Use pull secret: resolve the pull secret the cluster uses for images; record its name and digest, never its
@@ -48,11 +49,23 @@ assembles it by hand from several `oc` reads.
   into one Ignition document, written to a caller-selected path.
 - Verify: the document validates against the Ignition version it declares, every reference resolves, and the
   result records the document's SHA-256 and size.
+- Build ISO: a node ISO that embeds the Ignition document, built from the release's boot image; record the ISO's
+  SHA-256 and size. Serve ISO: publish it where the machine can fetch it and read back that it is served. Boot
+  node: the machine boots from that ISO; the combo waits for the joiner to appear, since the boot itself happens
+  on the user's hypervisor or hardware.
+- After the machine boots: approve all pending certificate signing requests and read the node back `Ready`. A
+  joining node asks twice, first for its bootstrap credential and then for its serving certificate, so the step
+  runs until no request is pending. Approving CSRs is an OpenShift atomic callback of its own, reusable by any
+  chain that adds a node: the plan lists every pending request by name, the apply approves them, and the
+  read-back shows each as `Approved` and `Issued`; nothing pending is a NO_OP.
 
-Status: proposed as a chain. CI11 plans the machine reads as `ocp_machine.py`; its `harbor_pull_secret.py sync` writes
-a pull secret into the cluster and does not read the one the cluster uses, so that read is still missing. Nothing in
-the skill reads machine configurations or writes Ignition today. Evidence rows: machine spec read, pull secret
-resolved, ignition source read, ignition built, verify passed.
+Status: proposed as a chain. CI11 plans the machine reads as `ocp_machine.py` and the ISO steps as `ocp_iso.py`
+(`rhcos-report`, `rhcos-download`, `rhcos-serve`, `node-build`, `node-serve`, `delete`, with a joiner read-back and
+a caller-selected specification as input); its `harbor_pull_secret.py sync` writes a pull secret into the cluster
+and does not read the one the cluster uses, so that read is still missing. Nothing in the skill reads machine
+configurations, writes Ignition, builds an ISO, or approves certificate requests today. Evidence rows: machine
+spec read, pull secret resolved, ignition source read, ignition built and verified, ISO built, ISO served, node
+joined, requests approved, node Ready, served ISO deleted.
 
 ## 3. Failed pipeline, root cause in one go
 
@@ -142,6 +155,32 @@ Status: proposed. Nothing in the skill reads GPU nodes or the NVIDIA operator to
 through the owner's selector and non-TTY exec from the Cilium checks, Pod records from `ceph_cluster.py`, and
 events from `event_trace.py`. Evidence rows: node inventory read, load read per node, operator state read,
 findings listed, all bound to one digest.
+
+## 11. Can this cluster build images from a GitLab job? (proposed)
+
+`probe podman on a node → runner with the same setup → job builds with podman → push to Harbor → read back digest`
+
+Goal: a user who installed ci-skills asks their agent to prepare CI so the project's container tests, docker
+builds included, run in GitLab jobs on their cluster. The agent proves in one go that podman can run containers on
+a node there, then that a real job can build and push an image, instead of discovering each failure inside a
+pipeline.
+
+- Probe podman on a node: a one-shot privileged Job, pinned to the selected node, runs podman from an image
+  pinned by digest with overlay storage on an emptyDir; inside it an inner container runs, writes a file that is
+  read back through a bind mount, and a second inner container exits 7 so the exit code is seen to propagate;
+  cleanup leaves no container. Every result is a marker line in the Job log, which becomes the evidence rows:
+  host kernel, podman version, storage driver and cgroup version, backing filesystem, inner run, bind-mount
+  read-back, exit propagation, remaining containers, probe exit.
+- Runner on that node: the toolbox-backed runner manager of chain 1 with the same privileged podman setup.
+- GitLab job builds with podman: a job on the test project that builds an image and pushes it to Harbor.
+- Read back digest: `harbor_push.py` style read-back of the pushed image, and the job read-back naming the
+  runner.
+
+Status: proposed. Nothing in the skill runs podman today. Reuse: the temporary Job with cleanup on every exit
+in [`core/kubernetes/runner.py`](../ci-skills/lib/python/core/kubernetes/runner.py) (`PullImage`), and the
+privileged debug Pod handling of the MTU check. On OpenShift a privileged Pod needs the `privileged` security
+context constraint on the namespace's service account; the probe reports that requirement instead of granting
+it. Evidence rows: the probe's marker lines, then the rows of chain 1 for the runner and the job.
 
 ## How to add one
 
