@@ -423,7 +423,7 @@ jobs:
       - uses: actions/download-artifact@v5
         if: always()
         with:
-          pattern: ci-evidence-*
+          pattern: 'ci-evidence-!(${{ github.job }})'
           path: reports
           merge-multiple: true
       - name: Aggregate, publish, and read back the exact result
@@ -431,6 +431,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           STATUS_CONTEXT: ci-skills/required
+          STATUS_READBACK_ATTEMPTS: 5
+          STATUS_READBACK_DELAY_SECONDS: 1
         run: |
           runner_digest=${CI_RUNNER_IMAGE##*@}
           aggregate_status=0
@@ -464,16 +466,28 @@ jobs:
               >/dev/null || status_status=$?
           fi
           if ((status_status == 0)); then
-            curl -fsS \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CI_SOURCE_SHA}/status" \
-              | jq -e --arg context "$STATUS_CONTEXT" --arg state "$state" --arg sha "$CI_SOURCE_SHA" \
-                --arg target_url "$target_url" \
-                '.sha == $sha and (.statuses | map(select(.context == $context))[0] |
-                 .state == $state and .target_url == $target_url)' \
-                >/dev/null || status_status=$?
+            status_status=1
+            for ((attempt = 1; attempt <= STATUS_READBACK_ATTEMPTS; attempt++)); do
+              status_response=$(curl -fsS \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H 'Accept: application/vnd.github+json' \
+                -H 'X-GitHub-Api-Version: 2022-11-28' \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/commits/${CI_SOURCE_SHA}/status") || {
+                status_status=$?
+                break
+              }
+              if jq -e --arg context "$STATUS_CONTEXT" --arg state "$state" \
+                  --arg sha "$CI_SOURCE_SHA" --arg target_url "$target_url" \
+                  '.sha == $sha and (.statuses | map(select(.context == $context))[0] |
+                   .state == $state and .target_url == $target_url)' \
+                  <<<"$status_response" >/dev/null; then
+                status_status=0
+                break
+              fi
+              if ((attempt < STATUS_READBACK_ATTEMPTS)); then
+                sleep "$STATUS_READBACK_DELAY_SECONDS"
+              fi
+            done
           fi
           aggregate_outcome=failure
           status_outcome=failure
