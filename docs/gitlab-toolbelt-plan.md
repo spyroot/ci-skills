@@ -62,14 +62,24 @@ can be attempted; a 401 or 403 is terminal.
 
 ## Delivery blocks
 
-| Block | Agent action | Proof before merge |
-| --- | --- | --- |
-| 1 | `gitlab.access.check` | Exact host, user, target, source |
-| 2 | `milestone.create/update/adjust-time` | GET exact milestone |
-| 3 | `bug.create` | GET exact issue IID |
-| 4 | `wiki.create/update` | GET exact page slug |
-| 5 | `runner.assign` | GET membership for each project |
-| 6 | `runner.create` | GET ID, description, scope; `sink_persisted` |
+Blocks 1 to 6 are delivered. Each has a sanitized live receipt under
+[`tests/acceptance/receipts`](../tests/acceptance/receipts), recorded from the
+installed skill against the user's selected GitLab target, and the
+[evidence index](../tests/acceptance/evidence/README.md) lists every case.
+Block 7 is planned: it pairs runner creation with the action that proves it.
+
+| Block | Agent action | Proof before merge | Receipts |
+| --- | --- | --- | --- |
+| 1 | `gitlab.access.check` | Exact host, user, target, source | `gitlab-access`, `gitlab-access-assignment` |
+| 2 | `milestone.create/update/adjust-time` | GET exact milestone | `milestone-*-applied`, `milestone-*-no_op` |
+| 3 | `bug.create` | GET exact issue IID | `issue-open-bug-applied`, `issue-open-bug-no_op` |
+| 4 | `wiki.create/update` | GET exact page slug | `wiki-*-applied`, `wiki-*-no_op` |
+| 5 | `runner.assign` | GET membership for each project | `runner-assign-applied`, `runner-assign-no_op` |
+| 6 | `runner.create` | GET ID, description, scope; `sink_persisted` | `runner-create-applied` |
+| 7 | `runner.register` + test job (planned) | GET runner `online`; GET job with runner ID and success | none yet |
+
+Runner creation has no `no_op` receipt by design: an existing runner with the
+requested description blocks instead of repeating.
 
 ### 1. Access and packaging
 
@@ -139,13 +149,14 @@ Tags and configuration are not compared. If a known newly created runner fails
 token persistence or read-back, the command attempts to delete that record and
 reports cleanup evidence. An uncertain POST or unresolved runner ID blocks
 further creation until independent reconciliation. The result records
-`sink_persisted`, not manager readiness. Registration and an online job remain
-separate acceptance work.
+`sink_persisted`, not manager readiness. Registration and an online job are
+block 7; the committed create receipt read record 72 back as `never_contacted`
+before cleanup deleted it.
 
 For an uncertain create, a later complete empty list read clears the local
 pending marker and blocks without another POST; a subsequent invocation may
 retry the same plan. An existing runner with the description keeps the marker.
-The operator must inspect the exact runner ID and scope in GitLab, then decide
+The user must inspect the exact runner ID and scope in GitLab, then decide
 whether to remove that record through the GitLab UI. A lost one-time token is
 not recoverable from the record. After authorized removal, one apply clears the
 marker and a further apply can create. This is a manual recovery step, not a
@@ -158,6 +169,39 @@ The suggested API mapping follows GitLab's project
 [runner assignment and creation](https://docs.gitlab.com/api/runners/)
 contracts. The legacy registration-token `POST /runners` route is not the
 creation target.
+
+### 7. Runner registration and test job (planned)
+
+`gitlab_runner.py create` proves that a record exists. The paired proof is a
+runner manager that uses the one-time token and a job that runs on it, and
+the complete combo is proven by one live run that produces six linked
+evidence rows, each consuming the previous step's actual outputs:
+
+| # | Step | Evidence |
+| --- | --- | --- |
+| 1 | Build toolbox | Build succeeds; the declared tools are present and executable |
+| 2 | Push to Harbor | Harbor read-back confirms the published image and its digest |
+| 3 | Create and configure runner | Created runner ID, selected configuration, live read-back `online` |
+| 4 | Execute test job | Pipeline and job IDs, selected ref, and the created runner picked the job up |
+| 5 | Verify results | The job succeeds, uses the published toolbox, and returns the expected tool checks |
+| 6 | Cleanup | Job resources and the runner removed; API read-back verifies the removal |
+
+The report binds all six rows to the same installed functional checksum with
+pointers to their traces. Six separate operations returning success do not
+prove the combo; the linked chain does. Steps 1 and 2 reuse the toolbox and
+Harbor commands. Step 3 reuses the toolbox-backed deployment of
+`create_selfhosted_runner.py` for a GitLab runner manager with the token
+written by `--token-out`, for both runner types the create command produces,
+`project_type` and `group_type`. Step 4 depends on `gitlab_pipeline.py start`
+and `watch` from CI11 (plan, apply, read-back of the new pipeline ID and sha;
+a pipeline that runs a marker job on the test project). Step 5 reads the job
+back with `gitlab_job.py get`, which must name the created runner's numeric
+ID; that read-back is the evidence, not the deployment. Step 6 removes the
+deployment through the toolbox-backed `DeleteRunner` path and the runner
+record through `gitlab_runner.py delete`, which has the APPLIED and NO_OP
+receipts. Configuration the create command does
+not accept today, such as paused, locked, run-untagged, access level, and
+maximum timeout, is a gap this block closes or records.
 
 ## One result contract
 
@@ -193,11 +237,10 @@ nonzero exit status.
 
 ## Gates and proof per block
 
-The GitHub `validate` workflow was the CI route until #27 (`1108cca`)
-deleted it; we decided "no gate for now" (D-GATE,
-`docs/phases/CI03-GATES.md`, G0). Each
-changed block needs exact-head static checks, catalog/manifest/schema
-validation, focused unit tests, and installed-package smoke. The installed
+The GitHub `validate` workflow is the required gate; its exact-head result
+is published as the `ci-skills/required` status. Each changed block needs
+exact-head static checks, catalog/manifest/schema validation, focused unit
+tests, and installed-package smoke, all of which that workflow runs. The installed
 smoke runs all entrypoints from an unrelated directory and checks normal
 JSON/YAML, structured failures, and runtime dependencies. If Bash is added,
 Bash parse, ShellCheck, shfmt, and Bats must execute in that workflow.
@@ -212,16 +255,22 @@ Stages 2–6 also require protected live smoke against a named disposable
 GitLab target, from a named execution host that can reach that instance. A
 sanitized receipt binds the exact skill digest, origin and
 numeric target IDs, effective source and user ID, plan digest, apply result,
-independent GET, repeated no-op, and cleanup. The existing acceptance checker
-requires operation receipt profiles alongside the diagnostic receipt; an
-empty or incomplete profile inventory blocks. Mocked unit tests alone cannot accept stages
+independent GET, repeated no-op, and cleanup. The repository acceptance checker,
+`tools/check_live_acceptance.py`, requires the operation receipts alongside
+the diagnostic receipt, compares each receipt's functional checksum with its
+own calculation for the candidate, and blocks on an empty or incomplete set. Mocked unit tests alone cannot accept stages
 2–6. No production resource is changed merely to satisfy smoke.
 
-## Remaining live acceptance inputs
+## Live acceptance inputs
 
-1. **Token sink for runner creation:** the command takes `--token-out PATH` and
-   saves the one-time token with mode 0600. A live smoke still needs the
-   operator's selected destination and manager-registration owner.
-2. **Live smoke route:** name a disposable project/group and execution host
-   for stages 2–6, then record exact-digest receipts from that host. A saved
-   login does not identify that target or supply an approved mutation route.
+1. **Token sink for runner creation:** closed. The live run supplied
+   `--token-out PATH` on plan and apply; `runner-create-applied.json` records
+   `sink_persisted: true` and a verified read-back of the created record.
+   Registering a runner manager with that token and an online job on the GitLab
+   test project are not covered by any receipt; they are block 7.
+2. **Live smoke route:** closed. The user's `~/.ci-skills/target.toml` selects
+   the GitLab instance; every stage 2–6 operation named a test project with
+   `--project` (project 123, and 124 for assignment), recorded as
+   `target_source` `user;argv:--project`; and every stage 2–6 receipt was
+   captured on one execution host from the installed skill with its exact
+   digest.
