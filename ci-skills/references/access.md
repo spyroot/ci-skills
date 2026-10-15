@@ -25,7 +25,12 @@ One cluster means filling in tier 3 once; many clusters mean tier 1 or tier 2,
 one target per cluster. A set `CI_SKILLS_TARGET` must name an existing file;
 an empty value or missing file blocks without falling back to another target.
 The nonsecret example below shows the target shape;
-include only the providers required by your command. `core.catalog.TARGET_PROTOCOL`
+include only the providers required by your command. Every provider section is
+optional: a target that declares only `[kubernetes]` serves every Kubernetes
+command, and a command that needs an undeclared provider blocks and names the
+authority tables it requires. A live smoke, or live test, reproduces the
+installed user experience: the installed commands run against real systems with
+exactly such a user-written target. `core.catalog.TARGET_PROTOCOL`
 defines target selection, also published in the installed `tools.json`.
 
 `ci-api` uses these three tiers. `ci-binary-build` validates explicit local inputs without selecting a

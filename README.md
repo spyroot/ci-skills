@@ -419,6 +419,17 @@ source. See the installed [access reference](ci-skills/references/access.md#wher
 command exceptions, smoke filename selection and credential resolution, and the
 [project binding](ci-skills/references/project-binding.md) for an existing kubeconfig resolver.
 
+### Live smoke setup
+
+A live smoke, or live test, reproduces the installed user experience: a user clones this repository, installs
+ci-skills into Codex or Claude, puts their configuration in `~/.ci-skills/target.toml` with their own token, and
+uses the commands against their real GitLab, Kubernetes, GitHub, Harbor, or any subset of them. Every provider
+section is optional. A target that
+declares only `[kubernetes]` runs every Kubernetes command; a command that needs a provider the target does not
+declare reports `BLOCKED` and names the authority tables it requires instead of running. The full
+`access_check.py` is the one command that needs the GitHub, GitLab, and Kubernetes tables together. The target file
+is that user's configuration: it never carries this repository's CI, gate, or delivery settings.
+
 ## GitLab operations
 
 For GitLab-only work, the selected target file may contain only `[gitlab]` with its exact `url`. Set `gitlab.project` or
