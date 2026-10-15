@@ -294,3 +294,203 @@ def test_live_acceptance_rejects_mismatched_deployment_readback(
     assert calls
     if mismatch in {"sha", "environment", "report_url", "functional_digest"}:
         assert all(item["method"] != "POST" for item in calls[1:])
+
+
+REQUIRED_REPORT_URL: Final = LIVE_REPORT_URL.replace(
+    "github.example.test", "github.com"
+)
+REQUIRED_STATUS_MAX_ATTEMPTS: Final = 5
+CURL_HTTP_FAILURE_EXIT: Final = 22
+FAKE_REQUIRED_RESULT_TOOLS: Final = r"""
+import json
+import os
+import pathlib
+import sys
+
+name = pathlib.Path(sys.argv[0]).name
+args = sys.argv[1:]
+journal = pathlib.Path(os.environ["FAKE_JOURNAL"])
+if name == "python":
+    assert args[0] == "tools/ci_required_result.py"
+    operation = args[1]
+    entry = {"operation": operation}
+    if operation == "emit":
+        entry["outcomes"] = json.loads(args[args.index("--step-results") + 1])
+    else:
+        assert operation == "aggregate"
+elif name == "sleep":
+    entry = {"operation": "sleep", "args": args}
+else:
+    assert name == "curl"
+    method = args[args.index("-X") + 1] if "-X" in args else "GET"
+    entry = {"operation": method}
+    if method == "POST":
+        entry["body"] = json.loads(args[args.index("-d") + 1])
+with journal.open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps(entry) + "\n")
+if name != "curl" or method != "GET":
+    raise SystemExit(0)
+get_exit_status = int(os.environ["FAKE_GET_EXIT_STATUS"])
+if get_exit_status:
+    raise SystemExit(get_exit_status)
+
+reads = sum(
+    json.loads(line)["operation"] == "GET"
+    for line in journal.read_text().splitlines()
+)
+status = {
+    "context": os.environ["STATUS_CONTEXT"],
+    "state": "success",
+    "target_url": os.environ["FAKE_TARGET_URL"],
+}
+response = {"sha": os.environ["CI_SOURCE_SHA"], "statuses": [status]}
+mismatch = os.environ["FAKE_STATUS_MISMATCH"]
+if reads == 1 and not mismatch:
+    status["state"] = "pending"
+elif mismatch == "sha":
+    response["sha"] = "different"
+elif mismatch:
+    status[mismatch] = "different"
+print(json.dumps(response))
+"""
+
+
+def _run_required_result(
+    fake_bin: Path,
+    call_journal: Path,
+    tmp_path: Path,
+    *,
+    mismatch: str = "",
+    get_exit_status: int = 0,
+) -> tuple[subprocess.CompletedProcess[str], Sequence[JSONObject], int]:
+    """Run the aggregate workflow against deterministic status visibility.
+
+    :param fake_bin: Existing fixture directory for offline command doubles.
+    :param call_journal: Request and emitter journal owned by this test.
+    :param tmp_path: Isolated shell working directory.
+    :param mismatch: Persistent wrong status field, or one initially pending read.
+    :param get_exit_status: Curl GET exit status, including terminal HTTP failures.
+    :returns: Shell outcome, ordered operations, and configured retry bound.
+    """
+    workflow = yaml.safe_load(_workflow_text())
+    step = next(
+        item
+        for item in workflow["jobs"]["required-result"]["steps"]
+        if "ci_required_result.py aggregate" in str(item.get("run", ""))
+    )
+    for tool in ("python", "curl", "sleep"):
+        install_executable(
+            fake_bin, tool, f"#!{sys.executable}\n{FAKE_REQUIRED_RESULT_TOOLS}"
+        )
+    environment = {
+        **os.environ,
+        **{key: str(value) for key, value in step["env"].items()},
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(tmp_path),
+        "GH_TOKEN": "offline-test-token",
+        "GITHUB_REPOSITORY": "unit/repo",
+        "GITHUB_RUN_ID": LIVE_REPORT_URL.rsplit("/", 1)[1],
+        "CI_SOURCE_SHA": LIVE_SHA,
+        "CI_RUNNER_IMAGE": f"unit/image@sha256:{LIVE_DIGEST}",
+        "FAKE_JOURNAL": str(call_journal),
+        "FAKE_TARGET_URL": REQUIRED_REPORT_URL,
+        "FAKE_STATUS_MISMATCH": mismatch,
+        "FAKE_GET_EXIT_STATUS": str(get_exit_status),
+    }
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    attempts = int(step["env"].get("STATUS_READBACK_ATTEMPTS", 1))
+    return result, read_journal(call_journal), attempts
+
+
+@pytest.mark.parametrize("mismatch", ("", "sha", "context", "state", "target_url"))
+def test_required_result_retries_readback_without_republishing(
+    fake_bin: Path, call_journal: Path, tmp_path: Path, mismatch: str
+) -> None:
+    """Wait for visibility while rejecting persistent wrong commit or status.
+
+    :param fake_bin: Isolated command-double directory.
+    :param call_journal: Per-test operation journal.
+    :param tmp_path: Isolated working directory.
+    :param mismatch: Wrong field retained through every read, or initial delay only.
+    """
+    result, calls, attempts = _run_required_result(
+        fake_bin, call_journal, tmp_path, mismatch=mismatch
+    )
+    assert 0 < attempts <= REQUIRED_STATUS_MAX_ATTEMPTS
+    operations = [item["operation"] for item in calls]
+    assert operations.count("POST") == 1
+    post = next(item["body"] for item in calls if item["operation"] == "POST")
+    assert post == {
+        "state": "success",
+        "context": "ci-skills/required",
+        "description": "Required CI passed",
+        "target_url": REQUIRED_REPORT_URL,
+    }
+    if mismatch:
+        assert result.returncode != 0
+        assert operations.count("GET") == attempts
+        assert operations.count("sleep") == attempts - 1
+    else:
+        assert result.returncode == 0, result.stderr
+        assert operations == ["aggregate", "POST", "GET", "sleep", "GET", "emit"]
+    assert calls[-1] == {
+        "operation": "emit",
+        "outcomes": {
+            "aggregate": "success",
+            "status": "failure" if mismatch else "success",
+        },
+    }
+
+
+def test_required_result_http_error_stops_readback_without_retry(
+    fake_bin: Path, call_journal: Path, tmp_path: Path
+) -> None:
+    """Curl HTTP failures stop immediately and preserve failed status evidence.
+
+    :param fake_bin: Isolated command-double directory.
+    :param call_journal: Per-test operation journal.
+    :param tmp_path: Isolated working directory.
+    """
+    result, calls, _attempts = _run_required_result(
+        fake_bin, call_journal, tmp_path, get_exit_status=CURL_HTTP_FAILURE_EXIT
+    )
+
+    assert result.returncode != 0
+    assert [item["operation"] for item in calls] == ["aggregate", "POST", "GET", "emit"]
+    assert calls[-1] == {
+        "operation": "emit",
+        "outcomes": {"aggregate": "success", "status": "failure"},
+    }
+
+
+def test_required_result_download_excludes_its_previous_artifact() -> None:
+    """Keep producer selection dynamic while excluding the reporting job itself."""
+    workflow = yaml.safe_load(_workflow_text())
+    job = workflow["jobs"]["required-result"]
+    downloads = [
+        step["with"]
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/download-artifact@")
+    ]
+    assert downloads == [
+        {
+            "pattern": "ci-evidence-!(${{ github.job }})",
+            "path": "reports",
+            "merge-multiple": True,
+        }
+    ]
+    for producer in job["needs"]:
+        uploads = [
+            step["with"]["name"]
+            for step in workflow["jobs"][producer]["steps"]
+            if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        ]
+        assert uploads == [f"ci-evidence-{producer}"]
