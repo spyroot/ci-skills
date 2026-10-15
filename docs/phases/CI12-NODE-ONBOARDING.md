@@ -17,8 +17,8 @@ document plans only from the authority that does exist:
 - the owner's directions of 2026-10-15 on run-scoped names and agent-chosen locations, on CI12 checking the
   generated ISO against the specification with the supported tooling for the selected image, on the certificate
   approval and the node join being the one part of the chain that cannot be tested live (it needs a real host to
-  join), so the test reads the pending requests live and mocks the approval and the join on the existing GitHub
-  test path, and on adding no new gate and no separate plan; all recorded with their dates in the
+  join), so CSR handling and joining are mocked in GitHub tests without a required live pending-request read,
+  and on adding no new gate and no separate plan; all recorded with their dates in the
   [ExecPlan's Decision Log](../exec-plans/active/ci12-node-onboarding.md#decision-log); the catalogue does not yet
   carry them, so the Decision Log is the cited authority for `R-CI12-004` and `R-CI12-008`;
 - the project motivation in [`README.md`](../../README.md#motivation): one combo instead of many hand-rolled
@@ -181,10 +181,10 @@ document plans only from the authority that does exist:
         evidence: [Exact head SHA, validate run URL, every job green, ci-skills/required SUCCESS, the new schemas listed in the metaschema step per the existing pairing rule, tools.json regenerated from the catalogue source]
       - id: G-CI12-LIVE
         requirementIds: [R-CI12-001, R-CI12-002, R-CI12-003, R-CI12-004, R-CI12-005, R-CI12-006, R-CI12-007, R-CI12-008]
-        command: The build apply, the verify, the remove apply and the join live plan under "Invocation and the result the agent reads", each with --receipt-out, run from the installed candidate against the live cluster; dry runs write no receipt
-        environment: The user's live smoke setup against the live cluster for build, verify and remove; for join, a read-only live plan over the pending requests, since the approval and the node join need a real host and are mocked by the owner's decision
+        command: The build apply, the verify and the remove apply under "Invocation and the result the agent reads", each with --receipt-out, run from the installed candidate against the live cluster; dry runs write no receipt
+        environment: The user's live smoke setup against the live cluster for build, verify and remove; CSR handling and join are the sole live exception and are mocked in GitHub tests by the owner's decision
         enforcement: Proposed; the live run precedes the merge and its receipts are attached to the pull request; whether and how those receipts are committed into the gate is open question 2 in "Open Decisions and Scope Boundary", because the checker today accepts only its declared GitLab kinds and rejects any other receipt in a declared directory
-        evidence: [One receipt per verb and result action, each row's read-back (ISO digest and size from the ISO directory, the per-field match of the ISO against the specification, the pending requests read live by the join plan), the mocked approval and node read-back from the unit tests marked as such, the run identifier shared by the build and join receipts, the functional checksum of the installed candidate]
+        evidence: [One receipt per live verb and result action, each row's read-back (ISO digest and size from the ISO directory, the per-field match of the ISO against the specification, scope removal), the mocked CSR and join cases from GitHub tests marked as such, the run identifier shared by the live receipts, the functional checksum of the installed candidate]
       - id: G-CI12-GATE
         requirementIds: [R-CI12-007]
         command: python tools/check_live_acceptance.py --root . --json
@@ -370,11 +370,11 @@ reads only, which for `join` is a read of the pending requests matching the sele
 GitLab access callback uses, returning `PLANNED` with the pending-request rows and no approval; an apply runs
 `K8SAuth`, then `ConfirmOnboardOperation` (re-verifies the target against the plan, as `ConfirmGitLabOperation`
 does), then the verb's sequence. The mode-by-option table: `--dry-run` refuses `--receipt-out`, `--output-dir`
-and `--log-file`; `--live-plan` accepts `--receipt-out` for this command, because the join plan is the mocked
-join's only live evidence by the owner's decision, which is where this adapter's receipt policy differs from the
-GitLab adapter's; an apply accepts all of them. The mode rules are not copied again: `prepare()` calls one shared
-validator, `core/action_modes.py`, which carries one canonical reason per rule and a per-adapter policy naming
-the adapter's read operations and which options need a live run; the GitLab adapter switches to it in the same
+and `--log-file`; `--live-plan` accepts `--receipt-out` for this command, which is where this adapter's receipt
+policy differs from the GitLab adapter's; an apply accepts all of them. The mode rules are not copied again:
+`prepare()` calls one shared validator, `core/action_modes.py`, which carries one canonical reason per rule and a
+per-adapter policy naming the adapter's read operations and which options need a live run; the GitLab adapter
+switches to it in the same
 pull request (the CI13 proposal names the same validator; whichever merges first delivers it). `execute()` runs
 the executor inside the recoverable-signal guard and renders the shared report; a signal exit raised by the
 guard after cleanup is converted at the boundary into a `BLOCKED` result with reason `interrupted`, the absence
@@ -548,8 +548,8 @@ The agent then tells the user what to mount (`served_url`) and waits for the boo
       "summary": { "record_count": <count>, "error_count": 0 }, "errors": [], "captured_at": "<time>"
     }
 
-A rerun of `join` against the joined node returns `status: PASS`, `result_action: NO_OP`, `mutated: false`. In
-the live test, by the owner's decision, `join` runs as a live plan only:
+A rerun of `join` against the joined node returns `status: PASS`, `result_action: NO_OP`, `mutated: false`.
+Production `join --live-plan` remains available; it is mocked for acceptance:
 
     conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" join --run-id <run identifier> --spec <SPEC> \
       --live-plan --json --receipt-out <RECEIPT>
@@ -592,7 +592,7 @@ identifier. The standalone check needs no cluster and no credentials:
 
 Two slices, because they have independent reasons to change and independent proofs: `build` (reads and the ISO,
 with `remove` as its recovery) is provable with nothing but the cluster and an ISO directory; `join` needs a host
-that boots. Each is one pull request with its own live proof.
+that boots. Each is one pull request with live ISO proof or GitHub mocked CSR/join coverage, respectively.
 
 #### When to Introduce Abstraction
 
@@ -653,18 +653,17 @@ owner decides; the document records the options and the finding that raised each
 2. How this command's live evidence enters the gate. Facts: the checker accepts only its declared GitLab kinds
    and rejects any other receipt in a declared directory; it fails on a missing required operation; every
    committed receipt turns red when anything under `ci-skills/bin`, `lib` or `schemas` changes, so each of these
-   pull requests triggers the README rerun of the whole set; by the owner's decision the join is never applied
-   live in the test, so its only live receipt is the read-only `PLANNED` one over the pending requests. The
-   owner's follow-up of 2026-10-15 directs the existing GitHub test and check path with no new gate and no
-   separate plan, so a separate receipt directory with its own freshness policy is withdrawn. What remains open:
+   pull requests triggers the README rerun of the whole set; CSR handling and join are mocked in GitHub tests
+   by the owner's decision, with no required live pending-request read. The owner's follow-up of 2026-10-15 directs
+   the existing GitHub test and check path with no new gate and no separate plan, so a separate receipt directory
+   with its own freshness policy is withdrawn. What remains open:
    whether this command's receipts are committed into the existing gate, which needs the checker to accept the
    kind (a validator, a kubernetes setup context and required operations for `build` `APPLIED`, `verify`,
-   `remove` and `join` `PLANNED`), or stay attached to the pull request only. Until answered, the pull requests
+   `remove`), or stay attached to the pull request only. Until answered, the pull requests
    attach their live evidence and commit no receipt under a declared directory.
 3. Which receipts prove the chain for the six-row model: the build receipt with the ISO read-back and its
-   per-field match, the verify and remove receipts, and the join plan receipt with the pending requests, linked
-   by the run identifier, plus the mocked approval and node rows from the unit tests marked as mocked, are the
-   proposal.
+   per-field match, the verify and remove receipts linked by the run identifier, plus the mocked CSR and join
+   rows from GitHub tests marked as mocked, are the proposal.
 4. The local gate's schema selector matches only `schemas/*.json`, so the existing pairing rule cannot cover the
    two new schemas without widening it to `ci-skills/schemas/`, which also starts checking the existing result
    schemas locally. Raised by the review of the pairing claim.
@@ -704,10 +703,8 @@ Decided as mechanism inside the library, recorded so no step hides a choice:
 - The host's boot is the user's action; automating the management controller is out of scope for this phase.
 - The live-ISO alternative (a hand-built Ignition document installed from the stock live ISO) is out of scope; no
   planned verb exists for it.
-- Approval and join are mocked, by the owner's decision of 2026-10-15: they need a real host to join, the one
-  thing the bench cannot supply on demand, so the live test runs `join --live-plan` to read the pending requests
-  and the approval loop and the node join are exercised by unit tests with a simulated two-request sequence; the
-  production `join` is unchanged, only its proof is.
+- CSR handling and join are mocked in GitHub tests, by the owner's decision of 2026-10-15: they need a real host
+  to join. No live pending-request read is required; production `join --live-plan` remains available.
 - Post-join CI preparation (labels and taints from the specification, then verification) is a separate proposal:
   chain 2 ends at the served ISO's removal and no recorded authority carries the preparation step, so it is
   UNGROUNDED here and gets its own requirement when the owner records it.
@@ -724,10 +721,9 @@ entries in the validate workflow per the existing pairing rule, and the routing;
 the installed candidate with the ISO read back from the ISO directory, checked field by field against the
 specification, and the scope removed afterwards. PR-CI12-2 (wave W-CI12-2) depends on it for the state fields, the run
 scope and the scope to remove, and delivers the `join` verb: the joiner wait, certificate approval and node state
-compared with the specification, with the result schema extended for the join fields; its live proof is the read-only
-`join --live-plan` over the pending requests, because the approval and the join need a real host and are mocked by the
-owner's decision. Per the owner's rule, each pull request is live-tested on its own head from the installed candidate
-before it merges; a change under `ci-skills/bin`, `lib` or `schemas` invalidates the proof, because the functional
+compared with the specification, with the result schema extended for the join fields; CSR handling and join are
+mocked in GitHub tests by the owner's decision. Per the owner's rule, applicable live proof comes from the installed
+candidate before merge; a change under `ci-skills/bin`, `lib` or `schemas` invalidates the proof, because the functional
 checksum covers those paths, while a documentation or test-only change does not. What each pull request commits into
 the gate follows the owner's answer to open question 2; until then the evidence is attached to the pull request. Each
 pull request leaves the installed command coherent under the existing gates, with the unimplemented verb absent from
@@ -738,8 +734,8 @@ the catalogue rather than stubbed.
 The traceability map in `Authority` is the canonical map. `G-CI12-STATIC` is the existing validate workflow and the
 local pre-commit gate; its enforcement is the main ruleset's required `ci-skills/required` status with the strict
 up-to-date policy, read back from the repository's branch rules on 2026-10-15. `G-CI12-LIVE` is the live run of each
-slice from the installed candidate on the user's live smoke setup, with one receipt per verb and result action, where
-the join's live run is its read-only plan and the approval and join are mocked; it is proposed, its evidence is
+ISO slice from the installed candidate on the user's live smoke setup, with one receipt per live verb and result
+action; CSR handling and join are mocked in GitHub tests as the sole live exception. It is proposed, its evidence is
 attached to the pull request, and whether its receipts enter the committed gate is open question 2. `G-CI12-GATE` is
 the existing live-acceptance step, unchanged by this phase until that question is answered.
 
@@ -750,9 +746,9 @@ stream digest and the Secret's name and digest and no value; `R-CI12-003` the IS
 serving URL; `R-CI12-004` a scope test (names derive from the identifier, `from_id` reproduces them, removal deletes
 exactly the owned set including the cluster-scoped objects) and nothing carrying the identifier after `join` or
 `remove`; `R-CI12-005` an approval-loop test against a simulated two-request sequence, a foreign signer and an expired
-deadline (the approval is never run live), and the live plan's pending-request rows; `R-CI12-006` the mocked joiner
-and the mocked node read-back with hostname and role matching the specification, and the live plan over the pending
-requests; `R-CI12-007` the catalogue consistency test, the render check and `--describe` without credentials;
+deadline (the approval is never run live), and mocked live-plan pending-request rows; `R-CI12-006` the mocked joiner
+and the mocked node read-back with hostname and role matching the specification; `R-CI12-007` the catalogue
+consistency test, the render check and `--describe` without credentials;
 `R-CI12-008` a test that builds a known configuration into a fixture ISO and asserts the comparison reports a changed
 hostname and a changed hardware address as drift, and the live build's per-field match rows.
 
@@ -761,10 +757,10 @@ hostname and a changed hardware address as drift, and the live build's per-field
 Planned, not observed. `build`: the command run from the installed candidate against the live cluster with a
 specification the agent passes and an ISO directory it chooses; evidence is the result's rows plus the ISO's digest
 and size read back from that directory, its per-field match against the specification, and the run identifier.
-`verify`: the fetched ISO checked against the specification; `remove`: nothing left carrying the identifier. `join`:
-`--live-plan` from the installed candidate reads the pending requests and returns `PLANNED` carrying the same run
-identifier; the approval and the node join are not run live, by the owner's decision, because they need a real host to
-join, and their rows come from the unit tests with a simulated two-request sequence, marked as mocked in the evidence.
+`verify`: the fetched ISO checked against the specification; `remove`: nothing left carrying the identifier. CSR
+handling and `join` are not run live, by the owner's decision, because they need a real host to join. Their rows come
+from GitHub mocked tests with a simulated two-request sequence and an already Ready repeat, marked as mocked in the
+evidence; no live pending-request read is required.
 Each receipt is sanitized with the portable writer and carries the functional checksum of the installed candidate;
 where it is committed is open question 2.
 
@@ -773,6 +769,6 @@ where it is committed is open question 2.
 The consumer journey: the agent passes a specification and an ISO directory, runs `build`, hands the returned run
 identifier to `join` after the user boots the host, and the final read-back is an ISO that matched the specification
 field by field, then a Ready node with the declared hostname and role and no resource left carrying the identifier.
-The proposed test is the live `build`, `verify` and `remove` receipts and the live `join` plan, linked by the same run
-identifier and the same checksum, with the approval and the join mocked by the owner's decision; its acceptance gate
-is `G-CI12-LIVE`. No execution is recorded yet.
+The proposed test combines live `build`, `verify` and `remove` receipts, linked by the run identifier and functional
+checksum, with GitHub mocked CSR/join tests under the owner's sole live exception. Its acceptance route is
+`G-CI12-LIVE` with the mocked cases in `G-CI12-STATIC`. No execution is recorded yet.

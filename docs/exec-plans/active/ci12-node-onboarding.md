@@ -33,8 +33,8 @@ checksum.
 - [ ] Milestone 2, code: joiner wait, certificate approval, node state compared with the specification, the
       `join` verb, the result schema extended for the join fields.
 - [ ] Milestone 2, gates: unit tests.
-- [ ] Milestone 2, proof: live `join --live-plan` over the pending requests carrying the build's run identifier,
-      attached to the pull request; the approval and the join mocked in the unit tests.
+- [ ] Milestone 2, proof: CSR handling and join mocked in GitHub tests, including the two-request approval
+      sequence and an already Ready repeat; attach the test evidence to the pull request.
 - [ ] Open question 1 (command surface) answered by the owner.
 - [ ] Open question 2 (gate wiring for this command's receipts) answered by the owner; the committed receipts, if
       any, follow that answer.
@@ -61,11 +61,11 @@ workload, if any, needs cluster API access and the least role that works.
 - 2026-10-15, the owner's direction: CI12 includes checking that the generated ISO carries the specification it
   was built from, as the last step of `build` and as a standalone `verify` verb, and the joined node's hostname
   and role are compared with the specification on `join`. The live-test report follows the existing pattern:
-  every verb runs from the installed candidate with `--receipt-out`, the receipt is the report, and its rows are
+  every live verb runs from the installed candidate with `--receipt-out`, the receipt is the report, and its rows are
   the evidence linked by the run identifier.
 - 2026-10-15, the owner's direction: the certificate approval and the node join cannot be tested live, because
-  they need a real host to join; that is the only part of CI12 not proven live. The test reads the pending
-  requests live (`join --live-plan`) and mocks the approval and the join with a simulated two-request sequence.
+  they need a real host to join; that is the only part of CI12 not proven live. CSR handling and join are mocked
+  in GitHub tests with a simulated two-request sequence; no live pending-request read is required.
 - 2026-10-15, mechanism, from the fourth review: the join live plan is a defined mode, `K8SAuth` plus a read of the
   pending requests by selector, with `--receipt-out` accepted on it as this adapter's policy; the mode rules are one
   shared validator in `core/action_modes.py`, not a copy of the GitLab adapter's; `build`'s generated identifier
@@ -186,13 +186,12 @@ receipts.
 
 Goal: after the user boots the host from the served ISO, the agent passes the run identifier and the same
 specification and gets a Ready node and an empty scope. Work: the joiner wait, the approval loop, the node read-back,
-the verb, the result-schema extension and tests, then the read-only live plan. Result: `ocp_node_onboard.py join
+the verb, the result-schema extension and GitHub mocked tests. Result: `ocp_node_onboard.py join
 --run-id <id> --spec <SPEC>` approves exactly the requests its selector matches, reads the node Ready with the
 hostname and role the specification declares, removes the whole scope with absence read-back, and is `NO_OP` when the
-node is already Ready and nothing is pending. Proof: the approval-loop tests with a simulated two-request sequence
-(the approval and the join are mocked by the owner's decision, since they need a real host), the validate workflow
-green on the exact head, and the live `join --live-plan` result over the pending requests carrying the build's run
-identifier, attached to the pull request.
+node is already Ready and nothing is pending. Proof: GitHub mocked tests of the two-request approval sequence and
+an already Ready repeat with no pending CSR, plus the validate workflow green on the exact head. CSR handling and
+joining are the owner's sole live exception; attach the mocked test evidence to the pull request.
 
 ## Concrete Steps
 
@@ -222,11 +221,10 @@ live step is its receipt, produced the same way as every other live run in this 
 installed command, sanitized by the portable writer, bound to the functional checksum, with the rows that prove the
 outcome quoted in the pull request body.
 
-Milestone 2 follows the same sequence up to the live run, which is read-only by the owner's decision: `join
---run-id <id> --spec <SPEC> --live-plan --json --receipt-out <RECEIPT>` from the installed candidate expects
-`PLANNED` with the pending requests listed, the selector shown and no approval; the `APPLIED` and `NO_OP` paths
-are exercised only by the unit tests with a simulated two-request sequence, because the approval and the join
-need a real host. The plan result is attached to the pull request with the mocked rows marked as mocked.
+Milestone 2 uses GitHub mocked tests for CSR handling and join, including `--live-plan`, the two-request approval
+sequence, and `NO_OP` when the node is already Ready with no pending request. The test evidence is attached to the
+pull request and marked as mocked. Production `join --live-plan` remains available; no live pending-request read is
+required for acceptance.
 
 ## Validation and Acceptance
 
@@ -254,9 +252,8 @@ simulated two-request sequence (client, then serving after approval, then issued
 a foreign signer, an expired deadline, the no-Node-before-client-approval ordering, and the already-Ready path that
 makes a repeated `join` `NO_OP`, all on the existing GitHub test path; when those mocked runs show the joiner request,
 the approved requests by name and signer, the node Ready with the declared hostname and role, and nothing carrying the
-identifier; and when the live `join --live-plan` result shows the pending requests read from the cluster. The approval
-and the join are the one part of this plan proven by mock, by the owner's decision. A green build alone demonstrates
-nothing; the live results and the mocked approval tests do.
+identifier. CSR handling and join are the sole mocked live exception, by the owner's decision. A green build alone
+demonstrates nothing; the live ISO results and GitHub mocked join tests do.
 
 ## Idempotence and Recovery
 
@@ -278,13 +275,14 @@ names and signers in the result are the audit trail. Nothing else carries the id
 
 ## Artifacts and Notes
 
-Evidence for each milestone is the live results attached to the pull request (sanitized receipts written with
-`--receipt-out`), the validate run URL on the exact head, and, once open question 2 is answered, whatever the owner
-decides is committed into the gate. The pull request body carries the chain's evidence rows in the six-row style, one
+Evidence is the live ISO results (sanitized receipts written with `--receipt-out`) and GitHub mocked CSR/join tests
+attached to the pull request, the validate run URL on the exact head, and, once open question 2 is answered, whatever
+the owner decides is committed into the gate. The pull request body carries the chain's evidence rows in the
+six-row style, one
 row per live step, each pointing at its receipt and all linked by the run identifier and the functional checksum: read
-the specification and the pool, build the ISO, check the ISO against the specification, serve it, read the pending
-requests live, approve the join (mocked), the node Ready with the declared hostname and role (mocked), remove the
-scope; the two mocked rows say so and point at their tests instead of a receipt. Keep the excerpts to the rows that
+the specification and the pool, build the ISO, check the ISO against the specification, serve it, read and approve
+CSRs (mocked), the node Ready with the declared hostname and role (mocked), remove the scope; the mocked rows say so
+and point at their GitHub tests instead of a live receipt. Keep the excerpts to the rows that
 prove the outcome: ISO digest and size, the per-field match, run identifier, joiner request, approved request names,
 node condition, and the role the first live run pinned for the scope.
 
