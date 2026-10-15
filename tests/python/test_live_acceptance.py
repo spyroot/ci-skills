@@ -880,13 +880,12 @@ def test_gate_never_reads_repository_merge_policy_from_the_skill_target() -> Non
     :returns: None; assertions in the body validate the boundary.
     """
     setup = _access_setup()
-    receipts = _complete_receipts(setup)
     access = setup["access.json"]
     del access["surfaces"]["github"]
     del access["targets"]["github"]
     del access["credential_sources"]["github"]
 
-    without_github = _evaluate(setup, receipts)
+    without_github = _evaluate(setup, _complete_receipts(setup))
 
     assert without_github["status"] == "PASS", without_github["problems"]
     assert not [
@@ -902,7 +901,7 @@ def test_gate_never_reads_repository_merge_policy_from_the_skill_target() -> Non
         "details": {"required_checks": []},
     }
 
-    with_publication_fields = _evaluate(setup, receipts)
+    with_publication_fields = _evaluate(setup, _complete_receipts(setup))
 
     assert with_publication_fields["status"] == "PASS", with_publication_fields[
         "problems"
