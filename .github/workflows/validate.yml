@@ -15,6 +15,7 @@ permissions:
   actions: read
   contents: read
   statuses: write
+  deployments: write
 
 # One run per source commit: a scheduled or dispatched run must not interleave
 # its ci-skills/required status writes with a push run on the same SHA.
@@ -195,12 +196,50 @@ jobs:
         env:
           BASE_SHA: ${{ steps.static.outputs.base }}
         run: git diff --check "$BASE_SHA" HEAD
-      - name: Evaluate committed live-acceptance receipts against the candidate
+      - name: Evaluate and publish committed live-acceptance evidence
         id: live_acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIVE_ENVIRONMENT: live-acceptance
+          REPORT_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           mkdir -p reports/raw
           python tools/check_live_acceptance.py --root . --json \
             | tee reports/raw/live-acceptance.json
+
+          github_api() {
+            local route="$1"
+            shift
+            curl -fsS \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/${route}" "$@"
+          }
+          # CI remains independently required; waiting for it here would be circular.
+          body=$(jq -n --arg ref "$CI_SOURCE_SHA" --arg environment "$LIVE_ENVIRONMENT" \
+            --arg report_url "$REPORT_URL" --slurpfile report reports/raw/live-acceptance.json \
+            '{ref: $ref, environment: $environment, auto_merge: false,
+              required_contexts: [], production_environment: false,
+              description: "Verified installed-skill live evidence",
+              payload: {report_url: $report_url, functional_digest: $report[0].functional_digest}}')
+          deployment=$(github_api deployments --request POST --data "$body")
+          deployment_id=$(jq -er '.id | select(type == "number")' <<<"$deployment")
+          github_api "deployments/$deployment_id" \
+            | jq -e --arg sha "$CI_SOURCE_SHA" --arg environment "$LIVE_ENVIRONMENT" \
+              --arg report_url "$REPORT_URL" --slurpfile report reports/raw/live-acceptance.json \
+              '.sha == $sha and .environment == $environment and .payload.report_url == $report_url
+                and .payload.functional_digest == $report[0].functional_digest' \
+              >/dev/null
+
+          body=$(jq -n --arg url "$REPORT_URL" \
+            '{state: "success", log_url: $url, environment_url: $url, auto_inactive: false,
+              description: "Live evidence matches the candidate functional checksum"}')
+          github_api "deployments/$deployment_id/statuses" --request POST --data "$body" >/dev/null
+          github_api "deployments/$deployment_id/statuses" \
+            | jq -e --arg url "$REPORT_URL" \
+              '.[0] | .state == "success" and .log_url == $url and .environment_url == $url' \
+              >/dev/null
       - name: Emit validate evidence
         if: always()
         env:

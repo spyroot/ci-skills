@@ -7,10 +7,25 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-from typing import Final
+import os
+import subprocess
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Final
 
+import pytest
 import yaml
-from conftest import REPO_ROOT, load_module, selected_test_paths
+from conftest import (
+    REPO_ROOT,
+    install_executable,
+    load_module,
+    read_journal,
+    selected_test_paths,
+)
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject
 
 WORKFLOW: Final = REPO_ROOT / ".github" / "workflows" / "validate.yml"
 ACCEPTANCE: Final = load_module(
@@ -97,3 +112,185 @@ def test_validate_workflow_schedules_the_declared_freshness_check() -> None:
     concurrency = workflow["concurrency"]
     assert concurrency["cancel-in-progress"] is False
     assert "github.sha" in concurrency["group"]
+
+
+LIVE_SHA: Final = "a" * 40
+LIVE_DIGEST: Final = "b" * 64
+LIVE_REPORT_URL: Final = "https://github.example.test/unit/repo/actions/runs/19"
+FAKE_PUBLICATION_TOOLS: Final = r"""
+import json
+import os
+import pathlib
+import sys
+
+if pathlib.Path(sys.argv[0]).name == "python":
+    assert sys.argv[1:] == ["tools/check_live_acceptance.py", "--root", ".", "--json"]
+    print(json.dumps({
+        "status": os.environ["FAKE_ACCEPTANCE_STATUS"],
+        "functional_digest": os.environ["FAKE_DIGEST"],
+    }))
+    raise SystemExit(0 if os.environ["FAKE_ACCEPTANCE_STATUS"] == "PASS" else 1)
+
+args = sys.argv[1:]
+url = next(arg for arg in args if arg.startswith("https://"))
+route = url.split("/repos/unit/repo/", 1)[1]
+method = args[args.index("--request") + 1] if "--request" in args else "GET"
+body = json.loads(args[args.index("--data") + 1]) if "--data" in args else {}
+with pathlib.Path(os.environ["FAKE_JOURNAL"]).open("a", encoding="utf-8") as stream:
+    stream.write(json.dumps({"method": method, "route": route, "body": body}) + "\n")
+
+mismatch = os.environ["FAKE_READBACK_MISMATCH"]
+if route == "deployments" and method == "POST":
+    response = {"id": 71}
+elif route == "deployments/71" and method == "GET":
+    response = {
+        "sha": os.environ["CI_SOURCE_SHA"],
+        "environment": os.environ["LIVE_ENVIRONMENT"],
+        "payload": {
+            "report_url": os.environ["REPORT_URL"],
+            "functional_digest": os.environ["FAKE_DIGEST"],
+        },
+    }
+    if mismatch in {"sha", "environment"}:
+        response[mismatch] = "different"
+    elif mismatch == "report_url":
+        response["payload"]["report_url"] = "https://example.test/different"
+    elif mismatch == "functional_digest":
+        response["payload"]["functional_digest"] = "different"
+elif route == "deployments/71/statuses":
+    response = {
+        "state": "success",
+        "log_url": os.environ["REPORT_URL"],
+        "environment_url": os.environ["REPORT_URL"],
+    }
+    if mismatch in response:
+        response[mismatch] = "different"
+    if method == "GET":
+        response = [response]
+else:
+    raise SystemExit(98)
+print(json.dumps(response))
+"""
+
+
+def _run_live_publication(
+    fake_bin: Path,
+    call_journal: Path,
+    tmp_path: Path,
+    *,
+    checker_status: str = "PASS",
+    mismatch: str = "",
+) -> tuple[subprocess.CompletedProcess[str], Sequence[JSONObject]]:
+    """Execute workflow Bash with only checker and HTTP transport replaced.
+
+    :param fake_bin: Fixture directory receiving offline command doubles.
+    :param call_journal: Sanitized request journal owned by this test.
+    :param tmp_path: Isolated workspace containing the generated report.
+    :param checker_status: Receipt evaluator outcome and matching exit status.
+    :param mismatch: Read-back field deliberately changed by the transport.
+    :returns: Shell result and the recorded HTTP requests in execution order.
+    """
+    workflow = yaml.safe_load(_workflow_text())
+    step = next(
+        item
+        for item in workflow["jobs"]["validate"]["steps"]
+        if item.get("id") == "live_acceptance"
+    )
+    for tool in ("python", "curl"):
+        install_executable(
+            fake_bin, tool, f"#!{sys.executable}\n{FAKE_PUBLICATION_TOOLS}"
+        )
+    environment = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(tmp_path),
+        "GH_TOKEN": "offline-test-token",
+        "GITHUB_API_URL": "https://api.github.example.test",
+        "GITHUB_REPOSITORY": "unit/repo",
+        "CI_SOURCE_SHA": LIVE_SHA,
+        "LIVE_ENVIRONMENT": step.get("env", {}).get("LIVE_ENVIRONMENT", ""),
+        "REPORT_URL": LIVE_REPORT_URL,
+        "FAKE_JOURNAL": str(call_journal),
+        "FAKE_ACCEPTANCE_STATUS": checker_status,
+        "FAKE_DIGEST": LIVE_DIGEST,
+        "FAKE_READBACK_MISMATCH": mismatch,
+    }
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result, read_journal(call_journal)
+
+
+def test_live_acceptance_publishes_verified_candidate_and_report(
+    fake_bin: Path, call_journal: Path, tmp_path: Path
+) -> None:
+    """Publish success only after candidate and report read-back agree."""
+    result, calls = _run_live_publication(fake_bin, call_journal, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert [(item["method"], item["route"]) for item in calls] == [
+        ("POST", "deployments"),
+        ("GET", "deployments/71"),
+        ("POST", "deployments/71/statuses"),
+        ("GET", "deployments/71/statuses"),
+    ]
+    deployment = calls[0]["body"]
+    assert isinstance(deployment, dict)
+    assert deployment["ref"] == LIVE_SHA
+    assert deployment["environment"] == "live-acceptance"
+    assert deployment["auto_merge"] is False
+    assert deployment["required_contexts"] == []
+    assert deployment["production_environment"] is False
+    assert deployment["payload"] == {
+        "report_url": LIVE_REPORT_URL,
+        "functional_digest": LIVE_DIGEST,
+    }
+    status = calls[2]["body"]
+    assert isinstance(status, dict)
+    assert status["state"] == "success"
+    assert status["auto_inactive"] is False
+    assert status["log_url"] == status["environment_url"] == LIVE_REPORT_URL
+
+
+def test_failed_live_acceptance_makes_no_deployment_requests(
+    fake_bin: Path, call_journal: Path, tmp_path: Path
+) -> None:
+    """A failed receipt evaluation stops before any deployment mutation."""
+    result, calls = _run_live_publication(
+        fake_bin, call_journal, tmp_path, checker_status="BLOCKED"
+    )
+
+    assert result.returncode != 0
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    (
+        "sha",
+        "environment",
+        "report_url",
+        "functional_digest",
+        "state",
+        "log_url",
+        "environment_url",
+    ),
+)
+def test_live_acceptance_rejects_mismatched_deployment_readback(
+    fake_bin: Path, call_journal: Path, tmp_path: Path, mismatch: str
+) -> None:
+    """Reject stale or unrelated deployment/status evidence from the API."""
+    result, calls = _run_live_publication(
+        fake_bin, call_journal, tmp_path, mismatch=mismatch
+    )
+
+    assert result.returncode != 0
+    assert calls
+    if mismatch in {"sha", "environment", "report_url", "functional_digest"}:
+        assert all(item["method"] != "POST" for item in calls[1:])
