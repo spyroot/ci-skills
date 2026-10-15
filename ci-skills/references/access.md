@@ -204,6 +204,9 @@ Cluster-wide list reads carry their own bound, `core.collection.LIST_TIMEOUT_SEC
 
 The `validate` workflow checks package layout, all installed entrypoints from
 an unrelated working directory, workflow/YAML and Markdown syntax, diff
-hygiene, secret scanning, Ruff lint and format, and mocked behavior. CI proves
-code behavior at its tested commit. The per-host live receipt proves actual
-access and resource reads on that host.
+hygiene, secret scanning, Ruff lint and format, and mocked behavior. It also
+evaluates the committed live receipts against the candidate's functional
+checksum, the required operation set, and the freshness window declared in the
+repository's `inventory/ci/live-acceptance.json`, on every run and on the
+declared schedule. CI proves code behavior at its tested commit. The per-host
+live receipt proves actual access and resource reads on that host.

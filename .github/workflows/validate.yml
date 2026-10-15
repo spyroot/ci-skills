@@ -4,11 +4,23 @@ name: validate
   pull_request:
   push:
     branches: [main]
+  # The cron below is declared in inventory/ci/live-acceptance.json; the policy
+  # test keeps the two in step. A scheduled run re-evaluates the committed
+  # live-acceptance receipts on main so stale receipts surface before a PR.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   actions: read
   contents: read
   statuses: write
+
+# One run per source commit: a scheduled or dispatched run must not interleave
+# its ci-skills/required status writes with a push run on the same SHA.
+concurrency:
+  group: validate-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -91,6 +103,7 @@ jobs:
           if [[ -z "$base_sha" || "$base_sha" =~ ^0+$ ]]; then
             base_sha="$(git rev-parse HEAD^)"
           fi
+          printf 'base=%s\n' "$base_sha" >>"$GITHUB_OUTPUT"
           scripts/ci/static.sh --base "$base_sha"
       - name: Check reStructuredText API docstrings
         id: style
@@ -109,7 +122,8 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_api.py \
             ci-skills/lib/python/core/catalog.py \
             ci-skills/lib/python/core/report.py \
-            ci-skills/bin/gitlab_runner.py
+            ci-skills/bin/gitlab_runner.py \
+            tools/check_live_acceptance.py
           pydoclint --style=sphinx --skip-checking-short-docstrings=False \
             --arg-type-hints-in-docstring=False --check-return-types=False \
             --allow-init-docstring=True \
@@ -126,6 +140,7 @@ jobs:
           check-jsonschema --check-metaschema \
             schemas/ci-result.schema.json \
             schemas/smoke-result.schema.json \
+            schemas/live-acceptance-policy.schema.json \
             ci-skills/schemas/results/gitlab-action.schema.json \
             ci-skills/schemas/results/gitlab-job-list.schema.json \
             ci-skills/schemas/results/toolbox-workflow.schema.json \
@@ -134,6 +149,8 @@ jobs:
             ci-skills/schemas/results/gitlab-runner-delete.schema.json
           check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             tests/acceptance/runner-tag/*.json
+          check-jsonschema --schemafile schemas/live-acceptance-policy.schema.json \
+            inventory/ci/live-acceptance.json
           if compgen -G 'tests/acceptance/runner-lifecycle/*-get.json' >/dev/null; then
             check-jsonschema --schemafile ci-skills/schemas/results/gitlab-runner-read.schema.json \
               tests/acceptance/runner-lifecycle/*-get.json
@@ -176,8 +193,14 @@ jobs:
       - name: Check patch whitespace
         id: whitespace
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ steps.static.outputs.base }}
         run: git diff --check "$BASE_SHA" HEAD
+      - name: Evaluate committed live-acceptance receipts against the candidate
+        id: live_acceptance
+        run: |
+          mkdir -p reports/raw
+          python tools/check_live_acceptance.py --root . --json \
+            | tee reports/raw/live-acceptance.json
       - name: Emit validate evidence
         if: always()
         env:
@@ -186,7 +209,8 @@ jobs:
             "style":"${{ steps.style.outcome }}","schema":"${{ steps.schema.outcome }}",
             "unit":"${{ steps.unit.outcome }}","bats":"${{ steps.bats.outcome }}",
             "acceptance":"${{ steps.acceptance.outcome }}",
-            "whitespace":"${{ steps.whitespace.outcome }}"}
+            "whitespace":"${{ steps.whitespace.outcome }}",
+            "live_acceptance":"${{ steps.live_acceptance.outcome }}"}
         run: |
           runner_digest=${CI_RUNNER_IMAGE##*@}
           python tools/ci_required_result.py emit \

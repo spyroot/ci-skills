@@ -7,10 +7,20 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-import yaml
-from conftest import REPO_ROOT, selected_test_paths
+from typing import Final
 
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
+import yaml
+from conftest import REPO_ROOT, load_module, selected_test_paths
+
+WORKFLOW: Final = REPO_ROOT / ".github" / "workflows" / "validate.yml"
+ACCEPTANCE: Final = load_module(
+    "workflow_policy_check_live_acceptance",
+    REPO_ROOT / "tools" / "check_live_acceptance.py",
+)
+POLICY: Final = ACCEPTANCE.load_policy(
+    REPO_ROOT / ACCEPTANCE.POLICY_FILE, REPO_ROOT / ACCEPTANCE.POLICY_SCHEMA_FILE
+)
+CHECKER_COMMAND: Final = "python tools/check_live_acceptance.py --root . --json"
 
 
 def _workflow_text() -> str:
@@ -54,4 +64,36 @@ def test_acceptance_evaluator_is_offline_and_unconditional() -> None:
     assert "if" not in step
     assert step.get("continue-on-error") in (None, False)
     assert "|| true" not in str(step.get("run"))
-    assert "python tools/check_live_acceptance.py" not in _workflow_text()
+
+
+def test_validate_workflow_evaluates_committed_receipts_unconditionally() -> None:
+    """GitHub runs the committed-receipt checker as one unconditional step."""
+    workflow = yaml.safe_load(_workflow_text())
+    steps = workflow["jobs"]["validate"]["steps"]
+
+    matching = [step for step in steps if CHECKER_COMMAND in str(step.get("run", ""))]
+    assert len(matching) == 1, "exactly one committed-receipt evaluation must run"
+    step = matching[0]
+    assert step.get("id") == "live_acceptance"
+    assert "if" not in step
+    assert step.get("continue-on-error") in (None, False)
+    assert "|| true" not in str(step.get("run"))
+    named = [step.get("id") for step in steps if step.get("id")]
+    assert named.index("live_acceptance") > named.index("whitespace"), (
+        "the live-acceptance step runs after every other check step"
+    )
+
+
+def test_validate_workflow_schedules_the_declared_freshness_check() -> None:
+    """The workflow's schedule matches the tracked live-acceptance policy."""
+    workflow = yaml.safe_load(_workflow_text())
+    triggers = workflow["on"]
+
+    assert POLICY["scheduled_workflow"] == ".github/workflows/validate.yml"
+    assert [entry["cron"] for entry in triggers["schedule"]] == [
+        POLICY["scheduled_cron"]
+    ]
+    assert "workflow_dispatch" in triggers
+    concurrency = workflow["concurrency"]
+    assert concurrency["cancel-in-progress"] is False
+    assert "github.sha" in concurrency["group"]

@@ -8,6 +8,8 @@ a different authenticated setup, or produced by different code.
 
 The candidate check compares the recorded functional checksum with ``bin/``,
 ``lib/``, and ``schemas/`` using the installed skill's shared implementation.
+The receipt directories and the freshness window are declared once in the
+tracked ``inventory/ci/live-acceptance.json`` policy; nothing here hardcodes them.
 The whole-package checksum remains evidence of the original installed package;
 documentation-only changes may alter that checksum without changing runtime
 behavior. The receipt keeps its original source revision and package identity.
@@ -32,6 +34,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Optional, TypeAlias, TypedDict
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError, ValidationError
+
 SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
 runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
 
@@ -43,6 +48,8 @@ from lib.python.core.json_types import (
     json_string,
     json_strings,
 )
+from lib.python.core.logging import add_log_arguments, log_event
+from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
 ReceiptPairKey: TypeAlias = tuple[str, str, str, str, str, int, str]
@@ -58,6 +65,8 @@ class AcceptanceResult(TypedDict, total=False):
     :param functional_digest: Candidate runtime and schema digest used for acceptance.
     :param accepted: Sorted names of accepted setup and operation receipts.
     :param problems: Sorted classified acceptance failures, or a loading diagnostic.
+    :param policy: Declared policy values, present only in a dry run.
+    :param receipts: Sorted receipt names that would be evaluated, dry run only.
 
     .. attribute :: schema_version
         :type: str
@@ -93,6 +102,16 @@ class AcceptanceResult(TypedDict, total=False):
         :type: Sequence[str]
 
         Sorted classified acceptance failures, or a loading diagnostic.
+
+    .. attribute :: policy
+        :type: AcceptancePolicy
+
+        Declared policy values, present only in a dry run.
+
+    .. attribute :: receipts
+        :type: Sequence[str]
+
+        Sorted receipt names that would be evaluated, dry run only.
     """
 
     schema_version: str
@@ -102,19 +121,24 @@ class AcceptanceResult(TypedDict, total=False):
     functional_digest: str
     accepted: Sequence[str]
     problems: Sequence[str]
+    policy: AcceptancePolicy
+    receipts: Sequence[str]
 
 
-SCHEMA_VERSION = "1.0"
-RECEIPT_KIND = "access_check"
-GITLAB_RECEIPT_KINDS = {
-    "gitlab_access",
-    "gitlab_milestone",
-    "gitlab_issue",
-    "gitlab_wiki",
-    "gitlab_runner",
-}
-# Preserve the existing acceptance window and operation coverage in one place.
-MAX_RECEIPT_AGE_DAYS: Final = 30
+SCHEMA_VERSION: Final = "1.0"
+RECEIPT_KIND: Final = "access_check"
+GITLAB_RECEIPT_KINDS: Final = frozenset(
+    {
+        "gitlab_access",
+        "gitlab_milestone",
+        "gitlab_issue",
+        "gitlab_wiki",
+        "gitlab_runner",
+    }
+)
+# The acceptance window and receipt locations come from the tracked policy file.
+POLICY_FILE: Final = Path("inventory") / "ci" / "live-acceptance.json"
+POLICY_SCHEMA_FILE: Final = Path("schemas") / "live-acceptance-policy.schema.json"
 REQUIRED_LIVE_CHECKS: Final = (
     "storage_report",
     "event_trace",
@@ -122,8 +146,9 @@ REQUIRED_LIVE_CHECKS: Final = (
     "ceph_cluster",
     "gitlab_job",
 )
-SETUP_RECEIPT_KINDS: Final = {RECEIPT_KIND, "gitlab_access"}
-REPEATABLE_GITLAB_OPERATIONS = (
+SETUP_RECEIPT_KINDS: Final = frozenset({RECEIPT_KIND, "gitlab_access"})
+GATE_SURFACES: Final = ("gitlab", "kubernetes")
+REPEATABLE_GITLAB_OPERATIONS: Final = (
     ("gitlab_milestone", "create"),
     ("gitlab_milestone", "update"),
     ("gitlab_milestone", "adjust-time"),
@@ -133,15 +158,15 @@ REPEATABLE_GITLAB_OPERATIONS = (
     ("gitlab_runner", "assign"),
     ("gitlab_runner", "tag"),
 )
-READ_ONLY_GITLAB_OPERATIONS = (
+READ_ONLY_GITLAB_OPERATIONS: Final = (
     ("gitlab_runner", "get"),
     ("gitlab_runner", "list"),
 )
-RUNNER_DELETE_OPERATIONS = (
+RUNNER_DELETE_OPERATIONS: Final = (
     ("gitlab_runner", "delete", "APPLIED"),
     ("gitlab_runner", "delete", "NO_OP"),
 )
-REQUIRED_GITLAB_OPERATIONS = (
+REQUIRED_GITLAB_OPERATIONS: Final = frozenset(
     {
         ("gitlab_access", None, None),
         ("gitlab_runner", "create", "APPLIED"),
@@ -154,15 +179,107 @@ REQUIRED_GITLAB_OPERATIONS = (
     }
     | {(kind, operation, None) for kind, operation in READ_ONLY_GITLAB_OPERATIONS}
 )
-DEFAULT_RECEIPT_DIRECTORIES = (
-    "receipts",
-    "runner-tag",
-    "runner-lifecycle",
-)
 
 
 class AcceptanceError(RuntimeError):
     """Acceptance inputs could not be read."""
+
+
+class AcceptancePolicy(TypedDict):
+    """Declared receipt locations and freshness window for live acceptance.
+
+    :param max_receipt_age_days: Whole days after which a receipt is stale.
+    :param receipt_directories: Repository-relative directories holding receipts.
+    :param historical_directory: Repository-relative directory never evaluated.
+    :param scheduled_workflow: Workflow that re-evaluates receipts on a schedule.
+    :param scheduled_cron: Cron expression declared for that workflow.
+    :param rerun_procedure: Document anchor describing how receipts are refreshed.
+
+    .. attribute :: max_receipt_age_days
+        :type: int
+
+        Whole days after which a receipt is stale.
+
+    .. attribute :: receipt_directories
+        :type: Sequence[str]
+
+        Repository-relative directories holding receipts.
+
+    .. attribute :: historical_directory
+        :type: str
+
+        Repository-relative directory never evaluated.
+
+    .. attribute :: scheduled_workflow
+        :type: str
+
+        Workflow that re-evaluates receipts on a schedule.
+
+    .. attribute :: scheduled_cron
+        :type: str
+
+        Cron expression declared for that workflow.
+
+    .. attribute :: rerun_procedure
+        :type: str
+
+        Document anchor describing how receipts are refreshed.
+    """
+
+    max_receipt_age_days: int
+    receipt_directories: Sequence[str]
+    historical_directory: str
+    scheduled_workflow: str
+    scheduled_cron: str
+    rerun_procedure: str
+
+
+def load_policy(path: Path, schema_path: Path) -> AcceptancePolicy:
+    """Read the tracked live-acceptance policy and validate it against its schema.
+
+    The JSON Schema owns every field rule; this loader adds only the relation the
+    schema cannot express, that the historical directory is never evaluated.
+
+    :param path: Policy file selected by the caller or the repository default.
+    :param schema_path: Schema file that defines the policy document.
+    :returns: Validated freshness window, receipt directories, and schedule.
+    :raises AcceptanceError: If the policy or schema is missing or unreadable (each
+        failure names its own file), the schema is invalid, the policy violates the
+        schema, or the historical directory is also a receipt directory.
+    """
+    if not path.is_file():
+        raise AcceptanceError(f"policy_missing:{path}")
+    if not schema_path.is_file():
+        raise AcceptanceError(f"policy_schema_missing:{schema_path}")
+    try:
+        document = response_decoder().decode(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:
+        raise AcceptanceError(f"policy_unreadable:{path}") from exc
+    try:
+        schema = response_decoder().decode(schema_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:
+        raise AcceptanceError(f"policy_schema_unreadable:{schema_path}") from exc
+    try:
+        Draft202012Validator.check_schema(schema)
+        Draft202012Validator(schema).validate(document)
+    except SchemaError as exc:
+        raise AcceptanceError(f"policy_schema_invalid:{schema_path}") from exc
+    except ValidationError as exc:
+        location = ".".join(str(part) for part in exc.absolute_path) or "keys"
+        raise AcceptanceError(f"policy_invalid:{location}") from exc
+    receipt_directories = [str(item) for item in document["receiptDirectories"]]
+    historical = str(document["historicalDirectory"])
+    if historical in receipt_directories:
+        raise AcceptanceError("policy_invalid:historicalDirectory")
+    scheduled = document["scheduledCheck"]
+    return {
+        "max_receipt_age_days": int(document["maxReceiptAgeDays"]),
+        "receipt_directories": receipt_directories,
+        "historical_directory": historical,
+        "scheduled_workflow": str(scheduled["workflow"]),
+        "scheduled_cron": str(scheduled["cron"]),
+        "rerun_procedure": str(document["rerunProcedure"]),
+    }
 
 
 def _mapping(value: JSONValue) -> JSONObject:
@@ -201,17 +318,15 @@ def _load_receipts(directory: Path) -> Mapping[str, JSONObject]:
 def _load_receipt_dirs(paths: Sequence[Path]) -> Mapping[str, JSONObject]:
     """Load committed acceptance receipts from one or more directories.
 
-    :param paths: Candidate receipt directories in priority order.
+    :param paths: Declared receipt directories in priority order.
     :returns: Mapping of unique file names to parsed receipt objects.
-    :raises AcceptanceError: If a required directory is unreadable, a receipt
-        is malformed, or two directories contain the same receipt name.
+    :raises AcceptanceError: If a declared directory is absent or unreadable, a
+        receipt is malformed, or two directories contain the same receipt name.
     """
     receipts: MutableMapping[str, JSONObject] = {}
-    for index, directory in enumerate(paths):
-        if not directory.exists():
-            if index == 0:
-                raise AcceptanceError(f"receipt_directory_missing:{directory}")
-            continue
+    for directory in paths:
+        if not directory.is_dir():
+            raise AcceptanceError(f"receipt_directory_missing:{directory}")
         for name, receipt in _load_receipts(directory).items():
             if name in receipts:
                 raise AcceptanceError(f"receipt_duplicate:{name}")
@@ -330,26 +445,28 @@ def _check_receipt(
     receipt: JSONObject,
     digest: str,
     now: datetime,
+    max_age_days: int,
 ) -> MutableSequence[str]:
-    """Validate the initial publication access receipt and live read-backs.
+    """Validate the initial full live access receipt and its live read-backs.
+
+    The gate binds GitLab and Kubernetes proof to the candidate runtime. It does
+    not read this repository's branch protection: the GitHub surface of the
+    receipt is tolerated but never required, because repository merge policy
+    lives in GitHub and the workflow, not in the skill's target file.
 
     :param name: Receipt file name prefixed to each reported problem.
-    :param receipt: Parsed publication access receipt to inspect.
+    :param receipt: Parsed full live access receipt to inspect.
     :param digest: Expected functional digest of the candidate runtime and schemas.
     :param now: Reference time used for receipt freshness.
+    :param max_age_days: Maximum accepted receipt age in whole days.
     :returns: Mutable problem list for missing identity, target, or live proof.
-    :raises ImportError: If the shared command-authority catalogue cannot be loaded.
     :raises TypeError: If a nested readback has an incompatible type or now is naive
         while receipt timestamps are timezone-aware.
     :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
-    """  # noqa: DOC502 - Shared validators and catalogue import propagate failures.
-    from lib.python.core.catalog import DEFAULT_AUTHORITIES
-
-    problems = _check_common(name, receipt, digest, now, MAX_RECEIPT_AGE_DAYS)
+    """  # noqa: DOC502 - Shared validators propagate failures.
+    problems = _check_common(name, receipt, digest, now, max_age_days)
     if receipt.get("kind") != RECEIPT_KIND:
         problems.append(f"{name}:kind_unexpected")
-    if receipt.get("publication") is not True:
-        problems.append(f"{name}:not_a_publication_receipt")
     revision = _mapping(_mapping(receipt.get("skill")).get("revision"))
     tested_revision = receipt.get("tested_revision")
     if (
@@ -365,7 +482,7 @@ def _check_receipt(
     surfaces = _mapping(receipt.get("surfaces"))
     sources = _mapping(receipt.get("credential_sources"))
     targets = _mapping(receipt.get("targets"))
-    for surface in DEFAULT_AUTHORITIES:
+    for surface in GATE_SURFACES:
         observed = _mapping(surfaces.get(surface))
         if not observed.get("identity"):
             problems.append(f"{name}:identity_missing:{surface}")
@@ -418,11 +535,6 @@ def _check_receipt(
         problems.append(f"{name}:ceph_namespace_missing")
     if receipt.get("blocking_live_checks"):
         problems.append(f"{name}:live_checks_blocking")
-    github = _mapping(surfaces.get("github"))
-    if "required_checks_read" not in json_strings(
-        github.get("observed_capability") or []
-    ) or not _mapping(github.get("details")).get("required_checks"):
-        problems.append(f"{name}:required_checks_readback_missing")
     return problems
 
 
@@ -470,6 +582,7 @@ def _check_gitlab_receipt(
     required: JSONObject,
     digest: str,
     now: datetime,
+    max_age_days: int,
 ) -> MutableSequence[str]:
     """Validate one GitLab receipt against selected access and operation proof.
 
@@ -478,13 +591,14 @@ def _check_gitlab_receipt(
     :param required: Expected host, credential, target, kind, and operation fields.
     :param digest: Expected functional digest of the candidate runtime and schemas.
     :param now: Reference time used for receipt freshness.
+    :param max_age_days: Maximum accepted receipt age in whole days.
     :returns: Mutable problem list for context or read-back mismatch.
     :raises KeyError: If the required context lacks its kind field.
     :raises TypeError: If nested evidence has an incompatible type or now is naive
         while receipt timestamps are timezone-aware.
     :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
     """  # noqa: DOC502 - Context indexing and shared validators propagate failures.
-    problems = _check_common(name, receipt, digest, now, MAX_RECEIPT_AGE_DAYS)
+    problems = _check_common(name, receipt, digest, now, max_age_days)
     kind = required["kind"]
     if kind not in GITLAB_RECEIPT_KINDS or receipt.get("kind") != kind:
         problems.append(f"{name}:kind_unexpected")
@@ -540,7 +654,7 @@ def _check_gitlab_receipt(
         kind == "gitlab_runner"
         and required.get("operation") == "create"
         and required.get("result_action") == "APPLIED"
-        and not _runner_smoke_cleanup_verified(receipt, required, now)
+        and not _runner_smoke_cleanup_verified(receipt, required, now, max_age_days)
     ):
         problems.append(f"{name}:runner_smoke_cleanup_unproven")
     if (
@@ -647,12 +761,14 @@ def _runner_smoke_cleanup_verified(
     receipt: JSONObject,
     required: JSONObject,
     now: datetime,
+    max_age_days: int,
 ) -> bool:
     """Verify a disposable runner's deletion and independent absence read-back.
 
     :param receipt: Runner creation receipt containing smoke cleanup evidence.
     :param required: Expected project target identity from setup access.
     :param now: Reference time bounding cleanup receipt freshness.
+    :param max_age_days: Maximum accepted cleanup receipt age in whole days.
     :returns: True only when the exact created runner is absent afterward.
     :raises TypeError: If now is naive while receipt timestamps are timezone-aware.
     """  # noqa: DOC502 - Datetime comparisons reject mixed timezone awareness.
@@ -684,7 +800,7 @@ def _runner_smoke_cleanup_verified(
         or captured is None
         or created is None
         or not created <= captured <= now
-        or (now - captured).days > MAX_RECEIPT_AGE_DAYS
+        or (now - captured).days > max_age_days
         or not isinstance(before, dict)
         or before.get("id") != runner_id
         or not isinstance(deletion, dict)
@@ -748,13 +864,15 @@ class AcceptanceReview:
         receipts: Mapping[str, JSONObject],
         skill_root: Path,
         now: datetime,
-    ):
+        max_age_days: int,
+    ) -> None:
         """Retain receipt views and initialize candidate-bound evaluation state.
 
         :param setup: Existing access receipts captured before writes, keyed by name.
         :param receipts: Setup and operation receipt objects keyed by unique name.
         :param skill_root: Candidate skill tree whose current bytes are fingerprinted.
         :param now: Timezone-aware reference time for receipt freshness.
+        :param max_age_days: Declared maximum receipt age in whole days.
         :raises ImportError: If shared provenance code cannot be loaded.
         :raises OSError: If a candidate skill source file cannot be read.
         :raises ValueError: If the candidate source tree cannot be fingerprinted.
@@ -765,37 +883,41 @@ class AcceptanceReview:
         self.receipts = receipts
         self.skill_root = skill_root
         self.now = now
+        self.max_age_days = max_age_days
         self.digest = tree_digest(skill_root)["digest"]
         self.functional_digest = functional_digest(skill_root)
         self.problems: MutableSequence[str] = []
         self.accepted: MutableSequence[str] = []
         self.contexts: MutableSequence[JSONObject] = []
-        self.publication_hosts: set[str] = set()
+        self.access_hosts: set[str] = set()
         self.observed_operations: set[OperationKey] = set()
         self.matched_operations: MutableMapping[
             ReceiptPairKey, MutableMapping[str, tuple[str, JSONObject]]
         ] = {}
 
     def setup_receipts(self) -> None:
-        """Require publication proof and retain each accepted GitLab access context.
+        """Require the full live access receipt and retain each GitLab access context.
 
-        :raises ImportError: If the shared command-authority catalogue cannot be loaded.
         :raises RecursionError: If receipt containers exceed recursive redaction limits.
-        """  # noqa: DOC502 - Receipt helpers propagate import and recursion failures.
+        """  # noqa: DOC502 - Receipt helpers propagate recursion failures.
         for name, receipt in self.setup.items():
             kind = receipt.get("kind")
             try:
                 if kind == RECEIPT_KIND:
                     found = _check_receipt(
-                        name, receipt, self.functional_digest, self.now
+                        name,
+                        receipt,
+                        self.functional_digest,
+                        self.now,
+                        self.max_age_days,
                     )
                     host = receipt.get("execution_host")
                     if not isinstance(host, str):
                         found.append(f"{name}:receipt_invalid_shape")
-                    elif host in self.publication_hosts:
+                    elif host in self.access_hosts:
                         found.append(f"{name}:receipt_ambiguous")
                     if isinstance(host, str):
-                        self.publication_hosts.add(host)
+                        self.access_hosts.add(host)
                 elif kind == "gitlab_access":
                     context = _gitlab_context(receipt)
                     found = _check_gitlab_receipt(
@@ -804,6 +926,7 @@ class AcceptanceReview:
                         {**context, "kind": kind},
                         self.functional_digest,
                         self.now,
+                        self.max_age_days,
                     )
                     if (
                         any(not value for value in context.values())
@@ -873,7 +996,12 @@ class AcceptanceReview:
             }
             try:
                 found = _check_gitlab_receipt(
-                    name, receipt, required, self.functional_digest, self.now
+                    name,
+                    receipt,
+                    required,
+                    self.functional_digest,
+                    self.now,
+                    self.max_age_days,
                 )
                 found.extend(
                     f"{name}:{reason}" for reason in _check_source_revision(receipt)
@@ -938,7 +1066,7 @@ class AcceptanceReview:
         return {
             "schema_version": SCHEMA_VERSION,
             "kind": "live_acceptance",
-            "status": "PASS" if not self.problems else "BLOCKED",
+            "status": PASS if not self.problems else BLOCKED,
             "skill_digest": self.digest,
             "functional_digest": self.functional_digest,
             "accepted": sorted(self.accepted),
@@ -951,6 +1079,8 @@ def evaluate(
     receipts: Mapping[str, JSONObject],
     skill_root: Path,
     now: Optional[datetime] = None,
+    *,
+    max_age_days: int,
 ) -> AcceptanceResult:
     """Compare action receipts with the initial authenticated runtime setup.
 
@@ -958,8 +1088,9 @@ def evaluate(
     :param receipts: Parsed operation and setup receipts keyed by file name.
     :param skill_root: Candidate skill tree used for digest comparison.
     :param now: Reference time for freshness, or None to read the current UTC time.
+    :param max_age_days: Declared maximum receipt age from the acceptance policy.
     :returns: Acceptance status, accepted receipts, and stable problem reasons.
-    :raises ImportError: If shared provenance or authority modules cannot be loaded.
+    :raises ImportError: If the shared provenance module cannot be loaded.
     :raises OSError: If a candidate source file cannot be read for its digest.
     :raises ValueError: If the candidate skill tree cannot be fingerprinted.
     :raises RecursionError: If receipt containers exceed recursive redaction limits.
@@ -969,6 +1100,7 @@ def evaluate(
         receipts,
         skill_root,
         now if now is not None else datetime.now(UTC),
+        max_age_days,
     )
     review.setup_receipts()
     review.operation_receipts()
@@ -979,7 +1111,7 @@ def evaluate(
 def main() -> int:
     """Evaluate committed live receipts and render the selected output format.
 
-    :returns: Zero for accepted evidence, or two for blocked acceptance.
+    :returns: Zero for accepted evidence or a dry run, or two for blocked acceptance.
     :raises SystemExit: If arguments are invalid or help is requested.
     :raises ImportError: If required shared modules or requested YAML support are absent.
     :raises OSError: If final output cannot be written.
@@ -992,48 +1124,72 @@ def main() -> int:
     )
     cli.add_argument("--root", required=True, metavar="PATH", help="repository root")
     cli.add_argument(
+        "--policy",
+        metavar="PATH",
+        help=f"acceptance policy file (default: <root>/{POLICY_FILE.as_posix()})",
+    )
+    cli.add_argument(
         "--receipts",
         metavar="PATH",
-        help="one receipt directory (default: all configured acceptance directories)",
+        help="one receipt directory (default: the directories the policy declares)",
     )
     cli.add_argument(
         "--skill",
         metavar="PATH",
         help="skill root (default: <root>/ci-skills)",
     )
+    cli.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list the policy and the receipts that would be evaluated, then exit",
+    )
     modes = cli.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print JSON")
     modes.add_argument("--yaml", action="store_true", help="print YAML")
+    add_log_arguments(cli)
     args = cli.parse_args()
 
     root = Path(args.root).resolve()
-    receipts_paths = (
-        [Path(args.receipts)]
-        if args.receipts
-        else [
-            root / "tests" / "acceptance" / directory
-            for directory in DEFAULT_RECEIPT_DIRECTORIES
-        ]
-    )
     skill_path = Path(args.skill) if args.skill else root / "ci-skills"
     _redactor()
     try:
+        policy = load_policy(
+            Path(args.policy) if args.policy else root / POLICY_FILE,
+            root / POLICY_SCHEMA_FILE,
+        )
+        receipts_paths = (
+            [Path(args.receipts)]
+            if args.receipts
+            else [root / directory for directory in policy["receipt_directories"]]
+        )
         receipts = _load_receipt_dirs(receipts_paths)
         setup = {
             name: receipt
             for name, receipt in receipts.items()
             if receipt.get("kind") in SETUP_RECEIPT_KINDS
         }
-        data = evaluate(
-            setup,
-            receipts,
-            skill_path,
-        )
+        if args.dry_run:
+            data = {
+                "schema_version": SCHEMA_VERSION,
+                "kind": "live_acceptance",
+                "status": DRY_RUN,
+                "policy": dict(policy),
+                "receipts": sorted(receipts),
+                "accepted": [],
+                "problems": [],
+            }
+        else:
+            data = evaluate(
+                setup,
+                receipts,
+                skill_path,
+                max_age_days=policy["max_receipt_age_days"],
+            )
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {
             "schema_version": SCHEMA_VERSION,
             "kind": "live_acceptance",
-            "status": "BLOCKED",
+            "status": BLOCKED,
             "accepted": [],
             "problems": [str(exc)],
         }
@@ -1046,11 +1202,20 @@ def main() -> int:
         print(yaml.safe_dump(data, sort_keys=True), end="")
     else:
         print(f"Live acceptance: {data['status']}")
+        if data["status"] == DRY_RUN:
+            policy = data["policy"]
+            print(f"  window    {policy['max_receipt_age_days']} days")
+            for directory in policy["receipt_directories"]:
+                print(f"  directory {directory}")
+            for name in data["receipts"]:
+                print(f"  receipt   {name}")
         for name in data["accepted"]:
             print(f"  accepted {name}")
         for problem in data["problems"]:
             print(f"  problem  {problem}")
-    return 0 if data["status"] == "PASS" else 2
+    status = json_string(data["status"])
+    log_event(args, "live_acceptance", "result", status, persist=not args.dry_run)
+    return exit_code(status)
 
 
 if __name__ == "__main__":
