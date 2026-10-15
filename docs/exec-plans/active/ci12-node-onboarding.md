@@ -66,6 +66,24 @@ workload, if any, needs cluster API access and the least role that works.
 - 2026-10-15, the owner's direction: the certificate approval and the node join cannot be tested live, because
   they need a real host to join; that is the only part of CI12 not proven live. The test reads the pending
   requests live (`join --live-plan`) and mocks the approval and the join with a simulated two-request sequence.
+- 2026-10-15, mechanism, from the fourth review: the join live plan is a defined mode, `K8SAuth` plus a read of the
+  pending requests by selector, with `--receipt-out` accepted on it as this adapter's policy; the mode rules are one
+  shared validator in `core/action_modes.py`, not a copy of the GitLab adapter's; `build`'s generated identifier
+  is outside its digest and the caller-supplied `--run-id` of `join` and `remove` is inside theirs; the JSON the
+  agent reads is the existing envelope exactly (`summary` an object of counts, `errors` entries of `source` and
+  `reason`, `plan_digest` bare hex); on drift the ISO check completes with `PARTIAL` and the scope is kept; an
+  interrupt is converted at the adapter boundary into a rendered `BLOCKED` result; the existing receipt set is
+  refreshed on each pull request head; how the embedded configuration is extracted locally is open question 7.
+- 2026-10-15, the owner's follow-up recorded in the queue: build from the agent-supplied specification; inspect the
+  generated ISO's embedded configuration with the supported tooling for the selected image and compare the
+  declared hostname, network and hardware address, install device and the other supported fields with the
+  embedded values, since existence, size and checksum alone prove nothing; expected values come from the runtime
+  specification, never from the bench; verify serving, fetch and cleanup live; keep live ISO proof distinct from
+  the mocked approval and join, which is the only live exception; use the existing GitHub test and check path,
+  with no new gate and no separate plan. Mechanism from the same note: the approval loop lives in one bounded
+  `run`, since the executor runs each hook once; a repeated `join` takes an already-Ready path to `NO_OP`; only
+  the generated build identifier is outside the plan digest; a documentation or test-only head change does not
+  invalidate functional proof.
 - 2026-10-15: the ISO is built inside the cluster, because a workstation build cannot reach the host's network and
   streams gigabytes over a slow tunnel.
 - 2026-10-15: the certificate step approves by a selector (the declared hostname and the two signers) and ends on
@@ -82,7 +100,8 @@ workload, if any, needs cluster API access and the least role that works.
   `core/catalog.py` and `tools.json` regenerated; the comparison baseline is the cluster's machine pool as CI11
   defines it, with no reference file; `RemoveScope` is delivered by milestone 1.
 - 2026-10-15, mechanism from the third review: the keep-or-remove decision rests on `state.serving_kept`, recorded
-  by the serving callback's cleanup, because the executor also sets `state.failed` when a cleanup hook raises; the
+  by `VerifyNodeImage.cleanup`, the last callback of `build`, which runs first in reverse order, because the
+  executor also sets `state.failed` when a cleanup hook raises; the
   joiner is the first pending client certificate request matching the declared hostname, because the Node object
   exists only after that request is approved; one Pod builds and serves, as CI11's source does, so the ISO never
   crosses workloads, and the ISO reaches the ISO directory by a fetch over the served URL because the Kubernetes
@@ -156,11 +175,12 @@ of Work, then the live run. Result: `ocp_node_onboard.py build` and `remove` exi
 phase document's "Invocation and the result the agent reads" shows; a successful build ends with the per-field match
 of the ISO against the specification; a successful build apply leaves the ISO in the ISO directory and the whole scope
 (namespace, ServiceAccount, any binding, Secret, ConfigMap, the build-and-serve Pod, the Service) in the cluster, all
-carrying the run identifier; a failed apply leaves only the ISO when the copy completed; `remove --run-id` leaves
-nothing carrying the identifier. Proof: the unit tests named under Validation and Acceptance, the validate workflow
-green on the exact head, and the live `build` result whose rows show the ISO digest and size read back, every declared
-field matching the specification, and whose `run_id` the next milestone consumes, a live `verify` of that ISO, and a
-live `remove` whose read-back shows nothing left, all attached to the pull request as receipts.
+carrying the run identifier; an apply that fails before `serving_kept` is recorded leaves only the ISO, if the fetch
+completed; `remove --run-id` leaves nothing carrying the identifier. Proof: the unit tests named under Validation and
+Acceptance, the validate workflow green on the exact head, and the live `build` result whose rows show the ISO digest
+and size read back, every declared field matching the specification, and whose `run_id` the next milestone consumes, a
+live `verify` of that ISO, and a live `remove` whose read-back shows nothing left, all attached to the pull request as
+receipts.
 
 ### Milestone 2: `join`, from booted host to Ready node
 
@@ -176,32 +196,34 @@ identifier, attached to the pull request.
 
 ## Concrete Steps
 
-`<SPEC>`, `<DIR>`, `<digest>` and `<id>` below stand for the agent's own arguments and for values the previous
-step returned; by project rule no example value is written here. Work in a worktree cut from main. For milestone
-1, implement the modules in the order the phase diagram lists them so each callback's state field exists before
-its consumer. After each module run `./bless.sh --all` from the repository root and expect every line to end in
+`<SPEC>`, `<DIR>`, `<ISO>`, `<RECEIPT>`, `<digest>` and `<id>` below stand for the agent's own arguments and for
+values the previous step returned; by project rule no example value is written here. Work in a worktree cut from main.
+For milestone 1, implement the modules in the order the phase diagram lists them so each callback's state field exists
+before its consumer. After each module run `./bless.sh --all` from the repository root and expect every line to end in
 `ok`; after the catalogue declaration run the render tool and expect `tools.json` regenerated and `python
-tools/render_manifest.py --check` to exit 0. Run `python ci-skills/bin/ocp_node_onboard.py --describe` and expect
-the command contract with the `build`, `remove` and `verify` verbs and no credentials read. Run `python
-ci-skills/bin/ocp_node_onboard.py build --spec <SPEC> --iso-dir <DIR> --dry-run --json` and expect `DRY_RUN` in
-phase `OFFLINE_PLAN` with the plan digest, the name pattern and no API call; run the same with `--live-plan` and
-expect `PLANNED` in phase `LIVE_PLAN` with the identity read back and the same digest. Push and read the validate
-workflow back green on the exact head. Install the candidate as the README's live smoke setup describes and run
-the remaining steps from the installed copy against the live cluster: `build --spec <SPEC> --iso-dir <DIR> --apply
---confirm-plan <digest> --json --receipt-out <PATH>` and expect `PASS`, `result_action` `APPLIED`, an ISO in the
-ISO directory, fetched over the served URL, whose digest and size appear in the result, every declared field
-matching the specification in the `VerifyNodeImage` row, the run identifier under `readback` and the serving URL
-read back; then `verify --iso <PATH> --spec <SPEC> --json --receipt-out <PATH>` on that ISO and expect `PASS`
-with the same match rows;
-then, for a build you do not intend to join, `remove --run-id <id> --dry-run --json` for its digest and `remove
---run-id <id> --apply --confirm-plan <digest> --json` and expect `PASS` with every object absent. Attach both
-results to the pull request; push the head they came from and expect the validate workflow green on it; that
-head is the one that merges. The report of every live step is its receipt, produced the same way as every other
-live run in this repository: `--receipt-out` on the installed command, sanitized by the portable writer, bound to
-the functional checksum, with the rows that prove the outcome quoted in the pull request body.
+tools/render_manifest.py --check` to exit 0. Run `python ci-skills/bin/ocp_node_onboard.py --describe` and expect the
+command contract with the `build`, `remove` and `verify` verbs and no credentials read. Run `python
+ci-skills/bin/ocp_node_onboard.py build --spec <SPEC> --iso-dir <DIR> --dry-run --json` and expect `DRY_RUN` in phase
+`OFFLINE_PLAN` with the plan digest, the name pattern and no API call; run the same with `--live-plan` and expect
+`PLANNED` in phase `LIVE_PLAN` with the identity read back and the same digest. Push and read the validate workflow
+back green on the exact head. Install the candidate as the README's live smoke setup describes and run the remaining
+steps from the installed copy against the live cluster: `build --spec <SPEC> --iso-dir <DIR> --apply --confirm-plan
+<digest> --json --receipt-out <RECEIPT>` and expect `PASS`, `result_action` `APPLIED`, an ISO in the ISO directory,
+fetched over the served URL, whose digest and size appear in the result, every declared field matching the
+specification in the `VerifyNodeImage` row, the run identifier under `readback` and the serving URL read back; then
+`verify --iso <ISO> --spec <SPEC> --json --receipt-out <RECEIPT>` on that ISO and expect `PASS` with the same match
+rows; then, for a build you do not intend to join, `remove --run-id <id> --dry-run --json` for its digest and `remove
+--run-id <id> --apply --confirm-plan <digest> --json --receipt-out <RECEIPT>` and expect `PASS` with every object
+absent. Then run the README rerun procedure on this head from the installed candidate so every existing committed
+receipt carries this checksum, run `python tools/check_live_acceptance.py --root . --json` and expect `PASS` with no
+`functional_digest_mismatch`. Attach the three results to the pull request, commit the refreshed set, push the head
+they came from and expect the validate workflow green on it; that head is the one that merges. The report of every
+live step is its receipt, produced the same way as every other live run in this repository: `--receipt-out` on the
+installed command, sanitized by the portable writer, bound to the functional checksum, with the rows that prove the
+outcome quoted in the pull request body.
 
 Milestone 2 follows the same sequence up to the live run, which is read-only by the owner's decision: `join
---run-id <id> --spec <SPEC> --live-plan --json --receipt-out <PATH>` from the installed candidate expects
+--run-id <id> --spec <SPEC> --live-plan --json --receipt-out <RECEIPT>` from the installed candidate expects
 `PLANNED` with the pending requests listed, the selector shown and no approval; the `APPLIED` and `NO_OP` paths
 are exercised only by the unit tests with a simulated two-request sequence, because the approval and the join
 need a real host. The plan result is attached to the pull request with the mocked rows marked as mocked.
@@ -212,22 +234,29 @@ Milestone 1 is accepted when `tests/python/test_run_scope.py` shows names derive
 reproduces them, the namespaced and cluster-scoped sets carry the operation label, and removal deletes exactly the
 owned set including the cluster-scoped objects; when `tests/python/test_ocp_node_onboard.py` shows the loader
 accepting a valid specification and rejecting an invalid one, the pool comparison reporting match and drift per field,
-a dry-run digest confirming a later apply with the same inputs and target and rejecting another target, a dry run with
-`--iso-dir` accepted and one with `--output-dir` still rejected, the build callback blocking with a classified reason
-on timeout and on a failed init container, the fetch blocking on a missing ISO directory, an existing ISO without
-`--overwrite` and an unreachable served URL, the serving read-back, the keep-on-success branch (`serving_kept` set,
-every object kept) and the remove-on-failure branch (each creator removes its object), the cleanup-failure case after
-a successful serve (scope kept, `BLOCKED`), and the ISO check against a fixture ISO built from a known configuration,
-reporting a changed hostname and a changed hardware address as drift and `PARTIAL`; when the catalogue consistency
-test and the render check pass; when the validate workflow is green on the exact head; and when the live `build`,
-`verify` and `remove` results attached to the pull request show the ISO digest read back, every field matching the
-specification, and nothing left carrying the identifier. Milestone 2 is accepted when the approval loop is tested
-against a simulated two-request sequence (client, then serving after approval), a foreign signer, an expired deadline
-and the no-Node-before-client-approval ordering; when those mocked runs show the joiner request, the approved requests
-by name and signer, the node Ready with the declared hostname and role, and nothing carrying the identifier; and when
-the live `join --live-plan` result shows the pending requests read from the cluster. The approval and the join are the
-one part of this plan proven by mock, by the owner's decision. A green build alone demonstrates nothing; the live
-results and the mocked approval tests do.
+a dry-run digest confirming a later apply with the same inputs and target and rejecting another target, a `remove`
+digest for one run identifier rejecting an apply for another, `tests/python/test_action_modes.py` showing the shared
+validator reproducing every existing rule under one canonical reason each with the GitLab adapter's cases still
+passing and this adapter accepting `--receipt-out` on a live plan, a workflow-level interrupt test asserting a
+rendered `BLOCKED` result with the read-back fields, a schema test of the sketched documents against the paired
+schema, a dry run with `--iso-dir` accepted and one with `--output-dir` still rejected, the build callback blocking
+with a classified reason on timeout and on a failed init container, the fetch blocking on a missing ISO directory, an
+existing ISO without `--overwrite` and an unreachable served URL, the serving read-back, the keep-on-success branch
+(`serving_kept` set, every object kept) and the remove-on-failure branch (each creator removes its object), the
+cleanup-failure case after a successful serve (scope kept, `BLOCKED`), and the ISO check against a fixture built from
+a known configuration, reporting a changed hostname and a changed hardware address as drift and `PARTIAL` with the
+scope kept; when the catalogue consistency test and the render check pass; when the validate workflow is green on the
+exact head; and when the live `build`, `verify` and `remove` results attached to the pull request show the ISO digest
+read back, every field matching the specification, and nothing left carrying the identifier. Milestone 2 is accepted
+when the join live plan is tested (accepted with `--receipt-out`, no confirm and no approval, `PLANNED` with the
+pending-request rows and the run identifier), when the approval loop is tested inside one bounded `run` against a
+simulated two-request sequence (client, then serving after approval, then issued and Ready, with the final read-back),
+a foreign signer, an expired deadline, the no-Node-before-client-approval ordering, and the already-Ready path that
+makes a repeated `join` `NO_OP`, all on the existing GitHub test path; when those mocked runs show the joiner request,
+the approved requests by name and signer, the node Ready with the declared hostname and role, and nothing carrying the
+identifier; and when the live `join --live-plan` result shows the pending requests read from the cluster. The approval
+and the join are the one part of this plan proven by mock, by the owner's decision. A green build alone demonstrates
+nothing; the live results and the mocked approval tests do.
 
 ## Idempotence and Recovery
 
