@@ -62,10 +62,11 @@ can be attempted; a 401 or 403 is terminal.
 
 ## Delivery blocks
 
-All six blocks are delivered. Each has a sanitized live receipt under
+Blocks 1 to 6 are delivered. Each has a sanitized live receipt under
 [`tests/acceptance/receipts`](../tests/acceptance/receipts), recorded from the
-installed skill against the operator's selected GitLab target, and the
+installed skill against the user's selected GitLab target, and the
 [evidence index](../tests/acceptance/evidence/README.md) lists every case.
+Block 7 is planned: it pairs runner creation with the action that proves it.
 
 | Block | Agent action | Proof before merge | Receipts |
 | --- | --- | --- | --- |
@@ -75,6 +76,7 @@ installed skill against the operator's selected GitLab target, and the
 | 4 | `wiki.create/update` | GET exact page slug | `wiki-*-applied`, `wiki-*-no_op` |
 | 5 | `runner.assign` | GET membership for each project | `runner-assign-applied`, `runner-assign-no_op` |
 | 6 | `runner.create` | GET ID, description, scope; `sink_persisted` | `runner-create-applied` |
+| 7 | `runner.register` + test job (planned) | GET runner `online`; GET job with runner ID and success | none yet |
 
 Runner creation has no `no_op` receipt by design: an existing runner with the
 requested description blocks instead of repeating.
@@ -147,9 +149,9 @@ Tags and configuration are not compared. If a known newly created runner fails
 token persistence or read-back, the command attempts to delete that record and
 reports cleanup evidence. An uncertain POST or unresolved runner ID blocks
 further creation until independent reconciliation. The result records
-`sink_persisted`, not manager readiness. Registration and an online job remain
-separate acceptance work: the committed create receipt reads the record back as
-`never_contacted`.
+`sink_persisted`, not manager readiness. Registration and an online job are
+block 7; the committed create receipt read record 72 back as `never_contacted`
+before cleanup deleted it.
 
 For an uncertain create, a later complete empty list read clears the local
 pending marker and blocks without another POST; a subsequent invocation may
@@ -167,6 +169,38 @@ The suggested API mapping follows GitLab's project
 [runner assignment and creation](https://docs.gitlab.com/api/runners/)
 contracts. The legacy registration-token `POST /runners` route is not the
 creation target.
+
+### 7. Runner registration and test job (planned)
+
+`gitlab_runner.py create` proves that a record exists. The paired proof is a
+runner manager that uses the one-time token and a job that runs on it, and
+the complete combo is proven by one live run that produces six linked
+evidence rows, each consuming the previous step's actual outputs:
+
+| # | Step | Evidence |
+| --- | --- | --- |
+| 1 | Build toolbox | Build succeeds; the declared tools are present and executable |
+| 2 | Push to Harbor | Harbor read-back confirms the published image and its digest |
+| 3 | Create and configure runner | Created runner ID, selected configuration, live read-back `online` |
+| 4 | Execute test job | Pipeline and job IDs, selected ref, and the created runner picked the job up |
+| 5 | Verify results | The job succeeds, uses the published toolbox, and returns the expected tool checks |
+| 6 | Cleanup | Job resources and the runner removed; API read-back verifies the removal |
+
+The report binds all six rows to the same installed functional checksum with
+pointers to their traces. Six separate operations returning success do not
+prove the combo; the linked chain does. Steps 1 and 2 reuse the toolbox and
+Harbor commands. Step 3 reuses the toolbox-backed deployment of
+`create_selfhosted_runner.py` for a GitLab runner manager with the token
+written by `--token-out`, for both runner types the create command produces,
+`project_type` and `group_type`. Step 4 depends on `gitlab_pipeline.py start`
+and `watch` from CI11 (plan, apply, read-back of the new pipeline ID and sha;
+a pipeline that runs a marker job on the test project). Step 5 reads the job
+back with `gitlab_job.py get`, which must name the created runner's numeric
+ID; that read-back is the evidence, not the deployment. Step 6 removes the
+deployment and the runner record through the existing `delete` operation
+with its APPLIED and NO_OP receipts. Configuration the create command does
+not accept today, such as paused, locked, run-untagged, access level, and
+maximum timeout, is a gap this block closes or records.
 
 ## One result contract
 
@@ -231,10 +265,10 @@ own calculation for the candidate, and blocks on an empty or incomplete set. Moc
 1. **Token sink for runner creation:** closed. The live run supplied
    `--token-out PATH` on plan and apply; `runner-create-applied.json` records
    `sink_persisted: true` and a verified read-back of the created record.
-   Manager registration of that runner and an online job on the GitLab target
-   remain open: the record reads back `never_contacted`.
-2. **Live smoke route:** closed. The operator's target file selects the GitLab
-   origin, each receipt names its disposable project explicitly
-   (`target_source` `user;argv:--project`), and the receipts for stages 2–6
-   were recorded from the operator's execution host with the installed skill's
-   exact digest.
+   Registering a runner manager with that token and an online job on the GitLab
+   test project are not covered by any receipt; they are block 7.
+2. **Live smoke route:** closed. The user's `~/.ci-skills/target.toml` selects
+   the GitLab instance; every stage 2–6 operation named the test project with
+   `--project`, recorded as `target_source` `user;argv:--project`; and every
+   receipt was captured on one execution host from the installed skill with
+   its exact digest.
