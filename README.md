@@ -1,7 +1,24 @@
 # CI Skills: GitLab and Kubernetes operations
 
 CI Skills provides project-neutral commands for GitLab, GitHub, and Kubernetes/OpenShift. Each command selects its
-target from caller input or the configured binding and returns evidence that an operator or agent can inspect.
+target from caller input or the configured binding and returns evidence that a user or agent can inspect.
+
+## Motivation
+
+Observation: both Claude and Codex, for a simple API call, spend N round trips to find an answer or read something
+from a state. A state, in the context of ci-skills, is anything connected to CI: the infrastructure, GitLab and
+GitHub, Harbor where images are stored, and the build chain such as Docker.
+
+Hence this set of tools, which lets an agent execute the same task more efficiently, using less of its context
+window, and get the same result in one go. One go is a set of atomic operations that reach a goal. Example goal: the
+agent needs to deploy a runner in CI, build a toolbox, upload the toolbox to Harbor, run a pipeline, and close a
+milestone. That is one example of many possible combinations.
+
+The workflow: a user installs ci-skills in Codex, Claude, or another agentic setup, and it becomes available to the
+agent. The agent then has a choice: ten `glab` commands, or one ci-skills combo. Can ci-skills do everything `glab`
+does? No. Does it need to? No. It chooses the most important operations and packs each as a combo that keeps the
+agent's context tight. A user who wants to enforce that choice can create a sub-agent or write an explicit
+instruction.
 
 ## Install and first run
 
@@ -418,6 +435,21 @@ The selected file does not inherit missing sections or credentials from another 
 source. See the installed [access reference](ci-skills/references/access.md#where-the-target-file-comes-from) for
 command exceptions, smoke filename selection and credential resolution, and the
 [project binding](ci-skills/references/project-binding.md) for an existing kubeconfig resolver.
+
+### Live smoke setup
+
+A live smoke, or live test, reproduces the installed user experience when a user installs the skill in their agentic
+setup: the user clones this repository, installs ci-skills into Codex or Claude, puts their configuration in
+`~/.ci-skills/target.toml` with references to their own credentials (a token file, a kubeconfig, or a CLI login), and
+uses the commands against their real GitLab, Kubernetes, GitHub, Harbor, or any subset of them. The actor is the
+agent: a Codex or Claude session that, through ci-skills, decides to create a runner or read a job and runs the
+ci-skills command instead of hand-rolled `glab`, `kubectl`, or `jq` calls. Every provider section is optional. A
+target that declares only `[kubernetes]` runs every command whose only declared authority is Kubernetes
+(`requires_authorities` in `--describe`); a command that needs a provider the target does not declare reports
+`BLOCKED` and names the authority tables it requires instead of running. The full `access_check.py` is the one command
+that needs the GitHub, GitLab, and Kubernetes tables together. The setup runs without the `ci-skills-smoke` switch,
+which would select `ci-skills-smoke.toml` instead. The target file is that user's configuration: it never carries this
+repository's CI, gate, or delivery settings.
 
 ## GitLab operations
 

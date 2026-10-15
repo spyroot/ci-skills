@@ -21,4 +21,5 @@ Start with [Install and first run](../README.md#install-and-first-run) to use th
 | [GitLab tool belt](gitlab-toolbelt-plan.md) | delivery plan of the GitLab operations tool belt |
 | [Field notes](field-notes.md) | observations from the first deliveries |
 | [Use cases](use-cases.md) | the behaviour we want, use case by use case, in our own words |
+| [Combos](combos.md) | chains worth packing, with the status of each step and the evidence that proves the chain |
 | [CI Skills agent hooks](skill-session-hook.md) | lifecycle integration and delivery lock |
