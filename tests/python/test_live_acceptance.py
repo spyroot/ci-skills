@@ -66,7 +66,7 @@ def _functional_digest() -> str:
 
 
 def _access_setup() -> Mapping[str, JSONObject]:
-    """Create matching publication and GitLab access receipts for one runtime.
+    """Create matching full access and GitLab access receipts for one runtime.
 
     :returns: Synthetic setup receipts keyed by their fixture file names.
     """
@@ -80,7 +80,6 @@ def _access_setup() -> Mapping[str, JSONObject]:
         "schema_version": "1.0",
         "kind": "access_check",
         "status": "PASS",
-        "publication": True,
         "execution_host": execution_host,
         "captured_at": (NOW - timedelta(days=1)).isoformat(),
         "tested_revision": "a" * 40,
@@ -108,8 +107,6 @@ def _access_setup() -> Mapping[str, JSONObject]:
                 "status": "PASS",
                 "target": "github.example.test/runtime/repo",
                 "credential_source": "gh-credential-store:github.example.test",
-                "observed_capability": ["required_checks_read"],
-                "details": {"required_checks": ["validate"]},
             },
             "gitlab": {
                 "identity": "runtime-gl",
@@ -317,7 +314,7 @@ def _complete_receipts(
 ) -> MutableMapping[str, JSONObject]:
     """Build receipts for every required GitLab operation from setup context.
 
-    :param setup: Fixture publication and GitLab access receipts.
+    :param setup: Fixture full access and GitLab access receipts.
     :returns: Setup plus all required read, applied, and no-op operation receipts.
     """
     receipts = deepcopy(setup)
@@ -870,6 +867,47 @@ def test_acceptance_requires_recorded_functional_digest() -> None:
     result = _evaluate(setup, receipts)
 
     assert "access.json:functional_digest_absent" in result["problems"]
+
+
+def test_gate_never_reads_repository_merge_policy_from_the_skill_target() -> None:
+    """Accept the full access receipt without GitHub, publication, or required checks.
+
+    The skill's target file belongs to whoever installs the skill; a GitLab-only
+    user has no GitHub section at all. The repository gate binds GitLab and
+    Kubernetes proof only, so a receipt with no GitHub surface, and one that
+    still carries publication fields, are both accepted.
+
+    :returns: None; assertions in the body validate the boundary.
+    """
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    access = setup["access.json"]
+    del access["surfaces"]["github"]
+    del access["targets"]["github"]
+    del access["credential_sources"]["github"]
+
+    without_github = _evaluate(setup, receipts)
+
+    assert without_github["status"] == "PASS", without_github["problems"]
+    assert not [
+        problem
+        for problem in without_github["problems"]
+        if "github" in problem or "publication" in problem
+    ]
+
+    access["publication"] = True
+    access["surfaces"]["github"] = {
+        "status": "BLOCKED",
+        "observed_capability": ["required_checks_read"],
+        "details": {"required_checks": []},
+    }
+
+    with_publication_fields = _evaluate(setup, receipts)
+
+    assert with_publication_fields["status"] == "PASS", with_publication_fields[
+        "problems"
+    ]
+    assert ACCEPTANCE.GATE_SURFACES == ("gitlab", "kubernetes")
 
 
 def test_cli_blocks_without_the_tracked_policy_file(

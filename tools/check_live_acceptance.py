@@ -147,6 +147,7 @@ REQUIRED_LIVE_CHECKS: Final = (
     "gitlab_job",
 )
 SETUP_RECEIPT_KINDS: Final = frozenset({RECEIPT_KIND, "gitlab_access"})
+GATE_SURFACES: Final = ("gitlab", "kubernetes")
 REPEATABLE_GITLAB_OPERATIONS: Final = (
     ("gitlab_milestone", "create"),
     ("gitlab_milestone", "update"),
@@ -446,26 +447,26 @@ def _check_receipt(
     now: datetime,
     max_age_days: int,
 ) -> MutableSequence[str]:
-    """Validate the initial publication access receipt and live read-backs.
+    """Validate the initial full live access receipt and its live read-backs.
+
+    The gate binds GitLab and Kubernetes proof to the candidate runtime. It does
+    not read this repository's branch protection: the GitHub surface of the
+    receipt is tolerated but never required, because repository merge policy
+    lives in GitHub and the workflow, not in the skill's target file.
 
     :param name: Receipt file name prefixed to each reported problem.
-    :param receipt: Parsed publication access receipt to inspect.
+    :param receipt: Parsed full live access receipt to inspect.
     :param digest: Expected functional digest of the candidate runtime and schemas.
     :param now: Reference time used for receipt freshness.
     :param max_age_days: Maximum accepted receipt age in whole days.
     :returns: Mutable problem list for missing identity, target, or live proof.
-    :raises ImportError: If the shared command-authority catalogue cannot be loaded.
     :raises TypeError: If a nested readback has an incompatible type or now is naive
         while receipt timestamps are timezone-aware.
     :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
-    """  # noqa: DOC502 - Shared validators and catalogue import propagate failures.
-    from lib.python.core.catalog import DEFAULT_AUTHORITIES
-
+    """  # noqa: DOC502 - Shared validators propagate failures.
     problems = _check_common(name, receipt, digest, now, max_age_days)
     if receipt.get("kind") != RECEIPT_KIND:
         problems.append(f"{name}:kind_unexpected")
-    if receipt.get("publication") is not True:
-        problems.append(f"{name}:not_a_publication_receipt")
     revision = _mapping(_mapping(receipt.get("skill")).get("revision"))
     tested_revision = receipt.get("tested_revision")
     if (
@@ -481,7 +482,7 @@ def _check_receipt(
     surfaces = _mapping(receipt.get("surfaces"))
     sources = _mapping(receipt.get("credential_sources"))
     targets = _mapping(receipt.get("targets"))
-    for surface in DEFAULT_AUTHORITIES:
+    for surface in GATE_SURFACES:
         observed = _mapping(surfaces.get(surface))
         if not observed.get("identity"):
             problems.append(f"{name}:identity_missing:{surface}")
@@ -534,11 +535,6 @@ def _check_receipt(
         problems.append(f"{name}:ceph_namespace_missing")
     if receipt.get("blocking_live_checks"):
         problems.append(f"{name}:live_checks_blocking")
-    github = _mapping(surfaces.get("github"))
-    if "required_checks_read" not in json_strings(
-        github.get("observed_capability") or []
-    ) or not _mapping(github.get("details")).get("required_checks"):
-        problems.append(f"{name}:required_checks_readback_missing")
     return problems
 
 
@@ -893,14 +889,14 @@ class AcceptanceReview:
         self.problems: MutableSequence[str] = []
         self.accepted: MutableSequence[str] = []
         self.contexts: MutableSequence[JSONObject] = []
-        self.publication_hosts: set[str] = set()
+        self.access_hosts: set[str] = set()
         self.observed_operations: set[OperationKey] = set()
         self.matched_operations: MutableMapping[
             ReceiptPairKey, MutableMapping[str, tuple[str, JSONObject]]
         ] = {}
 
     def setup_receipts(self) -> None:
-        """Require publication proof and retain each accepted GitLab access context.
+        """Require the full live access receipt and retain each GitLab access context.
 
         :raises ImportError: If the shared command-authority catalogue cannot be loaded.
         :raises RecursionError: If receipt containers exceed recursive redaction limits.
@@ -919,10 +915,10 @@ class AcceptanceReview:
                     host = receipt.get("execution_host")
                     if not isinstance(host, str):
                         found.append(f"{name}:receipt_invalid_shape")
-                    elif host in self.publication_hosts:
+                    elif host in self.access_hosts:
                         found.append(f"{name}:receipt_ambiguous")
                     if isinstance(host, str):
-                        self.publication_hosts.add(host)
+                        self.access_hosts.add(host)
                 elif kind == "gitlab_access":
                     context = _gitlab_context(receipt)
                     found = _check_gitlab_receipt(

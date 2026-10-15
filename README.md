@@ -555,9 +555,10 @@ mocked regressions run on GitHub.
 `target.toml` selects runtime targets and credentials for the installed skill, including GitHub capabilities and
 cross-provider workflows. It is not this repository's CI or delivery configuration. Changing a runtime target does
 not change repository merge requirements by itself. Live targets gate code validation in exactly one way: the
-committed live-acceptance receipts described below must be bound to the candidate and fresh, and the publication
-setup receipt among them records branch protection on `main`. Preserve candidate identity, relevant live evidence,
-and the required GitHub result as distinct proof. `standards-binding.yaml` pins the shared Standards contracts. The
+committed live-acceptance receipts described below must be bound to the candidate and fresh. The skill's target
+file belongs to whoever installs the skill and never carries this repository's merge policy; GitHub enforces
+`ci-skills/required` through its own branch rules. Preserve candidate identity, relevant live evidence, and the
+required GitHub result as distinct proof. `standards-binding.yaml` pins the shared Standards contracts. The
 local agent and handoff files are ignored.
 
 ### Live acceptance receipts and freshness
@@ -567,16 +568,18 @@ local agent and handoff files are ignored.
 the required operation set, and the declared freshness window (`maxReceiptAgeDays`). The `validate` workflow runs
 it as the last required step on every pull request and push, and again on the schedule the policy declares, so a
 receipt that goes stale between pull requests is reported on `main` by the next scheduled run. The setup receipt is the
-full publication access check, which reads back branch protection on the protected `main` branch; the
-`github.required_checks` declared in the execution host's target must match that protection. Superseded receipts
-live under `tests/acceptance/historical/`, which the checker never evaluates.
+full live access check of the installed candidate, `access_check.py --json`, whose GitLab and Kubernetes identities,
+targets, and declared live reads are bound to the functional checksum. The checker ignores the receipt's GitHub
+surface and never reads this repository's branch protection, so the execution host's target file needs no
+`required_checks` declaration. Superseded receipts live under `tests/acceptance/historical/`, which the checker
+never evaluates.
 
 #### Live acceptance reruns
 
 When the scheduled run reports `receipt_stale`, or a runtime change invalidates the recorded functional checksum,
 refresh the receipts from the installed candidate on the execution host and commit them through a pull request:
 
-1. `access_check.py --json --publication --job-url <declared job> --ceph-namespace <declared namespace>
+1. `access_check.py --json --job-url <declared job> --ceph-namespace <declared namespace>
    --receipt-out tests/acceptance/receipts/access-check.json`.
 2. `gitlab_access.py check --project <declared project> --receipt-out tests/acceptance/receipts/gitlab-access.json`.
 3. Each required GitLab operation with `--apply --confirm-plan DIGEST --receipt-out
