@@ -197,8 +197,9 @@ and `watch` from CI11 (plan, apply, read-back of the new pipeline ID and sha;
 a pipeline that runs a marker job on the test project). Step 5 reads the job
 back with `gitlab_job.py get`, which must name the created runner's numeric
 ID; that read-back is the evidence, not the deployment. Step 6 removes the
-deployment and the runner record through the existing `delete` operation
-with its APPLIED and NO_OP receipts. Configuration the create command does
+deployment through the toolbox-backed `DeleteRunner` path and the runner
+record through `gitlab_runner.py delete`, which has the APPLIED and NO_OP
+receipts. Configuration the create command does
 not accept today, such as paused, locked, run-untagged, access level, and
 maximum timeout, is a gap this block closes or records.
 
@@ -268,7 +269,8 @@ own calculation for the candidate, and blocks on an empty or incomplete set. Moc
    Registering a runner manager with that token and an online job on the GitLab
    test project are not covered by any receipt; they are block 7.
 2. **Live smoke route:** closed. The user's `~/.ci-skills/target.toml` selects
-   the GitLab instance; every stage 2–6 operation named the test project with
-   `--project`, recorded as `target_source` `user;argv:--project`; and every
-   receipt was captured on one execution host from the installed skill with
-   its exact digest.
+   the GitLab instance; every stage 2–6 operation named a test project with
+   `--project` (project 123, and 124 for assignment), recorded as
+   `target_source` `user;argv:--project`; and every stage 2–6 receipt was
+   captured on one execution host from the installed skill with its exact
+   digest.
