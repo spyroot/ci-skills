@@ -38,7 +38,7 @@ repository = "owner/repository"
 # Optional: a private token file, if you do not want the `gh` credential store
 # used. Absolute or relative to this target file; keep it outside this
 # repository and the installed skill.
-# token_file = "/home/operator/.ci-skills/credentials/github.token"
+# token_file = "/home/user/.ci-skills/credentials/github.token"
 
 # Required for `access_check.py --publication`: the status checks that branch
 # protection must require. Compared by exact equality, and a declared check
@@ -63,7 +63,7 @@ url = "https://gitlab.example.com"
 # The full diagnostics access check needs an instance administrator identity.
 # The GitLab-only check proves identity and target read access; an action's
 # apply and read-back establish whether that action is authorized.
-# token_file = "/home/operator/.ci-skills/credentials/gitlab.token"
+# token_file = "/home/user/.ci-skills/credentials/gitlab.token"
 
 [kubernetes]
 # The context name and the API server it must resolve to. The server is
@@ -77,14 +77,14 @@ server = "https://api.cluster.example.com:6443"
 # can also select the kubeconfig. Context and server are verified either way.
 
 # One file:
-# kubeconfig = "/home/operator/.kube/config"
+# kubeconfig = "/home/user/.kube/config"
 
 # Or the whole search path, in kubectl's own order. Use this when the context
 # and the credential live in separate files — for example a CA-verified overlay
 # plus the file holding the token. It needs no environment variable.
 # kubeconfigs = [
-#   "/home/operator/.ci-skills/credentials/kubeconfig",
-#   "/home/operator/.kube/config",
+#   "/home/user/.ci-skills/credentials/kubeconfig",
+#   "/home/user/.kube/config",
 # ]
 
 # Optional node diagnostics. Declare only the route you use. Each route names
