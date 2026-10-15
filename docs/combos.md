@@ -26,7 +26,8 @@ the toolbox, push it, deploy the runner, register it), exists and the runner com
 workflow dispatch) → verify results, missing → `create_selfhosted_runner.py delete`, exists [10].
 
 GitLab today: `toolbox.py` and `harbor_push.py` as above → `gitlab_runner.py create`, exists, record only [23],
-with the runner manager deployment planned (block 7) → `gitlab_pipeline.py start` and `watch`, planned (CI11) →
+with the runner manager deployment planned (block 7; CI11 "Toolbox build, publish and configure a runner") →
+`gitlab_pipeline.py start` and `watch`, planned (CI11) →
 `gitlab_job.py get`, exists [16], but naming the created runner is unproven: case 16 is PARTIAL because that job
 never reached a runner, and that read-back is block 7's proof → `gitlab_runner.py delete`, exists [24], with
 deployment removal planned.
@@ -48,10 +49,10 @@ assembles it by hand from several `oc` reads.
 - Verify: the document validates against the Ignition version it declares, every reference resolves, and the
   result records the document's SHA-256 and size.
 
-Status: proposed as a chain; its read steps are planned in CI11 (`ocp_machine.py` for machine objects and
-machine configuration, `harbor_pull_secret.py` for the pull secret). Nothing in the skill reads machine
-configurations or writes Ignition today. Evidence rows: machine spec read, pull secret resolved, ignition source
-read, ignition built, verify passed.
+Status: proposed as a chain. CI11 plans the machine reads as `ocp_machine.py`; its `harbor_pull_secret.py sync` writes
+a pull secret into the cluster and does not read the one the cluster uses, so that read is still missing. Nothing in
+the skill reads machine configurations or writes Ignition today. Evidence rows: machine spec read, pull secret
+resolved, ignition source read, ignition built, verify passed.
 
 ## 3. Failed pipeline, root cause in one go
 
@@ -61,8 +62,9 @@ Goal: from a pipeline ID to an issue that names the failed jobs, their runners, 
 agent paging through the pipeline by hand.
 
 Steps: `gitlab_pipeline.py --pipeline-id ID` (the bare read), exists [21] → `watch` and `logs`, planned (CI11) →
-`gitlab_job.py get`, exists [16] → `gitlab_issue.py open-bug`, exists [14, 15]. CI11 plans this pack as
-`ci_failure_trace.py`. Evidence: pipeline ID and settled status, failed job IDs with trace tails, the issue IID
+`gitlab_job.py get`, exists [16] → `gitlab_issue.py open-bug`, exists [14, 15]. CI11's `ci_failure_trace.py`
+plans the failed-job read with its runner and time-window correlation; watch, logs, and the bug are beyond it.
+Evidence: pipeline ID and settled status, failed job IDs with trace tails, the issue IID
 read back, NO_OP on a repeat.
 
 ## 4. Milestone close-out
@@ -112,9 +114,11 @@ All steps exist [23, 22, 27, 25, 24]. The gap is the runner going online, which 
 
 `toolbox update → push to Harbor → runner update to the new image`
 
-For GitHub this is already one installed command, `create_selfhosted_runner.py update`, which rebuilds, pushes and
-redeploys, exists [11]; the standalone `toolbox.py update` [37] and `harbor_push.py push` [31] exist for the parts.
-The open gap is the GitLab runner update, which is part of chain 1.
+For GitHub this is already one installed command, `create_selfhosted_runner.py update`, which walks build
+(reused by fingerprint), push, and deploy, exists [11] as an unchanged-image update where push and deploy were
+NO_OP; a refresh to a new image has no live receipt yet. The standalone `toolbox.py update` [37] and
+`harbor_push.py push` [31] exist for the parts. The open gap is the GitLab runner update, which is part of chain 1
+(CI11 "Toolbox build, publish and configure a runner").
 
 ## 10. GPU state before the rabbit hole (proposed)
 
