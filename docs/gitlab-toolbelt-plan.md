@@ -147,8 +147,9 @@ Tags and configuration are not compared. If a known newly created runner fails
 token persistence or read-back, the command attempts to delete that record and
 reports cleanup evidence. An uncertain POST or unresolved runner ID blocks
 further creation until independent reconciliation. The result records
-`sink_persisted`, not manager readiness. Registration and an online runner are
-proven separately by `create_selfhosted_runner.py` (evidence cases 9 to 11).
+`sink_persisted`, not manager readiness. Registration and an online job remain
+separate acceptance work: the committed create receipt reads the record back as
+`never_contacted`.
 
 For an uncertain create, a later complete empty list read clears the local
 pending marker and blocks without another POST; a subsequent invocation may
@@ -227,11 +228,13 @@ own calculation for the candidate, and blocks on an empty or incomplete set. Moc
 
 ## Live acceptance inputs
 
-Both inputs this plan once listed as remaining are closed.
-
-1. **Token sink for runner creation:** the live run supplied `--token-out PATH`
-   on plan and apply; `runner-create-applied.json` records
+1. **Token sink for runner creation:** closed. The live run supplied
+   `--token-out PATH` on plan and apply; `runner-create-applied.json` records
    `sink_persisted: true` and a verified read-back of the created record.
-2. **Live smoke route:** the operator's selected target file names the
-   disposable project, and the receipts for stages 2–6 were recorded from the
-   operator's execution host with the installed skill's exact digest.
+   Manager registration of that runner and an online job on the GitLab target
+   remain open: the record reads back `never_contacted`.
+2. **Live smoke route:** closed. The operator's target file selects the GitLab
+   origin, each receipt names its disposable project explicitly
+   (`target_source` `user;argv:--project`), and the receipts for stages 2–6
+   were recorded from the operator's execution host with the installed skill's
+   exact digest.
