@@ -18,6 +18,8 @@ Start with [Install and first run](../README.md#install-and-first-run) to use th
 | [CI08-ROUTING](phases/CI08-ROUTING.md) | routing, lazy loading and compact representation |
 | [CI09-REFERENCE](phases/CI09-REFERENCE.md) | references, tool operations, upstream knowledge and the navigator |
 | [CI11-TOOLS](phases/CI11-TOOLS.md) | the tool catalogue and the port of the source repo's scripts |
+| [CI13-IMAGE-BUILD-READINESS](phases/CI13-IMAGE-BUILD-READINESS.md) | proposed phase: prove a cluster can build images from a GitLab job, starting with a podman probe |
+| [Image-build readiness ExecPlan](exec-plans/active/ci13-image-build-readiness.md) | the executable plan for CI13, milestone by milestone |
 | [GitLab tool belt](gitlab-toolbelt-plan.md) | delivery plan of the GitLab operations tool belt |
 | [Field notes](field-notes.md) | observations from the first deliveries |
 | [Use cases](use-cases.md) | the behaviour we want, use case by use case, in our own words |
