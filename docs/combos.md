@@ -9,8 +9,10 @@ exploration list: an entry marked proposed is an idea to evaluate, not a commitm
 Status words: **exists** means an installed command with a live receipt in
 [`tests/acceptance/evidence`](../tests/acceptance/evidence/README.md) (case numbers in brackets); **planned** means
 specified in [CI11](phases/CI11-TOOLS.md) or the [GitLab tool belt plan](gitlab-toolbelt-plan.md); **missing**
-means no command yet. A chain is proven only by one live run whose rows link, each consuming the previous row's
-output, bound to one functional checksum; see block 7 of the tool belt plan for the six-row model.
+means no command yet. [CI11 "Combos"](phases/CI11-TOOLS.md#combos) owns the delivery entries; this list points at
+them where they exist and adds chains they do not name yet. A chain is proven only by one live run whose rows link,
+each consuming the previous row's output, bound to one functional checksum; see block 7 of the tool belt plan for
+the six-row model.
 
 ## 1. Runner proven by a test job
 
@@ -18,13 +20,16 @@ output, bound to one functional checksum; see block 7 of the tool belt plan for 
 
 Goal: a runner the agent created runs a real job, and the job read-back names that runner.
 
-GitHub today: `toolbox.py create/update`, exists [35, 37] → `harbor_push.py push`, exists [31] →
-`create_selfhosted_runner.py create`, exists and the runner comes online [9] → execute test job, missing (the skill
-has no workflow dispatch) → verify results, missing → `create_selfhosted_runner.py delete`, exists [10].
+GitHub today: the first three steps are already one installed combo, `create_selfhosted_runner.py create` (build
+the toolbox, push it, deploy the runner, register it), exists and the runner comes online [9]; the standalone
+`toolbox.py` [35, 37] and `harbor_push.py` [31] exist for the parts. Execute test job, missing (the skill has no
+workflow dispatch) → verify results, missing → `create_selfhosted_runner.py delete`, exists [10].
 
-GitLab today: the same first two steps → `gitlab_runner.py create`, exists, record only [23], with the runner
-manager deployment planned (block 7) → `gitlab_pipeline.py start` and `watch`, planned (CI11) → `gitlab_job.py get`
-names the runner, exists [16] → `gitlab_runner.py delete`, exists [24], with deployment removal planned.
+GitLab today: `toolbox.py` and `harbor_push.py` as above → `gitlab_runner.py create`, exists, record only [23],
+with the runner manager deployment planned (block 7) → `gitlab_pipeline.py start` and `watch`, planned (CI11) →
+`gitlab_job.py get`, exists [16], but naming the created runner is unproven: case 16 is PARTIAL because that job
+never reached a runner, and that read-back is block 7's proof → `gitlab_runner.py delete`, exists [24], with
+deployment removal planned.
 
 ## 2. OpenShift ignition for a new machine (proposed)
 
@@ -43,8 +48,10 @@ assembles it by hand from several `oc` reads.
 - Verify: the document validates against the Ignition version it declares, every reference resolves, and the
   result records the document's SHA-256 and size.
 
-Status: proposed. Nothing in the skill reads machine configurations or writes Ignition today. Evidence rows:
-machine spec read, pull secret resolved, ignition source read, ignition built, verify passed.
+Status: proposed as a chain; its read steps are planned in CI11 (`ocp_machine.py` for machine objects and
+machine configuration, `harbor_pull_secret.py` for the pull secret). Nothing in the skill reads machine
+configurations or writes Ignition today. Evidence rows: machine spec read, pull secret resolved, ignition source
+read, ignition built, verify passed.
 
 ## 3. Failed pipeline, root cause in one go
 
@@ -53,9 +60,10 @@ machine spec read, pull secret resolved, ignition source read, ignition built, v
 Goal: from a pipeline ID to an issue that names the failed jobs, their runners, and trace excerpts, without the
 agent paging through the pipeline by hand.
 
-Steps: `gitlab_pipeline.py get`, exists [21] → `watch` and `logs`, planned (CI11) → `gitlab_job.py get`, exists
-[16] → `gitlab_issue.py open-bug`, exists [14, 15]. Evidence: pipeline ID and settled status, failed job IDs with
-trace tails, the issue IID read back, NO_OP on a repeat.
+Steps: `gitlab_pipeline.py --pipeline-id ID` (the bare read), exists [21] → `watch` and `logs`, planned (CI11) →
+`gitlab_job.py get`, exists [16] → `gitlab_issue.py open-bug`, exists [14, 15]. CI11 plans this pack as
+`ci_failure_trace.py`. Evidence: pipeline ID and settled status, failed job IDs with trace tails, the issue IID
+read back, NO_OP on a repeat.
 
 ## 4. Milestone close-out
 
@@ -63,9 +71,10 @@ trace tails, the issue IID read back, NO_OP on a repeat.
 
 Goal: close a milestone with its dates settled, in one call that is a NO_OP when already done.
 
-Steps: `gitlab_milestone.py update` and `adjust-time`, exist [18, 20]; `update --state closed` exists. Missing: a
-read of the open issues still attached to the milestone, so the combo can refuse or report before closing.
-Evidence: milestone ID, dates, and `closed` in the read-back; NO_OP on a repeat.
+Steps: milestone get, planned (CI11 `gitlab_milestone.py list`) → `adjust-time`, exists [18] → `update --state
+closed`, implemented, no live receipt yet (the update receipt [20] changed title and description) → read back.
+Missing: a read of the open issues still attached to the milestone, so the combo can refuse or report before
+closing. Evidence: milestone ID, dates, and `closed` in the read-back; NO_OP on a repeat.
 
 ## 5. Cluster health in one go
 
@@ -74,15 +83,17 @@ Evidence: milestone ID, dates, and `closed` in the read-back; NO_OP on a repeat.
 Goal: one read-only document with a status per surface, instead of five commands and a hand-written summary.
 
 Steps: `access_check.py`, `ceph_cluster.py`, `cilium_status.py`, `storage_report.py`, `event_trace.py`, all exist
-[1, 5, 8, 34, 12]. Each is already a combo over several `kubectl` reads; packing them returns one report whose
-sections carry their own status and `access_proven`, bound to one digest.
+[1, 5, 8, 34, 12]. Each is already a combo over several `kubectl` reads. The pack is planned in CI11 as
+`cluster_health.py`, which also covers MTU and controllers; its one report carries a status per component, bound
+to one digest.
 
 ## 6. Node triage
 
 `cilium node → Ceph kernel journal → MTU verify`
 
 Goal: one node name in, three findings out. Steps: `cilium_node.py`, `ceph_kernel.py`,
-`k8s_verify_mtu_consistency.py`, all exist [7, 6, 32].
+`k8s_verify_mtu_consistency.py`, all exist [7, 6, 32]. Gap: only the MTU check takes `--node`; the other two read
+their node from the target's `kubernetes.node_diagnostics`, so per-node selection is the piece to add.
 
 ## 7. Image promotion
 
@@ -101,8 +112,9 @@ All steps exist [23, 22, 27, 25, 24]. The gap is the runner going online, which 
 
 `toolbox update → push to Harbor → runner update to the new image`
 
-Steps: `toolbox.py update`, exists, real build then reuse [37] → `harbor_push.py push`, exists [31] →
-`create_selfhosted_runner.py update`, exists for GitHub [11]; the GitLab runner update is part of chain 1.
+For GitHub this is already one installed command, `create_selfhosted_runner.py update`, which rebuilds, pushes and
+redeploys, exists [11]; the standalone `toolbox.py update` [37] and `harbor_push.py push` [31] exist for the parts.
+The open gap is the GitLab runner update, which is part of chain 1.
 
 ## 10. GPU state before the rabbit hole (proposed)
 
