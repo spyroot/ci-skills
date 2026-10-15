@@ -115,6 +115,7 @@ jobs:
             --allow-init-docstring=True \
             ci-skills/lib/python/core/abstract \
             ci-skills/lib/python/core/executor.py \
+            ci-skills/lib/python/core/action_modes.py \
             ci-skills/lib/python/core/gitlab/callback.py \
             ci-skills/lib/python/core/gitlab/gitlab_action.py \
             ci-skills/lib/python/core/gitlab/gitlab_runners.py \
@@ -122,6 +123,11 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_milestones.py \
             ci-skills/lib/python/core/gitlab/gitlab_api.py \
             ci-skills/lib/python/core/catalog.py \
+            ci-skills/lib/python/core/kubernetes/run_scope.py \
+            ci-skills/lib/python/core/kubernetes/podman_probe.py \
+            ci-skills/lib/python/core/kubernetes/podman_evidence.py \
+            ci-skills/lib/python/core/kubernetes/podman_callbacks.py \
+            ci-skills/lib/python/core/kubernetes/image_build_readiness.py \
             ci-skills/lib/python/core/report.py \
             ci-skills/bin/gitlab_runner.py \
             tools/check_live_acceptance.py
@@ -145,6 +151,7 @@ jobs:
             ci-skills/schemas/results/gitlab-action.schema.json \
             ci-skills/schemas/results/gitlab-job-list.schema.json \
             ci-skills/schemas/results/toolbox-workflow.schema.json \
+            ci-skills/schemas/results/image-build-readiness.schema.json \
             ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             ci-skills/schemas/results/gitlab-runner-read.schema.json \
             ci-skills/schemas/results/gitlab-runner-delete.schema.json

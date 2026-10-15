@@ -99,6 +99,7 @@ Routing, in short:
 | --- | --- |
 | Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
 | Build a schema-declared toolbox | `bin/toolbox.py` |
+| Prove nested Podman execution on a worker | `bin/image_build_readiness.py` |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | proof of access across all three authorities | `access_check.py` |
 | a named CI job's own facts | `gitlab_job.py --job-url URL` |
@@ -281,6 +282,32 @@ For a Ceph network or RBD timeout, start with `ceph_cluster.py` and
 `event_trace.py`, then run the MTU command when physical network consistency
 matters. For Cilium, run `cilium_status.py` first and `cilium_node.py` for an
 affected node. `tools.json` describes every command and its filters.
+
+## Nested Podman readiness
+
+`bin/image_build_readiness.py` composes worker selection, a temporary privileged Job, runtime checks, and cleanup.
+It uses Kubernetes configuration and `kubectl`; Podman runs in the Job. The selected identity must read Nodes,
+Pods, Jobs, Events and Pod logs, and create/delete Namespaces and Jobs. The cluster must admit the privileged
+probe Pod for the runtime checks to execute. The result schema is
+[image-build-readiness.schema.json](schemas/results/image-build-readiness.schema.json), also linked by `--describe`.
+
+```bash
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/image_build_readiness.py" --live-plan --json
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/image_build_readiness.py" \
+  --apply --confirm-plan DIGEST_FROM_PLAN --json
+```
+
+Use `--node NAME` to choose a Ready worker; otherwise the command discovers one. Repeat the same input options on
+apply. The default images require a Linux amd64 worker; use `--node` to select one on a mixed cluster, or override
+`--probe-image` and `--inner-image` with compatible digests. `--help` lists resource and timeout options.
+`--dry-run` makes no API calls and its plan cannot authorize apply.
+
+The result reports the exact Job-owned Pod exit, marker rows, and cleanup read-back. It proves nested container
+execution, bind-mount read-back, exit propagation, no remaining run-labeled containers, and Job/Namespace absence.
+It does not yet prove a GitLab runner, an image build, or a Harbor push. OpenShift admission denial reports
+`scc_required` with the namespace and service account; the command does not grant SCC permissions.
+`--output-dir PATH` saves the probe log and, when parsing succeeds, marker rows alongside the shared reports.
+Without an output path, results go to stdout. Marker files use the result schema's `$defs/markers` shape.
 
 ## Toolbox and runner workflows
 
