@@ -571,8 +571,9 @@ receipt that goes stale between pull requests is reported on `main` by the next 
 full live access check of the installed candidate, `access_check.py --json`, whose GitLab and Kubernetes identities,
 targets, and declared live reads are bound to the functional checksum. The checker ignores the receipt's GitHub
 surface and never reads this repository's branch protection, so the execution host's target file needs no
-`required_checks` declaration. Superseded receipts live under `tests/acceptance/historical/`, which the checker
-never evaluates.
+`required_checks` declaration and no entry for this repository; `access_check.py` itself still needs a `[github]`
+table naming some readable repository, as its own contract requires all three authorities. Superseded receipts live
+under `tests/acceptance/historical/`, which the checker never evaluates.
 
 #### Live acceptance reruns
 

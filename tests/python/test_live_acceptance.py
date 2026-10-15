@@ -456,6 +456,16 @@ def test_operation_target_cannot_switch_away_from_initial_synthetic_setup() -> N
             "live_checks_blocking",
         ),
         (
+            lambda setup: setup["access.json"]["surfaces"]["kubernetes"].update(
+                status="BLOCKED"
+            ),
+            "surface_not_pass:kubernetes",
+        ),
+        (
+            lambda setup: setup["access.json"]["surfaces"].pop("gitlab"),
+            "identity_missing:gitlab",
+        ),
+        (
             lambda setup: setup["gitlab-access.json"].update(credential_digest=""),
             "credential_source_unresolved",
         ),
@@ -464,7 +474,7 @@ def test_operation_target_cannot_switch_away_from_initial_synthetic_setup() -> N
 def test_setup_receipts_preserve_freshness_and_shape_checks(
     mutate: bool, reason: str
 ) -> None:
-    """Retain setup status, time, live-read, and credential checks.
+    """Retain setup status, time, live-read, surface, and credential checks.
 
     :param mutate: Case-specific change that invalidates a setup receipt.
     :param reason: Expected acceptance problem suffix for that change.
@@ -870,12 +880,15 @@ def test_acceptance_requires_recorded_functional_digest() -> None:
 
 
 def test_gate_never_reads_repository_merge_policy_from_the_skill_target() -> None:
-    """Accept the full access receipt without GitHub, publication, or required checks.
+    """Accept the full access receipt without publication or required-checks proof.
 
-    The skill's target file belongs to whoever installs the skill; a GitLab-only
-    user has no GitHub section at all. The repository gate binds GitLab and
-    Kubernetes proof only, so a receipt with no GitHub surface, and one that
-    still carries publication fields, are both accepted.
+    The skill's target file belongs to whoever installs the skill and never
+    carries this repository's merge policy. The repository gate binds GitLab and
+    Kubernetes proof only: it never reads the receipt's GitHub surface, so a
+    receipt without one, and one that still carries publication fields with a
+    blocked GitHub surface, are both accepted. The installed `access_check.py`
+    itself still needs a `[github]` table with some readable repository to run;
+    that is the producer's contract, not this gate's.
 
     :returns: None; assertions in the body validate the boundary.
     """
@@ -1203,14 +1216,16 @@ def test_receipt_older_than_the_policy_window_is_stale() -> None:
     :returns: None; assertions in the body validate the regression.
     """
     setup = _access_setup()
-    receipts = _complete_receipts(setup)
     setup["access.json"]["captured_at"] = (
         NOW - timedelta(days=MAX_AGE_DAYS + 1)
     ).isoformat()
+    receipts = _complete_receipts(setup)
 
     result = _evaluate(setup, receipts)
 
+    assert result["status"] == "BLOCKED"
     assert "access.json:receipt_stale" in result["problems"]
+    assert "access.json:setup_receipt_mismatch" not in result["problems"]
 
 
 def test_window_applies_to_every_setup_receipt() -> None:
@@ -1262,14 +1277,14 @@ def test_receipt_inside_the_policy_window_is_fresh() -> None:
     :returns: None; assertions in the body validate the regression.
     """
     setup = _access_setup()
-    receipts = _complete_receipts(setup)
     setup["access.json"]["captured_at"] = (
         NOW - timedelta(days=MAX_AGE_DAYS)
     ).isoformat()
+    receipts = _complete_receipts(setup)
 
     result = _evaluate(setup, receipts)
 
-    assert "access.json:receipt_stale" not in result["problems"]
+    assert result["status"] == "PASS", result["problems"]
 
 
 def test_no_committed_receipt_carries_a_host_path() -> None:

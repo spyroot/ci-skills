@@ -898,9 +898,8 @@ class AcceptanceReview:
     def setup_receipts(self) -> None:
         """Require the full live access receipt and retain each GitLab access context.
 
-        :raises ImportError: If the shared command-authority catalogue cannot be loaded.
         :raises RecursionError: If receipt containers exceed recursive redaction limits.
-        """  # noqa: DOC502 - Receipt helpers propagate import and recursion failures.
+        """  # noqa: DOC502 - Receipt helpers propagate recursion failures.
         for name, receipt in self.setup.items():
             kind = receipt.get("kind")
             try:
@@ -1091,7 +1090,7 @@ def evaluate(
     :param now: Reference time for freshness, or None to read the current UTC time.
     :param max_age_days: Declared maximum receipt age from the acceptance policy.
     :returns: Acceptance status, accepted receipts, and stable problem reasons.
-    :raises ImportError: If shared provenance or authority modules cannot be loaded.
+    :raises ImportError: If the shared provenance module cannot be loaded.
     :raises OSError: If a candidate source file cannot be read for its digest.
     :raises ValueError: If the candidate skill tree cannot be fingerprinted.
     :raises RecursionError: If receipt containers exceed recursive redaction limits.
