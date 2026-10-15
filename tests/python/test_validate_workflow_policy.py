@@ -300,6 +300,7 @@ REQUIRED_REPORT_URL: Final = LIVE_REPORT_URL.replace(
     "github.example.test", "github.com"
 )
 REQUIRED_STATUS_MAX_ATTEMPTS: Final = 5
+CURL_HTTP_FAILURE_EXIT: Final = 22
 FAKE_REQUIRED_RESULT_TOOLS: Final = r"""
 import json
 import os
@@ -329,6 +330,9 @@ with journal.open("a", encoding="utf-8") as stream:
     stream.write(json.dumps(entry) + "\n")
 if name != "curl" or method != "GET":
     raise SystemExit(0)
+get_exit_status = int(os.environ["FAKE_GET_EXIT_STATUS"])
+if get_exit_status:
+    raise SystemExit(get_exit_status)
 
 reads = sum(
     json.loads(line)["operation"] == "GET"
@@ -357,6 +361,7 @@ def _run_required_result(
     tmp_path: Path,
     *,
     mismatch: str = "",
+    get_exit_status: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], Sequence[JSONObject], int]:
     """Run the aggregate workflow against deterministic status visibility.
 
@@ -364,6 +369,7 @@ def _run_required_result(
     :param call_journal: Request and emitter journal owned by this test.
     :param tmp_path: Isolated shell working directory.
     :param mismatch: Persistent wrong status field, or one initially pending read.
+    :param get_exit_status: Curl GET exit status, including terminal HTTP failures.
     :returns: Shell outcome, ordered operations, and configured retry bound.
     """
     workflow = yaml.safe_load(_workflow_text())
@@ -389,6 +395,7 @@ def _run_required_result(
         "FAKE_JOURNAL": str(call_journal),
         "FAKE_TARGET_URL": REQUIRED_REPORT_URL,
         "FAKE_STATUS_MISMATCH": mismatch,
+        "FAKE_GET_EXIT_STATUS": str(get_exit_status),
     }
     result = subprocess.run(
         ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
@@ -440,6 +447,27 @@ def test_required_result_retries_readback_without_republishing(
             "aggregate": "success",
             "status": "failure" if mismatch else "success",
         },
+    }
+
+
+def test_required_result_http_error_stops_readback_without_retry(
+    fake_bin: Path, call_journal: Path, tmp_path: Path
+) -> None:
+    """Curl HTTP failures stop immediately and preserve failed status evidence.
+
+    :param fake_bin: Isolated command-double directory.
+    :param call_journal: Per-test operation journal.
+    :param tmp_path: Isolated working directory.
+    """
+    result, calls, _attempts = _run_required_result(
+        fake_bin, call_journal, tmp_path, get_exit_status=CURL_HTTP_FAILURE_EXIT
+    )
+
+    assert result.returncode != 0
+    assert [item["operation"] for item in calls] == ["aggregate", "POST", "GET", "emit"]
+    assert calls[-1] == {
+        "operation": "emit",
+        "outcomes": {"aggregate": "success", "status": "failure"},
     }
 
 
