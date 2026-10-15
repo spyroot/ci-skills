@@ -20,6 +20,8 @@ Start with [Install and first run](../README.md#install-and-first-run) to use th
 | [CI11-TOOLS](phases/CI11-TOOLS.md) | the tool catalogue and the port of the source repo's scripts |
 | [CI12-NODE-ONBOARDING](phases/CI12-NODE-ONBOARDING.md) | proposed phase: onboard a host into OpenShift from one machine specification |
 | [Node onboarding ExecPlan](exec-plans/active/ci12-node-onboarding.md) | the executable plan for CI12, milestone by milestone |
+| [CI13-IMAGE-BUILD-READINESS](phases/CI13-IMAGE-BUILD-READINESS.md) | proposed phase: prove a cluster can build images from a GitLab job, starting with a podman probe |
+| [Image-build readiness ExecPlan](exec-plans/active/ci13-image-build-readiness.md) | the executable plan for CI13, milestone by milestone |
 | [GitLab tool belt](gitlab-toolbelt-plan.md) | delivery plan of the GitLab operations tool belt |
 | [Field notes](field-notes.md) | observations from the first deliveries |
 | [Use cases](use-cases.md) | the behaviour we want, use case by use case, in our own words |
