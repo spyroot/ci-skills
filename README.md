@@ -1,7 +1,7 @@
 # CI Skills: GitLab and Kubernetes operations
 
 CI Skills provides project-neutral commands for GitLab, GitHub, and Kubernetes/OpenShift. Each command selects its
-target from caller input or the configured binding and returns evidence that an operator or agent can inspect.
+target from caller input or the configured binding and returns evidence that a user or agent can inspect.
 
 ## Install and first run
 
@@ -421,15 +421,17 @@ command exceptions, smoke filename selection and credential resolution, and the
 
 ### Live smoke setup
 
-A live smoke, or live test, reproduces the installed user experience: a user clones this repository, installs
-ci-skills into Codex or Claude, puts their configuration in `~/.ci-skills/target.toml` with references to their own
-credentials (a token file, a kubeconfig, or a CLI login), and uses the commands against their real GitLab,
-Kubernetes, GitHub, Harbor, or any subset of them. Every provider section is optional. A target that declares only
-`[kubernetes]` runs every command whose only declared authority is Kubernetes (`requires_authorities` in
-`--describe`); a command that needs a provider the target does not declare reports `BLOCKED` and names the
-authority tables it requires instead of running. The full `access_check.py` is the one command that needs the
-GitHub, GitLab, and Kubernetes tables together. The setup runs without the `ci-skills-smoke` switch, which would
-select `ci-skills-smoke.toml` instead. The target file is that user's configuration: it never carries this
+A live smoke, or live test, reproduces the installed user experience when a user installs the skill in their agentic
+setup: the user clones this repository, installs ci-skills into Codex or Claude, puts their configuration in
+`~/.ci-skills/target.toml` with references to their own credentials (a token file, a kubeconfig, or a CLI login), and
+uses the commands against their real GitLab, Kubernetes, GitHub, Harbor, or any subset of them. The actor is the
+agent: a Codex or Claude session that, through ci-skills, decides to create a runner or read a job and runs the
+ci-skills command instead of hand-rolled `glab`, `kubectl`, or `jq` calls. Every provider section is optional. A
+target that declares only `[kubernetes]` runs every command whose only declared authority is Kubernetes
+(`requires_authorities` in `--describe`); a command that needs a provider the target does not declare reports
+`BLOCKED` and names the authority tables it requires instead of running. The full `access_check.py` is the one command
+that needs the GitHub, GitLab, and Kubernetes tables together. The setup runs without the `ci-skills-smoke` switch,
+which would select `ci-skills-smoke.toml` instead. The target file is that user's configuration: it never carries this
 repository's CI, gate, or delivery settings.
 
 ## GitLab operations

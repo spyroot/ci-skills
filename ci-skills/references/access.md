@@ -29,8 +29,9 @@ include only the providers required by your command. Every provider section is
 optional: a target that declares only `[kubernetes]` serves every command whose
 only declared authority is Kubernetes, and a command that needs an undeclared
 provider blocks and names the authority tables it requires. A live smoke, or live test, reproduces the
-installed user experience: the installed commands run against real systems with
-exactly such a user-written target. `core.catalog.TARGET_PROTOCOL`
+installed user experience when a user installs the skill in their agentic
+setup: the installed commands run against real systems with exactly such a
+user-written target. `core.catalog.TARGET_PROTOCOL`
 defines target selection, also published in the installed `tools.json`.
 
 `ci-api` uses these three tiers. `ci-binary-build` validates explicit local inputs without selecting a
@@ -50,7 +51,7 @@ The `target_selection` receipt field also records the selected route:
 resolved path. Portable receipts replace absolute paths with digest tokens.
 
 This skill resolves; it does not provision. It creates no target file, mints no
-token and fetches no kubeconfig. Putting them there is the operator's job, or
+token and fetches no kubeconfig. Putting them there is the user's job, or
 an explicit step in the calling project's own instructions.
 
 ## Effective credential sources
@@ -89,16 +90,16 @@ Example nonsecret target:
 [github]
 host = "github.com"
 repository = "owner/repository"
-# token_file = "/home/operator/.ci-skills/credentials/github.token"
+# token_file = "/home/user/.ci-skills/credentials/github.token"
 
 [gitlab]
 url = "https://gitlab.example.com"
-# token_file = "/home/operator/.ci-skills/credentials/gitlab.token"
+# token_file = "/home/user/.ci-skills/credentials/gitlab.token"
 
 [kubernetes]
 context = "admin-context"
 server = "https://api.cluster.example.com:6443"
-# kubeconfig = "/home/operator/.kube/config"
+# kubeconfig = "/home/user/.kube/config"
 ```
 
 ## Package and functional identity
@@ -185,7 +186,7 @@ since it IS the gate rather than a report authorized by one.
 
 `--receipt-out PATH` writes the committable form, with every absolute host path
 replaced by a digest token. That is what makes a real receipt publishable: the
-captured form names credential locations under the operator's home directory.
+captured form names credential locations under the user's home directory.
 Invoke `access_check.py --ceph-namespace NAME` when the requested live proof
 includes Ceph reads in that selected namespace. Capture live evidence from the
 installed candidate on the intended execution host; the repository's static
