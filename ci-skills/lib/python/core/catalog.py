@@ -364,6 +364,45 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
         "are cleaned on exit.",
     },
+    "image_build_readiness.py": {
+        "kind": "image_build_readiness",
+        "purpose": "Probe nested Podman execution on one Kubernetes worker and clean up.",
+        "use_when": "Check container execution, bind mounts and exit propagation before "
+        "building a runner workflow.",
+        "requires": ("kubernetes",),
+        "capabilities": ("node_scoped",),
+        "mutates": True,
+        "options": {
+            "--probe-image": "digest-pinned image providing Podman; default is Linux amd64",
+            "--inner-image": "digest-pinned inner test image; default is Linux amd64",
+            "--timeout": "maximum probe duration in seconds",
+            "--cpu-request": "probe container CPU request",
+            "--cpu-limit": "probe container CPU limit",
+            "--memory-request": "probe container memory request",
+            "--memory-limit": "probe container memory limit",
+            "--storage-size": "maximum temporary container-storage volume size",
+            "--live-plan": "read target identity and select a Ready worker without mutation",
+            "--apply": "run the confirmed probe and verify cleanup",
+            "--confirm-plan": "exact fingerprint returned by the live plan",
+            "--receipt-out": "write a sanitized operation receipt to this exact path",
+        },
+        "subcommands": {
+            "probe": {
+                "purpose": "Run a temporary Podman Job on one selected worker.",
+                "result_schema": "schemas/results/image-build-readiness.schema.json",
+                "mutates": True,
+                "side_effects": "Creates and removes a temporary namespace, script ConfigMap and privileged Job.",
+                "read_back": "Exact Job-owned Pod exit, probe rows and resource absence.",
+            },
+        },
+        "related": ("toolbox.py", "harbor_pull.py"),
+        "required_tools": ("kubectl",),
+        "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows "
+        "and cleanup read-back; does not prove runner or image-publication behavior.",
+        "execution_surface": "configured Kubernetes API and a temporary privileged Job",
+        "side_effects": "Apply creates a run-owned namespace, script ConfigMap and Job, then removes them. "
+        "No service-account token is mounted and no SCC permission is granted.",
+    },
     "access_check.py": {
         "kind": "access_check",
         "purpose": "Prove access to every selected authority and emit one receipt.",
@@ -1230,6 +1269,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 **DISCOVERY_COMMANDS,
             },
             "routing": {
+                "prove nested Podman runtime readiness": "image_build_readiness.py",
                 "build or delete a toolbox": "toolbox.py",
                 "publish an image to Harbor": "harbor_push.py",
                 "verify a Harbor toolbox pull": "harbor_pull.py",

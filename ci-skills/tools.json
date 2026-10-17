@@ -959,6 +959,61 @@
       },
       "use_when": "Publish an existing image without building or creating a runner."
     },
+    "image_build_readiness.py": {
+      "capabilities": [
+        "node_scoped"
+      ],
+      "execution_surface": "configured Kubernetes API and a temporary privileged Job",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--cpu-limit",
+        "--cpu-request",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--inner-image",
+        "--json",
+        "--live-plan",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--memory-limit",
+        "--memory-request",
+        "--node",
+        "--output-dir",
+        "--probe-image",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--storage-size",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Probe nested Podman execution on one Kubernetes worker and clean up.",
+      "read_only": false,
+      "report_kind": "image_build_readiness",
+      "required_options": [],
+      "required_tools": [
+        "kubectl"
+      ],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows and cleanup read-back; does not prove runner or image-publication behavior.",
+      "side_effects": "Apply creates a run-owned namespace, script ConfigMap and Job, then removes them. No service-account token is mounted and no SCC permission is granted.",
+      "subcommands": {
+        "probe": {
+          "mutates": true,
+          "purpose": "Run a temporary Podman Job on one selected worker.",
+          "read_back": "Exact Job-owned Pod exit, probe rows and resource absence.",
+          "result_schema": "schemas/results/image-build-readiness.schema.json",
+          "side_effects": "Creates and removes a temporary namespace, script ConfigMap and privileged Job."
+        }
+      },
+      "use_when": "Check container execution, bind mounts and exit propagation before building a runner workflow."
+    },
     "k8s_verify_mtu_consistency.py": {
       "capabilities": [
         "node_scoped"
@@ -1177,6 +1232,7 @@
     "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
     "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
     "prove all three authorities": "access_check.py",
+    "prove nested Podman runtime readiness": "image_build_readiness.py",
     "publish an image to Harbor": "harbor_push.py",
     "read a caller-selected Git API resource": "bin/ci-api",
     "read or manage a GitLab runner": "gitlab_runner.py",

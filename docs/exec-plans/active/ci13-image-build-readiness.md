@@ -197,8 +197,9 @@ the pushed digest read back. A green build alone demonstrates nothing; the live 
 ## Idempotence and Recovery
 
 Every apply generates a new identifier, so repeated probes do not collide and two probes can run on two nodes at
-once. Resources owned by the work: the run-scoped namespace and the Job, with its Pod and emptyDirs. Both are
-removed on success, on failure and on interrupt by their creators' cleanup hooks, with absence read-back; the
+once. Resources owned by the work: the run-scoped namespace, read-only script ConfigMap and Job, with its Pod
+and emptyDirs. The confirmed plan binds the script bytes. These resources are removed on success, on failure and on
+interrupt by their creators' cleanup hooks, with absence read-back; the
 evidence directory, when named, is never removed. The probe changes nothing on the node: podman's storage lives on
 the Pod's emptyDir and leaves with the Pod, and the two inner containers are removed by the script before it
 exits. Recovery: if a cleanup hook fails, the result is `BLOCKED` with the run identifier and the objects still

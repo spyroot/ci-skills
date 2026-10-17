@@ -182,11 +182,13 @@ pipeline.
 - Read back digest: `harbor_push.py` style read-back of the pushed image, and the job read-back naming the
   runner.
 
-Status: proposed. Nothing in the skill runs podman today. Reuse: the temporary Job with cleanup on every exit
-in [`core/kubernetes/runner.py`](../ci-skills/lib/python/core/kubernetes/runner.py) (`PullImage`), and the
-privileged debug Pod handling of the MTU check. On OpenShift a privileged Pod needs the `privileged` security
-context constraint on the namespace's service account; the probe reports that requirement instead of granting
-it. Evidence rows: the probe's marker lines, then the rows of chain 1 for the runner and the job.
+Status: probe implemented by [`image_build_readiness.py`](../ci-skills/bin/image_build_readiness.py); the runner,
+image-build job, and publication chain remain proposed. The probe uses the shared Kubernetes callbacks,
+`RunScope`, and `ResourceSet` for run ownership and cleanup. Its
+[installed example](../ci-skills/SKILL.md#nested-podman-readiness) shows live planning and confirmed apply.
+On OpenShift, an observed privileged-Pod admission rejection reports `scc_required` for the generated namespace's
+service account without granting permission. Probe evidence covers nested runtime behavior only; the later
+runner, build, and publication steps need their own live results.
 
 ## How to add one
 
