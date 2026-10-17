@@ -391,7 +391,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "purpose": "Run a temporary Podman Job on one selected worker.",
                 "result_schema": "schemas/results/image-build-readiness.schema.json",
                 "mutates": True,
-                "side_effects": "Creates and removes a temporary namespace and privileged Job.",
+                "side_effects": "Creates and removes a temporary namespace, script ConfigMap and privileged Job.",
                 "read_back": "Exact Job-owned Pod exit, probe rows and resource absence.",
             },
         },
@@ -400,7 +400,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows "
         "and cleanup read-back; does not prove runner or image-publication behavior.",
         "execution_surface": "configured Kubernetes API and a temporary privileged Job",
-        "side_effects": "Apply creates a run-owned namespace and Job, then removes them. "
+        "side_effects": "Apply creates a run-owned namespace, script ConfigMap and Job, then removes them. "
         "No service-account token is mounted and no SCC permission is granted.",
     },
     "access_check.py": {
@@ -1269,6 +1269,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 **DISCOVERY_COMMANDS,
             },
             "routing": {
+                "prove nested Podman runtime readiness": "image_build_readiness.py",
                 "build or delete a toolbox": "toolbox.py",
                 "publish an image to Harbor": "harbor_push.py",
                 "verify a Harbor toolbox pull": "harbor_pull.py",

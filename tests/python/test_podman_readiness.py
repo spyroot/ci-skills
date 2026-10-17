@@ -8,15 +8,28 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import json
+import os
+import signal
+import subprocess
+import sys
 from argparse import Namespace
 from collections.abc import MutableMapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn, Optional
+from typing import TYPE_CHECKING, Final, NoReturn, Optional
 
 import pytest
-from conftest import import_script_module, parse_json_output, run_script
+from conftest import (
+    SKILL_ROOT,
+    import_script_module,
+    install_executable,
+    parse_json_output,
+    read_journal,
+    run_script,
+)
+from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
 
 PODMAN = import_script_module("lib.python.core.kubernetes.podman_probe")
 PODMAN_EVIDENCE = import_script_module("lib.python.core.kubernetes.podman_evidence")
@@ -125,26 +138,73 @@ def test_probe_action_requires_digest_pinned_images(tmp_path: Path) -> None:
         replace(_action(tmp_path), inner_image="registry.example.test/busybox:latest")
 
 
+@pytest.mark.parametrize(
+    "quantities",
+    (
+        ("0.5", "1500m", "0.5Gi", "1.5Gi", "2.5Gi"),
+        ("5e-1", "1", "512M", "1G", "2G"),
+        ("250m", "1", "512Mi", "1Gi", "2Gi"),
+    ),
+)
 def test_probe_inputs_accept_positive_timeout_and_native_decimal_quantities(
     tmp_path: Path,
+    quantities: tuple[str, str, str, str, str],
 ) -> None:
-    """Accept caller-selected bounds expressed in Kubernetes quantity syntax.
+    """Preserve valid Kubernetes quantities instead of rewriting caller inputs.
 
     :param tmp_path: Directory used by the Kubernetes-only target.
-    :returns: None; the action retains valid non-integer quantities and timeout.
+    :param quantities: Valid decimal, exponent, or binary-suffix resource values.
+    :returns: None; the action and rendered Job retain the selected quantities.
     """
-    resources = PODMAN.ProbeResources(
-        cpu_request="0.5",
-        cpu_limit="1500m",
-        memory_request="0.5Gi",
-        memory_limit="1.5Gi",
-        storage_size="2.5Gi",
-    )
-
+    resources = PODMAN.ProbeResources(*quantities)
     action = replace(_action(tmp_path), timeout=1800, resources=resources)
+    document = PODMAN.probe_job(
+        action, RUN_SCOPE.RunScope.from_id("unit123"), "worker-a"
+    )
+    specification = document["spec"]["template"]["spec"]
+    observed = specification["containers"][0]["resources"]
 
     assert action.timeout == 1800
     assert action.resources == resources
+    assert observed["requests"] == {"cpu": quantities[0], "memory": quantities[2]}
+    assert observed["limits"] == {"cpu": quantities[1], "memory": quantities[3]}
+    storage = next(
+        volume
+        for volume in specification["volumes"]
+        if volume["name"] == "containers-storage"
+    )
+    assert storage["emptyDir"]["sizeLimit"] == quantities[4]
+
+
+@pytest.mark.parametrize(
+    "changes",
+    (
+        {"cpu_request": "garbage"},
+        {"cpu_request": "-100m"},
+        {"cpu_limit": "-1"},
+        {"memory_request": "1KK"},
+        {"memory_request": "-1Gi"},
+        {"memory_limit": "-1Gi"},
+        {"storage_size": "-2Gi"},
+        {"cpu_request": "2", "cpu_limit": "1"},
+        {"memory_request": "2Gi", "memory_limit": "1Gi"},
+    ),
+)
+def test_probe_rejects_invalid_resource_bounds_before_action_construction(
+    tmp_path: Path,
+    changes: dict[str, str],
+) -> None:
+    """Reject unusable bounds before an action can create its temporary namespace.
+
+    :param tmp_path: Directory used by the Kubernetes-only target.
+    :param changes: Malformed, negative, or request-above-limit input overrides.
+    :returns: None; input validation raises before constructing an apply action.
+    """
+    action = _apply_action(tmp_path)
+
+    with pytest.raises(ValueError):
+        resources = replace(action.resources, **changes)
+        replace(action, resources=resources)
 
 
 def test_probe_rejects_nonpositive_timeout(tmp_path: Path) -> None:
@@ -195,6 +255,7 @@ def test_probe_plan_needs_only_kubernetes_configuration(tmp_path: Path) -> None:
     assert plan["claim"] == "nested_podman_runtime_readiness"
     assert plan["side_effects_on_apply"] == [
         "temporary_namespace",
+        "temporary_configmap",
         "temporary_job",
     ]
 
@@ -324,7 +385,19 @@ def test_probe_job_is_bounded_owned_and_pinned_to_selected_worker(
         "requests": {"cpu": "100m", "memory": "128Mi"},
         "limits": {"cpu": "1", "memory": "512Mi"},
     }
+    configmap = PODMAN.probe_configmap(scope)
+    assert configmap["immutable"] is True
+    assert configmap["metadata"]["namespace"] == scope.namespace
+    assert configmap["metadata"]["labels"] == dict(scope.labels)
+    assert configmap["data"] == PODMAN.probe_scripts()
     assert pod_spec["volumes"] == [
+        {
+            "name": PODMAN.PROBE_VOLUME,
+            "configMap": {
+                "name": configmap["metadata"]["name"],
+                "defaultMode": 0o444,
+            },
+        },
         {
             "name": "containers-storage",
             "emptyDir": {"sizeLimit": "2Gi"},
@@ -332,11 +405,25 @@ def test_probe_job_is_bounded_owned_and_pinned_to_selected_worker(
         {"name": "containers-runroot", "emptyDir": {}},
         {"name": "evidence", "emptyDir": {"sizeLimit": "16Mi"}},
     ]
-    script = container["command"][-1]
-    assert "--storage-driver overlay" in script
-    assert "--cgroup-manager cgroupfs" in script
-    assert "--memory 64m --cpus 0.25" in script
-    assert '[ "$failure_rc" -eq 7 ]' in script
+    assert container["command"] == [
+        "/bin/bash",
+        f"{PODMAN.PROBE_MOUNT}/{PODMAN.PROBE_SCRIPT_NAME}",
+    ]
+    environment = {item["name"]: item["value"] for item in container["env"]}
+    assert environment["PROBE_RUNTIME_DIR"] == PODMAN.PROBE_MOUNT
+    assert environment["EVIDENCE_DIR"] == PODMAN.PROBE_EVIDENCE_MOUNT
+    assert environment["EXPECTED_INNER_EXIT"] == str(
+        PODMAN_EVIDENCE.EXPECTED_INNER_EXIT
+    )
+    mounts = container["volumeMounts"]
+    scripts_mount = next(
+        mount for mount in mounts if mount["name"] == PODMAN.PROBE_VOLUME
+    )
+    assert scripts_mount == {
+        "name": PODMAN.PROBE_VOLUME,
+        "mountPath": PODMAN.PROBE_MOUNT,
+        "readOnly": True,
+    }
 
 
 def _pod_list(job_uid: str, exit_code: int = 0) -> JSONValue:
@@ -709,17 +796,30 @@ def _apply_action(
     )
 
 
-def test_confirm_mismatch_blocks_before_any_resource_mutation(tmp_path: Path) -> None:
-    """Refuse a stale live-plan digest before namespace or Job creation.
+@pytest.mark.parametrize(
+    "changed_scripts", (False, True), ids=("bad-digest", "script-change")
+)
+def test_confirm_mismatch_blocks_before_any_resource_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_scripts: bool,
+) -> None:
+    """Refuse stale confirmation or changed script bytes before resource creation.
 
     :param tmp_path: Directory used by the Kubernetes-only target.
-    :returns: None; the mutation journal remains empty.
+    :param monkeypatch: Fixture replacing installed script bytes after confirmation.
+    :param changed_scripts: Whether only script bytes invalidate a previously valid plan.
+    :returns: None; no namespace, ConfigMap, or Job was created.
     """
     service = FakeKubernetes(_target(tmp_path))
-    executor = _executor(
-        _apply_action(tmp_path, confirmation="stale-plan"),
-        service,
+    action = _apply_action(
+        tmp_path, confirmation=None if changed_scripts else "stale-plan"
     )
+    if changed_scripts:
+        scripts = PODMAN.probe_scripts()
+        scripts[PODMAN.PROBE_SCRIPT_NAME] += "\n# changed after confirmation\n"
+        monkeypatch.setattr(PODMAN, "probe_scripts", lambda: scripts)
+    executor = _executor(action, service)
 
     with pytest.raises(ValueError, match="confirm_plan_mismatch_rerun_live_plan"):
         executor.run()
@@ -753,14 +853,69 @@ def test_apply_verifies_probe_then_cleans_job_before_namespace(tmp_path: Path) -
     pod = state.probe_record["pod"]
     assert isinstance(pod, dict)
     assert pod["exit_code"] == 0
+    assert [kind for kind, _name, _namespace in service.mutations] == [
+        "Namespace",
+        "ConfigMap",
+        "Job",
+    ]
     assert [item["kind"] for item in state.cleanup_resources] == [
         "Job",
+        "ConfigMap",
         "Namespace",
     ]
     assert [kind for kind, _name, _namespace in service.deletions] == [
         "Job",
+        "ConfigMap",
         "Namespace",
     ]
+    assert service.resources == {}
+
+
+@pytest.mark.parametrize("scc_rejected", (False, True), ids=("pass", "scc-required"))
+def test_emitted_apply_report_matches_shipped_result_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    scc_rejected: bool,
+) -> None:
+    """Validate actual successful and admission-blocked command reports offline.
+
+    :param tmp_path: Directory used by the Kubernetes-only target.
+    :param monkeypatch: Fixture replacing configuration and the provider boundary.
+    :param capsys: Fixture capturing the real JSON result emitter.
+    :param scc_rejected: Whether the fake provider denies privileged Pod admission.
+    :returns: None; emitted status, runtime claim, cleanup, and schema are asserted.
+    """
+    action = _apply_action(tmp_path)
+    service = FakeKubernetes(action.target, scc_rejected=scc_rejected)
+    executor = _executor(action, service)
+    controller = READINESS.ImageBuildReadiness(
+        READINESS.build_parser().parse_args(
+            ["--apply", "--confirm-plan", action.confirm_plan, "--json"]
+        )
+    )
+    controller.action = action
+    controller.target = replace(action.target, tested_revision="a" * 40)
+    controller.state = executor.state
+    monkeypatch.setattr(controller, "_prepare", lambda mode: mode)
+    monkeypatch.setattr(READINESS, "workflow", lambda _action, _state: executor)
+
+    exit_code = controller.execute()
+    output = json.loads(capsys.readouterr().out)
+    schema_root = SKILL_ROOT / "schemas" / "results"
+    schema = json.loads((schema_root / "image-build-readiness.schema.json").read_text())
+    tag_schema = json.loads((schema_root / "gitlab-runner-tag.schema.json").read_text())
+    registry = Registry().with_resource(
+        tag_schema["$id"], Resource.from_contents(tag_schema)
+    )
+    Draft202012Validator(schema, registry=registry).validate(output)
+
+    assert exit_code == (2 if scc_rejected else 0)
+    assert output["status"] == ("BLOCKED" if scc_rejected else "PASS")
+    record = next(item for item in output["records"] if "outcome" in item)
+    assert record["outcome"] == ("scc_required" if scc_rejected else "ready")
+    assert record["verified"] is (not scc_rejected)
+    assert output["cleanup"]["status"] == "PASS"
     assert service.resources == {}
 
 
@@ -844,6 +999,96 @@ def test_scc_rejection_reports_requirement_without_granting_it(tmp_path: Path) -
 
 
 @pytest.mark.parametrize(
+    "final_termination", (False, True), ids=("no-pod", "final-pod")
+)
+def test_terminal_job_failure_observes_once_more_without_waiting_for_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    final_termination: bool,
+) -> None:
+    """Return promptly after a final Pod/Event read when the Job cannot retry.
+
+    :param tmp_path: Directory used by the Kubernetes-only target.
+    :param monkeypatch: Fixture replacing native observations and the polling clock.
+    :param final_termination: Whether the final Pod read discovers delayed termination.
+    :returns: None; final observation priority, no sleep, and cleanup are asserted.
+    """
+    service = FakeKubernetes(_target(tmp_path))
+    read_resource = service.read
+    observations: list[str] = []
+    sleeps: list[float] = []
+    now = [0.0]
+
+    def read(kind: str, name: str, namespace: str) -> Optional[JSONObject]:
+        """Expose a terminal Job after the initial Pod/Event observation.
+
+        :param kind: Resource kind selected by the callback.
+        :param name: Exact generated resource name.
+        :param namespace: Generated run namespace or cluster scope.
+        :returns: Existing resource with a terminal Failed condition on the Job.
+        """
+        document = read_resource(kind, name, namespace)
+        if kind == "Job" and document is not None and observations:
+            observations.append("job-failed")
+            document["status"] = {"conditions": [{"type": "Failed", "status": "True"}]}
+        return document
+
+    def observe(*args: str, openshift: bool = False) -> JSONValue:
+        """Observe no Pod until the bounded final read after terminal Job failure.
+
+        :param *args: Requested native resource read.
+        :param openshift: Native-client selector, unused by this fixture.
+        :returns: Node selection, empty Events, or the delayed Pod termination.
+        :raises AssertionError: If the callback requests an unexpected resource.
+        """
+        assert openshift is False
+        if "nodes" in args:
+            return {"items": [_node("worker-a")]}
+        if "pods" in args:
+            observations.append("pods")
+            if final_termination and "job-failed" in observations:
+                return _pod_list("job-uid")
+            return {"items": []}
+        if "events" in args:
+            observations.append("events")
+            return {"items": []}
+        raise AssertionError(f"unexpected provider read: {args}")
+
+    def advance(seconds: float) -> None:
+        """Advance fake time so a regressed wait finishes without a real delay.
+
+        :param seconds: Polling interval requested by the production wait loop.
+        :returns: None; the elapsed time and sleep journal are updated.
+        """
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(service, "read", read)
+    monkeypatch.setattr(service, "json", observe)
+    monkeypatch.setattr(PODMAN_CALLBACKS.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(PODMAN_CALLBACKS.time, "sleep", advance)
+    executor = _executor(_apply_action(tmp_path), service)
+
+    executor.run()
+
+    assert observations == (
+        ["pods", "events", "job-failed", "pods"]
+        if final_termination
+        else ["pods", "events", "job-failed", "pods", "events"]
+    )
+    assert sleeps == []
+    assert now[0] == 0
+    assert service.timeout == 30
+    assert executor.state.probe_record["outcome"] == (
+        "ready" if final_termination else "job_failed_without_termination"
+    )
+    assert _reported_apply_status(executor.state) == (
+        "PASS" if final_termination else "BLOCKED"
+    )
+    assert service.resources == {}
+
+
+@pytest.mark.parametrize(
     "outcome",
     ("probe_timeout", "job_failed_without_termination"),
 )
@@ -905,6 +1150,7 @@ def test_interruption_runs_reverse_cleanup_for_entered_callbacks(
 
     assert [kind for kind, _name, _namespace in service.deletions] == [
         "Job",
+        "ConfigMap",
         "Namespace",
     ]
     assert service.resources == {}
@@ -929,6 +1175,7 @@ def test_cleanup_failure_blocks_success_but_continues_namespace_cleanup(
 
     assert [kind for kind, _name, _namespace in service.deletions] == [
         "Job",
+        "ConfigMap",
         "Namespace",
     ]
     assert not any(key[0] == "namespace" for key in service.resources)
@@ -1053,3 +1300,187 @@ def _target_file_result(
     assert dry_run is True
     assert tuple(required_surfaces) == ("kubernetes",)
     return _target(tmp_path)
+
+
+FAKE_PROBE_PODMAN: Final = r"""import json
+import os
+import signal
+import sys
+from pathlib import Path
+
+arguments = sys.argv[1:]
+with Path(os.environ["FAKE_JOURNAL"]).open("a", encoding="utf-8") as journal:
+    journal.write(json.dumps({"tool": "podman", "argv": arguments}) + "\n")
+failure = os.environ["FAKE_PROBE_FAILURE"]
+if arguments == ["--version"]:
+    if failure == "version":
+        print("fixture podman version failed", file=sys.stderr)
+        raise SystemExit(23)
+    if failure == "term":
+        os.kill(int(os.environ["FAKE_PROBE_PARENT"]), signal.SIGTERM)
+    print("podman version 5.0")
+    raise SystemExit(0)
+command = next(
+    (item for item in arguments if item in {"info", "run", "inspect", "rm", "ps"}),
+    None,
+)
+if command == "info":
+    template = arguments[arguments.index("--format") + 1]
+    print("none" if "GraphOptions" in template else
+          "overlay|/var/lib/containers/storage|cgroupfs|v2")
+elif command == "run":
+    name = arguments[arguments.index("--name") + 1]
+    if name == os.environ["FAIL_NAME"]:
+        raise SystemExit(7)
+    Path(os.environ["EVIDENCE_DIR"], "inner.txt").write_text("ready", encoding="utf-8")
+    print("marker=inner-ok;cgroup=0::/;root=/")
+elif command == "inspect":
+    print("a" * 64)
+elif command == "rm":
+    if failure == "cleanup":
+        print("fixture cleanup failed after removal", file=sys.stderr)
+        raise SystemExit(31)
+elif command == "ps":
+    pass
+else:
+    print(f"unexpected podman arguments: {arguments!r}", file=sys.stderr)
+    raise SystemExit(99)
+"""
+
+
+def _run_probe_script(
+    tmp_path: Path,
+    fake_bin: Path,
+    call_journal: Path,
+    failure: str,
+) -> tuple[subprocess.CompletedProcess[str], Sequence[JSONObject]]:
+    """Run shipped probe script bytes with only native external tools replaced.
+
+    :param tmp_path: Test-owned script bundle, evidence, and working directory.
+    :param fake_bin: Directory for fake podman and filesystem-info commands.
+    :param call_journal: Sanitized native-call journal consumed after execution.
+    :param failure: Selected external-command failure or normal successful behavior.
+    :returns: Actual Bash exit/streams and recorded Podman invocations.
+    """
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    for name, body in PODMAN.probe_scripts().items():
+        assert isinstance(body, str)
+        (script_dir / name).write_text(body, encoding="utf-8")
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    install_executable(fake_bin, "podman", f"#!{sys.executable}\n{FAKE_PROBE_PODMAN}")
+    install_executable(fake_bin, "stat", f"#!{sys.executable}\nprint('xfs')\n")
+    environment = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(tmp_path),
+        "EVIDENCE_DIR": str(evidence),
+        "PROBE_RUNTIME_DIR": str(script_dir),
+        "EXPECTED_INNER_EXIT": str(PODMAN_EVIDENCE.EXPECTED_INNER_EXIT),
+        "CI_LOG_LEVEL": "info",
+        "CI_LOG_FORMAT": "text",
+        "CI_LOG_FILE": "",
+        "CI_SKILLS_RUNTIME_LOADED": "0",
+        "INNER_IMAGE": _action(tmp_path).inner_image,
+        "OK_NAME": "unit-inner-ok",
+        "FAIL_NAME": "unit-inner-fail",
+        "RUN_LABEL": "ci-skills.spyroot.dev/run-id=unit123",
+        "MARKER_PREFIX": PODMAN_EVIDENCE.MARKER_PREFIX,
+        "FAKE_JOURNAL": str(call_journal),
+        "FAKE_PROBE_FAILURE": failure,
+    }
+    result = subprocess.run(
+        [
+            "/bin/bash",
+            "-c",
+            'export FAKE_PROBE_PARENT=$$; exec /bin/bash "$1"',
+            "probe-test",
+            str(script_dir / PODMAN.PROBE_SCRIPT_NAME),
+        ],
+        cwd=tmp_path,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result, read_journal(call_journal)
+
+
+@pytest.mark.parametrize("failure", ("none", "version", "cleanup", "term"))
+def test_checked_probe_script_preserves_failures_and_always_checks_cleanup(
+    tmp_path: Path,
+    fake_bin: Path,
+    call_journal: Path,
+    failure: str,
+) -> None:
+    """Exercise real Bash lifecycle behavior while Podman itself remains offline.
+
+    :param tmp_path: Test-owned script and evidence directories.
+    :param fake_bin: Directory containing only deterministic external-command fakes.
+    :param call_journal: Journal proving cleanup calls happened after each outcome.
+    :param failure: Successful, early-command, cleanup-command, or signal outcome.
+    :returns: None; native exit status, stderr, markers, and cleanup are asserted.
+    """
+    result, calls = _run_probe_script(tmp_path, fake_bin, call_journal, failure)
+    argv = [call["argv"] for call in calls]
+    assert any("rm" in arguments for arguments in argv)
+    assert "ps" in argv[-1]
+    assert f"{PODMAN_EVIDENCE.MARKER_PREFIX}|remaining_containers|" in result.stdout
+    if failure == "none":
+        assert result.returncode == 0, result.stderr
+        assert PODMAN_EVIDENCE.parse_probe_markers(result.stdout).verified is True
+        assert (tmp_path / "evidence" / "inner.txt").read_text() == "ready"
+    elif failure == "version":
+        assert result.returncode == 23
+        assert "fixture podman version failed" in result.stderr
+        assert not any("run" in arguments for arguments in argv)
+    elif failure == "cleanup":
+        assert result.returncode != 0
+        assert "fixture cleanup failed after removal" in result.stderr
+    else:
+        assert result.returncode == -signal.SIGTERM
+        assert not any("run" in arguments for arguments in argv)
+
+
+@pytest.mark.parametrize(
+    "write_evidence", (False, True), ids=("expected-exit", "evidence")
+)
+def test_checked_inner_script_writes_evidence_or_preserves_requested_exit(
+    tmp_path: Path,
+    write_evidence: bool,
+) -> None:
+    """Run the actual inner script with its two declared argument forms.
+
+    :param tmp_path: Directory containing the isolated script and evidence file.
+    :param write_evidence: Whether to supply an evidence filename or numeric exit code.
+    :returns: None; file content, stdout markers, and native exit are asserted.
+    """
+    script = tmp_path / PODMAN.INNER_SCRIPT_NAME
+    script.write_text(
+        PODMAN.probe_scripts()[PODMAN.INNER_SCRIPT_NAME], encoding="utf-8"
+    )
+    evidence = tmp_path / "inner.txt"
+    argument = (
+        str(evidence) if write_evidence else str(PODMAN_EVIDENCE.EXPECTED_INNER_EXIT)
+    )
+
+    result = subprocess.run(
+        ["/bin/sh", str(script), argument],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    if write_evidence:
+        assert result.returncode == 0, result.stderr
+        assert evidence.read_text() == "ready"
+        assert result.stdout.startswith("marker=inner-ok;cgroup=")
+        assert ";root=" in result.stdout
+    else:
+        assert result.returncode == PODMAN_EVIDENCE.EXPECTED_INNER_EXIT
+        assert result.stdout == ""
+        assert not evidence.exists()

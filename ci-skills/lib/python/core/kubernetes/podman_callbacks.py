@@ -35,6 +35,7 @@ from lib.python.core.kubernetes.podman_probe import (
     PROBE_POLL_SECONDS,
     PodmanProbeAction,
     ProbeMode,
+    probe_configmap,
     probe_job,
     select_ready_worker,
 )
@@ -275,6 +276,7 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
         state, scope = self.probe_state, self.probe_state.run_scope
         resources = scope.resources(self.kubernetes)
         self.resources = resources
+        resources.apply(probe_configmap(scope))
         job_evidence = resources.apply(
             probe_job(self.action, scope, state.selected_node)
         )
@@ -337,25 +339,28 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
         return self.result.get("verified") is True
 
     def cleanup(self) -> JSONObject:
-        """Delete the exact Job and prove absence before namespace cleanup.
+        """Delete the Job then its scripts and prove absence before the namespace.
 
-        :returns: Verified cleanup identity, or an empty mapping before creation.
+        :returns: Verified cleanup identities, or an empty mapping before creation.
         :raises KubernetesError: If deletion or absence read-back fails.
         """  # noqa: DOC502 - ResourceSet propagates cleanup and read-back failures.
         if self.resources is None:
             return {}
         scope = self.probe_state.run_scope
-        name = scope.name("podman-probe")
+        created = tuple(reversed(self.resources.created))
         self.resources.cleanup_created()
-        evidence: JSONObject = {
-            "kind": "Job",
-            "name": name,
-            "namespace": scope.namespace,
-            "status": PASS,
-            "absent": True,
-        }
-        self.probe_state.cleanup_resources.append(evidence)
-        return evidence
+        evidence: list[JSONObject] = [
+            {
+                "kind": kind,
+                "name": name,
+                "namespace": scope.namespace,
+                "status": PASS,
+                "absent": True,
+            }
+            for kind, name in created
+        ]
+        self.probe_state.cleanup_resources.extend(evidence)
+        return {"resources": evidence}
 
     def _wait(self, scope: RunScope, job_uid: str) -> PodTermination | str:
         """Wait for termination or a directly observed SCC admission rejection.
@@ -409,10 +414,16 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
                         if job_failed
                         else "probe_timeout"
                     )
+                if job_failed:
+                    return "job_failed_without_termination"
                 job = service.read("Job", name, scope.namespace)
                 if job is None:
                     raise KubernetesError("probe_job_missing")
-                job_failed = job_failed or _job_failed(job)
+                job_failed = _job_failed(job)
+                if job_failed:
+                    # One final Pod/Event read can expose termination or denial
+                    # that arrived with the terminal Job condition.
+                    continue
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return (

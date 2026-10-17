@@ -10,17 +10,22 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Final, Optional
+
+from kubernetes.utils.quantity import parse_quantity
 
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.kubernetes import KubernetesError
 from lib.python.core.kubernetes.podman_evidence import (
+    EXPECTED_INNER_EXIT,
     MARKER_PREFIX,
     PROBE_CONTAINER,
 )
 from lib.python.core.kubernetes.run_scope import RUN_ID_LABEL, RunScope
+from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.report import plan_digest
 from lib.python.core.target import Target
 
@@ -42,6 +47,19 @@ DEFAULT_MEMORY_LIMIT: Final = "1Gi"
 DEFAULT_STORAGE_SIZE: Final = "8Gi"
 PROBE_TTL_SECONDS: Final = 600
 PROBE_POLL_SECONDS: Final = 2
+PROBE_SCRIPT_ROOT: Final = SKILL_ROOT / "lib/bash/kubernetes"
+PROBE_MOUNT: Final = "/ci-skills/scripts"
+PROBE_VOLUME: Final = "probe-scripts"
+PROBE_EVIDENCE_MOUNT: Final = "/ci-skills/evidence"
+PROBE_SCRIPT_NAME: Final = "probe.bash"
+INNER_SCRIPT_NAME: Final = "inner.sh"
+PROBE_CONFIGMAP_ROLE: Final = "podman-scripts"
+PROBE_SCRIPT_SOURCES: Final = {
+    PROBE_SCRIPT_NAME: PROBE_SCRIPT_ROOT / PROBE_SCRIPT_NAME,
+    INNER_SCRIPT_NAME: PROBE_SCRIPT_ROOT / INNER_SCRIPT_NAME,
+    "runtime.bash": SKILL_ROOT / "lib/bash/core/runtime.bash",
+    "bash_runtime.bash": SKILL_ROOT / "lib/bash/core/bash_runtime.bash",
+}
 _IMAGE_DIGEST = re.compile(r"[^\s]+@sha256:[0-9a-f]{64}")
 
 
@@ -57,17 +75,21 @@ def immutable_image(value: str) -> str:
     return value
 
 
-def _quantity(value: str, field_name: str) -> str:
-    """Require one nonempty Kubernetes resource quantity.
+def _quantity(value: str, field_name: str) -> Decimal:
+    """Parse a nonnegative resource amount using the Kubernetes client.
 
-    :param value: Quantity supplied through the command interface.
-    :param field_name: Stable field name used in a classified error.
-    :returns: The stripped quantity for Kubernetes to validate natively.
-    :raises ValueError: If the caller supplies an empty value.
+    :param value: Caller-selected Kubernetes quantity, including its unit suffix.
+    :param field_name: Input field used to identify malformed resource settings.
+    :returns: Finite nonnegative amount in the provider's base unit.
+    :raises ValueError: If the quantity has invalid syntax or is negative.
     """
-    if not value.strip():
+    try:
+        amount = parse_quantity(value.strip())
+    except (ValueError, InvalidOperation) as exc:
+        raise ValueError(f"{field_name}_invalid") from exc
+    if not amount.is_finite() or amount < 0:
         raise ValueError(f"{field_name}_invalid")
-    return value.strip()
+    return amount
 
 
 @dataclass(frozen=True)
@@ -107,31 +129,21 @@ class ProbeResources:
     storage_size: str = DEFAULT_STORAGE_SIZE
 
     def __post_init__(self) -> None:
-        """Reject malformed resource quantities before rendering a Job.
+        """Validate quantities and request/limit ordering before planning.
 
-        :raises ValueError: If any resource quantity is empty.
-        """  # noqa: DOC502 - The shared quantity validator rejects empty values.
-        object.__setattr__(
-            self,
-            "cpu_request",
-            _quantity(self.cpu_request, "cpu_request"),
-        )
-        object.__setattr__(self, "cpu_limit", _quantity(self.cpu_limit, "cpu_limit"))
-        object.__setattr__(
-            self,
-            "memory_request",
-            _quantity(self.memory_request, "memory_request"),
-        )
-        object.__setattr__(
-            self,
-            "memory_limit",
-            _quantity(self.memory_limit, "memory_limit"),
-        )
-        object.__setattr__(
-            self,
-            "storage_size",
-            _quantity(self.storage_size, "storage_size"),
-        )
+        :raises ValueError: If a quantity is malformed, negative, or a request
+            exceeds its corresponding limit.
+        """
+        for resource in ("cpu", "memory"):
+            request_name, limit_name = f"{resource}_request", f"{resource}_limit"
+            for name in (request_name, limit_name):
+                object.__setattr__(self, name, getattr(self, name).strip())
+            request = _quantity(getattr(self, request_name), request_name)
+            limit = _quantity(getattr(self, limit_name), limit_name)
+            if request > limit:
+                raise ValueError(f"{resource}_request_exceeds_limit")
+        object.__setattr__(self, "storage_size", self.storage_size.strip())
+        _quantity(self.storage_size, "storage_size")
 
 
 class ProbeMode(StrEnum):
@@ -255,7 +267,12 @@ class PodmanProbeAction(SkillAction):
                 "memory_limit": self.resources.memory_limit,
                 "storage_size": self.resources.storage_size,
             },
-            "side_effects_on_apply": ["temporary_namespace", "temporary_job"],
+            "script_digest": plan_digest(probe_scripts()),
+            "side_effects_on_apply": [
+                "temporary_namespace",
+                "temporary_configmap",
+                "temporary_job",
+            ],
             "claim": NESTED_RUNTIME_CLAIM,
         }
 
@@ -395,83 +412,38 @@ def _ready_worker(node: Mapping[str, JSONValue]) -> Optional[ReadyWorker]:
     return ReadyWorker(name, kernel_version, os_image)
 
 
-PROBE_SCRIPT: Final = r"""set -eu
-podman_cmd() {
-  podman --root /var/lib/containers/storage \
-    --runroot /run/containers/storage \
-    --storage-driver overlay \
-    --storage-opt= \
-    --cgroup-manager cgroupfs "$@"
-}
-cleanup() {
-  probe_rc="$1"
-  trap - EXIT HUP INT TERM
-  set +e
-  podman_cmd rm -f "$OK_NAME" "$FAIL_NAME" >/dev/null 2>&1
-  remaining_output="$(podman_cmd ps -aq --filter "label=$RUN_LABEL")"
-  inventory_rc="$?"
-  if [ "$inventory_rc" -ne 0 ]; then
-    probe_rc=1
-    remaining=inventory_failed
-  else
-    remaining="$(printf '%s' "$remaining_output" | tr '\n' ',')"
-    if [ -n "$remaining" ]; then
-      probe_rc=1
-    else
-      remaining=none
-    fi
-  fi
-  printf '%s|remaining_containers|%s\n' "$MARKER_PREFIX" "$remaining"
-  exit "$probe_rc"
-}
-trap 'cleanup $?' EXIT
-trap 'cleanup 129' HUP
-trap 'cleanup 130' INT
-trap 'cleanup 143' TERM
+def probe_scripts() -> JSONObject:
+    """Read the checked script bundle shipped by this installed skill.
 
-printf '%s|kernel|%s\n' "$MARKER_PREFIX" "$(uname -sr)"
-printf '%s|podman_version|%s\n' "$MARKER_PREFIX" "$(podman --version)"
-storage_info="$(
-  podman_cmd info \
-    --format '{{.Store.GraphDriverName}}|{{.Store.GraphRoot}}|{{.Host.CgroupManager}}|{{.Host.CgroupsVersion}}'
-)"
-IFS='|' read -r storage_driver graph_root cgroup_manager cgroup_version <<EOF
-$storage_info
-EOF
-mount_program="$(
-  podman_cmd info \
-    --format '{{index .Store.GraphOptions "overlay.mount_program"}}'
-)"
-if [ -z "$mount_program" ] || [ "$mount_program" = '<no value>' ]; then
-  mount_program=none
-fi
-printf '%s|storage|driver=%s;mount_program=%s;cgroup_manager=%s;graph_root=%s;cgroup_version=%s\n' \
-  "$MARKER_PREFIX" "$storage_driver" "$mount_program" "$cgroup_manager" \
-  "$graph_root" "$cgroup_version"
-printf '%s|backing_filesystem|%s\n' "$MARKER_PREFIX" "$(stat -f -c %T /var/lib/containers)"
+    :returns: ConfigMap file names mapped to their exact UTF-8 source text.
+    :raises OSError: If an installed script is absent or unreadable.
+    :raises UnicodeError: If a script is not valid UTF-8.
+    """  # noqa: DOC502 - Path.read_text propagates file and decoding errors.
+    return {
+        name: path.read_text(encoding="utf-8")
+        for name, path in PROBE_SCRIPT_SOURCES.items()
+    }
 
-inner="$(podman_cmd run --name "$OK_NAME" --label "$RUN_LABEL" \
-  --memory 64m --cpus 0.25 --security-opt label=disable \
-  -v /ci-skills/evidence:/evidence:rw "$INNER_IMAGE" sh -ceu '
-    printf ready >/evidence/inner.txt
-    printf "marker=inner-ok;cgroup="
-    tr "\n" "," </proc/self/cgroup
-    printf ";root="
-    grep -m 1 " / " /proc/self/mountinfo
-  ')"
-inner_id="$(podman_cmd inspect --format '{{.Id}}' "$OK_NAME")"
-printf '%s|inner_runtime|id=%s;%s\n' "$MARKER_PREFIX" "$inner_id" "$inner"
-printf '%s|bind_readback|%s\n' "$MARKER_PREFIX" "$(cat /ci-skills/evidence/inner.txt)"
 
-set +e
-podman_cmd run --name "$FAIL_NAME" --label "$RUN_LABEL" \
-  --memory 64m --cpus 0.25 --security-opt label=disable \
-  "$INNER_IMAGE" sh -c 'exit 7'
-failure_rc="$?"
-set -e
-printf '%s|expected_exit|%s\n' "$MARKER_PREFIX" "$failure_rc"
-[ "$failure_rc" -eq 7 ]
-"""
+def probe_configmap(scope: RunScope) -> JSONObject:
+    """Mount the installed script bundle as one run-owned, immutable ConfigMap.
+
+    :param scope: Generated run namespace, names, and ownership labels.
+    :returns: ConfigMap document consumed read-only by the probe Job.
+    :raises OSError: If an installed script is absent or unreadable.
+    :raises UnicodeError: If a script is not valid UTF-8.
+    """  # noqa: DOC502 - The script reader propagates file and decoding errors.
+    return {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": scope.name(PROBE_CONFIGMAP_ROLE),
+            "namespace": scope.namespace,
+            "labels": dict(scope.labels),
+        },
+        "immutable": True,
+        "data": probe_scripts(),
+    }
 
 
 def probe_job(
@@ -513,9 +485,18 @@ def probe_job(
                                 "runAsUser": 0,
                                 "runAsNonRoot": False,
                             },
-                            "command": ["/bin/sh", "-ceu", PROBE_SCRIPT],
+                            "command": [
+                                "/bin/bash",
+                                f"{PROBE_MOUNT}/{PROBE_SCRIPT_NAME}",
+                            ],
                             "env": [
                                 {"name": "INNER_IMAGE", "value": action.inner_image},
+                                {"name": "PROBE_RUNTIME_DIR", "value": PROBE_MOUNT},
+                                {"name": "EVIDENCE_DIR", "value": PROBE_EVIDENCE_MOUNT},
+                                {
+                                    "name": "EXPECTED_INNER_EXIT",
+                                    "value": str(EXPECTED_INNER_EXIT),
+                                },
                                 {"name": "OK_NAME", "value": scope.name("inner-ok")},
                                 {
                                     "name": "FAIL_NAME",
@@ -539,6 +520,11 @@ def probe_job(
                             },
                             "volumeMounts": [
                                 {
+                                    "name": PROBE_VOLUME,
+                                    "mountPath": PROBE_MOUNT,
+                                    "readOnly": True,
+                                },
+                                {
                                     "name": "containers-storage",
                                     "mountPath": "/var/lib/containers",
                                 },
@@ -548,12 +534,19 @@ def probe_job(
                                 },
                                 {
                                     "name": "evidence",
-                                    "mountPath": "/ci-skills/evidence",
+                                    "mountPath": PROBE_EVIDENCE_MOUNT,
                                 },
                             ],
                         }
                     ],
                     "volumes": [
+                        {
+                            "name": PROBE_VOLUME,
+                            "configMap": {
+                                "name": scope.name(PROBE_CONFIGMAP_ROLE),
+                                "defaultMode": 0o444,
+                            },
+                        },
                         {
                             "name": "containers-storage",
                             "emptyDir": {"sizeLimit": action.resources.storage_size},

@@ -17,6 +17,7 @@ from lib.python.sys.status import BLOCKED, PASS
 
 PROBE_CONTAINER: Final = "podman-probe"
 MARKER_PREFIX: Final = "CI_SKILLS_PROBE"
+EXPECTED_INNER_EXIT: Final = 7
 REQUIRED_MARKERS: Final = (
     "kernel",
     "podman_version",
@@ -222,7 +223,7 @@ def _marker_passed(key: str, value: str) -> bool:
     """
     expected = {
         "bind_readback": "ready",
-        "expected_exit": "7",
+        "expected_exit": str(EXPECTED_INNER_EXIT),
         "remaining_containers": "none",
     }
     if key in expected:

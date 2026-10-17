@@ -102,7 +102,7 @@ blocker in `Open Decisions and Scope Boundary`, and this document plans only fro
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: Every temporary name (namespace, Job, labels) derives from one random run identifier generated after confirmation; the namespace and the Job are removed on every exit, success, failure and interrupt, with absence read-back; when the agent names an evidence directory the Job log and the parsed rows persist there, otherwise nothing persists beyond the result.
+        deliverable: Every temporary name (namespace, ConfigMap, Job, labels) derives from one random run identifier generated after confirmation; the namespace, script ConfigMap and Job are removed on every exit, success, failure and interrupt, with absence read-back; when the agent names an evidence directory the Job log and the parsed rows persist there, otherwise nothing persists beyond the result.
         owner: ci-skills/lib/python/core/kubernetes/run_scope.py
         preserve: [ResourceSet ownership semantics and its operation label; the executor's reverse cleanup and recoverable signals; the shared --run-id option's existing meaning]
         prIds: [PR-CI13-1]
@@ -213,7 +213,8 @@ and a pushed digest.
       K8SAuth ─► ConfirmReadinessOperation ─► SelectNode ─► OpenRunScope ─► RunProbeJob ─► ReadProbeResult ─► ParseMarkers
                      │ target re-verified       │ state.node    │ namespace      │ Job; waits   │ state.log,       │ state.rows,
                                                                                  │ to completion│ state.exit_code  │ state.verdict
-      cleanup, reverse: Job (RunProbeJob) and namespace (OpenRunScope) on every exit, with absence read-back
+      cleanup, reverse: Job and script ConfigMap (RunProbeJob), namespace (OpenRunScope) on every exit, with absence
+  read-back
                                                               │
                                       shared report ─► JSON result, sanitized receipt (schema image-build-readiness)
 
@@ -341,15 +342,16 @@ Callbacks, each a `K8SCallback[ReadinessAction]` unless stated, each owning its 
   applies the Namespace through the scope's cluster-scoped set; `cleanup` removes it on every exit with absence
   read-back. No ServiceAccount or binding is created: the probe runs under the namespace's default account, which
   is what an OpenShift administrator grants the constraint to.
-- `RunProbeJob` (`core/kubernetes/image_build_probe.py`): `collect` renders the Job document from the action: one
-  privileged container from the probe image, pinned to `state.node`, `backoffLimit` 0, the deadline, a TTL, no
-  service-account token, the storage and evidence emptyDirs with size limits, the bounds, and the probe script as
-  the container command, which runs podman with the overlay driver and the cgroupfs manager, runs the inner
-  container with limits, writes and reads back through the bind mount, runs the second inner container that exits
-  7, removes both and lists what remains, printing one marker line per step; `run` applies the Job through the
-  scope's namespaced set and waits for it within the deadline, classifying an admission rejection of the
-  privileged Pod as `scc_required` with the namespace's service account named; `update` reads the Job back and
-  writes `state.job`; `cleanup` deletes the Job on every exit with absence read-back, the pattern of `PullImage`.
+- `RunProbeJob` (`core/kubernetes/image_build_probe.py`): `collect` renders a script ConfigMap and Job from the
+  action: one privileged container from the probe image, pinned to `state.node`, `backoffLimit` 0, the deadline,
+  a TTL, no service-account token, the storage and evidence emptyDirs with size limits, the bounds, and the
+  probe script as the container command, which runs podman with the overlay driver and the cgroupfs manager,
+  runs the inner container with limits, writes and reads back through the bind mount, runs the second inner
+  container that exits 7, removes both and lists what remains, printing one marker line per step; `run` applies
+  the Job through the scope's namespaced set after its read-only script ConfigMap and waits for it within the
+  deadline, classifying an admission rejection of the privileged Pod as `scc_required` with the namespace's
+  service account named; `update` reads the Job back and writes `state.job`; `cleanup` deletes the Job then its
+  ConfigMap on every exit with absence read-back, using the existing `ResourceSet` ownership journal.
 - `ReadProbeResult` (`core/kubernetes/image_build_probe.py`): `run` reads the Job's Pod through the service's
   `json` call and takes the container's terminated exit code as `state.exit_code`, then reads the log through the
   service's `command` call into `state.log`; when the agent named an evidence directory, `update` writes the log
@@ -366,11 +368,12 @@ executor's recoverable-signal guard and reverse cleanup, which is what the MTU c
 guarantees by hand; the statuses from `ci-skills/lib/python/sys/status.py`; the existing report renderer and the
 portable receipt writer in `core/portable.py`; the catalogue declaration and render tool.
 
-Lifetime, decided as mechanism: nothing of the probe is kept. The namespace and the Job are owned by the run
-identifier and removed by their creators' cleanup hooks on success, on failure and on interrupt, each with absence
-read-back; a cleanup hook that raises is rendered as `BLOCKED` with `cleanup.status` `BLOCKED` and the run
-identifier, and deleting by the operation label is the manual recovery. A new run never changes or deletes
-another run's objects, because `ResourceSet` refuses to modify an existing object whose operation label differs.
+Lifetime, decided as mechanism: nothing of the probe is kept. The namespace, script ConfigMap and Job are owned
+by the run identifier and removed by their creators' cleanup hooks on success, on failure and on interrupt, each
+with absence read-back; a cleanup hook that raises is rendered as `BLOCKED` with `cleanup.status` `BLOCKED` and
+the run identifier, and deleting by the operation label is the manual recovery. A new run never changes or
+deletes another run's objects, because `ResourceSet` refuses to modify an existing object whose operation label
+differs.
 
 Concrete statuses, from the shared validator: `--dry-run` returns `DRY_RUN` in phase `OFFLINE_PLAN` with the plan
 digest and no API call, and rejects `--receipt-out`; `--live-plan` returns `PLANNED` in phase `LIVE_PLAN` after
@@ -404,7 +407,7 @@ image_build_readiness`, `side_effects`. The verb is a positional argument, shown
       "plan": { "node": "<NODE>", "probe_image": "<registry>/<image>@sha256:<...>", "inner_image": "<registry>/<image>@sha256:<...>",
                 "timeout": <seconds>, "bounds": { "cpu": "<...>", "memory": "<...>", "storage": "<...>" },
                 "target": "<context> -> <server>", "names": "<pattern derived from the run identifier>",
-                "objects": ["Namespace", "Job"] },
+                "objects": ["Namespace", "ConfigMap", "Job"] },
       "plan_digest": "sha256:<digest>",
       "summary": "<one line>", "errors": [], "captured_at": "<time>"
     }
@@ -468,8 +471,9 @@ The run scope is the abstraction CI12 specifies (`RunScope` over `ResourceSet` w
 phase is its second consumer, which is why CI12 justified it; nothing new is introduced here. Which pull request
 delivers `core/kubernetes/run_scope.py` first is open question 5. The marker parser is a pure function over the
 log with a table of expected markers, not an abstraction: one consumer, one shape, tested against fixture logs.
-The probe script inside the Job is data owned by the callback that renders the Job, versioned with the digest of
-the probe image it runs in.
+The checked probe scripts live in `ci-skills/lib/bash/kubernetes/`. A read-only ConfigMap mounts them with the
+shared Bash runtime; the Job invokes the script file directly. The plan digest binds all script bytes as well as
+the image digests, and the run's existing `ResourceSet` removes the Job then its ConfigMap before the namespace.
 
 ### Open Decisions and Scope Boundary
 
