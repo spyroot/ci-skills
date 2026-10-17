@@ -1016,6 +1016,7 @@ def test_terminal_job_failure_observes_once_more_without_waiting_for_timeout(
     service = FakeKubernetes(_target(tmp_path))
     read_resource = service.read
     observations: list[str] = []
+    cleanup_observations: list[str] = []
     sleeps: list[float] = []
     now = [0.0]
 
@@ -1029,7 +1030,14 @@ def test_terminal_job_failure_observes_once_more_without_waiting_for_timeout(
         """
         document = read_resource(kind, name, namespace)
         if kind == "Job" and document is not None and observations:
-            observations.append("job-failed")
+            # The run result is written only after _wait returns. Later Job
+            # reads belong to ResourceSet's required cleanup ownership check.
+            journal = (
+                cleanup_observations
+                if hasattr(executor.state, "probe_record")
+                else observations
+            )
+            journal.append("job-failed")
             document["status"] = {"conditions": [{"type": "Failed", "status": "True"}]}
         return document
 
@@ -1076,6 +1084,7 @@ def test_terminal_job_failure_observes_once_more_without_waiting_for_timeout(
         if final_termination
         else ["pods", "events", "job-failed", "pods", "events"]
     )
+    assert cleanup_observations == ["job-failed"]
     assert sleeps == []
     assert now[0] == 0
     assert service.timeout == 30
