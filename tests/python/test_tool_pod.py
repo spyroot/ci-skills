@@ -11,12 +11,13 @@ import json
 from collections.abc import MutableMapping, MutableSequence, Sequence
 from copy import deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 import pytest
 from conftest import import_script_module
 
 PODS = import_script_module("lib.python.core.kubernetes.tool_pod")
+POD_RESOURCES = import_script_module("lib.python.core.kubernetes.tool_pod_resources")
 CLI = import_script_module("lib.python.core.kubernetes.tool_pod_cli")
 SCOPES = import_script_module("lib.python.core.kubernetes.run_scope")
 RESOURCES = import_script_module("lib.python.core.kubernetes.resources")
@@ -30,7 +31,7 @@ STATUS = import_script_module("lib.python.sys.status")
 
 if TYPE_CHECKING:
     from lib.python.core.abstract.callback import AbstractCallback
-    from lib.python.core.json_types import JSONObject
+    from lib.python.core.json_types import JSONObject, JSONValue
 
 
 def _target() -> TARGET.Target:
@@ -834,3 +835,187 @@ def test_remove_scope_preserves_selected_namespace_with_labeled_child() -> None:
     assert state.results[remove]["preserved_scopes"] == [selected.as_dict()]
     assert cluster.objects == before
     assert cluster.deleted == []
+
+
+@pytest.mark.parametrize("read_only", (False, True), ids=("writable", "read-only"))
+def test_prepare_and_reuse_accept_api_omitted_writable_mount_default(
+    specification: PODS.ToolPodSpec, read_only: bool
+) -> None:
+    """Native omission of false mount defaults must not reject an admitted Pod.
+
+    :param specification: Existing tool fixture exercising the real lifecycle.
+    :param read_only: Caller-selected mount flag; true remains explicit in read-back.
+    """
+
+    submitted: MutableSequence[JSONObject] = []
+
+    class DefaultingCluster(MemoryCluster):
+        """Model the observed API omission in both apply and independent reads."""
+
+        def apply(self, document: JSONObject) -> JSONObject:
+            """Store native default omissions while retaining exact submitted inputs.
+
+            :param document: Generated resource submitted by the real ResourceSet.
+            :returns: API response with false mount and PVC readOnly flags omitted.
+            """
+            if document["kind"] == "Pod":
+                submitted.append(deepcopy(document))
+            observed = super().apply(document)
+            if observed["kind"] == "Pod":
+                metadata = observed["metadata"]
+                key = ("pod", metadata["namespace"], metadata["name"])
+                stored = self.objects[key]
+                for mount in stored["spec"]["containers"][0]["volumeMounts"]:
+                    if mount.get("readOnly") is False:
+                        del mount["readOnly"]
+                for volume in stored["spec"]["volumes"]:
+                    claim = volume.get("persistentVolumeClaim", {})
+                    if claim.get("readOnly") is False:
+                        del claim["readOnly"]
+                return deepcopy(stored)
+            return observed
+
+    source = {"persistentVolumeClaim": {"claimName": "caller-data", "readOnly": False}}
+    mount = PODS.ToolPodMount("caller-storage", source, "/shared", read_only=read_only)
+    cluster = DefaultingCluster()
+    first = _state(cluster)
+    action = PODS.PrepareToolPodAction(specification, mounts=(mount,))
+
+    _run(first, _preparation(action))
+
+    original = first.pod
+    observed = cluster.read("Pod", original.name, original.namespace)
+    mounts = {
+        item["name"]: item for item in observed["spec"]["containers"][0]["volumeMounts"]
+    }
+    assert mounts["ci-skills-scripts"]["readOnly"] is True
+    assert mounts["caller-storage"].get("readOnly", False) is read_only
+    assert mount.as_dict()["readOnly"] is read_only
+    assert mount.as_dict()["volumeSource"] == source
+    assert (
+        submitted[0]["spec"]["containers"][0]["volumeMounts"][1]["readOnly"]
+        is read_only
+    )
+    assert submitted[0]["spec"]["volumes"][1] == {"name": mount.name, **source}
+    assert observed["spec"]["volumes"][1]["persistentVolumeClaim"] == {
+        "claimName": "caller-data"
+    }
+    assert first.readback["tools"][0]["verified"] is True
+    applied = tuple(cluster.applied)
+    second = _state(cluster)
+    repeated = PODS.PrepareToolPodAction(
+        specification, run_id=first.run_scope.run_id, mounts=(mount,)
+    )
+    callbacks = _preparation(repeated)
+
+    _run(second, callbacks)
+
+    stage = next(
+        callback for callback in callbacks if isinstance(callback, PODS.StageToolPod)
+    )
+    assert second.results[stage]["action"] == STATUS.NO_OP
+    assert second.pod == original
+    assert tuple(cluster.applied) == applied
+    assert cluster.deleted == []
+
+
+def test_render_preserves_caller_native_false_without_rewriting_volume_source(
+    specification: PODS.ToolPodSpec,
+) -> None:
+    """Renderer and typed inputs retain explicit false values for native submission.
+
+    :param specification: Existing parsed tool specification bound by the action.
+    """
+    source = {"persistentVolumeClaim": {"claimName": "caller-data", "readOnly": False}}
+    mount = PODS.ToolPodMount("caller-storage", source, "/shared")
+    action = PODS.PrepareToolPodAction(specification, mounts=(mount,))
+    scope = SCOPES.RunScope("native-volume-run", "consumer-storage", False)
+
+    document = POD_RESOURCES.tool_pod_document(scope, action)
+
+    volume = next(
+        item for item in document["spec"]["volumes"] if item["name"] == mount.name
+    )
+    assert volume == {"name": mount.name, **source}
+    assert volume["persistentVolumeClaim"]["readOnly"] is False
+    assert source == {
+        "persistentVolumeClaim": {"claimName": "caller-data", "readOnly": False}
+    }
+    assert mount.as_dict() == {
+        "name": "caller-storage",
+        "volumeSource": source,
+        "mountPath": "/shared",
+        "readOnly": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("kind", "field", "requested", "returned"),
+    (
+        ("Pod", "mount", False, True),
+        ("Pod", "pvc", False, True),
+        ("Pod", "claim", "caller-data", "different-data"),
+        ("Pod", "claim", "caller-data", None),
+        ("Pod", "mount", True, None),
+        ("Pod", "pvc", True, None),
+        ("Pod", "other", False, None),
+        ("ConfigMap", "mount", False, None),
+        ("ConfigMap", "pvc", False, None),
+    ),
+    ids=(
+        "mount-true-drift",
+        "pvc-true-drift",
+        "claim-changed",
+        "claim-missing",
+        "required-read-only-mount-missing",
+        "required-read-only-pvc-missing",
+        "unrelated-false-missing",
+        "non-pod-mount-false-missing",
+        "non-pod-pvc-false-missing",
+    ),
+)
+def test_native_default_matching_rejects_drift_and_unrelated_omissions(
+    kind: str, field: str, requested: JSONValue, returned: JSONValue
+) -> None:
+    """Native omission equivalence must preserve requested access and resource identity.
+
+    :param kind: Native Pod root or another root that must not gain Pod defaults.
+    :param field: Requested access flag, claim identity, or unrelated boolean.
+    :param requested: Exact caller value retained in the native desired document.
+    :param returned: Provider value; None models an absent requested key.
+    """
+    expected = {
+        "apiVersion": "v1",
+        "kind": kind,
+        "spec": {
+            "automountServiceAccountToken": False,
+            "containers": [{"volumeMounts": [{"readOnly": False}]}],
+            "volumes": [
+                {
+                    "persistentVolumeClaim": {
+                        "claimName": "caller-data",
+                        "readOnly": False,
+                    }
+                }
+            ],
+        },
+    }
+    paths: dict[str, tuple[Union[str, int], ...]] = {
+        "mount": ("spec", "containers", 0, "volumeMounts", 0, "readOnly"),
+        "pvc": ("spec", "volumes", 0, "persistentVolumeClaim", "readOnly"),
+        "claim": ("spec", "volumes", 0, "persistentVolumeClaim", "claimName"),
+        "other": ("spec", "automountServiceAccountToken"),
+    }
+    observed = deepcopy(expected)
+    requested_parent, observed_parent = expected, observed
+    for key in paths[field][:-1]:
+        requested_parent = requested_parent[key]
+        observed_parent = observed_parent[key]
+    final_key = paths[field][-1]
+    requested_parent[final_key] = requested
+    if returned is None:
+        del observed_parent[final_key]
+    else:
+        observed_parent[final_key] = returned
+
+    assert not RESOURCES.matches(expected, observed)
