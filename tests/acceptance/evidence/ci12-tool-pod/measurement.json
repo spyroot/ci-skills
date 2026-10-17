@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "measurement_name": "ci12_tool_pod_live_proof",
+  "status": "PASS",
+  "source_commit": "9fe0fea86d224a58f0b86011a39af1297334f647",
+  "environment": {
+    "surface": "selected Kubernetes target",
+    "timeout_seconds": 600
+  },
+  "sample_count": 1,
+  "warmup_count": 0,
+  "identity": {
+    "install_digest": "7e5cf3950d5c5d80b8193e650734899c678703b3e129af8f284196553353a8da",
+    "functional_digest": "a1f62f687d0e8c6392abe1412cbaa10abc03a03815471f55df3b49b56e425fd8",
+    "run_id": "c795c9ba39d8407b9e8220f385d3acad",
+    "pod_uid": "386e5762-720e-4282-8ac5-a43167a2b29c"
+  },
+  "metrics": {
+    "initial_prepare": {
+      "value": 105,
+      "unit": "seconds"
+    },
+    "repeat_prepare": {
+      "value": 49,
+      "unit": "seconds"
+    },
+    "remove": {
+      "value": 29,
+      "unit": "seconds"
+    },
+    "repeat_remove": {
+      "value": 5,
+      "unit": "seconds"
+    }
+  },
+  "baseline": null,
+  "deltas": null,
+  "evidence_sources": [
+    "traces/05-prepare.jsonl",
+    "traces/10-repeat-prepare.jsonl",
+    "traces/12-remove.jsonl",
+    "traces/15-repeat-remove.jsonl"
+  ],
+  "warnings": [
+    "No comparable prior live implementation existed at base revision; no performance delta is claimed."
+  ],
+  "blocking_reasons": []
+}

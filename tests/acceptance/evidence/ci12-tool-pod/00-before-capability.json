@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "kind": "ci12_before_evidence",
+  "base": {
+    "revision": "54ceb7f1a9ae17aa57129771c5f43e39fc64f9c3",
+    "prepare_tool_pod_entrypoint_absent": true
+  },
+  "live": {
+    "run_id": "c795c9ba39d8407b9e8220f385d3acad",
+    "exact_name_absence_before_create": [
+      {
+        "kind": "Namespace",
+        "name": "ci-skills-run-f2c0be69ac504445bf6f",
+        "observed_bytes": 0,
+        "absent": true
+      },
+      {
+        "kind": "ConfigMap",
+        "name": "ci-skills-run-tool-pod-scripts-4509c625634f3e52",
+        "observed_bytes": 0,
+        "absent": true
+      },
+      {
+        "kind": "Pod",
+        "name": "ci-skills-run-tool-pod-4509c625634f3e52",
+        "observed_bytes": 0,
+        "absent": true
+      }
+    ],
+    "run_label_observation_after_scope_open_before_pod_stage": {
+      "namespaces": 1,
+      "pods": 0,
+      "configmaps": 0
+    }
+  },
+  "raw_trace": "../traces/05-prepare.jsonl"
+}

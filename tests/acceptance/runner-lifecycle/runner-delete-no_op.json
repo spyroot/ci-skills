@@ -1,12 +1,12 @@
 {
-  "captured_at": "2026-10-13T06:33:02.843441+00:00",
+  "captured_at": "2026-10-17T21:09:54.469734+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
-  "execution_host": "spyroots-mbp.lan",
+  "execution_host": "mac.lan",
   "identity": {
     "id": 6,
     "username": "spyroot",
@@ -25,17 +25,17 @@
     ],
     "one_time_sink_required": false,
     "operation": "delete",
-    "plan_digest": "188f601379e341968941bd5e9b9a4683c5f3304b4b38dd31e3fa70c451109ac2",
+    "plan_digest": "70dd03e2aa72e9d6fae54af05b6168bbc51d0bbb4058b78610a5cd430d65c440",
     "project_ids": null,
-    "resource_id": 72,
+    "resource_id": 78,
     "runner_snapshot": {
-      "id": 72,
+      "id": 78,
       "present": false
     },
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "188f601379e341968941bd5e9b9a4683c5f3304b4b38dd31e3fa70c451109ac2",
+  "plan_digest": "70dd03e2aa72e9d6fae54af05b6168bbc51d0bbb4058b78610a5cd430d65c440",
   "readback": {
     "action": "NO_OP",
     "after": {
@@ -43,7 +43,7 @@
       "scoped_absent": true
     },
     "before": null,
-    "id": 72,
+    "id": 78,
     "mutated": false,
     "verified": true
   },
@@ -55,7 +55,7 @@
         "scoped_absent": true
       },
       "before": null,
-      "id": 72,
+      "id": 78,
       "mutated": false,
       "verified": true
     }
@@ -68,12 +68,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
-    "file_count": 139,
-    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+    "digest": "7e5cf3950d5c5d80b8193e650734899c678703b3e129af8f284196553353a8da",
+    "file_count": 159,
+    "functional_digest": "a1f62f687d0e8c6392abe1412cbaa10abc03a03815471f55df3b49b56e425fd8",
     "revision": {
       "source": "installer_record",
-      "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+      "value": "9fe0fea86d224a58f0b86011a39af1297334f647",
       "verified": true
     }
   },
@@ -86,9 +86,9 @@
     "kind": "project",
     "reference": "hott/test"
   },
-  "target_file": "path:5e5380df1eda",
-  "target_source": "user;argv:--project",
-  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+  "target_file": "path:d5d66d4789c0",
+  "target_source": "project;argv:--project",
+  "tested_revision": "9fe0fea86d224a58f0b86011a39af1297334f647",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

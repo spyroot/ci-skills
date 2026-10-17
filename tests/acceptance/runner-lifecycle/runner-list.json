@@ -1,9 +1,9 @@
 {
-  "captured_at": "2026-10-13T06:30:39.393270+00:00",
+  "captured_at": "2026-10-17T21:09:22.909263+00:00",
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
-  "execution_host": "spyroots-mbp.lan",
+  "execution_host": "mac.lan",
   "identity": {
     "id": 6,
     "username": "spyroot",
@@ -15,7 +15,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "READ",
   "plan": {
-    "body_sha256": "d1a5f22122ce07e7724b14bd1333c8020551c4817a5a3d9f09fc0e3845cf968c",
+    "body_sha256": "fa74aa18d4645085cfbd414cc0de956ea2eb50fbef495066453004670e3405fa",
     "confirmation_ready": true,
     "fields": [
       "description",
@@ -24,13 +24,13 @@
     ],
     "one_time_sink_required": false,
     "operation": "list",
-    "plan_digest": "ffb2fd3e94f20fb91e40d671ff65782f00c07072226b0ff77a673931793f8fcd",
+    "plan_digest": "2cd9f9de5f0a02c2861e078fdc2933a538745fbff97a93623e2eca533383467a",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "ffb2fd3e94f20fb91e40d671ff65782f00c07072226b0ff77a673931793f8fcd",
+  "plan_digest": "2cd9f9de5f0a02c2861e078fdc2933a538745fbff97a93623e2eca533383467a",
   "readback": {
     "record_count": 1,
     "truncated": false,
@@ -41,20 +41,22 @@
       "access_level": "not_protected",
       "architecture": null,
       "contacted_at": null,
-      "description": "ci-skills-pr67-runner-a9ef7ff4",
-      "id": 72,
+      "description": "ci-skills-9fe0fea8-20261017T210558Z-runner",
+      "id": 78,
       "is_shared": false,
       "job_execution_status": "idle",
       "online": null,
       "paused": false,
       "platform": null,
       "projects": [
+        124,
         123
       ],
       "runner_type": "project_type",
       "status": "never_contacted",
       "tag_list": [
-        "ci-skills"
+        "ci-skills",
+        "9fe0fea8"
       ],
       "version": null
     }
@@ -67,12 +69,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
-    "file_count": 139,
-    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+    "digest": "7e5cf3950d5c5d80b8193e650734899c678703b3e129af8f284196553353a8da",
+    "file_count": 159,
+    "functional_digest": "a1f62f687d0e8c6392abe1412cbaa10abc03a03815471f55df3b49b56e425fd8",
     "revision": {
       "source": "installer_record",
-      "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+      "value": "9fe0fea86d224a58f0b86011a39af1297334f647",
       "verified": true
     }
   },
@@ -85,9 +87,9 @@
     "kind": "project",
     "reference": "hott/test"
   },
-  "target_file": "path:5e5380df1eda",
-  "target_source": "user;argv:--project",
-  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+  "target_file": "path:d5d66d4789c0",
+  "target_source": "project;argv:--project",
+  "tested_revision": "9fe0fea86d224a58f0b86011a39af1297334f647",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

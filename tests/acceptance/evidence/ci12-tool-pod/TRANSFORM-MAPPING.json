@@ -1,0 +1,68 @@
+{
+  "algorithm": "sha256",
+  "entries": [
+    {
+      "event_count": 126,
+      "kind": "debug_trace",
+      "portable_name": "traces/05-prepare.jsonl",
+      "portable_sha256": "4035a6d2365646efcba80b6378476bb2f0425c098b027e24a1df17d8246fe418",
+      "raw_name": "traces/05-prepare.jsonl",
+      "raw_sha256": "08585f4e364f010b0e4c6f70039ae0eb623c37dfdca0ef770df5d6830ada6d12"
+    },
+    {
+      "event_count": 109,
+      "kind": "debug_trace",
+      "portable_name": "traces/10-repeat-prepare.jsonl",
+      "portable_sha256": "c7612674c5e55ced7534dbb3d128fbb773fc46dcab185d17ac318d632651dda2",
+      "raw_name": "traces/10-repeat-prepare.jsonl",
+      "raw_sha256": "3e52aec9c9653a9f828b4e066cce720f72c592f34b24c1dff5b6893041e79717"
+    },
+    {
+      "event_count": 50,
+      "kind": "debug_trace",
+      "portable_name": "traces/12-remove.jsonl",
+      "portable_sha256": "e187c2d1c1b383ebd0f95e4b4a875b66297908e8d63e46add33b554f2b4d811a",
+      "raw_name": "traces/12-remove.jsonl",
+      "raw_sha256": "64421419b26eac7a0a7d801decb02697ca53847a075af4c780972bcb278bd253"
+    },
+    {
+      "event_count": 38,
+      "kind": "debug_trace",
+      "portable_name": "traces/15-repeat-remove.jsonl",
+      "portable_sha256": "386bb48ca5eb97719e1808510185f2bddb4600e92985a6facb65896ba48f4e8d",
+      "raw_name": "traces/15-repeat-remove.jsonl",
+      "raw_sha256": "d8d4aa40a914bc184a2283b1c2bee9e44d5e599bb1a46528ccc013cd9ddd4adc"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "05-prepare.json",
+      "portable_sha256": "d6ea6cef7d6eb77dd1aa5e9dcc2b248eac13c1c7f79cf03edec23f044126b25e",
+      "raw_name": "receipts/05-prepare.json",
+      "raw_sha256": "dcb460bae091450897c3b53630ed0c7101723fc400f3833384ebdac9b13e7227"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "10-repeat-prepare.json",
+      "portable_sha256": "a298ac9f3ee7615d19fe1d1fd5c59400dac2067d16fadeb211c788b91d676481",
+      "raw_name": "receipts/10-repeat-prepare.json",
+      "raw_sha256": "38358efbfd3764cace619694f5a1b95d9ddfac59217b0405bb81bf766ba7234e"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "12-remove.json",
+      "portable_sha256": "ce73fab877676110b9762f3348fec9a0986f6b910d667226beef4fde907370d0",
+      "raw_name": "receipts/12-remove.json",
+      "raw_sha256": "c441d7665a6bbf68468b34787172c0f83301a880b9c5bb906ce256aaf874feb3"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "15-repeat-remove.json",
+      "portable_sha256": "0fc43fa93f58e5e919180a6cd66a52f8171d4bab59ec4b459f1dbf3baf0f6676",
+      "raw_name": "receipts/15-repeat-remove.json",
+      "raw_sha256": "2f201e751a646a8cdf120966e028a60ddd297b2e7c2d77ed16a0bde445195a3f"
+    }
+  ],
+  "kind": "ci12_portable_evidence_mapping",
+  "path_token_algorithm": "sha256-first-12-hex",
+  "schema_version": "1.0"
+}

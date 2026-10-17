@@ -1,12 +1,12 @@
 {
-  "captured_at": "2026-10-13T06:32:07.415106+00:00",
+  "captured_at": "2026-10-17T21:09:10.399107+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
-  "execution_host": "spyroots-mbp.lan",
+  "execution_host": "mac.lan",
   "identity": {
     "id": 6,
     "username": "spyroot",
@@ -18,36 +18,36 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "fdfa8fab8de904c60a3b12ab56caf180c1f694d15862fc9ed5e6165de8960feb",
+    "body_sha256": "bc80bfe2d92921947fc11f41b0d76358b1784a5be110affc0fc6105a38026a0b",
     "confirmation_ready": true,
     "fields": [
       "tag_list"
     ],
     "one_time_sink_required": false,
     "operation": "tag",
-    "plan_digest": "0948085f5f5278537d3880203baba6406c9f95ebe4466e8a3a2710a979491fee",
+    "plan_digest": "c50f713015f5503f0388561e0bb0a68bf6c8d90d4cd4cc6deb2f8894758e4570",
     "project_ids": null,
     "requested_tags": [
       "ci-skills",
-      "pr67"
+      "9fe0fea8"
     ],
-    "resource_id": 72,
+    "resource_id": 78,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "0948085f5f5278537d3880203baba6406c9f95ebe4466e8a3a2710a979491fee",
+  "plan_digest": "c50f713015f5503f0388561e0bb0a68bf6c8d90d4cd4cc6deb2f8894758e4570",
   "readback": {
     "action": "NO_OP",
     "added_tags": [],
     "after_tags": [
       "ci-skills",
-      "pr67"
+      "9fe0fea8"
     ],
     "before_tags": [
       "ci-skills",
-      "pr67"
+      "9fe0fea8"
     ],
-    "id": 72,
+    "id": 78,
     "mutated": false,
     "verified": true
   },
@@ -57,13 +57,13 @@
       "added_tags": [],
       "after_tags": [
         "ci-skills",
-        "pr67"
+        "9fe0fea8"
       ],
       "before_tags": [
         "ci-skills",
-        "pr67"
+        "9fe0fea8"
       ],
-      "id": 72,
+      "id": 78,
       "mutated": false,
       "verified": true
     }
@@ -76,12 +76,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
-    "file_count": 139,
-    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+    "digest": "7e5cf3950d5c5d80b8193e650734899c678703b3e129af8f284196553353a8da",
+    "file_count": 159,
+    "functional_digest": "a1f62f687d0e8c6392abe1412cbaa10abc03a03815471f55df3b49b56e425fd8",
     "revision": {
       "source": "installer_record",
-      "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+      "value": "9fe0fea86d224a58f0b86011a39af1297334f647",
       "verified": true
     }
   },
@@ -94,9 +94,9 @@
     "kind": "project",
     "reference": "hott/test"
   },
-  "target_file": "path:5e5380df1eda",
-  "target_source": "user;argv:--project",
-  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+  "target_file": "path:d5d66d4789c0",
+  "target_source": "project;argv:--project",
+  "tested_revision": "9fe0fea86d224a58f0b86011a39af1297334f647",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,
