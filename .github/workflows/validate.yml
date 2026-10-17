@@ -115,6 +115,12 @@ jobs:
             --allow-init-docstring=True \
             ci-skills/lib/python/core/abstract \
             ci-skills/lib/python/core/executor.py \
+            ci-skills/lib/python/core/tooling \
+            ci-skills/lib/python/core/action_modes.py \
+            ci-skills/lib/python/core/kubernetes/tool_pod*.py \
+            ci-skills/lib/python/core/kubernetes/run_scope.py \
+            ci-skills/lib/python/core/kubernetes/script_resources.py \
+            ci-skills/bin/prepare_tool_pod.py \
             ci-skills/lib/python/core/gitlab/callback.py \
             ci-skills/lib/python/core/gitlab/gitlab_action.py \
             ci-skills/lib/python/core/gitlab/gitlab_runners.py \
@@ -140,6 +146,8 @@ jobs:
           python tools/render_manifest.py --check
           check-jsonschema --check-metaschema \
             schemas/ci-result.schema.json \
+            ci-skills/schemas/tool-pod.schema.json \
+            ci-skills/schemas/results/tool-pod.schema.json \
             schemas/smoke-result.schema.json \
             schemas/live-acceptance-policy.schema.json \
             ci-skills/schemas/results/gitlab-action.schema.json \

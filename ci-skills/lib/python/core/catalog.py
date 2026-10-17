@@ -264,6 +264,60 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
         "are cleaned on exit.",
     },
+    "prepare_tool_pod.py": {
+        "kind": "tool_pod",
+        "purpose": "Prepare, reuse or remove a cluster Pod with declared tools.",
+        "use_when": "Run tooling in a retained cluster Pod for another callback or command.",
+        "requires": ("kubernetes",),
+        "capabilities": (),
+        "mutates": True,
+        "options": {
+            "--spec": "JSON with image and dependencies; schemas/tool-pod.schema.json",
+            "--run-id": "returned run identifier for reuse/removal, also used in logs",
+            "--live-plan": "verify Kubernetes access without creating resources",
+            "--apply": "perform the exact confirmed operation",
+            "--confirm-plan": "plan digest binding target, inputs, run ID and functional code",
+            "--timeout": "positive operation timeout in seconds (default: 300)",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "prepare": {
+                "required_options": ["--spec"],
+                "result_schema": "schemas/results/tool-pod.schema.json",
+            },
+            "remove": {
+                "required_options": ["--run-id"],
+                "result_schema": "schemas/results/tool-pod.schema.json",
+            },
+        },
+        "related": ("toolbox.py",),
+        "required_tools": ("kubectl",),
+        "returns": "Plan or actual Pod identity, tool observations, per-callback results and cleanup.",
+        "execution_surface": "installed skill controls a Pod in the selected Kubernetes cluster",
+        "side_effects": "Confirmed prepare creates and retains run-owned resources; remove deletes "
+        "only those resources. Failure removes resources created by the failed run.",
+        "description": "Supply image and dependencies in the input JSON. Each dependency uses the "
+        "existing toolchain schema (name, commands, optional probe and installation route). "
+        "Tools are installed inside the Pod, never on this computer. See references/tool-pod.md.",
+        "examples": (
+            {
+                "description": "Plan without provider calls",
+                "command": "prepare_tool_pod.py prepare --spec tools.json --dry-run --json",
+            },
+            {
+                "description": "Prepare the confirmed tools",
+                "command": "prepare_tool_pod.py prepare --spec tools.json --apply --confirm-plan DIGEST --json",
+            },
+            {
+                "description": "Reuse and re-probe the same Pod",
+                "command": "prepare_tool_pod.py prepare --spec tools.json --run-id RUN_ID --dry-run --json",
+            },
+            {
+                "description": "Plan removal of owned resources",
+                "command": "prepare_tool_pod.py remove --run-id RUN_ID --dry-run --json",
+            },
+        ),
+    },
     "toolbox.py": {
         "kind": "toolbox",
         "purpose": "Build or delete a toolbox using the configured OpenShift and Harbor.",
@@ -1110,7 +1164,11 @@ def describe(script: str) -> MutableMapping[str, JSONValue]:
                 "usage": entry["usage"],
             }
             if discovery or read
-            else {}
+            else {
+                key: entry[key]
+                for key in ("description", "examples", "output_modes", "usage")
+                if key in entry
+            }
         ),
     }
 
@@ -1230,6 +1288,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 **DISCOVERY_COMMANDS,
             },
             "routing": {
+                "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
                 "build or delete a toolbox": "toolbox.py",
                 "publish an image to Harbor": "harbor_push.py",
                 "verify a Harbor toolbox pull": "harbor_pull.py",
