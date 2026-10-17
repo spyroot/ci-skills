@@ -21,22 +21,22 @@ node through a runner, a build-and-push job and a pushed digest.
 
 ## Progress
 
-- [ ] Milestone 1, code: the shared mode validator, the run scope (or CI12's), node selection, the probe Job and
+- [ ] Milestone 1, code: the shared mode validator, reuse of CI12.0's run scope, node selection, the probe Job and
       its script, the result and log read-back, the marker parser, the adapter, the thin main with the `probe`
       verb, the catalogue declaration with regenerated `tools.json`, result schema, routing.
 - [ ] Milestone 1, gates: unit tests; the new schema listed in the validate metaschema step per the existing
       pairing rule (the local selector is open question 3).
 - [ ] Milestone 1, proof: live `probe` from the installed candidate on one node with every row present and the
-      Pod exited 0, plus an interrupted run with the same absence read-back, attached to the pull request; or the
-      live `scc_required` result until the constraint is granted (open question 4).
+      Pod exited 0, plus an interrupted run with the same absence read-back, attached to the pull request.
+      Admission failure proves its error path only; successful capability proof remains required.
 - [ ] Milestone 2, code: the `chain` verb composing the probe with chain 1's runner, the build-and-push job and
       the digest read-back; waits for chain 1 and block 7 (open question 6).
 - [ ] Milestone 2, proof: live chain on the test project with the pushed digest read back.
 - [ ] Open question 1 (command surface and default digests) answered by the owner.
 - [ ] Open question 2 (gate wiring for this command's receipts) answered by the owner.
 - [ ] Open question 4 (the privileged constraint on the bench) answered by the owner.
-- [ ] Phase identity `CI13` and its authority named by the owner (blocker in the phase document).
-- [ ] The standards pin moved to a revision carrying the architecture contract (blocker in the phase document).
+- [x] Phase identity `CI13` approved; CI12.0 owns the shared foundation (see the phase's Authority and PR Order).
+      The selected architecture format adds no gate outside the pinned binding.
 
 ## Surprises & Discoveries
 
@@ -106,8 +106,8 @@ constraint is the `privileged` security context constraint an OpenShift administ
 
 Milestone 1 adds `ci-skills/lib/python/core/action_modes.py` (the shared mode validator with its per-adapter
 read and receipt policy, consumed by `ci-skills/lib/python/core/gitlab/gitlab_action.py` in the same change),
-`ci-skills/lib/python/core/kubernetes/run_scope.py` as CI12 specifies it unless CI12's pull request lands first
-(open question 5), `ci-skills/lib/python/core/kubernetes/image_build_probe.py` (`SelectNode`, `RunProbeJob` with
+then consumes `ci-skills/lib/python/core/kubernetes/run_scope.py` delivered by CI12.0 and adds
+`ci-skills/lib/python/core/kubernetes/image_build_probe.py` (`SelectNode`, `RunProbeJob` with
 the probe script, `ReadProbeResult`, `ParseMarkers`), `ci-skills/lib/python/core/image_build_action.py`
 (`ReadinessState`, `ReadinessAction`, `ConfirmReadinessOperation`, `ReadinessWorkflow`), the thin main
 `ci-skills/bin/image_build_readiness.py` with the `probe` verb, the declaration in
@@ -134,8 +134,8 @@ namespace and no Job; a refused Pod returns `BLOCKED` with `scc_required` naming
 either; an interrupted apply leaves nothing. Proof: the unit tests named under Validation and Acceptance, the
 validate workflow green on the exact head, and the live `probe` result on one node of the live cluster with every
 row present and the Pod exited 0, plus a second run interrupted during the Job with the same absence read-back,
-both attached to the pull request as receipts; until the constraint is granted, the live `scc_required` result
-stands in and is marked as such.
+both attached to the pull request as receipts. A live `scc_required` result is negative-path evidence, not a
+substitute for the successful probe. Reuse proof when the functional checksum is unchanged.
 
 ### Milestone 2: `chain`, from the proven node to a pushed digest
 
@@ -222,7 +222,8 @@ code, the run identifier, the absence read-back.
 `ReadinessAction(SkillAction)`: `node` (optional), `probe_image`, `inner_image` (digests), `timeout`,
 `evidence_dir` (optional), the resource bounds (`cpu`, `memory`, `storage`, with defaults), and the shared mode
 flags `dry_run`, `live_plan`, `apply`, `confirm_plan`. `ReadinessState(DeliveryState)`: `node`, `run_scope`,
-`job`, `log`, `exit_code`, `rows`, `verdict`. `RunScope` and `OpenRunScope` as CI12's ExecPlan declares them.
+`job`, `log`, `exit_code`, `rows`, `verdict`. CI12.0 owns `RunScope` and `OpenRunScope`; their interface is
+recorded in [CI12's ExecPlan](ci12-node-onboarding.md#interfaces-and-dependencies).
 The shared validator: `resolve_mode(args, policy) -> Mode` in `core/action_modes.py`, where `policy` names the
 adapter's read operations and its receipt rule, returning one of `describe`, `offline`, `live-plan`, `read`,
 `apply`, and raising the shared reasons. `ReadinessWorkflow`: `prepare()`, `callbacks() ->
