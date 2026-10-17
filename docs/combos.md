@@ -8,9 +8,10 @@ exploration list: an entry marked proposed is an idea to evaluate, not a commitm
 
 Status words: **exists** means an installed command with a live receipt in
 [`tests/acceptance/evidence`](../tests/acceptance/evidence/README.md) (case numbers in brackets); **planned** means
-specified in [CI11](phases/CI11-TOOLS.md) or the [GitLab tool belt plan](gitlab-toolbelt-plan.md); **missing**
-means no command yet. [CI11 "Combos"](phases/CI11-TOOLS.md#combos) owns the delivery entries; this list points at
-them where they exist and adds chains they do not name yet. A chain is proven only by one live run whose rows link,
+specified in [CI11](phases/CI11-TOOLS.md), the [GitLab tool belt plan](gitlab-toolbelt-plan.md), or the owning
+[CI12](phases/CI12-NODE-ONBOARDING.md) / [CI13](phases/CI13-IMAGE-BUILD-READINESS.md) phase; **missing** means no
+command yet. Those plans own delivery; this list points at them and adds chains they do not name yet.
+A chain is proven only by one live run whose rows link,
 each consuming the previous row's output, bound to one functional checksum; see block 7 of the tool belt plan for
 the six-row model.
 
@@ -32,45 +33,17 @@ with the runner manager deployment planned (block 7; CI11 "Toolbox build, publis
 never reached a runner, and that read-back is block 7's proof → `gitlab_runner.py delete`, exists [24], with
 deployment removal planned.
 
-## 2. OpenShift node from one spec (proposed)
+## 2. OpenShift node onboarding (planned)
 
-`read spec → pull secret → build node ISO → serve ISO → boot node → approve join CSRs → node Ready → delete served ISO`
+`prepare tool Pod → native node ISO → verify destination and contents → boot node → join → remove owned resources`
 
-Goal: the agent passes one machine specification and the combo carries it to a joined node: a self-installing
-node ISO built from the cluster's own release and node configuration, served where the machine can fetch it, the
-host booted from it, and the join completed, so the agent never assembles any of it by hand from several `oc`
-reads.
+Goal: the caller supplies native OpenShift inputs and an in-cluster destination, and the combo carries the host
+from a generated ISO to a joined, Ready node. The user boots the host.
 
-- Read machine spec: the target pool's machine objects and their role, image, and network settings.
-- Use pull secret: resolve the pull secret the cluster uses for images; record its name and digest, never its
-  value. The skill already handles pull secrets as `dockerconfigjson` Secrets in
-  [`core/kubernetes/runner.py`](../ci-skills/lib/python/core/kubernetes/runner.py).
-- Build node ISO (planned, CI11 `ocp_iso.py node-build`): a self-installing node ISO for this host, built inside
-  the cluster from the release's boot image and a node configuration rendered from the spec (hostname, MAC,
-  install device, interface); the cluster's machine-config server supplies the node's Ignition at install time,
-  so no Ignition document is built by hand on this route. Record the ISO's SHA-256 and size. Serve ISO (planned,
-  `node-serve`): publish it where the machine can fetch it and read back that it is served. Boot node: the
-  machine boots from that ISO; the combo waits for the joiner to appear, since the boot itself happens on the
-  user's hypervisor or hardware.
-- Alternative live-ISO route (missing, no planned verb): build an Ignition document from the pool's rendered
-  machine configuration, verify it against the Ignition version it declares, record its SHA-256, and install
-  from the stock live ISO (`rhcos-report`, `rhcos-download`, `rhcos-serve`) with that document.
-- Approve join CSRs (planned, CI11 `ocp_csr.py`): a joining node asks twice, first for its client certificate
-  using the bootstrap credential, then for its serving certificate, and the second request appears only after
-  the first is approved. The step approves the requests whose names and signers belong to this joiner, as planned,
-  and ends when the joiner's serving request reads back `Approved` and `Issued` and the node reads `Ready`, with
-  a deadline; it reports any other signer instead of approving it. An atomic callback reusable by any chain that
-  adds a node.
-- Delete served ISO (planned, `delete`): remove the serving resources with an absence read-back.
-
-Status: proposed as a chain. CI11 plans the machine reads as `ocp_machine.py`, the ISO steps as `ocp_iso.py`
-(`rhcos-report`, `rhcos-download`, `rhcos-serve`, `node-build`, `node-serve`, `delete`, with a joiner read-back and
-a caller-selected specification as input), and the certificate step as `ocp_csr.py` (approve only the planned
-names and signers from one request list); its `harbor_pull_secret.py sync` writes a pull secret into the cluster
-and does not read the one the cluster uses, so that read is still missing. Nothing in the skill reads machine
-configurations, builds an ISO, or approves certificate requests today. Evidence rows: machine spec read, pull
-secret resolved, node ISO built, ISO served, host booted, requests approved by name and signer, node Ready with
-role, served ISO deleted.
+[CI12](phases/CI12-NODE-ONBOARDING.md) owns the inputs, atomic callbacks, concrete examples and evidence.
+Its [delivery order](phases/CI12-NODE-ONBOARDING.md#pr-order) is CI12.0 reusable tool Pod and shared download/install,
+CI12.1 native ISO build/verify/remove, then CI12.2 join. The ISO stays at the caller-selected cluster destination;
+CSR handling and join are the sole mocked-live exception. These capabilities are not implemented on main.
 
 ## 3. Failed pipeline, root cause in one go
 
@@ -170,23 +143,10 @@ builds included, run in GitLab jobs on their cluster. The agent proves in one go
 a node there, then that a real job can build and push an image, instead of discovering each failure inside a
 pipeline.
 
-- Probe podman on a node: a one-shot privileged Job, pinned to the selected node, runs podman from an image
-  pinned by digest with overlay storage on an emptyDir; inside it an inner container runs, writes a file that is
-  read back through a bind mount, and a second inner container exits 7 so the exit code is seen to propagate;
-  cleanup leaves no container. Every result is a marker line in the Job log, which becomes the evidence rows:
-  host kernel, podman version, storage driver and cgroup version, backing filesystem, inner run, bind-mount
-  read-back, exit propagation, remaining containers; the probe's own exit is read from the Pod's terminated
-  exit code, not from a line it printed.
-- Runner on that node: the toolbox-backed runner manager of chain 1 with the same privileged podman setup.
-- GitLab job builds with podman: a job on the test project that builds an image and pushes it to Harbor.
-- Read back digest: `harbor_push.py` style read-back of the pushed image, and the job read-back naming the
-  runner.
-
-Status: proposed. Nothing in the skill runs podman today. Reuse: the temporary Job with cleanup on every exit
-in [`core/kubernetes/runner.py`](../ci-skills/lib/python/core/kubernetes/runner.py) (`PullImage`), and the
-privileged debug Pod handling of the MTU check. On OpenShift a privileged Pod needs the `privileged` security
-context constraint on the namespace's service account; the probe reports that requirement instead of granting
-it. Evidence rows: the probe's marker lines, then the rows of chain 1 for the runner and the job.
+[CI13](phases/CI13-IMAGE-BUILD-READINESS.md) owns the probe, its evidence rows and the later runner/job chain.
+Follow its [PR order](phases/CI13-IMAGE-BUILD-READINESS.md#pr-order) and
+[live smoke evidence](phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence). The probe and chain are not
+implemented on main; an admission rejection reports the blocked run and does not prove Podman runtime readiness.
 
 ## How to add one
 

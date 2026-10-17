@@ -3,51 +3,36 @@
 This ExecPlan is maintained in accordance with the shared standards' execution plan format (`docs/PLANS.md` at
 standards revision `cae52b2`). Its Progress, Surprises & Discoveries, Decision Log and Outcomes & Retrospective
 sections are kept current as work proceeds. The phase document is
-[`docs/phases/CI12-NODE-ONBOARDING.md`](../../phases/CI12-NODE-ONBOARDING.md); this plan turns its two pull
-requests into milestones a reader can carry out and observe. All paths are relative to the repository root. The
-command surface and the gate wiring are open questions for the owner in the phase document; this plan uses the
-proposed surface so the steps are concrete, and nothing here decides those questions.
+[`docs/phases/CI12-NODE-ONBOARDING.md`](../../phases/CI12-NODE-ONBOARDING.md); this plan follows its three
+ordered deliveries. All paths are relative to the repository root. CI12 owns the invocation and destination
+contracts, concrete examples, implementation ownership and acceptance requirements.
 
 ## Purpose / Big Picture
 
-After this work a user who installed ci-skills can ask their agent to onboard a host into their OpenShift cluster by
-passing one machine specification and an ISO directory. The agent runs `build`, the user boots the host from the
-served ISO, and the agent runs `join` with the run identifier `build` returned; `remove` with the same identifier
-clears everything the build left if the join never happens; `verify` checks any ISO against any specification without
-a cluster. The person observes an ISO appear in the ISO directory with its digest and its field-by-field match against
-the specification in the result, the host boot from it, and the node read back Ready with the declared hostname and
-role, with nothing left in the cluster carrying the run identifier. Every step reports its own plan, apply and
-read-back in the shared envelope, and every verb can write a sanitized receipt bound to the installed runtime's
-checksum.
+A user first prepares reusable tools in a ci-skills-owned Pod, then builds and verifies a native OpenShift node
+ISO at the caller-selected in-cluster destination, then boots the host and runs the join step. The installed
+commands return location and evidence; the ISO is not copied to the agent computer. Each delivery is usable and
+proven independently before the next one consumes it.
 
 ## Progress
 
-- [ ] Milestone 1, code: run scope with its two callbacks, specification loader and schema, pool comparison,
-      boot-image read, pull-secret copy, ISO build and serving in one Pod, the ISO fetch and its check against the
-      specification, the adapter, the thin main with the `build`, `remove` and `verify` verbs, the catalogue
-      declaration with regenerated `tools.json`, result schema, routing.
-- [ ] Milestone 1, gates: unit tests; the new schemas listed in the validate metaschema step per the existing
-      pairing rule (the local selector is open question 4).
-- [ ] Milestone 1, proof: live `build`, `verify` and `remove` from the installed candidate with the ISO read back
-      and matched against the specification, attached to the pull request.
-- [ ] Milestone 2, code: joiner wait, certificate approval, node state compared with the specification, the
-      `join` verb, the result schema extended for the join fields.
-- [ ] Milestone 2, gates: unit tests.
-- [ ] Milestone 2, proof: CSR handling and join mocked in GitHub tests, including the two-request approval
-      sequence and an already Ready repeat; attach the test evidence to the pull request.
-- [ ] Open question 1 (command surface) answered by the owner.
-- [ ] Open question 2 (gate wiring for this command's receipts) answered by the owner; the committed receipts, if
-      any, follow that answer.
-- [ ] Phase identity `CI12` and its authority named by the owner (blocker in the phase document).
-- [ ] The standards pin moved to a revision carrying the architecture contract (blocker in the phase document).
+- [ ] CI12.0 / PR-CI12-0: deliver and prove the reusable tool Pod, shared download/install operations,
+      same-Pod consumption, present-tool `NO_OP` and owned-resource cleanup.
+- [ ] CI12.1 / PR-CI12-1: consume merged CI12.0; deliver native ISO build/verify/remove with both native input
+      routes, exact destination read-back, embedded-configuration inspection and cleanup.
+- [ ] CI12.2 / PR-CI12-2: deliver join with GitHub mocked CSR/join coverage, the sole live-test exception.
 
 ## Surprises & Discoveries
 
 None yet. Record here anything the cluster, the release tooling or the install media does differently from the
-assumptions in the phase document, with the observation that showed it; the first expected entry is which
-workload, if any, needs cluster API access and the least role that works.
+phase document, with the observation that showed it.
 
 ## Decision Log
+
+Historical decisions from 2026-10-15 are preserved below. The
+[CI12 delivery revision](../../phases/CI12-NODE-ONBOARDING.md#authority) supersedes their custom machine schema,
+pool preflight, workstation ISO fetch, local verification, one-Pod build-and-serve design and two-PR order.
+The current milestones below follow CI12.0, CI12.1 and CI12.2.
 
 - 2026-10-15, the owner's direction: every temporary name (namespace, ServiceAccount, binding, Secret, ConfigMap,
   Pod, Service, labels) is derived from a random run identifier generated per run and removed in cleanup; the
@@ -115,194 +100,77 @@ record what the next combo should copy or avoid.
 ## Context and Orientation
 
 The installed skill lives under `ci-skills/`: commands in `ci-skills/bin/`, the library in
-`ci-skills/lib/python/core/`, schemas in `ci-skills/schemas/`. A combo is a thin main that composes atomic
-callbacks through `WorkflowExecutor(context, Callbacks([...]))`; each callback subclasses a provider base
-(`K8SCallback` for Kubernetes) and implements only the hooks it needs from `collect`, `run`, `update` and
-`cleanup`; the executor runs the first three in order for each callback, stops on an incomplete result, and runs
-cleanup in reverse for every entered callback on success and on failure, setting `state.failed` before cleanup
-when the run failed and again when a cleanup hook raises. State is one object the executor binds once; callbacks
-hand values to each other only through its named fields. A mutating verb returns an offline plan with
-`--dry-run`, a live plan with `--live-plan`, and applies only with `--apply --confirm-plan <digest>`, where the
-digest is computed from the caller's inputs and the resolved target so the apply reproduces it; it re-verifies
-the target before writing and reads the result back; the shared `APPLIED` and `NO_OP` values describe the
-outcome. The command is declared in `ci-skills/lib/python/core/catalog.py`, from which `ci-skills/tools.json`,
-`--help` and `--describe` are rendered; the validate workflow fails on a stale `tools.json`. The functional
-checksum over `ci-skills/bin/`, `ci-skills/lib/` and `ci-skills/schemas/` binds every live receipt to the runtime
-that produced it. The contribution guide, `docs/contribution_guide.md`, is the authority for all of this; the
-GitLab adapter in `ci-skills/lib/python/core/gitlab/gitlab_action.py` is the pattern the OpenShift adapter copies.
-
-Terms used below: a machine specification is the YAML the agent passes, describing the host's identity, operating
-system, cluster membership, network and storage, plus the first NIC's hardware address, the install device, the
-hostname and the interface used for the build; the machine pool is the set of the cluster's machine objects the
-specification targets, read and compared as CI11's `ocp_machine.py --node-spec` defines; the boot image is the
-installer image the cluster publishes for its own version; a joiner is the first pending client certificate
-request a booted host makes with the bootstrap credential, matched by the declared hostname; the run identifier
-is the random value `build` generates after confirmation, from which every temporary name derives and which
-`join` and `remove` receive; the envelope is the shared JSON result every installed command prints, declared by
-the paired result schema; a receipt is the
-sanitized copy of it the portable writer produces with `--receipt-out`; the installed candidate is the skill
-installed from the pull request head as the README's live smoke setup describes.
+`ci-skills/lib/python/core/`, schemas in `ci-skills/schemas/`. The
+[contribution guide](../../contribution_guide.md) owns callback composition, shared state, command declaration
+and reports. [CI12's reuse boundary](../../phases/CI12-NODE-ONBOARDING.md#existing-code-and-reuse-boundary)
+names the existing implementations this delivery consumes.
 
 ## Plan of Work
 
-Milestone 1 adds `ci-skills/lib/python/core/kubernetes/run_scope.py` (run identifier, deterministic names and
-labels, the namespaced and the cluster-scoped `ResourceSet` bound to the operation label, reconstruction from an
-identifier, and the `OpenRunScope` and `RemoveScope` callbacks), `ci-skills/lib/python/core/ocp_machines.py` with
-`ci-skills/schemas/machine-spec.schema.json` (loader, validation, pool read and comparison),
-`ci-skills/lib/python/core/ocp_iso.py` (boot-image stream read, pull-secret copy, the build-and-serve Pod with its
-ConfigMap, the NodePort Service, the ISO fetch into the ISO directory with read-back, the check of the embedded
-node configuration against the specification),
-`ci-skills/lib/python/core/ocp_onboard.py` (`OnboardState`, `OnboardAction`, `ConfirmOnboardOperation`,
-`OnboardWorkflow`), the thin main
-`ci-skills/bin/ocp_node_onboard.py` with the `build`, `remove` and `verify` verbs, the declaration in
-`ci-skills/lib/python/core/catalog.py` with `ci-skills/tools.json` regenerated,
-`ci-skills/schemas/results/ocp-node-onboard.schema.json`, the routing in `ci-skills/SKILL.md`, the unit tests
-`tests/python/test_run_scope.py` and `tests/python/test_ocp_node_onboard.py`, and the metaschema entries in
-`.github/workflows/validate.yml` paired in `lib/bash/automation/bless.bash` as open question 4 allows. Milestone 2
-adds `ci-skills/lib/python/core/ocp_csr.py` and `ci-skills/lib/python/core/ocp_join.py`, the `join` verb in the
-adapter, the thin main and the catalogue declaration, the join fields in the result schema, and
-`tests/python/test_ocp_join.py`. Each milestone edits only the files its pull request owns in the phase
-document's map; any receipt committed into the gate follows the owner's answer to open question 2 and is not
-part of either milestone until then. The two milestones, each with its goal, work, result and proof:
+### Milestone 0: reusable tool Pod (CI12.0 / PR-CI12-0)
 
-### Milestone 1: `build`, `verify` and `remove`, from specification to a checked, served ISO
+Deliver the installed `prepare_tool_pod.py prepare/remove` capability and shared `DownloadArtifact` /
+`InstallArtifact` operations together, following
+[CI12.0](../../phases/CI12-NODE-ONBOARDING.md#phase-ci120--reusable-tool-pod-pr-ci12-0).
+Prove actual download/install, a different callback consuming the same Pod, present-tool `NO_OP`, and removal
+with live read-back. No ISO build is required for this milestone.
 
-Goal: an agent passes one specification and an ISO directory and gets an ISO on disk that carries that specification,
-served in the cluster, with the run identifier to hand on, and can check any ISO or clear the scope with that
-identifier. Work: the modules, schemas, adapter, thin main, catalogue declaration, routing and tests listed under Plan
-of Work, then the live run. Result: `ocp_node_onboard.py build` and `remove` exist in the installed catalogue with
-`--dry-run`, `--live-plan` and `--apply --confirm-plan`, and `verify` as a read-only verb, invoked and read as the
-phase document's "Invocation and the result the agent reads" shows; a successful build ends with the per-field match
-of the ISO against the specification; a successful build apply leaves the ISO in the ISO directory and the whole scope
-(namespace, ServiceAccount, any binding, Secret, ConfigMap, the build-and-serve Pod, the Service) in the cluster, all
-carrying the run identifier; an apply that fails before `serving_kept` is recorded leaves only the ISO, if the fetch
-completed; `remove --run-id` leaves nothing carrying the identifier. Proof: the unit tests named under Validation and
-Acceptance, the validate workflow green on the exact head, and the live `build` result whose rows show the ISO digest
-and size read back, every declared field matching the specification, and whose `run_id` the next milestone consumes, a
-live `verify` of that ISO, and a live `remove` whose read-back shows nothing left, all attached to the pull request as
-receipts.
+### Milestone 1: native ISO build, verify and remove (CI12.1 / PR-CI12-1)
 
-### Milestone 2: `join`, from booted host to Ready node
+Start from merged CI12.0 and its live evidence. Follow
+[CI12.1](../../phases/CI12-NODE-ONBOARDING.md#phase-ci121--native-ocp-iso-combo-pr-ci12-1) for native input
+pass-through, destination checking, build, inspection and cleanup. Prove the generated ISO exists at the exact
+caller-selected in-cluster destination and contains the expected configuration. Exercise both native input
+routes from the installed candidate; no custom native schema or workstation ISO fetch belongs to this milestone.
 
-Goal: after the user boots the host from the served ISO, the agent passes the run identifier and the same
-specification and gets a Ready node and an empty scope. Work: the joiner wait, the approval loop, the node read-back,
-the verb, the result-schema extension and GitHub mocked tests. Result: `ocp_node_onboard.py join
---run-id <id> --spec <SPEC>` approves exactly the requests its selector matches, reads the node Ready with the
-hostname and role the specification declares, removes the whole scope with absence read-back, and is `NO_OP` when the
-node is already Ready and nothing is pending. Proof: GitHub mocked tests of the two-request approval sequence and
-an already Ready repeat with no pending CSR, plus the validate workflow green on the exact head. CSR handling and
-joining are the owner's sole live exception; attach the mocked test evidence to the pull request.
+### Milestone 2: join from a booted host to a Ready node (CI12.2 / PR-CI12-2)
+
+Follow [CI12.2](../../phases/CI12-NODE-ONBOARDING.md#phase-ci122--monitor-and-join-pr-ci12-2) after the user boots
+the host. Deliver the bounded hostname/two-signer approval sequence, Ready-node read-back, already-Ready `NO_OP`
+and owned-scope removal. CSR handling and join use GitHub mocked acceptance, including missing reverse DNS,
+unrelated requests and expiry; no live CSR read or approval is required for acceptance.
 
 ## Concrete Steps
 
-`<SPEC>`, `<DIR>`, `<ISO>`, `<RECEIPT>`, `<digest>` and `<id>` below stand for the agent's own arguments and for
-values the previous step returned; by project rule no example value is written here. Work in a worktree cut from main.
-For milestone 1, implement the modules in the order the phase diagram lists them so each callback's state field exists
-before its consumer. After each module run `./bless.sh --all` from the repository root and expect every line to end in
-`ok`; after the catalogue declaration run the render tool and expect `tools.json` regenerated and `python
-tools/render_manifest.py --check` to exit 0. Run `python ci-skills/bin/ocp_node_onboard.py --describe` and expect the
-command contract with the `build`, `remove` and `verify` verbs and no credentials read. Run `python
-ci-skills/bin/ocp_node_onboard.py build --spec <SPEC> --iso-dir <DIR> --dry-run --json` and expect `DRY_RUN` in phase
-`OFFLINE_PLAN` with the plan digest, the name pattern and no API call; run the same with `--live-plan` and expect
-`PLANNED` in phase `LIVE_PLAN` with the identity read back and the same digest. Push and read the validate workflow
-back green on the exact head. Install the candidate as the README's live smoke setup describes and run the remaining
-steps from the installed copy against the live cluster: `build --spec <SPEC> --iso-dir <DIR> --apply --confirm-plan
-<digest> --json --receipt-out <RECEIPT>` and expect `PASS`, `result_action` `APPLIED`, an ISO in the ISO directory,
-fetched over the served URL, whose digest and size appear in the result, every declared field matching the
-specification in the `VerifyNodeImage` row, the run identifier under `readback` and the serving URL read back; then
-`verify --iso <ISO> --spec <SPEC> --json --receipt-out <RECEIPT>` on that ISO and expect `PASS` with the same match
-rows; then, for a build you do not intend to join, `remove --run-id <id> --dry-run --json` for its digest and `remove
---run-id <id> --apply --confirm-plan <digest> --json --receipt-out <RECEIPT>` and expect `PASS` with every object
-absent. Then run the README rerun procedure on this head from the installed candidate so every existing committed
-receipt carries this checksum, run `python tools/check_live_acceptance.py --root . --json` and expect `PASS` with no
-`functional_digest_mismatch`. Attach the three results to the pull request, commit the refreshed set, push the head
-they came from and expect the validate workflow green on it; that head is the one that merges. The report of every
-live step is its receipt, produced the same way as every other live run in this repository: `--receipt-out` on the
-installed command, sanitized by the portable writer, bound to the functional checksum, with the rows that prove the
-outcome quoted in the pull request body.
-
-Milestone 2 uses GitHub mocked tests for CSR handling and join, including `--live-plan`, the two-request approval
-sequence, and `NO_OP` when the node is already Ready with no pending request. The test evidence is attached to the
-pull request and marked as mocked. Production `join --live-plan` remains available; no live pending-request read is
-required for acceptance.
+1. Follow the proposed preparation invocation in
+   [CI12.0](../../phases/CI12-NODE-ONBOARDING.md#phase-ci120--reusable-tool-pod-pr-ci12-0), using the caller's
+   tool inputs and the digest returned by its planning path. Install the candidate and collect its live proof
+   before advancing to CI12.1.
+2. Follow CI12.1's [native input examples](../../phases/CI12-NODE-ONBOARDING.md#caller-input-and-schema-boundary)
+   and [native procedure](../../phases/CI12-NODE-ONBOARDING.md#native-procedure-and-callback-composition).
+   Use the caller's actual destination and native inputs; read the artifact back there, inspect it in the cluster,
+   then exercise verify/remove.
+3. Run CI12.2's mocked CSR/join acceptance on GitHub and attach evidence marked as mocked.
 
 ## Validation and Acceptance
 
-Milestone 1 is accepted when `tests/python/test_run_scope.py` shows names derive from the identifier, `from_id`
-reproduces them, the namespaced and cluster-scoped sets carry the operation label, and removal deletes exactly the
-owned set including the cluster-scoped objects; when `tests/python/test_ocp_node_onboard.py` shows the loader
-accepting a valid specification and rejecting an invalid one, the pool comparison reporting match and drift per field,
-a dry-run digest confirming a later apply with the same inputs and target and rejecting another target, a `remove`
-digest for one run identifier rejecting an apply for another, `tests/python/test_action_modes.py` showing the shared
-validator reproducing every existing rule under one canonical reason each with the GitLab adapter's cases still
-passing and this adapter accepting `--receipt-out` on a live plan, a workflow-level interrupt test asserting a
-rendered `BLOCKED` result with the read-back fields, a schema test of the sketched documents against the paired
-schema, a dry run with `--iso-dir` accepted and one with `--output-dir` still rejected, the build callback blocking
-with a classified reason on timeout and on a failed init container, the fetch blocking on a missing ISO directory, an
-existing ISO without `--overwrite` and an unreachable served URL, the serving read-back, the keep-on-success branch
-(`serving_kept` set, every object kept) and the remove-on-failure branch (each creator removes its object), the
-cleanup-failure case after a successful serve (scope kept, `BLOCKED`), and the ISO check against a fixture built from
-a known configuration, reporting a changed hostname and a changed hardware address as drift and `PARTIAL` with the
-scope kept; when the catalogue consistency test and the render check pass; when the validate workflow is green on the
-exact head; and when the live `build`, `verify` and `remove` results attached to the pull request show the ISO digest
-read back, every field matching the specification, and nothing left carrying the identifier. Milestone 2 is accepted
-when the join live plan is tested (accepted with `--receipt-out`, no confirm and no approval, `PLANNED` with the
-pending-request rows and the run identifier), when the approval loop is tested inside one bounded `run` against a
-simulated two-request sequence (client, then serving after approval, then issued and Ready, with the final read-back),
-a foreign signer, an expired deadline, the no-Node-before-client-approval ordering, and the already-Ready path that
-makes a repeated `join` `NO_OP`, all on the existing GitHub test path; when those mocked runs show the joiner request,
-the approved requests by name and signer, the node Ready with the declared hostname and role, and nothing carrying the
-identifier. CSR handling and join are the sole mocked live exception, by the owner's decision. A green build alone
-demonstrates nothing; the live ISO results and GitHub mocked join tests do.
+Follow [CI12 Gates](../../phases/CI12-NODE-ONBOARDING.md#gates),
+[Live Smoke Evidence](../../phases/CI12-NODE-ONBOARDING.md#live-smoke-evidence) and
+[End-to-End Test](../../phases/CI12-NODE-ONBOARDING.md#end-to-end-test). Reuse the existing GitHub checks and
+portable report writer; do not add a gate or treat mocked preparation/ISO results as live evidence.
 
 ## Idempotence and Recovery
 
-Every `build` apply generates a new identifier (whether a caller may pass one is open question 1), so repeated
-builds do not collide; an
-existing ISO with the same name in the ISO directory blocks unless the agent passes `--overwrite`. Resources owned
-by the work: the run-scoped namespace, the ServiceAccount, any ClusterRoleBinding, the pull-secret Secret, the
-node-configuration ConfigMap, the build-and-serve Pod, the NodePort Service, and the ISO file. On a failed build
-each callback removes what it created, with absence read-back; on a successful build everything is kept for
-`join`; the ISO and the ISO directory are never removed. `join` approves only what its selector matches, is
-`NO_OP` when the node is already Ready, and never deletes a node. Recovery: `remove --run-id <id>` deletes
-everything carrying the identifier, cluster-scoped objects included, without waiting for a joiner; it is the path
-for an abandoned build, for a `join` that failed before its last step, and for the case where a cleanup hook
-fails after the serving was kept (the scope stays intact and the result is `BLOCKED` with the identifier).
-Rollback: `build` changes no persistent cluster state beyond the scope, so `remove` is its rollback; a
-certificate approval cannot be undone and a joined node is persistent cluster state this combo never removes, so
-the rollback of `join` is the user's decision through the cluster's own node deletion, and the approved request
-names and signers in the result are the audit trail. Nothing else carries the identifier.
+Resource ownership, retention and removal follow the corresponding CI12.0, CI12.1 and CI12.2 sections above.
+Cleanup releases owned temporary resources and preserves caller-owned storage. The generated ISO remains at its
+requested cluster destination; removal does not imply deleting a joined node.
 
 ## Artifacts and Notes
 
-Evidence is the live ISO results (sanitized receipts written with `--receipt-out`) and GitHub mocked CSR/join tests
-attached to the pull request, the validate run URL on the exact head, and, once open question 2 is answered, whatever
-the owner decides is committed into the gate. The pull request body carries the chain's evidence rows in the
-six-row style, one
-row per live step, each pointing at its receipt and all linked by the run identifier and the functional checksum: read
-the specification and the pool, build the ISO, check the ISO against the specification, serve it, read and approve
-CSRs (mocked), the node Ready with the declared hostname and role (mocked), remove the scope; the mocked rows say so
-and point at their GitHub tests instead of a live receipt. Keep the excerpts to the rows that
-prove the outcome: ISO digest and size, the per-field match, run identifier, joiner request, approved request names,
-node condition, and the role the first live run pinned for the scope.
+Use the evidence described in [CI12 Live Smoke Evidence](../../phases/CI12-NODE-ONBOARDING.md#live-smoke-evidence):
+installed functional identity, linked operation/read-back records and cleanup, with CSR/join rows marked mocked.
+Receipt placement follows [CI12 Gates](../../phases/CI12-NODE-ONBOARDING.md#gates).
 
 ## Interfaces and Dependencies
 
-`OnboardAction(SkillAction)`: `spec_path`, `iso_dir`, `iso_path` (for `verify`), `run_id` (generated by `build`,
-required by `join` and `remove`; a caller value on `build` is open question 1), `node` (optional),
-`build_timeout`, `join_timeout`, `approve_timeout`, `overwrite`, and the shared mode flags `dry_run`,
-`live_plan`, `apply`, `confirm_plan`. `OnboardState(DeliveryState)`: `spec`, `pool`, `run_scope`, `boot_image`,
-`pull_secret_ref`, `iso`, `served_url`, `iso_check`, `serving_kept`, `joiner`, `approved`, `node`.
-`RunScope`: `RunScope.new() -> RunScope`, `RunScope.from_id(run_id: str) -> RunScope`, `scope.run_id`,
+CI12.0 owns the reusable tool Pod and dependency inputs; CI12.1 owns native input selection, cluster destination
+and artifact references; CI12.2 owns join selection. Use the interfaces and file ownership declared in the
+[CI12 implementation plan](../../phases/CI12-NODE-ONBOARDING.md#implementation-plan), including the shared run
+scope. The planned shared scope interface supports generated or caller-selected namespaces as CI12.0 specifies:
+
+`RunScope`: `RunScope.new(*, namespace: Optional[str] = None) -> RunScope`,
+`RunScope.resolve(service: KubernetesService, run_id: str) -> RunScope`, `scope.run_id`, `scope.owns_namespace`,
 `scope.namespace`, `scope.labels -> Mapping[str, str]`, `scope.name(kind: str) -> str`,
 `scope.resources(service) -> ResourceSet` (namespaced), `scope.cluster_resources(service) -> ResourceSet`
 (cluster-scoped); `RunScopeAction(SkillAction)`: `scope`, `role` (optional); `OpenRunScope` and `RemoveScope`,
-each a `K8SCallback[RunScopeAction]` composable by any chain. `OnboardWorkflow`: `prepare()`, `callbacks() ->
-Callbacks[OnboardState]`, `execute() -> int`, mirroring `GitLabWorkflow`; `ConfirmOnboardOperation`, mirroring
-`ConfirmGitLabOperation`. Callbacks: `LoadMachineSpec` (local), `ReadMachinePool`, `ReadBootImage`,
-`OpenRunScope`, `ResolvePullSecret`, `BuildNodeImage`, `ServeNodeImage`, `FetchNodeImage`, `VerifyNodeImage`
-(local), `WaitForJoiner`, `ApproveJoinRequests`, `ReadNodeState`, `RemoveScope`, each `K8SCallback[OnboardAction]`
-except the two local callbacks and the two scope callbacks. Dependencies: the existing `K8SAuth`, `ResourceSet`, the
-Secret-copy pattern, the catalogue
-source and render tool, the report renderer, the portable receipt writer and the provenance checksum; the
-release's node-image tooling inside the build container; no new third-party dependency.
+each a `K8SCallback[RunScopeAction]` composable by any chain.
