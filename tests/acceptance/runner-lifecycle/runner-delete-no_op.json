@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-18T13:46:02.018887+00:00",
+  "captured_at": "2026-10-18T14:06:58.298420+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -25,17 +25,17 @@
     ],
     "one_time_sink_required": false,
     "operation": "delete",
-    "plan_digest": "ce435855b81c5045d142871caf4031d429dde645a184cf0710d6a0bf51ee0c97",
+    "plan_digest": "4c6d44cf8adbb7387a480eb7824e6085b9f4585422af143c8584971a8f9c4635",
     "project_ids": null,
-    "resource_id": 88,
+    "resource_id": 90,
     "runner_snapshot": {
-      "id": 88,
+      "id": 90,
       "present": false
     },
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "ce435855b81c5045d142871caf4031d429dde645a184cf0710d6a0bf51ee0c97",
+  "plan_digest": "4c6d44cf8adbb7387a480eb7824e6085b9f4585422af143c8584971a8f9c4635",
   "readback": {
     "action": "NO_OP",
     "after": {
@@ -43,7 +43,7 @@
       "scoped_absent": true
     },
     "before": null,
-    "id": 88,
+    "id": 90,
     "mutated": false,
     "verified": true
   },
@@ -55,7 +55,7 @@
         "scoped_absent": true
       },
       "before": null,
-      "id": 88,
+      "id": 90,
       "mutated": false,
       "verified": true
     }
@@ -68,12 +68,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "fbee08719b9e496ffbda89fd67638ba244a6402788eb2f877cdb723334bb59b6",
-    "file_count": 200,
-    "functional_digest": "64a6c81530fadf2ba454c644489ce8cd944fd4d36453b3c5899819d26c5d8c1f",
+    "digest": "0d343fe1d4c8dc6bda5172f572306f6e1f2b50dfdf0d6b0a0d5938a624fab0a8",
+    "file_count": 207,
+    "functional_digest": "5c8a13b2c648a054c1988092cb72af4dff6b6c6c1394d3de4692ee51709e6b9a",
     "revision": {
       "source": "installer_record",
-      "value": "a546bcbb2a0208f8be75841fa5f727eefee7cbb4",
+      "value": "d8ab14b2d4d408975bc378ce871737bd014bbe44",
       "verified": true
     }
   },
@@ -86,9 +86,9 @@
     "kind": "project",
     "reference": "hott/test"
   },
-  "target_file": "path:0212123cd950",
+  "target_file": "path:331790f9f63b",
   "target_source": "project;argv:--project",
-  "tested_revision": "a546bcbb2a0208f8be75841fa5f727eefee7cbb4",
+  "tested_revision": "d8ab14b2d4d408975bc378ce871737bd014bbe44",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

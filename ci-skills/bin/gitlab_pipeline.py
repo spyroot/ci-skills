@@ -18,7 +18,7 @@ from typing import Optional
 import _bootstrap  # noqa: F401
 from lib.python.access.gitlab import check_gitlab_operation_access
 from lib.python.access.gitlab_credentials import bind_gitlab_session
-from lib.python.core.catalog import describe
+from lib.python.core.catalog import describe, missing_required_options
 from lib.python.core.cli import _failure, output_mode, parser
 from lib.python.core.gitlab.cli import resolve_gitlab_target
 from lib.python.core.gitlab.gitlab_actions import ActionError
@@ -173,7 +173,7 @@ def _reject_unrelated(args: argparse.Namespace, action: str) -> None:
     if action == "start" and args.pipeline_id is not None:
         raise ActionError("pipeline_id_not_valid_for_start")
     if action in {"get", "watch"} and args.pipeline_id is None:
-        raise ActionError("pipeline_id_required")
+        raise ActionError("pipeline_id_must_be_positive")
     if args.pipeline_id is not None and args.pipeline_id <= 0:
         raise ActionError("pipeline_id_must_be_positive")
     if action == "get" and args.receipt_out:
@@ -201,64 +201,70 @@ def _select_target(
 
 
 def _get(args: argparse.Namespace) -> int:
-    """Preserve the existing bounded pipeline read behavior.
+    """Preserve the existing bounded pipeline read and classified failures.
 
     :param args: Validated get arguments.
-    :returns: Status-derived command exit code.
-    :raises TargetError: Target or project selection fails.
-    :raises RuntimeError: Credential binding or access verification fails.
-    :raises ValueError: Provider evidence has an invalid shape.
+    :returns: Status-derived command exit code, with the original failure source.
     """
     started = time.monotonic()
-    target, target_source, reference = _select_target(args)
-    filters: JSONObject = {"project": reference, "pipeline_id": args.pipeline_id}
-    if args.dry_run:
-        job_limit = PAGE_SIZE * MAX_JOB_PAGES
-        data = report(KIND, target.gitlab.url, filters, [], [])
-        data["status"] = DRY_RUN
-        data["target_source"] = target_source
-        data["access"] = {
-            "status": DRY_RUN,
-            "target": {"kind": "project", "reference": reference},
-            "observed_capability": [],
-        }
-        data["collection_probes"] = [
-            "exact GitLab identity and project reads",
-            f"pipeline and up to {job_limit} job reads with one overflow probe",
-        ]
-    else:
-        session = bind_gitlab_session(
-            target,
-            target_kind="project",
-            target_reference=reference,
-            target_source=(
-                f"{target_source};argv:--project" if args.project else target_source
-            ),
-            revision=args.revision,
-        )
-        gate = check_gitlab_operation_access(session)
-        if gate["status"] != PASS:
-            data = report(
-                KIND,
-                target.gitlab.url,
-                filters,
-                [],
-                json_objects(gate["errors"]),
-            )
-            data["status"] = BLOCKED
+    source = "target"
+    try:
+        target, target_source, reference = _select_target(args)
+        filters: JSONObject = {"project": reference, "pipeline_id": args.pipeline_id}
+        if args.dry_run:
+            job_limit = PAGE_SIZE * MAX_JOB_PAGES
+            data = report(KIND, target.gitlab.url, filters, [], [])
+            data["status"] = DRY_RUN
+            data["target_source"] = target_source
+            data["access"] = {
+                "status": DRY_RUN,
+                "target": {"kind": "project", "reference": reference},
+                "observed_capability": [],
+            }
+            data["collection_probes"] = [
+                "exact GitLab identity and project reads",
+                f"pipeline and up to {job_limit} job reads with one overflow probe",
+            ]
         else:
-            record, errors = read_pipeline(
-                session,
-                json_integer(json_object(gate["target"])["id"]),
-                args.pipeline_id,
+            source = "credential"
+            session = bind_gitlab_session(
+                target,
+                target_kind="project",
+                target_reference=reference,
+                target_source=(
+                    f"{target_source};argv:--project" if args.project else target_source
+                ),
+                revision=args.revision,
             )
-            data = report(KIND, target.gitlab.url, filters, [record], errors)
-        attach_pipeline_provenance(data, session, gate)
-    rendered = emit(data, output_mode(args), args.output_dir)
-    status = json_string(data["status"])
-    log_event(args, KIND, "result", status, elapsed=time.monotonic() - started)
-    sys.stdout.write(rendered)
-    return exit_code(status)
+            source = "access"
+            gate = check_gitlab_operation_access(session)
+            if gate["status"] != PASS:
+                data = report(
+                    KIND,
+                    target.gitlab.url,
+                    filters,
+                    [],
+                    json_objects(gate["errors"]),
+                )
+                data["status"] = BLOCKED
+            else:
+                source = "pipeline"
+                record, errors = read_pipeline(
+                    session,
+                    json_integer(json_object(gate["target"])["id"]),
+                    args.pipeline_id,
+                )
+                data = report(KIND, target.gitlab.url, filters, [record], errors)
+            attach_pipeline_provenance(data, session, gate)
+        rendered = emit(data, output_mode(args), args.output_dir)
+        status = json_string(data["status"])
+        log_event(args, KIND, "result", status, elapsed=time.monotonic() - started)
+        sys.stdout.write(rendered)
+        return exit_code(status)
+    except (TargetError, RuntimeError, ValueError, OSError, TypeError, KeyError) as exc:
+        return _failure(args, KIND, source, str(exc))
+    except Exception:  # noqa: BLE001 - keep unexpected failures machine-readable
+        return _failure(args, KIND, source, "unexpected_runtime_failure")
 
 
 def _watch(args: argparse.Namespace) -> int:
@@ -290,7 +296,8 @@ def _pipeline_failure(args: argparse.Namespace, reason: str) -> int:
     :raises OSError: Even the final blocked report cannot be written to stdout.
     """  # noqa: DOC503 - final stdout writes can still fail.
     if args.action != "watch":
-        return _failure(args, KIND, f"pipeline.{args.action}", reason)
+        source = "arguments" if args.action == "get" else f"pipeline.{args.action}"
+        return _failure(args, KIND, source, reason)
     data = watch_failure_report(args, reason)
     try:
         sys.stdout.write(emit(data, output_mode(args)))
@@ -310,6 +317,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.describe:
         sys.stdout.write(json.dumps(describe(SCRIPT), indent=2, sort_keys=True) + "\n")
         return 0
+    if args.action == "get":
+        if args.dry_run and (args.output_dir or args.log_file):
+            return _failure(args, KIND, "arguments", "dry_run_cannot_write_output")
+        missing = missing_required_options(SCRIPT, args)
+        if missing:
+            return _failure(
+                args,
+                KIND,
+                "arguments",
+                f"{', '.join(missing)} is required; see --describe",
+            )
     try:
         _reject_unrelated(args, args.action)
         if (

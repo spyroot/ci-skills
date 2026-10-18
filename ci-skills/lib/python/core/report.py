@@ -498,8 +498,8 @@ def _pipeline_watch_lines(data: JSONObject) -> MutableSequence[str]:
         )
     ]
     target = (
-        f"{data['target']}  project {filters['project']}"
-        f"  pipeline {filters['pipeline_id']}"
+        f"{data['target']}  project {filters.get('project', 'unresolved')}"
+        f"  pipeline {filters.get('pipeline_id', 'unresolved')}"
     )
     if filters.get("related_name") is not None:
         target += f"  related {filters['related_name']!r}"

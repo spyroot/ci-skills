@@ -504,7 +504,7 @@ class PipelineStartWorkflow(GitLabWorkflow):
                 DRY_RUN,
                 phase="OFFLINE_PLAN",
                 mutated=False,
-                readback={"verified": False, "reason": "live_plan_required"},
+                readback={"verified": False},
             )
             public = copy_json_object(json_object(self.state.report["plan"]))
             public["confirmation_ready"] = False

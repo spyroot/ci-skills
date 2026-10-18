@@ -135,7 +135,7 @@ def test_watch_rejects_nonfinite_interval_before_provider_contact(
 ) -> None:
     """Reject every nonfinite parser value before constructing provider work."""
     args = SCRIPT.build_parser().parse_args(
-        ["watch", "--pipeline-id", "17", "--interval", interval]
+        ["watch", "--pipeline-id", "17", f"--interval={interval}"]
     )
     with pytest.raises(
         ACTION.ActionError,
