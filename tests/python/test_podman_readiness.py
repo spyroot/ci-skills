@@ -127,7 +127,7 @@ def test_run_scope_rejects_identifiers_that_cannot_own_kubernetes_objects(
     :returns: None; the expected exception is the behavior under test.
     """
     with pytest.raises(ValueError, match="run_scope_id_invalid"):
-        RUN_SCOPE.RunScope.new(namespace="unit-namespace", run_id=run_id)
+        RUN_SCOPE.RunScope(run_id, "unit-namespace", False)
 
 
 def test_probe_action_requires_digest_pinned_images(tmp_path: Path) -> None:
@@ -288,7 +288,7 @@ def test_scc_access_action_uses_the_selected_constraint_without_allowlist() -> N
         constraint="nonroot.example.com",
         service_account="builder",
     )
-    scope = RUN_SCOPE.RunScope.create(run_id="scc-action")
+    scope = RUN_SCOPE.RunScope.new(run_id="scc-action")
 
     assert action.plan() == {
         "provider": "openshift_scc_access",
@@ -322,7 +322,7 @@ def test_scc_binding_name_distinguishes_service_accounts_after_bounding() -> Non
 
     :returns: None; long caller names remain bounded, stable and distinct.
     """
-    scope = RUN_SCOPE.RunScope.create(run_id="scc-account")
+    scope = RUN_SCOPE.RunScope.new(run_id="scc-account")
     constraint = "s" * 200
     first = SCC_ACCESS.SCCAccessAction(constraint, "builder-a")
     second = SCC_ACCESS.SCCAccessAction(constraint, "builder-b")
@@ -1130,7 +1130,11 @@ def test_emitted_apply_report_matches_shipped_result_schema(
 
     assert exit_code == (2 if scc_rejected else 0)
     assert output["status"] == ("BLOCKED" if scc_rejected else "PASS")
-    record = next(item for item in output["records"] if "outcome" in item)
+    probe_records = [
+        item for item in output["records"] if item.get("callback") == "RunPodmanProbe"
+    ]
+    assert len(probe_records) == 1
+    record = probe_records[0]
     assert record["outcome"] == ("scc_required" if scc_rejected else "ready")
     assert record["verified"] is (not scc_rejected)
     assert output["cleanup"]["status"] == "PASS"
@@ -1382,6 +1386,7 @@ def test_terminal_job_failure_observes_once_more_without_waiting_for_timeout(
     """
     service = FakeKubernetes(_target(tmp_path))
     read_resource = service.read
+    read_json = service.json
     observations: list[str] = []
     cleanup_observations: list[str] = []
     sleeps: list[float] = []
@@ -1413,10 +1418,12 @@ def test_terminal_job_failure_observes_once_more_without_waiting_for_timeout(
 
         :param *args: Requested native resource read.
         :param openshift: Native-client selector, unused by this fixture.
-        :returns: Node selection, empty Events, or the delayed Pod termination.
+        :returns: Run ownership, node selection, Events, or delayed Pod termination.
         :raises AssertionError: If the callback requests an unexpected resource.
         """
         assert openshift is False
+        if "namespaces" in args or "--all-namespaces" in args:
+            return read_json(*args, openshift=openshift)
         if "nodes" in args:
             return {"items": [_node("worker-a")]}
         if "pods" in args:

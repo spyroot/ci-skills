@@ -425,9 +425,10 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "use_when": "Check container execution, bind mounts and exit propagation before "
         "building a runner workflow.",
         "requires": ("kubernetes",),
-        "capabilities": ("node_scoped",),
+        "capabilities": ("node_scoped", "namespaced"),
         "mutates": True,
         "options": {
+            "--namespace": "existing namespace; default creates a temporary namespace",
             "--probe-image": "digest-pinned image providing Podman; default is Linux amd64",
             "--inner-image": "digest-pinned inner test image; default is Linux amd64",
             "--timeout": "maximum probe duration in seconds",

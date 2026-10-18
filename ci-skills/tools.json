@@ -961,7 +961,8 @@
     },
     "image_build_readiness.py": {
       "capabilities": [
-        "node_scoped"
+        "node_scoped",
+        "namespaced"
       ],
       "execution_surface": "configured Kubernetes API and a temporary privileged Job",
       "options": [
@@ -981,6 +982,7 @@
         "--log-level",
         "--memory-limit",
         "--memory-request",
+        "--namespace",
         "--node",
         "--output-dir",
         "--probe-image",
