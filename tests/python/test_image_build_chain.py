@@ -26,14 +26,17 @@ CHAIN = import_script_module("lib.python.core.kubernetes.image_build_chain")
 EXECUTOR = import_script_module("lib.python.core.executor")
 GITLAB_ACTIONS = import_script_module("lib.python.core.gitlab.gitlab_actions")
 GITLAB_JOBS = import_script_module("lib.python.core.gitlab.gitlab_jobs")
+KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 MANAGER_ACTION = import_script_module("lib.python.core.gitlab.runner_manager.action")
 PODMAN = import_script_module("lib.python.core.kubernetes.podman_probe")
 READINESS = import_script_module("lib.python.core.kubernetes.image_build_readiness")
 RUN_SCOPE = import_script_module("lib.python.core.kubernetes.run_scope")
 TARGET = import_script_module("lib.python.core.target")
+TOOLBOX_ACTIONS = import_script_module("lib.python.core.toolbox_actions")
 VERIFICATION = import_script_module(
     "lib.python.core.kubernetes.image_build_chain.verification"
 )
+WORKFLOW = import_script_module("lib.python.core.kubernetes.image_build_chain.workflow")
 
 if TYPE_CHECKING:
     from argparse import Namespace
@@ -102,12 +105,14 @@ def _args(
     group: bool = False,
     apply: bool = False,
     confirmation: Optional[str] = None,
+    timeout: Optional[int] = None,
 ) -> Namespace:
     """Parse one complete project- or group-runner chain request.
 
     :param group: Select a group runner and a separate pipeline project.
     :param apply: Select confirmed mutation mode.
     :param confirmation: Digest supplied to confirmed apply.
+    :param timeout: Optional caller-selected operation bound in seconds.
     :returns: Public parser namespace with explicit chain inputs.
     """
     scope = (
@@ -158,6 +163,7 @@ def _args(
             "2Gi",
             "--storage-size",
             "12Gi",
+            *(["--timeout", str(timeout)] if timeout is not None else []),
             *mode,
             "--json",
         ]
@@ -273,6 +279,80 @@ def _prepared_action(
     action.mode = PODMAN.ProbeMode.APPLY if apply else PODMAN.ProbeMode.LIVE_PLAN
     action.state.args = action.args
     return action
+
+
+def test_chain_toolbox_build_can_complete_after_command_default_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Honor the chain timeout when a toolbox Build outlasts the command default.
+
+    :param monkeypatch: Fixture isolating configuration, provider reads, and time.
+    :returns: None; the real shared service observes a complete Build at 35 seconds.
+    """
+    action = _prepared_action()
+    action.args = _args(timeout=300)
+    action.state.args = action.args
+    action.state.runner_auth_plan = _pipeline_plan()
+    action.state.pipeline_plan = _pipeline_plan()
+    action.toolbox = TOOLBOX_ACTIONS.WorkflowAction(
+        action.args, spec=action.toolbox.spec, context=action.state
+    )
+    action.probe = PODMAN.PodmanProbeAction(
+        target=action.target,
+        node=NODE,
+        probe_image=action.args.probe_image,
+        inner_image=action.args.inner_image,
+        timeout=action.args.timeout,
+        resources=PODMAN.probe_resources_from_args(action.args),
+        mode=action.mode,
+        confirm_plan=None,
+        namespace=CALLER_NAMESPACE,
+    )
+    monkeypatch.setattr(
+        WORKFLOW, "WorkflowExecutor", lambda **kwargs: SimpleNamespace(**kwargs)
+    )
+    callbacks = CHAIN.workflow(action).callbacks
+    authentication = next(
+        callback for callback in callbacks if isinstance(callback, KUBERNETES.K8SAuth)
+    )
+    authentication.bind(action.state)
+    action.state.kubernetes_target = action.target
+    monkeypatch.setattr(
+        KUBERNETES.KubernetesService, "verify", lambda _service: "unit-builder"
+    )
+    authentication.run()
+    service = action.state.kubernetes
+    elapsed = [0.0]
+    completed = {"status": {"phase": "Complete"}}
+
+    def advance(seconds: float) -> None:
+        """Advance the fake clock without waiting.
+
+        :param seconds: Poll interval selected by the real Build waiter.
+        :returns: None after advancing simulated elapsed time.
+        """
+        elapsed[0] += seconds
+
+    def read_build(kind: str, name: str, namespace: str) -> JSONObject:
+        """Keep the selected Build running until its 35-second completion.
+
+        :param kind: Native resource kind requested by the waiter.
+        :param name: Exact toolbox Build selected by the caller.
+        :param namespace: Caller-owned Build namespace.
+        :returns: Running or complete provider read-back at the fake clock time.
+        """
+        assert (kind, name, namespace) == ("build", "toolbox-1", CALLER_NAMESPACE)
+        return completed if elapsed[0] >= 35 else {"status": {"phase": "Running"}}
+
+    monkeypatch.setattr(
+        KUBERNETES,
+        "time",
+        SimpleNamespace(monotonic=lambda: elapsed[0], sleep=advance),
+    )
+    monkeypatch.setattr(service, "read", read_build)
+
+    assert service.wait_build("toolbox-1", CALLER_NAMESPACE) is completed
+    assert elapsed[0] == 35
 
 
 @pytest.mark.parametrize(
