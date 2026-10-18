@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from conftest import install_executable, parse_json_output, run_script
+from conftest import install_executable, parse_json_output, read_journal, run_script
 
 TEST_REVISION = "a" * 40
 
@@ -47,6 +47,9 @@ import sys
 
 tool = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
+if os.environ.get("FAKE_ACCESS_CALLS"):
+    with open(os.environ["FAKE_ACCESS_CALLS"], "a", encoding="utf-8") as journal:
+        journal.write(json.dumps({"tool": tool, "args": args}) + "\\n")
 
 def emit(value):
     print(json.dumps(value))
@@ -89,6 +92,9 @@ if tool == "glab":
     if args[:2] == ["auth", "status"]:
         raise SystemExit(0)
     if args[-1] == "user":
+        if os.environ.get("FAKE_GLAB_DENY") == "1":
+            print("401 Unauthorized", file=sys.stderr)
+            raise SystemExit(1)
         emit({
             "username": "unit-gl",
             "is_admin": True,
@@ -213,6 +219,201 @@ def live_target_file(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return target
+
+
+def _keep_target_providers(target_file: Path, providers: tuple[str, ...]) -> None:
+    """Narrow the existing fixture to the tables selected by a consumer.
+
+    :param target_file: Existing full target fixture edited only in its scratch directory.
+    :param providers: Provider tables to retain, preserving their declared contents.
+    """
+    sections = target_file.read_text(encoding="utf-8").split("\n\n")
+    target_file.write_text(
+        "\n\n".join(
+            section
+            for section in sections
+            if any(section.startswith(f"[{name}]\n") for name in providers)
+        ),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize(
+    ("providers", "extra_table"),
+    (
+        (("github",), ""),
+        (("gitlab",), ""),
+        (("kubernetes",), ""),
+        (("gitlab", "kubernetes"), ""),
+        (("github", "gitlab", "kubernetes"), ""),
+        (
+            ("gitlab",),
+            '[harbor]\nurl = "https://harbor.example.test"\nproject = "unit"\n',
+        ),
+    ),
+)
+def test_access_check_uses_only_configured_providers(
+    fake_access_tools: Path,
+    live_target_file: Path,
+    call_journal: Path,
+    providers: tuple[str, ...],
+    extra_table: str,
+) -> None:
+    """Probe configured providers without requiring an unrelated authority.
+
+    :param fake_access_tools: Existing isolated provider command doubles.
+    :param live_target_file: Full fixture narrowed to the configured subset.
+    :param call_journal: Journal proving which native commands were contacted.
+    :param providers: Authorities configured by this installed-skill consumer.
+    :param extra_table: Additional configured authority without a general access probe.
+    :returns: None; assertions verify the selected authority probes and report.
+    """
+    _keep_target_providers(live_target_file, providers)
+    if extra_table:
+        with live_target_file.open("a", encoding="utf-8") as handle:
+            handle.write("\n\n" + extra_table)
+    result = run_script(
+        "access_check.py",
+        "--revision",
+        TEST_REVISION,
+        "--json",
+        fake_bin=fake_access_tools,
+        env={"FAKE_ACCESS_CALLS": str(call_journal)},
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 0, data
+    assert data["status"] == "PASS"
+    assert set(data["surfaces"]) == set(providers)
+    assert set(data["credential_sources"]) == set(providers)
+    expected_tools = {"github": "gh", "gitlab": "glab", "kubernetes": "kubectl"}
+    assert {row["tool"] for row in read_journal(call_journal)} == {
+        expected_tools[name] for name in providers
+    }
+    expected_collectors = (
+        {"storage_report", "event_trace", "cilium_status"}
+        if "kubernetes" in providers
+        else set()
+    )
+    assert set(data["live_checks"]) == expected_collectors
+    assert data["blocking_live_checks"] == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    ("", '[harbor]\nurl = "https://harbor.example.test"\nproject = "unit"\n'),
+)
+def test_access_check_requires_at_least_one_supported_configured_provider(
+    fake_access_tools: Path,
+    live_target_file: Path,
+    call_journal: Path,
+    body: str,
+) -> None:
+    """Avoid reporting access success when no provider probe can actually run.
+
+    :param fake_access_tools: Existing isolated provider command doubles.
+    :param live_target_file: Target fixture replaced with no supported access provider.
+    :param call_journal: Journal proving no native command was contacted.
+    :param body: Empty target or a Harbor-only target without a general access probe.
+    :returns: None; assertions verify setup refusal instead of vacuous success.
+    """
+    live_target_file.write_text(body, encoding="utf-8")
+    result = run_script(
+        "access_check.py",
+        "--revision",
+        TEST_REVISION,
+        "--json",
+        fake_bin=fake_access_tools,
+        env={"FAKE_ACCESS_CALLS": str(call_journal)},
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 2
+    assert data["status"] == "BLOCKED"
+    assert data["errors"][0] == {
+        "source": "target",
+        "reason": "target has no configured authority tables for this command",
+    }
+    assert read_journal(call_journal) == []
+
+
+@pytest.mark.parametrize(
+    ("configured", "options", "required"),
+    (
+        ("kubernetes", ("--publication",), "github"),
+        (
+            "kubernetes",
+            ("--job-url", "https://gitlab.example.test/unit/repo/-/jobs/1"),
+            "gitlab",
+        ),
+        ("gitlab", ("--ceph-namespace", "unit-ceph"), "kubernetes"),
+    ),
+)
+def test_access_check_selected_option_requires_provider_before_any_probe(
+    fake_access_tools: Path,
+    live_target_file: Path,
+    call_journal: Path,
+    configured: str,
+    options: tuple[str, ...],
+    required: str,
+) -> None:
+    """Refuse an unavailable selected capability before contacting any provider.
+
+    :param fake_access_tools: Existing isolated native command doubles.
+    :param live_target_file: Fixture narrowed to a different available provider.
+    :param call_journal: Journal that must remain empty after target rejection.
+    :param configured: Only authority configured in the target file.
+    :param options: Explicit operation selecting an otherwise optional authority.
+    :param required: Missing authority needed by the selected operation.
+    :returns: None; assertions verify refusal before any native provider call.
+    """
+    _keep_target_providers(live_target_file, (configured,))
+    result = run_script(
+        "access_check.py",
+        *options,
+        "--revision",
+        TEST_REVISION,
+        "--json",
+        fake_bin=fake_access_tools,
+        env={"FAKE_ACCESS_CALLS": str(call_journal)},
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 2
+    assert data["status"] == "BLOCKED"
+    assert data["errors"][0]["source"] == "target"
+    assert data["errors"][0]["reason"] == (
+        f"target is missing required authority tables: {required}"
+    )
+    assert read_journal(call_journal) == []
+
+
+def test_access_check_provider_denial_does_not_pass_with_no_extra_collectors(
+    fake_access_tools: Path, live_target_file: Path, call_journal: Path
+) -> None:
+    """Keep GitLab authentication mandatory even when no collector is selected.
+
+    :param fake_access_tools: Existing native doubles with a denied GitLab user read.
+    :param live_target_file: Fixture narrowed to a GitLab-only consumer.
+    :param call_journal: Journal proving that GitLab access was actually attempted.
+    :returns: None; assertions verify an actual authentication failure stays blocked.
+    """
+    _keep_target_providers(live_target_file, ("gitlab",))
+    result = run_script(
+        "access_check.py",
+        "--revision",
+        TEST_REVISION,
+        "--json",
+        fake_bin=fake_access_tools,
+        env={"FAKE_ACCESS_CALLS": str(call_journal), "FAKE_GLAB_DENY": "1"},
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 2
+    assert data["status"] == "BLOCKED"
+    assert set(data["surfaces"]) == {"gitlab"}
+    assert data["surfaces"]["gitlab"]["reason"] == "authentication"
+    assert {row["tool"] for row in read_journal(call_journal)} == {"glab"}
 
 
 def test_access_check_publication_pass_reports_admin_and_required_check_receipt(
