@@ -27,8 +27,8 @@ adds the record, or `today` where the record exists in the tree.
 | `skill-frontmatter` | none, upstream shape | the YAML block in each `SKILL.md` | authors | missing |
 | `skill-manifest` | `skill_manifest` | `ci-skills/tools.json` | `tools/render_manifest.py` | implemented |
 | `skill-index` | `skill_index` | `bin/ci-skills list --json` | `tools/skillkit/discover.py` | implemented |
-| `reference-next` | `reference_next` | `next` answers and the shared pointer | `core/navigate.py` | implemented |
-| `reference-section` | `reference_section` | `reference.py get` answers | `core/navigate.py` | implemented |
+| `reference-next` | `reference_next` | node answers and shared pointer definitions | `core/catalog.py` | implemented |
+| `reference-section` | `reference_section` | `reference.py get` answers | `core/navigate_references.py` | implemented |
 | `gitlab-pipeline-watch` | `gitlab_pipeline_watch` | `watch` results | `core/gitlab_pipelines.py` | implemented |
 | `vendor-lock` | `skill_vendor_lock` | `vendor/vendor.lock.json` | `bin/ci-skills update` | missing |
 | `vendor-declarations` | not named yet | `vendor/vendor.toml` | by hand | missing |

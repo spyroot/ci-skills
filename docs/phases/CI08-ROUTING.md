@@ -28,7 +28,7 @@ carries their sizes.
 
 ## Navigator and routing
 
-The navigator is `ci-skills/bin/reference.py next` (planned, CI09-REFERENCE,
+The navigator is `ci-skills/bin/reference.py` (CI09-REFERENCE,
 section 3); this phase supplies the `SKILL.md` routing around it, not the
 navigator's data.
 
@@ -58,7 +58,7 @@ navigator's data.
 | Owner | `ci-skills/lib/python/core/catalog.py` in `ci-skills` |
 | Entrypoint | `tools/render_manifest.py` |
 | Result | `skill_manifest` (today's `tools.json` shape) |
-| Read-back | byte-equality test on `tools.json`; `bin/reference.py next gitlab --json`; a fresh live receipt |
+| Read-back | byte-equality test on `tools.json`; `bin/reference.py glab --json`; a fresh live receipt |
 
 ## Changes to `ci-skills`
 
@@ -83,7 +83,7 @@ navigator's data.
 2. Routing grows from symptom → command to symptom → command, reference and
    tags.
 3. `SKILL.md` becomes the router: access first, one sentence that points at
-   `ci-skills/bin/reference.py next` (the sentence of CI09-REFERENCE
+   `ci-skills/bin/reference.py` (the sentence of CI09-REFERENCE
    section 3, Steps), the routing table, the option tiers,
    and "load only what matches".
    - Sections 4 to 6 (statuses, correlation, persisting evidence) move
@@ -211,12 +211,12 @@ request's final package bytes.
      the matching dependency is installed.
    - Live: the receipt of parts 4 and 5, captured on this laptop (D-SMOKE).
 3. *Smoke*: this phase changes no live behaviour. The static read-back, on
-   the D-SMOKE executor: `ci-skills/bin/reference.py next gitlab --json`
+   the D-SMOKE executor: `ci-skills/bin/reference.py glab --json`
    matches CI09-REFERENCE section 3, Render 2, and
    `wc -l ci-skills/SKILL.md` reads back fewer than 500 lines (229 on
    2026-10-06, before the split).
 4. *Evidence*: the routing evidence is the installed candidate's
-   `reference.py next gitlab --json` output and the `wc -l` count. Affected
+   `reference.py glab --json` output and the `wc -l` count. Affected
    live capabilities retain matching authenticated setup and operation
    receipts, candidate revision, skill digest, freshness, redaction,
    read-back and cleanup proof under CI11-TOOLS, Smoke cases.

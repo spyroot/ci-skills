@@ -1,149 +1,82 @@
-"""Render progressive answers without expanding any additional reference.
+"""Render discovery answers for a terminal without expanding anything further.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
 spyroot@gmail.com
 """
 
-import shlex
 from collections.abc import Sequence
-from pathlib import PurePosixPath
 
-from lib.python.core.json_types import (
-    JSONObject,
-    JSONValue,
-    json_object,
-    json_objects,
-    json_strings,
-)
+from lib.python.core.json_types import JSONObject, json_object, json_objects
 
 
-def invocation(record: JSONObject) -> str:
-    """Render a pointer as a copyable human invocation.
+def read_lines(entries: Sequence[JSONObject], title: str) -> Sequence[str]:
+    """Render what can be read at this level, each with its next call.
 
-    :param record: Command pointer from the current answer.
-    :returns: Shell-quoted command omitting the machine-output flag.
-    """
-    args = [
-        PurePosixPath(str(record["entrypoint"])).name,
-        *(item for item in json_strings(record["args"]) if item != "--json"),
-    ]
-    return shlex.join(args)
-
-
-def choice_lines(choices: Sequence[JSONObject]) -> Sequence[str]:
-    """Render only the choices and input hints already present in an answer.
-
-    :param choices: Current page of choices.
+    :param entries: Read entries already present in the answer.
+    :param title: Heading for the list.
     :returns: Indented human text, never fetched content.
     """
-    lines: list[str] = []
-    width = max((len(str(item["id"])) for item in choices), default=7) + 2
-    labels = {
-        "expand": "Expand",
-        "describe": "Describe",
-        "execute": "Run",
-        "read": "Read",
-        "retrieve": "Retrieve",
-    }
-    for item in choices:
-        lines.append(f"  {item['id']!s:<{width}}{item['summary']}")
-        indent = " " * (width + 2)
-        if item.get("available") is False:
-            lines.append(f"{indent}Unavailable")
-        else:
-            step = json_object(item["next"])
-            lines.append(f"{indent}{labels[str(step['action'])]}: {invocation(step)}")
-            for field in json_objects(step.get("inputs", [])):
-                label = "Needs" if field["required"] else "Optional"
-                lines.append(
-                    f"{indent}{label}: --{field['name']}  {field.get('summary', '')}".rstrip()
-                )
-        if "when" in item:
-            lines.append(f"{indent}{item['when']}")
-        lines.append("")
+    if not entries:
+        return []
+    width = max(len(str(item["name"])) for item in entries) + 2
+    lines = [title]
+    for item in entries:
+        lines.append(f"  {item['name']!s:<{width}}{item['summary']}")
+        lines.append(f"  {'':<{width}}reference.py {item['pointer']}")
+    lines.append("")
     return lines
 
 
-def value_text(value: JSONValue) -> str:
-    """Format one already-selected capability fact.
+def node_lines(data: JSONObject) -> Sequence[str]:
+    """Render one node: what the agent can run, then what it can read.
 
-    :param value: Boolean, scalar or ordered string list.
-    :returns: Human representation with explicit empty-list meaning.
+    :param data: One proposition node.
+    :returns: Human text for the node.
     """
-    if isinstance(value, bool):
-        return "yes" if value else "no"
-    if isinstance(value, (list, tuple)):
-        return ", ".join(json_strings(value)) or "none"
-    return str(value)
+    lines: list[str] = []
+    tools = list(json_object(data["tools"]))
+    if tools:
+        lines.append("Run")
+        lines.extend(f"  {script}  ({script} --help)" for script in tools)
+        lines.append("")
+    lines.extend(read_lines(json_objects(data["reference"]), "Read"))
+    return lines
 
 
 def human(data: JSONObject) -> str:
-    """Draw the CI09 human view from the same bounded machine answer.
+    """Draw the human view from the same bounded machine answer.
 
-    :param data: Reference-next or reference-section answer.
-    :returns: Human output with expandable sections and continuation invocation.
+    :param data: Root, node or reference-section answer.
+    :returns: Human output with the continuation invocation when one exists.
     """
     lines: list[str] = []
     if "error" in data:
         error = json_object(data["error"])
         lines.append(f"{error['reason']}: {error['input']}")
-    is_section = data["kind"] == "reference_section"
-    if is_section:
+    if data.get("kind") == "reference_section":
         lines.extend(
             (
-                f"{data['reference']}#{data['anchor']}  pinned {data['pinned']}",
+                f"{data['document']}#{data['anchor']}  pinned {data['pinned']}",
                 "",
-                str(data["text"]),
+                str(data["text"]).rstrip("\n"),
+                "",
             )
         )
+        lines.extend(read_lines(json_objects(data["reference"]), "Subsections"))
+    elif "tools" in data:
+        if "query" in data:
+            lines.append(f'Sections containing "{data["query"]}"')
+            lines.append("")
+        lines.extend(node_lines(data))
     else:
-        lines.extend((str(data["summary"]), ""))
-    if "capability" in data:
-        facts = json_object(data["capability"])
-        for name in (
-            "command",
-            "kind",
-            "requires",
-            "tools",
-            "mutates",
-            "side_effects",
-            "returns",
-            "read_back",
-        ):
-            value = value_text(facts[name])
-            if name == "command" and facts.get("verb"):
-                value += " " + str(facts["verb"])
-            lines.append(f"  {name:<14}{value}")
-        lines.append("")
-    groups: dict[str, list[JSONObject]] = {}
-    for item in json_objects(data["choices"]):
-        name, kind = item["id"], item["kind"]
-        group = (
-            "Subsections"
-            if is_section
-            else "Commands / combos"
-            if kind == "execute" or name in ("run", "options")
-            else "References"
-            if kind == "read" or name == "read"
-            else "Results"
-            if kind == "retrieve"
-            else "Subresources"
-            if data.get("path")
-            else "Available groups"
-        )
-        groups.setdefault(group, []).append(item)
-    for name in (
-        "Available groups",
-        "Subresources",
-        "Commands / combos",
-        "References",
-        "Results",
-        "Subsections",
-    ):
-        if name in groups:
+        for name, value in data.items():
+            if name == "schema_version":
+                continue
             lines.append(name)
-            lines.extend(choice_lines(groups[name]))
+            lines.extend(
+                f"  {line}" if line else "" for line in node_lines(json_object(value))
+            )
     if data.get("continuation"):
-        lines.append("More: " + invocation(json_object(data["continuation"])))
-    return "\n".join(lines) + "\n"
+        lines.append(f"More: reference.py {data['continuation']}")
+    return "\n".join(lines).rstrip("\n") + "\n"
