@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-18T11:39:39.567862+00:00",
+  "captured_at": "2026-10-18T13:53:06.638960+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,7 +18,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "700b9d57b80a5e8acb6f24807b909098b7420c440240c6b5153584f806975c90",
+    "body_sha256": "9a0d7584862fa5fbf54c0396ce94e09ae88016aa7fb8d06d3a5c6499f8e67f6e",
     "confirmation_ready": true,
     "fields": [
       "description",
@@ -28,24 +28,24 @@
     ],
     "one_time_sink_required": false,
     "operation": "create",
-    "plan_digest": "eb98173d53a7f9efa96ad687cd0cfd2096113f1eed07cd952a2169e6a3b0a32f",
+    "plan_digest": "9de733e3ed33f106f2513c015ca4516965cc95022e923223a3a4902984340447",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "eb98173d53a7f9efa96ad687cd0cfd2096113f1eed07cd952a2169e6a3b0a32f",
+  "plan_digest": "9de733e3ed33f106f2513c015ca4516965cc95022e923223a3a4902984340447",
   "readback": {
     "action": "APPLIED",
-    "id": 97,
-    "title": "ci-skills-48c4489a-20261018T113823Z",
+    "id": 101,
+    "title": "ci-skills-6ca1d777-20261018T135138Z",
     "verified": true
   },
   "records": [
     {
       "action": "APPLIED",
-      "id": 97,
-      "title": "ci-skills-48c4489a-20261018T113823Z",
+      "id": 101,
+      "title": "ci-skills-6ca1d777-20261018T135138Z",
       "verified": true
     }
   ],
@@ -57,12 +57,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ca60a9cf729239fe161121f72d094b2bf1f4b9f075507bc03fe9fa2daa944972",
-    "file_count": 196,
-    "functional_digest": "87f13c4f55a8e965c3e719e8a5b0e7a11b498082cfec1442e3b79d2fe12d240a",
+    "digest": "86eeff94d94240f04cad123064ac6cb233cc47182f66a2f685c4f010cd9cfda1",
+    "file_count": 203,
+    "functional_digest": "6e940688a3c787ca63728040f5445ec95376b6b6b240a456d420ecad406da080",
     "revision": {
       "source": "installer_record",
-      "value": "48c4489afdf339d016cdc713affa5c1acdc9405b",
+      "value": "6ca1d7778d07c417815618452b3dbee96170e8d5",
       "verified": true
     }
   },
@@ -75,9 +75,9 @@
     "kind": "project",
     "reference": "hott/test"
   },
-  "target_file": "path:8617612df58d",
+  "target_file": "path:a9d3a059049d",
   "target_source": "project;argv:--project",
-  "tested_revision": "48c4489afdf339d016cdc713affa5c1acdc9405b",
+  "tested_revision": "6ca1d7778d07c417815618452b3dbee96170e8d5",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,
