@@ -144,11 +144,15 @@ def _action(
 
     :param action: Manager ``deploy`` or ``delete`` action.
     :param apply: Whether the public workflow should include mutations.
-    :returns: Manager action with exact target, scope, and token selection.
+    :returns: Manager action with exact target, scope, runtime, and token selection.
     """
     selected = ACTION.GitLabRunnerManagerAction(_args(action, apply=apply))
     selected.target = _target()
     selected.candidate_scope = RUN_SCOPE.RunScope(RUN_ID, NAMESPACE, False)
+    if action == "deploy":
+        selected.podman_runtime = ACTION.PodmanRuntimeSettings(
+            node_name=selected.args.node
+        )
     selected.runner_token = (
         TOKEN.BoundRunnerToken(Path("/unit/runner.token"), TOKEN_DIGEST, PRIVATE_TOKEN)
         if action == "deploy"
@@ -411,7 +415,7 @@ def test_observe_reads_exact_runner_scope_identity_and_tags(
     assert result == {
         "verified": True,
         "run_id": RUN_ID,
-        "scope": action.candidate_scope.as_dict(),
+        "scope": {**action.candidate_scope.as_dict(), "state": "selected"},
         **ACTION.runner_evidence(_runner_record(online=False)),
     }
 
@@ -878,17 +882,22 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
     ],
 )
 def test_workflow_confirms_exact_plan_before_any_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     action_name: str,
     apply: bool,
     expected: Sequence[str],
 ) -> None:
     """Keep confirmation before mutation and deletion outside GitLab registration.
 
+    :param monkeypatch: Fixture binding the existing offline provider doubles.
+    :param tmp_path: Isolated runner-token and lock directory for the harness.
     :param action_name: Manager deploy or delete action.
     :param apply: Whether mutation callbacks are requested.
     :param expected: Exact callback order for the selected mode.
     :returns: None; assertions validate workflow ordering and provider boundaries.
     """
+    _manager_cli_harness(monkeypatch, tmp_path)
     action = _action(action_name, apply=apply)
     executor = SCRIPT.workflow(action)
     callbacks = tuple(type(callback).__name__ for callback in executor.callbacks)
@@ -1132,7 +1141,7 @@ def _manager_cli_arguments(
         RUNNER_DESCRIPTION,
         "--project",
         "team/project",
-        "--target",
+        "--binding",
         "/unit/target.toml",
         "--json",
         "--label",

@@ -128,7 +128,7 @@ def _args(
     return READINESS.build_parser().parse_args(
         [
             "chain",
-            "--target",
+            "--binding",
             "/unit/target.toml",
             "--toolbox-spec",
             "/unit/toolbox.toml",
