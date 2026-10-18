@@ -1,4 +1,10 @@
-# CI09-REFERENCE: references, tool operations and upstream knowledge
+# PARTIALLY_IMPLEMENTED: CI09 — references, tool operations and upstream knowledge
+
+- grounding: GROUNDED
+- verification: UNVERIFIED
+- planningStage: PROPOSED
+
+## Authority
 
 Status: proposed. Order and dependencies: CI10-PHASES, Phases. Followed by
 CI08-ROUTING, whose routing points at this phase's navigator (section 3), and
@@ -12,9 +18,173 @@ kinds, declared with the same `uses` pointers (CI07-SCHEMA):
 - **knowledge** (section 2): what an agent reads, one upstream page vendored
   as verbatim chunks with a derived index, served on demand.
 
-## 1. Tool operations
+This document plans from:
 
-### Block
+- the proposition interface. [`CI11-TOOLS`](CI11-TOOLS.md#proposition-interface) and its schema define the node
+  every call returns, version `2.0`: `tools`, installed filenames mapped to empty objects, and `reference`, names
+  mapped to a summary and a pointer, derived from `core/catalog.py`; a live offering never advertises a proposed
+  command. Section 3 below specifies the graph: the nodes, the placement of every command, the verbs' purposes,
+  the references and sections, and the compact output rules. Its renders use the 1.x `choices` envelope, one
+  entry per verb with `available` and `next`, which the 2.0 schema keeps only as legacy; a 2.0 node carries no
+  verb entry and no planned verb. Section 3 is retained as written; every capability registers into the 2.0
+  node and none defines a second navigator or inventory; this is requirement `R-CI09-005` in the map;
+- [`CI11-TOOLS`](CI11-TOOLS.md), recipe step 4: a capability extends the catalogue's placement declarations for
+  its proposition nodes, and its read-back is that the proposition lists the installed tool and its reference
+  pointers;
+- [`CI07-SCHEMA`](CI07-SCHEMA.md) for `uses` pointers and record versions, [`CI08-ROUTING`](CI08-ROUTING.md) for
+  the router and `SKILL.md`, [`CI02-CLI`](CI02-CLI.md) for the command contract, as the sections below cite them;
+- the project motivation in [`README.md`](../../README.md#motivation): one go instead of N round trips;
+- the shared standards: the phase format of `system-architecture.md` and the classification values of
+  `work-classification.md` at standards revision `cae52b2`.
+
+Not on main `54ceb7f`, although the sections below cite them: the phase documents `CI03-GATES`, `CI05-VENDOR`
+and `CI10-PHASES`, the gate wrapper `scripts/check.sh`, the root command `bin/ci-skills` and the D-SMOKE
+executor. The validate workflow is the required gate (`ci-skills/required`).
+
+## Consumer
+
+The consumer is the agent acting for a user through installed ci-skills. It meets this phase in three ways. It
+discovers what it can run and read through the navigator, one level per call, each command placed under its
+node with its reference pointers, and its verbs' purposes through `--describe` (section 3). It reads one short
+reference, one section of an upstream page and never the page, when a command's input needs it, reached through
+that pointer or through the command's `--help` (section 2). And every operation ci-skills' own code runs against
+`gh`, `glab`, `kubectl` and `oc` is declared and checked against the installed binary, so a renamed or removed
+flag is found by the check, not by a failed run (section 1). The second consumer is a caller or a maintainer
+adding a command, a verb or a reference: rows in `core/catalog.py` and, for an upstream page, one declaration and
+one run of the update tool (sections 2 to 4).
+
+Motivations, in the contract's categories: the capability it adds, discovery one level at a time, one upstream
+fact per read and a declared, checked set of tool operations (`README.md#motivation`); the necessity it
+addresses, today the agent reads `--help` text or upstream documentation to choose a command and its flags, and
+nothing records which operations our code relies on or fails when an upgrade renames one (section 1, Context);
+the limitation in established code it resolves, the proposition offers four fixed references chosen by provider
+with no row for a reference scoped to one command, and no operation is declared (`core/catalog.py`,
+`PROPOSITION_REFERENCES` and `_proposition_offering`, main `54ceb7f`).
+
+## Motivation
+
+Add three capabilities to ci-skills behind one entrypoint: the agent discovers what it can run and read one level
+at a time and never reads `tools.json`, an index or a whole page; it reads the one upstream section a command
+needs; and every external operation our code runs is declared once and checked against the installed binary.
+They are a skill because the same discovery, the same lookup and the same compatibility check repeat for every
+command in the catalogue; without them the agent reads `--help` text and upstream pages every time, makes
+mistakes on keywords and flags it never had to compose, and nobody learns that an upgrade renamed an operation
+until a run fails.
+
+ci-skills declares all three as data in `core/catalog.py`, rows per command, verb, reference and section, and
+renders the proposition from them. It ships each reference as a short file under `references/`, written by us or
+vendored from the upstream page and chunked by heading, and keeps a vendored one current from a pinned or latest
+upstream commit. It declares each tool operation with its exact arguments and `mutates` flag. Adding any of them
+is rows in the catalogue and, for an upstream page, one `[references.<name>]` table in `vendor/vendor.toml` and
+one run of `tools/update_reference.py` (sections 1 to 4).
+
+## Diagram
+
+How the agent reaches a reference, and where each pointer comes from; the node shape, `tools` as installed
+filenames mapped to empty objects and `reference` as names mapped to a summary and a pointer under
+`schema_version` `2.0`, is the [Proposition interface](CI11-TOOLS.md#proposition-interface) and
+[Proposition schema](CI11-TOOLS.md#proposition-schema) of CI11-TOOLS:
+
+```mermaid
+flowchart LR
+    Agent["Agent running an installed command"]
+    Prop["reference.py [node]<br/>proposition: tools and reference pointers"]
+    Help["command --help"]
+    Cat["core/catalog.py<br/>REFERENCES, REFERENCE_SECTIONS"]
+    Local["references/&lt;name&gt;.md<br/>local reference"]
+    Vendored["references/vendor/&lt;name&gt;/<br/>index.json and one chunk per heading"]
+    Agent -- "expand one node" --> Prop
+    Agent -- "read the input's reference" --> Help
+    Cat -- "renders summary and pointer" --> Prop
+    Cat -- "names the reference" --> Help
+    Prop -- "one pointer, read on demand" --> Local
+    Prop -- "one pointer; get REF ANCHOR serves one chunk" --> Vendored
+```
+
+How a reference is collected, added, refreshed and retired; the stages are section 4's, in its order:
+
+```mermaid
+flowchart LR
+    Declare["declare<br/>[references.&lt;name&gt;] in vendor/vendor.toml"]
+    Fetch["fetch<br/>tools/update_reference.py, checkout only"]
+    Structure["structure<br/>chunk, anchor, index, lock"]
+    Verify["verify<br/>digests and index from the committed files"]
+    Publish["publish<br/>journaled replace-tree transaction"]
+    Serve["serve<br/>installed, offline, one chunk"]
+    Check["check-upstream<br/>update --dry-run"]
+    Refresh["refresh<br/>stages 2 to 5 at the new commit"]
+    Retire["retire<br/>remove the declaration"]
+    Declare -- "pinned sha or pin = latest" --> Fetch
+    Fetch -- "page and schema bytes" --> Structure
+    Structure -- "chunks, index.json, lock entry" --> Verify
+    Verify -- "PASS" --> Publish
+    Publish -- "committed tree" --> Serve
+    Serve -. "max_age_days passed or upstream ahead" .-> Check
+    Check -- "upstream_ahead" --> Refresh
+    Refresh -- "new commit" --> Fetch
+    Declare -. "declaration removed" .-> Retire
+```
+
+How a declared tool operation is checked against the installed binary (section 1):
+
+```mermaid
+flowchart LR
+    Code["ci-skills code<br/>one call site per operation"]
+    Decl["core/tool_operations.py<br/>argv, method, flags, mutates"]
+    Verb["bin/ci-skills tools [NAME]"]
+    Bin["installed binary<br/>path, version, digest; __complete"]
+    Fix["recorded fixtures<br/>tests/python/fixtures/complete/"]
+    Result["tool_operations result<br/>every operation resolved, or tool_missing"]
+    Code -- "declares" --> Decl
+    Decl -- "every command and flag" --> Verb
+    Verb -- "resolves against" --> Bin
+    Verb -- "parser only, offline" --> Fix
+    Verb -- "read-back" --> Result
+```
+
+The first diagram is the data flow the agent sees; control is one call per level and never a forced walk from the
+root. The second is the construction path a caller or maintainer runs; `fetch` is the only stage that uses the
+network and it never runs from the installed skill. The third is the compatibility check; it reads the binary and
+writes nothing.
+
+## Implementation Plan
+
+### Current State and Intended Outcome
+
+Inspected at main `54ceb7f`; evidence is from main unless stated.
+
+- `NOT_IMPLEMENTED: tool operations (section 1)`. `core/tool_operations.py`, `schemas/tool-operations.schema.json`,
+  the `tools` verb and the completion fixtures do not exist. Intended: the declared operations checked against
+  the installed binaries, as section 1 decides.
+- `PARTIALLY_IMPLEMENTED: knowledge references (sections 2 and 4)`. Three local references exist,
+  `references/access.md`, `references/mcp.md` and `references/project-binding.md`, offered through
+  `PROPOSITION_REFERENCES` in `core/catalog.py`. The vendored tree `references/vendor/`, `vendor/vendor.toml`,
+  `vendor/vendor.lock.json`, `tools/update_reference.py` and `core/reference.py` do not exist. Intended: a
+  reference is declared once, collected and refreshed by the update tool, verified from the committed files and
+  served one chunk at a time, as sections 2 and 4 specify.
+- `PARTIALLY_IMPLEMENTED: the proposition interface (section 3)`. `ci-skills/bin/reference.py [node]` returns
+  the version `2.0` node of CI11, built by `proposition()` in `core/catalog.py` from `PROPOSITION_CLUSTERS` and
+  the commands' provider authorities; `schemas/reference-next.schema.json` owns that shape and keeps the 1.x
+  `choices` envelope as legacy. Not yet built from section 3: the `next` and `get` verbs, the hierarchical nodes
+  and placement tables, the verb purposes, `--search`, cards and paging, the renders, and a row for a reference
+  scoped to one command; the proposition today offers four fixed references chosen by provider. The planned
+  verbs of section 3, the verbs CI11-TOOLS names for existing commands and has not delivered, are rendered there
+  as 1.x choices with `available: false`; a 2.0 node cannot carry them, and this phase delivers none of them
+  (open decision below).
+
+### Design and Decomposition
+
+Sections 1 to 4 follow as written. Section 1 is the tool-operations design, section 2 the knowledge-reference
+layout, index, declaration and algorithms, section 3 the proposition interface in full, its catalogue
+declarations and its output contract, section 4 the lifecycle that collects, adds, refreshes and retires a
+reference. The node every call returns has the shape and schema of the
+[Proposition interface](CI11-TOOLS.md#proposition-interface) in CI11-TOOLS; its `reference` entries render from
+the `REFERENCES` and `REFERENCE_SECTIONS` declarations of section 3, and a command's `--help` names the references
+its inputs need.
+
+#### 1. Tool operations
+
+##### Block
 
 | Part | Value |
 | --- | --- |
@@ -30,7 +200,7 @@ on the D-SMOKE executor, against the installed binary; its `mutates`
 assertion is the gate that no unbounded `api` or `exec` call is labelled
 read-only.
 
-### Context
+##### Context
 
 Our code calls `gh`, `glab`, `kubectl` and `oc`; the toolchain contract from
 the shared standards (`bin/agent-tools.sh`) names 61 tools by full path. To
@@ -46,7 +216,7 @@ Measured on 2026-10-02 against the local binaries:
 | `gh` | 2.98.0 | 35 | `gh help reference`: 94,244 bytes |
 | `kubectl` | v1.36.4 | 45 | `kubectl get`: 53 flags |
 
-### What the code calls today
+##### What the code calls today
 
 Derived on 2026-10-06 from every `run_command`, `kubectl_argv`, `oc_argv` and
 `GlabAPIClient` call site under `ci-skills/lib/python/core/` (file:line beside each
@@ -88,7 +258,7 @@ operation (command, method, endpoint class, fixed arguments) can.
 - `oc:debug.node`: `oc debug node/X MARKER --quiet --to-namespace=N -- chroot /host
   ip -d -j addr show` (`mtu_consistency.py:373-387`); mutates (creates a debug Pod).
 
-### Names: tool, operation, option
+##### Names: tool, operation, option
 
 - **Tool:** `name` (the binary); `version`, read from the tool's own version
   command (`glab --version`, `gh --version`, `kubectl version --client -o json`);
@@ -123,7 +293,7 @@ Commands and references name the operations they use in `uses`; `used_by`,
 the closed-world rule and the example are CI07-SCHEMA, "Pointers between
 references and tools".
 
-### Options considered
+##### Options considered
 
 | Option | Rejected because |
 | --- | --- |
@@ -132,7 +302,7 @@ references and tools".
 | C, runtime discovery through `__complete` | a hidden completion protocol; needs the binary; kept for `--complete` |
 | E, an external search index | a service with network and credentials; breaks offline CI |
 
-### Decision
+##### Decision
 
 Proposed: **D, declared operations checked against the installed tool, with
 C as optional navigation.**
@@ -159,7 +329,7 @@ C as optional navigation.**
 - **Revisit** when a tool not built with cobra is added, or when upstream
   publishes a machine-readable reference.
 
-## 2. Knowledge references: upstream text read on demand
+#### 2. Knowledge references: upstream text read on demand
 
 The first instance is the GitLab CI/CD YAML syntax reference
 (<https://docs.gitlab.com/ci/yaml/>, for example `trigger:forward`). The
@@ -167,7 +337,7 @@ mechanism is generic: any upstream Markdown page with stable headings, from
 any project, under any domain. It follows the Agent Skills layout:
 `references/` beside `SKILL.md`, loaded only when required.
 
-### Block, knowledge kind
+##### Block, knowledge kind
 
 | Part | Value |
 | --- | --- |
@@ -177,7 +347,7 @@ any project, under any domain. It follows the Agent Skills layout:
 | Result | `reference_next` and `reference_section` (section 3), `reference_verify`, `reference_index`, lock entries |
 | Read-back | `verify` recomputes every digest and the index from the committed files; `update` runs it last |
 
-### Upstream, measured 2026-10-06
+##### Upstream, measured 2026-10-06
 
 - Source: `gitlab-org/gitlab`, `doc/ci/yaml/_index.md`, pinned at commit
   `9892f2e6cf006fa1acc3f4d744f707757111db58` (2026-10-02, the latest commit
@@ -213,7 +383,7 @@ any project, under any domain. It follows the Agent Skills layout:
   repository has no license file (D-LICENSE); each vendored tree carries its
   own notice stating that changes (chunking) were made.
 
-### Layout
+##### Layout
 
 The tree mirrors the keyword path, so the filesystem is a browsable index
 (`ls` shows the sub-keywords) and the worst case an agent can read is one
@@ -245,7 +415,7 @@ byte-sum invariant. No local text inside a chunk; metadata lives only in
 lock's `file_count` for this tree is 177: 167 keyword chunks, 7 section
 chunks, `_preamble.md`, `LICENSE.md` and `index.json`.
 
-### Index record
+##### Index record
 
 Schema `reference-index` (CI07-SCHEMA; version per its Versions section:
 `0.1` while this phase is in review, `1.0` on merge).
@@ -287,7 +457,7 @@ tokens, the section and the slugs of the chunk's **Related topics** links;
 `children` from the heading tree. Entries are sorted by keyword; the file is
 written with sorted keys, two-space indentation and a trailing newline.
 
-### Declaration
+##### Declaration
 
 One table per reference in `vendor/vendor.toml` (CI05-VENDOR owns the file;
 this phase adds the `[references.<name>]` fields with a MINOR bump of the
@@ -317,7 +487,7 @@ second `ReferenceSource` implementation first.
 source, not before (CI10-PHASES, Modularity: contract first only where two
 implementations exist).
 
-### Algorithms
+##### Algorithms
 
 1. **Fetch** (checkout only, network). GET the page and the schema at
    `https://gitlab.com/gitlab-org/gitlab/-/raw/<sha>/<path>` with a timeout
@@ -361,7 +531,7 @@ implementations exist).
 Reason tokens are defined once each, in the lifecycle stage that produces
 them (section 4); `tests/python/test_reference.py` produces every one.
 
-### Loading, measured
+##### Loading, measured
 
 | Step | The agent runs | Cost |
 | --- | --- | --- |
@@ -373,14 +543,14 @@ them (section 4); `tests/python/test_reference.py` produces every one.
 material; the `SKILL.md` sentence of section 3, Steps, says so, and CI08-ROUTING
 owns the rest of the router.
 
-## 3. The navigator: one entrypoint for knowledge and tools
+#### 3. The navigator: one entrypoint for knowledge and tools
 
 An agent discovers what the skill can do through one entrypoint, `ci-skills/bin/reference.py`. Each call returns
 one level of the resource graph: a short summary and typed pointers to the next level. The agent follows a pointer
 only when it needs what is behind it. It never reads `tools.json`, a reference `index.json`, the documentation tree
 or a command's full `--help`; those files are the navigator's inputs.
 
-### Authority
+##### Authority
 
 This section is the only specification of the navigator, of `get` and `--search`, of the pointer every response
 carries, and of how both render. Sections 2 and 4, CI08-ROUTING, CI11-TOOLS and `docs/README.md` point here and
@@ -390,7 +560,7 @@ pin, license, chunker, tiers) follows section 2; where its sections appear in th
 navigator needs CI10 block 0 (importable `bin/`, a working `tools/render_manifest.py`) and, for Renders 4 to 6, the
 pipeline watch pull request (CI11-TOOLS, Pipeline watch, exact); the rest of this phase does not block it.
 
-### Grammar
+##### Grammar
 
 Every call has the same shape, so an agent repeats it one segment deeper:
 
@@ -416,7 +586,7 @@ reference.py get REF ANCHOR --card             one tier of it, where section 2 d
   and 7).
 - `--json` prints one line, and the limits below apply to that line. The renders show it wrapped for reading.
 
-### The renders, in the order an agent meets them
+##### The renders, in the order an agent meets them
 
 Each render shows the call, what a person sees (`--human`, the default on a terminal) and what an agent parses
 (`--json`, the default on a pipe). The human view is the JSON drawn by the rules that follow the renders; nothing
@@ -425,7 +595,7 @@ request and this task land. Renders 8 to 13 appear when section 2 vendors the re
 as pasted on 2026-10-07, and their exact bytes come from the fetched copy. A combo result draws as CI11-TOOLS,
 Combos shows for the pipeline watch.
 
-#### Render 1. The root
+###### Render 1. The root
 
 Produced by: this task. One-line JSON: 851 bytes.
 
@@ -469,7 +639,7 @@ References
 }
 ```
 
-#### Render 2. Expand a group
+###### Render 2. Expand a group
 
 Produced by: this task. One-line JSON: 1650 bytes.
 
@@ -531,7 +701,7 @@ Subresources
 }
 ```
 
-#### Render 3. Expand a subresource
+###### Render 3. Expand a subresource
 
 Produced by: this task, after the pipeline watch pull request. One-line JSON: 345 bytes.
 
@@ -558,7 +728,7 @@ Commands / combos
 }
 ```
 
-#### Render 4. What you can run
+###### Render 4. What you can run
 
 Produced by: this task, after the pipeline watch pull request. One-line JSON: 1246 bytes.
 
@@ -614,7 +784,7 @@ Commands / combos
 }
 ```
 
-#### Render 5. Describe one capability
+###### Render 5. Describe one capability
 
 Produced by: this task, after the pipeline watch pull request. One-line JSON: 1089 bytes.
 
@@ -659,7 +829,7 @@ Commands / combos
 }
 ```
 
-#### Render 6. Its optional inputs, only if needed
+###### Render 6. Its optional inputs, only if needed
 
 Produced by: this task, after the pipeline watch pull request. One-line JSON: 933 bytes.
 
@@ -697,7 +867,7 @@ Commands / combos
 }
 ```
 
-#### Render 7. A planned verb is shown, never callable
+###### Render 7. A planned verb is shown, never callable
 
 Produced by: this task. One-line JSON: 996 bytes.
 
@@ -738,7 +908,7 @@ Commands / combos
 }
 ```
 
-#### Render 8. What you can read
+###### Render 8. What you can read
 
 Produced by: once section 2 vendors `gitlab-labels`. One-line JSON: 375 bytes.
 
@@ -765,7 +935,7 @@ Subresources
 }
 ```
 
-#### Render 9. One reference as a cluster
+###### Render 9. One reference as a cluster
 
 Produced by: once section 2 vendors `gitlab-labels`. One-line JSON: 2920 bytes.
 
@@ -849,7 +1019,7 @@ Relations
 }
 ```
 
-#### Render 10. Read one section
+###### Render 10. Read one section
 
 Produced by: once section 2 vendors `gitlab-labels`. One-line JSON: 537 bytes.
 
@@ -882,7 +1052,7 @@ Refer to the issue triage [priority label](https://handbook.gitlab.com/handbook/
 }
 ```
 
-#### Render 11. Read deeper only through a pointer
+###### Render 11. Read deeper only through a pointer
 
 Produced by: once section 2 vendors `gitlab-labels`. One-line JSON: 629 bytes.
 
@@ -916,7 +1086,7 @@ Subsections
 }
 ```
 
-#### Render 12. Search one pinned reference
+###### Render 12. Search one pinned reference
 
 Produced by: once section 2 vendors `gitlab-labels`. One-line JSON: 771 bytes.
 
@@ -951,7 +1121,7 @@ References
 }
 ```
 
-#### Render 13. Enter by name
+###### Render 13. Enter by name
 
 Produced by: once the MCP references are vendored. One-line JSON: 501 bytes.
 
@@ -983,7 +1153,7 @@ Subresources
 }
 ```
 
-#### Render 14. A wrong segment
+###### Render 14. A wrong segment
 
 Produced by: this task. One-line JSON: 1702 bytes.
 
@@ -1047,7 +1217,7 @@ Subresources
 }
 ```
 
-### How a render is drawn
+##### How a render is drawn
 
 1. The first line is the summary; an `error` comes before it as `reason: input`.
 2. A `capability` follows with one aligned line per field, in this order: `command` (the command, then its verb),
@@ -1066,7 +1236,7 @@ Subresources
 6. A section renders as `reference#anchor  pinned <pin>`, its text verbatim, then a "Subsections" block of its
    pointers, then `More:` when it continues.
 
-### Contract values
+##### Contract values
 
 - **Response** (`reference_next`): `kind`, `schema_version`, `path`, `summary`, `choices`, `continuation`; `query`
   on a search; `capability` on a `run ID` level; `relations` on a `read REF` level; `error` with exit 2.
@@ -1132,7 +1302,7 @@ Subresources
 - **Exit codes**: 0 for an answer; 2 with `error.reason` `path_unknown`, `reference_unknown`, `anchor_unknown`,
   `tier_unavailable` or `page_out_of_range`.
 
-### Schemas
+##### Schemas
 
 `schemas/reference-next.schema.json` defines the answer, and in its `$defs` the choice and pointer every other
 pointer-carrying record reuses. `schemas/reference-section.schema.json` defines `get`. Every render above validates
@@ -1558,7 +1728,7 @@ check-jsonschema --base-uri "file://$PWD/schemas/reference-section.schema.json" 
 }
 ```
 
-### Declarations: exactly what `core/catalog.py` gains
+##### Declarations: exactly what `core/catalog.py` gains
 
 Nodes, each with its one summary:
 
@@ -1718,7 +1888,7 @@ chunker = "markdown-headings"
 
 A new command, verb, reference or section adds rows here in the same pull request; nothing else changes.
 
-### Steps
+##### Steps
 
 Who adds what, in order:
 
@@ -1734,7 +1904,7 @@ Who adds what, in order:
 3. Acceptance: Renders 1 to 7 and 14 come out of the real tool exactly as shown and validate against the schemas
    above, and the five acceptance points below hold. Renders 8 to 13 follow when section 2 vendors their references.
 
-### Compact, versioned, pointer-based output
+##### Compact, versioned, pointer-based output
 
 Discovery, capability descriptions, and combo results must use versioned,
 machine-readable output that is compact by default.
@@ -1781,7 +1951,7 @@ Acceptance must demonstrate that:
 - combo results do not inline all component reports;
 - every advertised invocation and reference anchor resolves correctly.
 
-## 4. Lifecycle of a reference
+#### 4. Lifecycle of a reference
 
 One state machine per declared reference, the same shape as CI05-VENDOR's
 vendoring and the installer's plan, confirm and read-back. Checkout stages
@@ -1815,28 +1985,51 @@ its reason tokens, defined here once.
    on any dangling
    `SKILL.md` or index pointer (`dangling_reference`).
 
-## 5. Gates and tests
+#### When to Decompose
 
-- `tests/python/test_reference.py`: the anchor oracle (Upstream, measured);
-  the chunker on a recorded skeleton fixture plus the real `trigger` section
-  and a hostile fixture (duplicate heading, a heading inside a fence, H6,
-  oversized chunk, shortcodes); the structural join for `trigger:forward`
-  (two pointers, two subkeys); every reason token of section 4 produced
-  once; `verify` passes on the committed tree and fails on one flipped byte,
-  a deleted notice, a stray file, a symlink; `update`'s default run writes
-  nothing; an interrupted transaction recovers. Fixtures under
-  `tests/python/fixtures/reference/`.
-- `tests/python/test_reference_contract.py`: every index entry's file exists
-  and nothing else is in the tree (closed world, CI07-SCHEMA); the vendored
-  tree is excluded from the executed-code digest (D-DIGEST) and digested on
-  its own in the lock.
-- `tests/python/test_tool_operations.py`: section 1's read-back.
-- Gate `reference`, a profile of `scripts/check.sh` (CI03-GATES, G1): it
-  runs `ci-skills/bin/reference.py verify --json` over every vendored tree
-  and fails on anything but `PASS`.
-- Run on the gate route (D-GATE; CI03-GATES, G0).
+Section 1, Options considered and Decision, holds the comparison for tool operations; section 2, Declaration,
+keeps `source`, `chunker` and `joiner` as one implementation each until a second source exists.
 
-## 6. Steps
+#### When to Introduce Abstraction
+
+The `ReferenceSource`, `Chunker` and `Joiner` seams are introduced with the second source, not before, as section
+2 states; the proposition, its schema and the catalogue recipe stay CI11's and gain rows, not a second mechanism.
+
+### Open Decisions and Scope Boundary
+
+- D-LICENSE: a per-tree notice only (recommended), or a repository license.
+- The one home of the hash walk that `bin/ci-skills verify` (CI05-VENDOR)
+  and `ci-skills/bin/reference.py verify` share, and whether
+  `bin/ci-skills verify` also walks the lock's `references` entries
+  (CI05-VENDOR, Interface).
+- The placement path. `REFERENCE_SECTIONS` in section 3 places a section under hierarchical nodes such as
+  `("gitlab", "issue")`, while the live proposition's nodes are the flat clusters of `PROPOSITION_CLUSTERS` and
+  the command keys. Affected requirements: `R-CI09-003`, `R-CI09-005`. Options: render the hierarchical path
+  onto the cluster and command nodes that exist, or add the hierarchical nodes to the proposition. Missing
+  authority: an owner decision; the Proposition interface shows only cluster and command nodes. Decision owner:
+  the owner. Work it prevents: placing any reference section under a node, `PR-CI09-1`.
+
+- Planned verbs under the 2.0 node. Section 3 renders a verb CI11-TOOLS names but has not delivered as a 1.x
+  choice with `available: false` and no pointer; the 2.0 node has no verb entries and CI11 forbids advertising a
+  proposed command. Affected requirements: `R-CI09-003`, `R-CI09-005`. Options: surface them in the command's
+  `--describe`, or not at all until delivered. Missing authority: an owner decision. Decision owner: the owner. Work it
+  prevents: the `PLANNED_VERBS` rows of `PR-CI09-1`.
+
+This document stops at references, tool operations and their placement in the proposition; the proposition
+itself, its schema and the catalogue recipe are CI11's.
+
+## PR Order
+
+- `PR-CI09-1`, wave `W-CI09-1`: `tools/update_reference.py`, `reference.py get` and `verify`, and the `REFERENCES`
+  rows; requirements `R-CI09-002`, `R-CI09-003`, `R-CI09-004`, `R-CI09-005`; depends on the pipeline watch and
+  block 0 named in section 6; non-goal: a second `ReferenceSource`, `Chunker` or `Joiner` before a second source exists.
+- `PR-CI09-2`, wave `W-CI09-2`: `core/tool_operations.py` and the `tools` verb; requirement `R-CI09-001`; depends on
+  nothing in this map; non-goal: tools not built with cobra, until one is added.
+
+`PR-CI09-1` supplies the declared and collected references and their pointers; `PR-CI09-2` is independent of it.
+Section 6, the owner's steps, follows as written.
+
+### 6. Steps
 
 1. Block 0 of CI10-PHASES (the locator and path repairs) lands first; the
    navigator and `get` depend on importable bins and a current `tools.json`.
@@ -1858,7 +2051,166 @@ its reason tokens, defined here once.
    reference and the navigator.
 7. Read back: the smoke in section 7.
 
-## 7. Delivery, test and proof
+## Gates
+
+Acceptance is section 5 below and the read-back CI11 defines: the proposition lists each new reference pointer
+and the command's `--help` names it. Enforcement today: the validate workflow exists; the `reference` gate and the
+smoke runs of section 7 are proposed, since the wrapper and the executor they name are not on main.
+
+The basic gate, `G-CI09-REGISTRATION`, runs one check per installed command on every pull request head, so no
+combo lands without what the agent needs to run it and read for it:
+
+1. the proposition lists the command in its cluster node and in its own node;
+2. every reference the command declares exists in the registry, every pointer resolves to a file in the
+   installed tree, and no reference file is left unreferenced;
+3. `--help` runs without credentials and `--describe` validates against the command contract;
+4. `tools/render_manifest.py --check` reports CURRENT;
+5. every operation the command's code runs is declared and resolves against the installed binary (section 1);
+6. every vendored reference tree passes `verify` (section 5).
+
+<!-- markdownlint-configure-file {"MD046": {"style": "fenced"}, "MD024": {"siblings_only": true}} -->
+<!-- markdownlint-disable MD046 -->
+<!-- architecture-map:v1 -->
+    requirements:
+      - id: R-CI09-001
+        authority: [docs/phases/CI11-TOOLS.md, docs/phases/CI02-CLI.md]
+        phaseId: CI09
+        classification:
+          grounding: GROUNDED
+          implementation: NOT_IMPLEMENTED
+          verification: UNVERIFIED
+        deliverable: Every external operation the code runs is declared once with its exact argv, method, flags and mutates flag and checked against the installed binary; the tools verb lists tools and their declared operations.
+        owner: ci-skills/lib/python/core/tool_operations.py
+        preserve: [The shared options, status values and exit codes]
+        prIds: [PR-CI09-2]
+        gateIds: [G-CI09-STATIC, G-CI09-REGISTRATION, G-CI09-LIVE]
+        evidence: []
+      - id: R-CI09-002
+        authority: [docs/phases/CI07-SCHEMA.md, README.md]
+        phaseId: CI09
+        classification:
+          grounding: GROUNDED
+          implementation: PARTIALLY_IMPLEMENTED
+          verification: UNVERIFIED
+        deliverable: An upstream page is declared once in vendor/vendor.toml, fetched at a pinned or latest commit by tools/update_reference.py, chunked by heading into references/vendor/<name>/ with a derived index.json and a lock entry, verified from the committed files and served one chunk at a time; a local reference is one file under references/.
+        owner: ci-skills/lib/python/core/reference.py
+        preserve: [The three local references and their pointers]
+        prIds: [PR-CI09-1]
+        gateIds: [G-CI09-STATIC, G-CI09-REFERENCE, G-CI09-LIVE]
+        evidence: []
+      - id: R-CI09-003
+        authority: [docs/phases/CI11-TOOLS.md]
+        phaseId: CI09
+        classification:
+          grounding: GROUNDED
+          implementation: PARTIALLY_IMPLEMENTED
+          verification: UNVERIFIED
+        deliverable: Every reference and reference section is offered through the proposition node of the commands that need it, as a summary and a pointer rendered from the REFERENCES and REFERENCE_SECTIONS declarations in core/catalog.py, and named by those commands' --help; no second navigator or inventory.
+        owner: ci-skills/lib/python/core/catalog.py
+        preserve: [The Proposition interface and schema of CI11, Existing clusters and pointers]
+        prIds: [PR-CI09-1]
+        gateIds: [G-CI09-STATIC, G-CI09-REGISTRATION, G-CI09-LIVE]
+        evidence: []
+      - id: R-CI09-004
+        authority: [docs/phases/CI07-SCHEMA.md]
+        phaseId: CI09
+        classification:
+          grounding: GROUNDED
+          implementation: NOT_IMPLEMENTED
+          verification: UNVERIFIED
+        deliverable: A reference moves through declare, fetch, structure, verify, publish, serve, check-upstream, refresh and retire with the evidence and reason tokens of section 4; the default run plans offline, --dry-run reads without writing, --apply --confirm-plan DIGEST publishes through the journaled transaction.
+        owner: tools/update_reference.py
+        preserve: [Mutating entrypoints default to dry-run, Apply requires the confirmed plan digest]
+        prIds: [PR-CI09-1]
+        gateIds: [G-CI09-STATIC, G-CI09-REFERENCE, G-CI09-LIVE]
+        evidence: []
+      - id: R-CI09-005
+        authority: [docs/phases/CI11-TOOLS.md]
+        phaseId: CI09
+        classification:
+          grounding: GROUNDED
+          implementation: PARTIALLY_IMPLEMENTED
+          verification: UNVERIFIED
+        deliverable: Every answer the navigator returns is a node of the CI11 Proposition interface at schema version 2.0, validated against schemas/reference-next.schema.json; the graph of section 3 is rendered into that node shape, and no answer advertises a command or verb that is not installed.
+        owner: ci-skills/bin/reference.py
+        preserve: [The 2.0 node schema and the legacy 1.x envelope it retains, Existing clusters and pointers]
+        prIds: [PR-CI09-1]
+        gateIds: [G-CI09-STATIC, G-CI09-REGISTRATION, G-CI09-LIVE]
+        evidence: []
+    pullRequests:
+      - id: PR-CI09-1
+        requirementIds: [R-CI09-002, R-CI09-003, R-CI09-004, R-CI09-005]
+        dependsOn: []
+        waveId: W-CI09-1
+        owns: [ci-skills/lib/python/core/reference.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/reference.py, ci-skills/references/, tools/update_reference.py, tools/skillkit/reference_update.py, vendor/vendor.toml, vendor/vendor.lock.json, ci-skills/schemas/reference-index.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_reference.py, tests/python/test_reference_contract.py]
+      - id: PR-CI09-2
+        requirementIds: [R-CI09-001]
+        dependsOn: []
+        waveId: W-CI09-2
+        owns: [ci-skills/lib/python/core/tool_operations.py, ci-skills/schemas/tool-operations.schema.json, bin/ci-skills, tests/python/test_tool_operations.py, tests/python/fixtures/complete/]
+    waves:
+      - id: W-CI09-1
+        prIds: [PR-CI09-1]
+        after: []
+        gateIds: [G-CI09-STATIC, G-CI09-REGISTRATION, G-CI09-REFERENCE, G-CI09-LIVE]
+      - id: W-CI09-2
+        prIds: [PR-CI09-2]
+        after: []
+        gateIds: [G-CI09-STATIC, G-CI09-REGISTRATION, G-CI09-LIVE]
+    gates:
+      - id: G-CI09-STATIC
+        requirementIds: [R-CI09-001, R-CI09-002, R-CI09-003, R-CI09-004, R-CI09-005]
+        command: ./bless.sh --all locally; the validate workflow on the pull request head
+        environment: GitHub Actions on the pull request head; ruleset "protected" on main requires the ci-skills/required status
+        enforcement: Existing
+        evidence: [Exact head SHA, validate run URL, ci-skills/required SUCCESS, tools.json regenerated from the catalogue source]
+      - id: G-CI09-REGISTRATION
+        requirementIds: [R-CI09-001, R-CI09-003, R-CI09-005]
+        command: One test over the catalogue on the pull request head, the six checks listed above, one per installed command
+        environment: The validate job; offline, no credentials
+        enforcement: Proposed; the placement, pointer and declared-operation checks do not exist on main
+        evidence: [Every installed command passes the six checks on the exact head SHA]
+      - id: G-CI09-REFERENCE
+        requirementIds: [R-CI09-002, R-CI09-004]
+        command: ci-skills/bin/reference.py verify --json over every vendored tree, as section 5 names it
+        environment: The validate job, once the verb exists
+        enforcement: Proposed; the wrapper section 5 names, scripts/check.sh, is not on main
+        evidence: [PASS with the declared file_count for every vendored tree]
+      - id: G-CI09-LIVE
+        requirementIds: [R-CI09-001, R-CI09-002, R-CI09-003, R-CI09-004, R-CI09-005]
+        command: The five smoke runs of section 7, each with --receipt-out
+        environment: The installed candidate; offline for get, next and verify, live for update --dry-run and tools
+        enforcement: Proposed; the executor section 7 names is not on main
+        evidence: [The five receipts of section 7 part 4, bound to the installed functional checksum]
+<!-- /architecture-map:v1 -->
+<!-- markdownlint-enable MD046 -->
+
+### 5. Gates and tests
+
+- `tests/python/test_reference.py`: the anchor oracle (Upstream, measured);
+  the chunker on a recorded skeleton fixture plus the real `trigger` section
+  and a hostile fixture (duplicate heading, a heading inside a fence, H6,
+  oversized chunk, shortcodes); the structural join for `trigger:forward`
+  (two pointers, two subkeys); every reason token of section 4 produced
+  once; `verify` passes on the committed tree and fails on one flipped byte,
+  a deleted notice, a stray file, a symlink; `update`'s default run writes
+  nothing; an interrupted transaction recovers. Fixtures under
+  `tests/python/fixtures/reference/`.
+- `tests/python/test_reference_contract.py`: every index entry's file exists
+  and nothing else is in the tree (closed world, CI07-SCHEMA); the vendored
+  tree is excluded from the executed-code digest (D-DIGEST) and digested on
+  its own in the lock.
+- `tests/python/test_tool_operations.py`: section 1's read-back.
+- Gate `reference`, a profile of `scripts/check.sh` (CI03-GATES, G1): it
+  runs `ci-skills/bin/reference.py verify --json` over every vendored tree
+  and fails on anything but `PASS`.
+- Run on the gate route (D-GATE; CI03-GATES, G0).
+
+## Live Smoke Evidence
+
+Planned, not observed. Section 7 follows as written; its receipts are the evidence of `G-CI09-LIVE`.
+
+### 7. Delivery, test and proof
 
 1. *Delivery*: the files of steps 2 to 6, plus `ci-skills/references/vendor/gitlab-ci-yaml/`
    (177 files), `vendor/vendor.toml`, `vendor/vendor.lock.json`, the
@@ -1895,10 +2247,8 @@ its reason tokens, defined here once.
    setup receipts, as CI11-TOOLS specifies. Provenance and applicable cleanup
    evidence remain required.
 
-## Open decisions
+## End-to-End Test
 
-- D-LICENSE: a per-tree notice only (recommended), or a repository license.
-- The one home of the hash walk that `bin/ci-skills verify` (CI05-VENDOR)
-  and `ci-skills/bin/reference.py verify` share, and whether
-  `bin/ci-skills verify` also walks the lock's `references` entries
-  (CI05-VENDOR, Interface).
+The journey is section 7, part 3: `reference.py next` to one pointer, `get` for one chunk, `verify` over the
+committed tree, `update --dry-run` against upstream, `tools` against the installed binary. Its acceptance gate is
+`G-CI09-LIVE`; no execution is recorded.
