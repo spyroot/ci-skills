@@ -62,6 +62,16 @@ class SCCAccessAction(SkillAction):
     :param constraint: OpenShift SecurityContextConstraint name.
     :param service_account: ServiceAccount name inside the resolved run namespace.
     :raises ValueError: If either name is empty or not DNS-subdomain-safe.
+
+    .. attribute :: constraint
+        :type: str
+
+        Existing SCC selected by the composing workflow.
+
+    .. attribute :: service_account
+        :type: str
+
+        ServiceAccount name within the resolved run namespace.
     """
 
     constraint: str
@@ -340,7 +350,7 @@ class EnsureSCCAccess(K8SCallback[SCCAccessAction]):
         :returns: Verified absence evidence, or an empty mapping after a no-op.
         :raises TypeError: If workflow state does not provide run-scope evidence.
         :raises KubernetesError: If owned binding deletion or absence read-back fails.
-        """  # noqa: DOC502 - shared cleanup propagates its declared error.
+        """  # noqa: DOC503 - resource cleanup propagates KubernetesError.
         resources = self.resources
         if resources is None or not resources.created:
             return {}
