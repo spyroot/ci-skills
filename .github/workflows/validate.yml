@@ -142,6 +142,12 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch_types.py \
             ci-skills/bin/gitlab_pipeline.py \
             ci-skills/lib/python/core/catalog.py \
+            ci-skills/lib/python/core/kubernetes/run_scope.py \
+            ci-skills/lib/python/core/kubernetes/scc_access.py \
+            ci-skills/lib/python/core/kubernetes/podman_probe.py \
+            ci-skills/lib/python/core/kubernetes/podman_evidence.py \
+            ci-skills/lib/python/core/kubernetes/podman_callbacks.py \
+            ci-skills/lib/python/core/kubernetes/image_build_readiness.py \
             ci-skills/lib/python/core/navigate*.py \
             ci-skills/bin/reference.py \
             ci-skills/lib/python/core/report.py \
@@ -172,6 +178,7 @@ jobs:
             ci-skills/schemas/results/gitlab-job-list.schema.json \
             ci-skills/schemas/results/gitlab-pipeline-watch.schema.json \
             ci-skills/schemas/results/toolbox-workflow.schema.json \
+            ci-skills/schemas/results/image-build-readiness.schema.json \
             ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             ci-skills/schemas/results/gitlab-runner-read.schema.json \
             ci-skills/schemas/results/gitlab-runner-delete.schema.json

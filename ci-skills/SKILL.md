@@ -102,6 +102,7 @@ Routing, in short:
 | --- | --- |
 | Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
 | Build a schema-declared toolbox | `bin/toolbox.py` |
+| Prove nested Podman execution on a worker | `bin/image_build_readiness.py` |
 | Build an OpenShift ISO or join its node | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | proof of access across all three authorities | `access_check.py` |
@@ -285,6 +286,12 @@ For a Ceph network or RBD timeout, start with `ceph_cluster.py` and
 `event_trace.py`, then run the MTU command when physical network consistency
 matters. For Cilium, run `cilium_status.py` first and `cilium_node.py` for an
 affected node. `tools.json` describes every command and its filters.
+
+## Nested Podman readiness
+
+`bin/image_build_readiness.py` composes worker selection, a temporary privileged Job, runtime checks, and cleanup.
+See [Podman inputs and execution](references/podman-readiness.md) and
+[OpenShift SCC discovery and access](references/openshift-scc.md).
 
 ## Toolbox and runner workflows
 

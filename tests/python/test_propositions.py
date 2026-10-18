@@ -186,6 +186,32 @@ def test_tool_pod_proposition_offers_installed_usage() -> None:
     assert "Tool Pod preparation" not in unrelated["reference"]
 
 
+def test_podman_proposition_offers_installed_readiness_procedure() -> None:
+    """Offer this installed procedure within the immediate proposition node.
+
+    :returns: None; assertions check task references and node-local discovery.
+    """
+    selected = CATALOG.proposition("image_build_readiness.py")
+    expected = {
+        "Nested Podman readiness": {
+            "summary": "Podman probe inputs, planning, execution and evidence.",
+            "pointer": "references/podman-readiness.md",
+        },
+        "OpenShift SCC access": {
+            "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
+            "pointer": "references/openshift-scc.md",
+        },
+    }
+
+    cluster = CATALOG.proposition()["kubernetes"]
+    unrelated = CATALOG.proposition("gitlab_runner.py")
+    for name, record in expected.items():
+        assert selected["reference"][name] == record
+        assert cluster["reference"][name] == record
+        assert name not in unrelated["reference"]
+    assert "create_selfhosted_runner.py" not in selected["tools"]
+
+
 def test_iso_proposition_offers_native_input_and_destination_guidance() -> None:
     """Offer this installed procedure within the immediate proposition node.
 

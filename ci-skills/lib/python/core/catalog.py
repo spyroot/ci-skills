@@ -528,6 +528,49 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
         "are cleaned on exit.",
     },
+    "image_build_readiness.py": {
+        "kind": "image_build_readiness",
+        "purpose": "Probe nested Podman execution on one Kubernetes worker and clean up.",
+        "use_when": "Check container execution, bind mounts and exit propagation before "
+        "building a runner workflow.",
+        "requires": ("kubernetes",),
+        "capabilities": ("node_scoped", "namespaced"),
+        "mutates": True,
+        "options": {
+            "--namespace": "existing namespace; default creates a temporary namespace",
+            "--probe-image": "digest-pinned image providing Podman; default is Linux amd64",
+            "--inner-image": "digest-pinned inner test image; default is Linux amd64",
+            "--timeout": "maximum probe duration in seconds",
+            "--cpu-request": "probe container CPU request",
+            "--cpu-limit": "probe container CPU limit",
+            "--memory-request": "probe container memory request",
+            "--memory-limit": "probe container memory limit",
+            "--storage-size": "maximum temporary container-storage volume size",
+            "--live-plan": "read target identity and select a Ready worker without mutation",
+            "--apply": "run the confirmed probe and verify cleanup",
+            "--confirm-plan": "exact fingerprint returned by the live plan",
+            "--receipt-out": "write a sanitized operation receipt to this exact path",
+        },
+        "subcommands": {
+            "probe": {
+                "purpose": "Run a temporary Podman Job on one selected worker.",
+                "result_schema": "schemas/results/image-build-readiness.schema.json",
+                "mutates": True,
+                "side_effects": "Creates and removes a temporary namespace, conditional "
+                "run-owned SCC RoleBinding, script ConfigMap and privileged Job.",
+                "read_back": "Exact permission source, optional RoleBinding UID, "
+                "Job-owned Pod exit, probe rows and resource absence.",
+            },
+        },
+        "related": ("toolbox.py", "harbor_pull.py"),
+        "references": ("Nested Podman readiness", "OpenShift SCC access"),
+        "required_tools": ("kubectl", "oc on OpenShift"),
+        "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows "
+        "and cleanup read-back; does not prove runner or image-publication behavior.",
+        "execution_surface": "configured Kubernetes API and a temporary privileged Job",
+        "side_effects": "Apply creates a run-owned namespace, conditionally creates one namespaced SCC RoleBinding, "
+        "then creates a script ConfigMap and Job; it removes only resources owned by the run.",
+    },
     "access_check.py": {
         "kind": "access_check",
         "purpose": "Prove access to every selected authority and emit one receipt.",
@@ -1115,6 +1158,14 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Exact pipeline read, confirmed start and bounded watch flow.",
             "pointer": "references/gitlab-pipeline.md",
         },
+        "Nested Podman readiness": {
+            "summary": "Podman probe inputs, planning, execution and evidence.",
+            "pointer": "references/podman-readiness.md",
+        },
+        "OpenShift SCC access": {
+            "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
+            "pointer": "references/openshift-scc.md",
+        },
         "Native OCP YAML example": {
             "summary": "Node MAC/NIC, disk and network inputs passed unchanged to OpenShift.",
             "pointer": "references/ocp-node-input.md",
@@ -1567,6 +1618,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 **DISCOVERY_COMMANDS,
             },
             "routing": {
+                "prove nested Podman runtime readiness": "image_build_readiness.py",
                 "build or inspect a cluster-held OpenShift node ISO": "ocp_node_onboard.py",
                 "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
                 "build or delete a toolbox": "toolbox.py",

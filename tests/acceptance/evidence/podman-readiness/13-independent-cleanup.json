@@ -1,0 +1,25 @@
+{
+  "checks": [
+    {
+      "kind": "Namespace",
+      "observed": [],
+      "status": "ABSENT"
+    },
+    {
+      "kinds": [
+        "Pod",
+        "ConfigMap",
+        "Job",
+        "RoleBinding"
+      ],
+      "observed": [],
+      "status": "ABSENT"
+    }
+  ],
+  "existing_cluster_role": "system:openshift:scc:privileged",
+  "existing_scc": "privileged",
+  "kind": "independent_cleanup_readback",
+  "run_id": "694346b9bc6b4547aeae61c02a1d368c",
+  "schema_version": "1.0",
+  "status": "PASS"
+}
