@@ -1330,6 +1330,10 @@ Subresources
   | search hit `when` | `Read for the passage that contains "TEXT".` |
   | subsection `when` | `Read when you need HEADING.` |
 
+  When a search summary above would exceed 100 characters, use `N matching sections.` instead. When its `when`
+  hint would exceed 120 characters, use `Read for the passage matching the query.` instead. In both cases, retain the
+  complete search text in `query`.
+
 - **Serialization**: every answer goes through the one emitter, `core/report.py:emit`, which keeps its redaction
   and its `verbatim` allowlist (section 2, Lookup) and gains a compact mode for the navigator:
   `json.dumps(answer, separators=(",", ":"), ensure_ascii=False)`, fields in the schema's property order, keys not

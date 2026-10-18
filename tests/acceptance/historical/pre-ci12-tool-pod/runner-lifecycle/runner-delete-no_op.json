@@ -1,0 +1,98 @@
+{
+  "captured_at": "2026-10-13T06:33:02.843441+00:00",
+  "cleanup": {
+    "status": "NOT_APPLICABLE"
+  },
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:29f247d18d3c",
+  "errors": [],
+  "execution_host": "spyroots-mbp.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_runner",
+  "mutated": false,
+  "operation": "delete",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "APPLY",
+  "plan": {
+    "body_sha256": "62faba5c6b37436df73346dc65a66ecb29e36982b600db1c72fb9e21cf967e71",
+    "confirmation_ready": true,
+    "fields": [
+      "description"
+    ],
+    "one_time_sink_required": false,
+    "operation": "delete",
+    "plan_digest": "188f601379e341968941bd5e9b9a4683c5f3304b4b38dd31e3fa70c451109ac2",
+    "project_ids": null,
+    "resource_id": 72,
+    "runner_snapshot": {
+      "id": 72,
+      "present": false
+    },
+    "target_kind": "project",
+    "target_reference": "hott/test"
+  },
+  "plan_digest": "188f601379e341968941bd5e9b9a4683c5f3304b4b38dd31e3fa70c451109ac2",
+  "readback": {
+    "action": "NO_OP",
+    "after": {
+      "global_get_status": 404,
+      "scoped_absent": true
+    },
+    "before": null,
+    "id": 72,
+    "mutated": false,
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "NO_OP",
+      "after": {
+        "global_get_status": 404,
+        "scoped_absent": true
+      },
+      "before": null,
+      "id": 72,
+      "mutated": false,
+      "verified": true
+    }
+  ],
+  "result_action": "NO_OP",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
+    "file_count": 139,
+    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+    "revision": {
+      "source": "installer_record",
+      "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": {
+    "kind": "project",
+    "reference": "hott/test"
+  },
+  "target_file": "path:5e5380df1eda",
+  "target_source": "user;argv:--project",
+  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+  "verified_target": {
+    "full_path": "hott/test",
+    "id": 123,
+    "kind": "project",
+    "web_url": "https://gitlab.dcloud.run/hott/test"
+  }
+}

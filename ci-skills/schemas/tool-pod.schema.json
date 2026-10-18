@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/ci-skills/schemas/tool-pod.schema.json",
+  "title": "Tool Pod preparation inputs",
+  "type": "object",
+  "required": [
+    "image",
+    "dependencies"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "image": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Caller-selected execution image with a shell and the prerequisites of its dependency routes."
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "$ref": "https://github.com/spyroot/ci-skills/schemas/configuration/toolchain-dependencies.schema.json#/$defs/dependency"
+      }
+    }
+  }
+}

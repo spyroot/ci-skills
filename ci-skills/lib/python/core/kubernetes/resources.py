@@ -35,17 +35,48 @@ RESTORABLE_METADATA: Final = frozenset(
 )
 
 
-def matches(expected: JSONValue, observed: JSONValue) -> bool:
-    """Compare requested fields while allowing provider-defaulted object keys.
+POD_OMITTED_FALSE_PATHS: Final = frozenset(
+    {
+        ("spec", "containers", "[]", "volumeMounts", "[]", "readOnly"),
+        ("spec", "volumes", "[]", "persistentVolumeClaim", "readOnly"),
+    }
+)
 
-    :param expected: Exact requested values owned by this operation.
-    :param observed: Native independent read-back.
-    :returns: Whether every requested field equals its observed value.
+
+def _omitted_field_matches(
+    value: JSONValue, path: tuple[str, ...], native_pod: bool
+) -> bool:
+    """Recognize only empty lists and the observed native Pod boolean defaults.
+
+    :param value: Requested value absent from the provider's response.
+    :param path: Field location, with sequence entries represented by ``[]``.
+    :param native_pod: Whether the root request is a native v1 Pod.
+    :returns: Whether omission preserves this field's requested native value.
+    """
+    return value == [] or (
+        native_pod and value is False and path in POD_OMITTED_FALSE_PATHS
+    )
+
+
+def _matches(
+    expected: JSONValue,
+    observed: JSONValue,
+    path: tuple[str, ...],
+    native_pod: bool,
+) -> bool:
+    """Compare requested fields while retaining their native resource location.
+
+    :param expected: Requested JSON value at the current field location.
+    :param observed: Provider-returned JSON value at that location.
+    :param path: Field location, with sequence entries represented by ``[]``.
+    :param native_pod: Whether the root request is a native v1 Pod.
+    :returns: Whether requested values and documented omissions match.
     """
     if isinstance(expected, Mapping):
-        # Native Kubernetes APIs may omit empty optional lists in JSON read-back.
         return isinstance(observed, Mapping) and all(
-            matches(value, observed[key]) if key in observed else value == []
+            _matches(value, observed[key], (*path, key), native_pod)
+            if key in observed
+            else _omitted_field_matches(value, (*path, key), native_pod)
             for key, value in expected.items()
         )
     if isinstance(expected, Sequence) and not isinstance(expected, str):
@@ -54,11 +85,29 @@ def matches(expected: JSONValue, observed: JSONValue) -> bool:
             and not isinstance(observed, str)
             and len(expected) == len(observed)
             and all(
-                matches(left, right)
+                _matches(left, right, (*path, "[]"), native_pod)
                 for left, right in zip(expected, observed, strict=True)
             )
         )
     return expected == observed
+
+
+def matches(expected: JSONValue, observed: JSONValue) -> bool:
+    """Compare requested fields with native independent read-back.
+
+    Native v1 Pod mount and PVC ``readOnly`` fields default to false when omitted.
+    Other requested booleans remain mandatory; an explicit different value fails.
+
+    :param expected: Exact requested values owned by this operation.
+    :param observed: Native independent read-back.
+    :returns: Whether requested fields match, including recognized native defaults.
+    """
+    native_pod = (
+        isinstance(expected, Mapping)
+        and expected.get("apiVersion") == "v1"
+        and expected.get("kind") == "Pod"
+    )
+    return _matches(expected, observed, (), native_pod)
 
 
 def restorable(document: JSONObject) -> MutableMapping[str, JSONValue]:
