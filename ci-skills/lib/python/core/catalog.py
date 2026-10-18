@@ -724,6 +724,83 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         },
         "returns": "Public runner fields, a sanitized plan, or verified before/after action evidence.",
     },
+    "gitlab_runner_manager.py": {
+        "kind": "gitlab_runner_manager",
+        "purpose": "Deploy or remove one toolbox-backed GitLab shell runner.",
+        "use_when": "A pre-created project or group runner must execute on the "
+        "exact worker proven ready for Podman.",
+        "requires": ("gitlab", "kubernetes", "harbor"),
+        "capabilities": ("namespaced", "node_scoped"),
+        "mutates": True,
+        "options": {
+            "--project": "exact project path or numeric ID; otherwise use "
+            "gitlab.project",
+            "--group": "exact group path or numeric ID; otherwise use gitlab.group",
+            "--runner-id": "positive ID returned by gitlab_runner.py create",
+            "--description": "exact description used to create the runner record",
+            "--label": "expected GitLab runner tag; repeat for multiple tags",
+            "--image": "digest-pinned toolbox image containing gitlab-runner and "
+            "podman",
+            "--token-file": "one-time token file written by gitlab_runner.py create",
+            "--namespace": "existing namespace to retain; omit for one run-owned "
+            "namespace",
+            "--node": "exact worker already verified by image_build_readiness.py",
+            "--cpu-request": "runner CPU request; repeat the proven probe value",
+            "--cpu-limit": "runner CPU limit; repeat the proven probe value",
+            "--memory-request": "runner memory request; repeat the proven probe value",
+            "--memory-limit": "runner memory limit; repeat the proven probe value",
+            "--storage-size": "runner Podman storage limit; repeat the proven probe value",
+            "--apply": "perform the confirmed operation",
+            "--confirm-plan": "exact fingerprint from the preceding plan",
+            "--timeout": "operation timeout in seconds",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "deploy": {
+                "required_options": [
+                    "--runner-id",
+                    "--description",
+                    "--label",
+                    "--image",
+                    "--token-file",
+                    "--node",
+                ],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+                "requires_authorities": ["gitlab", "kubernetes", "harbor"],
+                "side_effects": "Confirmed apply opens or reuses one run scope, "
+                "creates a run-owned SCC RoleBinding only when required, and "
+                "retains the verified manager workload.",
+                "read_back": "Exact-node privileged Deployment and immutable Pod "
+                "image, then the exact scoped GitLab runner online with contact "
+                "evidence.",
+            },
+            "delete": {
+                "required_options": ["--runner-id", "--description", "--run-id"],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+                "requires_authorities": ["gitlab", "kubernetes"],
+                "side_effects": "Confirmed apply removes only run-owned manager "
+                "resources and preserves the GitLab runner record.",
+                "read_back": "Owned Deployment and Secrets absent, exact runner "
+                "record preserved with its current cached status, run-owned SCC "
+                "RoleBinding absent, and owned generated namespace absent.",
+            },
+        },
+        "related": (
+            "gitlab_runner.py",
+            "gitlab_pipeline.py",
+            "gitlab_job.py",
+            "image_build_readiness.py",
+        ),
+        "references": ("GitLab runner manager", "OpenShift SCC access"),
+        "required_tools": ("glab", "kubectl", "oc on OpenShift"),
+        "returns": "A run ID and confirmed plan, or verified workload and exact "
+        "GitLab runner read-back with cleanup evidence.",
+        "execution_surface": "installed skill, configured provider APIs, and the "
+        "caller-selected digest-pinned toolbox image",
+        "side_effects": "Deploy uses GitLab, Kubernetes and Harbor; delete uses "
+        "GitLab and Kubernetes only. Provider runner deletion remains "
+        "gitlab_runner.py delete.",
+    },
     "storage_report.py": {
         "kind": "storage_report",
         "purpose": "Correlate claims, volumes, attachments, pods and controllers.",
@@ -985,6 +1062,10 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
             "pointer": "references/openshift-scc.md",
         },
+        "GitLab runner manager": {
+            "summary": "Runner token, exact-node deployment, verification and cleanup.",
+            "pointer": "references/gitlab-runner-manager.md",
+        },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",
             "pointer": "references/mcp.md",
@@ -1028,6 +1109,7 @@ NAV_PLACEMENT: Final = MappingProxyType(
         "gitlab_milestone.py": ("gitlab", "milestone"),
         "gitlab_pipeline.py": ("gitlab", "pipeline"),
         "gitlab_runner.py": ("gitlab", "runner"),
+        "gitlab_runner_manager.py": ("gitlab", "runner"),
         "gitlab_wiki.py": ("gitlab", "wiki"),
         "bin/ci-binary-build": ("k8s", "build"),
         "ceph_cluster.py": ("k8s", "ceph"),
@@ -1444,6 +1526,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 "open a GitLab bug": "gitlab_issue.py",
                 "create or change a GitLab wiki page": "gitlab_wiki.py",
                 "read or manage a GitLab runner": "gitlab_runner.py",
+                "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
                 "a volume or claim is stuck": "storage_report.py",
                 "what the cluster said during an interval": "event_trace.py",
                 "connectivity or CNI health": "cilium_status.py",
