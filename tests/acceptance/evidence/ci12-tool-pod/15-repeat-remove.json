@@ -6,7 +6,7 @@
       "server": "server:6076e1dcf760"
     }
   },
-  "captured_at": "2026-10-18T02:46:38.038995+00:00",
+  "captured_at": "2026-10-18T03:40:10.279867+00:00",
   "cleanup": {
     "failures": [],
     "resources": [],
@@ -18,22 +18,22 @@
   "kind": "tool_pod",
   "operation": "remove",
   "plan": {
-    "functional_digest": "856dadd68651a9c393636c97bc9fe9aa51c44470f105148347c774f8fa69fc30",
+    "functional_digest": "e5523516780793f388c33e81cde0747b44571f6f380339a01a04be4bfde5bf9b",
     "kind": "tool_pod",
     "operation": "remove",
-    "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
+    "run_id": "a494d409e92d409496e4491518e0fa41",
     "spec": {},
     "target": {
       "context": "context:611e49b22818",
       "server": "server:6076e1dcf760"
     },
-    "timeout_seconds": 600
+    "timeout_seconds": 300
   },
-  "plan_digest": "cefc8c3937f141590cae7fc3c7cfbac75bf40837123d65cf6c6c3191a5331876",
+  "plan_digest": "3990b703965903e6a49b54612d05d08c5fd703a253c9286d3e25e7d173608991",
   "readback": {
     "action": "NO_OP",
     "resources": [],
-    "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
+    "run_id": "a494d409e92d409496e4491518e0fa41",
     "verified": true
   },
   "records": [
@@ -46,7 +46,7 @@
     {
       "action": "VERIFIED",
       "callback": "ResolveRunScopes",
-      "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
+      "run_id": "a494d409e92d409496e4491518e0fa41",
       "scopes": [],
       "verified": true
     },
@@ -54,7 +54,7 @@
       "action": "NO_OP",
       "callback": "RemoveToolPod",
       "resources": [],
-      "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
+      "run_id": "a494d409e92d409496e4491518e0fa41",
       "verified": true
     },
     {
@@ -62,11 +62,11 @@
       "callback": "RemoveScope",
       "preserved_scopes": [],
       "resources": [],
-      "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
+      "run_id": "a494d409e92d409496e4491518e0fa41",
       "verified": true
     }
   ],
-  "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
+  "run_id": "a494d409e92d409496e4491518e0fa41",
   "schema_version": "1.0",
   "skill": {
     "algorithm": "sha256-tree-v1",
@@ -74,12 +74,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "e5aaa500d9b9aa69b61b95683595ce54442f9d28c8ad0f3ac25b499f3644de9f",
-    "file_count": 159,
-    "functional_digest": "856dadd68651a9c393636c97bc9fe9aa51c44470f105148347c774f8fa69fc30",
+    "digest": "33c82b7da68ad46124877127d01e62b4a1e0b03fdd6a47ff95fc682566ed5547",
+    "file_count": 164,
+    "functional_digest": "e5523516780793f388c33e81cde0747b44571f6f380339a01a04be4bfde5bf9b",
     "revision": {
       "source": "installer_record",
-      "value": "2c615ffcc0c9ec16e323e8e72c7e6e0962897bca",
+      "value": "0017df813f5ef0beacc581745c3a16590bfb4229",
       "verified": true
     }
   },
@@ -91,5 +91,5 @@
   "target": "target:7bd724cadedd",
   "target_file": "path:8617612df58d",
   "target_source": "project",
-  "tested_revision": "2c615ffcc0c9ec16e323e8e72c7e6e0962897bca"
+  "tested_revision": "0017df813f5ef0beacc581745c3a16590bfb4229"
 }
