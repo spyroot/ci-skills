@@ -42,8 +42,6 @@ class CallerInputs:
         """
         return [
             "build",
-            "--target",
-            str(self.target),
             "--spec",
             str(self.native),
             "--destination",
@@ -54,10 +52,11 @@ class CallerInputs:
 
 
 @pytest.fixture
-def caller_inputs(tmp_path: Path) -> CallerInputs:
+def caller_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CallerInputs:
     """Provide only Kubernetes configuration and opaque caller-native bytes.
 
     :param tmp_path: Isolated directory containing the caller's inputs.
+    :param monkeypatch: Select only this test's target through the public environment.
     :returns: Concrete input paths with no GitLab, Harbor or GitHub configuration.
     """
     target = tmp_path / "target.toml"
@@ -66,6 +65,8 @@ def caller_inputs(tmp_path: Path) -> CallerInputs:
         'server = "https://api.cluster.example.test:6443"\n',
         encoding="utf-8",
     )
+    monkeypatch.setenv("CI_SKILLS_TARGET", str(target))
+    monkeypatch.delenv("K8S_ADMIN_DIAGNOSTICS_BINDING", raising=False)
     native = tmp_path / "caller-nodes.yaml"
     native.write_bytes(
         b"# native bytes remain opaque\r\nfuture-field: [invalid\x00\xff"
@@ -294,8 +295,6 @@ def test_build_requires_the_caller_to_choose_a_destination(
     code, result = run_cli(
         [
             "build",
-            "--target",
-            str(caller_inputs.target),
             "--spec",
             str(caller_inputs.native),
             "--json",
