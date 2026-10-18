@@ -453,7 +453,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "related": ("toolbox.py", "harbor_pull.py"),
-        "references": ("Nested Podman readiness",),
+        "references": ("Nested Podman readiness", "OpenShift SCC access"),
         "required_tools": ("kubectl", "oc on OpenShift"),
         "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows "
         "and cleanup read-back; does not prove runner or image-publication behavior.",
@@ -977,8 +977,12 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "pointer": "references/tool-pod.md",
         },
         "Nested Podman readiness": {
-            "summary": "Nested Podman readiness section: inputs, execution and evidence.",
-            "pointer": "SKILL.md",
+            "summary": "Podman probe inputs, planning, execution and evidence.",
+            "pointer": "references/podman-readiness.md",
+        },
+        "OpenShift SCC access": {
+            "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
+            "pointer": "references/openshift-scc.md",
         },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",

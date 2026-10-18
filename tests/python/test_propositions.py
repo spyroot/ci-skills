@@ -176,16 +176,23 @@ def test_podman_proposition_offers_installed_readiness_procedure() -> None:
     """
     selected = CATALOG.proposition("image_build_readiness.py")
     expected = {
-        "summary": "Nested Podman readiness section: inputs, execution and evidence.",
-        "pointer": "SKILL.md",
+        "Nested Podman readiness": {
+            "summary": "Podman probe inputs, planning, execution and evidence.",
+            "pointer": "references/podman-readiness.md",
+        },
+        "OpenShift SCC access": {
+            "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
+            "pointer": "references/openshift-scc.md",
+        },
     }
 
-    assert selected["reference"]["Nested Podman readiness"] == expected
     cluster = CATALOG.proposition()["kubernetes"]
-    assert cluster["reference"]["Nested Podman readiness"] == expected
-    assert "create_selfhosted_runner.py" not in selected["tools"]
     unrelated = CATALOG.proposition("gitlab_runner.py")
-    assert "Nested Podman readiness" not in unrelated["reference"]
+    for name, record in expected.items():
+        assert selected["reference"][name] == record
+        assert cluster["reference"][name] == record
+        assert name not in unrelated["reference"]
+    assert "create_selfhosted_runner.py" not in selected["tools"]
 
 
 def test_reference_cli_expands_nodes_without_fetching_optional_references(
