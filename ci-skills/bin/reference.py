@@ -13,9 +13,10 @@ from typing import Optional
 
 import _bootstrap  # noqa: F401
 from lib.python.core.catalog import describe, proposition
-from lib.python.core.cli import MachineArgumentParser
+from lib.python.core.cli import MachineArgumentParser, output_mode
 from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.navigate import next_document, section_document
+from lib.python.core.navigate_common import NavigationError, document, error_document
 from lib.python.core.report import emit, render_value
 
 
@@ -40,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     modes.add_argument(
         "--human",
         action="store_true",
-        help="render next/get for a human (their default)",
+        help="render next/get for a human; default on terminal stdout",
     )
     parser.add_argument(
         "--page", type=int, default=1, help="one-based discovery or section page"
@@ -73,7 +74,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     :raises SystemExit: If argparse handles help or rejects invalid arguments.
     :raises RuntimeError: If YAML output is requested without the YAML dependency.
     :raises OSError: If the requested log or process output cannot be written.
-    """  # noqa: DOC502 - Argument parsing, YAML import, and output writes can fail.
+    """  # noqa: DOC502,DOC503 - Lookup errors are caught; parser/output errors propagate.
     args = build_parser().parse_args(argv)
     progressive = (
         bool(args.path and args.path[0] in ("next", "get")) and not args.describe
@@ -83,12 +84,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             data = describe("reference.py")
         elif progressive and args.path[0] == "next":
             if args.card or args.part:
-                build_parser().error("--card and --part require get")
+                raise NavigationError(
+                    "tier_unavailable", "card" if args.card else f"part:{args.part}"
+                )
             data = next_document(args.path[1:], page=args.page, search=args.search)
         elif progressive:
             if len(args.path) != 3 or args.search:
-                build_parser().error(
-                    "get requires one reference and anchor; --search belongs to next"
+                raise NavigationError(
+                    "path_unknown", args.search or " ".join(args.path)
                 )
             tier = "card" if args.card else f"part:{args.part}" if args.part else ""
             data = section_document(
@@ -105,12 +108,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             ):
                 build_parser().error("progressive options require next or get")
             data = proposition(args.path[0] if args.path else None)
-    except ValueError:
-        print("path_unknown: choose a node from reference.py", file=sys.stderr)
-        return 2
-    mode = "yaml" if args.yaml else "json" if args.json or not progressive else "human"
-    if args.human:
-        mode = "human"
+    except ValueError as exc:
+        if not progressive:
+            print("path_unknown: choose a node from reference.py", file=sys.stderr)
+            return 2
+        error = (
+            exc
+            if isinstance(exc, NavigationError)
+            else NavigationError("path_unknown", " ".join(args.path))
+        )
+        data = error_document(
+            document([], "Choose a registered node or reference.", []), error, ["next"]
+        )
+    mode = output_mode(args) if progressive else "yaml" if args.yaml else "json"
     rendered = (
         emit(data, mode)
         if progressive

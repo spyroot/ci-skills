@@ -23,6 +23,7 @@ from lib.python.core.navigate_common import (
     NavigationError,
     choice,
     document,
+    error_document,
     paginate,
 )
 
@@ -253,14 +254,13 @@ def next_document(
             args.extend(("--search", search))
         return paginate(result, page, args)
     except NavigationError as exc:
+        known = nodes()
         for length in range(len(path), 0, -1):
             candidate = tuple(path[:length])
-            if candidate in nodes():
+            if candidate in known:
                 parent = candidate
                 break
-        result = dict(node_document(parent))
-        result["error"] = {"reason": exc.reason, "input": exc.value}
-        return paginate(result, 1, ["next", *parent])
+        return error_document(node_document(parent), exc, ["next", *parent])
 
 
 def section_document(
@@ -279,6 +279,6 @@ def section_document(
             reference, anchor, page=page, tier=tier
         )
     except NavigationError as exc:
-        result = document([], "Choose a registered reference.", [])
-        result["error"] = {"reason": exc.reason, "input": exc.value}
-        return paginate(result, 1, ["next", "read"])
+        return error_document(
+            document([], "Choose a registered reference.", []), exc, ["next", "read"]
+        )

@@ -10,6 +10,7 @@ from typing import Final
 
 from lib.python.core.json_types import JSONObject, JSONValue, json_object, json_objects
 from lib.python.core.report import render_value
+from lib.python.core.runtime import sanitize
 
 ENTRYPOINT: Final = "bin/reference.py"
 MAX_BYTES: Final = 4096
@@ -82,6 +83,63 @@ def document(
     }
 
 
+def _serialized_size(value: JSONValue) -> int:
+    """Count compact UTF-8 JSON bytes, including the final newline.
+
+    :param value: JSON value in the navigator's output format.
+    :returns: Serialized byte count used for response budgets.
+    """
+    return len(render_value(value, "json", compact=True, ordered=True).encode())
+
+
+def _error_input(value: str, budget: int) -> str:
+    """Fit a redacted diagnostic echo into its remaining serialized byte budget.
+
+    :param value: Rejected caller input, unrestricted by this formatter.
+    :param budget: Bytes available for the serialized string, including its newline.
+    :returns: Complete redacted input or a prefix with an explicit ellipsis.
+    """
+    value = sanitize(value, len(value)) or "<empty>"
+    if _serialized_size(value) <= budget:
+        return value
+    low, high = 0, min(len(value), budget)
+    while low < high:
+        middle = (low + high + 1) // 2
+        candidate = value[:middle] + ("..." if middle < len(value) else "")
+        if _serialized_size(candidate) <= budget:
+            low = middle
+        else:
+            high = middle - 1
+    return value[:low] + ("..." if low < len(value) else "")
+
+
+def error_document(
+    data: JSONObject, error: NavigationError, args: Sequence[str]
+) -> JSONObject:
+    """Return a bounded failure even when the recovery choices cannot fit.
+
+    :param data: Nearest valid parent answer before adding the diagnostic.
+    :param error: Original failure reason and rejected caller value.
+    :param args: Canonical parent invocation for paging its valid choices.
+    :returns: Schema-shaped error with bounded input and a recovery route.
+    """
+    failure: JSONObject = {"reason": error.reason, "input": "..."}
+    result: JSONObject = {**data, "error": failure}
+    try:
+        result = paginate(result, 1, args)
+    except NavigationError:
+        result = {
+            **document([], "Choose a registered node or reference.", []),
+            "continuation": pointer("expand", ["next"]),
+            "error": failure,
+        }
+    budget = MAX_BYTES - _serialized_size(result) + _serialized_size("...")
+    return {
+        **result,
+        "error": {"reason": error.reason, "input": _error_input(error.value, budget)},
+    }
+
+
 def split_inputs(
     data: JSONObject, choices: Sequence[JSONObject], continuation: JSONObject
 ) -> Sequence[JSONObject]:
@@ -104,14 +162,7 @@ def split_inputs(
         for field in inputs:
             candidate = {**item, "next": {**step, "inputs": [*selected, field]}}
             envelope = {**data, "choices": [candidate], "continuation": continuation}
-            if (
-                len(
-                    render_value(envelope, "json", compact=True, ordered=True)
-                    .rstrip("\n")
-                    .encode()
-                )
-                > MAX_BYTES
-            ):
+            if _serialized_size(envelope) > MAX_BYTES:
                 if not selected:
                     raise NavigationError(
                         "page_out_of_range", "one input exceeds the response budget"
@@ -152,18 +203,11 @@ def paginate(data: JSONObject, page: int, args: Sequence[str]) -> JSONObject:
                 if remaining
                 else None
             )
-            if (
-                len(
-                    render_value(candidate, "json", compact=True, ordered=True)
-                    .rstrip("\n")
-                    .encode()
-                )
-                > MAX_BYTES
-            ):
+            if _serialized_size(candidate) > MAX_BYTES:
                 break
             selected.append(item)
             answer = candidate
-        if not selected and choices:
+        if (not selected and choices) or _serialized_size(answer) > MAX_BYTES:
             raise NavigationError(
                 "page_out_of_range", "one catalogue choice exceeds the response budget"
             )
