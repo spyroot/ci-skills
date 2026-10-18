@@ -3,29 +3,29 @@
   "baseline_ref": null,
   "baseline_values": null,
   "blocking_reasons": [],
-  "candidate_ref": "2c615ffcc0c9ec16e323e8e72c7e6e0962897bca",
+  "candidate_ref": "0017df813f5ef0beacc581745c3a16590bfb4229",
   "candidate_values": {
     "initial_prepare": {
       "unit": "milliseconds",
-      "value": 97478
+      "value": 113046
     },
     "remove": {
       "unit": "milliseconds",
-      "value": 30515
+      "value": 36639
     },
     "repeat_prepare": {
       "unit": "milliseconds",
-      "value": 48890
+      "value": 51881
     },
     "repeat_remove": {
       "unit": "milliseconds",
-      "value": 5953
+      "value": 18617
     }
   },
-  "captured_at": "2026-10-18T02:46:38.052454+00:00",
+  "captured_at": "2026-10-18T03:40:10.279867+00:00",
   "environment": {
-    "installed_functional_digest": "856dadd68651a9c393636c97bc9fe9aa51c44470f105148347c774f8fa69fc30",
-    "installed_package_digest": "e5aaa500d9b9aa69b61b95683595ce54442f9d28c8ad0f3ac25b499f3644de9f",
+    "installed_functional_digest": "e5523516780793f388c33e81cde0747b44571f6f380339a01a04be4bfde5bf9b",
+    "installed_package_digest": "33c82b7da68ad46124877127d01e62b4a1e0b03fdd6a47ff95fc682566ed5547",
     "instrumentation": "installed ci-skills JSONL debug trace",
     "surface": "selected Kubernetes live target"
   },
@@ -43,25 +43,25 @@
   "metrics": {
     "initial_prepare": {
       "unit": "milliseconds",
-      "value": 97478
+      "value": 113046
     },
     "remove": {
       "unit": "milliseconds",
-      "value": 30515
+      "value": 36639
     },
     "repeat_prepare": {
       "unit": "milliseconds",
-      "value": 48890
+      "value": 51881
     },
     "repeat_remove": {
       "unit": "milliseconds",
-      "value": 5953
+      "value": 18617
     }
   },
   "percentage_deltas": null,
   "sample_count": 1,
   "schema_version": "1.0",
-  "source_commit": "2c615ffcc0c9ec16e323e8e72c7e6e0962897bca",
+  "source_commit": "0017df813f5ef0beacc581745c3a16590bfb4229",
   "status": "PASS",
   "thresholds": null,
   "warmup_count": 0,

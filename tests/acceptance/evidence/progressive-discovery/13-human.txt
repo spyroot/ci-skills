@@ -1,0 +1,22 @@
+Discover what ci-skills can inspect, run or read.
+
+Available groups
+  gitlab  GitLab pipelines, jobs, runners, issues, milestones and wikis.
+          Expand: reference.py next gitlab
+
+  k8s     Cluster, workload, storage and network operations.
+          Expand: reference.py next k8s
+
+  github  GitHub operations and related combinations.
+          Expand: reference.py next github
+
+  harbor  Registry, images, charts and related operations.
+          Expand: reference.py next harbor
+
+Commands / combos
+  run  1 capability to run.
+       Expand: reference.py next run
+
+References
+  read  4 references with sections here.
+        Expand: reference.py next read
