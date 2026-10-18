@@ -1,0 +1,47 @@
+{
+  "kind": "image_build_readiness_markers",
+  "rows": [
+    {
+      "check": "kernel",
+      "observed": "Linux 5.14.0-570.98.1.el9_6.x86_64",
+      "status": "PASS"
+    },
+    {
+      "check": "podman_version",
+      "observed": "podman version 5.8.7",
+      "status": "PASS"
+    },
+    {
+      "check": "storage",
+      "observed": "driver=overlay;mount_program=none;cgroup_manager=cgroupfs;graph_root=/var/lib/containers/storage;cgroup_version=v2",
+      "status": "PASS"
+    },
+    {
+      "check": "backing_filesystem",
+      "observed": "xfs",
+      "status": "PASS"
+    },
+    {
+      "check": "inner_runtime",
+      "observed": "id=0ddc0bae9d31ea7998be5a6e1c104b7d2d2754bffbe05c014935de7a110f5f75;marker=inner-ok;cgroup=0::/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod75367afb_31d6_446a_b07e_acb10120ebd3.slice/crio-2b2fa9a76a39375b23426c94eeb5a5edf6aec72e1b7b63103b3d9de2f113ab30.scope,;root=21355 16607 0:1149 / / rw,relatime - overlay overlay rw,seclabel,lowerdir=/var/lib/containers/storage/overlay/l/YB7SXNMVYDGVCFJKXYRQRSJAGB,upperdir=/var/lib/containers/storage/overlay/224456aa10aeb177e6bb805d7252d7b5286a607afeeae6ea770c9ee709103ea1/diff,workdir=/var/lib/containers/storage/overlay/224456aa10aeb177e6bb805d7252d7b5286a607afeeae6ea770c9ee709103ea1/work",
+      "status": "PASS"
+    },
+    {
+      "check": "bind_readback",
+      "observed": "ready",
+      "status": "PASS"
+    },
+    {
+      "check": "expected_exit",
+      "observed": "7",
+      "status": "PASS"
+    },
+    {
+      "check": "remaining_containers",
+      "observed": "none",
+      "status": "PASS"
+    }
+  ],
+  "run_id": "a418c7dbb24141e09a7f26d920b96af5",
+  "schema_version": "1.0"
+}

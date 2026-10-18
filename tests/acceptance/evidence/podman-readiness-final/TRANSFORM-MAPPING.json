@@ -1,0 +1,143 @@
+{
+  "algorithm": "sha256",
+  "entries": [
+    {
+      "kind": "installed_discovery",
+      "portable_name": "discovery/01-installed-provenance.json",
+      "portable_sha256": "50978c2a3adbb361e12fe5ffbcf1c5194dad3ecc9596f1db42e891b9676026de",
+      "raw_name": "pr81-final-3570e1b-20261018/discovery/01-installed-provenance.json",
+      "raw_sha256": "50978c2a3adbb361e12fe5ffbcf1c5194dad3ecc9596f1db42e891b9676026de"
+    },
+    {
+      "kind": "installed_discovery",
+      "portable_name": "discovery/02-proposition.json",
+      "portable_sha256": "026b158d36069b99d851441010c07e6d3c7adafc7466099b06e33412d42bee4d",
+      "raw_name": "pr81-final-3570e1b-20261018/discovery/02-proposition.json",
+      "raw_sha256": "3db507fe5b76c199c2fc60809d13e31f41c68626b2220e5639cb103ff30fa785"
+    },
+    {
+      "kind": "installed_discovery",
+      "portable_name": "discovery/03-task-references.json",
+      "portable_sha256": "99a2c9233ac4882860a1fced45922fd35fe40bd61d8f2e1d70f4995c6da9acc2",
+      "raw_name": "pr81-final-3570e1b-20261018/discovery/03-task-references.json",
+      "raw_sha256": "4774b5a3b125f65ae4f8ed2242b753a93aa356e2754aaebbd9c7205202b7f4c2"
+    },
+    {
+      "kind": "installed_discovery",
+      "portable_name": "discovery/04-scc-reference.json",
+      "portable_sha256": "6c5ba42f8ccf18292846b5d5aa213d54bca44aeb1d272215ff44226d39def90e",
+      "raw_name": "pr81-final-3570e1b-20261018/discovery/04-scc-reference.json",
+      "raw_sha256": "6600c1b059a4bf7ccab9284b3921d9869c39f481b57fe9666a0ea495083d0e0c"
+    },
+    {
+      "kind": "installed_discovery",
+      "portable_name": "discovery/05-run.json",
+      "portable_sha256": "c93729f754d0aa3dda9d20fdae481a36c9207d63e345c68d5feeaa432236e28f",
+      "raw_name": "pr81-final-3570e1b-20261018/discovery/05-run.json",
+      "raw_sha256": "2918067739b09b42bc9c347d0d334b679e7fb2191d6998e1a9efab8b336399f8"
+    },
+    {
+      "kind": "installed_discovery",
+      "portable_name": "discovery/06-selected-action.json",
+      "portable_sha256": "3f632dee386aea7c87a423be2034325a8642b51129a7fcf2a2fb3434d06d608d",
+      "raw_name": "pr81-final-3570e1b-20261018/discovery/06-selected-action.json",
+      "raw_sha256": "e96b54f68bc2eabfa8c3131323065ba282650065ff1f4b700d4557d2af8289a5"
+    },
+    {
+      "kind": "installed_discovery",
+      "portable_name": "discovery/07-options.json",
+      "portable_sha256": "face2a844e1141a17932357c1d6d85e4c09d6a3fe564cafab80c153c9124890a",
+      "raw_name": "pr81-final-3570e1b-20261018/discovery/07-options.json",
+      "raw_sha256": "5d57d3b74592c26d47b77d9e48f8cecf18ff2106c5b1765a2fb1d48ffb3130dd"
+    },
+    {
+      "kind": "installed_help",
+      "portable_name": "discovery/08-help.txt",
+      "portable_sha256": "843d9967ea6344c4a1e0f93b3d708614d73146f31132d62ca3dcf12359850b0d",
+      "raw_name": "pr81-final-3570e1b-20261018/discovery/08-help.txt",
+      "raw_sha256": "843d9967ea6344c4a1e0f93b3d708614d73146f31132d62ca3dcf12359850b0d"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "success/receipt.json",
+      "portable_sha256": "cb9c25f54851abcffea8c1000cbe26c760d4b4ef2d503744f244b1f2246b8200",
+      "raw_name": "pr81-final-3570e1b-20261018/results/success-receipt.json",
+      "raw_sha256": "460a8fe5d136af4f4aa4b243d46e5a965e9840047049ab9938ed99d48e151c84"
+    },
+    {
+      "kind": "observer_limitation",
+      "portable_name": "success/observer.json",
+      "portable_sha256": "673d66ee2afde642c5b921c9a9ee8ae6cc41a46227f526e40d6f6192ed3648c4",
+      "raw_name": "observer/success/observer.json",
+      "raw_sha256": "673d66ee2afde642c5b921c9a9ee8ae6cc41a46227f526e40d6f6192ed3648c4"
+    },
+    {
+      "kind": "independent_cleanup",
+      "portable_name": "success/supplemental-cleanup.json",
+      "portable_sha256": "a4eb43f8feec49e9b4bdc6ab9396bf2f1e21383035c3fdb05ed5d98444d2a38c",
+      "raw_name": "observer/success/supplemental-cleanup-readback.json",
+      "raw_sha256": "a823a3dec4a7fad2c48424caa59a6b2f304e779d057c2a6f172665f51f93fc4e"
+    },
+    {
+      "kind": "mistimed_attempt_receipt",
+      "portable_name": "mistimed-term/receipt.json",
+      "portable_sha256": "406d711575d1b0c52ff7849f8934538f6d56e4da4fe9edbad0ed7be48b85043d",
+      "raw_name": "pr81-final-3570e1b-20261018/results/interrupted-receipt.json",
+      "raw_sha256": "603dac14bec73c66549c147952a1c229d171fbceaf9d0be6b31e119deaa8bcf2"
+    },
+    {
+      "kind": "mistimed_attempt_observer",
+      "portable_name": "mistimed-term/observer.json",
+      "portable_sha256": "f8f6130956653a11e535920546d83b731abd8ed9c60bc11c8b010170168dd087",
+      "raw_name": "observer/interrupted/observer.json",
+      "raw_sha256": "f8f6130956653a11e535920546d83b731abd8ed9c60bc11c8b010170168dd087"
+    },
+    {
+      "kind": "independent_pod_absence",
+      "portable_name": "mistimed-term/supplemental-pod-absence.json",
+      "portable_sha256": "e275d414103e39ffa6b352838d2cba396c5415417235bfccbfbc82fb68bfe4d4",
+      "raw_name": "observer/interrupted/supplemental-pod-readback.json",
+      "raw_sha256": "bd00492941d34d3de9baa73d64b2c867f00c5c88a3e6f9dc78c898e1c770ac66"
+    },
+    {
+      "kind": "probe_log",
+      "portable_name": "success/image_build_readiness-a418c7dbb24141e09a7f26d920b96af5.probe.log",
+      "portable_sha256": "bc0c7a8777dbb1ee5e42a99d741c1c94a76b6169e5bcb379fb7dd3c59e917aad",
+      "raw_name": "reports/success/image_build_readiness-a418c7dbb24141e09a7f26d920b96af5.probe.log",
+      "raw_sha256": "bc0c7a8777dbb1ee5e42a99d741c1c94a76b6169e5bcb379fb7dd3c59e917aad"
+    },
+    {
+      "kind": "probe_markers",
+      "portable_name": "success/image_build_readiness-a418c7dbb24141e09a7f26d920b96af5.markers.json",
+      "portable_sha256": "0f0e7b66f65fc312016ba5426ba3f698d6b2b1e702032fa423df0f4e47628f46",
+      "raw_name": "reports/success/image_build_readiness-a418c7dbb24141e09a7f26d920b96af5.markers.json",
+      "raw_sha256": "0f0e7b66f65fc312016ba5426ba3f698d6b2b1e702032fa423df0f4e47628f46"
+    },
+    {
+      "event_count": 89,
+      "kind": "debug_trace",
+      "portable_name": "success/trace.jsonl",
+      "portable_sha256": "ec1821d0599bc4b992b7a4f74c553cc14b6810e40972c48ba6ca5d3aa1df68ff",
+      "raw_name": "pr81-final-3570e1b-20261018/traces/success.jsonl",
+      "raw_sha256": "7e2bd44d4be481a195dce63286a6f6d459a12420da12cada456799194841dc6b"
+    },
+    {
+      "event_count": 89,
+      "kind": "debug_trace",
+      "portable_name": "mistimed-term/trace.jsonl",
+      "portable_sha256": "5d87b4555248003ef013c566630920918778f2dc6e2addc6b0b3ead2f47c910c",
+      "raw_name": "pr81-final-3570e1b-20261018/traces/interrupted.jsonl",
+      "raw_sha256": "8e5ba4689d8be2f86fddc827165595ea2f62c3a5fb1a7d1cbf3945cd15c849d1"
+    },
+    {
+      "kind": "ordinary_acceptance_cleanup",
+      "portable_name": "acceptance-cleanup.json",
+      "portable_sha256": "19e2a320636189199b6538f538f48eb67ddc766c9a9da08f4c15449d87c7aa22",
+      "raw_name": "acceptance/cleanup.json",
+      "raw_sha256": "19e2a320636189199b6538f538f48eb67ddc766c9a9da08f4c15449d87c7aa22"
+    }
+  ],
+  "kind": "podman_portable_evidence_mapping",
+  "path_token_algorithm": "sha256-first-12-hex",
+  "schema_version": "1.0"
+}
