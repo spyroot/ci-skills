@@ -80,6 +80,32 @@ ocp_node_image_status() {
   cat "$ocp_node_image_status_path"
 }
 
+ocp_node_image_cleanup_failed() {
+  ocp_node_image_asset_directory=$1
+  ocp_node_image_output_name=$2
+  ocp_node_image_output_path="${ocp_node_image_asset_directory}/${ocp_node_image_output_name}"
+  ocp_node_image_report_path="${ocp_node_image_asset_directory}/report.json"
+
+  [ -d "$ocp_node_image_asset_directory" ] || exit 40
+  for ocp_node_image_failed_path in \
+    "$ocp_node_image_output_path" \
+    "$ocp_node_image_report_path"; do
+    if [ -L "$ocp_node_image_failed_path" ] ||
+      { [ -e "$ocp_node_image_failed_path" ] &&
+        [ ! -f "$ocp_node_image_failed_path" ]; }; then
+      exit 47
+    fi
+    if [ -f "$ocp_node_image_failed_path" ]; then
+      rm -f -- "$ocp_node_image_failed_path"
+    fi
+    if [ -e "$ocp_node_image_failed_path" ] ||
+      [ -L "$ocp_node_image_failed_path" ]; then
+      exit 48
+    fi
+  done
+  printf '{"verified":true}\n'
+}
+
 ocp_node_image_inspect() {
   ocp_node_image_path=$1
   exec coreos-installer iso ignition show "$ocp_node_image_path"
@@ -94,6 +120,9 @@ run)
   ;;
 status)
   ocp_node_image_status "$@"
+  ;;
+cleanup-failed)
+  ocp_node_image_cleanup_failed "$@"
   ;;
 inspect)
   ocp_node_image_inspect "$@"

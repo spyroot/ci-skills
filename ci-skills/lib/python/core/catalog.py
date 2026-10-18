@@ -317,6 +317,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "related": ("prepare_tool_pod.py", "storage_report.py"),
+        "references": ("OpenShift node image",),
         "required_tools": ("kubectl", "oc", "curl (default tool discovery)"),
         "returns": "Shared workflow report with native completion, callback observations, final cluster artifact "
         "identity/lifetime, plan, provenance and cleanup evidence.",
@@ -1023,6 +1024,10 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         "Tool Pod preparation": {
             "summary": "Tool input, preparation, reuse and removal examples.",
             "pointer": "references/tool-pod.md",
+        },
+        "OpenShift node image": {
+            "summary": "Native OCP YAML, cluster destination and ISO lifecycle examples.",
+            "pointer": "references/ocp-node-image.md",
         },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",

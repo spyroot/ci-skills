@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import (
@@ -40,6 +40,9 @@ from lib.python.core.kubernetes.tool_pod_models import (
     ToolPodMount,
     ToolPodSpec,
 )
+
+if TYPE_CHECKING:
+    from lib.python.core.kubernetes.ocp_recovery import NodeRecoveryRecord
 
 ARTIFACT_RECORD_VERSION: Final = "1.0"
 _RECORD_FIELDS: Final = frozenset(
@@ -109,7 +112,7 @@ def _boolean(document: Mapping[str, JSONValue], key: str, source: str) -> bool:
     return value
 
 
-def _pod(document: JSONObject) -> PodHandle:
+def decode_pod_handle(document: JSONObject) -> PodHandle:
     """Decode the exact producer Pod identity from a run record.
 
     :param document: Persisted Pod identity.
@@ -150,7 +153,7 @@ def _artifact(document: JSONObject) -> ArtifactHandle:
         if not path.startswith("/"):
             raise ValueError("relative artifact path")
         return ArtifactHandle(
-            pod=_pod(json_object(document["pod"])),
+            pod=decode_pod_handle(json_object(document["pod"])),
             path=path,
             sha256=digest,
             size=size,
@@ -441,6 +444,36 @@ class OCPArtifactState(OCPState):
         :type: PodHandle
 
         Temporary reader identity held constant across persistent read-backs.
+
+    .. attribute :: recovery_record
+        :type: NodeRecoveryRecord
+
+        Minimal immutable identity persisted before native execution.
+
+    .. attribute :: recovery_scope
+        :type: RunScope
+
+        Exact live scope containing the resolved recovery record.
+
+    .. attribute :: recovery_record_uid
+        :type: str
+
+        Immutable ConfigMap UID read back from the provider.
+
+    .. attribute :: recovery_record_present
+        :type: bool
+
+        Whether the invocation resolved a recovery record.
+
+    .. attribute :: recovery_record_deleted
+        :type: bool
+
+        Whether exact recovery-record deletion was verified.
+
+    .. attribute :: build_reused
+        :type: bool
+
+        Whether an identical completed run was selected for live verification.
     """
 
     artifact_record: NodeArtifactRecord = field(init=False)
@@ -452,6 +485,12 @@ class OCPArtifactState(OCPState):
     artifact_after_removal_verified: bool = False
     temporary_backing_absent: bool = False
     artifact_readback_pod: PodHandle = field(init=False)
+    recovery_record: NodeRecoveryRecord = field(init=False)
+    recovery_scope: RunScope = field(init=False)
+    recovery_record_uid: str = field(init=False)
+    recovery_record_present: bool = False
+    recovery_record_deleted: bool = False
+    build_reused: bool = False
 
 
 __all__ = [
@@ -459,4 +498,5 @@ __all__ = [
     "NodeArtifactRecord",
     "OCPArtifactState",
     "RecordArtifactAction",
+    "decode_pod_handle",
 ]

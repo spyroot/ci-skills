@@ -34,6 +34,8 @@ from lib.python.core.kubernetes.ocp_invocation import (
 from lib.python.core.kubernetes.ocp_lifecycle_workflow import (
     artifact_callbacks,
     resolve_artifact,
+    resolve_artifact_records,
+    reuse_artifact_callbacks,
 )
 from lib.python.core.kubernetes.workflow_report import workflow_result
 from lib.python.core.project_binding import resolve_target
@@ -86,8 +88,30 @@ class NodeInvocation:
         self.plan = operation_plan(self.args, target, evidence)
         self._confirm(mode)
         if mode == ActionMode.APPLY:
+            input_fingerprint = f"sha256:{plan_digest(self.plan)}"
+            if self.args.run_id:
+                resolve_artifact_records(self.state, self.args.run_id)
+                if self.state.artifact_record_present:
+                    execute_callbacks(
+                        self.state,
+                        reuse_artifact_callbacks(
+                            self.state,
+                            self.args.run_id,
+                            self.args.timeout,
+                            input_fingerprint,
+                        ),
+                    )
+                    return
+                if self.state.recovery_record_present:
+                    raise KubernetesError("node_recovery_requires_verify_or_remove")
+                if self.state.found_scopes:
+                    raise KubernetesError("node_build_existing_scope_incomplete")
             callbacks = build_callbacks(
-                self.state, inputs, run_id=self.args.run_id, timeout=self.args.timeout
+                self.state,
+                inputs,
+                input_fingerprint=input_fingerprint,
+                run_id=self.args.run_id,
+                timeout=self.args.timeout,
             )
             execute_callbacks(self.state, callbacks)
 
@@ -107,9 +131,14 @@ class NodeInvocation:
         resolve_artifact(
             self.state, target, operation, self.args.run_id, self.args.timeout
         )
-        evidence: JSONObject = {"present": self.state.artifact_record_present}
+        evidence: JSONObject = {
+            "artifact_record_present": self.state.artifact_record_present,
+            "recovery_record_present": self.state.recovery_record_present,
+        }
         if self.state.artifact_record_present:
             evidence["artifact_record"] = self.state.artifact_record.as_dict()
+        if self.state.recovery_record_present:
+            evidence["recovery_record"] = self.state.recovery_record.as_dict()
         self.plan = operation_plan(self.args, target, evidence)
         self._confirm(mode)
         if mode in (ActionMode.APPLY, ActionMode.READ):

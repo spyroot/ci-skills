@@ -199,8 +199,8 @@ class ResolveNodeArtifactRecord(K8SCallback[ResolveRunScopeAction]):
 
         :returns: Verified record evidence or an absent no-op for repeated removal.
         :raises TypeError: If the workflow state is not artifact-aware.
-        :raises KubernetesError: If lookup evidence is stale, ambiguous, missing
-            within a live scope, not run-owned, or malformed.
+        :raises KubernetesError: If lookup evidence is stale, ambiguous, not
+            run-owned, or malformed.
         """  # noqa: DOC503 - state narrowing raises the documented TypeError.
         state = _state(self)
         if state.resolved_run_id != self.action.run_id or any(
@@ -221,7 +221,13 @@ class ResolveNodeArtifactRecord(K8SCallback[ResolveRunScopeAction]):
         name = scope.name(ARTIFACT_RECORD_ROLE)
         observed = self.kubernetes.read("ConfigMap", name, scope.namespace)
         if observed is None:
-            raise KubernetesError("node_artifact_record_missing")
+            state.artifact_record_present = False
+            return {
+                "action": NO_OP,
+                "verified": True,
+                "run_id": self.action.run_id,
+                "present": False,
+            }
         if not run_owned(observed, self.action.run_id):
             raise KubernetesError("node_artifact_record_ownership_mismatch")
         record = decode_artifact_record_resource(observed)

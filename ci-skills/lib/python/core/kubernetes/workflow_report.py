@@ -24,11 +24,13 @@ def result_records(state: ToolPodState) -> Sequence[JSONObject]:
     :returns: Ordered JSON records with callback names for the execution trace.
     :raises TypeError: A callback's result contains a non-JSON value.
     """  # noqa: DOC502 - The common JSON conversion rejects unsupported values.
-    return [
+    records = [
         {"callback": type(callback).__name__, **json_object(copy_json(value))}
         for callback, value in state.results.items()
         if value
     ]
+    records.extend(json_object(copy_json(value)) for value in state.cleanup_results)
+    return records
 
 
 def operation_evidence(state: ToolPodState) -> JSONObject:

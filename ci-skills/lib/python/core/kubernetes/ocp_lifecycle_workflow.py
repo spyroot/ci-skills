@@ -21,11 +21,20 @@ from lib.python.core.kubernetes.ocp_artifact_lifecycle import (
 from lib.python.core.kubernetes.ocp_artifact_run import (
     ArtifactLifetime,
     OCPArtifactState,
-    RequireNodeArtifactRecord,
     ResolveNodeArtifactRecord,
 )
 from lib.python.core.kubernetes.ocp_build_workflow import execute_callbacks
 from lib.python.core.kubernetes.ocp_invocation import NodeOperation
+from lib.python.core.kubernetes.ocp_recovery import (
+    CleanupRecoveredNodeRun,
+    DeleteNodeRecoveryRecord,
+    ReconcileNodeRecovery,
+    ReportReusedNodeArtifact,
+    RequireReusableNodeArtifact,
+    ResolveNodeRecoveryRecord,
+    ReuseNodeArtifactAction,
+    VerifyRecoveredNodeImage,
+)
 from lib.python.core.kubernetes.run_scope import (
     RemoveScope,
     ResolveRunScopeAction,
@@ -52,14 +61,35 @@ def resolve_artifact(
     :param timeout: Positive native API operation bound.
     :raises BaseException: Authentication, lookup or record decoding fails.
     """  # noqa: DOC502 - the common executor preserves provider failures.
+    if operation not in (NodeOperation.VERIFY, NodeOperation.REMOVE):
+        raise ValueError("node_artifact_operation_invalid")
     action = ResolveRunScopeAction(run_id)
-    record = (
-        RequireNodeArtifactRecord
-        if operation == NodeOperation.VERIFY
-        else ResolveNodeArtifactRecord
-    )
     execute_callbacks(
-        state, [K8SAuth(target, timeout), ResolveRunScopes(action), record(action)]
+        state,
+        [
+            K8SAuth(target, timeout),
+            ResolveRunScopes(action),
+            ResolveNodeArtifactRecord(action),
+            ResolveNodeRecoveryRecord(action),
+        ],
+    )
+
+
+def resolve_artifact_records(state: OCPArtifactState, run_id: str) -> None:
+    """Resolve final and recovery records using an already authenticated state.
+
+    :param state: Invocation state with a configured Kubernetes service.
+    :param run_id: Exact caller-selected run correlation identity.
+    :raises BaseException: Live scope or record lookup fails.
+    """  # noqa: DOC502 - shared callbacks preserve provider failures.
+    action = ResolveRunScopeAction(run_id)
+    execute_callbacks(
+        state,
+        [
+            ResolveRunScopes(action),
+            ResolveNodeArtifactRecord(action),
+            ResolveNodeRecoveryRecord(action),
+        ],
     )
 
 
@@ -77,6 +107,7 @@ def _persistent_removal(
         RemoveToolPod(RemoveToolPodAction(action.run_id)),
         VerifyArtifactAfterRemoval(action),
         DeleteNodeArtifactRecord(action),
+        DeleteNodeRecoveryRecord(action),
         RemoveScope(action),
     ]
 
@@ -94,6 +125,7 @@ def _temporary_removal(
         RemoveToolPod(RemoveToolPodAction(action.run_id)),
         VerifyTemporaryBackingRemoved(action),
         DeleteNodeArtifactRecord(action),
+        DeleteNodeRecoveryRecord(action),
         RemoveScope(action),
     ]
 
@@ -117,9 +149,31 @@ def artifact_callbacks(
         raise ValueError("node_artifact_operation_invalid")
     lookup = ResolveRunScopeAction(run_id)
     if not state.artifact_record_present:
+        if not state.recovery_record_present:
+            if operation == NodeOperation.VERIFY:
+                raise ValueError("node_artifact_record_not_found")
+            if state.found_scopes:
+                raise ValueError("node_artifact_records_missing")
+            return [
+                DeleteNodeArtifactRecord(lookup),
+                DeleteNodeRecoveryRecord(lookup),
+                RemoveScope(lookup),
+            ]
+        callbacks: AbstractCallbacks[DeliveryState, SkillAction] = [
+            ReconcileNodeRecovery(lookup)
+        ]
         if operation == NodeOperation.VERIFY:
-            raise ValueError("node_artifact_record_not_found")
-        return [DeleteNodeArtifactRecord(lookup), RemoveScope(lookup)]
+            callbacks.append(VerifyRecoveredNodeImage(lookup))
+            return callbacks
+        callbacks.extend(
+            (
+                CleanupRecoveredNodeRun(lookup),
+                RemoveToolPod(RemoveToolPodAction(run_id)),
+                DeleteNodeRecoveryRecord(lookup),
+                RemoveScope(lookup),
+            )
+        )
+        return callbacks
     record = state.artifact_record
     if operation == NodeOperation.REMOVE and record.lifetime == ArtifactLifetime.POD:
         return _temporary_removal(lookup)
@@ -129,4 +183,27 @@ def artifact_callbacks(
         callbacks.append(VerifyArtifactReference(lookup))
     else:
         callbacks.extend(_persistent_removal(lookup))
+    return callbacks
+
+
+def reuse_artifact_callbacks(
+    state: OCPArtifactState,
+    run_id: str,
+    timeout: int,
+    input_fingerprint: str,
+) -> AbstractCallbacks[DeliveryState, SkillAction]:
+    """Verify an identical completed build and report an idempotent no-op.
+
+    :param state: State containing final and recovery records resolved by run ID.
+    :param run_id: Exact caller-selected existing build run.
+    :param timeout: Positive provider operation bound for any temporary reader.
+    :param input_fingerprint: Digest of the currently confirmed build plan.
+    :returns: Eligibility, live byte read-back, and no-op evidence callbacks.
+    """
+    action = ReuseNodeArtifactAction(run_id, input_fingerprint)
+    callbacks: AbstractCallbacks[DeliveryState, SkillAction] = [
+        RequireReusableNodeArtifact(action)
+    ]
+    callbacks.extend(artifact_callbacks(state, NodeOperation.VERIFY, run_id, timeout))
+    callbacks.append(ReportReusedNodeArtifact(action))
     return callbacks

@@ -36,8 +36,12 @@ from lib.python.core.kubernetes.ocp_input_callbacks import (
 )
 from lib.python.core.kubernetes.ocp_invocation import NodeBuildInputs
 from lib.python.core.kubernetes.ocp_iso import NodeImageAction
-from lib.python.core.kubernetes.ocp_iso_build import BuildNodeImage
+from lib.python.core.kubernetes.ocp_iso_build import BuildNodeImage, PreflightNodeImage
 from lib.python.core.kubernetes.ocp_iso_verify import VerifyNodeImage
+from lib.python.core.kubernetes.ocp_recovery import (
+    PersistNodeRecoveryRecord,
+    RecoveryArtifactAction,
+)
 from lib.python.core.kubernetes.pod_credentials import (
     CredentialAction,
     NativePermission,
@@ -133,6 +137,7 @@ def build_callbacks(
     state: OCPArtifactState,
     inputs: NodeBuildInputs,
     *,
+    input_fingerprint: str,
     run_id: Optional[str],
     timeout: int,
 ) -> AbstractCallbacks[DeliveryState, SkillAction]:
@@ -143,6 +148,7 @@ def build_callbacks(
 
     :param state: State containing provider-resolved or caller-selected tools.
     :param inputs: Exact native bytes and destination used in the confirmed plan.
+    :param input_fingerprint: Confirmed plan digest used for safe repeat detection.
     :param run_id: Supplied correlation identity, or absent for a fresh run.
     :param timeout: Positive provider operation bound.
     :returns: Ordered preparation, credential, native and storage callbacks.
@@ -179,6 +185,15 @@ def build_callbacks(
             ResolvePullSecret(credentials),
             StageNodeInput(
                 StageNodeInputAction(inputs.node, PurePosixPath(node.asset_directory))
+            ),
+            PreflightNodeImage(node),
+            PersistNodeRecoveryRecord(
+                RecoveryArtifactAction(
+                    preparation,
+                    node,
+                    destination,
+                    input_fingerprint,
+                )
             ),
             BuildNodeImage(node),
             VerifyNodeImage(node),

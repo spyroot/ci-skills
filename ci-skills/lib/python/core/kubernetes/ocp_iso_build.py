@@ -13,12 +13,13 @@ from lib.python.core.kubernetes.artifact_storage_runtime import observe_artifact
 from lib.python.core.kubernetes.kubernetes import KubernetesError
 from lib.python.core.kubernetes.ocp_iso import (
     NodeImageCallback,
+    OCPState,
     native_status_path,
     read_native_exit_code,
+    retain_native_recovery,
     run_node_image_script,
 )
 from lib.python.core.kubernetes.pod_files import remove_pod_file
-from lib.python.core.kubernetes.tool_pod_runtime import retain_tool_pod
 from lib.python.core.runtime import sanitize
 from lib.python.sys.status import APPLIED, NO_OP
 
@@ -40,15 +41,7 @@ def _preserve_uncertain_native_run(callback: NodeImageCallback) -> None:
     """
     state = callback.ocp_state
     state.native_completion_unknown = True
-    retain_tool_pod(state)
-    state.retained_pod_files.add(state.native_status_path)
-    if hasattr(state, "kubeconfig_file"):
-        state.retained_pod_files.add(state.kubeconfig_file.path)
-    if hasattr(state, "pull_secret_file"):
-        state.retained_pod_files.add(state.pull_secret_file.path)
-    state.retained_pod_files.update(
-        staged.artifact.path for staged in state.staged_inputs
-    )
+    retain_native_recovery(state)
 
 
 def _verify_asset_preflight(callback: NodeImageCallback) -> None:
@@ -77,6 +70,58 @@ def _verify_asset_preflight(callback: NodeImageCallback) -> None:
         raise KubernetesError("node_image_asset_preflight_invalid") from exc
     if not isinstance(value, dict) or value != {"verified": True}:
         raise KubernetesError("node_image_asset_preflight_invalid")
+    callback.ocp_state.preflight_verified = True
+
+
+def cleanup_failed_native_outputs(
+    state: OCPState, asset_directory: str, output_name: str
+) -> None:
+    """Remove only exact output paths whose absence was proven before execution.
+
+    :param state: Shared state retaining the successful absence preflight.
+    :param asset_directory: Exact preflight-checked native asset directory.
+    :param output_name: Exact preflight-checked native output filename.
+    :raises KubernetesError: If preflight is absent or exact-path cleanup fails.
+    """
+    if not state.preflight_verified:
+        raise KubernetesError("node_image_failed_cleanup_preflight_missing")
+    result = run_node_image_script(
+        state,
+        "cleanup-failed",
+        asset_directory,
+        output_name,
+    )
+    if result.returncode:
+        raise KubernetesError(
+            f"node_image_failed_output_cleanup_failed:exit={result.returncode}"
+        )
+    try:
+        value = response_decoder().decode(result.stdout)
+    except (ValueError, UnicodeError, RecursionError) as exc:
+        raise KubernetesError("node_image_failed_output_cleanup_invalid") from exc
+    if not isinstance(value, dict) or value != {"verified": True}:
+        raise KubernetesError("node_image_failed_output_cleanup_invalid")
+    state.native_failure_cleaned = True
+
+
+class PreflightNodeImage(NodeImageCallback):
+    """Prove the native output paths absent before recovery metadata is stored."""
+
+    def run(self) -> JSONObject:
+        """Select the private status path and verify exact output absence.
+
+        :returns: Verified path-absence evidence for the selected native output.
+        :raises KubernetesError: If the asset directory or any output path conflicts.
+        """
+        state = self.ocp_state
+        state.native_status_path = native_status_path(state)
+        _verify_asset_preflight(self)
+        return {
+            "action": NO_OP,
+            "verified": True,
+            "build_path": self.action.build_path,
+            "native_status_path_selected": True,
+        }
 
 
 class BuildNodeImage(NodeImageCallback):
@@ -96,9 +141,11 @@ class BuildNodeImage(NodeImageCallback):
             raise KubernetesError("node_image_kubeconfig_missing")
         if not hasattr(state, "pull_secret_file"):
             raise KubernetesError("node_image_pull_secret_missing")
-        state.native_status_path = native_status_path(state)
-        _verify_asset_preflight(self)
+        if not state.preflight_verified:
+            state.native_status_path = native_status_path(state)
+            _verify_asset_preflight(self)
         state.native_completion_unknown = False
+        state.native_started = True
         try:
             result = run_node_image_script(
                 state,
@@ -170,16 +217,31 @@ class BuildNodeImage(NodeImageCallback):
         :returns: No-op evidence and whether exact completion remains unknown.
         """
         state = self.ocp_state
+        failed_outputs_removed = False
         removed = False
+        if (
+            state.native_started
+            and state.native_exit_code > 0
+            and not state.native_completion_unknown
+        ):
+            cleanup_failed_native_outputs(
+                state, self.action.asset_directory, self.action.output_name
+            )
+            failed_outputs_removed = True
         if not state.native_completion_unknown and hasattr(state, "native_status_file"):
             removed = remove_pod_file(state, state.native_status_file)
         return {
-            "action": APPLIED if removed else NO_OP,
-            "verified": False,
+            "action": APPLIED if removed or failed_outputs_removed else NO_OP,
+            "verified": not state.native_completion_unknown,
             "native_completion_unknown": state.native_completion_unknown,
             "requires_preservation": state.native_completion_unknown,
             "completion_record_removed": removed,
+            "failed_outputs_removed": failed_outputs_removed,
         }
 
 
-__all__ = ["BuildNodeImage"]
+__all__ = [
+    "BuildNodeImage",
+    "PreflightNodeImage",
+    "cleanup_failed_native_outputs",
+]

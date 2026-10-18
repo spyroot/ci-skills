@@ -25,6 +25,7 @@ from lib.python.core.kubernetes.tool_pod_runtime import (
     SHELL,
     ToolPodK8SCallback,
     _shell,
+    retain_tool_pod,
 )
 from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.runtime import CommandResult
@@ -147,6 +148,21 @@ class OCPState(
 
         Exact observed completion-record identity, excluded from public results.
 
+    .. attribute :: preflight_verified
+        :type: bool
+
+        Whether exact native output paths were proved absent before execution.
+
+    .. attribute :: native_started
+        :type: bool
+
+        Whether the native process was dispatched for this run.
+
+    .. attribute :: native_failure_cleaned
+        :type: bool
+
+        Whether exact partial output cleanup completed after a known failure.
+
     .. attribute :: build_completed
         :type: bool
 
@@ -169,6 +185,9 @@ class OCPState(
     native_completion_unknown: bool = False
     native_status_path: str = ""
     native_status_file: ArtifactHandle = field(init=False, repr=False)
+    preflight_verified: bool = False
+    native_started: bool = False
+    native_failure_cleaned: bool = False
     build_completed: bool = False
     build_artifact: ArtifactHandle = field(init=False)
     embedded_ignition: JSONObject = field(default_factory=dict)
@@ -266,11 +285,29 @@ def read_native_exit_code(state: OCPState) -> Optional[int]:
     return exit_code
 
 
+def retain_native_recovery(state: OCPState) -> None:
+    """Retain the exact Pod and private inputs needed to reconcile native work.
+
+    :param state: Shared state whose native completion is not yet finalized.
+    """
+    retain_tool_pod(state)
+    if state.native_status_path:
+        state.retained_pod_files.add(state.native_status_path)
+    if hasattr(state, "kubeconfig_file"):
+        state.retained_pod_files.add(state.kubeconfig_file.path)
+    if hasattr(state, "pull_secret_file"):
+        state.retained_pod_files.add(state.pull_secret_file.path)
+    state.retained_pod_files.update(
+        staged.artifact.path for staged in state.staged_inputs
+    )
+
+
 __all__ = [
     "NodeImageAction",
     "NodeImageCallback",
     "OCPState",
     "native_status_path",
     "read_native_exit_code",
+    "retain_native_recovery",
     "run_node_image_script",
 ]
