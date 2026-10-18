@@ -23,19 +23,20 @@ This document plans from:
 - the proposition interface. [`CI11-TOOLS`](CI11-TOOLS.md#proposition-interface) and its schema define the node
   every call returns: `tools`, what the agent can run, the installed filenames, each chosen to say what the
   command actually does since that name is all the node shows for it, mapped to empty objects; and `reference`,
-  what it can read, an ordered array of entries each with a name,
-  a summary and a pointer to the next node, derived from `core/catalog.py`; a live offering never advertises a
-  proposed command. Section 3 below specifies the graph: the nodes, the placement of every command, the verbs'
-  purposes, the references and sections, and the compact output rules. Its renders use the 1.x `choices`
-  envelope, one entry per verb with `available` and `next`, which the schema keeps only as legacy beside the 2.0
-  mapping; the node carries no verb entry and no planned verb. CI11 also supersedes section 3's forced walk
-  through `run` and `read`: one answer per node carries `tools` and `reference` together, the agent expands a
-  node only when it decides it needs more, and no call through `run`, `read` or `describe` is required before
-  invoking a command; `next PATH` and `get` remain for drilling into a reference section. A reference pointer
-  resolves to a file ci-skills stores under `references/`, and a reference is itself a node of the same graph: it
-  expands into its sections through `get REF ANCHOR`, so the graph continues past the command node, and
-  expanding it is the agent's decision. Section 3 is retained as written; every capability registers into the
-  node and none defines a second navigator or inventory; this is requirement `R-CI09-005` in the map;
+  what it can read, an ordered array of entries each with a name, a summary and a pointer to the next node,
+  derived from `core/catalog.py`; a live offering never advertises a proposed command. Section 3 below
+  specifies the graph: the nodes, the placement of every command, the verbs' purposes, the references and
+  sections, and the compact output rules. Its renders use the 1.x `choices` envelope, one entry per verb with
+  `available` and `next`; that envelope and the 2.0 reference mapping are retired, and the `choice`, `pointer`
+  and `input` definitions stay in the reference-next schema only for the gitlab-pipeline-watch result schema;
+  the node carries no verb entry and no planned verb. CI11 also supersedes section 3's forced walk through
+  `run` and `read`: one answer per node carries `tools` and `reference` together, the agent expands a node
+  only when it decides it needs more, and no call through `run`, `read` or `describe` is required before
+  invoking a command; `get` remains for drilling into a reference's sections. A reference pointer resolves to
+  a file ci-skills stores under `references/`, and a reference is itself a node of the same graph: it expands
+  into its sections through `get REF ANCHOR`, so the graph continues past the command node, and expanding it
+  is the agent's decision. Section 3 is retained as written; every capability registers into the node and none
+  defines a second navigator or inventory; this is requirement `R-CI09-005` in the map;
 - [`CI11-TOOLS`](CI11-TOOLS.md), recipe step 4: a capability extends the catalogue's placement declarations for
   its proposition nodes, and its read-back is that the proposition lists the installed tool and its reference
   pointers;
@@ -203,15 +204,15 @@ Inspected at main `54ceb7f`; evidence is from main unless stated.
   served one chunk at a time, as sections 2 and 4 specify.
 - `PARTIALLY_IMPLEMENTED: the proposition interface (section 3)`. `ci-skills/bin/reference.py [node]` returns
   the version `2.0` node of CI11, built by `proposition()` in `core/catalog.py` from `PROPOSITION_CLUSTERS` and
-  the commands' provider authorities; `schemas/reference-next.schema.json` owns that shape and keeps the 1.x
-  `choices` envelope as legacy. Not yet built from section 3: the `next` and `get` verbs, the hierarchical nodes
+  the commands' provider authorities; `schemas/reference-next.schema.json` owns that shape and still carries
+  the 1.x `choices` envelope, now retired. Not yet built from section 3: the `get` verb, the hierarchical nodes
   and placement tables, the verb purposes, `--search`, cards and paging, the renders, and a row for a reference
   scoped to one command; the proposition today offers four fixed references chosen by provider. The planned
   verbs of section 3, the verbs CI11-TOOLS names for existing commands and has not delivered, are rendered there
   as 1.x choices with `available: false`; the node cannot carry them, and this phase delivers none of them
   (open decision below). The `run` and `read` segments of section 3 are not required steps: one answer per node
-  carries tools and references together, and `next PATH` and `get` are the agent's optional expansion into a
-  reference section.
+  carries tools and references together, and `get` is the agent's optional expansion into a reference's
+  sections.
 
 ### Design and Decomposition
 
@@ -2176,9 +2177,9 @@ combo lands without what the agent needs to run it and read for it:
           grounding: GROUNDED
           implementation: PARTIALLY_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: Every answer the navigator returns is a node of the CI11 Proposition interface at schema version 3.0, with 2.0 and 1.x retained as legacy, validated against schemas/reference-next.schema.json; the graph of section 3 is rendered into that node shape, and no answer advertises a command or verb that is not installed; one answer per node carries tools and references together, and no traversal through run, read or describe is required before invoking a command, the agent expanding only when it decides to; every reference pointer resolves to a file ci-skills delivers, and a reference expands into its sections on the agent's decision, so the graph continues past the command node.
+        deliverable: Every answer the navigator returns is a node of the CI11 Proposition interface at schema version 3.0, the 2.0 mapping and the 1.x envelope retired, validated against schemas/reference-next.schema.json; the graph of section 3 is rendered into that node shape, and no answer advertises a command or verb that is not installed; one answer per node carries tools and references together, and no traversal through run, read or describe is required before invoking a command, the agent expanding only when it decides to; every reference pointer resolves to a file ci-skills delivers, and a reference expands into its sections on the agent's decision, so the graph continues past the command node.
         owner: ci-skills/bin/reference.py
-        preserve: [The node schema and the legacy versions it retains, Existing clusters and pointers]
+        preserve: [The node schema, The pointer definitions the gitlab-pipeline-watch result schema uses, Existing clusters and pointers]
         prIds: [PR-CI09-1]
         gateIds: [G-CI09-STATIC, G-CI09-REGISTRATION, G-CI09-LIVE]
         evidence: []
