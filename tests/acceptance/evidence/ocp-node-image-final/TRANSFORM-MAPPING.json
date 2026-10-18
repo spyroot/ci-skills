@@ -1,0 +1,357 @@
+{
+  "algorithm": "sha256",
+  "entries": [
+    {
+      "kind": "installed_identity",
+      "portable_name": "01-installed-provenance.json",
+      "portable_sha256": "573e7c3429786cc9f4ecf7d6b3d0f3e9104d759ee25d92ffb8162a669cee3714",
+      "raw_name": "reports/install-apply.json",
+      "raw_sha256": "de818eac2507c2034390078b33b7c550415e9317526efe0f00075bcf351f1c44"
+    },
+    {
+      "kind": "installed_record",
+      "portable_name": "02-installation-record.json",
+      "portable_sha256": "ec1bd9fb0aaa839da82651d3e3bad6f9c9ada666e337867cc849733576cc8b8e",
+      "raw_name": "installation/ci-skills/INSTALLATION.json",
+      "raw_sha256": "aaec0e02e86b3330fafc39e5d4315d3321e1b3866962aa73b66e98e536346b64"
+    },
+    {
+      "kind": "installed_proposition",
+      "portable_name": "03-proposition.json",
+      "portable_sha256": "9351bb8b98bc538aa3afdbeb2303e900bc4667c804c9e7113214a495b8153cd2",
+      "raw_name": "reports/discovery-node.json",
+      "raw_sha256": "dc5928a5af8906016e03e091edcc1a9139ae9322a58089bacb07c6a0965f1496"
+    },
+    {
+      "kind": "installed_references",
+      "portable_name": "04-references.json",
+      "portable_sha256": "0e79b4cb172c2d60759eab6ec4d057888a34575fc3e5a14a126bc340d412a5f4",
+      "raw_name": "reports/discovery-read.json",
+      "raw_sha256": "d95ff5ced9d412ca1c71f083c8a5696068cc639b87994811ba2f0b3bf18c6078"
+    },
+    {
+      "kind": "installed_actions",
+      "portable_name": "05-actions.json",
+      "portable_sha256": "5b3920007e9af4c5d302a4ccf2c9f2b964bc2a2de6d2b44d3aba60b840460ecf",
+      "raw_name": "reports/discovery-run.json",
+      "raw_sha256": "80a92bf6eaae4ffa054e3de7d3d52402113776da75aa6ff246db1a938e063c2e"
+    },
+    {
+      "kind": "installed_help",
+      "portable_name": "06-help.txt",
+      "portable_sha256": "6c80ac30e8df1ea833e8f02d0f344f9dd099760aaacea0f3d5ec252c9656a048",
+      "raw_name": "reports/help.txt",
+      "raw_sha256": "6c80ac30e8df1ea833e8f02d0f344f9dd099760aaacea0f3d5ec252c9656a048"
+    },
+    {
+      "kind": "installed_description",
+      "portable_name": "07-description.json",
+      "portable_sha256": "ea36ad6f4ac23d861e8d76918f829aebc701e91b71629c18649d94e3f43d051b",
+      "raw_name": "reports/describe.json",
+      "raw_sha256": "752f7445cdd1a8d4f0ac3580e6bd83a10903d14ef0e6de3b122542d728fa5972"
+    },
+    {
+      "kind": "native_input",
+      "portable_name": "inputs/nodes-config.yaml",
+      "portable_sha256": "e6865bddb6570fe49614c14ab49dfd896ac478d170db8323a86bba85beba4eb4",
+      "raw_name": "inputs/nodes-config.yaml",
+      "raw_sha256": "e6865bddb6570fe49614c14ab49dfd896ac478d170db8323a86bba85beba4eb4"
+    },
+    {
+      "kind": "destination_input",
+      "portable_name": "inputs/yaml-destination.json",
+      "portable_sha256": "a8a3a1de6b3778590a5c89f8fb37af82087fcb5445d74c31320bb6cacbbc749f",
+      "raw_name": "inputs/yaml-destination.json",
+      "raw_sha256": "2e34d646c360146975c0cc78ebac75ef324871a02f752d626a38a7964bc2b3bb"
+    },
+    {
+      "kind": "destination_input",
+      "portable_name": "inputs/mac-destination.json",
+      "portable_sha256": "11635027f080edb00057b38ea04a7dfb717e54b833d584df1e02e4febfb05092",
+      "raw_name": "inputs/mac-destination.json",
+      "raw_sha256": "f1189a79a7813c4c5f38c67cdfd2c84c4b0a590387087116d45fdbfd56ecdc40"
+    },
+    {
+      "kind": "build_plan",
+      "portable_name": "yaml/01-build-plan.json",
+      "portable_sha256": "45c78e2fb800a2db4e8c936475f505b5f24ef20fc2090b70554888ca9c819114",
+      "raw_name": "reports/yaml-plan-final.json",
+      "raw_sha256": "2428a39fa3992b1b4352d264a009c81e17ba7f2b23643b661de8e9ec65fcae75"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "yaml/02-build.json",
+      "portable_sha256": "9a61b862a87ae7368f4f88f8a4fdf9dacf325168b5a3ef2bc3bb16036b1fee02",
+      "raw_name": "reports/yaml-build.json",
+      "raw_sha256": "9f25f1903660a96c20bb6a4828f77063dc80b71d7dc27d344c6d0b8ed5bb48ee"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "yaml/03-verify.json",
+      "portable_sha256": "aa47d2a74a91ef6dd9e6faacdc2d6f1a09a0092da4f20f9a1948486ea11e5bef",
+      "raw_name": "reports/yaml-verify.json",
+      "raw_sha256": "d63f2cffd3f0849984fec573417d4ba6f6fb9d363cc364d44f802a7050e22d02"
+    },
+    {
+      "kind": "remove_plan",
+      "portable_name": "yaml/04-remove-plan.json",
+      "portable_sha256": "3925d049867875b33f6b301c1ce9e4a4c05c06f1505a80f1462466794cf5b209",
+      "raw_name": "reports/yaml-remove-plan.stdout.json",
+      "raw_sha256": "371a8f5359ba9c8045af72e60c91f6c45778d42ffa13019a834eba848f27059c"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "yaml/05-remove.json",
+      "portable_sha256": "d5cd42063f3bafbef7c0199669f34cc352b4a6c2443b7a6cb491d64e8128eb87",
+      "raw_name": "reports/yaml-remove.json",
+      "raw_sha256": "1b943230e86b29261cd3a1909248c756e98a88bfa56cbb1828a80acde92dee0a"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "yaml/build.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/yaml-build.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "yaml/verify.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/yaml-verify.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "yaml/remove.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/yaml-remove.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "yaml/remove-plan.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/yaml-remove-plan.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "event_count": 23,
+      "kind": "debug_trace",
+      "portable_name": "traces/yaml-build-plan.jsonl",
+      "portable_sha256": "024ce061fd8bd497d8c48e3b9c8dd42606fa3e224c85f138e48aaf0d72ed5edb",
+      "raw_name": "reports/yaml-plan-final-trace.jsonl",
+      "raw_sha256": "f1644babd9ded9f1188a4e535b6220d2f44df06a2eb640b9b8fdb09179866aba"
+    },
+    {
+      "event_count": 297,
+      "kind": "debug_trace",
+      "portable_name": "traces/yaml-build.jsonl",
+      "portable_sha256": "10d8112c06b9f7d6703cafe687ac800f52d416477847f8e2241ba59e506746eb",
+      "raw_name": "reports/yaml-build-trace.jsonl",
+      "raw_sha256": "dd0b81f250e020643586ccc2ac205ea763b60c861264520322ab068c4dd6a20d"
+    },
+    {
+      "event_count": 158,
+      "kind": "debug_trace",
+      "portable_name": "traces/yaml-verify.jsonl",
+      "portable_sha256": "e28a07596080ec3dc8a48f2fea48b58eb5e74ea40b726a525a3112ed7c342c90",
+      "raw_name": "reports/yaml-verify-trace.jsonl",
+      "raw_sha256": "f6af74e28d72c8aea322fb8804e4453e180bb2167e20f268079f8937a783eb90"
+    },
+    {
+      "kind": "build_plan",
+      "portable_name": "mac/01-build-plan.json",
+      "portable_sha256": "22a1f11e4641563c0dcdd0f3c65d668c30fed92e2a13392a4fa14be915a95f90",
+      "raw_name": "reports/mac-plan-final.json",
+      "raw_sha256": "8aab599263e1185cd6be17a631fa21ab34af130bd807149a9da956a9cd1bac83"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "mac/02-build.json",
+      "portable_sha256": "1a2d6281cbaba11c9fb468bfb0ca5d9d68295bec3dd6891af7d82fa0b14c3ed2",
+      "raw_name": "reports/mac-build.json",
+      "raw_sha256": "177d5abbb531946521851bc4ac28a18db8ddc0768aeaed1faa452b75b44767ed"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "mac/03-verify.json",
+      "portable_sha256": "373ad4c99a2e16cf0b9ead2cb0ece23eb10cb6365083a2b4569d630403c519ab",
+      "raw_name": "reports/mac-verify.json",
+      "raw_sha256": "b3bb73503abd1c18e79bb5429e38c27ae236140c18a5e5dddd78a964d457ca8c"
+    },
+    {
+      "kind": "remove_plan",
+      "portable_name": "mac/04-remove-plan.json",
+      "portable_sha256": "343b8c11f7701d141dfa4cc9d04cbbacf0db96de1d04df33a78ca47225f7fec1",
+      "raw_name": "reports/mac-remove-plan.stdout.json",
+      "raw_sha256": "00739ddf00a3df92dd5bb59d900d93f877ccf18c281b1488b8ddf4d5322fac34"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "mac/05-remove.json",
+      "portable_sha256": "1e970f53705da330dc02bfc5be173f4d10077375ff466bcc140ca87b6932b3fd",
+      "raw_name": "reports/mac-remove.json",
+      "raw_sha256": "521134dc42c54924017d9fdf75351875aed4cbcb66062f51411e47c4f0084aaf"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "mac/build.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/mac-build.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "mac/verify.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/mac-verify.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "mac/remove.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/mac-remove.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "mac/remove-plan.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/mac-remove-plan.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "event_count": 23,
+      "kind": "debug_trace",
+      "portable_name": "traces/mac-build-plan.jsonl",
+      "portable_sha256": "72591d803d8f9514df371ee7a7b50dca2611b49be64acfe3d488987331253b83",
+      "raw_name": "reports/mac-plan-final-trace.jsonl",
+      "raw_sha256": "680e260070d10ca2c094f312af6fb3edb8c767584da7a9ef8bb7f30e6b2a5a6a"
+    },
+    {
+      "event_count": 286,
+      "kind": "debug_trace",
+      "portable_name": "traces/mac-build.jsonl",
+      "portable_sha256": "eaae59dc205c778f32276e7340f54a7eb5d3f2f5560d7d5a25d0a63990bd951b",
+      "raw_name": "reports/mac-build-trace.jsonl",
+      "raw_sha256": "9ff5a8c1d05b4cc48cf7d41a0a9971cdf248789d11eac474b9f6ca4a8fc12a6c"
+    },
+    {
+      "event_count": 158,
+      "kind": "debug_trace",
+      "portable_name": "traces/mac-verify.jsonl",
+      "portable_sha256": "f3685e5423ce38ce310a6af8544e43c004bed8297c53467f9c351587339af354",
+      "raw_name": "reports/mac-verify-trace.jsonl",
+      "raw_sha256": "321664ec95ff9a573813ff848c1a80eb88383138b4fdd10c82aaac965d324efc"
+    },
+    {
+      "kind": "exact_file_readback",
+      "portable_name": "cleanup/iso-cleanup.log",
+      "portable_sha256": "9c643112702cecb997a2f8ab5b779f645af68c5467207439e05d1542d018bead",
+      "raw_name": "reports/exact-file-cleanup.log",
+      "raw_sha256": "9c643112702cecb997a2f8ab5b779f645af68c5467207439e05d1542d018bead"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "cleanup/cleanup-apply.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/exact-file-cleanup-apply.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "cleanup/cleanup-wait.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/exact-file-cleanup-wait.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "cleanup/cleanup-helper-delete.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/exact-file-cleanup-helper-delete.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "helper_deletion_readback",
+      "portable_name": "cleanup/cleanup-helper-delete.txt",
+      "portable_sha256": "c986af31037fc2a324439e428e88f48194ee195641c30cf3c544f3852880d019",
+      "raw_name": "reports/exact-file-cleanup-helper-delete.stdout",
+      "raw_sha256": "cc39e80319661d09f613fc23816113e75bf0126dda825387b75dc22c8f4a7473"
+    },
+    {
+      "kind": "exact_file_readback",
+      "portable_name": "cleanup/iso-absence.log",
+      "portable_sha256": "56710bb03a485df3474195a9afe5f82db3afdce8a9ec38f6717fea803dc4fb43",
+      "raw_name": "reports/exact-file-absence.log",
+      "raw_sha256": "56710bb03a485df3474195a9afe5f82db3afdce8a9ec38f6717fea803dc4fb43"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "cleanup/absence-apply.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/exact-file-absence-apply.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "cleanup/absence-wait.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/exact-file-absence-wait.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "cleanup/absence-helper-delete.exit",
+      "portable_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "raw_name": "reports/exact-file-absence-helper-delete.exit",
+      "raw_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "kind": "helper_deletion_readback",
+      "portable_name": "cleanup/absence-helper-delete.txt",
+      "portable_sha256": "21c55ee7e15a3236d7a88edb999d89fbf0c3418fb68f2b685d78b43550535403",
+      "raw_name": "reports/exact-file-absence-helper-delete.stdout",
+      "raw_sha256": "9268b04c84b21f2c4a71677227de9f0b1f1fbc2cdf97b88b9989a258ded81d0e"
+    },
+    {
+      "kind": "helper_resource_readback",
+      "portable_name": "cleanup/helpers-before.txt",
+      "portable_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_name": "reports/exact-file-helper-resources-before.txt",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "kind": "helper_resource_readback",
+      "portable_name": "cleanup/helpers-after.txt",
+      "portable_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_name": "reports/exact-file-helper-resources-after.txt",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "kind": "independent_resource_absence",
+      "portable_name": "cleanup/run-owned-resources.txt",
+      "portable_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_name": "reports/run-owned-resources-post-cleanup.txt",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "kind": "acceptance_refresh_cleanup",
+      "portable_name": "cleanup/acceptance-refresh.json",
+      "portable_sha256": "fe7f51c4520cd26026027bc5157cda6d187b64b3a8f39a9bdde84fe031f1f374",
+      "raw_name": "acceptance-refresh-final/cleanup.json",
+      "raw_sha256": "fe7f51c4520cd26026027bc5157cda6d187b64b3a8f39a9bdde84fe031f1f374"
+    },
+    {
+      "kind": "scoped_cleanup_readback",
+      "portable_name": "cleanup/scoped-readback.json",
+      "portable_sha256": "791ac9b810ddf39969b1770d74e6ee0e7bb3302e43a42aa745d1b501fb534cca",
+      "raw_name": "reports/native-cleanup-temporal-exclusion.json",
+      "raw_sha256": "42298b24063dd2a7bfa76ded0b5c865a48208889a3c29cda0d39ebb3a38a8bbb"
+    }
+  ],
+  "kind": "ocp_iso_portable_evidence_mapping",
+  "path_token_algorithm": "sha256-first-12-hex",
+  "schema_version": "1.0"
+}
