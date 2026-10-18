@@ -283,20 +283,23 @@ def test_podman_proposition_offers_installed_readiness_procedure() -> None:
     expected = {
         "Nested Podman readiness": {
             "summary": "Podman probe inputs, planning, execution and evidence.",
-            "pointer": "references/podman-readiness.md",
+            "pointer": "get nested-podman-readiness",
         },
         "OpenShift SCC access": {
             "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
-            "pointer": "references/openshift-scc.md",
+            "pointer": "get openshift-scc-access",
         },
     }
 
-    cluster = CATALOG.proposition()["kubernetes"]
+    root = CATALOG.proposition()
+    cluster = root["kubernetes"]
     unrelated = CATALOG.proposition("gitlab_runner.py")
+    for payload in (root, selected, unrelated):
+        _validate(payload)
     for name, record in expected.items():
-        assert selected["reference"][name] == record
-        assert cluster["reference"][name] == record
-        assert name not in unrelated["reference"]
+        assert _entries(selected)[name] == {"name": name, **record}
+        assert _entries(cluster)[name] == {"name": name, **record}
+        assert name not in _entries(unrelated)
     assert "create_selfhosted_runner.py" not in selected["tools"]
 
 
@@ -309,21 +312,24 @@ def test_iso_proposition_offers_native_input_and_destination_guidance() -> None:
     expected = {
         "Native OCP YAML example": {
             "summary": "Node MAC/NIC, disk and network inputs passed unchanged to OpenShift.",
-            "pointer": "references/ocp-node-input.md",
+            "pointer": "get native-ocp-yaml-example",
         },
         "Native OCP command flags": {
             "summary": "OpenShift flags, ci-skills input mapping and upstream procedure.",
-            "pointer": "references/ocp-node-image-flags.md",
+            "pointer": "get native-ocp-command-flags",
         },
     }
 
-    cluster = CATALOG.proposition()["kubernetes"]
+    root = CATALOG.proposition()
+    cluster = root["kubernetes"]
     unrelated = CATALOG.proposition("gitlab_runner.py")
+    for payload in (root, selected, unrelated):
+        _validate(payload)
     for name, reference in expected.items():
-        assert selected["reference"][name] == reference
-        assert cluster["reference"][name] == reference
-        assert (SCRIPT_ROOT.parent / reference["pointer"]).is_file()
-        assert name not in unrelated["reference"]
+        assert _entries(selected)[name] == {"name": name, **reference}
+        assert _entries(cluster)[name] == {"name": name, **reference}
+        assert _registered_file(name).is_file()
+        assert name not in _entries(unrelated)
     assert "toolbox.py" not in selected["tools"]
 
 

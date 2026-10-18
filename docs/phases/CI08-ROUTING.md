@@ -32,12 +32,11 @@ The navigator is `ci-skills/bin/reference.py` (CI09-REFERENCE,
 section 3); this phase supplies the `SKILL.md` routing around it, not the
 navigator's data.
 
-- **Sources.** CI09-REFERENCE, section 3 (Authority, Declarations) is the
-  single specification of the navigator's declarations, output and
-  rendering; this phase adds none.
+- **Sources.** [CI11-TOOLS, Proposition interface](CI11-TOOLS.md#proposition-interface) owns the v3 node
+  shape; CI09-REFERENCE owns the navigator declarations and reference expansion. This phase adds neither.
 - **Installed copies.** CI09-REFERENCE lists `ci-skills/bin/reference.py`
   among the installed entrypoints (section 2, Block, knowledge kind), so an
-  installed copy will answer `next` without a checkout. `bin/ci-skills list`
+  installed copy answers `reference.py [node]` and `get` without a checkout. `bin/ci-skills list`
   (planned, CI01-CATALOG) needs a checkout, because `tools/` is not installed
   with a skill.
 - **Matching `load_when`** (stated once, here). A
@@ -45,10 +44,9 @@ navigator's data.
   report's `status` (for example `BLOCKED`); else a case-insensitive
   substring over the task text. The navigator places reference sections by
   CI09-REFERENCE section 3, Declarations, not by `load_when`.
-- **Example.** The walk is CI09-REFERENCE section 3, Renders 1 to 6.
-
-  An agent with a pipeline question runs `next gitlab pipeline`, then the
-  `next` or leaf it chose; `references/access.md` opens only on `BLOCKED`.
+- **Example.** An agent with a pipeline question runs `reference.py gitlab_pipeline.py`. The answer offers
+  installed tools and an ordered `reference` array together. The agent invokes the chosen tool or follows a
+  returned pointer, such as `reference.py get access`, when needed; reference reading is optional.
 
 ## Block
 

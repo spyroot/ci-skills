@@ -222,10 +222,9 @@ A proposition is a compact offering of the tools and references at one node. The
 each selected node proposes its own relevant tools and references. Nodes form a graph: related job, pipeline, runner,
 and milestone tools can appear together, and multiple nodes can point to the same command or document.
 
-The following root/jobs payloads are design examples from the existing
-[CI11 plan](docs/phases/CI11-TOOLS.md#proposition-interface), not commands already installed. Short filenames and
-reference paths illustrate the proposed offerings; the [current capabilities](#current-capabilities) below name the
-shipped commands.
+The following root/jobs payload excerpts use the installed filenames and reference pointers defined by the
+[CI11 proposition interface](docs/phases/CI11-TOOLS.md#proposition-interface). The
+[current capabilities](#current-capabilities) below describe the shipped commands.
 
 Root, showing the `glab` cluster:
 
@@ -233,47 +232,51 @@ Root, showing the `glab` cluster:
 {
   "glab": {
     "tools": {
-      "runner.py": {},
-      "pipeline.py": {},
-      "milestone.py": {},
-      "jobs.py": {}
+      "gitlab_runner.py": {},
+      "gitlab_pipeline.py": {},
+      "gitlab_milestone.py": {},
+      "gitlab_job.py": {}
     },
-    "reference": {
-      "mcp": {
+    "reference": [
+      {
+        "name": "mcp",
         "summary": "GitLab MCP configuration and toolsets.",
-        "pointer": "references/mcp.md"
+        "pointer": "get mcp"
       }
-    }
+    ]
   }
 }
 ```
 
-Selecting `jobs.py` returns that node's proposition directly:
+Selecting `reference.py gitlab_job.py` returns that node's proposition directly:
 
 ```json
 {
   "tools": {
-    "watch.py": {},
-    "create_tagged_protected_job.py": {}
+    "gitlab_job.py": {},
+    "gitlab_pipeline.py": {},
+    "gitlab_runner.py": {}
   },
-  "reference": {
-    "pipeline variables": {
-      "summary": "Predefined CI/CD variables reference",
-      "pointer": "references/predefine.md"
+  "reference": [
+    {
+      "name": "mcp",
+      "summary": "GitLab MCP configuration and toolsets.",
+      "pointer": "get mcp"
     }
-  }
+  ]
 }
 ```
 
 A descriptive filename identifies the action; the agent can request its native `--help` for arguments. Reference
-pointers are optional reading. A proposition returns the useful connections for that node without expanding all
-commands or embedding the referenced documents.
+pointers must be offered; following them is optional. A proposition returns the useful connections for that node
+without expanding all commands or embedding the referenced documents.
 
 The [proposition schema](docs/phases/CI11-TOOLS.md#proposition-schema) defines a root mapping of cluster names to nodes;
-each node has `tools` (filename → `{}`) and `reference` (name → summary/pointer) mappings. Responses pair
-these payloads with `schema_version: "2.0"`, omitted from the payload excerpts above. The
-[reference-next schema](schemas/reference-next.schema.json) validates propositions and preserves the legacy 1.x
-response and pointer definitions.
+each node has a `tools` mapping (filename → `{}`) and an ordered `reference` array of `name`, `summary` and
+`pointer` entries. Each pointer is the next `reference.py` invocation, such as `get mcp`; entries have no separate
+`next` field. Responses carry `schema_version: "3.0"`, omitted from the excerpts above. The
+[reference-next schema](schemas/reference-next.schema.json) retires the 1.x discovery envelope and 2.0 reference map;
+its command-pointer definitions remain only for pipeline watch results.
 
 ## Callback workflow boilerplate
 
