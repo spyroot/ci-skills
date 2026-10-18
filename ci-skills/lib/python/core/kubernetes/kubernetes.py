@@ -105,11 +105,17 @@ class KubernetesService:
             raise TargetError("kubernetes_target_missing")
         self.configuration = selected
 
-    def command(self, *args: str, openshift: bool = False) -> CommandResult:
+    def command(
+        self,
+        *args: str,
+        openshift: bool = False,
+        input_data: Optional[bytes] = None,
+    ) -> CommandResult:
         """Run one bounded ``kubectl`` or ``oc`` command without a shell.
 
         :param *args: Native client arguments after the selected context flags.
         :param openshift: Select ``oc`` instead of ``kubectl``.
+        :param input_data: Optional exact stdin bytes, excluded from command metadata.
         :returns: Bounded stdout, stderr, exit status, and exact argument vector.
         :raises TargetError: If the bound kubeconfig changed before execution.
         :raises OSError: If the native process cannot start or its output cannot be read.
@@ -119,6 +125,7 @@ class KubernetesService:
             builder(self.target, *args),
             timeout=self.timeout,
             env=kubernetes_env(self.target),
+            **({"input_data": input_data} if input_data is not None else {}),
         )
 
     def json(self, *args: str, openshift: bool = False) -> JSONDocument:
@@ -263,6 +270,7 @@ class KubernetesService:
         pod: str,
         container: str,
         *argv: str,
+        input_data: Optional[bytes] = None,
     ) -> CommandResult:
         """Execute one bounded argument vector in an exact Pod container.
 
@@ -273,6 +281,7 @@ class KubernetesService:
         :param pod: Exact observed Pod name.
         :param container: Exact selected container name.
         :param *argv: Command and arguments after the native ``--`` separator.
+        :param input_data: Optional stdin bytes; supplied bytes enable native ``-i``.
         :returns: Bounded native process result.
         :raises ValueError: If the command vector is empty.
         :raises TargetError: If the bound kubeconfig changed before execution.
@@ -283,11 +292,13 @@ class KubernetesService:
         return self.command(
             *self._namespace_args(namespace),
             "exec",
+            *(("-i",) if input_data is not None else ()),
             f"pod/{pod}",
             "-c",
             container,
             "--",
             *argv,
+            **({"input_data": input_data} if input_data is not None else {}),
         )
 
     def wait_pod_ready(self, name: str, namespace: str) -> JSONObject:
