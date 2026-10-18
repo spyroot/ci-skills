@@ -187,7 +187,7 @@ def test_pod_exec_only_enables_interactive_input_for_supplied_bytes(
         *,
         timeout: int,
         env: Optional[Mapping[str, Optional[str]]],
-        input_data: Optional[bytes],
+        input_data: Optional[bytes] = None,
     ) -> RUNTIME.CommandResult:
         """Record the adapter's native vector and exact input without a cluster.
 

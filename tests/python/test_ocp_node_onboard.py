@@ -7,12 +7,13 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
-from collections.abc import MutableSequence, Sequence
+from collections.abc import Mapping, MutableSequence, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import pytest
 from conftest import import_script_module
@@ -23,6 +24,10 @@ INVOCATION = import_script_module("lib.python.core.kubernetes.ocp_invocation")
 DISCOVERY = import_script_module("lib.python.core.kubernetes.ocp_boot_image")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 PLAN = import_script_module("lib.python.core.report")
+
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject
 
 
 @dataclass(frozen=True)
@@ -314,10 +319,28 @@ def test_live_plan_resolves_published_tools_without_creating_any_resources(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Live planning reads the release and published tool identities, then stops."""
+    """Live planning binds original inputs before redacting its mutation-free report."""
     cluster = PlanningCluster()
     bind_provider(monkeypatch, cluster)
+    digests: MutableSequence[str] = []
+    emit_result = CLI.emit_result
 
+    def capture_plan(data: JSONObject, args: argparse.Namespace) -> int:
+        """Observe the original plan while retaining the real report writer.
+
+        :param data: Actual command report before display redaction.
+        :param args: Caller-selected output and receipt settings.
+        :returns: Real report writer's command status.
+        """
+        plan = data["plan"]
+        assert isinstance(plan, Mapping)
+        inputs = plan["inputs"]
+        assert isinstance(inputs, Mapping)
+        assert isinstance(inputs["pull_secret"], Mapping)
+        digests.append(PLAN.plan_digest(plan))
+        return emit_result(data, args)
+
+    monkeypatch.setattr(CLI, "emit_result", capture_plan)
     code, result = run_cli(caller_inputs.argv("--live-plan"), capsys)
 
     assert code == 0
@@ -328,7 +351,8 @@ def test_live_plan_resolves_published_tools_without_creating_any_resources(
     assert inputs["release"]["source"] == "provider"
     assert inputs["tool_pod"]["image"].endswith("@sha256:" + "d" * 64)
     assert inputs["node_selector"] == {"kubernetes.io/arch": "amd64"}
-    assert result["plan_digest"] == PLAN.plan_digest(result["plan"])
+    assert inputs["pull_secret"] == "[REDACTED]"
+    assert digests == [result["plan_digest"]]
 
 
 def test_caller_tool_override_avoids_provider_release_and_publication_discovery(
