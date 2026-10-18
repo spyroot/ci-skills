@@ -230,7 +230,8 @@ def test_dry_run_and_existing_destination_are_non_destructive(tmp_path: Path) ->
     )
     assert blocked["status"] == "BLOCKED"
     assert blocked["reason"] == "destination_exists"
-    assert blocked["safe_next_step"]
+    assert "--upgrade --dry-run" in blocked["safe_next_step"]
+    assert "--confirm-upgrade FINGERPRINT" in blocked["safe_next_step"]
     assert marker.read_text(encoding="utf-8") == "keep"
 
 
