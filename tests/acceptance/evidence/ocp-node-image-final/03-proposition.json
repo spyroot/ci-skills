@@ -1,0 +1,44 @@
+{
+  "choices": [
+    {
+      "id": "run",
+      "kind": "expand",
+      "next": {
+        "action": "expand",
+        "args": [
+          "next",
+          "k8s",
+          "ocp_node_onboard",
+          "run",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "3 capabilities to run."
+    },
+    {
+      "id": "read",
+      "kind": "expand",
+      "next": {
+        "action": "expand",
+        "args": [
+          "next",
+          "k8s",
+          "ocp_node_onboard",
+          "read",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "4 references with sections here."
+    }
+  ],
+  "continuation": null,
+  "kind": "reference_next",
+  "path": [
+    "k8s",
+    "ocp_node_onboard"
+  ],
+  "schema_version": "1.0",
+  "summary": "Build an OpenShift node ISO in-cluster and verify its delivery to selected storage."
+}

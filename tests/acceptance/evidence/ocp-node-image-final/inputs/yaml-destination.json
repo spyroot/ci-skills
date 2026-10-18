@@ -1,0 +1,11 @@
+{
+  "artifactPath": "/shared/ci-skills-pr85-48c4489a-yaml-20261018t113417z/node.iso",
+  "buildOutput": "scratch",
+  "mountPath": "/shared",
+  "namespace": "namespace:b115cbf8fccd",
+  "volumeSource": {
+    "persistentVolumeClaim": {
+      "claimName": "pvc:92a982289cbe"
+    }
+  }
+}
