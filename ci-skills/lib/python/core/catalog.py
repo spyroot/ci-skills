@@ -264,6 +264,97 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
         "are cleaned on exit.",
     },
+    "ocp_node_onboard.py": {
+        "kind": "ocp_node_onboard",
+        "purpose": "Build an OpenShift node ISO in-cluster and verify its delivery to selected storage.",
+        "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; "
+        "inspect or release a previous run. See references/ocp-node-image.md.",
+        "requires": ("kubernetes",),
+        "capabilities": (),
+        "mutates": True,
+        "options": {
+            "--spec": "native nodes-config.yaml passed unchanged; alternative to --mac-address",
+            "--mac-address": "joining host's actual NIC MAC; alternative to --spec",
+            "--network-config-path": "native network YAML used with the MAC route, passed unchanged",
+            "--destination": "five-field cluster storage JSON; schemas/artifact-destination.schema.json",
+            "--tool-pod-spec": "optional CI12.0 tool override; schemas/tool-pod.schema.json",
+            "--pull-secret-namespace": "existing registry Secret namespace; default openshift-config",
+            "--pull-secret-name": "existing registry Secret name; default pull-secret",
+            "--pull-secret-key": "existing registry Secret data key; default .dockerconfigjson",
+            "--run-id": "returned run identifier for verification/removal, also used in logs",
+            "--timeout": "positive operation timeout in seconds (default: 1800)",
+            "--live-plan": "resolve live prerequisites and produce the confirmation digest",
+            "--apply": "perform the exact confirmed build or removal",
+            "--confirm-plan": "plan digest binding target, native inputs, storage, tools and functional code",
+            "--receipt-out": "write the sanitized result to this exact path",
+        },
+        "subcommands": {
+            "build": {
+                "purpose": "Build from either a MAC or native YAML and verify the exact cluster destination.",
+                "required_options": ["--destination"],
+                "mutates": True,
+                "side_effects": "Confirmed build stages a tool Pod and native OpenShift temporary resources, "
+                "writes the requested ISO, and retains its run record; temporary final storage retains its Pod.",
+                "read_back": "Native completion, embedded Ignition, actual ISO size/SHA-256 and destination.",
+                "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+            },
+            "verify": {
+                "purpose": "Read and inspect the existing cluster-held ISO identified by its run.",
+                "required_options": ["--run-id"],
+                "mutates": True,
+                "side_effects": "Persistent storage can require a temporary reader Pod, cleaned after inspection.",
+                "read_back": "Exact stored artifact identity, size/SHA-256 and embedded Ignition.",
+                "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+            },
+            "remove": {
+                "purpose": "Remove owned run resources while preserving persistent destination storage and ISO.",
+                "required_options": ["--run-id"],
+                "mutates": True,
+                "side_effects": "Confirmed removal deletes only run-owned resources; temporary output ends "
+                "with its Pod. Persistent ISO and caller storage remain.",
+                "read_back": "Owned resource absence and, for persistent output, unchanged ISO before and after removal.",
+                "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+            },
+        },
+        "related": ("prepare_tool_pod.py", "storage_report.py"),
+        "references": ("OpenShift node image",),
+        "required_tools": ("kubectl", "oc", "curl (default tool discovery)"),
+        "returns": "Shared workflow report with native completion, callback observations, final cluster artifact "
+        "identity/lifetime, plan, provenance and cleanup evidence.",
+        "execution_surface": "installed skill controls tools and ISO generation inside the selected Kubernetes cluster",
+        "side_effects": "Build/remove use plan confirmation. Native oc creates its temporary workload and RBAC; "
+        "the wrapper grants no additional cluster rights. ISO bytes stay in the cluster.",
+        "description": "Build requires --destination and exactly one of --mac-address or --spec. "
+        "The caller selects real NIC/network/disk values; ci-skills passes native YAML unchanged to OpenShift "
+        "and returns native errors. Tools are prepared inside the Pod through CI12.0. "
+        "The destination wrapper selects storage and an exact final path; it does not define an OCP schema. "
+        "Native input and destination examples: references/ocp-node-image.md.",
+        "examples": (
+            {
+                "description": "Plan a MAC-based build at the selected cluster destination",
+                "command": "ocp_node_onboard.py build --mac-address 02:00:00:10:00:01 "
+                "--destination destination.json --live-plan --json",
+            },
+            {
+                "description": "Plan a build from the caller's unchanged native YAML",
+                "command": "ocp_node_onboard.py build --spec nodes-config.yaml "
+                "--destination destination.json --live-plan --json",
+            },
+            {
+                "description": "Build from the same inputs after inspecting the plan",
+                "command": "ocp_node_onboard.py build --spec nodes-config.yaml "
+                "--destination destination.json --apply --confirm-plan DIGEST --json",
+            },
+            {
+                "description": "Inspect a previous run's cluster-held artifact",
+                "command": "ocp_node_onboard.py verify --run-id RUN_ID --json",
+            },
+            {
+                "description": "Plan removal while preserving persistent output",
+                "command": "ocp_node_onboard.py remove --run-id RUN_ID --live-plan --json",
+            },
+        ),
+    },
     "prepare_tool_pod.py": {
         "kind": "tool_pod",
         "purpose": "Prepare, reuse or remove a cluster Pod with declared tools.",
@@ -1038,6 +1129,10 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
             "pointer": "references/openshift-scc.md",
         },
+        "OpenShift node image": {
+            "summary": "Native OCP YAML, cluster destination and ISO lifecycle examples.",
+            "pointer": "references/ocp-node-image.md",
+        },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",
             "pointer": "references/mcp.md",
@@ -1484,6 +1579,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
             "routing": {
                 "prove nested Podman runtime readiness": "image_build_readiness.py",
                 "verify a runner build and Harbor publication": "image_build_readiness.py",
+                "build or inspect a cluster-held OpenShift node ISO": "ocp_node_onboard.py",
                 "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
                 "build or delete a toolbox": "toolbox.py",
                 "publish an image to Harbor": "harbor_push.py",

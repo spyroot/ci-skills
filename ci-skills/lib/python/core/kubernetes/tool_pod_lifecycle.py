@@ -31,6 +31,7 @@ from lib.python.core.kubernetes.tool_pod_runtime import (
     _pod_handle,
     _presence,
     _resource,
+    retain_tool_pod,
 )
 from lib.python.core.runtime import error_class, sanitize
 from lib.python.sys.status import APPLIED, NO_OP, PASS, VERIFIED
@@ -216,20 +217,7 @@ class VerifyTools(ToolPodK8SCallback[PrepareToolPodAction]):
             )
         state, scope = self.tool_state, self.tool_state.run_scope
         if self.action.retain:
-            state.retained_resources.add(
-                _resource("Pod", state.pod.name, state.pod.namespace)
-            )
-            state.retained_resources.add(
-                _resource(
-                    "ConfigMap",
-                    scope.name(TOOL_POD_SCRIPT_ROLE),
-                    scope.namespace,
-                )
-            )
-            if scope.owns_namespace:
-                state.retained_resources.add(
-                    _resource("Namespace", scope.namespace, "")
-                )
+            retain_tool_pod(state)
         state.readback["tools"] = records
         state.readback["retained_resources"] = [
             item.as_dict()

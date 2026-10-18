@@ -1,0 +1,276 @@
+{
+  "cases": {
+    "destination_failure": {
+      "cleanup": {
+        "cleanup_resources": [
+          {
+            "absent": true,
+            "kind": "Pod",
+            "name": "ci-skills-run-tool-pod-5161ea393df99a5e",
+            "namespace": "namespace:b115cbf8fccd",
+            "status": "PASS"
+          },
+          {
+            "absent": true,
+            "kind": "ConfigMap",
+            "name": "ci-skills-run-tool-pod-scripts-5161ea393df99a5e",
+            "namespace": "namespace:b115cbf8fccd",
+            "status": "PASS"
+          }
+        ],
+        "remaining_scopes": [],
+        "run_id": "ci12-store-dstfail-bf69d6d5"
+      },
+      "fixture_absent": true,
+      "native_build_started": false,
+      "reason": "artifact_storage_destination_conflict",
+      "run_id": "ci12-store-dstfail-bf69d6d5",
+      "status": "PASS"
+    },
+    "persistent_copy": {
+      "cleanup": [
+        {
+          "absent": true,
+          "action": "VERIFIED",
+          "callback": "AssertAbsent",
+          "hook": "cleanup",
+          "path": "/shared/ci-skills-ci12-storage-proof-bf69d6d5-20261018/persistent/copied.bin",
+          "verified": true
+        },
+        {
+          "absent": true,
+          "action": "VERIFIED",
+          "callback": "RemoveVerifiedTestArtifact",
+          "hook": "cleanup",
+          "path": "/shared/ci-skills-ci12-storage-proof-bf69d6d5-20261018/persistent/copied.bin",
+          "verified": true
+        },
+        {
+          "absent": true,
+          "action": "VERIFIED",
+          "callback": "ObserveMatches",
+          "hook": "cleanup",
+          "path": "/shared/ci-skills-ci12-storage-proof-bf69d6d5-20261018/persistent/copied.bin",
+          "verified": true
+        },
+        {
+          "absent": true,
+          "action": "VERIFIED",
+          "callback": "VerifyStoredArtifact",
+          "hook": "cleanup",
+          "path": "/shared/ci-skills-ci12-storage-proof-bf69d6d5-20261018/persistent/copied.bin",
+          "verified": true
+        },
+        {
+          "action": "NO_OP",
+          "callback": "CopyArtifact",
+          "hook": "cleanup",
+          "preserved_source": true,
+          "verified": true
+        },
+        {
+          "action": "NO_OP",
+          "callback": "StageVerifiedSource",
+          "hook": "cleanup",
+          "source_retained_in_pod": true,
+          "verified": true
+        },
+        {
+          "action": "NO_OP",
+          "callback": "CheckDestinationStorage",
+          "hook": "cleanup",
+          "preserved_directories": [],
+          "verified": true
+        },
+        {
+          "action": "NO_OP",
+          "callback": "VerifyTools",
+          "hook": "cleanup",
+          "preserved_directories": [],
+          "verified": true
+        },
+        {
+          "action": "NO_OP",
+          "callback": "ReadToolState",
+          "hook": "cleanup",
+          "preserved_directories": [],
+          "verified": true
+        },
+        {
+          "callback": "StageToolPod",
+          "hook": "cleanup",
+          "resources": [
+            {
+              "absent": true,
+              "kind": "Pod",
+              "name": "ci-skills-run-tool-pod-cc692f274175d385",
+              "namespace": "namespace:b115cbf8fccd",
+              "status": "PASS"
+            },
+            {
+              "absent": true,
+              "kind": "ConfigMap",
+              "name": "ci-skills-run-tool-pod-scripts-cc692f274175d385",
+              "namespace": "namespace:b115cbf8fccd",
+              "status": "PASS"
+            }
+          ],
+          "retained": []
+        },
+        {
+          "callback": "OpenRunScope",
+          "hook": "cleanup",
+          "resources": [],
+          "retained": []
+        },
+        {
+          "callback": "ResolveRunScopes",
+          "hook": "cleanup",
+          "resources": [],
+          "retained": []
+        },
+        {
+          "callback": "K8SAuth",
+          "hook": "cleanup",
+          "resources": [],
+          "retained": []
+        }
+      ],
+      "destination": {
+        "path": "/shared/ci-skills-ci12-storage-proof-bf69d6d5-20261018/persistent/copied.bin",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-cc692f274175d385",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "47f4ac85-97a2-462f-807b-6ee309944a6d"
+        },
+        "sha256": "b0b8ce3ce4ab8592fef023735ca84b53cfb60c6e959fb0d014202d825210262d",
+        "size": 3395
+      },
+      "digest_equal": true,
+      "output_absent": true,
+      "run_id": "ci12-store-persist-bf69d6d5",
+      "scope_absent": true,
+      "size_equal": true,
+      "source": {
+        "path": "/proof-work/ci12-store-persist-bf69d6d5-source.bin",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-cc692f274175d385",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "47f4ac85-97a2-462f-807b-6ee309944a6d"
+        },
+        "sha256": "b0b8ce3ce4ab8592fef023735ca84b53cfb60c6e959fb0d014202d825210262d",
+        "size": 3395
+      },
+      "status": "PASS"
+    },
+    "temporary_retention": {
+      "cleanup": {
+        "cleanup_resources": [
+          {
+            "absent": true,
+            "kind": "Pod",
+            "name": "ci-skills-run-tool-pod-36af5837d37eb00d",
+            "namespace": "namespace:b115cbf8fccd",
+            "status": "PASS"
+          },
+          {
+            "absent": true,
+            "kind": "ConfigMap",
+            "name": "ci-skills-run-tool-pod-scripts-36af5837d37eb00d",
+            "namespace": "namespace:b115cbf8fccd",
+            "status": "PASS"
+          }
+        ],
+        "remaining_scopes": [],
+        "run_id": "ci12-store-temp-bf69d6d5"
+      },
+      "destination": {
+        "path": "/ephemeral/final/output.bin",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-36af5837d37eb00d",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "b61ed66d-e30f-40c9-ba3d-c9b4ae931238"
+        },
+        "sha256": "b61a28afb80c5603f0451681e9dc9a375033f8a41c4eb054c1efdcf0ef1ec327",
+        "size": 3026
+      },
+      "digest_equal": true,
+      "output_absent_with_pod": true,
+      "retained_until_remove": true,
+      "run_id": "ci12-store-temp-bf69d6d5",
+      "size_equal": true,
+      "source": {
+        "path": "/proof-work/ci12-store-temp-bf69d6d5-source.bin",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-36af5837d37eb00d",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "b61ed66d-e30f-40c9-ba3d-c9b4ae931238"
+        },
+        "sha256": "b61a28afb80c5603f0451681e9dc9a375033f8a41c4eb054c1efdcf0ef1ec327",
+        "size": 3026
+      },
+      "status": "PASS"
+    },
+    "transfer_failure_recovery": {
+      "cleanup": {
+        "cleanup_resources": [
+          {
+            "absent": true,
+            "kind": "Pod",
+            "name": "ci-skills-run-tool-pod-cdc14f43d2832517",
+            "namespace": "namespace:b115cbf8fccd",
+            "status": "PASS"
+          },
+          {
+            "absent": true,
+            "kind": "ConfigMap",
+            "name": "ci-skills-run-tool-pod-scripts-cdc14f43d2832517",
+            "namespace": "namespace:b115cbf8fccd",
+            "status": "PASS"
+          }
+        ],
+        "remaining_scopes": [],
+        "run_id": "ci12-store-xferfail-bf69d6d5"
+      },
+      "destination_absent": true,
+      "reason": "artifact_storage_destination_conflict",
+      "run_id": "ci12-store-xferfail-bf69d6d5",
+      "source": {
+        "path": "/proof-work/ci12-store-xferfail-bf69d6d5-source.bin",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-cdc14f43d2832517",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "53d89639-cb12-4742-babc-4b2010b159c6"
+        },
+        "sha256": "112ef300041d3d50cd9fae150f0025f83fbeb35c9eeacd199b2688fd3df6612f",
+        "size": 3486
+      },
+      "source_recovery_verified": true,
+      "status": "PASS"
+    }
+  },
+  "functional_digest": "8dde2e6f7389ab60a1cf978d7ead63366e6b045cb422b2a7f82705f209084ff1",
+  "kind": "artifact_storage_live_proof",
+  "owned_paths": {
+    "destination_conflict": "/shared/.ci-skills-ci12-storage-proof-bf69d6d5-destination-conflict",
+    "persistent_prefix": "/shared/ci-skills-ci12-storage-proof-bf69d6d5-20261018"
+  },
+  "revision": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
+  "schema_version": "1.0",
+  "status": "PASS"
+}

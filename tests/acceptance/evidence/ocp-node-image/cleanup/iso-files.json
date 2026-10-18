@@ -1,0 +1,183 @@
+{
+  "candidate": {
+    "functional_digest": "8dde2e6f7389ab60a1cf978d7ead63366e6b045cb422b2a7f82705f209084ff1",
+    "package_digest": "dbaf02d4a9ab24fb4ee5980c66f42425fd84a4f5c1e4c7e6f73735c4942d5b6b",
+    "revision": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df"
+  },
+  "captured_at": "2026-10-18T04:40:41.044914+00:00",
+  "deletion_scope": {
+    "artifacts": [
+      {
+        "deletion": "DELETED",
+        "independent_readback": "ABSENT",
+        "label": "current_yaml",
+        "ownership_precheck": "MATCHED",
+        "parent_directory": "removed_empty",
+        "path": "/shared/ci-skills-ci12-final-bf69d6d5-yaml-20261018/node.iso",
+        "sha256": "a18a4b5447e63be1646c5c5d90cf51f6f7f9fcd2d89e50b5185c0f72a29ce6d6",
+        "size_bytes": 1379328000
+      },
+      {
+        "deletion": "DELETED",
+        "independent_readback": "ABSENT",
+        "label": "current_mac",
+        "ownership_precheck": "MATCHED",
+        "parent_directory": "removed_empty",
+        "path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "sha256": "a147f306fd4e10cfa0200e223720450e9bc0fd459657f223909672bdd26d3529",
+        "size_bytes": 1379328000
+      },
+      {
+        "deletion": "DELETED",
+        "independent_readback": "ABSENT",
+        "label": "prior_yaml",
+        "ownership_precheck": "MATCHED",
+        "parent_directory": "removed_empty",
+        "path": "/shared/ci-skills-ci12-20261018-yaml/node.iso",
+        "sha256": "3ede9043ce13a0fcffa0e165558ca071b00f083902bc599d5170b5b5ab8aa2d8",
+        "size_bytes": 1379328000
+      },
+      {
+        "deletion": "DELETED",
+        "independent_readback": "ABSENT",
+        "label": "prior_mac",
+        "ownership_precheck": "MATCHED",
+        "parent_directory": "removed_empty",
+        "path": "/shared/ci-skills-ci12-20261018-mac/node.iso",
+        "sha256": "063d4f44c76fb51032282977495923c1a91eb4f9c81c2c6c6560af07c57b63fd",
+        "size_bytes": 1379328000
+      }
+    ],
+    "reclaimed_bytes": 5517312000,
+    "recursive_delete": false,
+    "selected_path_count": 4,
+    "wildcard_delete": false
+  },
+  "evidence": {
+    "iso-absence-pod-terminal.json": {
+      "path": "path:518e905de469",
+      "sha256": "dec3a899a627095ce1f3184f28eaa16f4d2ed65b0d737f322fdf082c2d7979e9",
+      "size_bytes": 9858
+    },
+    "iso-absence-readback.log": {
+      "path": "path:48b38d2c044b",
+      "sha256": "a505232a0118518119fed7316dc4ae3024f32d8901461f940fd48592c56eb99c",
+      "size_bytes": 240
+    },
+    "iso-cleanup-pod-terminal.json": {
+      "path": "path:1832f0214089",
+      "sha256": "ef29a9fa9e8eac830b233a2b5c9212ec296d268f2ce4a9fdfc6ecc6159873458",
+      "size_bytes": 9573
+    },
+    "iso-cleanup-raw.log": {
+      "path": "path:c5095b3aefc0",
+      "sha256": "0a4c18bb881fbe57fa681690b767cfe55734b1f33f2df100db28527b9a2ab382",
+      "size_bytes": 1465
+    },
+    "mac-build.json": {
+      "path": "path:74db8014c5e5",
+      "sha256": "93e72883f3779cae2dbb3d1662cf1b4549bbbb62bfd7a86df5882484b3817e24",
+      "size_bytes": 47333
+    },
+    "mac-native-rbac-absence.json": {
+      "path": "path:527f622cc272",
+      "sha256": "c5da6093bee6b8ab7276eee607ab657c08cc87afeaca6cd7b3037a4309efe651",
+      "size_bytes": 708
+    },
+    "mac-native-rbac-during.json": {
+      "path": "path:ead9279ec819",
+      "sha256": "3d052b2dba71bba5dfc8046a74b8701e30a60c19fe92b0a9ee80ed6cdb2f46a2",
+      "size_bytes": 4424
+    },
+    "mac-remove.json": {
+      "path": "path:a52964d124f6",
+      "sha256": "f0668bf3fd474ee5bf22f432d6d5fb7772c73281f30f7b1efc77b2a0dcac0784",
+      "size_bytes": 44163
+    },
+    "mac-verify.json": {
+      "path": "path:ae9c6c4f5f6a",
+      "sha256": "63c666f40511f9e7670b3210ff0826b287bb357618250ab0adfd85fad6614651",
+      "size_bytes": 44506
+    },
+    "native-resources-post-cleanup.txt": {
+      "path": "path:13ce659e770c",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0
+    },
+    "pvc-post-cleanup.json": {
+      "path": "path:8245afcc68a9",
+      "sha256": "aed017f30082b8de63b7efa979cff8edb4445c3d5db522a850008827f374423c",
+      "size_bytes": 1915
+    },
+    "run-owned-resources-post-cleanup.txt": {
+      "path": "path:117c7522760b",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0
+    },
+    "yaml-build.json": {
+      "path": "path:c1c8c93c527d",
+      "sha256": "255d641880597163b8ad5b6c6e2e55286de177d23fc68c35060397d637ac9c05",
+      "size_bytes": 53814
+    },
+    "yaml-remove.json": {
+      "path": "path:1460031ae5b3",
+      "sha256": "054b75847471157fc3821c0f16013e9269fb49ec2679e0e7a4d91ea880406746",
+      "size_bytes": 50472
+    },
+    "yaml-verify.json": {
+      "path": "path:0253d76ef442",
+      "sha256": "1ed83c76c2e6867e6f729b7028bcb2388bf3dc47fbc88227d27ff2a3529c9246",
+      "size_bytes": 55485
+    }
+  },
+  "kind": "ci12_iso_test_artifact_cleanup",
+  "operations": {
+    "mac": {
+      "build": "PASS",
+      "remove": "PASS",
+      "verify": "PASS"
+    },
+    "yaml": {
+      "build": "PASS",
+      "remove": "PASS",
+      "verify": "PASS"
+    }
+  },
+  "preserved_storage": {
+    "access_modes": [
+      "ReadWriteMany"
+    ],
+    "capacity": {
+      "storage": "10Ti"
+    },
+    "namespace": "namespace:b115cbf8fccd",
+    "persistent_volume_claim": "pvc:92a982289cbe",
+    "phase": "Bound",
+    "uid": "1296f669-6c2c-40e9-9b5b-b6659278d326"
+  },
+  "resource_readback": {
+    "absence_reader_pod_absent": true,
+    "cleanup_configmap_absent": true,
+    "cleanup_pod_absent": true,
+    "native_observed_resources": [
+      {
+        "absent": true,
+        "kind": "ClusterRole",
+        "name": "node-joiner-jsdf9"
+      },
+      {
+        "absent": true,
+        "kind": "ClusterRoleBinding",
+        "name": "node-joiner-monitor-wkhvb"
+      },
+      {
+        "absent": true,
+        "kind": "Namespace",
+        "name": "openshift-node-joiner-wbkvq"
+      }
+    ],
+    "run_owned_resources_absent": true
+  },
+  "schema_version": "1.0",
+  "status": "PASS"
+}
