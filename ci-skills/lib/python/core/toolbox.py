@@ -18,19 +18,17 @@ from collections.abc import (
     Mapping,
     MutableMapping,
     MutableSequence,
-    Sequence,
 )
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
-from typing import Final, Optional, TypeGuard, TypeVar
-from urllib.parse import urlsplit
+from pathlib import Path
+from typing import Final, Optional, TypeGuard
 
+from lib.python.core import tooling
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
-    json_integer,
     json_object,
     json_objects,
     json_string,
@@ -48,6 +46,12 @@ from lib.python.core.schema import (
     SpecificationError,
     validate_specification,
 )
+from lib.python.core.tooling import package_install_operation
+
+# Preserve existing toolbox imports while keeping dependency behavior in its owner.
+Dependency = tooling.Dependency
+LinuxInstall = tooling.LinuxInstall
+SpecificationFields = tooling.SpecificationFields
 
 MANAGED_ANNOTATION: Final = "ci-skills.spyroot.dev/managed-by"
 MANAGED_VALUE: Final = "toolbox-build"
@@ -75,74 +79,6 @@ class ToolboxError(RuntimeError):
     """A toolbox specification or build did not complete safely."""
 
 
-FieldT = TypeVar("FieldT")
-
-
-class SpecificationFields:
-    """Narrow schema fields while retaining their toolbox specification location.
-
-    :ivar document: Read-only JSON object supplied by the caller.
-    :ivar path: Schema location used in value-free validation failures.
-    """
-
-    def __init__(self, document: JSONObject, path: str):
-        """Bind the object and its known schema location without copying it.
-
-        :param document: Decoded object whose fields are being converted to a model.
-        :param path: Schema path naming the object, without caller-supplied values.
-        """
-        self.document = document
-        self.path = path
-
-    def read(self, name: str, reader: Callable[[JSONValue], FieldT]) -> FieldT:
-        """Read one required field through a shared concrete JSON shape reader.
-
-        :param name: Declared schema field to read from the bound object.
-        :param reader: Shared JSON reader returning the field's concrete type.
-        :returns: Field value narrowed by the selected reader.
-        :raises SpecificationError: The field is absent or its JSON shape is invalid.
-        """
-        try:
-            return reader(self.document[name])
-        except (KeyError, TypeError) as exc:
-            raise SpecificationError(
-                f"invalid_specification:{self.path}/{name}:type"
-            ) from exc
-
-    def optional_text(self, name: str) -> Optional[str]:
-        """Read a text field that is absent for unselected installation routes.
-
-        :param name: Declared optional text field.
-        :returns: Original text, or None when the field is absent or JSON null.
-        :raises SpecificationError: A present nonnull value is not text.
-        """  # noqa: DOC502 - field validation propagates from read
-        return None if self.document.get(name) is None else self.read(name, json_string)
-
-    def optional_strings(self, name: str) -> Sequence[str]:
-        """Read an optional ordered string array with an empty absence default.
-
-        :param name: Declared optional array field.
-        :returns: Declared strings, or an empty sequence when the field is absent.
-        :raises SpecificationError: A present value is not an array of strings.
-        """  # noqa: DOC502 - field validation propagates from read
-        return () if name not in self.document else self.read(name, json_strings)
-
-
-def _installation_text(value: Optional[str], field: str) -> str:
-    """Require a route-specific text value before rendering an installation command.
-
-    :param value: Typed route field, absent for methods that do not consume it.
-    :param field: Schema field required by the selected installation method.
-    :returns: Original required text for shell quoting.
-    :raises SpecificationError: The selected method lacks its required field.
-    """
-    if value is None:
-        raise SpecificationError(
-            f"invalid_specification:spec/dependencies/linux/{field}:required"
-        )
-    return value
-
-
 def _toolbox_document(source: Path) -> JSONObject:
     """Decode finite JSON and validate the installed toolbox schema once.
 
@@ -166,322 +102,6 @@ def _toolbox_document(source: Path) -> JSONObject:
         raise SpecificationError("invalid_specification:/:type")
     validate_specification(document, TOOLBOX_SCHEMA)
     return document
-
-
-@dataclass(frozen=True)
-class LinuxInstall:
-    """Validated installation route for one Linux dependency.
-
-    :param method: Archive, deb, installer, download, Go, npm, or uv route.
-    :param url: Download URL for artifact-backed routes, when selected.
-    :param sha256: Expected artifact checksum for downloaded routes.
-    :param strip_components: Archive path components removed during extraction.
-    :param files: Optional archive members selected for extraction.
-    :param module: Go module reference for the Go route.
-    :param package: npm or uv package reference for package routes.
-    :param destination: Optional installation path or binary directory.
-    :param interpreter: Executable used for an installer script.
-    :param args: Declared installer-script arguments.
-
-    .. attribute :: method
-        :type: str
-
-        Archive, deb, installer, download, Go, npm, or uv route.
-
-    .. attribute :: url
-        :type: Optional[str]
-
-        Download URL for artifact-backed routes, when selected.
-
-    .. attribute :: sha256
-        :type: Optional[str]
-
-        Expected artifact checksum for downloaded routes.
-
-    .. attribute :: strip_components
-        :type: int
-
-        Archive path components removed during extraction.
-
-    .. attribute :: files
-        :type: tuple[str, ...]
-
-        Optional archive members selected for extraction.
-
-    .. attribute :: module
-        :type: Optional[str]
-
-        Go module reference for the Go route.
-
-    .. attribute :: package
-        :type: Optional[str]
-
-        npm or uv package reference for package routes.
-
-    .. attribute :: destination
-        :type: Optional[str]
-
-        Optional installation path or binary directory.
-
-    .. attribute :: interpreter
-        :type: Optional[str]
-
-        Executable used for an installer script.
-
-    .. attribute :: args
-        :type: tuple[str, ...]
-
-        Declared installer-script arguments.
-    """
-
-    method: str
-    url: Optional[str]
-    sha256: Optional[str]
-    strip_components: int
-    files: tuple[str, ...]
-    module: Optional[str]
-    package: Optional[str]
-    destination: Optional[str]
-    interpreter: Optional[str]
-    args: tuple[str, ...]
-
-    @classmethod
-    def from_document(cls, value: JSONObject) -> LinuxInstall:
-        """Create an installation route from a schema-validated object.
-
-        :param value: Validated ``linux`` object.
-        :returns: Typed installation route.
-        :raises SpecificationError: A method omits a required field or a field has the wrong shape.
-        """
-        fields = SpecificationFields(value, "spec/dependencies/linux")
-        route = cls(
-            method=fields.read("method", json_string),
-            url=fields.optional_text("url"),
-            sha256=fields.optional_text("sha256"),
-            strip_components=(
-                fields.read("stripComponents", json_integer)
-                if "stripComponents" in value
-                else 0
-            ),
-            files=tuple(fields.optional_strings("files")),
-            module=fields.optional_text("module"),
-            package=fields.optional_text("package"),
-            destination=fields.optional_text("destination"),
-            interpreter=fields.optional_text("interpreter"),
-            args=tuple(fields.optional_strings("args")),
-        )
-        required = {
-            "archive": (route.url, route.sha256, route.destination),
-            "go": (route.module,),
-            "npm": (route.package,),
-            "uv": (route.package,),
-            "deb": (route.url, route.sha256),
-            "installer": (route.url, route.sha256, route.interpreter),
-            "download": (route.url, route.sha256, route.destination),
-        }
-        if route.method not in required or any(
-            item is None for item in required[route.method]
-        ):
-            raise SpecificationError(
-                "invalid_specification:spec/dependencies/linux:required"
-            )
-        return route
-
-    def _operation(self, index: int) -> str:
-        """Render one declared Linux dependency installation command.
-
-        :param index: Stable dependency index used for a temporary download filename.
-        :returns: Shell command for the selected archive, package, installer,
-            download, Go, npm, or uv route with declared inputs quoted.
-        :raises SpecificationError: A selected route lacks a required text field.
-        """  # noqa: DOC502 - route-specific text validation propagates
-        if self.method in {"archive", "deb", "installer", "download"}:
-            return self._artifact_operation(index)
-        if self.method == "go":
-            destination = self.destination or "/usr/local/bin"
-            return (
-                f"mkdir -p {shlex.quote(destination)}; "
-                f"GOBIN={shlex.quote(destination)} go install "
-                f"{shlex.quote(_installation_text(self.module, 'module'))}"
-            )
-        if self.method == "npm":
-            prefix = (
-                f" --prefix {shlex.quote(self.destination)}"
-                if self.destination is not None
-                else ""
-            )
-            return (
-                f"npm install --global{prefix} "
-                f"{shlex.quote(_installation_text(self.package, 'package'))}"
-            )
-        destination = self.destination or "/usr/local/bin"
-        return (
-            f"mkdir -p {shlex.quote(destination)}; "
-            f"UV_TOOL_BIN_DIR={shlex.quote(destination)} uv tool install "
-            f"{shlex.quote(_installation_text(self.package, 'package'))}"
-        )
-
-    def _artifact_operation(self, index: int) -> str:
-        """Render checksum verification, installation, and temporary artifact cleanup.
-
-        :param index: Stable dependency index used in the temporary artifact name.
-        :returns: Quoted command for the selected archive, deb, installer, or download.
-        :raises SpecificationError: The selected route lacks a required text field.
-        """  # noqa: DOC502 - route-specific text validation propagates
-        suffix = ".deb" if self.method == "deb" else ""
-        if self.method == "installer":
-            suffix = PurePosixPath(
-                urlsplit(_installation_text(self.url, "url")).path
-            ).suffix
-        artifact = f"/tmp/ci-skills-dependency-{index}{suffix}"
-        prefix = (
-            f"curl --fail --location --silent --show-error "
-            f"--output {shlex.quote(artifact)} {shlex.quote(_installation_text(self.url, 'url'))}; "
-            f"printf '%s  %s\\n' {shlex.quote(_installation_text(self.sha256, 'sha256'))} "
-            f"{shlex.quote(artifact)} | sha256sum -c -; "
-        )
-        if self.method == "archive":
-            members = " ".join(shlex.quote(item) for item in self.files)
-            selected = f" {members}" if members else ""
-            install = (
-                f"mkdir -p {shlex.quote(_installation_text(self.destination, 'destination'))}; "
-                f"tar -xf {shlex.quote(artifact)} "
-                f"-C {shlex.quote(_installation_text(self.destination, 'destination'))} "
-                f"--strip-components={self.strip_components}{selected}"
-            )
-        elif self.method == "deb":
-            install = (
-                "command -v apt-get >/dev/null 2>&1; "
-                f"apt-get install -y {shlex.quote(artifact)}"
-            )
-        elif self.method == "installer":
-            arguments = " ".join(shlex.quote(item) for item in self.args)
-            install = (
-                f"{shlex.quote(_installation_text(self.interpreter, 'interpreter'))} "
-                f"{shlex.quote(artifact)}{(' ' + arguments) if arguments else ''}"
-            )
-        else:
-            destination = _installation_text(self.destination, "destination")
-            install = (
-                f"mkdir -p {shlex.quote(str(PurePosixPath(destination).parent))}; "
-                f"install -m 0755 {shlex.quote(artifact)} "
-                f"{shlex.quote(destination)}"
-            )
-        return f"{prefix}{install}; rm -f {shlex.quote(artifact)}"
-
-    def _paths(self) -> tuple[str, ...]:
-        """Identify installed executable paths to add to image ``PATH``.
-
-        :returns: Route-specific destination paths, or an empty tuple when no
-            destination is declared.
-        """
-        if self.destination is None:
-            return ()
-        destination = PurePosixPath(self.destination)
-        if self.method == "archive":
-            return str(destination), str(destination / "bin")
-        if self.method == "npm":
-            return (str(destination / "bin"),)
-        if self.method == "download":
-            return (str(destination.parent),)
-        return (str(destination),)
-
-    def _writable_roots(self) -> tuple[str, ...]:
-        """Identify installed paths to make group-writable in the image.
-
-        :returns: Destination root, its parent for direct downloads, or empty tuple.
-        """
-        if self.destination is None:
-            return ()
-        destination = PurePosixPath(self.destination)
-        root = destination.parent if self.method == "download" else destination
-        return (str(root),)
-
-
-@dataclass(frozen=True)
-class Dependency:
-    """One toolbox dependency with command probes and installation fallback.
-
-    :param name: Dependency name from the specification.
-    :param commands: Executables used to detect whether it is installed.
-    :param apt: Packages selected for an apt-based base image.
-    :param yum: Packages selected for a yum-based base image.
-    :param linux: Optional explicit Linux installation route.
-
-    .. attribute :: name
-        :type: str
-
-        Dependency name from the specification.
-
-    .. attribute :: commands
-        :type: tuple[str, ...]
-
-        Executables used to detect whether it is installed.
-
-    .. attribute :: apt
-        :type: tuple[str, ...]
-
-        Packages selected for an apt-based base image.
-
-    .. attribute :: yum
-        :type: tuple[str, ...]
-
-        Packages selected for a yum-based base image.
-
-    .. attribute :: linux
-        :type: Optional[LinuxInstall]
-
-        Optional explicit Linux installation route.
-    """
-
-    name: str
-    commands: tuple[str, ...]
-    apt: tuple[str, ...]
-    yum: tuple[str, ...]
-    linux: Optional[LinuxInstall]
-
-    @classmethod
-    def from_document(cls, value: JSONObject) -> Dependency:
-        """Create a dependency from a schema-validated object.
-
-        :param value: Validated dependency object.
-        :returns: Typed dependency.
-        :raises SpecificationError: A required field is missing or has an invalid shape.
-        """  # noqa: DOC502 - field and installation validation errors propagate
-        fields = SpecificationFields(value, "spec/dependencies")
-        linux = value.get("linux")
-        return cls(
-            name=fields.read("name", json_string),
-            commands=tuple(fields.read("commands", json_strings)),
-            apt=tuple(fields.optional_strings("apt")),
-            yum=tuple(fields.optional_strings("yum")),
-            linux=(
-                LinuxInstall.from_document(fields.read("linux", json_object))
-                if linux is not None
-                else None
-            ),
-        )
-
-    def _render(self, index: int) -> Optional[str]:
-        """Render a conditional Containerfile installation step.
-
-        :param index: Dependency index passed to the Linux installation route.
-        :returns: ``RUN`` instruction probing declared commands, or ``None`` when
-            the dependency has no Linux fallback.
-        :raises SpecificationError: The selected installation route lacks a required field.
-        """  # noqa: DOC502 - installation rendering propagates field errors
-        if self.linux is None:
-            return None
-        probes = " && ".join(
-            f"command -v {shlex.quote(command)} >/dev/null 2>&1"
-            for command in self.commands
-        )
-        return (
-            "RUN set -eu; \\\n"
-            f"    if ! ( {probes} ); then \\\n"
-            f"        {self.linux._operation(index)}; \\\n"
-            "    fi"
-        )
 
 
 @dataclass(frozen=True)
@@ -785,7 +405,7 @@ class ToolboxSpec:
         lines.extend(
             rendered
             for index, dependency in enumerate(self.dependencies)
-            if (rendered := dependency._render(index)) is not None
+            if (rendered := _dependency_instruction(dependency, index)) is not None
         )
         lines.extend(
             (
@@ -1366,41 +986,35 @@ class BuildToolbox(K8SCallback[BuildAction]):
         return result.public()
 
 
+def _dependency_instruction(dependency: Dependency, index: int) -> Optional[str]:
+    """Render a conditional Containerfile installation step.
+
+    :param dependency: Typed dependency with shared presence/install operations.
+    :param index: Dependency index passed to the Linux installation route.
+    :returns: ``RUN`` instruction probing declared commands, or ``None`` when
+        the dependency has no Linux fallback.
+    :raises SpecificationError: The selected installation route lacks a required field.
+    """  # noqa: DOC502 - installation rendering propagates field errors
+    if dependency.linux is None:
+        return None
+    probes = dependency.presence_operation()
+    return (
+        "RUN set -eu; \\\n"
+        f"    if ! ( {probes} ); then \\\n"
+        f"        {dependency.linux._operation(index)}; \\\n"
+        "    fi"
+    )
+
+
 def _package_instruction(apt: tuple[str, ...], yum: tuple[str, ...]) -> str:
-    """Render package-manager installation branches for the Containerfile.
+    """Wrap the shared package operation in a Containerfile instruction.
 
     :param apt: Apt package names declared by dependencies.
     :param yum: DNF/Yum package names declared by dependencies.
     :returns: ``RUN`` instruction using the available declared package manager;
         it fails inside the image when none is available.
     """
-    branches: MutableSequence[str] = []
-    if apt:
-        packages = " ".join(shlex.quote(item) for item in apt)
-        branches.append(
-            "if command -v apt-get >/dev/null 2>&1; then \\\n"
-            "        apt-get update; \\\n"
-            f"        DEBIAN_FRONTEND=noninteractive apt-get install -y "
-            f"--no-install-recommends {packages}; \\\n"
-            "        rm -rf /var/lib/apt/lists/*"
-        )
-    if yum:
-        packages = " ".join(shlex.quote(item) for item in yum)
-        prefix = "elif" if branches else "if"
-        branches.append(
-            f"{prefix} command -v dnf >/dev/null 2>&1; then \\\n"
-            f"        dnf install -y {packages}; \\\n"
-            "        dnf clean all; \\\n"
-            "    elif command -v yum >/dev/null 2>&1; then \\\n"
-            f"        yum install -y {packages}; \\\n"
-            "        yum clean all"
-        )
-    branches.append(
-        "else \\\n"
-        "        echo 'declared package manager unavailable' >&2; \\\n"
-        "        exit 1"
-    )
-    return "RUN set -eu; \\\n    " + "; \\\n    ".join(branches) + "; \\\n    fi"
+    return "RUN set -eu; \\\n    " + package_install_operation(apt, yum)
 
 
 def _unique(values: Iterable[str]) -> tuple[str, ...]:

@@ -491,12 +491,25 @@ about ISO files, host MAC addresses, node roles, GitLab or Harbor. Kubernetes tr
 Kubernetes adapter, so toolbox rendering consumes the same installation operations without creating a Pod.
 
 ```python
-# Composition sketch; proposed names above, existing executor/lifecycle unchanged.
-callbacks = [K8SAuth(target), StageToolPod(pod_action), ReadToolState(tools_action)]
-callbacks.extend(tool_callbacks(tools_action))  # compose only; hooks perform reads and installation
+# Compose only; hooks perform provider reads, creation and installation.
+scope = RunScope.new(namespace=pod_action.namespace, run_id=pod_action.run_id)
+callbacks = [K8SAuth(target)]
+if pod_action.run_id is not None:
+    callbacks.append(ResolveRunScopes(ResolveRunScopeAction(pod_action.run_id)))
+callbacks.extend([
+    OpenRunScope(RunScopeAction(scope)),
+    StageToolPod(pod_action),
+    ReadToolState(tools_action),
+])
+callbacks.extend(tool_callbacks(tools_action))
 callbacks.append(VerifyTools(tools_action))
 return WorkflowExecutor(context=state, callbacks=Callbacks(callbacks)).run()
 ```
+
+The removal chain is `K8SAuth → ResolveRunScopes → RemoveToolPod → RemoveScope`: the tool callback removes
+its Pod and ConfigMap; shared scope removal handles only owned namespaces. The
+[shared scope interface](../exec-plans/active/ci12-node-onboarding.md#interfaces-and-dependencies) defines
+lookup, ambiguity and recovery behavior for both preparation and later consumers.
 
 Configuration checks during binding concern Kubernetes only. Downloads are not performed by `read_config()` or
 `is_configured()`. Preparation uses the existing plan/confirm/apply path. The same executor can run downstream

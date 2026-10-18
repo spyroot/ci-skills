@@ -1,0 +1,74 @@
+Summary:
+  Prepare, reuse or remove a cluster Pod with declared tools.
+
+Description:
+  Supply image and dependencies in the input JSON. Each dependency uses the
+  existing toolchain schema (name, commands, optional probe and installation
+  route). Tools are installed inside the Pod, never on this computer. See
+  references/tool-pod.md.
+
+Examples:
+  Plan without provider calls: prepare_tool_pod.py prepare --spec tools.json
+  --dry-run --json
+
+  Prepare the confirmed tools: prepare_tool_pod.py prepare --spec tools.json
+  --apply --confirm-plan DIGEST --json
+
+  Reuse and re-probe the same Pod: prepare_tool_pod.py prepare --spec
+  tools.json --run-id RUN_ID --dry-run --json
+
+  Plan removal of owned resources: prepare_tool_pod.py remove --run-id
+  RUN_ID --dry-run --json
+
+Options:
+  -h, --help            show this help message and exit
+  --binding PATH        project-declared target and ordered kubeconfig source
+                        resolver
+  --json                versioned JSON document
+  --yaml                versioned YAML document
+  --human               human summary even when stdout is not a terminal
+  --describe            this command's machine-readable contract, then exit
+  --dry-run             list planned probes without contacting any API; never
+                        access evidence
+  --revision SHA        exact source commit of the installed copy, recorded as
+                        a claim
+  --log-format {text,json}
+                        diagnostic log format: text or JSON Lines (default:
+                        text)
+  --log-level {debug,info,warning,error}
+                        minimum diagnostic level: debug, info, warning, or
+                        error
+  --log-file PATH       also append sanitized diagnostics to this exact path
+  --run-id ID           returned run identifier for reuse/removal, also used
+                        in logs
+  --output-dir PATH     write paired JSON and text reports to this explicit
+                        path
+  {prepare,remove}
+  --spec FILE           JSON with image and dependencies; schemas/tool-
+                        pod.schema.json
+  --timeout TIMEOUT     positive operation timeout in seconds (default: 300)
+  --live-plan           verify Kubernetes access without creating resources
+  --apply               perform the exact confirmed operation
+  --confirm-plan SHA256
+                        plan digest binding target, inputs, run ID and
+                        functional code
+  --receipt-out PATH    write a sanitized operation receipt
+
+Output modes:
+  json: versioned JSON document
+
+  yaml: versioned YAML document
+
+  human: human summary even when stdout is not a terminal
+
+Usage:
+  usage: prepare_tool_pod.py [-h] [--binding PATH] [--json | --yaml |
+  --human] [--describe] [--dry-run] [--revision SHA] [--log-format
+  {text,json}] [--log-level {debug,info,warning,error}] [--log-file PATH]
+  [--run-id ID] [--output-dir PATH] [--spec FILE] [--timeout TIMEOUT]
+  [--live-plan] [--apply] [--confirm-plan SHA256] [--receipt-out PATH]
+  [{prepare,remove}]
+
+  Exit 0: PASS, DRY_RUN, or a live read-only PLANNED result.
+
+  Exit 2: BLOCKED or PARTIAL, or an input that could not be used.
