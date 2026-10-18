@@ -1,25 +1,33 @@
 # Installed pipeline execution proof
 
-## Latest exact candidate
+## Latest v3 integration candidate
 
-The `final-30ccd8e` directory records the installed candidate at source
-`30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58`, package checksum
-`b19198a7e05e618d470c090d31baac0511e4fc867e562be0fbbfd14991af03a8`, and
-functional checksum
-`33dd8b7910f6936f2b513408e92b6748781ea908179f35b33ea8c1014eb53bc4`.
+Installed source `d1b2c6fb4e47836a68140873c220935463ebff81` uses the shared v3 discovery
+schema and renderer. Its package checksum is
+`a034ab750654ed12a5eaffad51e5f48ef4aac8e99984aa7f601b69c9c8337631`; its functional checksum is
+`9e28e57e6fbf4ea4e3de0ad155fd2d95bf2353bd7eb1503814ea9e81f301c07e`.
 
-Pipeline 3922 ran the existing protected test ref at exact commit
-`a9cd22f5a66395f9514102356ba8dd3e3573af5e`. The confirmed start was APPLIED,
-the watch and final get observed success, all five jobs succeeded on existing
-runners 74 and 75, and the same confirmed plan returned NO_OP without creating
-a second pipeline. [Checksums](final-30ccd8e/sha256.txt) cover the six current
-evidence documents. The refreshed 24 ordinary receipts carry the same package
-and functional identities; their cleanup report records successful deletion
-and absence checks for disposable resources.
+The confirmed [start](final-d1b2c6f/start-applied.json) created pipeline 3927 on the
+existing protected test ref at commit `a9cd22f5a66395f9514102356ba8dd3e3573af5e`.
+The identical [retry](final-d1b2c6f/start-no_op.json) returned NO_OP for that same pipeline.
+[Watch](final-d1b2c6f/watch.json) and [final get](final-d1b2c6f/get-final.json) observed success;
+all five jobs, 60337–60341, succeeded. Watch also produced a persisted JSON/text report pair.
 
-This publication does not claim a current-candidate Podman or live-acceptance
-gate PASS. The standalone Podman run that would exercise the temporary SCC
-RoleBinding remains pending separately.
+The installed [command node](final-d1b2c6f/command.json) offered the task reference.
+Following that emitted pointer returned [sections](final-d1b2c6f/pipeline-sections.json),
+then the [selected section](final-d1b2c6f/pipeline-section.json). These outputs validate against
+the existing v3 schemas, and the [human renderer](final-d1b2c6f/command-human.txt) exited successfully.
+
+All 24 ordinary acceptance receipts carry this functional checksum; disposable resources were
+removed and [absence verified](final-d1b2c6f/acceptance-cleanup.json). The separate Podman receipt
+remains pending; no live-acceptance checkpoint PASS is claimed.
+[Checksums](final-d1b2c6f/sha256.txt) bind the published documents. CLI portable receipts are
+unchanged; final get uses the existing portable transform for local credential paths.
+
+## Earlier pipeline candidate
+
+The `final-30ccd8e` directory preserves the earlier pipeline 3922 capture and checksums.
+It is historical evidence, not proof of the current functional checksum.
 
 ## Historical pipeline captures
 
