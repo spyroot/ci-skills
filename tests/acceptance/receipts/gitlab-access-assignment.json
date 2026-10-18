@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-17T21:07:07.191562+00:00",
+  "captured_at": "2026-10-18T02:03:05.084146+00:00",
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
@@ -22,12 +22,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "7e5cf3950d5c5d80b8193e650734899c678703b3e129af8f284196553353a8da",
+    "digest": "1cb30887851e9edb58fbb0d08c9679d8dd736d82314b53bf1c7aff5e33ef6cc3",
     "file_count": 159,
-    "functional_digest": "a1f62f687d0e8c6392abe1412cbaa10abc03a03815471f55df3b49b56e425fd8",
+    "functional_digest": "1bd593cf493b854d921cb2d08eea333d6f08c3f3033fa474e09f28e921c1e052",
     "revision": {
       "source": "installer_record",
-      "value": "9fe0fea86d224a58f0b86011a39af1297334f647",
+      "value": "9aa288084328a9c44d38d78bd86b5e8785d810b3",
       "verified": true
     }
   },
@@ -38,6 +38,6 @@
     "kind": "project",
     "web_url": "https://gitlab.dcloud.run/hott/ci-skills-runner-proof"
   },
-  "target_file": "path:d5d66d4789c0",
+  "target_file": "path:aef5c479ccee",
   "target_source": "project"
 }
