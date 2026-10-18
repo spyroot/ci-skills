@@ -506,8 +506,15 @@ def test_invalid_watch_arguments_emit_schema_valid_blocked_report(
 def test_missing_watch_target_emits_schema_valid_blocked_report(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
-    """Missing optional GitLab configuration yields usable watch failure evidence."""
+    """Keep emitted and persisted watch failure evidence schema-valid.
+
+    :param monkeypatch: Replaces target resolution with a configuration failure.
+    :param capsys: Captures the real command's blocked report.
+    :param tmp_path: Isolates the shared renderer's persisted report pair.
+    :returns: None; stdout and persisted reports satisfy the canonical watch schema.
+    """
 
     def missing_target(_args: object) -> None:
         """Represent the target resolver's classified configuration failure."""
@@ -524,3 +531,17 @@ def test_missing_watch_target_emits_schema_valid_blocked_report(
     assert data["records"] == []
     assert data["errors"][0]["reason"] == "gitlab_configuration_missing"
     SCHEMA.validate_specification(data, "results/gitlab-pipeline-watch.schema.json")
+
+    emitted = json.loads(REPORT.emit(data, "json", str(tmp_path)))
+    SCHEMA.validate_specification(emitted, "results/gitlab-pipeline-watch.schema.json")
+    files = emitted["report_files"]
+    json_path = Path(files["json"])
+    text_path = Path(files["text"])
+    persisted = json.loads(json_path.read_text(encoding="utf-8"))
+    assert persisted == emitted
+    SCHEMA.validate_specification(
+        persisted, "results/gitlab-pipeline-watch.schema.json"
+    )
+    assert text_path.is_file()
+    assert json_path.parent == text_path.parent
+    assert list(tmp_path.iterdir()) == [json_path.parent]
