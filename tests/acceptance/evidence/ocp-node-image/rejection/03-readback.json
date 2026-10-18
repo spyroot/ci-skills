@@ -1,0 +1,153 @@
+{
+  "candidate_revision": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
+  "captured_at": "2026-10-18T04:50:21.028338+00:00",
+  "cleanup_failures": [],
+  "cleanup_status": "PASS",
+  "destination": {
+    "all_absent": true,
+    "exact_empty_parent_removed_or_already_absent": true,
+    "paths_checked": [
+      "/shared/ci-skills-ci12-native-reject-bf69d6d5-20261018/node.iso",
+      "/shared/ci-skills-ci12-native-reject-bf69d6d5-20261018/report.json",
+      "/shared/ci-skills-ci12-native-reject-bf69d6d5-20261018"
+    ]
+  },
+  "evidence": {
+    "native-reject-clusterrolebindings-after.txt": {
+      "bytes": 426,
+      "sha256": "6af3ffc0dd1179875fa02b634a12794171e1a4c31779edd5fda936c5e3421795"
+    },
+    "native-reject-clusterrolebindings-before.txt": {
+      "bytes": 497,
+      "sha256": "18c74de18c824f3b9caf19886bacdaaa1114404f62ae3b0d13f74085ab8088da"
+    },
+    "native-reject-clusterroles-after.txt": {
+      "bytes": 336,
+      "sha256": "ba8a397c4c0f0b8e08d39c4e652d358152aeced1ac88a8cfc5045dd4fc5f8ed8"
+    },
+    "native-reject-clusterroles-before.txt": {
+      "bytes": 392,
+      "sha256": "4d36c7d6ece084ea26e012a7c8d713f2faf865a823226cfc86762f4aea3b4a53"
+    },
+    "native-reject-control-flow.json": {
+      "bytes": 877,
+      "sha256": "8c4305f49526dc20ee38e0d1fa22fc8b32c35ab8de0640b15ca9fb3d8d501466"
+    },
+    "native-reject-current-plan-trace.jsonl": {
+      "bytes": 10628,
+      "sha256": "1ae2294812d6b193cb0fe5df696051e260850fb196333af0c30f424a9e4e1f8c"
+    },
+    "native-reject-current-plan.json": {
+      "bytes": 8117,
+      "sha256": "4ed54b865aedf475edb8987832a568c5c11487e5dd3b75f641d6350e519e2a44"
+    },
+    "native-reject-current-receipt.json": {
+      "bytes": 32813,
+      "sha256": "7faac1d258ace5bebe40276133e05beabf4b45855a2bf51fca91106903b02dbd"
+    },
+    "native-reject-current-trace.jsonl": {
+      "bytes": 161518,
+      "sha256": "b7d73193ff3d2c4d999f5469a49b4c818bbdc1ad162c1ef45deb6fa3eb8611d4"
+    },
+    "native-reject-current.exit": {
+      "bytes": 2,
+      "sha256": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3"
+    },
+    "native-reject-current.json": {
+      "bytes": 33258,
+      "sha256": "ef51827e39a59ae594d93aeb8ad5f75be990810a4673db97044a99a9b8f454de"
+    },
+    "native-reject-current.stderr": {
+      "bytes": 161518,
+      "sha256": "b7d73193ff3d2c4d999f5469a49b4c818bbdc1ad162c1ef45deb6fa3eb8611d4"
+    },
+    "native-reject-destination-absence-pod-terminal.json": {
+      "bytes": 11208,
+      "sha256": "5e3f1feacdb72f96d40457e8ea47411e43ff0f0c3579eace65958b1f129cefbf"
+    },
+    "native-reject-destination-absence.log": {
+      "bytes": 284,
+      "sha256": "de8dcb52d5f3ffcc1dd88a730fddaf225ba5ef67ef0b568d1297575d8efe29e2"
+    },
+    "native-reject-input.txt": {
+      "bytes": 21,
+      "sha256": "47c618c9d1f3940ec0f772d5848d3d404855a20f6035792a4472b351a59310a4"
+    },
+    "native-reject-namespaces-after.txt": {
+      "bytes": 228,
+      "sha256": "ac433a989d84eb0a20941f2bb7ee2f66941739e6d65b5ea33bd5f5adc92b7eae"
+    },
+    "native-reject-namespaces-before.txt": {
+      "bytes": 266,
+      "sha256": "93a0a3c1c024111038b234032da6a4cddd5b0dfd4422d9926813e9d0d0112a5e"
+    },
+    "native-reject-pvc-post.json": {
+      "bytes": 1915,
+      "sha256": "aed017f30082b8de63b7efa979cff8edb4445c3d5db522a850008827f374423c"
+    },
+    "native-reject-readback-pod-post.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "native-reject-run-owned-post.txt": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "expected_command_status": "BLOCKED",
+  "functional_digest": "8dde2e6f7389ab60a1cf978d7ead63366e6b045cb422b2a7f82705f209084ff1",
+  "kind": "native_input_rejection_acceptance",
+  "malformed_input": {
+    "bytes": 21,
+    "sha256": "47c618c9d1f3940ec0f772d5848d3d404855a20f6035792a4472b351a59310a4"
+  },
+  "native_exit_code": 1,
+  "native_resource_finding": "No node-image resource was added. One pre-existing name disappeared from each filtered set during the observation window; the post-set is a strict subset of the pre-set.",
+  "native_resource_prefix_delta": {
+    "clusterrolebindings": {
+      "added": [],
+      "after_count": 6,
+      "before_count": 7,
+      "no_new_resources": true,
+      "removed": [
+        "clusterrolebinding.rbac.authorization.k8s.io/node-joiner-monitor-vcg4g"
+      ]
+    },
+    "clusterroles": {
+      "added": [],
+      "after_count": 6,
+      "before_count": 7,
+      "no_new_resources": true,
+      "removed": [
+        "clusterrole.rbac.authorization.k8s.io/node-joiner-4qkk6"
+      ]
+    },
+    "namespaces": {
+      "added": [],
+      "after_count": 6,
+      "before_count": 7,
+      "no_new_resources": true,
+      "removed": [
+        "namespace/openshift-node-joiner-9lrsr"
+      ]
+    }
+  },
+  "observed_command_status": "BLOCKED",
+  "package_digest": "dbaf02d4a9ab24fb4ee5980c66f42425fd84a4f5c1e4c7e6f73735c4942d5b6b",
+  "plan_digest": "43f11afbe6d482d4cc2e52f3457e48b25099b765938808a1aece403e13288528",
+  "process_exit_code": 2,
+  "provider_rejection": "node_image_native_failed:exit=1:error: config file nodes-config.yaml is not valid: error converting YAML to JSON: yaml: line 1: did not find expected ',' or ']'\ncommand terminated with exit code 1\n",
+  "readback_pod_absent": true,
+  "run_id": "ci12-reject-bf69d6d5-20261018",
+  "run_owned_resources_absent": true,
+  "schema_version": "1.0",
+  "shared_pvc": {
+    "capacity": "10Ti",
+    "name": "pvc:92a982289cbe",
+    "namespace": "namespace:b115cbf8fccd",
+    "phase": "Bound",
+    "preserved": true,
+    "uid": "1296f669-6c2c-40e9-9b5b-b6659278d326"
+  },
+  "status": "PASS"
+}

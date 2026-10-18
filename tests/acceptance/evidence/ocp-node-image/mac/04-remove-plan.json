@@ -1,0 +1,745 @@
+{
+  "access": {
+    "kubernetes": {
+      "context": "context:611e49b22818",
+      "identity": "identity:547a4b6a7894",
+      "server": "server:6076e1dcf760"
+    }
+  },
+  "artifact": {
+    "path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+    "pod": {
+      "container": "ci-skills-pod",
+      "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+      "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+      "namespace": "namespace:b115cbf8fccd",
+      "restart_count": 0,
+      "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+    },
+    "sha256": "a147f306fd4e10cfa0200e223720450e9bc0fd459657f223909672bdd26d3529",
+    "size": 1379328000
+  },
+  "artifact_lifetime": "caller_selected_volume",
+  "captured_at": "2026-10-18T04:28:13.787292+00:00",
+  "cleanup": {
+    "failures": [],
+    "resources": [],
+    "retained": [
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-record-0eaf9e7b6e574ee7",
+        "namespace": "namespace:b115cbf8fccd"
+      },
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-0eaf9e7b6e574ee7",
+        "namespace": "namespace:b115cbf8fccd"
+      }
+    ],
+    "status": "PASS"
+  },
+  "errors": [],
+  "filters": {},
+  "kind": "ocp_node_onboard",
+  "operation": "remove",
+  "plan": {
+    "functional_digest": "8dde2e6f7389ab60a1cf978d7ead63366e6b045cb422b2a7f82705f209084ff1",
+    "inputs": {
+      "artifact_record": {
+        "artifact": {
+          "path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+            "namespace": "namespace:b115cbf8fccd",
+            "restart_count": 0,
+            "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+          },
+          "sha256": "a147f306fd4e10cfa0200e223720450e9bc0fd459657f223909672bdd26d3529",
+          "size": 1379328000
+        },
+        "destination": {
+          "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/shared",
+          "namespace": "namespace:b115cbf8fccd",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "pvc:92a982289cbe"
+            }
+          }
+        },
+        "lifetime": "caller_selected_volume",
+        "node_selector": {
+          "kubernetes.io/arch": "amd64"
+        },
+        "run_id": "ci12-final-mac-bf69d6d5-20261018",
+        "schema_version": "1.0",
+        "storage": {
+          "access_route": "storage:036cbdc14cbb",
+          "artifact_path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "build_output": "destination",
+          "destination_fingerprint": "sha256:b5fb58be82069d314a821109678110aecd6fa08d03cebafa5baf01b2743145bb",
+          "lifetime": "caller_selected_volume",
+          "mount_path": "/shared",
+          "namespace": "namespace:b115cbf8fccd",
+          "observed_mount_path": "/shared",
+          "output_absent": true,
+          "protocol": "nfs4",
+          "volume_source_types": [
+            "persistentVolumeClaim"
+          ],
+          "writable": true
+        },
+        "tool_mounts": [
+          {
+            "mountPath": "/shared",
+            "name": "artifact-destination",
+            "readOnly": false,
+            "volumeSource": {
+              "persistentVolumeClaim": {
+                "claimName": "pvc:92a982289cbe"
+              }
+            }
+          },
+          {
+            "mountPath": "/ci-skills-work/ci12-final-mac-bf69d6d5-20261018",
+            "name": "node-image-work",
+            "readOnly": false,
+            "volumeSource": {
+              "emptyDir": {}
+            }
+          }
+        ],
+        "tool_spec": {
+          "dependencies": [
+            {
+              "commands": [
+                "coreos-installer"
+              ],
+              "name": "coreos-installer",
+              "probe": [
+                "coreos-installer",
+                "--version"
+              ]
+            },
+            {
+              "commands": [
+                "rsync"
+              ],
+              "name": "rsync",
+              "probe": [
+                "rsync",
+                "--version"
+              ],
+              "yum": [
+                "rsync"
+              ]
+            },
+            {
+              "commands": [
+                "oc"
+              ],
+              "linux": {
+                "destination": "/tmp/ci-skills-tools/bin",
+                "files": [
+                  "oc"
+                ],
+                "method": "archive",
+                "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+                "stripComponents": 0,
+                "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz"
+              },
+              "name": "oc",
+              "probe": [
+                "oc",
+                "version",
+                "--client",
+                "-o",
+                "json"
+              ]
+            }
+          ],
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71"
+        }
+      },
+      "artifact_record_present": true,
+      "recovery_record": {
+        "build_path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "destination": {
+          "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/shared",
+          "namespace": "namespace:b115cbf8fccd",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "pvc:92a982289cbe"
+            }
+          }
+        },
+        "input_fingerprint": "sha256:dc86670086021f0979b5dbc2755adfe35a9e39c3f36571feb28109a8dc8928b8",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+        },
+        "run_id": "ci12-final-mac-bf69d6d5-20261018",
+        "schema_version": "1.0",
+        "status_path": "/ci-skills-work/ci12-final-mac-bf69d6d5-20261018/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:b0639718d0e1cfed72d8c4aee3dfd2dafe6e48d7f7087427051fa88bbaafcdad",
+        "tool_pod_fingerprint_label": "wbrzoggq4hh624wyysxohx6s3l7g4sgx64ehijyfd6uixovpzwwq"
+      },
+      "recovery_record_present": true
+    },
+    "kind": "ocp_node_onboard",
+    "operation": "remove",
+    "run_id": "ci12-final-mac-bf69d6d5-20261018",
+    "target": {
+      "context": "context:611e49b22818",
+      "server": "server:6076e1dcf760"
+    },
+    "timeout_seconds": 1800
+  },
+  "plan_digest": "3ce6da5a06ff8ca5fbb0843bf39519c70358f2964cf2f22d399ea693fcc38980",
+  "readback": {
+    "artifact_record": {
+      "artifact": {
+        "path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+        },
+        "sha256": "a147f306fd4e10cfa0200e223720450e9bc0fd459657f223909672bdd26d3529",
+        "size": 1379328000
+      },
+      "destination": {
+        "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "buildOutput": "destination",
+        "mountPath": "/shared",
+        "namespace": "namespace:b115cbf8fccd",
+        "volumeSource": {
+          "persistentVolumeClaim": {
+            "claimName": "pvc:92a982289cbe"
+          }
+        }
+      },
+      "lifetime": "caller_selected_volume",
+      "node_selector": {
+        "kubernetes.io/arch": "amd64"
+      },
+      "run_id": "ci12-final-mac-bf69d6d5-20261018",
+      "schema_version": "1.0",
+      "storage": {
+        "access_route": "storage:036cbdc14cbb",
+        "artifact_path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "build_output": "destination",
+        "destination_fingerprint": "sha256:b5fb58be82069d314a821109678110aecd6fa08d03cebafa5baf01b2743145bb",
+        "lifetime": "caller_selected_volume",
+        "mount_path": "/shared",
+        "namespace": "namespace:b115cbf8fccd",
+        "observed_mount_path": "/shared",
+        "output_absent": true,
+        "protocol": "nfs4",
+        "volume_source_types": [
+          "persistentVolumeClaim"
+        ],
+        "writable": true
+      },
+      "tool_mounts": [
+        {
+          "mountPath": "/shared",
+          "name": "artifact-destination",
+          "readOnly": false,
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "pvc:92a982289cbe"
+            }
+          }
+        },
+        {
+          "mountPath": "/ci-skills-work/ci12-final-mac-bf69d6d5-20261018",
+          "name": "node-image-work",
+          "readOnly": false,
+          "volumeSource": {
+            "emptyDir": {}
+          }
+        }
+      ],
+      "tool_spec": {
+        "dependencies": [
+          {
+            "commands": [
+              "coreos-installer"
+            ],
+            "name": "coreos-installer",
+            "probe": [
+              "coreos-installer",
+              "--version"
+            ]
+          },
+          {
+            "commands": [
+              "rsync"
+            ],
+            "name": "rsync",
+            "probe": [
+              "rsync",
+              "--version"
+            ],
+            "yum": [
+              "rsync"
+            ]
+          },
+          {
+            "commands": [
+              "oc"
+            ],
+            "linux": {
+              "destination": "/tmp/ci-skills-tools/bin",
+              "files": [
+                "oc"
+              ],
+              "method": "archive",
+              "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+              "stripComponents": 0,
+              "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz"
+            },
+            "name": "oc",
+            "probe": [
+              "oc",
+              "version",
+              "--client",
+              "-o",
+              "json"
+            ]
+          }
+        ],
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71"
+      }
+    },
+    "recovery_record": {
+      "build_path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+      "destination": {
+        "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "buildOutput": "destination",
+        "mountPath": "/shared",
+        "namespace": "namespace:b115cbf8fccd",
+        "volumeSource": {
+          "persistentVolumeClaim": {
+            "claimName": "pvc:92a982289cbe"
+          }
+        }
+      },
+      "input_fingerprint": "sha256:dc86670086021f0979b5dbc2755adfe35a9e39c3f36571feb28109a8dc8928b8",
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+        "namespace": "namespace:b115cbf8fccd",
+        "restart_count": 0,
+        "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+      },
+      "run_id": "ci12-final-mac-bf69d6d5-20261018",
+      "schema_version": "1.0",
+      "status_path": "/ci-skills-work/ci12-final-mac-bf69d6d5-20261018/private/node-image-status.json",
+      "tool_pod_fingerprint": "sha256:b0639718d0e1cfed72d8c4aee3dfd2dafe6e48d7f7087427051fa88bbaafcdad",
+      "tool_pod_fingerprint_label": "wbrzoggq4hh624wyysxohx6s3l7g4sgx64ehijyfd6uixovpzwwq"
+    }
+  },
+  "records": [
+    {
+      "callback": "K8SAuth",
+      "context": "context:611e49b22818",
+      "identity": "identity:547a4b6a7894",
+      "server": "server:6076e1dcf760"
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveRunScopes",
+      "run_id": "ci12-final-mac-bf69d6d5-20261018",
+      "scopes": [
+        {
+          "namespace": "namespace:b115cbf8fccd",
+          "owns_namespace": false,
+          "run_id": "ci12-final-mac-bf69d6d5-20261018"
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveNodeArtifactRecord",
+      "present": true,
+      "record": {
+        "artifact": {
+          "path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+            "namespace": "namespace:b115cbf8fccd",
+            "restart_count": 0,
+            "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+          },
+          "sha256": "a147f306fd4e10cfa0200e223720450e9bc0fd459657f223909672bdd26d3529",
+          "size": 1379328000
+        },
+        "destination": {
+          "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/shared",
+          "namespace": "namespace:b115cbf8fccd",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "pvc:92a982289cbe"
+            }
+          }
+        },
+        "lifetime": "caller_selected_volume",
+        "node_selector": {
+          "kubernetes.io/arch": "amd64"
+        },
+        "run_id": "ci12-final-mac-bf69d6d5-20261018",
+        "schema_version": "1.0",
+        "storage": {
+          "access_route": "storage:036cbdc14cbb",
+          "artifact_path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "build_output": "destination",
+          "destination_fingerprint": "sha256:b5fb58be82069d314a821109678110aecd6fa08d03cebafa5baf01b2743145bb",
+          "lifetime": "caller_selected_volume",
+          "mount_path": "/shared",
+          "namespace": "namespace:b115cbf8fccd",
+          "observed_mount_path": "/shared",
+          "output_absent": true,
+          "protocol": "nfs4",
+          "volume_source_types": [
+            "persistentVolumeClaim"
+          ],
+          "writable": true
+        },
+        "tool_mounts": [
+          {
+            "mountPath": "/shared",
+            "name": "artifact-destination",
+            "readOnly": false,
+            "volumeSource": {
+              "persistentVolumeClaim": {
+                "claimName": "pvc:92a982289cbe"
+              }
+            }
+          },
+          {
+            "mountPath": "/ci-skills-work/ci12-final-mac-bf69d6d5-20261018",
+            "name": "node-image-work",
+            "readOnly": false,
+            "volumeSource": {
+              "emptyDir": {}
+            }
+          }
+        ],
+        "tool_spec": {
+          "dependencies": [
+            {
+              "commands": [
+                "coreos-installer"
+              ],
+              "name": "coreos-installer",
+              "probe": [
+                "coreos-installer",
+                "--version"
+              ]
+            },
+            {
+              "commands": [
+                "rsync"
+              ],
+              "name": "rsync",
+              "probe": [
+                "rsync",
+                "--version"
+              ],
+              "yum": [
+                "rsync"
+              ]
+            },
+            {
+              "commands": [
+                "oc"
+              ],
+              "linux": {
+                "destination": "/tmp/ci-skills-tools/bin",
+                "files": [
+                  "oc"
+                ],
+                "method": "archive",
+                "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+                "stripComponents": 0,
+                "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz"
+              },
+              "name": "oc",
+              "probe": [
+                "oc",
+                "version",
+                "--client",
+                "-o",
+                "json"
+              ]
+            }
+          ],
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71"
+        }
+      },
+      "resource": {
+        "kind": "ConfigMap",
+        "name": "ci-skills-run-node-artifact-record-0eaf9e7b6e574ee7",
+        "namespace": "namespace:b115cbf8fccd",
+        "uid": "0b9575a3-3202-4249-acd6-7fa85db3716c"
+      },
+      "run_id": "ci12-final-mac-bf69d6d5-20261018",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveNodeRecoveryRecord",
+      "present": true,
+      "recovery": {
+        "build_path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "destination": {
+          "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/shared",
+          "namespace": "namespace:b115cbf8fccd",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "pvc:92a982289cbe"
+            }
+          }
+        },
+        "input_fingerprint": "sha256:dc86670086021f0979b5dbc2755adfe35a9e39c3f36571feb28109a8dc8928b8",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+        },
+        "run_id": "ci12-final-mac-bf69d6d5-20261018",
+        "schema_version": "1.0",
+        "status_path": "/ci-skills-work/ci12-final-mac-bf69d6d5-20261018/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:b0639718d0e1cfed72d8c4aee3dfd2dafe6e48d7f7087427051fa88bbaafcdad",
+        "tool_pod_fingerprint_label": "wbrzoggq4hh624wyysxohx6s3l7g4sgx64ehijyfd6uixovpzwwq"
+      },
+      "resource": {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-0eaf9e7b6e574ee7",
+        "namespace": "namespace:b115cbf8fccd",
+        "uid": "25e95c38-9466-4b67-9965-35e5a1aec104"
+      },
+      "run_id": "ci12-final-mac-bf69d6d5-20261018",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveNodeRecoveryRecord",
+      "hook": "cleanup",
+      "present": true,
+      "recovery": {
+        "build_path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "destination": {
+          "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/shared",
+          "namespace": "namespace:b115cbf8fccd",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "pvc:92a982289cbe"
+            }
+          }
+        },
+        "input_fingerprint": "sha256:dc86670086021f0979b5dbc2755adfe35a9e39c3f36571feb28109a8dc8928b8",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+        },
+        "run_id": "ci12-final-mac-bf69d6d5-20261018",
+        "schema_version": "1.0",
+        "status_path": "/ci-skills-work/ci12-final-mac-bf69d6d5-20261018/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:b0639718d0e1cfed72d8c4aee3dfd2dafe6e48d7f7087427051fa88bbaafcdad",
+        "tool_pod_fingerprint_label": "wbrzoggq4hh624wyysxohx6s3l7g4sgx64ehijyfd6uixovpzwwq"
+      },
+      "resource": {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-0eaf9e7b6e574ee7",
+        "namespace": "namespace:b115cbf8fccd",
+        "uid": "25e95c38-9466-4b67-9965-35e5a1aec104"
+      },
+      "run_id": "ci12-final-mac-bf69d6d5-20261018",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveNodeArtifactRecord",
+      "hook": "cleanup",
+      "present": true,
+      "recovery": {
+        "build_path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "destination": {
+          "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/shared",
+          "namespace": "namespace:b115cbf8fccd",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "pvc:92a982289cbe"
+            }
+          }
+        },
+        "input_fingerprint": "sha256:dc86670086021f0979b5dbc2755adfe35a9e39c3f36571feb28109a8dc8928b8",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+        },
+        "run_id": "ci12-final-mac-bf69d6d5-20261018",
+        "schema_version": "1.0",
+        "status_path": "/ci-skills-work/ci12-final-mac-bf69d6d5-20261018/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:b0639718d0e1cfed72d8c4aee3dfd2dafe6e48d7f7087427051fa88bbaafcdad",
+        "tool_pod_fingerprint_label": "wbrzoggq4hh624wyysxohx6s3l7g4sgx64ehijyfd6uixovpzwwq"
+      },
+      "resource": {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-0eaf9e7b6e574ee7",
+        "namespace": "namespace:b115cbf8fccd",
+        "uid": "25e95c38-9466-4b67-9965-35e5a1aec104"
+      },
+      "run_id": "ci12-final-mac-bf69d6d5-20261018",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveRunScopes",
+      "hook": "cleanup",
+      "present": true,
+      "recovery": {
+        "build_path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "destination": {
+          "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/shared",
+          "namespace": "namespace:b115cbf8fccd",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "pvc:92a982289cbe"
+            }
+          }
+        },
+        "input_fingerprint": "sha256:dc86670086021f0979b5dbc2755adfe35a9e39c3f36571feb28109a8dc8928b8",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+        },
+        "run_id": "ci12-final-mac-bf69d6d5-20261018",
+        "schema_version": "1.0",
+        "status_path": "/ci-skills-work/ci12-final-mac-bf69d6d5-20261018/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:b0639718d0e1cfed72d8c4aee3dfd2dafe6e48d7f7087427051fa88bbaafcdad",
+        "tool_pod_fingerprint_label": "wbrzoggq4hh624wyysxohx6s3l7g4sgx64ehijyfd6uixovpzwwq"
+      },
+      "resource": {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-0eaf9e7b6e574ee7",
+        "namespace": "namespace:b115cbf8fccd",
+        "uid": "25e95c38-9466-4b67-9965-35e5a1aec104"
+      },
+      "run_id": "ci12-final-mac-bf69d6d5-20261018",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "K8SAuth",
+      "hook": "cleanup",
+      "present": true,
+      "recovery": {
+        "build_path": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+        "destination": {
+          "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/shared",
+          "namespace": "namespace:b115cbf8fccd",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "pvc:92a982289cbe"
+            }
+          }
+        },
+        "input_fingerprint": "sha256:dc86670086021f0979b5dbc2755adfe35a9e39c3f36571feb28109a8dc8928b8",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-0eaf9e7b6e574ee7",
+          "namespace": "namespace:b115cbf8fccd",
+          "restart_count": 0,
+          "uid": "e1b7fa7a-9756-4c1c-8a11-49a790e6daa3"
+        },
+        "run_id": "ci12-final-mac-bf69d6d5-20261018",
+        "schema_version": "1.0",
+        "status_path": "/ci-skills-work/ci12-final-mac-bf69d6d5-20261018/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:b0639718d0e1cfed72d8c4aee3dfd2dafe6e48d7f7087427051fa88bbaafcdad",
+        "tool_pod_fingerprint_label": "wbrzoggq4hh624wyysxohx6s3l7g4sgx64ehijyfd6uixovpzwwq"
+      },
+      "resource": {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-0eaf9e7b6e574ee7",
+        "namespace": "namespace:b115cbf8fccd",
+        "uid": "25e95c38-9466-4b67-9965-35e5a1aec104"
+      },
+      "run_id": "ci12-final-mac-bf69d6d5-20261018",
+      "verified": true
+    }
+  ],
+  "run_id": "ci12-final-mac-bf69d6d5-20261018",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "dbaf02d4a9ab24fb4ee5980c66f42425fd84a4f5c1e4c7e6f73735c4942d5b6b",
+    "file_count": 196,
+    "functional_digest": "8dde2e6f7389ab60a1cf978d7ead63366e6b045cb422b2a7f82705f209084ff1",
+    "revision": {
+      "source": "installer_record",
+      "value": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
+      "verified": true
+    }
+  },
+  "status": "PLANNED",
+  "summary": {
+    "error_count": 0,
+    "record_count": 8
+  },
+  "target": "context:611e49b22818@server:6076e1dcf760",
+  "target_file": "path:5e5380df1eda",
+  "target_source": "user",
+  "tested_revision": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df"
+}

@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-18T03:35:42.840376+00:00",
+  "captured_at": "2026-10-18T04:15:46.246515+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,7 +18,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "4443292475c0a14552a5e373f5b188b9706dbead1802b685bbd472ee60727571",
+    "body_sha256": "e780c80b51bd41266275f516d5b97706d42d65d3bf1870645f0134b08b038a82",
     "confirmation_ready": true,
     "fields": [
       "description",
@@ -28,22 +28,22 @@
     ],
     "one_time_sink_required": false,
     "operation": "create",
-    "plan_digest": "96f53d1e265659dcbfbe1c63363b0bd49023222599c9de0dbb045797acb5b4b8",
+    "plan_digest": "7aa5dd1475ea235eb2144c4e68121b1d1f6102b6cc2dabbd3a5ff675360ea92c",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "96f53d1e265659dcbfbe1c63363b0bd49023222599c9de0dbb045797acb5b4b8",
+  "plan_digest": "7aa5dd1475ea235eb2144c4e68121b1d1f6102b6cc2dabbd3a5ff675360ea92c",
   "readback": {
     "action": "NO_OP",
-    "id": 93,
+    "id": 95,
     "verified": true
   },
   "records": [
     {
       "action": "NO_OP",
-      "id": 93,
+      "id": 95,
       "verified": true
     }
   ],
@@ -55,12 +55,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "33c82b7da68ad46124877127d01e62b4a1e0b03fdd6a47ff95fc682566ed5547",
-    "file_count": 164,
-    "functional_digest": "e5523516780793f388c33e81cde0747b44571f6f380339a01a04be4bfde5bf9b",
+    "digest": "dbaf02d4a9ab24fb4ee5980c66f42425fd84a4f5c1e4c7e6f73735c4942d5b6b",
+    "file_count": 196,
+    "functional_digest": "8dde2e6f7389ab60a1cf978d7ead63366e6b045cb422b2a7f82705f209084ff1",
     "revision": {
       "source": "installer_record",
-      "value": "0017df813f5ef0beacc581745c3a16590bfb4229",
+      "value": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
       "verified": true
     }
   },
@@ -75,7 +75,7 @@
   },
   "target_file": "path:8617612df58d",
   "target_source": "project;argv:--project",
-  "tested_revision": "0017df813f5ef0beacc581745c3a16590bfb4229",
+  "tested_revision": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-18T03:34:31.733282+00:00",
+  "captured_at": "2026-10-18T04:14:37.589748+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -22,7 +22,7 @@
       "namespace": "openshift-storage",
       "osd_count": 12,
       "pod_count": 15,
-      "readback_sha256": "aec7c2d23df678fe7874019bac80e67fdfce34d90c3a1a6a56daf716fd418c14",
+      "readback_sha256": "971f5e550f78db4acaec02ef7eb28d5e2a726766c2d952d6bae0bb04c705db7d",
       "record_count": 15,
       "status": "PASS"
     },
@@ -35,7 +35,7 @@
       "ciliumnode_count": 9,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "27c7831d7db8846857168d0de4e4a9bf84d15e37e065005b222c3b1f6c00120e",
+      "readback_sha256": "07304e464be1eaf374f10471ad29d74b86e7b174dcd02b8b3504498d384f5c8d",
       "record_count": 9,
       "status": "PASS"
     },
@@ -43,8 +43,8 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "fc7937b18cd21da3df60e79b0a955d5054e1393aee8865e353f6d7acf571dc6b",
-      "record_count": 548,
+      "readback_sha256": "cb3b0bb7aa3bdfbec02ba9230982ef10e73deed7bbdf731afcd856a00bd36561",
+      "record_count": 561,
       "status": "PASS"
     },
     "gitlab_job": {
@@ -58,7 +58,7 @@
         "trace_line_count": 59
       },
       "job_url": "https://gitlab.dcloud.run/hott/test/-/jobs/59277",
-      "readback_sha256": "23f14f3411b94d650a2fa5df58b3dc3284b9565f4b5ea42c4a6bbb23042b8e7d",
+      "readback_sha256": "83866ba836942f0843c6e5b394d0750a97f0c53aba2766abadeec02523548ed3",
       "record_count": 1,
       "status": "PASS"
     },
@@ -66,7 +66,7 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "e6c5fb123f0d76b7e5cf550944bcac7137f4dcfda716fa6fae1c52aba65d85f0",
+      "readback_sha256": "d46bb184fe6f5ff4e4f5b4e9015ea045fe08d3cc581a0ef408a896e98f4afb49",
       "record_count": 65,
       "resource_counts": {
         "attachments": 34,
@@ -94,12 +94,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "33c82b7da68ad46124877127d01e62b4a1e0b03fdd6a47ff95fc682566ed5547",
-    "file_count": 164,
-    "functional_digest": "e5523516780793f388c33e81cde0747b44571f6f380339a01a04be4bfde5bf9b",
+    "digest": "dbaf02d4a9ab24fb4ee5980c66f42425fd84a4f5c1e4c7e6f73735c4942d5b6b",
+    "file_count": 196,
+    "functional_digest": "8dde2e6f7389ab60a1cf978d7ead63366e6b045cb422b2a7f82705f209084ff1",
     "revision": {
       "source": "installer_record",
-      "value": "0017df813f5ef0beacc581745c3a16590bfb4229",
+      "value": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
       "verified": true
     }
   },
@@ -183,5 +183,5 @@
       "server": "server:6076e1dcf760"
     }
   },
-  "tested_revision": "0017df813f5ef0beacc581745c3a16590bfb4229"
+  "tested_revision": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df"
 }
