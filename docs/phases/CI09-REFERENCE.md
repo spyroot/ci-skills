@@ -26,8 +26,12 @@ This document plans from:
   command. Section 3 below specifies the graph: the nodes, the placement of every command, the verbs' purposes,
   the references and sections, and the compact output rules. Its renders use the 1.x `choices` envelope, one
   entry per verb with `available` and `next`, which the 2.0 schema keeps only as legacy; a 2.0 node carries no
-  verb entry and no planned verb. Section 3 is retained as written; every capability registers into the 2.0
-  node and none defines a second navigator or inventory; this is requirement `R-CI09-005` in the map;
+  verb entry and no planned verb. CI11 also supersedes section 3's forced walk through `run` and `read`: one
+  answer per node carries `tools` and `reference` together, the agent expands a node only when it decides it
+  needs more, and no call through `run`, `read` or `describe` is required before invoking a command; `next PATH`
+  and `get` remain for drilling into a reference section. Section 3 is retained as written; every capability
+  registers into the 2.0 node and none defines a second navigator or inventory; this is requirement
+  `R-CI09-005` in the map;
 - [`CI11-TOOLS`](CI11-TOOLS.md), recipe step 4: a capability extends the catalogue's placement declarations for
   its proposition nodes, and its read-back is that the proposition lists the installed tool and its reference
   pointers;
@@ -170,7 +174,9 @@ Inspected at main `54ceb7f`; evidence is from main unless stated.
   scoped to one command; the proposition today offers four fixed references chosen by provider. The planned
   verbs of section 3, the verbs CI11-TOOLS names for existing commands and has not delivered, are rendered there
   as 1.x choices with `available: false`; a 2.0 node cannot carry them, and this phase delivers none of them
-  (open decision below).
+  (open decision below). The `run` and `read` segments of section 3 are not required steps: one answer per node
+  carries tools and references together, and `next PATH` and `get` are the agent's optional expansion into a
+  reference section.
 
 ### Design and Decomposition
 
@@ -2131,7 +2137,7 @@ combo lands without what the agent needs to run it and read for it:
           grounding: GROUNDED
           implementation: PARTIALLY_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: Every answer the navigator returns is a node of the CI11 Proposition interface at schema version 2.0, validated against schemas/reference-next.schema.json; the graph of section 3 is rendered into that node shape, and no answer advertises a command or verb that is not installed.
+        deliverable: Every answer the navigator returns is a node of the CI11 Proposition interface at schema version 2.0, validated against schemas/reference-next.schema.json; the graph of section 3 is rendered into that node shape, and no answer advertises a command or verb that is not installed; one answer per node carries tools and references together, and no traversal through run, read or describe is required before invoking a command, the agent expanding only when it decides to.
         owner: ci-skills/bin/reference.py
         preserve: [The 2.0 node schema and the legacy 1.x envelope it retains, Existing clusters and pointers]
         prIds: [PR-CI09-1]
