@@ -25,30 +25,26 @@ from lib.python.core.catalog import describe
 from lib.python.core.cli import parser
 from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.executor import WorkflowExecutor
-from lib.python.core.json_types import JSONObject, JSONValue, copy_json, json_object
+from lib.python.core.json_types import JSONObject, JSONValue, json_object
 from lib.python.core.kubernetes.kubernetes import K8SAuth, KubernetesError
 from lib.python.core.kubernetes.run_scope import validate_run_id
 from lib.python.core.kubernetes.tool_pod import (
-    OpenRunScope,
     PrepareToolPodAction,
-    ReadToolState,
     RemoveScope,
     RemoveToolPod,
     RemoveToolPodAction,
     ResolveRunScopeAction,
     ResolveRunScopes,
     RunScope,
-    RunScopeAction,
-    StageToolPod,
     ToolPodSpec,
     ToolPodState,
-    VerifyTools,
-    tool_callbacks,
 )
+from lib.python.core.kubernetes.tool_pod_workflow import prepare_tool_pod_callbacks
+from lib.python.core.kubernetes.workflow_report import workflow_result
 from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.provenance import functional_digest
-from lib.python.core.report import emit_result, plan_digest, report
+from lib.python.core.report import emit_result, plan_digest
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import Target, TargetError
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, PLANNED
@@ -192,12 +188,7 @@ def workflow(
                 spec, run_id=args.run_id, timeout=args.timeout
             )
             scope = RunScope.new(run_id=action.run_id, namespace=action.namespace)
-            if action.run_id is not None:
-                callbacks.append(ResolveRunScopes(ResolveRunScopeAction(action.run_id)))
-            callbacks.append(OpenRunScope(RunScopeAction(scope)))
-            callbacks.extend((StageToolPod(action), ReadToolState(action)))
-            callbacks.extend(tool_callbacks(action))
-            callbacks.append(VerifyTools(action))
+            callbacks.extend(prepare_tool_pod_callbacks(action, scope))
         else:
             lookup = ResolveRunScopeAction(args.run_id)
             callbacks.extend(
@@ -208,20 +199,6 @@ def workflow(
                 )
             )
     return WorkflowExecutor(context=state, callbacks=Callbacks(callbacks))
-
-
-def result_records(state: ToolPodState) -> Sequence[JSONObject]:
-    """Select each callback's final run result once, excluding empty default hooks.
-
-    :param state: Workflow state retaining per-callback results.
-    :returns: Ordered JSON records with callback names for the execution trace.
-    :raises TypeError: A callback's result contains a non-JSON value.
-    """  # noqa: DOC502 - The common JSON conversion rejects unsupported values.
-    return [
-        {"callback": type(callback).__name__, **json_object(copy_json(value))}
-        for callback, value in state.results.items()
-        if value
-    ]
 
 
 def invocation_report(
@@ -243,45 +220,9 @@ def invocation_report(
     :returns: Report ready for shared rendering and portable receipt persistence.
     :raises TypeError: A callback or provenance field is not valid JSON.
     """  # noqa: DOC502 - Shared JSON conversion and records validate report content.
-    selected = target.kubernetes
-    label = f"{selected.context}@{selected.server}" if selected else "kubernetes"
-    output = report(TOOL_POD_KIND, label, {}, result_records(state), errors)
-    output.update(operation=args.action or "", status=status, plan=plan)
-    if plan:
-        output["plan_digest"] = plan_digest(plan)
-    output["tested_revision"] = target.tested_revision
-    output["skill"] = copy_json(target.skill) if target.skill else {}
-    output["target_source"] = target.source_kind or ""
-    output["target_file"] = str(target.source_file) if target.source_file else ""
-    output.update(operation_evidence(state))
-    return output
-
-
-def operation_evidence(state: ToolPodState) -> JSONObject:
-    """Keep observed cleanup, retained identities and provider read-back together.
-
-    :param state: Shared callback state, including partial observations after failure.
-    :returns: Nonsecret evidence common to successful and failed command reports.
-    :raises TypeError: Callback evidence contains a non-JSON value.
-    """  # noqa: DOC502 - Shared JSON copying rejects unsupported values.
-    retained = sorted(
-        state.retained_resources,
-        key=lambda item: (item.namespace, item.kind, item.name),
+    return workflow_result(
+        TOOL_POD_KIND, args.action or "", state, plan, status, errors, target
     )
-    output: JSONObject = {
-        "cleanup": {
-            "status": BLOCKED if state.cleanup_failures else PASS,
-            "failures": copy_json(state.cleanup_failures),
-            "resources": copy_json(state.cleanup_resources),
-            "retained": [item.as_dict() for item in retained],
-        },
-        "access": copy_json(state.access_evidence),
-        "readback": copy_json(state.readback),
-    }
-    for field in ("pod", "run_id"):
-        if field in state.readback:
-            output[field] = copy_json(state.readback[field])
-    return output
 
 
 def execute(args: argparse.Namespace) -> int:
@@ -342,18 +283,9 @@ def failure_report(
     :raises TypeError: A callback's evidence cannot be represented as JSON.
     """  # noqa: DOC502 - Callback results are narrowed by result_records.
     errors: Sequence[JSONObject] = [{"source": TOOL_POD_KIND, "reason": reason}]
-    if target is not None:
-        return invocation_report(args, target, state, plan, BLOCKED, errors)
-    output = report(
-        TOOL_POD_KIND,
-        "kubernetes",
-        {},
-        result_records(state),
-        errors,
+    return workflow_result(
+        TOOL_POD_KIND, args.action or "", state, plan, BLOCKED, errors, target
     )
-    output.update(status=BLOCKED, operation=args.action or "", plan=plan)
-    output.update(operation_evidence(state))
-    return output
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

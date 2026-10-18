@@ -1,0 +1,81 @@
+{
+  "choices": [
+    {
+      "id": "access",
+      "kind": "expand",
+      "next": {
+        "action": "expand",
+        "args": [
+          "next",
+          "k8s",
+          "ocp_node_onboard",
+          "read",
+          "access",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Selected authority and credential sources."
+    },
+    {
+      "id": "project-binding",
+      "kind": "expand",
+      "next": {
+        "action": "expand",
+        "args": [
+          "next",
+          "k8s",
+          "ocp_node_onboard",
+          "read",
+          "project-binding",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Project target and credential binding."
+    },
+    {
+      "id": "openshift-node-image",
+      "kind": "expand",
+      "next": {
+        "action": "expand",
+        "args": [
+          "next",
+          "k8s",
+          "ocp_node_onboard",
+          "read",
+          "openshift-node-image",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Native OCP YAML, cluster destination and ISO lifecycle examples."
+    },
+    {
+      "id": "tool-pod-preparation",
+      "kind": "expand",
+      "next": {
+        "action": "expand",
+        "args": [
+          "next",
+          "k8s",
+          "ocp_node_onboard",
+          "read",
+          "tool-pod-preparation",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Tool input, preparation, reuse and removal examples."
+    }
+  ],
+  "continuation": null,
+  "kind": "reference_next",
+  "path": [
+    "k8s",
+    "ocp_node_onboard",
+    "read"
+  ],
+  "schema_version": "1.0",
+  "summary": "4 references with sections here."
+}

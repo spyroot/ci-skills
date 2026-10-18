@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from collections.abc import Mapping, MutableMapping, MutableSequence
+from collections.abc import Mapping, MutableMapping, MutableSequence, MutableSet
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -229,6 +229,7 @@ class PrepareToolPodAction(SkillAction):
     :param timeout: Positive bound for each Kubernetes operation.
     :param retain: Keep a successfully verified Pod until explicit removal.
     :param mounts: Native storage mounts selected by an internal consumer.
+    :param node_selector: Native Pod placement labels selected by an internal consumer.
 
     .. attribute :: spec
         :type: ToolPodSpec
@@ -259,6 +260,11 @@ class PrepareToolPodAction(SkillAction):
         :type: tuple[ToolPodMount, ...]
 
         Native storage mounts selected by an internal consumer.
+
+    .. attribute :: node_selector
+        :type: Mapping[str, str]
+
+        Immutable native Pod placement labels selected by an internal consumer.
     """
 
     spec: ToolPodSpec
@@ -267,11 +273,16 @@ class PrepareToolPodAction(SkillAction):
     timeout: int = DEFAULT_COMMAND_TIMEOUT
     retain: bool = True
     mounts: tuple[ToolPodMount, ...] = ()
+    node_selector: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({}),
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         """Reject invalid bounds and correlation identities before provider access.
 
         :raises ValueError: If timeout, run ID, or namespace is invalid.
+        :raises TypeError: If a node-selector key or value is not text.
         """
         if self.timeout <= 0:
             raise ValueError("tool_pod_timeout_invalid")
@@ -279,6 +290,16 @@ class PrepareToolPodAction(SkillAction):
             validate_run_id(self.run_id)
         if self.namespace:
             validate_namespace(self.namespace)
+        if not isinstance(self.node_selector, Mapping) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in self.node_selector.items()
+        ):
+            raise TypeError("tool_pod_node_selector_invalid")
+        object.__setattr__(
+            self,
+            "node_selector",
+            MappingProxyType(dict(self.node_selector)),
+        )
 
     @property
     def image(self) -> str:
@@ -309,10 +330,13 @@ class PrepareToolPodAction(SkillAction):
 
         :returns: Exact tool specification and ordered native mounts.
         """
-        return {
+        document: JSONObject = {
             "spec": self.spec.as_dict(),
             "mounts": [mount.as_dict() for mount in self.mounts],
         }
+        if self.node_selector:
+            document["nodeSelector"] = dict(self.node_selector)
+        return document
 
 
 @dataclass(frozen=True)
@@ -529,6 +553,12 @@ class ToolPodState(RunScopeState):
         :type: MutableMapping[str, JSONValue]
 
         Safe provider and tool read-back selected for the final report.
+
+    .. attribute :: retained_pod_files
+        :type: MutableSet[str]
+
+        Exact Pod paths preserved while an asynchronous native process may still
+        consume them.
     """
 
     pod: PodHandle = field(init=False)
@@ -537,6 +567,7 @@ class ToolPodState(RunScopeState):
     artifacts: MutableMapping[str, ArtifactHandle] = field(default_factory=dict)
     search_paths: MutableSequence[str] = field(default_factory=list)
     readback: MutableMapping[str, JSONValue] = field(default_factory=dict)
+    retained_pod_files: MutableSet[str] = field(default_factory=set, repr=False)
 
     @property
     def result_records(self) -> MutableSequence[Mapping[str, object]]:

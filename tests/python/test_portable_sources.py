@@ -45,6 +45,22 @@ def test_project_source_and_recorded_query_paths_are_portable() -> None:
     assert "file:path:" in rendered["credential_sources"]["kubernetes"]
     assert rendered["queries"]["pods"][2].startswith("path:")
     assert "/private/" not in str(rendered)
+    assert portable.portable(rendered) == rendered
+
+
+def test_portable_nested_logical_binding_source_remains_unchanged() -> None:
+    """Keep a catalogue source pointer unchanged during repeated conversion.
+    :returns: None; assertions in the body validate the regression.
+    """
+    portable = import_script_module("lib.python.core.portable")
+    description = {
+        "access_protocol": {"kubernetes": [{"source": "binding:kubernetes.sources"}]}
+    }
+
+    rendered = portable.portable(description)
+
+    assert rendered == description
+    assert portable.portable(rendered) == rendered
 
 
 def test_portable_root_document_without_key_keeps_nested_path_redaction() -> None:

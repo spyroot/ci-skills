@@ -49,6 +49,7 @@ class SkillState:
     :param records: Successful hook results in execution order, including cleanup.
     :param results: Each bound callback's most recent run result, initially empty.
     :param cleanup_failures: Callback names and sanitized reasons from failed cleanup hooks.
+    :param cleanup_results: Successful nonempty cleanup-hook results with identities.
     :param failed: Whether the current run failed or an operation remained incomplete.
     :param name: Caller-supplied workflow name for reporting.
     :param debug: Caller-selected diagnostic detail setting.
@@ -75,6 +76,11 @@ class SkillState:
         :type: MutableSequence[CleanupFailure]
 
         Callback names and sanitized reasons from failed cleanup hooks.
+
+    .. attribute :: cleanup_results
+        :type: MutableSequence[SkillResult]
+
+        Successful nonempty cleanup-hook results with callback and hook identities.
 
     .. attribute :: failed
         :type: bool
@@ -118,6 +124,7 @@ class SkillState:
         default_factory=dict, repr=False
     )
     cleanup_failures: MutableSequence[CleanupFailure] = field(default_factory=list)
+    cleanup_results: MutableSequence[SkillResult] = field(default_factory=list)
     failed: bool = False
     name: str = ""
     debug: bool = False
