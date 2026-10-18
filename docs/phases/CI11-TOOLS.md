@@ -97,12 +97,12 @@ decides it needs to. The graph therefore continues past the command node through
 
 ### Proposition schema
 
-The [reference-next schema](../../schemas/reference-next.schema.json) owns version `3.0` propositions and retains
-the `2.0` node with its `reference` mapping and the 1.x `choices` envelope as legacy. The proposition response
-revision is `3.0`; a proposition reference's `pointer` is the next `reference.py` call as a string, as shown in
-the root/jobs examples. Preserve the separate 1.x command-pointer definitions (`action`, `entrypoint`, `args`)
-still used by the [reference-section schema](../../schemas/reference-section.schema.json) and existing result
-schemas. Proposition reference pointers do not reuse that command-pointer object.
+The [reference-next schema](../../schemas/reference-next.schema.json) owns version `3.0` propositions; the `2.0`
+node with its `reference` mapping and the 1.x `choices` envelope are retired. The proposition response revision
+is `3.0`; a proposition reference's `pointer` is the next `reference.py` call as a string, as shown in the
+root/jobs examples. The separate command-pointer definitions (`action`, `entrypoint`, `args`) stay in that schema
+only for the [gitlab-pipeline-watch result schema](../../schemas/gitlab-pipeline-watch.schema.json), their
+remaining user. Proposition reference pointers do not reuse that command-pointer object.
 
 Every response carries `schema_version` alongside its payload members. The examples above omit only that response
 metadata to show the root and node shapes. The schema describes structure; it does not prescribe which reference an
