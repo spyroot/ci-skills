@@ -21,17 +21,21 @@ kinds, declared with the same `uses` pointers (CI07-SCHEMA):
 This document plans from:
 
 - the proposition interface. [`CI11-TOOLS`](CI11-TOOLS.md#proposition-interface) and its schema define the node
-  every call returns, version `2.0`: `tools`, installed filenames mapped to empty objects, and `reference`, names
-  mapped to a summary and a pointer, derived from `core/catalog.py`; a live offering never advertises a proposed
-  command. Section 3 below specifies the graph: the nodes, the placement of every command, the verbs' purposes,
-  the references and sections, and the compact output rules. Its renders use the 1.x `choices` envelope, one
-  entry per verb with `available` and `next`, which the 2.0 schema keeps only as legacy; a 2.0 node carries no
-  verb entry and no planned verb. CI11 also supersedes section 3's forced walk through `run` and `read`: one
-  answer per node carries `tools` and `reference` together, the agent expands a node only when it decides it
-  needs more, and no call through `run`, `read` or `describe` is required before invoking a command; `next PATH`
-  and `get` remain for drilling into a reference section. Section 3 is retained as written; every capability
-  registers into the 2.0 node and none defines a second navigator or inventory; this is requirement
-  `R-CI09-005` in the map;
+  every call returns: `tools`, what the agent can run, the installed filenames, each chosen to say what the
+  command actually does since that name is all the node shows for it, mapped to empty objects; and `reference`,
+  what it can read, an ordered array of entries each with a name,
+  a summary and a pointer to the next node, derived from `core/catalog.py`; a live offering never advertises a
+  proposed command. Section 3 below specifies the graph: the nodes, the placement of every command, the verbs'
+  purposes, the references and sections, and the compact output rules. Its renders use the 1.x `choices`
+  envelope, one entry per verb with `available` and `next`, which the schema keeps only as legacy beside the 2.0
+  mapping; the node carries no verb entry and no planned verb. CI11 also supersedes section 3's forced walk
+  through `run` and `read`: one answer per node carries `tools` and `reference` together, the agent expands a
+  node only when it decides it needs more, and no call through `run`, `read` or `describe` is required before
+  invoking a command; `next PATH` and `get` remain for drilling into a reference section. A reference pointer
+  resolves to a file ci-skills stores under `references/`, and a reference is itself a node of the same graph: it
+  expands into its sections through `get REF ANCHOR`, so the graph continues past the command node, and
+  expanding it is the agent's decision. Section 3 is retained as written; every capability registers into the
+  node and none defines a second navigator or inventory; this is requirement `R-CI09-005` in the map;
 - [`CI11-TOOLS`](CI11-TOOLS.md), recipe step 4: a capability extends the catalogue's placement declarations for
   its proposition nodes, and its read-back is that the proposition lists the installed tool and its reference
   pointers;
@@ -85,8 +89,8 @@ one run of `tools/update_reference.py` (sections 1 to 4).
 ## Diagram
 
 How the agent reaches a reference, and where each pointer comes from; the node shape, `tools` as installed
-filenames mapped to empty objects and `reference` as names mapped to a summary and a pointer under
-`schema_version` `2.0`, is the [Proposition interface](CI11-TOOLS.md#proposition-interface) and
+filenames mapped to empty objects and `reference` as an ordered array of name, summary and pointer to the
+next node under `schema_version` `3.0`, is the [Proposition interface](CI11-TOOLS.md#proposition-interface) and
 [Proposition schema](CI11-TOOLS.md#proposition-schema) of CI11-TOOLS:
 
 ```mermaid
@@ -147,9 +151,40 @@ flowchart LR
 ```
 
 The first diagram is the data flow the agent sees; control is one call per level and never a forced walk from the
-root. The second is the construction path a caller or maintainer runs; `fetch` is the only stage that uses the
-network and it never runs from the installed skill. The third is the compatibility check; it reads the binary and
-writes nothing.
+root. A reference is a node of the same graph: its pointer is a file ci-skills ships, and `get REF ANCHOR` expands
+it into one section when the agent decides to. The second is the construction path a caller or maintainer runs;
+`fetch` is the only stage that uses the network and it never runs from the installed skill. The third is the
+compatibility check; it reads the binary and writes nothing.
+
+One walk, in CI11's node shape, for the command that builds a node ISO. The node answers with what the agent can
+run, the installed commands, and what it can read, the references ci-skills stores, each read entry pointing at
+the next node:
+
+```json
+{
+  "schema_version": "3.0",
+  "tools": { "ocp_node_onboard.py": {}, "prepare_tool_pod.py": {} },
+  "reference": [
+    {
+      "name": "OpenShift node image",
+      "summary": "Every flag oc adm node-image create accepts, and a nodes-config.yaml example.",
+      "pointer": "get ocp-node-image"
+    }
+  ]
+}
+```
+
+The agent runs the command from `tools` with its `--help`, or, when it decides it needs the upstream facts, expands
+the reference. `reference.py get ocp-node-image flags` returns the one section the agent must get right to
+produce a valid build: the one required flag on the flags route, `--mac-address`, and the thirteen OpenShift
+leaves optional, `--hostname`, `--cpu-architecture`, `--network-config-path`, `--root-device-hint`,
+`--ssh-key-path`, `--pxe`, `--output-name`, `--dir`, `--registry-config`, `--report`, `--skip-verification`,
+`--insecure` and `--certificate-authority`, each with the upstream meaning. `reference.py get ocp-node-image
+nodes-config-example` returns the one section holding a `nodes-config.yaml`: a `hosts` entry with `hostname`,
+`interfaces` with `name` and `macAddress`, `rootDeviceHints` with `deviceName`, `networkConfig`,
+`cpuArchitecture`, `sshKey` and `bootArtifactsBaseURL`, each marked required or optional as the upstream page
+states, with pointers to its subsections (section 3, `get`). The reference is a node; the command node did not
+have to carry any of that text, and nothing forced the expansion.
 
 ## Implementation Plan
 
@@ -173,7 +208,7 @@ Inspected at main `54ceb7f`; evidence is from main unless stated.
   and placement tables, the verb purposes, `--search`, cards and paging, the renders, and a row for a reference
   scoped to one command; the proposition today offers four fixed references chosen by provider. The planned
   verbs of section 3, the verbs CI11-TOOLS names for existing commands and has not delivered, are rendered there
-  as 1.x choices with `available: false`; a 2.0 node cannot carry them, and this phase delivers none of them
+  as 1.x choices with `available: false`; the node cannot carry them, and this phase delivers none of them
   (open decision below). The `run` and `read` segments of section 3 are not required steps: one answer per node
   carries tools and references together, and `next PATH` and `get` are the agent's optional expansion into a
   reference section.
@@ -2015,8 +2050,8 @@ The `ReferenceSource`, `Chunker` and `Joiner` seams are introduced with the seco
   authority: an owner decision; the Proposition interface shows only cluster and command nodes. Decision owner:
   the owner. Work it prevents: placing any reference section under a node, `PR-CI09-1`.
 
-- Planned verbs under the 2.0 node. Section 3 renders a verb CI11-TOOLS names but has not delivered as a 1.x
-  choice with `available: false` and no pointer; the 2.0 node has no verb entries and CI11 forbids advertising a
+- Planned verbs under the node. Section 3 renders a verb CI11-TOOLS names but has not delivered as a 1.x
+  choice with `available: false` and no pointer; the node has no verb entries and CI11 forbids advertising a
   proposed command. Affected requirements: `R-CI09-003`, `R-CI09-005`. Options: surface them in the command's
   `--describe`, or not at all until delivered. Missing authority: an owner decision. Decision owner: the owner. Work it
   prevents: the `PLANNED_VERBS` rows of `PR-CI09-1`.
@@ -2137,9 +2172,9 @@ combo lands without what the agent needs to run it and read for it:
           grounding: GROUNDED
           implementation: PARTIALLY_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: Every answer the navigator returns is a node of the CI11 Proposition interface at schema version 2.0, validated against schemas/reference-next.schema.json; the graph of section 3 is rendered into that node shape, and no answer advertises a command or verb that is not installed; one answer per node carries tools and references together, and no traversal through run, read or describe is required before invoking a command, the agent expanding only when it decides to.
+        deliverable: Every answer the navigator returns is a node of the CI11 Proposition interface at schema version 3.0, with 2.0 and 1.x retained as legacy, validated against schemas/reference-next.schema.json; the graph of section 3 is rendered into that node shape, and no answer advertises a command or verb that is not installed; one answer per node carries tools and references together, and no traversal through run, read or describe is required before invoking a command, the agent expanding only when it decides to; every reference pointer resolves to a file ci-skills delivers, and a reference expands into its sections on the agent's decision, so the graph continues past the command node.
         owner: ci-skills/bin/reference.py
-        preserve: [The 2.0 node schema and the legacy 1.x envelope it retains, Existing clusters and pointers]
+        preserve: [The node schema and the legacy versions it retains, Existing clusters and pointers]
         prIds: [PR-CI09-1]
         gateIds: [G-CI09-STATIC, G-CI09-REGISTRATION, G-CI09-LIVE]
         evidence: []
