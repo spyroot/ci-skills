@@ -1038,7 +1038,7 @@
     },
     "ocp_node_onboard.py": {
       "capabilities": [],
-      "execution_surface": "installed skill controls tools and ISO generation inside the selected Kubernetes cluster",
+      "execution_surface": "installed skill controls tools, ISO generation and node join in the selected cluster",
       "options": [
         "--apply",
         "--binding",
@@ -1047,6 +1047,7 @@
         "--destination",
         "--dry-run",
         "--human",
+        "--ip-address",
         "--json",
         "--live-plan",
         "--log-file",
@@ -1054,6 +1055,7 @@
         "--log-level",
         "--mac-address",
         "--network-config-path",
+        "--node-name",
         "--output-dir",
         "--pull-secret-key",
         "--pull-secret-name",
@@ -1066,7 +1068,7 @@
         "--tool-pod-spec",
         "--yaml"
       ],
-      "purpose": "Build an OpenShift node ISO in-cluster and verify its delivery to selected storage.",
+      "purpose": "Build an OpenShift node ISO in-cluster, join its node, and verify selected storage.",
       "read_only": false,
       "report_kind": "ocp_node_onboard",
       "required_options": [],
@@ -1078,8 +1080,8 @@
       "requires_authorities": [
         "kubernetes"
       ],
-      "returns": "Shared workflow report with native completion, callback observations, final cluster artifact identity/lifetime, plan, provenance and cleanup evidence.",
-      "side_effects": "Build/remove use plan confirmation. Native oc creates its temporary workload and RBAC; the wrapper grants no additional cluster rights. ISO bytes stay in the cluster.",
+      "returns": "Shared workflow report with native completion, join read-back, final cluster artifact identity/lifetime, plan, provenance and cleanup evidence.",
+      "side_effects": "Build/join/remove use plan confirmation. Native oc creates temporary build resources; join approves only the selected node's two signers. ISO bytes stay in the cluster.",
       "subcommands": {
         "build": {
           "mutates": true,
@@ -1090,6 +1092,18 @@
           ],
           "result_schema": "schemas/results/ocp-node-onboard.schema.json",
           "side_effects": "Confirmed build stages a tool Pod and native OpenShift temporary resources, writes the requested ISO, and retains its run record; temporary final storage retains its Pod."
+        },
+        "join": {
+          "mutates": true,
+          "purpose": "Approve the booted node's selected CSRs and verify its Ready identity.",
+          "read_back": "Client bootstrap-completion evidence, issued serving request state and exact Ready Node hostname, roles and observed IPs.",
+          "required_options": [
+            "--run-id",
+            "--node-name",
+            "--ip-address"
+          ],
+          "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+          "side_effects": "Confirmed join approves only the exact hostname's client and serving signers, then removes the owned build scope; it never boots or deletes a node."
         },
         "remove": {
           "mutates": true,
@@ -1112,7 +1126,7 @@
           "side_effects": "Persistent storage can require a temporary reader Pod, cleaned after inspection."
         }
       },
-      "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; inspect or release a previous run. See references/ocp-node-image.md."
+      "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; join its booted node, inspect it or release a previous run. See references/ocp-node-image.md."
     },
     "prepare_tool_pod.py": {
       "capabilities": [],
