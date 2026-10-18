@@ -286,10 +286,11 @@ affected node. `tools.json` describes every command and its filters.
 ## Nested Podman readiness
 
 `bin/image_build_readiness.py` composes worker selection, a temporary privileged Job, runtime checks, and cleanup.
-It uses Kubernetes configuration and `kubectl`; Podman runs in the Job. The selected identity must read Nodes,
-Pods, Jobs, Events and Pod logs, and create/delete Namespaces, ConfigMaps and Jobs. The cluster must admit the
-privileged
-probe Pod for the runtime checks to execute. The result schema is
+It uses Kubernetes configuration, `kubectl`, and OpenShift `oc` authorization reads when API discovery exposes
+the SCC API; Podman runs in the Job. The selected identity must read Nodes, Pods, Jobs, Events, Pod logs and
+the exact SCC ClusterRole, and create/delete Namespaces, ConfigMaps and Jobs. When the run service account lacks
+the exposed constraint, it must also create/delete a namespaced RoleBinding and bind only that exact ClusterRole.
+The result schema is
 [image-build-readiness.schema.json](schemas/results/image-build-readiness.schema.json), also linked by `--describe`.
 
 ```bash
@@ -307,8 +308,11 @@ authorize apply.
 The result reports the exact Job-owned Pod exit, marker rows, and cleanup read-back. It proves nested container
 execution, bind-mount read-back, exit propagation, no remaining run-labeled containers, and
 Job/ConfigMap/Namespace absence.
-It does not yet prove a GitLab runner, an image build, or a Harbor push. OpenShift admission denial reports
-`scc_required` with the namespace and service account; the command does not grant SCC permissions.
+It does not yet prove a GitLab runner, an image build, or a Harbor push. On OpenShift, existing SCC permission is
+a verified no-op; otherwise the command creates and reads back one run-owned RoleBinding before the Job and
+removes only that binding during cleanup. A denied authorization preflight blocks before Job creation.
+On an OpenShift target, a missing selected SCC or its generated ClusterRole also blocks before Job creation;
+only a target without the OpenShift SCC API uses the native-Kubernetes no-op path.
 `--output-dir PATH` saves the probe log and, when parsing succeeds, marker rows alongside the shared reports.
 Without an output path, results go to stdout. Marker files use the result schema's `$defs/markers` shape.
 

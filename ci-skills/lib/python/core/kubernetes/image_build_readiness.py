@@ -52,6 +52,7 @@ from lib.python.core.kubernetes.podman_probe import (
     ProbeMode,
     ProbeResources,
 )
+from lib.python.core.kubernetes.scc_access import EnsureSCCAccess
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import emit_result, report
 from lib.python.core.runtime import TRACE_TEXT_LIMIT, redact_tree, sanitize
@@ -133,7 +134,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     result.epilog = (result.epilog or "") + (
         " Default mode is the live plan. --dry-run contacts no API and uses "
-        "'auto' when --node is omitted. Only --apply creates resources."
+        "'auto' when --node is omitted. Only --apply creates resources. On "
+        "OpenShift, apply reuses existing SCC permission or creates and removes "
+        "one run-owned RoleBinding."
     )
     return result
 
@@ -182,7 +185,8 @@ def workflow(
 
     :param action: Validated Kubernetes-only probe operation.
     :param state: One shared typed state instance retained for this invocation.
-    :returns: Executor whose reverse cleanup removes Job before Namespace.
+    :returns: Executor whose reverse cleanup removes Job, optional SCC binding,
+        then Namespace.
     :raises TypeError: If callback construction violates the shared contracts.
     :raises ValueError: If callbacks are already bound to another state.
     """  # noqa: DOC502 - Callback construction enforces binding contracts.
@@ -192,7 +196,13 @@ def workflow(
         ConfirmPodmanProbe(action),
     ]
     if action.mode == ProbeMode.APPLY:
-        callbacks.extend((OpenProbeNamespace(action), RunPodmanProbe(action)))
+        callbacks.extend(
+            (
+                OpenProbeNamespace(action),
+                EnsureSCCAccess(action.scc_access()),
+                RunPodmanProbe(action),
+            )
+        )
     return WorkflowExecutor(context=state, callbacks=Callbacks(callbacks))
 
 

@@ -86,6 +86,47 @@
           "service_account": {
             "type": "string"
           },
+          "constraint": {
+            "type": "string"
+          },
+          "cluster_role": {
+            "type": "string"
+          },
+          "permission_source": {
+            "enum": [
+              "not_applicable",
+              "existing",
+              "temporary_role_binding"
+            ]
+          },
+          "role_binding": {
+            "type": "object",
+            "required": [
+              "kind",
+              "name",
+              "namespace",
+              "uid",
+              "action"
+            ],
+            "properties": {
+              "kind": {
+                "const": "RoleBinding"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "uid": {
+                "type": "string"
+              },
+              "action": {
+                "const": "APPLIED"
+              }
+            },
+            "additionalProperties": false
+          },
           "job": {
             "type": "object",
             "required": [

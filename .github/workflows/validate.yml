@@ -124,6 +124,7 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_api.py \
             ci-skills/lib/python/core/catalog.py \
             ci-skills/lib/python/core/kubernetes/run_scope.py \
+            ci-skills/lib/python/core/kubernetes/scc_access.py \
             ci-skills/lib/python/core/kubernetes/podman_probe.py \
             ci-skills/lib/python/core/kubernetes/podman_evidence.py \
             ci-skills/lib/python/core/kubernetes/podman_callbacks.py \

@@ -34,6 +34,7 @@ from referencing import Registry, Resource
 PODMAN = import_script_module("lib.python.core.kubernetes.podman_probe")
 PODMAN_EVIDENCE = import_script_module("lib.python.core.kubernetes.podman_evidence")
 PODMAN_CALLBACKS = import_script_module("lib.python.core.kubernetes.podman_callbacks")
+SCC_ACCESS = import_script_module("lib.python.core.kubernetes.scc_access")
 READINESS = import_script_module("lib.python.core.kubernetes.image_build_readiness")
 CALLBACKS = import_script_module("lib.python.core.abstract.callbacks")
 EXECUTOR = import_script_module("lib.python.core.executor")
@@ -263,11 +264,78 @@ def test_probe_plan_needs_only_kubernetes_configuration(tmp_path: Path) -> None:
         "namespace": None,
         "service_account": "default",
     }
+    assert plan["authorization"] == {
+        "provider": "openshift_scc_access",
+        "constraint": "privileged",
+        "service_account": "default",
+        "cluster_role": "system:openshift:scc:privileged",
+        "behavior": "reuse_existing_or_create_temporary_role_binding",
+    }
     assert plan["side_effects_on_apply"] == [
         "temporary_namespace",
+        "temporary_scc_role_binding_when_required",
         "temporary_configmap",
         "temporary_job",
     ]
+
+
+def test_scc_access_action_uses_the_selected_constraint_without_allowlist() -> None:
+    """Keep the shared SCC callback independent from the Podman consumer.
+
+    :returns: None; the plan and native RoleBinding retain caller-selected names.
+    """
+    action = SCC_ACCESS.SCCAccessAction(
+        constraint="nonroot.example.com",
+        service_account="builder",
+    )
+    scope = RUN_SCOPE.RunScope.create(run_id="scc-action")
+
+    assert action.plan() == {
+        "provider": "openshift_scc_access",
+        "constraint": "nonroot.example.com",
+        "service_account": "builder",
+        "cluster_role": "system:openshift:scc:nonroot.example.com",
+        "behavior": "reuse_existing_or_create_temporary_role_binding",
+    }
+    binding = SCC_ACCESS.role_binding_document(action, scope)
+    assert binding["subjects"] == [
+        {
+            "kind": "ServiceAccount",
+            "name": "builder",
+            "namespace": scope.namespace,
+        }
+    ]
+    assert binding["roleRef"] == {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "ClusterRole",
+        "name": "system:openshift:scc:nonroot.example.com",
+    }
+    second = SCC_ACCESS.role_binding_document(
+        SCC_ACCESS.SCCAccessAction("restricted", "builder"),
+        scope,
+    )
+    assert binding["metadata"]["name"] != second["metadata"]["name"]
+
+
+def test_scc_binding_name_distinguishes_service_accounts_after_bounding() -> None:
+    """Keep every SCC and ServiceAccount permission identity independent.
+
+    :returns: None; long caller names remain bounded, stable and distinct.
+    """
+    scope = RUN_SCOPE.RunScope.create(run_id="scc-account")
+    constraint = "s" * 200
+    first = SCC_ACCESS.SCCAccessAction(constraint, "builder-a")
+    second = SCC_ACCESS.SCCAccessAction(constraint, "builder-b")
+
+    first_name = SCC_ACCESS.role_binding_document(first, scope)["metadata"]["name"]
+    second_name = SCC_ACCESS.role_binding_document(second, scope)["metadata"]["name"]
+
+    assert (
+        first_name == SCC_ACCESS.role_binding_document(first, scope)["metadata"]["name"]
+    )
+    assert first_name != second_name
+    assert len(first_name) <= RUN_SCOPE.DNS_LABEL_LIMIT
+    assert len(second_name) <= RUN_SCOPE.DNS_LABEL_LIMIT
 
 
 def _node(
@@ -546,6 +614,10 @@ class FakeKubernetes:
         pod_exit: int = 0,
         log: Optional[str] = None,
         scc_rejected: bool = False,
+        openshift_api: Optional[bool] = None,
+        scc_available: bool = False,
+        scc_access: bool = False,
+        denied_authorization: Optional[str] = None,
         delete_failure: Optional[str] = None,
         namespace_readback_failure: bool = False,
     ):
@@ -555,6 +627,11 @@ class FakeKubernetes:
         :param pod_exit: Probe Pod termination exit code.
         :param log: Exact probe log; omitted means a complete successful log.
         :param scc_rejected: Whether Pod creation is rejected by SCC admission.
+        :param openshift_api: Whether SCC API discovery identifies OpenShift;
+            omitted follows ``scc_available``.
+        :param scc_available: Whether the OpenShift SCC ClusterRole exists.
+        :param scc_access: Whether the probe account already has SCC use.
+        :param denied_authorization: Authorization verb denied to the caller.
         :param delete_failure: Resource kind whose cleanup should fail.
         :param namespace_readback_failure: Whether the post-apply Namespace read fails.
         """
@@ -563,12 +640,28 @@ class FakeKubernetes:
         self.pod_exit = pod_exit
         self.log = _complete_log() if log is None else log
         self.scc_rejected = scc_rejected
+        self.openshift_api = scc_available if openshift_api is None else openshift_api
+        self.scc_available = scc_available
+        self.scc_access = scc_access
+        self.denied_authorization = denied_authorization
         self.delete_failure = delete_failure
         self.namespace_readback_failure = namespace_readback_failure
         self.resources: MutableMapping[tuple[str, str, str], JSONObject] = {}
         self.mutations: list[tuple[str, str, str]] = []
         self.deletions: list[tuple[str, str, str]] = []
         self.commands: list[tuple[str, ...]] = []
+        if scc_available:
+            cluster_role = SCC_ACCESS.SCC_CLUSTER_ROLE_PREFIX + "privileged"
+            self.resources[("securitycontextconstraint", "privileged", "")] = {
+                "apiVersion": "security.openshift.io/v1",
+                "kind": "SecurityContextConstraint",
+                "metadata": {"name": "privileged", "uid": "scc-uid"},
+            }
+            self.resources[("clusterrole", cluster_role, "")] = {
+                "apiVersion": "rbac.authorization.k8s.io/v1",
+                "kind": "ClusterRole",
+                "metadata": {"name": cluster_role, "uid": "clusterrole-uid"},
+            }
 
     def read(self, kind: str, name: str, namespace: str) -> Optional[JSONObject]:
         """Return a copy of one retained resource.
@@ -682,14 +775,52 @@ class FakeKubernetes:
         return result
 
     def command(self, *args: str, openshift: bool = False) -> CommandResult:
-        """Return bounded logs for the exact probe Pod.
+        """Return bounded discovery, authorization, or probe-log output.
 
-        :param *args: Native logs command arguments.
-        :param openshift: Unused native-client selector.
-        :returns: Successful command result carrying the configured log.
+        :param *args: Native provider arguments selected by the callback.
+        :param openshift: Whether the request uses the OpenShift CLI.
+        :returns: Configured discovery, authorization, or log result.
         """
-        assert openshift is False
         self.commands.append(args)
+        if args == ("get", "--raw=/apis/security.openshift.io/v1"):
+            if not self.openshift_api:
+                return RUNTIME.CommandResult(
+                    ("kubectl", *args),
+                    1,
+                    "",
+                    "server returned 404 not found\n",
+                )
+            return RUNTIME.CommandResult(
+                ("kubectl", *args),
+                0,
+                json.dumps(
+                    {
+                        "kind": "APIResourceList",
+                        "groupVersion": "security.openshift.io/v1",
+                        "resources": [{"name": "securitycontextconstraints"}],
+                    }
+                ),
+                "",
+            )
+        if args[:2] == ("auth", "can-i"):
+            assert openshift is True
+            verb = args[2]
+            if self.denied_authorization == verb:
+                return RUNTIME.CommandResult(("oc", *args), 1, "no\n", "")
+            if verb == "use":
+                permitted = self.scc_access or any(
+                    kind == "rolebinding"
+                    and namespace == args[args.index("--namespace") + 1]
+                    for kind, _name, namespace in self.resources
+                )
+                return RUNTIME.CommandResult(
+                    ("oc", *args),
+                    0 if permitted else 1,
+                    "yes\n" if permitted else "no\n",
+                    "",
+                )
+            return RUNTIME.CommandResult(("oc", *args), 0, "yes\n", "")
+        assert openshift is False
         return RUNTIME.CommandResult(("kubectl", *args), 0, self.log, "")
 
 
@@ -707,6 +838,7 @@ def _executor(
         PODMAN_CALLBACKS.SelectReadyWorker(action),
         PODMAN_CALLBACKS.ConfirmPodmanProbe(action),
         PODMAN_CALLBACKS.OpenProbeNamespace(action),
+        SCC_ACCESS.EnsureSCCAccess(action.scc_access()),
         PODMAN_CALLBACKS.RunPodmanProbe(action),
     ]
     state = PODMAN_CALLBACKS.PodmanProbeState()
@@ -896,6 +1028,7 @@ def test_apply_uses_and_preserves_caller_selected_namespace(tmp_path: Path) -> N
         "service_account": "default",
     }
     assert action.plan("worker-a")["side_effects_on_apply"] == [
+        "temporary_scc_role_binding_when_required",
         "temporary_configmap",
         "temporary_job",
     ]
@@ -1061,26 +1194,175 @@ def test_probe_failure_still_cleans_every_created_resource(
     assert service.resources == {}
 
 
-def test_scc_rejection_reports_requirement_without_granting_it(tmp_path: Path) -> None:
-    """Return observed SCC evidence, clean resources, and issue no grant command.
+def test_scc_access_reuses_existing_authorization_without_binding(
+    tmp_path: Path,
+) -> None:
+    """Preserve an existing SCC grant and create no run-owned binding.
 
     :param tmp_path: Directory used by the Kubernetes-only target.
-    :returns: None; provider calls and the blocked record are asserted.
+    :returns: None; permission and resource evidence prove a verified no-op.
     """
-    service = FakeKubernetes(_target(tmp_path), scc_rejected=True)
+    service = FakeKubernetes(
+        _target(tmp_path),
+        scc_available=True,
+        scc_access=True,
+    )
     executor = _executor(_apply_action(tmp_path), service)
 
     executor.run()
 
-    assert executor.state.probe_record["verified"] is False
-    assert executor.state.probe_record["outcome"] == "scc_required"
-    assert executor.state.probe_record["service_account"] == (
-        f"system:serviceaccount:{executor.state.run_scope.namespace}:default"
+    permission = next(
+        value
+        for callback, value in executor.state.results.items()
+        if isinstance(callback, SCC_ACCESS.EnsureSCCAccess)
     )
-    assert executor.state.probe_record["constraint"] == "privileged"
-    assert _reported_apply_status(executor.state) == "BLOCKED"
-    assert service.commands == []
-    assert service.resources == {}
+    assert permission["action"] == "NO_OP"
+    assert permission["permission_source"] == "existing"
+    assert not any(kind == "RoleBinding" for kind, _name, _ns in service.mutations)
+    assert not any(kind == "RoleBinding" for kind, _name, _ns in service.deletions)
+    assert set(service.resources) == {
+        ("securitycontextconstraint", "privileged", ""),
+        ("clusterrole", "system:openshift:scc:privileged", ""),
+    }
+
+
+def test_scc_access_is_not_applicable_only_when_api_is_absent(
+    tmp_path: Path,
+) -> None:
+    """Keep native Kubernetes independent from OpenShift SCC resources.
+
+    :param tmp_path: Directory used by the Kubernetes-only target.
+    :returns: None; provider discovery is the only not-applicable condition.
+    """
+    service = FakeKubernetes(_target(tmp_path))
+    executor = _executor(_apply_action(tmp_path), service)
+
+    executor.run()
+
+    access = next(
+        value
+        for callback, value in executor.state.results.items()
+        if isinstance(callback, SCC_ACCESS.EnsureSCCAccess)
+    )
+    assert access["action"] == "NO_OP"
+    assert access["outcome"] == "scc_not_available"
+    assert access["permission_source"] == "not_applicable"
+    assert not any(kind == "RoleBinding" for kind, _name, _ns in service.mutations)
+
+
+def test_scc_access_creates_reads_and_removes_only_run_binding(
+    tmp_path: Path,
+) -> None:
+    """Prepare missing SCC use through one temporary owned RoleBinding.
+
+    :param tmp_path: Directory used by the Kubernetes-only target.
+    :returns: None; apply, same-target authorization and reverse cleanup are asserted.
+    """
+    service = FakeKubernetes(_target(tmp_path), scc_available=True)
+    executor = _executor(_apply_action(tmp_path), service)
+
+    executor.run()
+
+    permission = next(
+        value
+        for callback, value in executor.state.results.items()
+        if isinstance(callback, SCC_ACCESS.EnsureSCCAccess)
+    )
+    assert permission["action"] == "APPLIED"
+    assert permission["permission_source"] == "temporary_role_binding"
+    assert permission["role_binding"]["uid"] == "rolebinding-uid"
+    assert [kind for kind, _name, _namespace in service.mutations] == [
+        "Namespace",
+        "RoleBinding",
+        "ConfigMap",
+        "Job",
+    ]
+    assert [kind for kind, _name, _namespace in service.deletions] == [
+        "Job",
+        "ConfigMap",
+        "RoleBinding",
+        "Namespace",
+    ]
+    assert [item["kind"] for item in executor.state.cleanup_resources] == [
+        "Job",
+        "ConfigMap",
+        "RoleBinding",
+        "Namespace",
+    ]
+    assert set(service.resources) == {
+        ("securitycontextconstraint", "privileged", ""),
+        ("clusterrole", "system:openshift:scc:privileged", ""),
+    }
+
+
+def test_scc_access_denial_blocks_before_probe_and_cleans_scope(
+    tmp_path: Path,
+) -> None:
+    """Refuse mutation when the selected identity cannot bind the SCC role.
+
+    :param tmp_path: Directory used by the Kubernetes-only target.
+    :returns: None; no Job starts and the generated namespace is absent.
+    """
+    service = FakeKubernetes(
+        _target(tmp_path),
+        scc_available=True,
+        denied_authorization="bind",
+    )
+    executor = _executor(_apply_action(tmp_path), service)
+
+    with pytest.raises(
+        KUBERNETES.KubernetesError,
+        match="scc_cluster_role_bind_denied",
+    ):
+        executor.run()
+
+    assert not any(kind == "Job" for kind, _name, _namespace in service.mutations)
+    assert [kind for kind, _name, _namespace in service.deletions] == ["Namespace"]
+    assert not any(kind == "namespace" for kind, _name, _ns in service.resources)
+
+
+def test_scc_access_blocks_when_openshift_lacks_selected_scc(
+    tmp_path: Path,
+) -> None:
+    """Do not confuse an absent selected SCC with a non-OpenShift target.
+
+    :param tmp_path: Directory used by the Kubernetes-only target.
+    :returns: None; provider discovery succeeds and Job creation remains blocked.
+    """
+    service = FakeKubernetes(_target(tmp_path), openshift_api=True)
+    executor = _executor(_apply_action(tmp_path), service)
+
+    with pytest.raises(KUBERNETES.KubernetesError, match="scc_not_found"):
+        executor.run()
+
+    assert not any(kind == "Job" for kind, _name, _namespace in service.mutations)
+    assert [kind for kind, _name, _namespace in service.deletions] == ["Namespace"]
+
+
+def test_scc_access_blocks_when_openshift_lacks_generated_cluster_role(
+    tmp_path: Path,
+) -> None:
+    """Require the selected SCC's exact generated ClusterRole on OpenShift.
+
+    :param tmp_path: Directory used by the Kubernetes-only target.
+    :returns: None; missing role cannot be mistaken for provider absence.
+    """
+    service = FakeKubernetes(_target(tmp_path), openshift_api=True)
+    service.resources[("securitycontextconstraint", "privileged", "")] = {
+        "apiVersion": "security.openshift.io/v1",
+        "kind": "SecurityContextConstraint",
+        "metadata": {"name": "privileged", "uid": "scc-uid"},
+    }
+    executor = _executor(_apply_action(tmp_path), service)
+
+    with pytest.raises(
+        KUBERNETES.KubernetesError,
+        match="scc_cluster_role_missing",
+    ):
+        executor.run()
+
+    assert not any(kind == "Job" for kind, _name, _namespace in service.mutations)
+    assert [kind for kind, _name, _namespace in service.deletions] == ["Namespace"]
 
 
 @pytest.mark.parametrize(

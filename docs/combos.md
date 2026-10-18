@@ -186,8 +186,9 @@ Status: probe implemented by [`image_build_readiness.py`](../ci-skills/bin/image
 image-build job, and publication chain remain proposed. The probe uses the shared Kubernetes callbacks,
 `RunScope`, and `ResourceSet` for run ownership and cleanup. Its
 [installed example](../ci-skills/SKILL.md#nested-podman-readiness) shows live planning and confirmed apply.
-On OpenShift, an observed privileged-Pod admission rejection reports `scc_required` for the generated namespace's
-service account without granting permission. Probe evidence covers nested runtime behavior only; the later
+On OpenShift, the installed command reuses existing `privileged` SCC permission or creates, verifies and removes
+one run-owned namespaced RoleBinding before the probe. A denied authorization preflight blocks before Job creation;
+external setup does not count as capability proof. Probe evidence covers nested runtime behavior only; the later
 runner, build, and publication steps need their own live results.
 
 ## How to add one

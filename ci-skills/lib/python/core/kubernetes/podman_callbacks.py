@@ -11,7 +11,7 @@ import math
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Final, Optional
+from typing import Optional
 
 from lib.python.core.abstract.skill_action import ActionT_co
 from lib.python.core.json_types import JSONObject
@@ -48,8 +48,6 @@ from lib.python.core.kubernetes.run_scope import (
 )
 from lib.python.core.runtime import error_class
 from lib.python.sys.status import APPLIED, PASS, VERIFIED
-
-PRIVILEGED_CONSTRAINT: Final = "privileged"
 
 
 @dataclass
@@ -269,7 +267,7 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
                 "rows": [],
             }
             if observed == "scc_required":
-                record["constraint"] = PRIVILEGED_CONSTRAINT
+                record["constraint"] = self.action.scc_access().constraint
             state.probe_record = record
             return record
         state.termination = observed

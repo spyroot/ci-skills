@@ -29,12 +29,14 @@ from lib.python.core.kubernetes.run_scope import (
     RunScope,
     validate_namespace,
 )
+from lib.python.core.kubernetes.scc_access import SCCAccessAction
 from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.report import plan_digest
 from lib.python.core.target import Target
 
 PROBE_KIND: Final = "image_build_readiness"
 NESTED_RUNTIME_CLAIM: Final = "nested_podman_runtime_readiness"
+PRIVILEGED_CONSTRAINT: Final = "privileged"
 DEFAULT_PROBE_IMAGE: Final = (
     "quay.io/podman/stable@sha256:"
     "24aa8442c468c62ffae6053c79942b3a53c169934098a80b93f653fd9f0f8783"
@@ -272,7 +274,15 @@ class PodmanProbeAction(SkillAction):
         kubernetes = self.target.kubernetes
         if kubernetes is None:
             raise ValueError("kubernetes_target_missing")
-        side_effects = ["temporary_configmap", "temporary_job"]
+        permission = SCCAccessAction(
+            constraint=PRIVILEGED_CONSTRAINT,
+            service_account=self.service_account,
+        )
+        side_effects = [
+            "temporary_scc_role_binding_when_required",
+            "temporary_configmap",
+            "temporary_job",
+        ]
         if self.namespace is None:
             side_effects.insert(0, "temporary_namespace")
         return {
@@ -301,6 +311,7 @@ class PodmanProbeAction(SkillAction):
                 "namespace": self.namespace,
                 "service_account": self.service_account,
             },
+            "authorization": permission.plan(),
             "side_effects_on_apply": side_effects,
             "claim": NESTED_RUNTIME_CLAIM,
         }
@@ -312,6 +323,16 @@ class PodmanProbeAction(SkillAction):
         :returns: Canonical SHA-256 plan fingerprint.
         """
         return plan_digest(self.plan(selected_node))
+
+    def scc_access(self) -> SCCAccessAction:
+        """Build the reusable SCC preparation action for this probe.
+
+        :returns: Privileged SCC input for the probe's fixed ServiceAccount.
+        """
+        return SCCAccessAction(
+            constraint=PRIVILEGED_CONSTRAINT,
+            service_account=self.service_account,
+        )
 
 
 @dataclass(frozen=True)

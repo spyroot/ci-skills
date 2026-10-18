@@ -391,17 +391,19 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "purpose": "Run a temporary Podman Job on one selected worker.",
                 "result_schema": "schemas/results/image-build-readiness.schema.json",
                 "mutates": True,
-                "side_effects": "Creates and removes a temporary namespace, script ConfigMap and privileged Job.",
-                "read_back": "Exact Job-owned Pod exit, probe rows and resource absence.",
+                "side_effects": "Creates and removes a temporary namespace, conditional "
+                "run-owned SCC RoleBinding, script ConfigMap and privileged Job.",
+                "read_back": "Exact permission source, optional RoleBinding UID, "
+                "Job-owned Pod exit, probe rows and resource absence.",
             },
         },
         "related": ("toolbox.py", "harbor_pull.py"),
-        "required_tools": ("kubectl",),
+        "required_tools": ("kubectl", "oc on OpenShift"),
         "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows "
         "and cleanup read-back; does not prove runner or image-publication behavior.",
         "execution_surface": "configured Kubernetes API and a temporary privileged Job",
-        "side_effects": "Apply creates a run-owned namespace, script ConfigMap and Job, then removes them. "
-        "No service-account token is mounted and no SCC permission is granted.",
+        "side_effects": "Apply creates a run-owned namespace, conditionally creates one namespaced SCC RoleBinding, "
+        "then creates a script ConfigMap and Job; it removes only resources owned by the run.",
     },
     "access_check.py": {
         "kind": "access_check",
