@@ -48,7 +48,12 @@ from lib.python.core.json_types import (
     json_string,
     json_strings,
 )
+from lib.python.core.kubernetes.podman_evidence import (
+    MARKER_PREFIX,
+    parse_probe_markers,
+)
 from lib.python.core.logging import add_log_arguments, log_event
+from lib.python.core.schema import SpecificationError, validate_specification
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
@@ -179,6 +184,13 @@ REQUIRED_GITLAB_OPERATIONS: Final = frozenset(
     }
     | {(kind, operation, None) for kind, operation in READ_ONLY_GITLAB_OPERATIONS}
 )
+IMAGE_BUILD_READINESS_KEY: Final[OperationKey] = (
+    "image_build_readiness",
+    "probe",
+    None,
+)
+REQUIRED_CAPABILITY_OPERATIONS: Final = frozenset({IMAGE_BUILD_READINESS_KEY})
+IMAGE_BUILD_READINESS_SCHEMA: Final = "results/image-build-readiness.schema.json"
 
 
 class AcceptanceError(RuntimeError):
@@ -437,6 +449,229 @@ def _check_common(
         problems.append(f"{name}:sanitization_check_unavailable")
     elif redactor(receipt) != receipt:
         problems.append(f"{name}:receipt_not_sanitized")
+    return problems
+
+
+def _callback_record(
+    records: Sequence[JSONValue], callback: str
+) -> Optional[JSONObject]:
+    """Select one exact callback result from a workflow report.
+
+    :param records: Schema-validated callback result objects.
+    :param callback: Concrete callback class name to select.
+    :returns: The sole matching result, or None when absent or ambiguous.
+    """
+    matching = [
+        item
+        for item in records
+        if isinstance(item, dict) and item.get("callback") == callback
+    ]
+    return matching[0] if len(matching) == 1 else None
+
+
+def _probe_runtime_verified(probe: Optional[JSONObject]) -> bool:
+    """Check the authoritative Pod termination retained by the probe callback.
+
+    :param probe: Sole RunPodmanProbe result, or None when missing or ambiguous.
+    :returns: Whether the callback proves a successful nested Podman execution.
+    """
+    if probe is None:
+        return False
+    pod = _mapping(probe.get("pod"))
+    return (
+        probe.get("verified") is True
+        and probe.get("action") == "APPLIED"
+        and probe.get("claim") == "nested_podman_runtime_readiness"
+        and probe.get("outcome") == "ready"
+        and probe.get("nested_runtime_ready") is True
+        and pod.get("exit_code") == 0
+        and bool(pod.get("image_id"))
+    )
+
+
+def _probe_markers_verified(probe: Optional[JSONObject]) -> bool:
+    """Re-evaluate reported marker rows through the production marker parser.
+
+    :param probe: Sole RunPodmanProbe result, or None when missing or ambiguous.
+    :returns: Whether every row exactly matches the production PASS evidence.
+    """
+    rows = probe.get("rows") if probe is not None else None
+    row_list = rows if isinstance(rows, list) else []
+    try:
+        marker_log = "\n".join(
+            f"{MARKER_PREFIX}|{json_string(row['check'])}|"
+            f"{json_string(row['observed'])}"
+            for row in row_list
+            if isinstance(row, Mapping)
+        )
+        marker_evidence = parse_probe_markers(marker_log)
+    except (KeyError, TypeError, ValueError):
+        return False
+    return marker_evidence.verified is True and list(marker_evidence.rows) == row_list
+
+
+def _object_identity(value: JSONValue) -> Optional[tuple[str, str, str]]:
+    """Read one exact Kubernetes kind, name, and namespace.
+
+    :param value: Schema-validated Kubernetes resource evidence.
+    :returns: Exact resource identity, or None when incomplete.
+    """
+    if not isinstance(value, Mapping):
+        return None
+    kind, name, namespace = (
+        value.get("kind"),
+        value.get("name"),
+        value.get("namespace"),
+    )
+    if (
+        not isinstance(kind, str)
+        or not kind
+        or not isinstance(name, str)
+        or not name
+        or not isinstance(namespace, str)
+    ):
+        return None
+    return kind, name, namespace
+
+
+def _cleanup_identity(value: JSONValue) -> Optional[tuple[str, str, str]]:
+    """Require one absent PASS resource and return its exact identity.
+
+    :param value: Schema-validated cleanup resource object.
+    :returns: Exact resource identity, or None when not proven absent.
+    """
+    identity = _object_identity(value)
+    if (
+        not isinstance(value, Mapping)
+        or identity is None
+        or value.get("status") != PASS
+        or value.get("absent") is not True
+    ):
+        return None
+    return identity
+
+
+def _expected_probe_cleanup(
+    records: Sequence[JSONValue],
+) -> Optional[tuple[set[tuple[str, str, str]], str]]:
+    """Derive cleanup identities only from resources callbacks say they own.
+
+    :param records: Schema-validated callback results from the installed command.
+    :returns: Expected exact identities and run namespace, or None if ambiguous.
+    """
+    scope = _callback_record(records, "OpenProbeNamespace")
+    access = _callback_record(records, "EnsureSCCAccess")
+    probe = _callback_record(records, "RunPodmanProbe")
+    if scope is None or access is None or probe is None:
+        return None
+    namespace = scope.get("namespace")
+    job = _mapping(probe.get("job"))
+    if (
+        not isinstance(namespace, str)
+        or not namespace
+        or probe.get("namespace") != namespace
+        or not isinstance(job.get("name"), str)
+        or not job.get("name")
+    ):
+        return None
+    expected = {("Job", str(job["name"]), namespace)}
+    owns_namespace = scope.get("owns_namespace")
+    if owns_namespace is True:
+        expected.add(("Namespace", namespace, ""))
+    elif owns_namespace is not False:
+        return None
+    permission_source = access.get("permission_source")
+    if permission_source == "temporary_role_binding":
+        binding_record = _mapping(access.get("role_binding"))
+        binding = _object_identity(binding_record)
+        if (
+            binding is None
+            or binding[0] != "RoleBinding"
+            or binding[2] != namespace
+            or binding_record.get("action") != "APPLIED"
+        ):
+            return None
+        expected.add(binding)
+    elif permission_source not in {"existing", "not_applicable"}:
+        return None
+    return expected, namespace
+
+
+def _probe_cleanup_verified(records: Sequence[JSONValue], cleanup: JSONObject) -> bool:
+    """Match every owned probe resource to a successful absence read-back.
+
+    :param records: Schema-validated callback results declaring resource ownership.
+    :param cleanup: Final cleanup report emitted after reverse callback cleanup.
+    :returns: Whether cleanup proves exactly the resources owned by this run absent.
+    """
+    resources = cleanup.get("resources")
+    resource_list = resources if isinstance(resources, list) else []
+    expected = _expected_probe_cleanup(records)
+    identities = [_cleanup_identity(item) for item in resource_list]
+    if (
+        cleanup.get("status") != PASS
+        or cleanup.get("failures") != []
+        or expected is None
+        or not resource_list
+        or any(identity is None for identity in identities)
+    ):
+        return False
+    expected_identities, namespace = expected
+    observed = {identity for identity in identities if identity is not None}
+    configmaps = {
+        identity
+        for identity in observed
+        if identity[0] == "ConfigMap" and identity[2] == namespace
+    }
+    return (
+        len(observed) == len(resource_list)
+        and len(configmaps) == 1
+        and observed == expected_identities | configmaps
+    )
+
+
+def _check_image_build_readiness_receipt(
+    name: str,
+    receipt: JSONObject,
+    digest: str,
+    now: datetime,
+    max_age_days: int,
+) -> MutableSequence[str]:
+    """Validate one installed Podman readiness result and its API read-backs.
+
+    :param name: Receipt file name prefixed to each reported problem.
+    :param receipt: Parsed image-build readiness result from the installed command.
+    :param digest: Expected functional digest of the candidate runtime and schemas.
+    :param now: Reference time used for receipt freshness.
+    :param max_age_days: Maximum accepted receipt age in whole days.
+    :returns: Problems proving a schema, runtime, read-back, or cleanup failure.
+    :raises RecursionError: If receipt containers exceed recursive validation limits.
+    """
+    problems = _check_common(name, receipt, digest, now, max_age_days)
+    try:
+        validate_specification(receipt, IMAGE_BUILD_READINESS_SCHEMA)
+    except (KeyError, OSError, SchemaError, SpecificationError, TypeError, ValueError):
+        problems.append(f"{name}:result_schema_invalid")
+        return problems
+
+    problems.extend(f"{name}:{reason}" for reason in _check_source_revision(receipt))
+    records = receipt.get("records")
+    record_list = records if isinstance(records, list) else []
+    summary = _mapping(receipt.get("summary"))
+    if (
+        receipt.get("operation") != "probe"
+        or receipt.get("errors") != []
+        or summary.get("error_count") != 0
+        or summary.get("record_count") != len(record_list)
+    ):
+        problems.append(f"{name}:execution_readback_unproven")
+    probe = _callback_record(record_list, "RunPodmanProbe")
+    if not _probe_runtime_verified(probe):
+        problems.append(f"{name}:runtime_readback_unproven")
+    if not _probe_markers_verified(probe):
+        problems.append(f"{name}:runtime_checks_incomplete")
+    if not _probe_cleanup_verified(record_list, _mapping(receipt.get("cleanup"))):
+        problems.append(f"{name}:cleanup_unproven")
     return problems
 
 
@@ -956,7 +1191,7 @@ class AcceptanceReview:
             self.problems.append("access_check:setup_missing")
 
     def operation_receipts(self) -> None:
-        """Match each operation to one setup context and retain repeatable pairs.
+        """Validate capability proof or match an operation to one setup context.
 
         Malformed fields contribute classified problems; accepted receipts retain
         their original bytes and must still match the candidate identity.
@@ -977,6 +1212,25 @@ class AcceptanceReview:
                 self.problems.append(f"{name}:receipt_not_declared")
                 continue
             operation_key = (kind, operation, result_action)
+            if operation_key in REQUIRED_CAPABILITY_OPERATIONS:
+                try:
+                    found = _check_image_build_readiness_receipt(
+                        name,
+                        receipt,
+                        self.functional_digest,
+                        self.now,
+                        self.max_age_days,
+                    )
+                except (AttributeError, KeyError, TypeError, ValueError):
+                    found = [f"{name}:receipt_invalid_shape"]
+                self.problems.extend(found)
+                if not found:
+                    if operation_key in self.observed_operations:
+                        self.problems.append(f"{name}:receipt_ambiguous")
+                        continue
+                    self.accepted.append(name)
+                    self.observed_operations.add(operation_key)
+                continue
             if operation_key not in REQUIRED_GITLAB_OPERATIONS:
                 self.problems.append(f"{name}:receipt_not_declared")
                 continue
@@ -1034,7 +1288,8 @@ class AcceptanceReview:
     def repeated_receipts(self) -> None:
         """Require operation coverage and matching APPLIED/NO_OP resource evidence."""
         for kind, operation, action in sorted(
-            REQUIRED_GITLAB_OPERATIONS - self.observed_operations,
+            (REQUIRED_GITLAB_OPERATIONS | REQUIRED_CAPABILITY_OPERATIONS)
+            - self.observed_operations,
             key=lambda entry: tuple(str(value) for value in entry),
         ):
             self.problems.append(

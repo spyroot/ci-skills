@@ -1,10 +1,13 @@
-# NOT_IMPLEMENTED: CI13 — Prove a cluster can build images from a GitLab job, starting with a podman probe on one node
+# PARTIALLY_IMPLEMENTED: CI13 — Prove a cluster can build images from a GitLab job, with a podman probe on one node
 
 - grounding: GROUNDED
-- verification: UNVERIFIED
-- planningStage: PROPOSED
+- verification: PARTIALLY_VERIFIED
+- planningStage: PLANNED
 
 ## Authority
+
+The installed `probe` and reusable SCC preparation merged in [PR81](https://github.com/spyroot/ci-skills/pull/81)
+at main `788b9e9`. The `chain` delivery remains unmerged; live interruption proof is not established.
 
 CI13 is the approved Podman/readiness delivery, separate from the native OCP delivery in
 [CI12](CI12-NODE-ONBOARDING.md). CI12.0 owns the reusable tool preparation and run scope; this phase consumes
@@ -36,7 +39,7 @@ This document plans from:
 - the live-acceptance gate as it exists: the policy
   [`inventory/ci/live-acceptance.json`](../../inventory/ci/live-acceptance.json) and the checker
   [`tools/check_live_acceptance.py`](../../tools/check_live_acceptance.py); how this command's evidence enters that
-  gate is an open question for the owner, recorded below, not a decision of this document;
+  gate was resolved by PR81's approved registration, recorded below;
 - the shared standards pinned by `standards-binding.yaml` at revision `56a579c`. The architecture and plan formats
   this document follows are taken from standards revision `cae52b2`, the `main` the owner named on 2026-10-15; the
   selected format does not add a validation gate absent from the pinned binding.
@@ -48,79 +51,79 @@ This document plans from:
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: The node is the agent's argument or, without one, a Ready worker the combo picks and names in the result; the plan lists the Job the apply would create (node, images by digest, limits, the name pattern) and its digest binds the caller's inputs and the resolved target.
         owner: ci-skills/lib/python/core/kubernetes/image_build_probe.py
         preserve: [The target and credential resolver, the result envelope, the exit-code contract]
         prIds: [PR-CI13-1]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-002
         authority: [docs/combos.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: One-shot privileged Job pinned to the selected node runs podman from an image pinned by digest with overlay storage on a size-limited emptyDir and the cgroupfs manager, no service-account token mounted, bounded requests, limits, deadline and TTL; inside it one inner container pinned by digest runs, writes a file read back through a bind mount, and a second inner container exits 7 so the exit code is seen to propagate; the probe removes both and lists what remains.
         owner: ci-skills/lib/python/core/kubernetes/image_build_probe.py
         preserve: [The temporary Job pattern of PullImage; a tag without a digest is refused]
         prIds: [PR-CI13-1]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-003
         authority: [docs/combos.md, docs/exec-plans/active/ci13-image-build-readiness.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: Every marker line of the Job log becomes an evidence row (host kernel, podman version, storage driver and cgroup version, backing filesystem, inner run, bind-mount read-back, exit propagation, remaining containers); a missing marker is a row of its own, never a silent gap; the probe's own result is the Pod's terminated exit code read from the API, not a line it printed.
         owner: ci-skills/lib/python/core/kubernetes/image_build_probe.py
         preserve: [Rows are read from the log and the Pod status through the bound Kubernetes service, never from a shell the agent runs]
         prIds: [PR-CI13-1]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-004
         authority: [docs/combos.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
-        deliverable: On OpenShift, when admission rejects the privileged Pod, the result is BLOCKED with the reason scc_required naming the run namespace's service account and the constraint it lacks; the combo never grants a security context constraint or any other right.
-        owner: ci-skills/lib/python/core/kubernetes/image_build_probe.py
-        preserve: [Read-only toward cluster authorization; nothing in the skill grants rights]
+          implementation: IMPLEMENTED
+          verification: VERIFIED
+        deliverable: On OpenShift, the installed command reads whether the run namespace's service account can use the privileged constraint before creating the Job; existing permission is a verified no-op, otherwise the command creates one run-owned namespaced RoleBinding to the exact OpenShift SCC ClusterRole, reads permission back, and removes only that binding during cleanup. A missing selected SCC or generated ClusterRole, or a denied create, delete or bind preflight, blocks before Job creation. Only absence of the OpenShift SCC API is not applicable.
+        owner: ci-skills/lib/python/core/kubernetes/scc_access.py
+        preserve: [Never alter or remove preexisting authorization; create no ServiceAccount; grant no cluster-wide or alternate runtime permission]
         prIds: [PR-CI13-1]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-005
         authority: [docs/exec-plans/active/ci13-image-build-readiness.md, docs/phases/CI12-NODE-ONBOARDING.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
-        deliverable: Every temporary name (namespace, Job, labels) derives from one random run identifier generated after confirmation; the namespace and the Job are removed on every exit, success, failure and interrupt, with absence read-back; when the agent names an evidence directory the Job log and the parsed rows persist there, otherwise nothing persists beyond the result.
+          implementation: IMPLEMENTED
+          verification: PARTIALLY_VERIFIED
+        deliverable: Every temporary name (namespace, ConfigMap, Job, labels) derives from one random run identifier generated after confirmation; the namespace, script ConfigMap and Job are removed on every exit, success, failure and interrupt, with absence read-back; when the agent names an evidence directory the Job log and the parsed rows persist there, otherwise nothing persists beyond the result.
         owner: ci-skills/lib/python/core/kubernetes/run_scope.py
         preserve: [ResourceSet ownership semantics and its operation label; the executor's reverse cleanup and recoverable signals; the shared --run-id option's existing meaning]
         prIds: [PR-CI13-1]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-006
         authority: [docs/combos.md, README.md, docs/contribution_guide.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: PARTIALLY_IMPLEMENTED
+          verification: PARTIALLY_VERIFIED
         deliverable: One thin main composes the callbacks through a Kubernetes action adapter over WorkflowExecutor, declares the command in the catalogue source with a paired result schema and regenerates tools.json, routes in SKILL.md, and renders the shared report, so the agent invokes it like every other installed command and reads the same envelope.
         owner: ci-skills/bin/image_build_readiness.py
         preserve: [The shared options, status values and exit codes; --describe and --help work without credentials; the existing gate's required operations and freshness policy]
         prIds: [PR-CI13-1, PR-CI13-2]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE, G-CI13-GATE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-007
         authority: [docs/combos.md, docs/gitlab-toolbelt-plan.md]
         phaseId: CI13
@@ -139,7 +142,7 @@ This document plans from:
         requirementIds: [R-CI13-001, R-CI13-002, R-CI13-003, R-CI13-004, R-CI13-005, R-CI13-006]
         dependsOn: [PR-CI12-0]
         waveId: W-CI13-1
-        owns: [ci-skills/lib/python/core/kubernetes/image_build_probe.py, ci-skills/lib/python/core/image_build_action.py, ci-skills/lib/python/core/action_modes.py, ci-skills/lib/python/core/gitlab/gitlab_action.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/image_build_readiness.py, ci-skills/schemas/results/image-build-readiness.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_run_scope.py, tests/python/test_action_modes.py, tests/python/test_image_build_probe.py, .github/workflows/validate.yml, lib/bash/automation/bless.bash]
+        owns: [ci-skills/lib/python/core/kubernetes/scc_access.py, ci-skills/lib/python/core/kubernetes/image_build_probe.py, ci-skills/lib/python/core/image_build_action.py, ci-skills/lib/python/core/action_modes.py, ci-skills/lib/python/core/gitlab/gitlab_action.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/image_build_readiness.py, ci-skills/schemas/results/image-build-readiness.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_run_scope.py, tests/python/test_action_modes.py, tests/python/test_image_build_probe.py, .github/workflows/validate.yml, lib/bash/automation/bless.bash]
       - id: PR-CI13-2
         requirementIds: [R-CI13-006, R-CI13-007]
         dependsOn: [PR-CI13-1]
@@ -164,15 +167,15 @@ This document plans from:
       - id: G-CI13-LIVE
         requirementIds: [R-CI13-001, R-CI13-002, R-CI13-003, R-CI13-004, R-CI13-005, R-CI13-006, R-CI13-007]
         command: The invocations under "Invocation and the result the agent reads", run from the installed candidate against the live cluster, each with --receipt-out
-        environment: The user's live smoke setup against the live cluster, with the privileged constraint granted to the probe's service account by the cluster administrator as open question 4 settles
-        enforcement: Proposed; the live run precedes the merge and its receipts are attached to the pull request; whether and how those receipts are committed into the gate is open question 2, because the checker today accepts only its declared GitLab kinds and rejects any other receipt in a declared directory
-        evidence: [One receipt per verb and result action, the marker rows with the Pod's terminated exit code, the chosen node, the run identifier, absence read-back of the namespace and the Job, the functional checksum of the installed candidate]
+        environment: The user's live smoke setup against the live cluster; the installed command must reuse or prepare its own run-scoped privileged permission
+        enforcement: Existing for probe through PR81; the live run precedes the merge and its receipt is committed under tests/acceptance/podman-readiness/; chain proof remains pending
+        evidence: [One receipt per verb and result action, the permission source and optional RoleBinding UID, the marker rows with the Pod's terminated exit code, the chosen node, the run identifier, absence read-back of every run-owned resource, the functional checksum of the installed candidate]
       - id: G-CI13-GATE
         requirementIds: [R-CI13-006]
         command: python tools/check_live_acceptance.py --root . --json
         environment: The live_acceptance step of the validate job, on the committed receipts
-        enforcement: Existing for the current operation set and unchanged by this phase until the owner answers open question 2; until then no receipt of this command is committed under a declared receipt directory
-        evidence: [Checker PASS on the pull request head with the existing receipt set unchanged, or, after the owner's answer, with the new receipts accepted]
+        enforcement: Existing; PR81 registers the Podman probe receipt, matching functional checksum, runtime checks and owned-resource cleanup alongside the existing required operations
+        evidence: [https://github.com/spyroot/ci-skills/actions/runs/39156922605, tests/acceptance/podman-readiness/image-build-readiness.json]
 <!-- /architecture-map:v1 -->
 
 ## Consumer
@@ -181,7 +184,7 @@ The consumer is an agent, a Codex or Claude session, acting for a user who insta
 preparing CI so their project's container tests and image builds run in GitLab jobs on their cluster. The agent
 calls the installed command with a node, or lets the combo pick one, and reads the shared result envelope: one
 row per thing the probe proved on that node, the probe's exit code from the Pod, and either `PASS` or a named
-reason such as `scc_required`. The exact invocations and the JSON the agent reads are under "Invocation and the
+authorization or runtime failure. The exact invocations and the JSON the agent reads are under "Invocation and the
 result the agent reads". The downstream consumer is chain 11's later steps: a runner with the same setup on that
 node, a job that builds and pushes, and the digest read-back.
 
@@ -213,7 +216,8 @@ and a pushed digest.
       K8SAuth ─► ConfirmReadinessOperation ─► SelectNode ─► OpenRunScope ─► RunProbeJob ─► ReadProbeResult ─► ParseMarkers
                      │ target re-verified       │ state.node    │ namespace      │ Job; waits   │ state.log,       │ state.rows,
                                                                                  │ to completion│ state.exit_code  │ state.verdict
-      cleanup, reverse: Job (RunProbeJob) and namespace (OpenRunScope) on every exit, with absence read-back
+      cleanup, reverse: Job and script ConfigMap (RunProbeJob), namespace (OpenRunScope) on every exit, with absence
+  read-back
                                                               │
                                       shared report ─► JSON result, sanitized receipt (schema image-build-readiness)
 
@@ -230,8 +234,8 @@ an evidence directory, the log and the rows.
 
 ### Current State and Intended Outcome
 
-NOT_IMPLEMENTED: the probe and the chain. Inspected at main `352128d` (documentation only for this phase). The
-relevant tree, with the files this phase adds marked NEW:
+PARTIALLY_IMPLEMENTED: the probe is merged in PR81 at main `788b9e9`; the chain remains unmerged.
+The following tree, CI topology and baseline observations retain the original planning snapshot at `352128d`:
 
     ci-skills/
       bin/
@@ -339,17 +343,26 @@ Callbacks, each a `K8SCallback[ReadinessAction]` unless stated, each owning its 
   kernel and OS image as read from the API, so the probe's kernel row can be compared with the API's view.
 - `OpenRunScope` (`K8SCallback[RunScopeAction]`, `core/kubernetes/run_scope.py`, as CI12 specifies it): `run`
   applies the Namespace through the scope's cluster-scoped set; `cleanup` removes it on every exit with absence
-  read-back. No ServiceAccount or binding is created: the probe runs under the namespace's default account, which
-  is what an OpenShift administrator grants the constraint to.
-- `RunProbeJob` (`core/kubernetes/image_build_probe.py`): `collect` renders the Job document from the action: one
-  privileged container from the probe image, pinned to `state.node`, `backoffLimit` 0, the deadline, a TTL, no
-  service-account token, the storage and evidence emptyDirs with size limits, the bounds, and the probe script as
-  the container command, which runs podman with the overlay driver and the cgroupfs manager, runs the inner
-  container with limits, writes and reads back through the bind mount, runs the second inner container that exits
-  7, removes both and lists what remains, printing one marker line per step; `run` applies the Job through the
-  scope's namespaced set and waits for it within the deadline, classifying an admission rejection of the
-  privileged Pod as `scc_required` with the namespace's service account named; `update` reads the Job back and
-  writes `state.job`; `cleanup` deletes the Job on every exit with absence read-back, the pattern of `PullImage`.
+  read-back. No ServiceAccount is created: the probe uses the namespace's default account.
+- `EnsureSCCAccess` (`K8SCallback[SCCAccessAction]`, `core/kubernetes/scc_access.py`): `run` reads
+  the selected OpenShift SCC ClusterRole and service account's permission on the bound target. The action accepts
+  those provider names without a consumer-specific allowlist; the Podman consumer selects `privileged` and
+  `default`. Existing
+  permission returns `NO_OP`. If the SCC and role exist and permission is absent, it preflights create/delete of one
+  namespaced RoleBinding plus bind of that exact ClusterRole, applies the run-owned RoleBinding through
+  `ResourceSet`, then reads both the object and resulting permission back. `cleanup` removes only a binding this
+  callback created, with absence read-back. Only a target whose API discovery lacks the OpenShift SCC API returns
+  the verified `not_applicable` `NO_OP`. On OpenShift, a missing selected SCC or generated ClusterRole blocks.
+- `RunProbeJob` (`core/kubernetes/image_build_probe.py`): `collect` renders a script ConfigMap and Job from the
+  action: one privileged container from the probe image, pinned to `state.node`, `backoffLimit` 0, the deadline,
+  a TTL, no service-account token, the storage and evidence emptyDirs with size limits, the bounds, and the
+  probe script as the container command, which runs podman with the overlay driver and the cgroupfs manager,
+  runs the inner container with limits, writes and reads back through the bind mount, runs the second inner
+  container that exits 7, removes both and lists what remains, printing one marker line per step; `run` applies
+  the Job through the scope's namespaced set after its read-only script ConfigMap and waits for it within the
+  deadline, classifying an admission rejection of the privileged Pod as `scc_required` with the namespace's
+  service account named; `update` reads the Job back and writes `state.job`; `cleanup` deletes the Job then its
+  ConfigMap on every exit with absence read-back, using the existing `ResourceSet` ownership journal.
 - `ReadProbeResult` (`core/kubernetes/image_build_probe.py`): `run` reads the Job's Pod through the service's
   `json` call and takes the container's terminated exit code as `state.exit_code`, then reads the log through the
   service's `command` call into `state.log`; when the agent named an evidence directory, `update` writes the log
@@ -366,11 +379,12 @@ executor's recoverable-signal guard and reverse cleanup, which is what the MTU c
 guarantees by hand; the statuses from `ci-skills/lib/python/sys/status.py`; the existing report renderer and the
 portable receipt writer in `core/portable.py`; the catalogue declaration and render tool.
 
-Lifetime, decided as mechanism: nothing of the probe is kept. The namespace and the Job are owned by the run
-identifier and removed by their creators' cleanup hooks on success, on failure and on interrupt, each with absence
-read-back; a cleanup hook that raises is rendered as `BLOCKED` with `cleanup.status` `BLOCKED` and the run
-identifier, and deleting by the operation label is the manual recovery. A new run never changes or deletes
-another run's objects, because `ResourceSet` refuses to modify an existing object whose operation label differs.
+Lifetime, decided as mechanism: nothing of the probe is kept. The namespace, script ConfigMap and Job are owned
+by the run identifier and removed by their creators' cleanup hooks on success, on failure and on interrupt, each
+with absence read-back; a cleanup hook that raises is rendered as `BLOCKED` with `cleanup.status` `BLOCKED` and
+the run identifier, and deleting by the operation label is the manual recovery. A new run never changes or
+deletes another run's objects, because `ResourceSet` refuses to modify an existing object whose operation label
+differs.
 
 Concrete statuses, from the shared validator: `--dry-run` returns `DRY_RUN` in phase `OFFLINE_PLAN` with the plan
 digest and no API call, and rejects `--receipt-out`; `--live-plan` returns `PLANNED` in phase `LIVE_PLAN` after
@@ -404,7 +418,7 @@ image_build_readiness`, `side_effects`. The verb is a positional argument, shown
       "plan": { "node": "<NODE>", "probe_image": "<registry>/<image>@sha256:<...>", "inner_image": "<registry>/<image>@sha256:<...>",
                 "timeout": <seconds>, "bounds": { "cpu": "<...>", "memory": "<...>", "storage": "<...>" },
                 "target": "<context> -> <server>", "names": "<pattern derived from the run identifier>",
-                "objects": ["Namespace", "Job"] },
+                "objects": ["Namespace", "ConfigMap", "Job"] },
       "plan_digest": "sha256:<digest>",
       "summary": "<one line>", "errors": [], "captured_at": "<time>"
     }
@@ -438,20 +452,20 @@ image_build_readiness`, `side_effects`. The verb is a positional argument, shown
     }
 
 A row that fails or is missing turns the verdict to `PARTIAL` with `ok: false` or `observed: "missing"` on that row
-and exit code 2. When admission rejects the privileged Pod:
+and exit code 2. When the selected identity cannot prepare the missing OpenShift permission, the command blocks
+before Job creation, for example:
 
     {
       "schema_version": "1.0", "kind": "image_build_readiness", "status": "BLOCKED", "phase": "APPLY",
       "operation": "probe", "mutated": true,
-      "errors": [ { "source": "RunProbeJob", "reason": "scc_required",
-                    "service_account": "system:serviceaccount:<namespace>:default", "constraint": "privileged" } ],
+      "errors": [ { "source": "EnsureSCCAccess", "reason": "scc_cluster_role_bind_denied" } ],
       "readback": { "verified": true, "run_id": "<run identifier>", "namespace_absent": true, "job_absent": true },
       "cleanup": { "status": "PASS" },
       "summary": "<one line>", "captured_at": "<time>"
     }
 
-The agent reports that reason to the user; granting the constraint is the cluster administrator's action, outside
-the skill. Every verb also accepts `--live-plan` (`status: PLANNED`, identity and node read back, no mutation),
+The agent reports that missing authorization to the user; no external grant can stand in for capability proof.
+Every verb also accepts `--live-plan` (`status: PLANNED`, identity and node read back, no mutation),
 `--yaml`, `--human`, `--output-dir` for paired reports, `--evidence-dir` for the persisted log and rows, and the
 shared diagnostic options.
 
@@ -468,8 +482,9 @@ and Harbor. Each is one pull request with its own live proof.
 CI13 consumes that shared implementation and its tool preparation callbacks where needed; it does not create
 another run scope, downloader or installer. The marker parser is a pure function over the
 log with a table of expected markers, not an abstraction: one consumer, one shape, tested against fixture logs.
-The probe script inside the Job is data owned by the callback that renders the Job, versioned with the digest of
-the probe image it runs in.
+The checked probe scripts live in `ci-skills/lib/bash/kubernetes/`. A read-only ConfigMap mounts them with the
+shared Bash runtime; the Job invokes the script file directly. The plan digest binds all script bytes as well as
+the image digests, and the run's existing `ResourceSet` removes the Job then its ConfigMap before the namespace.
 
 ### Open Decisions and Scope Boundary
 
@@ -477,8 +492,8 @@ The phase identity and shared-foundation delivery order are settled by the opera
 specifications. Missing optional roadmap files do not create another approval requirement. The architecture
 format is documented above; the existing pinned checks remain authoritative.
 
-Open questions for the owner. Each is a requirement, a user-facing contract or a gate behaviour that only the
-owner decides; the document records the options and the finding that raised each, and decides none of them:
+Questions 1–3 were resolved by merged PR81; question 6 remains open. The original choices and approved
+boundaries are retained below:
 
 1. The command surface: the command name `image_build_readiness.py`, the verb `probe` (and `chain` later), and
    the options `--node`, `--probe-image`, `--inner-image`, `--timeout`, `--evidence-dir` and the resource bounds,
@@ -494,13 +509,12 @@ owner decides; the document records the options and the finding that raised each
 3. The local gate's schema selector matches only `schemas/*.json`, so the existing pairing rule cannot cover the
    new result schema without widening it to `ci-skills/schemas/`, which also starts checking the existing result
    schemas locally.
-4. The privileged constraint on the bench. On OpenShift the probe's Pod is admitted only when the run namespace's
-   default service account holds the `privileged` constraint, and the namespace is generated per run, so a
-   cluster administrator must grant it before each live run, or grant it to a namespace the agent names and the
-   combo then uses instead of generating one. Options: the administrator grants per run (the combo reports
-   `scc_required` and the exact account until then); an `--namespace` argument that uses the named namespace and
-   generates only the Job name and labels, kept as an exception to the generated-names rule; or a cluster-level
-   grant to a label selector the combo sets, which is the administrator's own policy. The combo never grants.
+4. Resolved by the operator: the installed command performs every prerequisite needed by the probe. On OpenShift
+   it reuses an existing `privileged` permission or creates one run-owned namespaced RoleBinding to
+   `system:openshift:scc:privileged`, verifies it on the same target, and removes only that binding. External test
+   setup is diagnostic evidence only and cannot make the capability pass. The selected identity therefore needs
+   read access to the exact SCC ClusterRole and ServiceAccount authorization; when permission is absent it also
+   needs create/delete RoleBinding and bind rights for that exact ClusterRole in the selected namespace.
 5. Resolved delivery order: CI12.0 delivers `core/kubernetes/run_scope.py` and reusable tool preparation.
    CI13 consumes them. The shared mode validator `core/action_modes.py` serves both adapters; reuse the existing
    implementation if already delivered rather than introduce a duplicate.
@@ -514,8 +528,9 @@ Decided as mechanism inside the library, recorded so no step hides a choice:
   missing marker is a row, never a silent gap.
 - Node selection without an argument: the first Ready worker by name order, named in the result, so two runs on
   the same cluster pick the same node unless it changes.
-- The probe runs under the namespace's default service account with no token mounted; no ServiceAccount or
-  binding is created, because the only right it needs is the constraint an administrator grants.
+- The probe runs under the namespace's default service account with no token mounted. Existing SCC permission is
+  preserved. When the exact OpenShift SCC ClusterRole exists and permission is absent, one run-owned namespaced
+  RoleBinding is created, read back and removed; no ServiceAccount or cluster-wide binding is created.
 - The Job log is read through the service's `command` call and the Pod status through `json`, because the service
   has no dedicated log call; adding one is not needed for one consumer.
 - Image references are digests; a tag without a digest is refused before any plan is produced.
@@ -531,15 +546,15 @@ the probe Job and its script, the result and log read-back, the marker parser, t
 the `probe` verb, the catalogue declaration with its regenerated `tools.json` and result schema, the schema entry
 in the validate workflow per the existing pairing rule, and the routing; its live proof is the probe run from
 the installed candidate on one node of the live cluster with every row present and the Pod exited 0, and the
-namespace and the Job absent afterwards. An `scc_required` result proves only admission-failure reporting
-and cleanup; it does not satisfy the successful Podman capability proof. PR-CI13-2 (wave W-CI13-2) depends on
-it and on chain 1 and block 7, and delivers the `chain` verb that
-composes the probe with the runner, the build-and-push job and the digest read-back; its live proof needs the
-test project and Harbor. Per the owner's rule, each pull request is live-tested on its own head from the
+namespace, RoleBinding and Job absent afterwards. A permission preflight failure is a blocked capability and is
+not accepted as live proof. PR-CI13-2 (wave W-CI13-2) depends on it and on chain 1 and block 7, and delivers the
+`chain` verb that composes the probe with the runner, the build-and-push job and the digest read-back; its live
+proof needs the test project and Harbor. Per the owner's rule, each pull request is live-tested on its own head
+from the
 installed candidate before it merges. Live proof is bound to the functional checksum; wording-only docs or
 test changes do not invalidate unchanged executable behavior. What each pull request commits
-into the gate follows the owner's answer to open question 2; until then the evidence is attached to the pull
-request. Each pull request leaves the installed command coherent under the existing gates, with the
+into the gate follows the existing registration contract; PR81 registered the probe receipt. Each pull request
+leaves the installed command coherent under the existing gates, with the
 unimplemented verb absent from the catalogue rather than stubbed.
 
 ## Gates
@@ -548,31 +563,39 @@ The traceability map in `Authority` is the canonical map. `G-CI13-STATIC` is the
 the local pre-commit gate; its enforcement is the main ruleset's required `ci-skills/required` status with the
 strict up-to-date policy, read back from the repository's branch rules on 2026-10-15. `G-CI13-LIVE` is the live
 run of each slice from the installed candidate on the user's live smoke setup, with one receipt per verb and
-result action; it is proposed, its evidence is attached to the pull request, and whether its receipts enter the
-committed gate is open question 2. `G-CI13-GATE` is the existing live-acceptance step, unchanged by this phase
-until that question is answered.
+result action. PR81 registered the captured probe receipt in `G-CI13-GATE`, the existing live-acceptance step,
+which now checks its functional checksum, runtime result and owned-resource cleanup. Chain proof remains pending.
 
-Per-requirement gaps today, all of the same kind: no module, no unit test and no live run exists for any of
-`R-CI13-001` to `R-CI13-007`, so every row records `UNVERIFIED`. The specific evidence each needs: `R-CI13-001`
+PR81 verifies `R-CI13-001`–`004`; `005` remains partial without interruption proof, `006` is delivered for
+`probe` only, and `007` remains unmerged and unverified. The required evidence remains: `R-CI13-001`
 a node selection test (named node, chosen worker, no Ready worker) and a digest test (same inputs and target
 reproduce it, another target does not); `R-CI13-002` a Job document test (privileged, pinned node, no token,
 emptyDir limits, bounds, deadline, TTL, digests only, tag refused) and the live Job's read-back; `R-CI13-003` a
 parser test against fixture logs (all markers, one missing, exit propagation 7 and not 7, remaining containers
 non-empty) and the live rows with the Pod's exit code; `R-CI13-004` a classification test on an admission
-rejection message and, if the bench refuses, the live `scc_required` result; `R-CI13-005` a scope test (names
+rejection message, existing-permission no-op preservation, temporary RoleBinding read-back and cleanup, and denial
+before Job creation; `R-CI13-005` a scope test (names
 derive from the identifier, removal deletes exactly the owned set) and the live absence read-back, including an
 interrupted run; `R-CI13-006` the catalogue consistency test, the render check and `--describe` without
 credentials; `R-CI13-007` nothing until chain 1 and block 7 exist.
 
 ## Live Smoke Evidence
 
-Planned, not observed. `probe`: the command run from the installed candidate against the live cluster on one node
-the agent names, after the cluster administrator grants the constraint per open question 4; evidence is the
-result's rows with the Pod's terminated exit code, the chosen node, the run identifier, and the namespace and
-the Job absent afterwards. A second run interrupted during the Job proves cleanup on interrupt by the same
-absence read-back. Each receipt is sanitized with the portable writer and carries the functional checksum of the
-installed candidate; where it is committed is open question 2. The chain's evidence (runner, job, digest) waits
-for PR-CI13-2.
+The [installed receipt](../../tests/acceptance/podman-readiness/image-build-readiness.json) records all eight
+runtime checks passing and Pod exit 0.
+[Independent cleanup](../../tests/acceptance/evidence/podman-readiness-final/success/supplemental-cleanup.json)
+confirms owned-resource absence. [GitHub validation](https://github.com/spyroot/ci-skills/actions/runs/39156922605)
+passed after merge.
+The [mistimed attempt](../../tests/acceptance/evidence/podman-readiness-final/mistimed-term/observer.json)
+sent no signal and proves no interruption handling. `chain` remains unverified.
+
+Required evidence for `probe`: the command run from the installed candidate against the live cluster on one node
+the agent names; evidence is the result's rows with the Pod's terminated exit code, the chosen node, the run
+identifier, the permission source, and the namespace, run-owned RoleBinding and Job absent afterwards. External
+authorization setup is not capability proof. A second run interrupted during the Job proves cleanup on interrupt
+by the same absence read-back. Each receipt is sanitized with the portable writer and carries the functional
+checksum of the installed candidate; PR81 registered its captured receipt in the existing gate. The chain's evidence
+(runner, job, digest) waits for PR-CI13-2.
 
 ## End-to-End Test
 
@@ -580,4 +603,4 @@ The consumer journey: the agent names a node (or not), runs `probe`, and reads b
 Pod exited 0 and nothing left in the cluster carrying the run identifier; later, `chain` carries the same node
 through a runner, a build-and-push job and a pushed digest. The proposed test is the probe's live receipt bound to
 the functional checksum, then, after PR-CI13-2, the chain's receipts linked by the same run identifier; its
-acceptance gate is `G-CI13-LIVE`. No execution is recorded yet.
+acceptance gate is `G-CI13-LIVE`. Probe execution is recorded above; chain execution remains pending.

@@ -1752,7 +1752,60 @@ def test_action_plan_rejects_log_file_without_creating_it(
     report = json.loads(capsys.readouterr().out)
     assert result == 2
     assert report["status"] == "BLOCKED"
+    assert report["errors"][0]["reason"] == "dry_run_cannot_write_output"
     assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "reason"),
+    (
+        ([], "action_required"),
+        (["open-bug", "--apply", "--dry-run"], "apply_and_dry_run_conflict"),
+        (["open-bug", "--confirm-plan", "unit"], "confirm_plan_requires_apply"),
+        (["open-bug", "--receipt-out", "unit.json"], "receipt_out_requires_live_run"),
+        (["open-bug", "--timeout", "301"], "timeout_out_of_range"),
+    ),
+)
+def test_issue_mode_errors_remain_stable_after_shared_validation(
+    arguments: Sequence[str], reason: str
+) -> None:
+    """Preserve existing GitLab failure reasons through the shared validator.
+
+    :param arguments: Issue arguments selecting one invalid mode combination.
+    :param reason: Stable classified error expected by existing consumers.
+    :returns: None; the exact error reason is asserted.
+    """
+    args = ISSUE.build_parser().parse_args(arguments)
+
+    with pytest.raises(ACTION.ActionError, match=f"^{reason}$"):
+        GITLAB_ACTION._workflow_mode(args)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "reason"),
+    (
+        (["get", "--runner-id", "1", "--apply"], "runner_read_rejects_apply_options"),
+        (["list", "--live-plan"], "runner_read_rejects_apply_options"),
+        (["tag", "--live-plan", "--dry-run"], "live_plan_mode_conflict"),
+    ),
+)
+def test_runner_mode_errors_remain_stable_after_shared_validation(
+    arguments: Sequence[str],
+    reason: str,
+) -> None:
+    """Keep runner-specific precedence and shared planning conflict behavior.
+
+    :param arguments: Runner arguments selecting one invalid mode combination.
+    :param reason: Stable classified error expected by existing consumers.
+    :returns: None; runner-specific precedence and shared errors are asserted.
+    """
+    args = RUNNER.build_parser().parse_args(arguments)
+
+    with pytest.raises(
+        ACTION.ActionError,
+        match=f"^{reason}$",
+    ):
+        GITLAB_ACTION._workflow_mode(args)
 
 
 def test_action_plan_json_diagnostic_is_separate_from_machine_result(

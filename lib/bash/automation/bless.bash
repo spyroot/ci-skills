@@ -337,7 +337,7 @@ bless_check_json() {
 # Returns: 0, 1 for invalid schema, or CI_EXIT_BLOCKED for a missing tool.
 bless_check_schemas() {
   local snap=$2 list=$3 python=$4 tool
-  bless_read_files < <(bless_select "$list" 'schemas/*.json')
+  bless_read_files < <(bless_select "$list" 'schemas/*.json' 'ci-skills/schemas/*.json')
   ((${#BLESS_FILES[@]})) || return 0
   tool=$(bless_tool check-jsonschema "$python") || return
   (cd "$snap" && "$tool" --check-metaschema "${BLESS_FILES[@]}") || return "$BLESS_FAILED"

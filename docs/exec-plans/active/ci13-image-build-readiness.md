@@ -5,9 +5,9 @@ standards revision `cae52b2`). Its Progress, Surprises & Discoveries, Decision L
 sections are kept current as work proceeds. The phase document is
 [`docs/phases/CI13-IMAGE-BUILD-READINESS.md`](../../phases/CI13-IMAGE-BUILD-READINESS.md); this plan turns its two
 pull requests into milestones a reader can carry out and observe. All paths are relative to the repository root.
-The command surface, the gate wiring and the privileged constraint on the bench are open questions for the owner
-in the phase document; this plan uses the proposed surface so the steps are concrete, and nothing here decides
-those questions.
+The command surface and gate wiring remain open questions in the phase document. The operator resolved the
+privileged-constraint behavior: the installed command must establish its own run-scoped prerequisite, so an
+external cluster grant cannot make an incomplete capability pass.
 
 ## Purpose / Big Picture
 
@@ -16,25 +16,26 @@ images from a GitLab job. The agent runs one probe on a node, and the person obs
 proved there (kernel, podman version, storage driver and cgroup version, backing filesystem, an inner container
 that ran, a bind mount read back, a failing exit code that propagated, nothing left behind), the Pod's exit code as
 the verdict, and nothing left in the cluster afterwards; when the cluster refuses privileged Pods, the person reads
-the exact service account and constraint to grant instead of a failed pipeline. Later, the same chain carries the
+the exact missing authorization instead of a failed pipeline. Later, the same chain carries the
 node through a runner, a build-and-push job and a pushed digest.
 
 ## Progress
 
-- [ ] Milestone 1, code: the shared mode validator, reuse of CI12.0's run scope, node selection, the probe Job and
+- [x] Milestone 1, code: the shared mode validator, reuse of CI12.0's run scope, node selection, the probe Job and
       its script, the result and log read-back, the marker parser, the adapter, the thin main with the `probe`
       verb, the catalogue declaration with regenerated `tools.json`, result schema, routing.
-- [ ] Milestone 1, gates: unit tests; the new schema listed in the validate metaschema step per the existing
+- [x] Milestone 1, gates: unit tests; the new schema listed in the validate metaschema step per the existing
       pairing rule (the local selector is open question 3).
+- [x] Standalone probe and owned SCC cleanup passed in [PR81](https://github.com/spyroot/ci-skills/pull/81).
 - [ ] Milestone 1, proof: live `probe` from the installed candidate on one node with every row present and the
-      Pod exited 0, plus an interrupted run with the same absence read-back, attached to the pull request.
-      Admission failure proves its error path only; successful capability proof remains required.
+      Pod exited 0, plus an interrupted run with the same absence read-back, attached to the pull request. The
+      command must reuse or prepare and clean its own SCC permission; an external grant is not accepted as proof.
 - [ ] Milestone 2, code: the `chain` verb composing the probe with chain 1's runner, the build-and-push job and
       the digest read-back; waits for chain 1 and block 7 (open question 6).
 - [ ] Milestone 2, proof: live chain on the test project with the pushed digest read back.
-- [ ] Open question 1 (command surface and default digests) answered by the owner.
-- [ ] Open question 2 (gate wiring for this command's receipts) answered by the owner.
-- [ ] Open question 4 (the privileged constraint on the bench) answered by the owner.
+- [x] Open question 1 (command surface and default digests) answered by the owner.
+- [x] Open question 2 (gate wiring for this command's receipts) answered by the owner.
+- [x] Open question 4 answered: reuse existing permission or create, verify and clean one run-owned RoleBinding.
 - [x] Phase identity `CI13` approved; CI12.0 owns the shared foundation (see the phase's Authority and PR Order).
       The selected architecture format adds no gate outside the pinned binding.
 
@@ -58,10 +59,12 @@ admission message for a refused privileged Pod and the backing filesystem the em
   gate behaviour are the owner's to approve; a review finding on any of them becomes an open question in the
   phase document, not a decision. The spec shows how the agent invokes the command and the JSON it reads.
 - 2026-10-15, the owner's direction: this combo is specified as its own phase, CI13, separate from CI12.
+- 2026-10-18, the owner's direction: live proof must use only the installed command; external OpenShift setup is
+  diagnostic evidence and cannot make an incomplete capability pass. The command reuses existing SCC permission
+  or creates, verifies and cleans one run-owned RoleBinding to the exact SCC ClusterRole.
 - 2026-10-15, mechanism: the Pod's terminated exit code read from the API is the probe's result; every marker line
-  is a row and a missing marker is a row; the probe never grants a constraint and reports `scc_required` with the
-  exact account; a tag without a digest is refused; node selection without an argument is the first Ready worker
-  by name order, named in the result.
+  is a row and a missing marker is a row; a tag without a digest is refused; node selection without an argument
+  is the first Ready worker by name order, named in the result.
 - 2026-10-15, mechanism, from the CI12 reviews: the run identifier is generated after confirmation and is not part
   of the plan digest, which binds the caller's inputs and the resolved target; the live plan runs the reads only,
   with no confirm callback; the mode rules are one shared validator in `core/action_modes.py` rather than a fourth
@@ -69,8 +72,8 @@ admission message for a refused privileged Pod and the backing filesystem the em
 
 ## Outcomes & Retrospective
 
-To be written when a milestone completes: compare the observed rows with the purpose, state the gaps, and record
-what the next combo should copy or avoid.
+PR81 merged the standalone probe with [live proof](../../phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence).
+Interruption proof remains unestablished. Milestone 2's runner/job/push chain remains unmerged and unverified.
 
 ## Context and Orientation
 
@@ -100,7 +103,8 @@ and the labels derive; the envelope is the shared JSON result every installed co
 paired result schema; a receipt is the sanitized copy of it the portable writer produces with `--receipt-out`; the
 evidence directory is the optional place the agent names for the Job log and the rows to persist; the installed
 candidate is the skill installed from the pull request head as the README's live smoke setup describes; the
-constraint is the `privileged` security context constraint an OpenShift administrator grants to a service account.
+constraint is the OpenShift `privileged` security context constraint. The installed command reads whether the
+run-scoped service account can use it and creates a temporary RoleBinding only when that permission is absent.
 
 ## Plan of Work
 
@@ -125,17 +129,18 @@ its goal, work, result and proof:
 ### Milestone 1: `probe`, one node proven able to run podman builds
 
 Goal: an agent names a node, or lets the combo pick one, and reads back every row the probe proved there with the
-Pod's exit code as the verdict, or the exact constraint to ask for, with nothing left in the cluster. Work: the
+Pod's exit code as the verdict, or the exact missing authorization, with nothing left in the cluster. Work: the
 modules, schema, adapter, thin main, catalogue declaration, routing and tests listed under Plan of Work, then the
 live run. Result: `image_build_readiness.py probe` exists in the installed catalogue with `--dry-run`,
 `--live-plan` and `--apply --confirm-plan`, invoked and read as the phase document's "Invocation and the result
 the agent reads" shows; a successful apply returns `PASS` with eight rows and the Pod's exit code 0 and leaves no
-namespace and no Job; a refused Pod returns `BLOCKED` with `scc_required` naming the account and leaves nothing
-either; an interrupted apply leaves nothing. Proof: the unit tests named under Validation and Acceptance, the
+namespace and no Job; existing SCC permission is a no-op, missing permission creates and cleans one run-owned
+RoleBinding, and a denied authorization preflight blocks before Job creation; an interrupted apply leaves nothing.
+Proof: the unit tests named under Validation and Acceptance, the
 validate workflow green on the exact head, and the live `probe` result on one node of the live cluster with every
 row present and the Pod exited 0, plus a second run interrupted during the Job with the same absence read-back,
-both attached to the pull request as receipts. A live `scc_required` result is negative-path evidence, not a
-substitute for the successful probe. Reuse proof when the functional checksum is unchanged.
+both attached to the pull request as receipts. A blocked authorization result does not stand in for execution.
+Reuse proof when the functional checksum is unchanged.
 
 ### Milestone 2: `chain`, from the proven node to a pushed digest
 
@@ -164,9 +169,10 @@ head. Install the candidate as the README's live smoke setup describes and run t
 installed copy against the live cluster: `probe --node <NODE> --apply --confirm-plan <digest> --json
 --receipt-out <RECEIPT> --evidence-dir <EVIDENCE>` and expect `PASS` with eight rows each `ok`, `exit_code` 0,
 the run identifier under `readback`, `namespace_absent` and `job_absent` true, and the log and the rows under
-`<EVIDENCE>`; if the cluster refuses the Pod, expect `BLOCKED` with `scc_required` naming
-`system:serviceaccount:<namespace>:default` and the constraint, with the same absence read-back, and record it
-under Surprises & Discoveries with the exact admission message. Then run the apply again and interrupt it while
+`<EVIDENCE>`. Expect the permission callback to report `existing` or `temporary_role_binding`; for a temporary
+binding, expect exact UID read-back and absence during cleanup. If permission preparation is denied, expect
+`BLOCKED` before Job creation and record the exact native authorization result under Surprises & Discoveries;
+that result is diagnostic, not capability proof. Then run the apply again and interrupt it while
 the Job runs; expect `BLOCKED` with the interrupt reason and `namespace_absent` and `job_absent` true. Attach the
 results to the pull request; push the head they came from and expect the validate workflow green on it; that
 head is the one that merges. The report of every live step is its receipt, produced the same way as every other
@@ -187,24 +193,26 @@ selection (a named node, the first Ready worker by name order, no Ready worker b
 a tag refused before any plan), a dry-run digest confirming a later apply with the same inputs and target and
 rejecting another target, the parser against fixture logs (all markers, one missing marker as a row, exit
 propagation 7 and not 7, remaining containers non-empty), the verdict (`PASS` only with exit 0 and every row
-`ok`, `PARTIAL` otherwise), and the classification of an admission rejection message as `scc_required` with the
-account named; when the catalogue consistency test and the render check pass; when the validate workflow is green
-on the exact head; and when the live results attached to the pull request show the rows with the Pod's exit code
-and nothing left carrying the identifier, including after the interrupted run. Milestone 2 is accepted when the
-composition tests pass and the live chain result shows the runner online, the job succeeded on that runner, and
+`ok`, `PARTIAL` otherwise), existing SCC permission as a preserved no-op, temporary RoleBinding read-back and
+cleanup, and authorization denial before Job creation; when the catalogue consistency test and the render check
+pass; when the validate workflow is green on the exact head; and when the live results attached to the pull
+request show the rows with the Pod's exit code and nothing left carrying the identifier, including after the
+interrupted run. Milestone 2 is accepted when the composition tests pass and the live chain result shows the
+runner online, the job succeeded on that runner, and
 the pushed digest read back. A green build alone demonstrates nothing; the live results do.
 
 ## Idempotence and Recovery
 
 Every apply generates a new identifier, so repeated probes do not collide and two probes can run on two nodes at
-once. Resources owned by the work: the run-scoped namespace and the Job, with its Pod and emptyDirs. Both are
+once. Resources owned by the work: the run-scoped namespace, optional run-owned SCC RoleBinding, read-only script
+ConfigMap and Job, with its Pod and emptyDirs. The confirmed plan binds the script bytes. These resources are
 removed on success, on failure and on interrupt by their creators' cleanup hooks, with absence read-back; the
 evidence directory, when named, is never removed. The probe changes nothing on the node: podman's storage lives on
 the Pod's emptyDir and leaves with the Pod, and the two inner containers are removed by the script before it
 exits. Recovery: if a cleanup hook fails, the result is `BLOCKED` with the run identifier and the objects still
 carry the operation label, so deleting by that label is the manual recovery; nothing else carries the identifier.
-Rollback: the probe creates no persistent cluster state, so there is nothing to roll back; the constraint, when
-granted, is the administrator's object and is never touched by the combo.
+Rollback: the probe creates no persistent cluster state, so there is nothing to roll back. Preexisting SCC
+permission is never touched; only the RoleBinding created by this run is removed.
 
 ## Artifacts and Notes
 

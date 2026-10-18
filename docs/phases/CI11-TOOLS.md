@@ -111,7 +111,7 @@ agent must read or require traversal through `run`, `read`, or `describe` before
 | Element | Shape |
 | --- | --- |
 | Root payload | Mapping of cluster names to proposition nodes. |
-| Node payload | `tools` and `reference` mappings, returned directly when that node is selected. |
+| Node payload | `tools` and `reference` fields, returned directly when that node is selected. |
 | `tools` | Mapping of actual entrypoint filenames to `{}` in this proposition version. |
 | `reference` | Ordered array of entries, each a `name`, a short `summary` and a `pointer` to the next node. |
 | `schema_version` | Response version `3.0` for this shape. |

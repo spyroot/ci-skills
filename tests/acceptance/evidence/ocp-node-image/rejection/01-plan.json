@@ -1,0 +1,199 @@
+{
+  "access": {
+    "kubernetes": {
+      "context": "context:611e49b22818",
+      "identity": "identity:547a4b6a7894",
+      "server": "server:6076e1dcf760"
+    }
+  },
+  "captured_at": "2026-10-18T04:42:34.010280+00:00",
+  "cleanup": {
+    "failures": [],
+    "resources": [],
+    "retained": [],
+    "status": "PASS"
+  },
+  "errors": [],
+  "filters": {},
+  "kind": "ocp_node_onboard",
+  "operation": "build",
+  "plan": {
+    "functional_digest": "8dde2e6f7389ab60a1cf978d7ead63366e6b045cb422b2a7f82705f209084ff1",
+    "inputs": {
+      "destination": {
+        "artifactPath": "/shared/ci-skills-ci12-native-reject-bf69d6d5-20261018/node.iso",
+        "buildOutput": "destination",
+        "mountPath": "/shared",
+        "namespace": "namespace:b115cbf8fccd",
+        "volumeSource": {
+          "persistentVolumeClaim": {
+            "claimName": "pvc:92a982289cbe"
+          }
+        }
+      },
+      "node_input": {
+        "files": [
+          {
+            "name": "nodes-config.yaml",
+            "sha256": "47c618c9d1f3940ec0f772d5848d3d404855a20f6035792a4472b351a59310a4",
+            "size": 21
+          }
+        ],
+        "mac_address": "",
+        "route": "file"
+      },
+      "node_selector": {
+        "kubernetes.io/arch": "amd64"
+      },
+      "pull_secret": "[REDACTED]",
+      "release": {
+        "cluster_release_architecture": "amd64",
+        "cluster_release_image": "quay.io/openshift-release-dev/ocp-release@sha256:64d312cc715ccb58e44b7ed0a7a1a24ad407b72be2cb865512f9bf8ff7578524",
+        "cluster_release_operating_system": "linux",
+        "cluster_release_version": "4.19.26",
+        "inspector_image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "oc_archive": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz",
+        "oc_archive_sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+        "source": "provider",
+        "tool_fingerprint": "sha256:54c6f8e902200968a09d69a2d09d4afcff963e3f208f676e75191ae1211fe070"
+      },
+      "tool_pod": {
+        "dependencies": [
+          {
+            "commands": [
+              "coreos-installer"
+            ],
+            "name": "coreos-installer",
+            "probe": [
+              "coreos-installer",
+              "--version"
+            ]
+          },
+          {
+            "commands": [
+              "rsync"
+            ],
+            "name": "rsync",
+            "probe": [
+              "rsync",
+              "--version"
+            ],
+            "yum": [
+              "rsync"
+            ]
+          },
+          {
+            "commands": [
+              "oc"
+            ],
+            "linux": {
+              "destination": "/tmp/ci-skills-tools/bin",
+              "files": [
+                "oc"
+              ],
+              "method": "archive",
+              "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+              "stripComponents": 0,
+              "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz"
+            },
+            "name": "oc",
+            "probe": [
+              "oc",
+              "version",
+              "--client",
+              "-o",
+              "json"
+            ]
+          }
+        ],
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71"
+      },
+      "tool_source": "provider"
+    },
+    "kind": "ocp_node_onboard",
+    "operation": "build",
+    "run_id": "ci12-reject-bf69d6d5-20261018",
+    "target": {
+      "context": "context:611e49b22818",
+      "server": "server:6076e1dcf760"
+    },
+    "timeout_seconds": 1800
+  },
+  "plan_digest": "43f11afbe6d482d4cc2e52f3457e48b25099b765938808a1aece403e13288528",
+  "readback": {},
+  "records": [
+    {
+      "callback": "K8SAuth",
+      "context": "context:611e49b22818",
+      "identity": "identity:547a4b6a7894",
+      "server": "server:6076e1dcf760"
+    },
+    {
+      "callback": "ResolveNodeImageTools",
+      "cluster_release_architecture": "amd64",
+      "cluster_release_image": "quay.io/openshift-release-dev/ocp-release@sha256:64d312cc715ccb58e44b7ed0a7a1a24ad407b72be2cb865512f9bf8ff7578524",
+      "cluster_release_operating_system": "linux",
+      "cluster_release_version": "4.19.26",
+      "inspector_image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+      "oc_archive": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz",
+      "oc_archive_sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+      "source": "provider",
+      "tool_fingerprint": "sha256:54c6f8e902200968a09d69a2d09d4afcff963e3f208f676e75191ae1211fe070"
+    },
+    {
+      "callback": "ResolveNodeImageTools",
+      "cluster_release_architecture": "amd64",
+      "cluster_release_image": "quay.io/openshift-release-dev/ocp-release@sha256:64d312cc715ccb58e44b7ed0a7a1a24ad407b72be2cb865512f9bf8ff7578524",
+      "cluster_release_operating_system": "linux",
+      "cluster_release_version": "4.19.26",
+      "hook": "cleanup",
+      "inspector_image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+      "oc_archive": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz",
+      "oc_archive_sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+      "source": "provider",
+      "tool_fingerprint": "sha256:54c6f8e902200968a09d69a2d09d4afcff963e3f208f676e75191ae1211fe070"
+    },
+    {
+      "callback": "K8SAuth",
+      "cluster_release_architecture": "amd64",
+      "cluster_release_image": "quay.io/openshift-release-dev/ocp-release@sha256:64d312cc715ccb58e44b7ed0a7a1a24ad407b72be2cb865512f9bf8ff7578524",
+      "cluster_release_operating_system": "linux",
+      "cluster_release_version": "4.19.26",
+      "hook": "cleanup",
+      "inspector_image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+      "oc_archive": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz",
+      "oc_archive_sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+      "source": "provider",
+      "tool_fingerprint": "sha256:54c6f8e902200968a09d69a2d09d4afcff963e3f208f676e75191ae1211fe070"
+    }
+  ],
+  "report_files": {
+    "json": "path:b3330a11cd28",
+    "text": "path:658bb1cfc1ab"
+  },
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "dbaf02d4a9ab24fb4ee5980c66f42425fd84a4f5c1e4c7e6f73735c4942d5b6b",
+    "file_count": 196,
+    "functional_digest": "8dde2e6f7389ab60a1cf978d7ead63366e6b045cb422b2a7f82705f209084ff1",
+    "revision": {
+      "source": "installer_record",
+      "value": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
+      "verified": true
+    }
+  },
+  "status": "PLANNED",
+  "summary": {
+    "error_count": 0,
+    "record_count": 4
+  },
+  "target": "context:611e49b22818@server:6076e1dcf760",
+  "target_file": "path:5e5380df1eda",
+  "target_source": "user",
+  "tested_revision": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df"
+}

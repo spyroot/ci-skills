@@ -1,0 +1,54 @@
+{
+  "approved_operation_last_completion": {
+    "evidence": "reports/mac-remove.json",
+    "operation": "MAC remove",
+    "timestamp": "2026-10-18T12:06:30.575365Z"
+  },
+  "approved_run_ids": [
+    "p85y-48c4489a-113417",
+    "p85m-48c4489a-113417"
+  ],
+  "approved_tool_pod_cleanup_completion": {
+    "evidence": "reports/mac-build-trace.jsonl",
+    "operation": "MAC build tool Pod cleanup",
+    "timestamp": "2026-10-18T12:00:23.531422Z"
+  },
+  "claim_boundary": "No global cluster emptiness claim. Only exact approved run-owned names, exact cleanup helper names, two exact ISO paths, and the named PVC identity were evaluated.",
+  "exact_cleanup_helper_readback": {
+    "evidence": "reports/exact-file-helper-resources-after.txt",
+    "evidence_bytes": 0,
+    "status": "ABSENT"
+  },
+  "exact_run_owned_resource_readback": {
+    "evidence": "reports/run-owned-resources-post-cleanup.txt",
+    "evidence_bytes": 0,
+    "status": "ABSENT"
+  },
+  "pvc_preservation": {
+    "evidence_after": "reports/pvc-after-exact-file-cleanup.json",
+    "evidence_before": "reports/pvc-before-exact-file-cleanup.json",
+    "name": "pvc:92a982289cbe",
+    "namespace": "namespace:b115cbf8fccd",
+    "phase_after": "Bound",
+    "phase_before": "Bound",
+    "uid_after": "1296f669-6c2c-40e9-9b5b-b6659278d326",
+    "uid_before": "1296f669-6c2c-40e9-9b5b-b6659278d326"
+  },
+  "schema_version": "1.0",
+  "scope": "PR85 installed ISO proof cleanup attribution",
+  "status": "PASS",
+  "transient_native_objects": {
+    "agent_deletion_issued": false,
+    "bounded_exact_read_at": "2026-10-18T12:14:24Z",
+    "bounded_exact_read_result": "all three objects NotFound; returned List items was empty",
+    "creation_timestamp": "2026-10-18T12:11:07Z",
+    "disposition": "temporally excluded concurrent/provider-cleaned objects; not attributed to either approved run",
+    "exact_name_matches_in_approved_run_evidence": 0,
+    "objects": [
+      "Namespace/openshift-node-joiner-sl9nt",
+      "ClusterRole/node-joiner-49vlk",
+      "ClusterRoleBinding/node-joiner-monitor-5p8hr"
+    ],
+    "temporal_relation": "created after all approved build, verify, and remove operations completed"
+  }
+}

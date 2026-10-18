@@ -1,0 +1,27 @@
+{
+  "checks": [
+    {
+      "kind": "Namespace",
+      "name": "ci-skills-run-e15d72b9dfbf4784b4a1",
+      "observed": [],
+      "status": "ABSENT"
+    },
+    {
+      "kinds": [
+        "Job",
+        "ConfigMap",
+        "RoleBinding",
+        "Pod"
+      ],
+      "observed": [],
+      "run_id": "db194549255b408991f9e2edfa196b7b",
+      "status": "ABSENT"
+    }
+  ],
+  "command_exit_code": 2,
+  "command_status": "BLOCKED",
+  "existing_cluster_role": "system:openshift:scc:privileged",
+  "existing_scc": "privileged",
+  "kind": "independent_cleanup_readback",
+  "schema_version": "1.0"
+}

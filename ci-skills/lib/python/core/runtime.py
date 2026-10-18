@@ -20,11 +20,14 @@ from pathlib import Path
 from typing import Optional, Union, overload
 
 from lib.python.core.json_types import JSONObject, JSONValue
+from lib.python.core.runtime_streams import (
+    OUTPUT_LIMIT_EXIT_CODE,
+    capture_command_streams,
+)
 
 # How long a killed child is given to be reaped, so the worst case is the
 # caller's timeout plus this, not unbounded.
 REAP_SECONDS = 5
-OUTPUT_LIMIT_EXIT_CODE = 125
 
 
 @dataclass(frozen=True)
@@ -313,16 +316,19 @@ def run_command(
 def run_command_bounded(
     argv: Sequence[str],
     *,
-    timeout: int = 25,
+    timeout: float = 25,
     env: Optional[Mapping[str, Optional[str]]] = None,
     max_stdout_bytes: int = 8 * 1024 * 1024,
+    input_data: Optional[bytes] = None,
 ) -> CommandResult:
     """Run a native command with a strict stdout byte limit.
 
     :param argv: Executable and arguments; each item is converted to text.
-    :param timeout: Maximum command runtime in seconds.
+    :param timeout: Maximum command runtime in seconds, including fractional seconds.
     :param env: Child environment overrides; ``None`` values remove variables.
     :param max_stdout_bytes: Maximum stdout bytes before the child is killed.
+    :param input_data: Optional exact stdin bytes; ``None`` keeps stdin disconnected.
+        The payload is excluded from arguments and execution trace metadata.
     :returns: Captured result; status 125 means stdout exceeded its limit,
         124 means timeout, and 127 means the executable is missing.
     :raises ValueError: ``timeout`` or ``max_stdout_bytes`` is nonpositive.
@@ -335,39 +341,21 @@ def run_command_bounded(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
             env=_environment(env),
         )
     except FileNotFoundError:
         return _traced_result(command, 127, "", "command unavailable")
-    stdout = bytearray()
-    stderr = bytearray()
     deadline = time.monotonic() + timeout
     failure: Optional[int] = None
     try:
-        with selectors.DefaultSelector() as selector:
-            assert process.stdout is not None and process.stderr is not None
-            selector.register(process.stdout, selectors.EVENT_READ, stdout)
-            selector.register(process.stderr, selectors.EVENT_READ, stderr)
-            while selector.get_map():
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    failure = 124
-                    break
-                for key, _ in selector.select(timeout=min(remaining, 0.5)):
-                    chunk = os.read(key.fd, 8192)
-                    if not chunk:
-                        selector.unregister(key.fileobj)
-                        continue
-                    captured = key.data
-                    captured.extend(chunk)
-                    if captured is stdout and len(stdout) > max_stdout_bytes:
-                        failure = OUTPUT_LIMIT_EXIT_CODE
-                        break
-                    if captured is stderr and len(stderr) > 4096:
-                        del stderr[:-4096]
-                if failure is not None:
-                    break
+        captured = capture_command_streams(
+            process,
+            input_data=input_data,
+            deadline=deadline,
+            max_stdout_bytes=max_stdout_bytes,
+        )
+        failure = captured.failure
         if failure is None:
             remaining = deadline - time.monotonic()
             try:
@@ -381,6 +369,8 @@ def run_command_bounded(
             process.wait(timeout=REAP_SECONDS)
         except subprocess.TimeoutExpired:
             failure = 124
+        if process.stdin is not None:
+            process.stdin.close()
         if process.stdout is not None:
             process.stdout.close()
         if process.stderr is not None:
@@ -388,10 +378,10 @@ def run_command_bounded(
     return _traced_result(
         command,
         failure if failure is not None else process.returncode,
-        stdout.decode("utf-8", errors="replace")
+        captured.stdout.decode("utf-8", errors="replace")
         if failure != OUTPUT_LIMIT_EXIT_CODE
         else "",
-        stderr.decode("utf-8", errors="replace"),
+        captured.stderr.decode("utf-8", errors="replace"),
     )
 
 

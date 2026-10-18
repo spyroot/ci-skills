@@ -1,0 +1,572 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/ocp-node-onboard.schema.json",
+  "title": "OpenShift node image build, join, verification and resource removal result",
+  "description": "The shared Kubernetes workflow envelope with typed artifact and node-join evidence. This is an output schema, not an OCP input validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "captured_at",
+    "target",
+    "filters",
+    "records",
+    "errors",
+    "status",
+    "summary",
+    "operation"
+  ],
+  "properties": {
+    "schema_version": {
+      "$ref": "tool-pod.schema.json#/properties/schema_version"
+    },
+    "kind": {
+      "const": "ocp_node_onboard"
+    },
+    "captured_at": {
+      "$ref": "tool-pod.schema.json#/properties/captured_at"
+    },
+    "target": {
+      "$ref": "tool-pod.schema.json#/properties/target"
+    },
+    "filters": {
+      "$ref": "tool-pod.schema.json#/properties/filters"
+    },
+    "records": {
+      "allOf": [
+        {
+          "$ref": "tool-pod.schema.json#/properties/records"
+        }
+      ],
+      "items": {
+        "properties": {
+          "native_exit_code": {
+            "type": "integer"
+          },
+          "transport_exit_code": {
+            "type": "integer"
+          },
+          "artifact": {
+            "$ref": "#/$defs/artifact"
+          },
+          "embedded_ignition": {
+            "$ref": "#/$defs/embeddedIgnition"
+          }
+        }
+      }
+    },
+    "errors": {
+      "$ref": "tool-pod.schema.json#/properties/errors"
+    },
+    "status": {
+      "$ref": "tool-pod.schema.json#/properties/status"
+    },
+    "summary": {
+      "$ref": "tool-pod.schema.json#/properties/summary"
+    },
+    "operation": {
+      "enum": [
+        "build",
+        "join",
+        "verify",
+        "remove",
+        ""
+      ]
+    },
+    "plan_digest": {
+      "$ref": "tool-pod.schema.json#/properties/plan_digest"
+    },
+    "access": {
+      "$ref": "tool-pod.schema.json#/properties/access"
+    },
+    "cleanup": {
+      "$ref": "tool-pod.schema.json#/properties/cleanup"
+    },
+    "skill": {
+      "$ref": "tool-pod.schema.json#/properties/skill"
+    },
+    "tested_revision": {
+      "$ref": "tool-pod.schema.json#/properties/tested_revision"
+    },
+    "trace_artifact": {
+      "$ref": "tool-pod.schema.json#/properties/trace_artifact"
+    },
+    "plan": {
+      "$ref": "tool-pod.schema.json#/properties/plan"
+    },
+    "pod": {
+      "$ref": "tool-pod.schema.json#/properties/pod"
+    },
+    "run_id": {
+      "$ref": "tool-pod.schema.json#/properties/run_id"
+    },
+    "target_source": {
+      "$ref": "tool-pod.schema.json#/properties/target_source"
+    },
+    "target_file": {
+      "$ref": "tool-pod.schema.json#/properties/target_file"
+    },
+    "readback": {
+      "type": "object",
+      "description": "Actual observations collected by completed callbacks, including partial evidence after failure.",
+      "properties": {
+        "node_image_source": {
+          "$ref": "#/$defs/artifact"
+        },
+        "stored_artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "artifact_live_readback": {
+          "$ref": "#/$defs/artifact"
+        },
+        "destination_storage": {
+          "$ref": "#/$defs/storage"
+        },
+        "embedded_ignition": {
+          "$ref": "#/$defs/embeddedIgnition"
+        },
+        "node_image_failure": {
+          "type": "object",
+          "required": [
+            "transport_exit_code",
+            "error",
+            "completion_unknown"
+          ],
+          "properties": {
+            "exit_code": {
+              "type": "integer"
+            },
+            "transport_exit_code": {
+              "type": "integer"
+            },
+            "error": {
+              "type": "string"
+            },
+            "completion_unknown": {
+              "type": "boolean"
+            }
+          }
+        },
+        "artifact_record": {
+          "type": "object",
+          "required": [
+            "schema_version",
+            "run_id",
+            "destination",
+            "artifact",
+            "storage",
+            "lifetime"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": "1.0"
+            },
+            "run_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "destination": {
+              "$ref": "../artifact-destination.schema.json"
+            },
+            "artifact": {
+              "$ref": "#/$defs/artifact"
+            },
+            "storage": {
+              "$ref": "#/$defs/storage"
+            },
+            "lifetime": {
+              "$ref": "#/$defs/lifetime"
+            }
+          }
+        }
+      }
+    },
+    "artifact": {
+      "$ref": "#/$defs/artifact"
+    },
+    "artifact_lifetime": {
+      "$ref": "#/$defs/lifetime"
+    },
+    "native_exit_code": {
+      "type": "integer"
+    },
+    "native_completion_unknown": {
+      "type": "boolean"
+    },
+    "join": {
+      "$ref": "#/$defs/join"
+    }
+  },
+  "$defs": {
+    "join": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "already_ready",
+        "client_issued",
+        "client_completion_source",
+        "serving_issued",
+        "poll_count",
+        "elapsed_time_ms"
+      ],
+      "properties": {
+        "already_ready": {
+          "type": "boolean"
+        },
+        "client_issued": {
+          "type": "boolean"
+        },
+        "client_completion_source": {
+          "enum": [
+            "",
+            "already_ready",
+            "csr_readback",
+            "serving_request"
+          ]
+        },
+        "serving_issued": {
+          "type": "boolean"
+        },
+        "poll_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "elapsed_time_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "monitor_exit_code": {
+          "type": "integer"
+        },
+        "node": {
+          "$ref": "#/$defs/joinNode"
+        },
+        "csr_inventory": {
+          "$ref": "#/$defs/csrInventory"
+        },
+        "client_csr": {
+          "$ref": "#/$defs/csr"
+        },
+        "serving_csr": {
+          "$ref": "#/$defs/csr"
+        }
+      }
+    },
+    "joinNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "uid",
+        "ready",
+        "roles",
+        "ip_addresses",
+        "selected_addresses_present"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "ip_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "selected_addresses_present": {
+          "type": "boolean"
+        }
+      }
+    },
+    "csrInventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "selector",
+        "requests",
+        "unrelated_signer_count"
+      ],
+      "properties": {
+        "selector": {
+          "$ref": "#/$defs/joinSelector"
+        },
+        "requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/csr"
+          }
+        },
+        "unrelated_signer_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "joinSelector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_name",
+        "ip_addresses",
+        "signers"
+      ],
+      "properties": {
+        "node_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ip_addresses": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "signers": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "kubernetes.io/kube-apiserver-client-kubelet"
+            },
+            {
+              "const": "kubernetes.io/kubelet-serving"
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "csr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "uid",
+        "signer",
+        "usages",
+        "approved",
+        "denied",
+        "issued",
+        "subject"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "signer": {
+          "enum": [
+            "kubernetes.io/kube-apiserver-client-kubelet",
+            "kubernetes.io/kubelet-serving"
+          ]
+        },
+        "usages": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "approved": {
+          "type": "boolean"
+        },
+        "denied": {
+          "type": "boolean"
+        },
+        "issued": {
+          "type": "boolean"
+        },
+        "subject": {
+          "$ref": "#/$defs/csrSubject"
+        }
+      }
+    },
+    "csrSubject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "common_name",
+        "organizations",
+        "dns_names",
+        "ip_addresses"
+      ],
+      "properties": {
+        "common_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "organizations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dns_names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ip_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "lifetime": {
+      "enum": [
+        "pod",
+        "caller_selected_volume"
+      ]
+    },
+    "artifact": {
+      "type": "object",
+      "required": [
+        "pod",
+        "path",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "pod": {
+          "$ref": "tool-pod.schema.json#/properties/pod"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^(sha256:)?[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "required": [
+        "namespace",
+        "mount_path",
+        "artifact_path",
+        "build_output",
+        "volume_source_types",
+        "destination_fingerprint",
+        "observed_mount_path",
+        "protocol",
+        "access_route",
+        "lifetime",
+        "writable",
+        "output_absent"
+      ],
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mount_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_output": {
+          "enum": [
+            "destination",
+            "scratch"
+          ]
+        },
+        "volume_source_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "destination_fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "observed_mount_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access_route": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lifetime": {
+          "$ref": "#/$defs/lifetime"
+        },
+        "writable": {
+          "type": "boolean"
+        },
+        "output_absent": {
+          "type": "boolean"
+        },
+        "capacity_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "embeddedIgnition": {
+      "type": "object",
+      "required": [
+        "version",
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "Version and checksum of the actual private native inspection output; no embedded credential contents."
+    }
+  }
+}
