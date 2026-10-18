@@ -1,0 +1,24 @@
+{
+  "captured_at": "2026-10-18T04:25:14.217147+00:00",
+  "kind": "native_rbac_cleanup_readback",
+  "resources": [
+    {
+      "absent": true,
+      "kind": "ClusterRole",
+      "name": "node-joiner-jsdf9",
+      "raw_file": "mac-native-clusterrole-post.txt",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_size": 0
+    },
+    {
+      "absent": true,
+      "kind": "ClusterRoleBinding",
+      "name": "node-joiner-monitor-wkhvb",
+      "raw_file": "mac-native-clusterrolebinding-post.txt",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_size": 0
+    }
+  ],
+  "schema_version": "1.0",
+  "status": "PASS"
+}

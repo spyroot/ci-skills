@@ -1,0 +1,324 @@
+{
+  "algorithm": "sha256",
+  "entries": [
+    {
+      "kind": "installed_identity",
+      "portable_name": "01-installed-provenance.json",
+      "portable_sha256": "e48248df384dad2571152020f8c290c47f1e02836ab45b07c508fdc5b1d8b657",
+      "raw_name": "reports/install-apply.json",
+      "raw_sha256": "5e7c89e3278095c205579c81b208b23c1d904264d4ccee6fc11f93f05731895d"
+    },
+    {
+      "kind": "installed_proposition",
+      "portable_name": "02-proposition.json",
+      "portable_sha256": "9351bb8b98bc538aa3afdbeb2303e900bc4667c804c9e7113214a495b8153cd2",
+      "raw_name": "reports/discovery-node.json",
+      "raw_sha256": "dc5928a5af8906016e03e091edcc1a9139ae9322a58089bacb07c6a0965f1496"
+    },
+    {
+      "kind": "installed_references",
+      "portable_name": "03-references.json",
+      "portable_sha256": "0e79b4cb172c2d60759eab6ec4d057888a34575fc3e5a14a126bc340d412a5f4",
+      "raw_name": "reports/discovery-read.json",
+      "raw_sha256": "d95ff5ced9d412ca1c71f083c8a5696068cc639b87994811ba2f0b3bf18c6078"
+    },
+    {
+      "kind": "installed_actions",
+      "portable_name": "04-actions.json",
+      "portable_sha256": "5b3920007e9af4c5d302a4ccf2c9f2b964bc2a2de6d2b44d3aba60b840460ecf",
+      "raw_name": "reports/discovery-run.json",
+      "raw_sha256": "80a92bf6eaae4ffa054e3de7d3d52402113776da75aa6ff246db1a938e063c2e"
+    },
+    {
+      "kind": "installed_help",
+      "portable_name": "05-help.txt",
+      "portable_sha256": "6c80ac30e8df1ea833e8f02d0f344f9dd099760aaacea0f3d5ec252c9656a048",
+      "raw_name": "reports/help.txt",
+      "raw_sha256": "6c80ac30e8df1ea833e8f02d0f344f9dd099760aaacea0f3d5ec252c9656a048"
+    },
+    {
+      "kind": "installed_description",
+      "portable_name": "06-description.json",
+      "portable_sha256": "0cd5da0093bd4c446793c9297f9fc991480a4e6375fa26c20edd41d9ffbecf37",
+      "raw_name": "reports/describe.json",
+      "raw_sha256": "752f7445cdd1a8d4f0ac3580e6bd83a10903d14ef0e6de3b122542d728fa5972"
+    },
+    {
+      "kind": "native_input",
+      "portable_name": "inputs/nodes-config.yaml",
+      "portable_sha256": "e6865bddb6570fe49614c14ab49dfd896ac478d170db8323a86bba85beba4eb4",
+      "raw_name": "inputs/nodes-config.yaml",
+      "raw_sha256": "e6865bddb6570fe49614c14ab49dfd896ac478d170db8323a86bba85beba4eb4"
+    },
+    {
+      "kind": "destination_input",
+      "portable_name": "inputs/yaml-destination.json",
+      "portable_sha256": "a18d5dc50d5f7b5395267b596d507aa7139a8153970e4598e6b8a2fcefdd867e",
+      "raw_name": "inputs/yaml-destination.json",
+      "raw_sha256": "e4f011e653d87703170924f55b433a51a6b718926a841a8a174f45e74f91357e"
+    },
+    {
+      "kind": "destination_input",
+      "portable_name": "inputs/mac-destination.json",
+      "portable_sha256": "bdd375347e25238711e0945520dba22f1574fba2dc4b70131f3fd3245aaa48b4",
+      "raw_name": "inputs/mac-destination.json",
+      "raw_sha256": "088b69dd262b267a2c83f918fe3651a69d7fb3703d53ab8039fbfbb0145dfcfa"
+    },
+    {
+      "kind": "build_plan",
+      "portable_name": "yaml/01-build-plan.json",
+      "portable_sha256": "3a10eae1e509daa11d8c930a8d3ca62a6c61d3ef97cceb556a8fbd8922dcb62a",
+      "raw_name": "reports/yaml-plan-final.json",
+      "raw_sha256": "903e40d774e5b125bd24eec3235d691227ac0ac825d4e880569e8c64136d25e0"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "yaml/02-build.json",
+      "portable_sha256": "eabf0cb81c91e06d25dfb0c31fb55c55ae5d2cb50e8d884ccf45b904bfd810aa",
+      "raw_name": "reports/yaml-build.json",
+      "raw_sha256": "255d641880597163b8ad5b6c6e2e55286de177d23fc68c35060397d637ac9c05"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "yaml/03-verify.json",
+      "portable_sha256": "75b78a4ee56338874972db761d48aba8d1360165478098c8e7db4c2d8c1faa3f",
+      "raw_name": "reports/yaml-verify.json",
+      "raw_sha256": "1ed83c76c2e6867e6f729b7028bcb2388bf3dc47fbc88227d27ff2a3529c9246"
+    },
+    {
+      "kind": "remove_plan",
+      "portable_name": "yaml/04-remove-plan.json",
+      "portable_sha256": "96e88a6e74f033cd7329241e6ce40480a630de81b742d2ebf9cb85cb32dc1b27",
+      "raw_name": "reports/yaml-remove-plan.json",
+      "raw_sha256": "5dadb36ebeea14243fcdf9219eb72d7ede8c8fbd51655bfd9802d4f79c210ed6"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "yaml/05-remove.json",
+      "portable_sha256": "c0325f81691167bcb9ca5953e31e11944a2602f8dc4b4f244f66727914ee78a2",
+      "raw_name": "reports/yaml-remove.json",
+      "raw_sha256": "054b75847471157fc3821c0f16013e9269fb49ec2679e0e7a4d91ea880406746"
+    },
+    {
+      "kind": "build_plan",
+      "portable_name": "mac/01-build-plan.json",
+      "portable_sha256": "45f2d46be2ac07cffeb06b1d096f166823c5c2c099d91e6af7f9e8a112860cc3",
+      "raw_name": "reports/mac-plan.json",
+      "raw_sha256": "4ece00083bfcc283aca087c6ee07b4d90403ba8c8ecb77b0902d00369d26cb59"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "mac/02-build.json",
+      "portable_sha256": "d0c4784d33666a9121cb048cba45d545b9d4439d252ae4286e9c7025f8cf6eff",
+      "raw_name": "reports/mac-build.json",
+      "raw_sha256": "93e72883f3779cae2dbb3d1662cf1b4549bbbb62bfd7a86df5882484b3817e24"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "mac/03-verify.json",
+      "portable_sha256": "0c29605222f9795959627ed48511605c0492e54f636aa34d0e8aa8d1dc6a9eb2",
+      "raw_name": "reports/mac-verify.json",
+      "raw_sha256": "63c666f40511f9e7670b3210ff0826b287bb357618250ab0adfd85fad6614651"
+    },
+    {
+      "kind": "remove_plan",
+      "portable_name": "mac/04-remove-plan.json",
+      "portable_sha256": "29987714b5c71d9a5354d7c6c79aa8acd1fdfbcb540d0117eff1071307f32ccd",
+      "raw_name": "reports/mac-remove-plan.json",
+      "raw_sha256": "d55e13befff9ae09813f80dbd821a03fcd265eb7ad254639e515e2154d10d08e"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "mac/05-remove.json",
+      "portable_sha256": "a38b288d5773e9a681b5ba97aeb958c6283d62ed8907d6e70f299626e58e7293",
+      "raw_name": "reports/mac-remove.json",
+      "raw_sha256": "f0668bf3fd474ee5bf22f432d6d5fb7772c73281f30f7b1efc77b2a0dcac0784"
+    },
+    {
+      "kind": "runtime_observation",
+      "portable_name": "mac/06-remove-runtime.json",
+      "portable_sha256": "c859f41777beb9eec44143bcd29c9e5fc22861d28c513f2009d2713c40c0263f",
+      "raw_name": "reports/mac-remove-runtime-observation.json",
+      "raw_sha256": "c859f41777beb9eec44143bcd29c9e5fc22861d28c513f2009d2713c40c0263f"
+    },
+    {
+      "kind": "native_resource_readback",
+      "portable_name": "cleanup/native-rbac-absence.json",
+      "portable_sha256": "c5da6093bee6b8ab7276eee607ab657c08cc87afeaca6cd7b3037a4309efe651",
+      "raw_name": "reports/mac-native-rbac-absence.json",
+      "raw_sha256": "c5da6093bee6b8ab7276eee607ab657c08cc87afeaca6cd7b3037a4309efe651"
+    },
+    {
+      "kind": "test_file_cleanup",
+      "portable_name": "cleanup/iso-files.json",
+      "portable_sha256": "418103e493a1715b288625cc99cdf277fa8fbe10f5bf7cc9fb14cdee157e7d71",
+      "raw_name": "reports/iso-cleanup.json",
+      "raw_sha256": "1935f0aa3a31fb1aaceee23f0c03cb01aa41204530437f2f3d84c27db5a9998b"
+    },
+    {
+      "kind": "test_file_cleanup_log",
+      "portable_name": "cleanup/iso-files.log",
+      "portable_sha256": "0a4c18bb881fbe57fa681690b767cfe55734b1f33f2df100db28527b9a2ab382",
+      "raw_name": "reports/iso-cleanup-raw.log",
+      "raw_sha256": "0a4c18bb881fbe57fa681690b767cfe55734b1f33f2df100db28527b9a2ab382"
+    },
+    {
+      "kind": "independent_file_absence",
+      "portable_name": "cleanup/iso-absence.log",
+      "portable_sha256": "a505232a0118518119fed7316dc4ae3024f32d8901461f940fd48592c56eb99c",
+      "raw_name": "reports/iso-absence-readback.log",
+      "raw_sha256": "a505232a0118518119fed7316dc4ae3024f32d8901461f940fd48592c56eb99c"
+    },
+    {
+      "kind": "independent_resource_absence",
+      "portable_name": "cleanup/run-owned-resources.txt",
+      "portable_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_name": "reports/run-owned-resources-post-cleanup.txt",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "kind": "independent_resource_absence",
+      "portable_name": "cleanup/native-resources.txt",
+      "portable_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_name": "reports/native-resources-post-cleanup.txt",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "kind": "captured_trace_measurements",
+      "portable_name": "measurement.json",
+      "portable_sha256": "884199ef42c97739725984825ec3d0c0ad1eb16663083e195e78dfd5918061ae",
+      "raw_name": "measurement/measurement.json",
+      "raw_sha256": "d9077bf6e20baf3ed595ab5c76599b8d3e4532d785455d275f1f3e13f6d9de94"
+    },
+    {
+      "kind": "native_input",
+      "portable_name": "rejection/native-input.txt",
+      "portable_sha256": "47c618c9d1f3940ec0f772d5848d3d404855a20f6035792a4472b351a59310a4",
+      "raw_name": "reports/native-reject-input.txt",
+      "raw_sha256": "47c618c9d1f3940ec0f772d5848d3d404855a20f6035792a4472b351a59310a4"
+    },
+    {
+      "kind": "destination_input",
+      "portable_name": "rejection/destination.json",
+      "portable_sha256": "e77d8213ae5a9d245390c471e0bb5d133f6e328a84812bc22df1bc8a4ffe56bb",
+      "raw_name": "inputs/native-reject-destination.json",
+      "raw_sha256": "cba432cf2be1a7426b5b0bba5cb330bc871704d79ca0ed73e37fa750c9ef837a"
+    },
+    {
+      "kind": "build_plan",
+      "portable_name": "rejection/01-plan.json",
+      "portable_sha256": "eb94d1574e4b1dbd52aa2cb5e97f003d78242fd63e61798d99806419f30d8e46",
+      "raw_name": "reports/native-reject-current-plan.json",
+      "raw_sha256": "4ed54b865aedf475edb8987832a568c5c11487e5dd3b75f641d6350e519e2a44"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "rejection/02-result.json",
+      "portable_sha256": "9c714603db94748824038b0642d263270f7301464e597bb7da637fe8ba5ff657",
+      "raw_name": "reports/native-reject-current.json",
+      "raw_sha256": "ef51827e39a59ae594d93aeb8ad5f75be990810a4673db97044a99a9b8f454de"
+    },
+    {
+      "kind": "process_exit",
+      "portable_name": "rejection/process.exit",
+      "portable_sha256": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3",
+      "raw_name": "reports/native-reject-current.exit",
+      "raw_sha256": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3"
+    },
+    {
+      "event_count": 261,
+      "kind": "debug_trace",
+      "portable_name": "traces/native-rejection.jsonl",
+      "portable_sha256": "191cb8023df29d1dac3c1fddcf6cf6f103ef1d3bb39cc69d4664f73a4928267c",
+      "raw_name": "reports/native-reject-current-trace.jsonl",
+      "raw_sha256": "b7d73193ff3d2c4d999f5469a49b4c818bbdc1ad162c1ef45deb6fa3eb8611d4"
+    },
+    {
+      "event_count": 23,
+      "kind": "debug_trace",
+      "portable_name": "traces/native-rejection-plan.jsonl",
+      "portable_sha256": "6341e895f3db99029ae63888f9e4d21f1f2bac7285eea8a278ba47ed142ccccf",
+      "raw_name": "reports/native-reject-current-plan-trace.jsonl",
+      "raw_sha256": "1ae2294812d6b193cb0fe5df696051e260850fb196333af0c30f424a9e4e1f8c"
+    },
+    {
+      "kind": "native_rejection_acceptance",
+      "portable_name": "rejection/03-readback.json",
+      "portable_sha256": "49d50a38fbad8a33a626f47123d23e0a476741c016abb39c3ba8063bb44702d1",
+      "raw_name": "reports/native-reject-current-summary.json",
+      "raw_sha256": "df68b2e9910dc9fc318924496482cde7febbc174bf84551b53e96b6e9c638e3b"
+    },
+    {
+      "kind": "independent_file_absence",
+      "portable_name": "rejection/destination-absence.log",
+      "portable_sha256": "de8dcb52d5f3ffcc1dd88a730fddaf225ba5ef67ef0b568d1297575d8efe29e2",
+      "raw_name": "reports/native-reject-destination-absence.log",
+      "raw_sha256": "de8dcb52d5f3ffcc1dd88a730fddaf225ba5ef67ef0b568d1297575d8efe29e2"
+    },
+    {
+      "kind": "installed_callback_proof",
+      "portable_name": "storage/callback-proof.json",
+      "portable_sha256": "eec6351cd274feda3399b114d7a6eba7c1a879901dc8dc357079bbaeb38d6ae9",
+      "raw_name": "storage-callback-proof/storage-callback-proof.json",
+      "raw_sha256": "b4f49f971cfb209b461ff5178efdd3b15ec93d25311ad769fb4bac4dc36371b5"
+    },
+    {
+      "kind": "acceptance_refresh_cleanup",
+      "portable_name": "cleanup/acceptance-refresh.json",
+      "portable_sha256": "e609889a9d670b451f7981f49277add9e8119319a35fc832d4166d1085125489",
+      "raw_name": "acceptance-refresh/cleanup.json",
+      "raw_sha256": "e609889a9d670b451f7981f49277add9e8119319a35fc832d4166d1085125489"
+    },
+    {
+      "event_count": 297,
+      "kind": "debug_trace",
+      "portable_name": "traces/yaml-build.jsonl",
+      "portable_sha256": "e703cdbc04e2cb062e936cef417a5ec16e77a8a194791f50500d652e4109ae47",
+      "raw_name": "reports/yaml-build-trace.jsonl",
+      "raw_sha256": "2fbcfbd0549a5785ac38756393fc5c3c124b55e4c84efc604195229a68b26b6a"
+    },
+    {
+      "event_count": 158,
+      "kind": "debug_trace",
+      "portable_name": "traces/yaml-verify.jsonl",
+      "portable_sha256": "cf5dd76121f51f8e8dba4466ad8e86405335ddc13a37a5ac371ed2aa363ae51d",
+      "raw_name": "reports/yaml-verify-trace.jsonl",
+      "raw_sha256": "b51880cb8e9329886437d4c24bd6d177ce54d4fea6019f434dbe5c355549a7ec"
+    },
+    {
+      "event_count": 286,
+      "kind": "debug_trace",
+      "portable_name": "traces/mac-build.jsonl",
+      "portable_sha256": "de0ccbd57f893a542ada00f39c93cb6bbf727835eab059cf85a345db568331f1",
+      "raw_name": "reports/mac-build-trace.jsonl",
+      "raw_sha256": "a187e9589271f6dd9e8a8bc0361fb5a6cace023643a10c6bc6ed3baa9640866b"
+    },
+    {
+      "event_count": 158,
+      "kind": "debug_trace",
+      "portable_name": "traces/mac-verify.jsonl",
+      "portable_sha256": "9cfaed6dcf3ad46af7448e844d6c1aae691407f7e9e8cb2051c65ab4086ba74a",
+      "raw_name": "reports/mac-verify-trace.jsonl",
+      "raw_sha256": "1071c9a404a6ca955c7a1102892c07dfc8498710c0fecf20067eb4becee01d8c"
+    },
+    {
+      "event_count": 23,
+      "kind": "debug_trace",
+      "portable_name": "traces/yaml-build-plan.jsonl",
+      "portable_sha256": "3175af933c035d8084563a099c1eeef50444eb5d53002c467e6af261b449ae43",
+      "raw_name": "reports/yaml-plan-final-trace.jsonl",
+      "raw_sha256": "38c283908c90c57c83b45511d88d3268345dbbe30bd7572391edd59bd9154e7f"
+    },
+    {
+      "event_count": 23,
+      "kind": "debug_trace",
+      "portable_name": "traces/mac-build-plan.jsonl",
+      "portable_sha256": "c6c7dfe1ad98d321d985f2cdb134223794d2e5b2e063f7ab241b455f331e5ff0",
+      "raw_name": "reports/mac-plan-trace.jsonl",
+      "raw_sha256": "4e0e6b5d869bda700826a3e872e9d6b5bdd1eafd90a04814b3fde86acecf7000"
+    }
+  ],
+  "kind": "ocp_iso_portable_evidence_mapping",
+  "path_token_algorithm": "sha256-first-12-hex",
+  "schema_version": "1.0"
+}

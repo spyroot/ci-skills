@@ -265,6 +265,115 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
         "are cleaned on exit.",
     },
+    "ocp_node_onboard.py": {
+        "kind": "ocp_node_onboard",
+        "purpose": "Build an OpenShift node ISO in-cluster, join its node, and verify selected storage.",
+        "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; "
+        "join its booted node, inspect it or release a previous run. "
+        "See references/ocp-node-image.md.",
+        "requires": ("kubernetes",),
+        "capabilities": (),
+        "mutates": True,
+        "options": {
+            "--spec": "native nodes-config.yaml passed unchanged; alternative to --mac-address",
+            "--mac-address": "joining host's actual NIC MAC; alternative to --spec",
+            "--network-config-path": "native network YAML used with the MAC route, passed unchanged",
+            "--destination": "five-field cluster storage JSON; schemas/artifact-destination.schema.json",
+            "--tool-pod-spec": "optional CI12.0 tool override; schemas/tool-pod.schema.json",
+            "--node-name": "exact Kubernetes Node name selected for join",
+            "--ip-address": "joining node address for native monitor; repeatable",
+            "--pull-secret-namespace": "existing registry Secret namespace; default openshift-config",
+            "--pull-secret-name": "existing registry Secret name; default pull-secret",
+            "--pull-secret-key": "existing registry Secret data key; default .dockerconfigjson",
+            "--run-id": "returned build run identifier for join, verification or removal",
+            "--timeout": "positive operation timeout in seconds (default: 1800)",
+            "--live-plan": "resolve live prerequisites and produce the confirmation digest",
+            "--apply": "perform the exact confirmed build, join or removal",
+            "--confirm-plan": "plan digest binding target, operation inputs and functional code",
+            "--receipt-out": "write the sanitized result to this exact path",
+        },
+        "subcommands": {
+            "build": {
+                "purpose": "Build from either a MAC or native YAML and verify the exact cluster destination.",
+                "required_options": ["--destination"],
+                "mutates": True,
+                "side_effects": "Confirmed build stages a tool Pod and native OpenShift temporary resources, "
+                "writes the requested ISO, and retains its run record; temporary final storage retains its Pod.",
+                "read_back": "Native completion, embedded Ignition, actual ISO size/SHA-256 and destination.",
+                "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+            },
+            "verify": {
+                "purpose": "Read and inspect the existing cluster-held ISO identified by its run.",
+                "required_options": ["--run-id"],
+                "mutates": True,
+                "side_effects": "Persistent storage can require a temporary reader Pod, cleaned after inspection.",
+                "read_back": "Exact stored artifact identity, size/SHA-256 and embedded Ignition.",
+                "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+            },
+            "join": {
+                "purpose": "Approve the booted node's selected CSRs and verify its Ready identity.",
+                "required_options": ["--run-id", "--node-name", "--ip-address"],
+                "mutates": True,
+                "side_effects": "Confirmed join approves only the exact hostname's client and serving "
+                "signers, then removes the owned build scope; it never boots or deletes a node.",
+                "read_back": "Client bootstrap-completion evidence, issued serving request state and exact Ready "
+                "Node hostname, roles and observed IPs.",
+                "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+            },
+            "remove": {
+                "purpose": "Remove owned run resources while preserving persistent destination storage and ISO.",
+                "required_options": ["--run-id"],
+                "mutates": True,
+                "side_effects": "Confirmed removal deletes only run-owned resources; temporary output ends "
+                "with its Pod. Persistent ISO and caller storage remain.",
+                "read_back": "Owned resource absence and, for persistent output, unchanged ISO before and after removal.",
+                "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+            },
+        },
+        "related": ("prepare_tool_pod.py", "storage_report.py"),
+        "references": ("Native OCP YAML example", "Native OCP command flags"),
+        "required_tools": ("kubectl", "oc", "curl (default tool discovery)"),
+        "returns": "Shared workflow report with native completion, join read-back, final cluster artifact "
+        "identity/lifetime, plan, provenance and cleanup evidence.",
+        "execution_surface": "installed skill controls tools, ISO generation and node join in the selected cluster",
+        "side_effects": "Build/join/remove use plan confirmation. Native oc creates temporary build resources; "
+        "join approves only the selected node's two signers. ISO bytes stay in the cluster.",
+        "description": "Build requires --destination and exactly one of --mac-address or --spec. "
+        "The caller selects real NIC/network/disk values; ci-skills passes native YAML unchanged to OpenShift "
+        "and returns native errors. Tools are prepared inside the Pod through CI12.0. "
+        "The destination wrapper selects storage and an exact final path; it does not define an OCP schema. "
+        "Native input and destination examples: references/ocp-node-image.md.",
+        "examples": (
+            {
+                "description": "Plan a MAC-based build at the selected cluster destination",
+                "command": "ocp_node_onboard.py build --mac-address 02:00:00:10:00:01 "
+                "--destination destination.json --live-plan --json",
+            },
+            {
+                "description": "Plan a build from the caller's unchanged native YAML",
+                "command": "ocp_node_onboard.py build --spec nodes-config.yaml "
+                "--destination destination.json --live-plan --json",
+            },
+            {
+                "description": "Build from the same inputs after inspecting the plan",
+                "command": "ocp_node_onboard.py build --spec nodes-config.yaml "
+                "--destination destination.json --apply --confirm-plan DIGEST --json",
+            },
+            {
+                "description": "Inspect a previous run's cluster-held artifact",
+                "command": "ocp_node_onboard.py verify --run-id RUN_ID --json",
+            },
+            {
+                "description": "Plan the selected booted node's exact join sequence",
+                "command": "ocp_node_onboard.py join --run-id RUN_ID --node-name worker-01 "
+                "--ip-address 192.0.2.10 --live-plan --json",
+            },
+            {
+                "description": "Plan removal while preserving persistent output",
+                "command": "ocp_node_onboard.py remove --run-id RUN_ID --live-plan --json",
+            },
+        ),
+    },
     "prepare_tool_pod.py": {
         "kind": "tool_pod",
         "purpose": "Prepare, reuse or remove a cluster Pod with declared tools.",
@@ -419,6 +528,49 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "tests and lint only",
         "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
         "are cleaned on exit.",
+    },
+    "image_build_readiness.py": {
+        "kind": "image_build_readiness",
+        "purpose": "Probe nested Podman execution on one Kubernetes worker and clean up.",
+        "use_when": "Check container execution, bind mounts and exit propagation before "
+        "building a runner workflow.",
+        "requires": ("kubernetes",),
+        "capabilities": ("node_scoped", "namespaced"),
+        "mutates": True,
+        "options": {
+            "--namespace": "existing namespace; default creates a temporary namespace",
+            "--probe-image": "digest-pinned image providing Podman; default is Linux amd64",
+            "--inner-image": "digest-pinned inner test image; default is Linux amd64",
+            "--timeout": "maximum probe duration in seconds",
+            "--cpu-request": "probe container CPU request",
+            "--cpu-limit": "probe container CPU limit",
+            "--memory-request": "probe container memory request",
+            "--memory-limit": "probe container memory limit",
+            "--storage-size": "maximum temporary container-storage volume size",
+            "--live-plan": "read target identity and select a Ready worker without mutation",
+            "--apply": "run the confirmed probe and verify cleanup",
+            "--confirm-plan": "exact fingerprint returned by the live plan",
+            "--receipt-out": "write a sanitized operation receipt to this exact path",
+        },
+        "subcommands": {
+            "probe": {
+                "purpose": "Run a temporary Podman Job on one selected worker.",
+                "result_schema": "schemas/results/image-build-readiness.schema.json",
+                "mutates": True,
+                "side_effects": "Creates and removes a temporary namespace, conditional "
+                "run-owned SCC RoleBinding, script ConfigMap and privileged Job.",
+                "read_back": "Exact permission source, optional RoleBinding UID, "
+                "Job-owned Pod exit, probe rows and resource absence.",
+            },
+        },
+        "related": ("toolbox.py", "harbor_pull.py"),
+        "references": ("Nested Podman readiness", "OpenShift SCC access"),
+        "required_tools": ("kubectl", "oc on OpenShift"),
+        "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows "
+        "and cleanup read-back; does not prove runner or image-publication behavior.",
+        "execution_surface": "configured Kubernetes API and a temporary privileged Job",
+        "side_effects": "Apply creates a run-owned namespace, conditionally creates one namespaced SCC RoleBinding, "
+        "then creates a script ConfigMap and Job; it removes only resources owned by the run.",
     },
     "access_check.py": {
         "kind": "access_check",
@@ -935,6 +1087,22 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Tool input, preparation, reuse and removal examples.",
             "pointer": "references/tool-pod.md",
         },
+        "Nested Podman readiness": {
+            "summary": "Podman probe inputs, planning, execution and evidence.",
+            "pointer": "references/podman-readiness.md",
+        },
+        "OpenShift SCC access": {
+            "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
+            "pointer": "references/openshift-scc.md",
+        },
+        "Native OCP YAML example": {
+            "summary": "Node MAC/NIC, disk and network inputs passed unchanged to OpenShift.",
+            "pointer": "references/ocp-node-input.md",
+        },
+        "Native OCP command flags": {
+            "summary": "OpenShift flags, ci-skills input mapping and upstream procedure.",
+            "pointer": "references/ocp-node-image-flags.md",
+        },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",
             "pointer": "references/mcp.md",
@@ -1348,6 +1516,8 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 **DISCOVERY_COMMANDS,
             },
             "routing": {
+                "prove nested Podman runtime readiness": "image_build_readiness.py",
+                "build or inspect a cluster-held OpenShift node ISO": "ocp_node_onboard.py",
                 "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
                 "build or delete a toolbox": "toolbox.py",
                 "publish an image to Harbor": "harbor_push.py",

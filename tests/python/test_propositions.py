@@ -7,6 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 from collections import deque
@@ -273,6 +274,59 @@ def test_tool_pod_proposition_offers_installed_usage() -> None:
     assert "Tool Pod preparation" not in _entries(unrelated)
 
 
+def test_podman_proposition_offers_installed_readiness_procedure() -> None:
+    """Offer this installed procedure within the immediate proposition node.
+
+    :returns: None; assertions check task references and node-local discovery.
+    """
+    selected = CATALOG.proposition("image_build_readiness.py")
+    expected = {
+        "Nested Podman readiness": {
+            "summary": "Podman probe inputs, planning, execution and evidence.",
+            "pointer": "references/podman-readiness.md",
+        },
+        "OpenShift SCC access": {
+            "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
+            "pointer": "references/openshift-scc.md",
+        },
+    }
+
+    cluster = CATALOG.proposition()["kubernetes"]
+    unrelated = CATALOG.proposition("gitlab_runner.py")
+    for name, record in expected.items():
+        assert selected["reference"][name] == record
+        assert cluster["reference"][name] == record
+        assert name not in unrelated["reference"]
+    assert "create_selfhosted_runner.py" not in selected["tools"]
+
+
+def test_iso_proposition_offers_native_input_and_destination_guidance() -> None:
+    """Offer this installed procedure within the immediate proposition node.
+
+    :returns: None; assertions check task references and node-local discovery.
+    """
+    selected = CATALOG.proposition("ocp_node_onboard.py")
+    expected = {
+        "Native OCP YAML example": {
+            "summary": "Node MAC/NIC, disk and network inputs passed unchanged to OpenShift.",
+            "pointer": "references/ocp-node-input.md",
+        },
+        "Native OCP command flags": {
+            "summary": "OpenShift flags, ci-skills input mapping and upstream procedure.",
+            "pointer": "references/ocp-node-image-flags.md",
+        },
+    }
+
+    cluster = CATALOG.proposition()["kubernetes"]
+    unrelated = CATALOG.proposition("gitlab_runner.py")
+    for name, reference in expected.items():
+        assert selected["reference"][name] == reference
+        assert cluster["reference"][name] == reference
+        assert (SCRIPT_ROOT.parent / reference["pointer"]).is_file()
+        assert name not in unrelated["reference"]
+    assert "toolbox.py" not in selected["tools"]
+
+
 def test_reference_cli_expands_nodes_without_fetching_optional_references(
     fake_bin: Path, call_journal: Path, tmp_path: Path
 ) -> None:
@@ -419,7 +473,7 @@ def test_get_lists_sections_then_reads_own_text_and_subsections(
         + child
         + "#### Grandchild\nDeeper detail.\n## Repeated\nFirst.\n## Repeated\nSecond.\n"
     )
-    _local_reference(tmp_path, monkeypatch, content)
+    reader = _local_reference(tmp_path, monkeypatch, content)
 
     listing = _reference_cli(capsys, "get", "unit-guide", "--json")
     assert listing["tools"] == {}
@@ -433,15 +487,22 @@ def test_get_lists_sections_then_reads_own_text_and_subsections(
     assert guide["kind"] == "reference_section"
     assert guide["document"] == "unit-guide"
     assert guide["text"] == "# Guide\nIntro.\n"
-    assert guide["pinned"]
+    assert guide["pinned"] == f"sha256:{hashlib.sha256(content.encode()).hexdigest()}"
     assert [item["name"] for item in guide["reference"]] == [
         "Parent",
         "Repeated",
         "Repeated",
     ]
 
+    revision = "a" * 40
+    monkeypatch.setattr(
+        reader,
+        "skill_identity",
+        lambda _root: {"revision": {"verified": True, "value": revision}},
+    )
     section = _reference_cli(capsys, "get", "unit-guide", "parent", "--json")
     assert section["text"] == parent
+    assert section["pinned"] == revision
     children = _entries(section)
     assert set(children) == {"Child"}
     assert children["Child"]["pointer"] == "get unit-guide child"

@@ -1,0 +1,161 @@
+{
+  "algorithm": "sha256",
+  "entries": [
+    {
+      "kind": "installed_identity",
+      "portable_name": "01-installed-provenance.json",
+      "portable_sha256": "cd2be4f92046b08eee845af4772a44e40bfa3fe961136d1744cc7d44442653dc",
+      "raw_name": "podman-final-855f00b-20261018/results/install-apply.json",
+      "raw_sha256": "9cb67c7ae4aa206e3b70c6535f6370518473ef1d83989c1d9bbdb52fa0dabee2"
+    },
+    {
+      "kind": "installed_proposition",
+      "portable_name": "02-proposition.json",
+      "portable_sha256": "3db507fe5b76c199c2fc60809d13e31f41c68626b2220e5639cb103ff30fa785",
+      "raw_name": "podman-final-855f00b-20261018/results/01-node.json",
+      "raw_sha256": "3db507fe5b76c199c2fc60809d13e31f41c68626b2220e5639cb103ff30fa785"
+    },
+    {
+      "kind": "installed_references",
+      "portable_name": "03-references.json",
+      "portable_sha256": "4774b5a3b125f65ae4f8ed2242b753a93aa356e2754aaebbd9c7205202b7f4c2",
+      "raw_name": "podman-final-855f00b-20261018/results/02-references.json",
+      "raw_sha256": "4774b5a3b125f65ae4f8ed2242b753a93aa356e2754aaebbd9c7205202b7f4c2"
+    },
+    {
+      "kind": "installed_reference",
+      "portable_name": "04-scc-reference.json",
+      "portable_sha256": "6600c1b059a4bf7ccab9284b3921d9869c39f481b57fe9666a0ea495083d0e0c",
+      "raw_name": "podman-final-855f00b-20261018/results/03-scc.json",
+      "raw_sha256": "6600c1b059a4bf7ccab9284b3921d9869c39f481b57fe9666a0ea495083d0e0c"
+    },
+    {
+      "kind": "installed_run_node",
+      "portable_name": "05-run.json",
+      "portable_sha256": "2918067739b09b42bc9c347d0d334b679e7fb2191d6998e1a9efab8b336399f8",
+      "raw_name": "podman-final-855f00b-20261018/results/04-run.json",
+      "raw_sha256": "2918067739b09b42bc9c347d0d334b679e7fb2191d6998e1a9efab8b336399f8"
+    },
+    {
+      "kind": "installed_action",
+      "portable_name": "06-selected-action.json",
+      "portable_sha256": "e7b4bc9fa75626b05e2239257c7359a30e0f289a42f44150a22862e5e28175bc",
+      "raw_name": "podman-final-855f00b-20261018/results/05-selected-action.json",
+      "raw_sha256": "e7b4bc9fa75626b05e2239257c7359a30e0f289a42f44150a22862e5e28175bc"
+    },
+    {
+      "kind": "installed_options",
+      "portable_name": "07-options.json",
+      "portable_sha256": "da1bf7cd293b5393450b8d76518c9875b40875a26141912f55d7704222580441",
+      "raw_name": "podman-final-855f00b-20261018/results/06-options.json",
+      "raw_sha256": "da1bf7cd293b5393450b8d76518c9875b40875a26141912f55d7704222580441"
+    },
+    {
+      "kind": "installed_help",
+      "portable_name": "08-help.txt",
+      "portable_sha256": "843d9967ea6344c4a1e0f93b3d708614d73146f31132d62ca3dcf12359850b0d",
+      "raw_name": "podman-final-855f00b-20261018/results/07-help.txt",
+      "raw_sha256": "843d9967ea6344c4a1e0f93b3d708614d73146f31132d62ca3dcf12359850b0d"
+    },
+    {
+      "kind": "operation_receipt",
+      "portable_name": "10-live-apply.json",
+      "portable_sha256": "50fcf9805543b4f88bf69abd8bd0a5c41bc41943795063d9d1a80d7fefc680e7",
+      "raw_name": "podman-final-855f00b-20261018/results/live-apply-receipt.json",
+      "raw_sha256": "8dcea490935de4d17ac58c82a7a750527bc19c8d774a972469e1ab204d926f55"
+    },
+    {
+      "kind": "probe_markers",
+      "portable_name": "11-probe-markers.json",
+      "portable_sha256": "65dbffa45c2f864314bff5d3f888febf1c471624bbd06a61c93caeef60b6fda6",
+      "raw_name": "podman-final-855f00b-20261018/reports/image_build_readiness-694346b9bc6b4547aeae61c02a1d368c.markers.json",
+      "raw_sha256": "65dbffa45c2f864314bff5d3f888febf1c471624bbd06a61c93caeef60b6fda6"
+    },
+    {
+      "kind": "probe_log",
+      "portable_name": "12-probe.log",
+      "portable_sha256": "a0bd4dbc13d05c30c208d2ba3ee759fb37db57e6826c79555fb182bec5157261",
+      "raw_name": "podman-final-855f00b-20261018/reports/image_build_readiness-694346b9bc6b4547aeae61c02a1d368c.probe.log",
+      "raw_sha256": "a0bd4dbc13d05c30c208d2ba3ee759fb37db57e6826c79555fb182bec5157261"
+    },
+    {
+      "event_count": 92,
+      "kind": "debug_trace",
+      "portable_name": "traces/10-live-apply.jsonl",
+      "portable_sha256": "7547e6c33f2c4b4b974716f3165c677465b6f2a26a3aaa80ec8e1625030e8e3a",
+      "raw_name": "podman-final-855f00b-20261018/traces/live-apply.jsonl",
+      "raw_sha256": "3d131774797812bd67f6e596b31267f18f8e44c8ca957c194aec1977e06999c3"
+    },
+    {
+      "kind": "independent_cleanup_readback",
+      "portable_name": "13-independent-cleanup.json",
+      "portable_sha256": "99606e7623ad7bee8e864c5ecae2db552887ec1612c3c97f9eb5d20679ff909e",
+      "raw_inputs": [
+        {
+          "raw_name": "observer/live/post-run-namespaces.json",
+          "raw_sha256": "7a779468a2dde976a9b896541df1e4ef805e813093bd5edb40ef1a6eea588edf"
+        },
+        {
+          "raw_name": "observer/live/post-run-objects.json",
+          "raw_sha256": "7a779468a2dde976a9b896541df1e4ef805e813093bd5edb40ef1a6eea588edf"
+        },
+        {
+          "raw_name": "observer/live/post-run-scc.json",
+          "raw_sha256": "dc424bcbabbbce0d2190c9f3d0c76d734dde8b12770b3473bee78147ea8f51b1"
+        },
+        {
+          "raw_name": "observer/live/post-run-clusterrole.json",
+          "raw_sha256": "755c27d44632066be832215724f9c2e833c41d51f1c3e024705e032a14d4b0d5"
+        }
+      ]
+    },
+    {
+      "kind": "observer_baseline",
+      "portable_name": "14-observer-baseline.json",
+      "portable_sha256": "48cc60d66628794ca29236fcc2335c01d832653d614159f1d0acd1ce49c0b50b",
+      "raw_name": "observer/live/baseline-namespaces.json",
+      "raw_sha256": "48cc60d66628794ca29236fcc2335c01d832653d614159f1d0acd1ce49c0b50b"
+    },
+    {
+      "kind": "observer_final",
+      "portable_name": "15-observer-final.json",
+      "portable_sha256": "aa53fb4b2cc593300c89a9b1bb41cd25748a344574e238d28d22147d5bd5e9a1",
+      "raw_name": "observer/live/observer-final.json",
+      "raw_sha256": "aa53fb4b2cc593300c89a9b1bb41cd25748a344574e238d28d22147d5bd5e9a1"
+    },
+    {
+      "kind": "before_blocked_receipt",
+      "portable_name": "before/01-blocked-receipt.json",
+      "portable_sha256": "cf33d513414d5f1c71a14774986926bd1f74d225412deedfca9e0b762d38b716",
+      "raw_name": "podman-final-23025b9-20261018/results/live-apply-receipt.json",
+      "raw_sha256": "4118922d80a2a0a3eac22e0282e477841e3c87ae9cca1d15ef0076fa745719e5"
+    },
+    {
+      "kind": "registry_diagnosis",
+      "portable_name": "before/02-registry-diagnosis.json",
+      "portable_sha256": "4331cd6e82186718bc21d5e6d2cb55360d081a46cb33aac8e67bc765c71a9349",
+      "raw_name": "podman-final-23025b9-20261018/observer/registry-diagnosis.json",
+      "raw_sha256": "4331cd6e82186718bc21d5e6d2cb55360d081a46cb33aac8e67bc765c71a9349"
+    },
+    {
+      "kind": "before_cleanup",
+      "portable_name": "before/03-independent-cleanup.json",
+      "portable_sha256": "8a6dda1e532a67a3fca9c53fd6c07e36a251dd24d23d09b230c94c1a8720b65d",
+      "raw_name": "podman-final-23025b9-20261018/observer/independent-cleanup.json",
+      "raw_sha256": "8a6dda1e532a67a3fca9c53fd6c07e36a251dd24d23d09b230c94c1a8720b65d"
+    },
+    {
+      "kind": "evidence_readme",
+      "portable_name": "README.md",
+      "portable_sha256": "09811131609672b8586523877e54ce58f255354ee338e2e6bd3ed2876985b911"
+    },
+    {
+      "kind": "transformation_note",
+      "portable_name": "TRACE-TRANSFORM.md",
+      "portable_sha256": "0cec4814a57ff3883a0f992dcd7fdaf496b53ef3a651403afbe90bde710ed1d9"
+    }
+  ],
+  "kind": "podman_portable_evidence_mapping",
+  "path_token_algorithm": "sha256-first-12-hex",
+  "schema_version": "1.0"
+}

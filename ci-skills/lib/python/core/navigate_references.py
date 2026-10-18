@@ -175,10 +175,10 @@ def sections(text: str) -> Sequence[Section]:
 
 
 def load(reference: str) -> tuple[str, Sequence[Section], str]:
-    """Read one registered document, preserving exact source bytes and provenance.
+    """Read one registered document, preserving exact source bytes and a content pin.
 
     :param reference: Registered id or filename stem.
-    :returns: Canonical id, its sections, and the source revision or content pin.
+    :returns: Canonical id, its sections, and their content pin.
         A document that is not Markdown is one section named ``document``.
     :raises NavigationError: If the reference is unregistered.
     :raises OSError: If the registered local document cannot be read.
@@ -188,16 +188,26 @@ def load(reference: str) -> tuple[str, Sequence[Section], str]:
     path = SKILL_ROOT / record["pointer"]
     raw = path.read_bytes()
     pin = f"sha256:{hashlib.sha256(raw).hexdigest()}"
-    try:
-        identity = skill_identity(SKILL_ROOT)
-        if identity["revision"]["verified"] and identity["revision"]["value"]:
-            pin = identity["revision"]["value"]
-    except ProvenanceError:
-        pass
     text = raw.decode("utf-8")
     if path.suffix != ".md":
         return name, (Section(WHOLE_DOCUMENT, path.name, 1, text, ""),), pin
     return name, sections(text), pin
+
+
+def source_pin(content_pin: str) -> str:
+    """Prefer a verified installed revision when returning source text.
+
+    :param content_pin: Digest of the exact registered document bytes.
+    :returns: Verified source revision, or the supplied content digest.
+    """
+    try:
+        identity = skill_identity(SKILL_ROOT)
+    except ProvenanceError:
+        return content_pin
+    revision = identity["revision"]
+    if revision["verified"] and revision["value"]:
+        return str(revision["value"])
+    return content_pin
 
 
 def section_entry(reference: str, section: Section, query: str = "") -> JSONObject:
@@ -315,7 +325,7 @@ def section_document(
         "kind": "reference_section",
         "document": name,
         "anchor": anchor,
-        "pinned": pin,
+        "pinned": source_pin(pin),
         "text": text,
         "reference": list(subsections),
         "continuation": f"get {name} {anchor} --page {page + 1}"

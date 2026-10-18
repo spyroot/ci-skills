@@ -1,0 +1,11 @@
+{
+  "artifactPath": "/shared/ci-skills-ci12-final-bf69d6d5-yaml-20261018/node.iso",
+  "buildOutput": "scratch",
+  "mountPath": "/shared",
+  "namespace": "namespace:b115cbf8fccd",
+  "volumeSource": {
+    "persistentVolumeClaim": {
+      "claimName": "pvc:92a982289cbe"
+    }
+  }
+}

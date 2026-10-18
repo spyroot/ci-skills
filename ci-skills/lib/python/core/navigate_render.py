@@ -5,9 +5,63 @@ mbayramo@cisco.com
 spyroot@gmail.com
 """
 
+import shlex
 from collections.abc import Sequence
+from pathlib import PurePosixPath
 
-from lib.python.core.json_types import JSONObject, json_object, json_objects
+from lib.python.core.json_types import (
+    JSONObject,
+    json_object,
+    json_objects,
+    json_strings,
+)
+
+
+def invocation(record: JSONObject) -> str:
+    """Render a pointer as a copyable human invocation.
+
+    :param record: Command pointer from the current answer.
+    :returns: Shell-quoted command omitting the machine-output flag.
+    """
+    args = [
+        PurePosixPath(str(record["entrypoint"])).name,
+        *(item for item in json_strings(record["args"]) if item != "--json"),
+    ]
+    return shlex.join(args)
+
+
+def choice_lines(choices: Sequence[JSONObject]) -> Sequence[str]:
+    """Render only the choices and input hints already present in an answer.
+
+    :param choices: Current page of choices.
+    :returns: Indented human text, never fetched content.
+    """
+    lines: list[str] = []
+    width = max((len(str(item["id"])) for item in choices), default=7) + 2
+    labels = {
+        "expand": "Expand",
+        "describe": "Describe",
+        "execute": "Run",
+        "read": "Read",
+        "retrieve": "Retrieve",
+    }
+    for item in choices:
+        lines.append(f"  {item['id']!s:<{width}}{item['summary']}")
+        indent = " " * (width + 2)
+        if item.get("available") is False:
+            lines.append(f"{indent}Unavailable")
+        else:
+            step = json_object(item["next"])
+            lines.append(f"{indent}{labels[str(step['action'])]}: {invocation(step)}")
+            for field in json_objects(step.get("inputs", [])):
+                label = "Needs" if field["required"] else "Optional"
+                lines.append(
+                    f"{indent}{label}: --{field['name']}  {field.get('summary', '')}".rstrip()
+                )
+        if "when" in item:
+            lines.append(f"{indent}{item['when']}")
+        lines.append("")
+    return lines
 
 
 def read_lines(entries: Sequence[JSONObject], title: str) -> Sequence[str]:

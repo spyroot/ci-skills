@@ -26,6 +26,7 @@ from lib.python.core.kubernetes.tool_pod_resources import (
     SPEC_FINGERPRINT_ANNOTATION,
     SPEC_FINGERPRINT_LABEL,
     TOOL_POD_CONTAINER,
+    TOOL_POD_SCRIPT_ROLE,
     ToolPodResourceSpec,
 )
 from lib.python.core.runtime import error_class
@@ -198,3 +199,21 @@ def _resource(kind: str, name: str, namespace: str) -> ResourceIdentity:
     :returns: Resource identity with a case-normalized kind.
     """
     return resource_identity(kind, name, namespace)
+
+
+def retain_tool_pod(state: ToolPodState) -> None:
+    """Retain the exact run-owned Pod resources backing native work.
+
+    :param state: Shared state containing the prepared Pod and resolved run scope.
+    """
+    scope = state.run_scope
+    state.retained_resources.add(_resource("Pod", state.pod.name, state.pod.namespace))
+    state.retained_resources.add(
+        _resource(
+            "ConfigMap",
+            scope.name(TOOL_POD_SCRIPT_ROLE),
+            scope.namespace,
+        )
+    )
+    if scope.owns_namespace:
+        state.retained_resources.add(_resource("Namespace", scope.namespace, ""))

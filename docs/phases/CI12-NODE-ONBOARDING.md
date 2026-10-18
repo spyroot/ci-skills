@@ -1,10 +1,15 @@
-# NOT_IMPLEMENTED: CI12 — Prepare reusable cluster tooling, then build and use an OpenShift node ISO
+# IMPLEMENTED: CI12 — Prepare reusable cluster tooling, then build and use an OpenShift node ISO
 
 - grounding: GROUNDED
-- verification: UNVERIFIED
-- planningStage: PROPOSED
+- verification: PARTIALLY_VERIFIED
+- planningStage: PLANNED
 
 ## Authority
+
+Delivery status at main `788b9e9`, 2026-10-18: CI12.0 merged in [PR84](https://github.com/spyroot/ci-skills/pull/84),
+CI12.1 in [PR85](https://github.com/spyroot/ci-skills/pull/85), and CI12.2 in
+[PR90](https://github.com/spyroot/ci-skills/pull/90). Captured proof and its limits are under
+[Live Smoke Evidence](#live-smoke-evidence); CSR/join acceptance remains mocked.
 
 Delivery revision, 2026-10-17: reusable download/install operations and the ci-skills-owned tool Pod land as
 PR-CI12-0 before the ISO combo. Native OCP MAC flags or a native YAML file are passed to `oc`; ci-skills
@@ -63,118 +68,118 @@ by this revision; they are not alternate implementation paths. This document pla
         phaseId: CI12
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: The calling agent selects native MAC-address flags or a nodes-config.yaml file. ci-skills validates its invocation wrapper and stages referenced native files unchanged; oc owns native input validation and errors. No custom OCP machine schema or mandatory machine-pool comparison is introduced.
         owner: ci-skills/lib/python/core/kubernetes/ocp_onboard.py
         preserve: [The target and credential resolver, the result envelope, the exit-code contract]
         prIds: [PR-CI12-1]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/evidence/ocp-node-image-final/yaml/02-build.json, tests/acceptance/evidence/ocp-node-image-final/mac/02-build.json, tests/acceptance/evidence/ocp-node-image/rejection/02-result.json]
       - id: R-CI12-002
         authority: [docs/phases/CI11-TOOLS.md, docs/combos.md]
         phaseId: CI12
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: The combo resolves release-compatible tooling through native cluster/provider data and prepares workload access plus the pull-secret file reference required by oc. Native oc fetches the matching release. Credentials never appear in reports.
         owner: ci-skills/lib/python/core/kubernetes/ocp_boot_image.py
         preserve: [Credential references never become values in reports or receipts]
         prIds: [PR-CI12-1]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/evidence/ocp-node-image-final/yaml/02-build.json, tests/acceptance/evidence/ocp-node-image-final/mac/02-build.json]
       - id: R-CI12-003
         authority: [docs/phases/CI11-TOOLS.md, docs/combos.md]
         phaseId: CI12
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: The ISO combo consumes the reusable prepared Pod and runs oc adm node-image create with caller-supplied native inputs. A shared storage callback checks the caller-selected destination; native oc/rsync writes there directly or writes to cluster scratch followed by a shared copy callback. Destination read-back proves the generated ISO is at the requested location with matching size and digest. The result returns evidence, never an ISO copy on the agent computer.
         owner: ci-skills/lib/python/core/kubernetes/ocp_iso.py
         preserve: [Native OCP behavior, Caller-selected storage, Metadata-only return to the agent]
         prIds: [PR-CI12-1]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/evidence/ocp-node-image-final/yaml/02-build.json, tests/acceptance/evidence/ocp-node-image-final/mac/02-build.json, tests/acceptance/evidence/ocp-node-image/storage/callback-proof.json]
       - id: R-CI12-004
         authority: [docs/exec-plans/active/ci12-node-onboarding.md]
         phaseId: CI12
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: Run-owned resources use the existing run identifier and ResourceSet ownership. Successful standalone preparation or build retains its requested Pod or artifact until removal; failure cleans resources created by that run, except the sole verified ISO copy retained for recovery after a delivery failure. Remove verifies absence of owned resources and preserves caller-owned storage.
         owner: ci-skills/lib/python/core/kubernetes/run_scope.py
         preserve: [ResourceSet ownership semantics and its operation label; the executor's reverse cleanup order; the shared --run-id option's existing meaning as a correlation identifier]
         prIds: [PR-CI12-0, PR-CI12-1, PR-CI12-2]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/evidence/ci12-tool-pod/12-remove.json, tests/acceptance/evidence/ocp-node-image-final/cleanup/scoped-readback.json, tests/acceptance/evidence/ocp-node-image/storage/callback-proof.json]
       - id: R-CI12-005
         authority: [docs/phases/CI11-TOOLS.md, docs/combos.md]
         phaseId: CI12
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: A joining node's certificate signing requests are approved by a digest-stable selector (the exact node identity supplied for join and the two signers) over the pending list, re-collected until the joiner's serving request reads back approved and issued and the node reads Ready within a deadline; any other signer is reported, never approved.
         owner: ci-skills/lib/python/core/kubernetes/ocp_csr.py
         preserve: [Plan, apply and read-back with the shared APPLIED and NO_OP values]
         prIds: [PR-CI12-2]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
-        evidence: []
+        evidence: [https://github.com/spyroot/ci-skills/actions/runs/39133469190, tests/python/test_ocp_csr.py]
       - id: R-CI12-006
         authority: [docs/combos.md]
         phaseId: CI12
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: After the user boots the host, the join combo consumes the run identifier and caller-selected node identity, drives the existing selected approval sequence, reads back Ready state and hostname/role, and releases the owned build scope. Hardware boot and node deletion remain outside this phase.
         owner: ci-skills/lib/python/core/kubernetes/ocp_join.py
         preserve: [No interaction with the host's management controller is implemented; the boot is the user's action; a joined node is never deleted]
         prIds: [PR-CI12-2]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
-        evidence: []
+        evidence: [https://github.com/spyroot/ci-skills/actions/runs/39133469190, tests/python/test_ocp_join.py]
       - id: R-CI12-007
         authority: [docs/combos.md, README.md, docs/contribution_guide.md]
         phaseId: CI12
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: One thin main composes the callbacks through an OpenShift action adapter over WorkflowExecutor, declares the command in the catalogue source with a paired result schema and regenerates tools.json, routes in SKILL.md, and renders the shared report, so the agent invokes it like every other installed command and reads the same envelope.
         owner: ci-skills/bin/ocp_node_onboard.py
         preserve: [The shared options, status values and exit codes; --describe and --help work without credentials; the existing gate's required operations and freshness policy]
         prIds: [PR-CI12-1, PR-CI12-2]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE, G-CI12-GATE]
-        evidence: []
+        evidence: [tests/acceptance/evidence/ocp-node-image-final/03-proposition.json, tests/acceptance/evidence/ocp-node-image-final/06-help.txt, https://github.com/spyroot/ci-skills/actions/runs/39133469190]
       - id: R-CI12-008
         authority: [docs/exec-plans/active/ci12-node-onboarding.md, docs/combos.md]
         phaseId: CI12
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: PARTIALLY_VERIFIED
         deliverable: The generated ISO is inspected inside the cluster with supported tooling for the selected image. Return artifact identity and actual embedded-configuration evidence so declared inputs can be checked against the generated result. This is output verification, not a replacement validator for native OCP input. Verify also consumes a cluster artifact reference.
         owner: ci-skills/lib/python/core/kubernetes/ocp_iso_verify.py
         preserve: [The ISO is inspected without rewriting it, No input-schema policy is introduced by output verification]
         prIds: [PR-CI12-1]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/evidence/ocp-node-image-final/yaml/03-verify.json, tests/acceptance/evidence/ocp-node-image-final/mac/03-verify.json]
       - id: R-CI12-009
         authority: [This document's delivery revision of 2026-10-17, docs/contribution_guide.md]
         phaseId: CI12
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: One shared implementation downloads and installs tools for internal Pod staging and agent-facing combos. The installed prepare/remove capability stages a ci-skills-owned Pod, reads tools back, exposes its live handle to another callback and verifies owned-resource cleanup without requiring an ISO build.
         owner: ci-skills/lib/python/core/kubernetes/tool_pod.py
         preserve: [Existing callback and state interfaces, Existing dependency schema, Toolbox behavior through the extracted implementation]
         prIds: [PR-CI12-0]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/evidence/ci12-tool-pod/README.md]
     pullRequests:
       - id: PR-CI12-0
         requirementIds: [R-CI12-004, R-CI12-009]
@@ -185,7 +190,7 @@ by this revision; they are not alternate implementation paths. This document pla
         requirementIds: [R-CI12-001, R-CI12-002, R-CI12-003, R-CI12-004, R-CI12-007, R-CI12-008]
         dependsOn: [PR-CI12-0]
         waveId: W-CI12-1
-        owns: [ci-skills/lib/python/core/action_modes.py, ci-skills/lib/python/core/gitlab/gitlab_action.py, ci-skills/lib/python/core/kubernetes/artifact_storage.py, ci-skills/lib/python/core/kubernetes/ocp_boot_image.py, ci-skills/lib/python/core/kubernetes/ocp_iso_verify.py, ci-skills/lib/python/core/kubernetes/ocp_iso.py, ci-skills/lib/python/core/kubernetes/ocp_onboard.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/ocp_node_onboard.py, ci-skills/schemas/node-image-input.schema.json, ci-skills/schemas/results/ocp-node-onboard.schema.json, ci-skills/references/ocp-node-image.md, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_run_scope.py, tests/python/test_action_modes.py, tests/python/test_ocp_node_onboard.py, tests/acceptance/receipts/, tests/acceptance/runner-tag/, tests/acceptance/runner-lifecycle/, .github/workflows/validate.yml, lib/bash/automation/bless.bash]
+        owns: [ci-skills/lib/python/core/action_modes.py, ci-skills/lib/python/core/gitlab/gitlab_action.py, ci-skills/lib/python/core/kubernetes/artifact_storage.py, ci-skills/lib/python/core/kubernetes/ocp_boot_image.py, ci-skills/lib/python/core/kubernetes/ocp_iso_verify.py, ci-skills/lib/python/core/kubernetes/ocp_iso.py, ci-skills/lib/python/core/kubernetes/ocp_onboard.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/ocp_node_onboard.py, ci-skills/schemas/artifact-destination.schema.json, ci-skills/schemas/results/ocp-node-onboard.schema.json, ci-skills/references/ocp-node-image.md, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_run_scope.py, tests/python/test_action_modes.py, tests/python/test_ocp_node_onboard.py, tests/acceptance/receipts/, tests/acceptance/runner-tag/, tests/acceptance/runner-lifecycle/, .github/workflows/validate.yml, lib/bash/automation/bless.bash]
       - id: PR-CI12-2
         requirementIds: [R-CI12-005, R-CI12-006, R-CI12-007]
         dependsOn: [PR-CI12-1]
@@ -235,8 +240,8 @@ node inputs. ci-skills prepares the execution environment and performs the nativ
 the interpretation and validation of its node configuration.
 
 Delivery is ordered: reusable tool Pod first, ISO build second, node join third. The first delivery works and
-has its own live proof without generating an ISO. This document is an implementation specification, not a
-claim that the current unmerged draft or any new command has passed acceptance.
+has its own live proof without generating an ISO. The merged deliveries and captured acceptance are recorded
+under [Live Smoke Evidence](#live-smoke-evidence); the requirements below retain their approved scope.
 
 **Delivery boundary:** PR-CI12-0 contains the complete reusable preparation capability, its thin installed
 command and its own live evidence. PR-CI12-1 starts from that merged capability. Schemas or helper functions
@@ -899,7 +904,16 @@ GitLab receipt directory. Existing required evidence remains required. This is n
 
 ## Live Smoke Evidence
 
-Planned, not observed. PR-CI12-0 produces linked BEFORE/AFTER, download/install/read-back, downstream consumption
+[Tool Pod evidence](../../tests/acceptance/evidence/ci12-tool-pod/README.md) records preparation, reuse and removal.
+[Final ISO evidence](../../tests/acceptance/evidence/ocp-node-image-final/README.md) records MAC/direct and
+YAML/copied output, independent inspection and cleanup with the shared PVC preserved. Earlier
+[storage callbacks](../../tests/acceptance/evidence/ocp-node-image/storage/callback-proof.json) and
+[native rejection](../../tests/acceptance/evidence/ocp-node-image/rejection/02-result.json) retain their own revision.
+[PR90 validation](https://github.com/spyroot/ci-skills/actions/runs/39133469190) covers mocked CSR/join.
+ISO inspection observed hostname, MACs and NIC MTUs; root-device hints were digest-only and role was unobserved.
+These captures identify their tested revisions; they do not claim a fresh run of the current complete package.
+
+Required evidence: PR-CI12-0 produces linked BEFORE/AFTER, download/install/read-back, downstream consumption
 and cleanup records for one actual prepared Pod. PR-CI12-1 exercises both native input routes and records provider
 execution, native inspection output and requested-versus-observed destination evidence. Cover direct output,
 scratch-to-destination transfer and explicit temporary final storage without rebuilding for unrelated docs edits.
@@ -919,7 +933,7 @@ selects an isolated run-specific subdirectory and exact ISO path on that export.
 backing PVC/PV and every pre-existing file. Limit probes and staged-file cleanup to identities created by the run;
 never recursively clean the shared export. Keep the delivered ISO available and read it back after build-Pod
 removal. Native acceptance/ISO inspection is distinct from successful node joining; CSR/join rows are marked as
-mocked. No live result is claimed by this specification.
+mocked. The captures above do not establish semantic verification of every native input field.
 
 ## End-to-End Test
 

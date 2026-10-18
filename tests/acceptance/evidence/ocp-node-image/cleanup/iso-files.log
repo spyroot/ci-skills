@@ -1,0 +1,13 @@
+PRECHECK	/shared/ci-skills-ci12-final-bf69d6d5-yaml-20261018/node.iso	matched	1379328000	a18a4b5447e63be1646c5c5d90cf51f6f7f9fcd2d89e50b5185c0f72a29ce6d6
+PRECHECK	/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso	matched	1379328000	a147f306fd4e10cfa0200e223720450e9bc0fd459657f223909672bdd26d3529
+PRECHECK	/shared/ci-skills-ci12-20261018-yaml/node.iso	matched	1379328000	3ede9043ce13a0fcffa0e165558ca071b00f083902bc599d5170b5b5ab8aa2d8
+PRECHECK	/shared/ci-skills-ci12-20261018-mac/node.iso	matched	1379328000	063d4f44c76fb51032282977495923c1a91eb4f9c81c2c6c6560af07c57b63fd
+DELETE	/shared/ci-skills-ci12-final-bf69d6d5-yaml-20261018/node.iso	deleted	1379328000	a18a4b5447e63be1646c5c5d90cf51f6f7f9fcd2d89e50b5185c0f72a29ce6d6
+DIRECTORY	/shared/ci-skills-ci12-final-bf69d6d5-yaml-20261018	removed_empty
+DELETE	/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018/node.iso	deleted	1379328000	a147f306fd4e10cfa0200e223720450e9bc0fd459657f223909672bdd26d3529
+DIRECTORY	/shared/ci-skills-ci12-final-bf69d6d5-mac-20261018	removed_empty
+DELETE	/shared/ci-skills-ci12-20261018-yaml/node.iso	deleted	1379328000	3ede9043ce13a0fcffa0e165558ca071b00f083902bc599d5170b5b5ab8aa2d8
+DIRECTORY	/shared/ci-skills-ci12-20261018-yaml	removed_empty
+DELETE	/shared/ci-skills-ci12-20261018-mac/node.iso	deleted	1379328000	063d4f44c76fb51032282977495923c1a91eb4f9c81c2c6c6560af07c57b63fd
+DIRECTORY	/shared/ci-skills-ci12-20261018-mac	removed_empty
+TOTAL	reclaimed_bytes	5517312000

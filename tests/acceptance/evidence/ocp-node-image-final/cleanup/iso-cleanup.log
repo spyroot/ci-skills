@@ -1,0 +1,7 @@
+PRECHECK	/shared/ci-skills-pr85-48c4489a-yaml-20261018t113417z/node.iso	matched	1379328000	3c942a87cb17ddbbfee77f94060200eced9d92c64584e9d47d9784df9d953b98
+PRECHECK	/shared/ci-skills-pr85-48c4489a-mac-20261018t113417z/node.iso	matched	1379328000	64b1caa11efff902d9db4ff6bf6ec31fa95f9618d19a31b0c4c37f228f610c9c
+DELETE	/shared/ci-skills-pr85-48c4489a-yaml-20261018t113417z/node.iso	deleted	1379328000	3c942a87cb17ddbbfee77f94060200eced9d92c64584e9d47d9784df9d953b98
+DIRECTORY	/shared/ci-skills-pr85-48c4489a-yaml-20261018t113417z	removed_empty
+DELETE	/shared/ci-skills-pr85-48c4489a-mac-20261018t113417z/node.iso	deleted	1379328000	64b1caa11efff902d9db4ff6bf6ec31fa95f9618d19a31b0c4c37f228f610c9c
+DIRECTORY	/shared/ci-skills-pr85-48c4489a-mac-20261018t113417z	removed_empty
+TOTAL	reclaimed_bytes	2758656000

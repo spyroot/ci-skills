@@ -48,6 +48,7 @@ Install the native clients for the capabilities you intend to use. The command's
 | GitLab operations | `glab` |
 | GitHub API reads | `gh` |
 | Kubernetes diagnostics | `kubectl` |
+| Nested Podman readiness probe | `kubectl`; Podman runs inside the probe Job |
 | OpenShift MTU checks | `kubectl`, `oc`; `ip` must be present on the selected node |
 | Toolbox create/update/delete | `kubectl`, `oc`, `skopeo` |
 | Harbor publication | `skopeo` |
@@ -335,6 +336,9 @@ The result's `trace_artifact` points to that file; smoke reports link the artifa
 - [Manage runners](ci-skills/bin/gitlab_runner.py): inspect and list runners, assign or create a runner record, add
   tags, or delete an exact runner ID after a live plan.
 - [Diagnose Kubernetes and OpenShift](ci-skills/bin/): inspect storage, events, Cilium, Ceph, and node MTU consistency.
+- [Probe nested Podman readiness](ci-skills/bin/image_build_readiness.py): run an inner container on one worker,
+  verify bind-mount writes and exit propagation, and remove the temporary Job and namespace. See the
+  [installed command example](ci-skills/SKILL.md#nested-podman-readiness).
 - Use [ci-api](ci-skills/bin/ci-api) for bounded Git API reads and [ci-binary-build](ci-skills/bin/ci-binary-build) for
   exact-commit OpenShift build planning.
 

@@ -1,0 +1,11 @@
+{
+  "artifactPath": "/shared/ci-skills-ci12-native-reject-bf69d6d5-20261018/node.iso",
+  "buildOutput": "destination",
+  "mountPath": "/shared",
+  "namespace": "namespace:b115cbf8fccd",
+  "volumeSource": {
+    "persistentVolumeClaim": {
+      "claimName": "pvc:92a982289cbe"
+    }
+  }
+}

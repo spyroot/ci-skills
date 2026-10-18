@@ -1,0 +1,64 @@
+{
+  "choices": [
+    {
+      "id": "build",
+      "kind": "execute",
+      "next": {
+        "action": "describe",
+        "args": [
+          "next",
+          "k8s",
+          "ocp_node_onboard",
+          "run",
+          "build",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Build from either a MAC or native YAML and verify the exact cluster destination."
+    },
+    {
+      "id": "verify",
+      "kind": "execute",
+      "next": {
+        "action": "describe",
+        "args": [
+          "next",
+          "k8s",
+          "ocp_node_onboard",
+          "run",
+          "verify",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Read and inspect the existing cluster-held ISO identified by its run."
+    },
+    {
+      "id": "remove",
+      "kind": "execute",
+      "next": {
+        "action": "describe",
+        "args": [
+          "next",
+          "k8s",
+          "ocp_node_onboard",
+          "run",
+          "remove",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Remove owned run resources while preserving persistent destination storage and ISO."
+    }
+  ],
+  "continuation": null,
+  "kind": "reference_next",
+  "path": [
+    "k8s",
+    "ocp_node_onboard",
+    "run"
+  ],
+  "schema_version": "1.0",
+  "summary": "3 capabilities to run."
+}

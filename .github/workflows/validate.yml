@@ -118,6 +118,13 @@ jobs:
             ci-skills/lib/python/core/tooling \
             ci-skills/lib/python/core/action_modes.py \
             ci-skills/lib/python/core/kubernetes/tool_pod*.py \
+            ci-skills/lib/python/core/kubernetes/artifact_storage*.py \
+            ci-skills/lib/python/core/kubernetes/pod_credential*.py \
+            ci-skills/lib/python/core/kubernetes/pod_files.py \
+            ci-skills/lib/python/core/kubernetes/ocp_*.py \
+            ci-skills/lib/python/core/kubernetes/workflow_report.py \
+            ci-skills/lib/python/core/runtime_streams.py \
+            ci-skills/bin/ocp_node_onboard.py \
             ci-skills/lib/python/core/kubernetes/run_scope.py \
             ci-skills/lib/python/core/kubernetes/script_resources.py \
             ci-skills/bin/prepare_tool_pod.py \
@@ -128,6 +135,12 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_milestones.py \
             ci-skills/lib/python/core/gitlab/gitlab_api.py \
             ci-skills/lib/python/core/catalog.py \
+            ci-skills/lib/python/core/kubernetes/run_scope.py \
+            ci-skills/lib/python/core/kubernetes/scc_access.py \
+            ci-skills/lib/python/core/kubernetes/podman_probe.py \
+            ci-skills/lib/python/core/kubernetes/podman_evidence.py \
+            ci-skills/lib/python/core/kubernetes/podman_callbacks.py \
+            ci-skills/lib/python/core/kubernetes/image_build_readiness.py \
             ci-skills/lib/python/core/navigate*.py \
             ci-skills/bin/reference.py \
             ci-skills/lib/python/core/report.py \
@@ -150,11 +163,14 @@ jobs:
             schemas/ci-result.schema.json \
             ci-skills/schemas/tool-pod.schema.json \
             ci-skills/schemas/results/tool-pod.schema.json \
+            ci-skills/schemas/artifact-destination.schema.json \
+            ci-skills/schemas/results/ocp-node-onboard.schema.json \
             schemas/smoke-result.schema.json \
             schemas/live-acceptance-policy.schema.json \
             ci-skills/schemas/results/gitlab-action.schema.json \
             ci-skills/schemas/results/gitlab-job-list.schema.json \
             ci-skills/schemas/results/toolbox-workflow.schema.json \
+            ci-skills/schemas/results/image-build-readiness.schema.json \
             ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             ci-skills/schemas/results/gitlab-runner-read.schema.json \
             ci-skills/schemas/results/gitlab-runner-delete.schema.json

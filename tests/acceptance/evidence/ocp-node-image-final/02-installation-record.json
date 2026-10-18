@@ -1,0 +1,13 @@
+{
+  "algorithm": "sha256-tree-v1",
+  "digest": "ca60a9cf729239fe161121f72d094b2bf1f4b9f075507bc03fe9fa2daa944972",
+  "file_count": 196,
+  "kind": "skill_install",
+  "revision": {
+    "source": "git_head",
+    "value": "48c4489afdf339d016cdc713affa5c1acdc9405b",
+    "verified": true
+  },
+  "schema_version": "1.0",
+  "status": "PASS"
+}
