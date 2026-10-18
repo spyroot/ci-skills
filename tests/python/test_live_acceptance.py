@@ -399,6 +399,24 @@ def test_full_required_operation_set_is_bound_to_initial_runtime_setup() -> None
     } == ACCEPTANCE.REQUIRED_GITLAB_OPERATIONS
 
 
+def test_required_podman_runtime_receipt_cannot_be_missing() -> None:
+    """Reject live acceptance when the installed Podman probe has no receipt.
+
+    :returns: None; assertions prove the capability cannot be omitted.
+    """
+    setup = _access_setup()
+    receipts = {
+        name: receipt
+        for name, receipt in _complete_receipts(setup).items()
+        if receipt.get("kind") != "image_build_readiness"
+    }
+
+    result = _evaluate(setup, receipts)
+
+    assert result["status"] == "BLOCKED"
+    assert "image_build_readiness:probe:check:receipt_missing" in result["problems"]
+
+
 def test_operation_identity_must_match_the_initial_synthetic_setup() -> None:
     """Block an operation whose GitLab user differs from initial access.
     :returns: None; assertions in the body validate the regression.
