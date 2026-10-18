@@ -29,6 +29,7 @@ from lib.python.core.json_types import (
     json_string,
     json_strings,
 )
+from lib.python.core.navigate_render import choice_lines
 from lib.python.core.runtime import redact_tree, sanitize
 from lib.python.sys.status import PARTIAL, PASS
 
@@ -465,6 +466,83 @@ def _diagnostic_lines(data: JSONObject) -> MutableSequence[str]:
     return lines
 
 
+def _pipeline_watch_jobs(item: JSONObject) -> str:
+    """Render the bounded job counts carried by one watched pipeline.
+
+    :param item: Pipeline record with a jobs total and status counts.
+    :returns: Compact total followed by sorted nonzero status counts.
+    :raises TypeError: If the jobs or status-count fields are not objects.
+    """  # noqa: DOC502 - Shared JSON shape readers reject malformed fields.
+    jobs = json_object(item["jobs"])
+    counts = json_object(jobs["by_status"])
+    detail = ", ".join(f"{name} {count}" for name, count in sorted(counts.items()))
+    return f"{jobs['total']} jobs" + (f": {detail}" if detail else "")
+
+
+def _pipeline_watch_lines(data: JSONObject) -> MutableSequence[str]:
+    """Render the exact CI11 pipeline-watch human result.
+
+    :param data: Pipeline-watch result with filters, bounded records, transitions,
+        retrieval choices, and errors.
+    :returns: Completion header, target facts, and the four CI11 result blocks.
+    :raises TypeError: If a declared object or array field has the wrong shape.
+    :raises KeyError: If required pipeline, transition, choice, or error fields are
+        absent.
+    """  # noqa: DOC502 - Required indexing and shape readers validate the result.
+    filters = json_object(data["filters"])
+    lines: MutableSequence[str] = [
+        (
+            f"{data['status']}  complete: "
+            f"{'yes' if data['complete'] else 'no'}  success: "
+            f"{'yes' if data['success'] else 'no'}"
+        )
+    ]
+    target = (
+        f"{data['target']}  project {filters['project']}"
+        f"  pipeline {filters['pipeline_id']}"
+    )
+    if filters.get("related_name") is not None:
+        target += f"  related {filters['related_name']!r}"
+    lines.extend(
+        (
+            target
+            + f"  {data['polls']} polls  {data['elapsed_seconds']} s"
+            + f"  captured {data['captured_at']}",
+            "",
+            "Pipelines",
+        )
+    )
+    records = json_objects(data["records"])
+    lines.extend(
+        (
+            f"  {item['pipeline_id']}  {item['status']}  {item['via']}"
+            f"  depth {item['depth']}  project {item['project_id']}"
+            f"  {_pipeline_watch_jobs(item)}"
+        )
+        for item in records
+    )
+    if not records:
+        lines.append("  none")
+    lines.extend(("", "Changes"))
+    changes = json_objects(data["changes"])
+    lines.extend(
+        f"  {item['at_seconds']} s  {item['pipeline_id']}  {item['status']}"
+        for item in changes
+    )
+    if not changes:
+        lines.append("  none")
+    lines.extend(("", "Results"))
+    choices = json_objects(data["choices"])
+    lines.extend(choice_lines(choices) if choices else ("  none",))
+    errors = json_objects(data["errors"])
+    if errors:
+        lines.append("Errors")
+        for item in errors:
+            count = f" count={item['count']}" if "count" in item else ""
+            lines.append(f"  {item['source']}: {item['reason']}{count}")
+    return lines
+
+
 def human(data: JSONObject) -> str:
     """Render bounded operator output from one structured result.
 
@@ -476,6 +554,8 @@ def human(data: JSONObject) -> str:
     kind = data.get("kind")
     if kind == "access_check":
         lines = _access_lines(data)
+    elif kind == "gitlab_pipeline_watch":
+        lines = _pipeline_watch_lines(data)
     else:
         lines = (
             _mtu_lines(data)

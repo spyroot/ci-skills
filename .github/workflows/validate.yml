@@ -127,6 +127,13 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_actions.py \
             ci-skills/lib/python/core/gitlab/gitlab_milestones.py \
             ci-skills/lib/python/core/gitlab/gitlab_api.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipelines.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_graph.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_start.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch_runtime.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch_types.py \
+            ci-skills/bin/gitlab_pipeline.py \
             ci-skills/lib/python/core/catalog.py \
             ci-skills/lib/python/core/navigate*.py \
             ci-skills/bin/reference.py \
@@ -154,6 +161,7 @@ jobs:
             schemas/live-acceptance-policy.schema.json \
             ci-skills/schemas/results/gitlab-action.schema.json \
             ci-skills/schemas/results/gitlab-job-list.schema.json \
+            ci-skills/schemas/results/gitlab-pipeline-watch.schema.json \
             ci-skills/schemas/results/toolbox-workflow.schema.json \
             ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             ci-skills/schemas/results/gitlab-runner-read.schema.json \
