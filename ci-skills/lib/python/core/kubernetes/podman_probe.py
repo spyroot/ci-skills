@@ -7,6 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import argparse
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -17,6 +18,11 @@ from typing import Final, Optional
 from kubernetes.utils.quantity import parse_quantity
 
 from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.action_modes import (
+    ActionMode,
+    ActionModePolicy,
+    validate_action_mode,
+)
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.kubernetes import KubernetesError
 from lib.python.core.kubernetes.podman_evidence import (
@@ -153,6 +159,21 @@ class ProbeResources:
         _quantity(self.storage_size, "storage_size")
 
 
+def probe_resources_from_args(args: argparse.Namespace) -> ProbeResources:
+    """Build validated probe resources from shared command arguments.
+
+    :param args: Namespace containing the five Podman resource quantities.
+    :returns: Immutable bounded resource settings.
+    """
+    return ProbeResources(
+        cpu_request=args.cpu_request,
+        cpu_limit=args.cpu_limit,
+        memory_request=args.memory_request,
+        memory_limit=args.memory_limit,
+        storage_size=args.storage_size,
+    )
+
+
 class ProbeMode(StrEnum):
     """Closed execution modes for planning or running the probe.
 
@@ -172,6 +193,37 @@ class ProbeMode(StrEnum):
     DRY_RUN = "dry-run"
     LIVE_PLAN = "live-plan"
     APPLY = "apply"
+
+
+PROBE_MODE_POLICY: Final = ActionModePolicy(
+    default_mode=ActionMode.LIVE_PLAN,
+    receipt_modes=frozenset((ActionMode.APPLY,)),
+    allow_offline_output=True,
+)
+PROBE_EXECUTION_MODES: Final[Mapping[ActionMode, ProbeMode]] = {
+    ActionMode.OFFLINE: ProbeMode.DRY_RUN,
+    ActionMode.LIVE_PLAN: ProbeMode.LIVE_PLAN,
+    ActionMode.APPLY: ProbeMode.APPLY,
+}
+
+
+def resolve_probe_mode(args: argparse.Namespace) -> ProbeMode:
+    """Validate shared execution controls and return the probe execution mode.
+
+    :param args: Parsed execution, confirmation, output, and timeout arguments.
+    :returns: Closed probe execution mode selected by the shared action policy.
+    """
+    mode = validate_action_mode(
+        apply=bool(args.apply),
+        dry_run=bool(args.dry_run),
+        live_plan=bool(args.live_plan),
+        confirmed=bool(args.confirm_plan),
+        receipt_requested=bool(args.receipt_out),
+        output_requested=bool(args.output_dir or args.log_file),
+        timeout=args.timeout,
+        policy=PROBE_MODE_POLICY,
+    )
+    return PROBE_EXECUTION_MODES[mode]
 
 
 @dataclass(frozen=True)

@@ -421,9 +421,9 @@ COMMANDS: Mapping[str, CommandDefinition] = {
     },
     "image_build_readiness.py": {
         "kind": "image_build_readiness",
-        "purpose": "Probe nested Podman execution on one Kubernetes worker and clean up.",
-        "use_when": "Check container execution, bind mounts and exit propagation before "
-        "building a runner workflow.",
+        "purpose": "Probe nested Podman or verify a runner build-and-push chain.",
+        "use_when": "Prove nested execution alone, or link a real GitLab job on the same worker "
+        "to its image digest in Harbor.",
         "requires": ("kubernetes",),
         "capabilities": ("node_scoped", "namespaced"),
         "mutates": True,
@@ -438,13 +438,29 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--memory-limit": "probe container memory limit",
             "--storage-size": "maximum temporary container-storage volume size",
             "--live-plan": "read target identity and select a Ready worker without mutation",
-            "--apply": "run the confirmed probe and verify cleanup",
+            "--apply": "run the confirmed operation and verify cleanup",
             "--confirm-plan": "exact fingerprint returned by the live plan",
             "--receipt-out": "write a sanitized operation receipt to this exact path",
+            "--toolbox-spec": "chain: existing toolbox specification with gitlab-runner, git and podman",
+            "--project": "chain: GitLab project for a project runner and build pipeline",
+            "--group": "chain: GitLab group for a group runner; requires --pipeline-project",
+            "--pipeline-project": "chain: project owning the build job when using a group runner",
+            "--ref": "chain: existing pipeline branch or tag",
+            "--expected-sha": "chain: optional exact commit expected at the selected ref",
+            "--pipeline-variable": "chain: caller-selected KEY=VALUE pipeline variable; repeatable",
+            "--job": "chain: exact build-and-push job name",
+            "--job-digest-artifact": "chain: uploaded job artifact containing podman push --digestfile output",
+            "--runner-description": "chain: unique description for the temporary runner record",
+            "--runner-label": "chain: label required by the selected job; repeatable",
+            "--build-repository": "chain: Harbor project-relative repository pushed by the job",
+            "--build-tag": "chain: exact Harbor tag pushed by the job",
+            "--watch-interval": "chain: positive pipeline polling interval in seconds",
+            "--watch-timeout": "chain: positive pipeline watch timeout in seconds",
         },
         "subcommands": {
             "probe": {
                 "purpose": "Run a temporary Podman Job on one selected worker.",
+                "requires_authorities": ("kubernetes",),
                 "result_schema": "schemas/results/image-build-readiness.schema.json",
                 "mutates": True,
                 "side_effects": "Creates and removes a temporary namespace, conditional "
@@ -452,15 +468,48 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "read_back": "Exact permission source, optional RoleBinding UID, "
                 "Job-owned Pod exit, probe rows and resource absence.",
             },
+            "chain": {
+                "purpose": "Probe, publish the toolbox, create a runner, execute the selected job and verify its digest.",
+                "requires_authorities": ("kubernetes", "gitlab", "harbor"),
+                "required_options": (
+                    "--toolbox-spec",
+                    "--ref",
+                    "--job",
+                    "--job-digest-artifact",
+                    "--runner-description",
+                    "--runner-label",
+                    "--build-repository",
+                    "--build-tag",
+                ),
+                "result_schema": "schemas/results/image-build-readiness.schema.json",
+                "mutates": True,
+                "side_effects": "Publishes toolbox and job images; creates a temporary runner record, "
+                "manager, token and run-owned cluster resources; removes temporary resources on exit.",
+                "read_back": "Probe and manager placement, exact runner and job IDs, job digest artifact, "
+                "independent Harbor digest and owned-resource absence.",
+            },
         },
-        "related": ("toolbox.py", "harbor_pull.py"),
-        "references": ("Nested Podman readiness", "OpenShift SCC access"),
-        "required_tools": ("kubectl", "oc on OpenShift"),
-        "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows "
-        "and cleanup read-back; does not prove runner or image-publication behavior.",
-        "execution_surface": "configured Kubernetes API and a temporary privileged Job",
-        "side_effects": "Apply creates a run-owned namespace, conditionally creates one namespaced SCC RoleBinding, "
-        "then creates a script ConfigMap and Job; it removes only resources owned by the run.",
+        "related": (
+            "toolbox.py",
+            "harbor_pull.py",
+            "gitlab_runner_manager.py",
+            "gitlab_pipeline.py",
+            "gitlab_job.py",
+        ),
+        "references": (
+            "Nested Podman readiness",
+            "Image build chain",
+            "OpenShift SCC access",
+        ),
+        "required_tools": (
+            "kubectl",
+            "oc on OpenShift; chain requires oc, glab and skopeo",
+        ),
+        "returns": "A plan or operation evidence: probe marker rows, or linked runner, job and Harbor digest "
+        "observations, plus temporary-resource cleanup.",
+        "execution_surface": "configured Kubernetes API; chain also uses the selected GitLab project and Harbor registry",
+        "side_effects": "Probe creates and removes temporary cluster resources. Chain also builds and publishes images "
+        "and runs a GitLab job; published images remain, while its temporary runner and owned helpers are removed.",
     },
     "access_check.py": {
         "kind": "access_check",
@@ -981,6 +1030,10 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Podman probe inputs, planning, execution and evidence.",
             "pointer": "references/podman-readiness.md",
         },
+        "Image build chain": {
+            "summary": "Runner, pipeline, job digest artifact and Harbor read-back inputs.",
+            "pointer": "references/image-build-chain.md",
+        },
         "OpenShift SCC access": {
             "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
             "pointer": "references/openshift-scc.md",
@@ -1430,6 +1483,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
             },
             "routing": {
                 "prove nested Podman runtime readiness": "image_build_readiness.py",
+                "verify a runner build and Harbor publication": "image_build_readiness.py",
                 "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
                 "build or delete a toolbox": "toolbox.py",
                 "publish an image to Harbor": "harbor_push.py",

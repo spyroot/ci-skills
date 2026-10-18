@@ -102,7 +102,7 @@ Routing, in short:
 | --- | --- |
 | Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
 | Build a schema-declared toolbox | `bin/toolbox.py` |
-| Prove nested Podman execution on a worker | `bin/image_build_readiness.py` |
+| Probe Podman or verify a runner build and push | `bin/image_build_readiness.py probe\|chain` |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | proof of access across all three authorities | `access_check.py` |
 | a named CI job's own facts | `gitlab_job.py --job-url URL` |
@@ -288,9 +288,9 @@ affected node. `tools.json` describes every command and its filters.
 
 ## Nested Podman readiness
 
-`bin/image_build_readiness.py` composes worker selection, a temporary privileged Job, runtime checks, and cleanup.
-See [Podman inputs and execution](references/podman-readiness.md) and
-[OpenShift SCC discovery and access](references/openshift-scc.md).
+`bin/image_build_readiness.py probe` checks nested runtime behavior; `chain` links a runner job to its Harbor digest.
+See [Podman inputs](references/podman-readiness.md), [chain inputs and evidence](references/image-build-chain.md),
+and [OpenShift SCC discovery and access](references/openshift-scc.md).
 
 ## Toolbox and runner workflows
 

@@ -1,6 +1,6 @@
 # Nested Podman readiness
 
-`bin/image_build_readiness.py` composes worker selection, a temporary privileged Job, runtime checks, and cleanup.
+`bin/image_build_readiness.py probe` composes worker selection, a temporary privileged Job, runtime checks, and cleanup.
 It uses only the Kubernetes configuration in your [target file](access.md), `kubectl`, and OpenShift `oc`
 authorization reads when API discovery exposes the SCC API. Podman runs in the Job.
 
@@ -43,8 +43,9 @@ its preparation and cleanup, and the reusable callback's inputs.
 
 The result reports the exact Job-owned Pod exit, marker rows, and cleanup read-back. It proves nested container
 execution, bind-mount read-back, exit propagation, no remaining run-labeled containers, and owned
-Job/ConfigMap/Namespace absence. A caller-supplied namespace remains. It does not yet prove a GitLab runner,
-an image build, or a Harbor push. The [result schema](../schemas/results/image-build-readiness.schema.json),
+Job/ConfigMap/Namespace absence. A caller-supplied namespace remains. This probe does not prove a GitLab runner,
+an image build, or a Harbor push; the separate [chain operation](image-build-chain.md) links those observations.
+The [result schema](../schemas/results/image-build-readiness.schema.json),
 also linked by `--describe`, defines the report and its `$defs/markers` shape.
 
 The probe selects native `overlay` storage and `cgroupfs`; see the current [Podman global options][podman].

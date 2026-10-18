@@ -147,14 +147,15 @@ pipeline.
 Follow its [PR order](phases/CI13-IMAGE-BUILD-READINESS.md#pr-order) and
 [live smoke evidence](phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence).
 
-Status: probe implemented by [`image_build_readiness.py`](../ci-skills/bin/image_build_readiness.py); the runner,
-image-build job, and publication chain remain proposed. The probe uses the shared Kubernetes callbacks,
+[`image_build_readiness.py`](../ci-skills/bin/image_build_readiness.py) provides `probe` and `chain`; the
+[chain reference](../ci-skills/references/image-build-chain.md) describes its runner, native job and digest evidence.
+The probe uses the shared Kubernetes callbacks,
 `RunScope`, and `ResourceSet` for run ownership and cleanup. Its
 [installed example](../ci-skills/SKILL.md#nested-podman-readiness) shows live planning and confirmed apply.
 On OpenShift, the installed command reuses existing `privileged` SCC permission or creates, verifies and removes
 one run-owned namespaced RoleBinding before the probe. A denied authorization preflight blocks before Job creation;
-external setup does not count as capability proof. Probe evidence covers nested runtime behavior only; the later
-runner, build, and publication steps need their own live results.
+external setup does not count as capability proof. Probe evidence covers nested runtime behavior only; accepting
+the chain requires its own installed live results for the runner, job, digest comparison and cleanup.
 
 ## How to add one
 

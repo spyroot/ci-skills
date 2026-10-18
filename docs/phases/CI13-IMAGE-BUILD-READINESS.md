@@ -129,7 +129,7 @@ This document plans from:
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
         deliverable: After a passing probe, the chain continues on the same node with a toolbox-backed runner carrying the same privileged podman setup, a job on the test project that builds an image with podman and pushes it to Harbor, and the read-back of the pushed digest and of the job naming the runner, composed from chain 1 and block 7 once they exist.
-        owner: ci-skills/lib/python/core/kubernetes/image_build_chain.py
+        owner: ci-skills/lib/python/core/kubernetes/image_build_chain/
         preserve: [Chain 1's runner manager and harbor_push read-back are composed, not reimplemented]
         prIds: [PR-CI13-2]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
@@ -144,7 +144,7 @@ This document plans from:
         requirementIds: [R-CI13-006, R-CI13-007]
         dependsOn: [PR-CI13-1]
         waveId: W-CI13-2
-        owns: [ci-skills/lib/python/core/kubernetes/image_build_chain.py, ci-skills/lib/python/core/image_build_action.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/image_build_readiness.py, ci-skills/schemas/results/image-build-readiness.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_image_build_chain.py]
+        owns: [ci-skills/lib/python/core/kubernetes/image_build_chain/, ci-skills/lib/python/core/kubernetes/image_build_readiness.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/image_build_readiness.py, ci-skills/schemas/results/image-build-readiness.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_image_build_chain.py]
     waves:
       - id: W-CI13-1
         prIds: [PR-CI13-1]
@@ -252,7 +252,7 @@ relevant tree, with the files this phase adds marked NEW:
         kubernetes/mtu_consistency.py                 privileged debug Pods, marker-based cleanup, interrupt handling
         kubernetes/run_scope.py                       RunScope over ResourceSet; OpenRunScope (delivered by CI12.0)
         kubernetes/image_build_probe.py          NEW  SelectNode, RunProbeJob, ReadProbeResult, ParseMarkers
-        kubernetes/image_build_chain.py          NEW  PR-CI13-2: composition over chain 1 and block 7
+        kubernetes/image_build_chain/            NEW  PR-CI13-2: typed model, callbacks, verification, workflow and command
         image_build_action.py                    NEW  ReadinessState, ReadinessAction, ConfirmReadinessOperation, ReadinessWorkflow
       schemas/
         results/image-build-readiness.schema.json NEW
@@ -465,6 +465,27 @@ The agent reports that missing authorization to the user; no external grant can 
 Every verb also accepts `--live-plan` (`status: PLANNED`, identity and node read back, no mutation),
 `--yaml`, `--human`, `--output-dir` for paired reports, `--evidence-dir` for the persisted log and rows, and the
 shared diagnostic options.
+
+#### Chain inputs and evidence
+
+The `chain` verb consumes the existing toolbox specification and caller-selected GitLab project/ref/job and
+Harbor repository/tag. A project runner uses `--project`; a group runner uses `--group` plus `--pipeline-project`.
+The runner's `--runner-label` must match the selected job. The caller's pipeline remains native GitLab YAML;
+ci-skills neither generates nor replaces it.
+
+The job uploads its `podman push --digestfile` output at the path selected by `--job-digest-artifact`.
+The confirmed plan includes that path, pipeline commit, runner scope, image selections and worker/runtime inputs.
+Success requires the watched pipeline graph to finish successfully, the selected job to succeed on the exact
+created runner, and its digest artifact to equal the independent Harbor read-back. A green unrelated job or a
+tag merely existing is insufficient.
+
+One executor composes the existing provider, probe, toolbox, runner, pipeline and verification callbacks. The
+chain owns the temporary runner record, registration token, manager and run-scoped cluster helpers and verifies
+their cleanup on exit. The reusable toolbox BuildConfig and build namespace persist, along with published
+toolbox and job images at the caller's selected tags. Live tests remove their exact disposable outputs after
+recording proof. Existing namespaces and shared storage
+remain untouched. The installed [chain reference](../../ci-skills/references/image-build-chain.md) supplies
+arguments and a native job example; command discovery must return that reference.
 
 #### When to Decompose
 

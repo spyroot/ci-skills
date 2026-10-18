@@ -964,17 +964,23 @@
         "node_scoped",
         "namespaced"
       ],
-      "execution_surface": "configured Kubernetes API and a temporary privileged Job",
+      "execution_surface": "configured Kubernetes API; chain also uses the selected GitLab project and Harbor registry",
       "options": [
         "--apply",
         "--binding",
+        "--build-repository",
+        "--build-tag",
         "--confirm-plan",
         "--cpu-limit",
         "--cpu-request",
         "--describe",
         "--dry-run",
+        "--expected-sha",
+        "--group",
         "--human",
         "--inner-image",
+        "--job",
+        "--job-digest-artifact",
         "--json",
         "--live-plan",
         "--log-file",
@@ -985,37 +991,71 @@
         "--namespace",
         "--node",
         "--output-dir",
+        "--pipeline-project",
+        "--pipeline-variable",
         "--probe-image",
+        "--project",
         "--receipt-out",
+        "--ref",
         "--revision",
         "--run-id",
+        "--runner-description",
+        "--runner-label",
         "--storage-size",
         "--timeout",
+        "--toolbox-spec",
+        "--watch-interval",
+        "--watch-timeout",
         "--yaml"
       ],
-      "purpose": "Probe nested Podman execution on one Kubernetes worker and clean up.",
+      "purpose": "Probe nested Podman or verify a runner build-and-push chain.",
       "read_only": false,
       "report_kind": "image_build_readiness",
       "required_options": [],
       "required_tools": [
         "kubectl",
-        "oc on OpenShift"
+        "oc on OpenShift; chain requires oc, glab and skopeo"
       ],
       "requires_authorities": [
         "kubernetes"
       ],
-      "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows and cleanup read-back; does not prove runner or image-publication behavior.",
-      "side_effects": "Apply creates a run-owned namespace, conditionally creates one namespaced SCC RoleBinding, then creates a script ConfigMap and Job; it removes only resources owned by the run.",
+      "returns": "A plan or operation evidence: probe marker rows, or linked runner, job and Harbor digest observations, plus temporary-resource cleanup.",
+      "side_effects": "Probe creates and removes temporary cluster resources. Chain also builds and publishes images and runs a GitLab job; published images remain, while its temporary runner and owned helpers are removed.",
       "subcommands": {
+        "chain": {
+          "mutates": true,
+          "purpose": "Probe, publish the toolbox, create a runner, execute the selected job and verify its digest.",
+          "read_back": "Probe and manager placement, exact runner and job IDs, job digest artifact, independent Harbor digest and owned-resource absence.",
+          "required_options": [
+            "--toolbox-spec",
+            "--ref",
+            "--job",
+            "--job-digest-artifact",
+            "--runner-description",
+            "--runner-label",
+            "--build-repository",
+            "--build-tag"
+          ],
+          "requires_authorities": [
+            "kubernetes",
+            "gitlab",
+            "harbor"
+          ],
+          "result_schema": "schemas/results/image-build-readiness.schema.json",
+          "side_effects": "Publishes toolbox and job images; creates a temporary runner record, manager, token and run-owned cluster resources; removes temporary resources on exit."
+        },
         "probe": {
           "mutates": true,
           "purpose": "Run a temporary Podman Job on one selected worker.",
           "read_back": "Exact permission source, optional RoleBinding UID, Job-owned Pod exit, probe rows and resource absence.",
+          "requires_authorities": [
+            "kubernetes"
+          ],
           "result_schema": "schemas/results/image-build-readiness.schema.json",
           "side_effects": "Creates and removes a temporary namespace, conditional run-owned SCC RoleBinding, script ConfigMap and privileged Job."
         }
       },
-      "use_when": "Check container execution, bind mounts and exit propagation before building a runner workflow."
+      "use_when": "Prove nested execution alone, or link a real GitLab job on the same worker to its image digest in Harbor."
     },
     "k8s_verify_mtu_consistency.py": {
       "capabilities": [
@@ -1298,6 +1338,7 @@
     "read a caller-selected Git API resource": "bin/ci-api",
     "read or manage a GitLab runner": "gitlab_runner.py",
     "verify a Harbor toolbox pull": "harbor_pull.py",
+    "verify a runner build and Harbor publication": "image_build_readiness.py",
     "what the cluster said during an interval": "event_trace.py"
   },
   "schema_version": "1.0",
