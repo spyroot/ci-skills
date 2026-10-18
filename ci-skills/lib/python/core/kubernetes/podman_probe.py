@@ -39,7 +39,7 @@ NESTED_RUNTIME_CLAIM: Final = "nested_podman_runtime_readiness"
 PRIVILEGED_CONSTRAINT: Final = "privileged"
 DEFAULT_PROBE_IMAGE: Final = (
     "quay.io/podman/stable@sha256:"
-    "24aa8442c468c62ffae6053c79942b3a53c169934098a80b93f653fd9f0f8783"
+    "5118bdbb154b115d77f58107a2e69d65df4375bcb0d89a8da10b055754e8b9f3"
 )
 DEFAULT_INNER_IMAGE: Final = (
     "docker.io/library/busybox@sha256:"
