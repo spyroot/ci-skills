@@ -150,6 +150,25 @@ def test_selected_cluster_and_command_are_small_schema_valid_propositions() -> N
     assert selected["reference"]["mcp"]["pointer"] == "references/mcp.md"
 
 
+def test_tool_pod_proposition_offers_installed_usage() -> None:
+    """Offer this installed procedure within the immediate proposition node.
+
+    :returns: None; assertions check task references and node-local discovery.
+    """
+    selected = CATALOG.proposition("prepare_tool_pod.py")
+    expected = {
+        "summary": "Tool input, preparation, reuse and removal examples.",
+        "pointer": "references/tool-pod.md",
+    }
+
+    assert selected["reference"]["Tool Pod preparation"] == expected
+    cluster = CATALOG.proposition()["kubernetes"]
+    assert cluster["reference"]["Tool Pod preparation"] == expected
+    assert "create_selfhosted_runner.py" not in selected["tools"]
+    unrelated = CATALOG.proposition("gitlab_runner.py")
+    assert "Tool Pod preparation" not in unrelated["reference"]
+
+
 def test_reference_cli_expands_nodes_without_fetching_optional_references(
     fake_bin: Path, call_journal: Path, tmp_path: Path
 ) -> None:
