@@ -1,0 +1,91 @@
+{
+  "child_pid": 19152,
+  "cleanup": {},
+  "command_exit": 0,
+  "command_status": "PASS",
+  "diagnostic_run_id": "pr81-3570e1b-success",
+  "evidence_complete": false,
+  "excluded": [
+    "persistentvolumes",
+    "persistentvolumeclaims",
+    "nfs",
+    "files",
+    "other_namespaces"
+  ],
+  "expected_result": true,
+  "generated_run_id": "a418c7dbb24141e09a7f26d920b96af5",
+  "kind": "pr81_installed_live_proof",
+  "mode": "success",
+  "observed": {
+    "namespace": {
+      "kind": "Namespace",
+      "name": "ci-skills-run-948f7c274cbe4a25bea9",
+      "namespace": "",
+      "uid": "ca7da558-741c-409a-bd5e-68a0ef5705bc"
+    },
+    "objects": {
+      "configmaps": [
+        {
+          "kind": "ConfigMap",
+          "name": "ci-skills-run-podman-scripts-c5530b16a4b9db36",
+          "namespace": "ci-skills-run-948f7c274cbe4a25bea9",
+          "uid": "2226361e-f4f1-414e-8940-1abf1cec4f70"
+        }
+      ],
+      "jobs": [
+        {
+          "kind": "Job",
+          "name": "ci-skills-run-podman-probe-c5530b16a4b9db36",
+          "namespace": "ci-skills-run-948f7c274cbe4a25bea9",
+          "uid": "97957279-60d3-44fa-8abf-9a343744db2a"
+        }
+      ],
+      "pods": [],
+      "rolebindings": [
+        {
+          "kind": "RoleBinding",
+          "name": "ci-skills-run-scc-permission-5f4add9322d9458c-c5530b16a4b9db36",
+          "namespace": "ci-skills-run-948f7c274cbe4a25bea9",
+          "uid": "5c560527-9864-4072-9cde-2c3320249e99"
+        }
+      ]
+    }
+  },
+  "observer_errors": [
+    "provider_read_failed:get:TimeoutExpired"
+  ],
+  "provider_identity": {
+    "after": {
+      "cluster_role": {
+        "kind": "ClusterRole",
+        "name": "system:openshift:scc:privileged",
+        "namespace": "",
+        "uid": "8f4125b7-d09a-4d59-aab2-5ecce566d0c6"
+      },
+      "scc": {
+        "kind": "SecurityContextConstraints",
+        "name": "privileged",
+        "namespace": "",
+        "uid": "3bd4207d-29ca-4278-8cb2-8454c239f493"
+      }
+    },
+    "before": {
+      "cluster_role": {
+        "kind": "ClusterRole",
+        "name": "system:openshift:scc:privileged",
+        "namespace": "",
+        "uid": "8f4125b7-d09a-4d59-aab2-5ecce566d0c6"
+      },
+      "scc": {
+        "kind": "SecurityContextConstraints",
+        "name": "privileged",
+        "namespace": "",
+        "uid": "3bd4207d-29ca-4278-8cb2-8454c239f493"
+      }
+    },
+    "preserved": true
+  },
+  "schema_version": "1.0",
+  "signal_sent": false,
+  "status": "BLOCKED"
+}

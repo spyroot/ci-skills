@@ -1,0 +1,152 @@
+{
+  "generated_run_id": "a418c7dbb24141e09a7f26d920b96af5",
+  "identity_sources": {
+    "configmap": {
+      "kind": "ConfigMap",
+      "name": "ci-skills-run-podman-scripts-c5530b16a4b9db36",
+      "namespace": "ci-skills-run-948f7c274cbe4a25bea9",
+      "source": "observer",
+      "uid": "2226361e-f4f1-414e-8940-1abf1cec4f70"
+    },
+    "job": {
+      "name": "ci-skills-run-podman-probe-c5530b16a4b9db36",
+      "source": "receipt.records.RunPodmanProbe.job",
+      "uid": "97957279-60d3-44fa-8abf-9a343744db2a"
+    },
+    "namespace": {
+      "kind": "Namespace",
+      "name": "ci-skills-run-948f7c274cbe4a25bea9",
+      "namespace": "",
+      "source": "observer",
+      "uid": "ca7da558-741c-409a-bd5e-68a0ef5705bc"
+    },
+    "pod": {
+      "exit_code": 0,
+      "image_id": "quay.io/podman/stable@sha256:5118bdbb154b115d77f58107a2e69d65df4375bcb0d89a8da10b055754e8b9f3",
+      "name": "ci-skills-run-podman-probe-c5530b16a4b9db36-t45lk",
+      "source": "receipt.records.RunPodmanProbe.pod",
+      "uid": "75367afb-31d6-446a-b07e-acb10120ebd3"
+    },
+    "rolebinding": {
+      "kind": "RoleBinding",
+      "name": "ci-skills-run-scc-permission-5f4add9322d9458c-c5530b16a4b9db36",
+      "namespace": "ci-skills-run-948f7c274cbe4a25bea9",
+      "source": "observer",
+      "uid": "5c560527-9864-4072-9cde-2c3320249e99"
+    }
+  },
+  "kind": "pr81_supplemental_cleanup_readback",
+  "original_observer": {
+    "path": "path:ad7303572f5f",
+    "status": "BLOCKED",
+    "unchanged": true
+  },
+  "provider_identity_preserved": true,
+  "reads": {
+    "configmap": {
+      "absent": true,
+      "arguments": [
+        "-n",
+        "ci-skills-run-948f7c274cbe4a25bea9",
+        "get",
+        "configmap",
+        "ci-skills-run-podman-scripts-c5530b16a4b9db36",
+        "--ignore-not-found",
+        "-o",
+        "json"
+      ],
+      "item_count": null,
+      "returncode": 0,
+      "stderr": "",
+      "stdout": ""
+    },
+    "job": {
+      "absent": true,
+      "arguments": [
+        "-n",
+        "ci-skills-run-948f7c274cbe4a25bea9",
+        "get",
+        "job",
+        "ci-skills-run-podman-probe-c5530b16a4b9db36",
+        "--ignore-not-found",
+        "-o",
+        "json"
+      ],
+      "item_count": null,
+      "returncode": 0,
+      "stderr": "",
+      "stdout": ""
+    },
+    "namespace": {
+      "absent": true,
+      "arguments": [
+        "get",
+        "namespace",
+        "ci-skills-run-948f7c274cbe4a25bea9",
+        "--ignore-not-found",
+        "-o",
+        "json"
+      ],
+      "item_count": null,
+      "returncode": 0,
+      "stderr": "",
+      "stdout": ""
+    },
+    "owned_labels": {
+      "absent": true,
+      "arguments": [
+        "get",
+        "namespaces,jobs,pods,configmaps,rolebindings",
+        "--all-namespaces",
+        "-l",
+        "app.kubernetes.io/managed-by=ci-skills,ci-skills.spyroot.dev/operation=a418c7dbb24141e09a7f26d920b96af5,ci-skills.spyroot.dev/run-id=a418c7dbb24141e09a7f26d920b96af5",
+        "-o",
+        "json"
+      ],
+      "item_count": 0,
+      "returncode": 0,
+      "stderr": "",
+      "stdout": "{\n    \"apiVersion\": \"v1\",\n    \"items\": [],\n    \"kind\": \"List\",\n    \"metadata\": {\n        \"resourceVersion\": \"\"\n    }\n}\n"
+    },
+    "pod": {
+      "absent": true,
+      "arguments": [
+        "-n",
+        "ci-skills-run-948f7c274cbe4a25bea9",
+        "get",
+        "pod",
+        "ci-skills-run-podman-probe-c5530b16a4b9db36-t45lk",
+        "--ignore-not-found",
+        "-o",
+        "json"
+      ],
+      "item_count": null,
+      "returncode": 0,
+      "stderr": "",
+      "stdout": ""
+    },
+    "rolebinding": {
+      "absent": true,
+      "arguments": [
+        "-n",
+        "ci-skills-run-948f7c274cbe4a25bea9",
+        "get",
+        "rolebinding",
+        "ci-skills-run-scc-permission-5f4add9322d9458c-c5530b16a4b9db36",
+        "--ignore-not-found",
+        "-o",
+        "json"
+      ],
+      "item_count": null,
+      "returncode": 0,
+      "stderr": "",
+      "stdout": ""
+    }
+  },
+  "receipt": {
+    "path": "path:289395b6d8c3",
+    "status": "PASS"
+  },
+  "schema_version": "1.0",
+  "status": "PASS"
+}

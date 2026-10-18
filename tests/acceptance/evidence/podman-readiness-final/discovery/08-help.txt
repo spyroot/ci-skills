@@ -1,0 +1,79 @@
+Summary:
+  Probe nested Podman execution on one Kubernetes worker and clean up.
+
+Description:
+  Check container execution, bind mounts and exit propagation before
+  building a runner workflow.
+
+Examples:
+  Inspect the command: image_build_readiness.py --describe
+
+Options:
+  -h, --help            show this help message and exit
+  --binding PATH        project-declared target and ordered kubeconfig source
+                        resolver
+  --json                versioned JSON document
+  --yaml                versioned YAML document
+  --human               human summary even when stdout is not a terminal
+  --describe            this command's machine-readable contract, then exit
+  --dry-run             list planned probes without contacting any API; never
+                        access evidence
+  --revision SHA        exact source commit of the installed copy, recorded as
+                        a claim
+  --log-format {text,json}
+                        diagnostic log format: text or JSON Lines (default:
+                        text)
+  --log-level {debug,info,warning,error}
+                        minimum diagnostic level: debug, info, warning, or
+                        error
+  --log-file PATH       also append sanitized diagnostics to this exact path
+  --run-id ID           caller-selected identifier included in diagnostic logs
+  --output-dir PATH     write paired JSON and text reports to this explicit
+                        path
+  {probe}
+  --node NAME           restrict to one node name
+  --namespace NAME      existing namespace; default creates a temporary
+                        namespace
+  --probe-image IMAGE@SHA256
+                        digest-pinned image providing Podman; default is Linux
+                        amd64
+  --inner-image IMAGE@SHA256
+                        digest-pinned inner test image; default is Linux amd64
+  --timeout SECONDS     maximum probe duration in seconds
+  --cpu-request QUANTITY
+                        probe container CPU request
+  --cpu-limit QUANTITY  probe container CPU limit
+  --memory-request QUANTITY
+                        probe container memory request
+  --memory-limit QUANTITY
+                        probe container memory limit
+  --storage-size QUANTITY
+                        maximum temporary container-storage volume size
+  --live-plan           read target identity and select a Ready worker without
+                        mutation
+  --apply               run the confirmed probe and verify cleanup
+  --confirm-plan SHA256
+                        exact fingerprint returned by the live plan
+  --receipt-out PATH    write a sanitized operation receipt to this exact path
+
+Output modes:
+  json: versioned JSON document
+
+  yaml: versioned YAML document
+
+  human: human summary even when stdout is not a terminal
+
+Usage:
+  usage: image_build_readiness.py [-h] [--binding PATH] [--json | --yaml |
+  --human] [--describe] [--dry-run] [--revision SHA] [--log-format
+  {text,json}] [--log-level {debug,info,warning,error}] [--log-file PATH]
+  [--run-id ID] [--output-dir PATH] [--node NAME] [--namespace NAME]
+  [--probe-image IMAGE@SHA256] [--inner-image IMAGE@SHA256] [--timeout
+  SECONDS] [--cpu-request QUANTITY] [--cpu-limit QUANTITY] [--memory-request
+  QUANTITY] [--memory-limit QUANTITY] [--storage-size QUANTITY]
+  [--live-plan] [--apply] [--confirm-plan SHA256] [--receipt-out PATH]
+  [{probe}]
+
+  Exit 0: PASS, DRY_RUN, or a live read-only PLANNED result.
+
+  Exit 2: BLOCKED or PARTIAL, or an input that could not be used.

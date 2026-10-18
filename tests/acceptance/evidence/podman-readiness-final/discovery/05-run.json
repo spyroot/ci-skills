@@ -1,0 +1,30 @@
+{
+  "choices": [
+    {
+      "id": "probe",
+      "kind": "execute",
+      "next": {
+        "action": "describe",
+        "args": [
+          "next",
+          "k8s",
+          "image_build_readiness",
+          "run",
+          "probe",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Run a temporary Podman Job on one selected worker."
+    }
+  ],
+  "continuation": null,
+  "kind": "reference_next",
+  "path": [
+    "k8s",
+    "image_build_readiness",
+    "run"
+  ],
+  "schema_version": "1.0",
+  "summary": "1 capability to run."
+}
