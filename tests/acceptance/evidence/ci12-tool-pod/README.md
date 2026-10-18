@@ -1,48 +1,54 @@
 # Installed tool Pod live evidence
 
-Captured on 2026-10-17 from installed candidate `9fe0fea86d224a58f0b86011a39af1297334f647`.
-This is CI12.0 tool preparation evidence; ISO generation and Podman execution are separate deliveries.
+Captured on 2026-10-18 from installed candidate `9aa288084328a9c44d38d78bd86b5e8785d810b3`.
 
-- Package checksum: `7e5cf3950d5c5d80b8193e650734899c678703b3e129af8f284196553353a8da`.
-- Functional checksum: `a1f62f687d0e8c6392abe1412cbaa10abc03a03815471f55df3b49b56e425fd8`.
-- Run ID: `c795c9ba39d8407b9e8220f385d3acad`.
-- Pod UID: `386e5762-720e-4282-8ac5-a43167a2b29c`; restart count remained zero.
+- Package checksum: `1cb30887851e9edb58fbb0d08c9679d8dd736d82314b53bf1c7aff5e33ef6cc3`.
+- Functional checksum: `1bd593cf493b854d921cb2d08eea333d6f08c3f3033fa474e09f28e921c1e052`.
+- Run ID: `a4d6162b88ea446c899e53ccaa2cd792`.
+- Pod UID: `ef739f71-d4b2-40d3-8349-6bb7db0b683d`; restart count remained zero.
 
-## Observed behavior
+## Observed lifecycle
 
-| Operation | Result | Report | Execution trace |
+Resource links abbreviate Namespace as N, Pod as P, and ConfigMap as CM.
+
+| Operation | Observed result | Report | Trace |
 | --- | --- | --- | --- |
-| Prepare and consume | PASS; yq downloaded/installed, all tools verified | [Report][prepare] | [Trace][prepare-trace] |
-| Repeat prepare | PASS; same Pod, no installation repeated | [Report][reuse] | [Trace][reuse-trace] |
-| Remove | PASS; owned resources deleted | [Report](12-remove.json) | [Trace](traces/12-remove.jsonl) |
-| Repeat remove | PASS; verified NO_OP | [Report](15-repeat-remove.json) | [Trace](traces/15-repeat-remove.jsonl) |
+| Before staging | No run-owned resources | [N][before-ns], [P][before-pod], [CM][before-cm] | — |
+| Prepare and consume | `PASS`; tools and same-Pod rsync verified | [Report][prepare] | [Trace][prepare-trace] |
+| Repeat prepare | `PASS`; scope and Pod `NO_OP`; UID unchanged | [Report][reuse] | [Trace][reuse-trace] |
+| Remove | `PASS`; run-owned resources were removed | [Report][remove] | [Trace][remove-trace] |
+| After removal | No run-owned resources | [N][after-ns], [P][after-pod], [CM][after-cm] | — |
+| Repeat remove | `PASS`; cleanup returned `NO_OP` | [Report][repeat-remove] | [Trace][repeat-remove-trace] |
 
-The selected image already contained `sh`, `oc` and `rsync`. The command downloaded and installed
-`yq` v4.47.2, then verified all four tools. An appended consumer callback copied a 34-byte fixture
-with rsync in the same Pod and verified SHA-256
+The selected image already contained `sh`, `oc`, and `rsync`. The installed
+workflow downloaded and installed `yq` v4.47.2, then verified all four tools.
+The `SamePodRsync` record in the prepare report copied 34 bytes with rsync inside
+the staged Pod and verified SHA-256
 `94731147f3b1260a8419454105592b0b2ab1de91d4c7cb63bf1636fd0fb28f2c`.
-The consumer's before/after UID and restart count matched. Its fixture was removed.
+Its before and after Pod UID and restart count are identical.
 
-[BEFORE evidence](00-before-capability.json) records the command's absence at the base revision
-and each generated resource name's absence immediately before creation. The label observation
-occurred after namespace creation but before Pod staging: one namespace, zero Pods and ConfigMaps.
-It does not claim that every run label was absent before the workflow began.
+The bounded GitLab/access refresh produced its existing receipt set at the same
+installed revision and functional checksum. Its [cleanup report][refresh-cleanup]
+records `PASS` with no errors. No shared storage or RBAC object was touched.
 
-Independent final queries returned empty lists for [namespaces](13-absence-namespaces.json),
-[Pods](13-absence-pods.json) and [ConfigMaps](13-absence-configmaps.json).
-The existing 24 GitLab/access receipts were refreshed against this same installation; their
-[cleanup report](acceptance-refresh-cleanup.json) records no errors. Previous receipts remain in
-[history](../../historical/pre-ci12-tool-pod/). No shared storage was touched.
+[Transformation details](TRACE-TRANSFORM.md) explain selector tokenization.
+[Hash mapping](TRANSFORM-MAPPING.json) binds original and published evidence.
+[Receipt hashes](raw-sha256.txt) identify the accompanying acceptance receipts.
+[Timing evidence](measurement.json) contains one correctness sample and makes no
+performance comparison.
 
-## Capture boundaries
-
-[Transformation notes](TRACE-TRANSFORM.md) explain private-selector tokenization.
-[Hash mapping](TRANSFORM-MAPPING.json) binds the original and published receipt/trace bytes;
-[raw hashes](raw-sha256.txt) also identify the required acceptance refresh captures.
-Every trace event, native return code and timing is preserved. No provider result is synthesized.
-[Timings](measurement.json) are one sample, not a performance comparison.
-
+[before-ns]: 04-before-namespaces.json
+[before-pod]: 04-before-pods.json
+[before-cm]: 04-before-configmaps.json
 [prepare]: 05-prepare.json
 [prepare-trace]: traces/05-prepare.jsonl
 [reuse]: 10-repeat-prepare.json
 [reuse-trace]: traces/10-repeat-prepare.jsonl
+[remove]: 12-remove.json
+[remove-trace]: traces/12-remove.jsonl
+[after-ns]: 13-absence-namespaces.json
+[after-pod]: 13-absence-pods.json
+[after-cm]: 13-absence-configmaps.json
+[repeat-remove]: 15-repeat-remove.json
+[repeat-remove-trace]: traces/15-repeat-remove.jsonl
+[refresh-cleanup]: acceptance-refresh-cleanup.json

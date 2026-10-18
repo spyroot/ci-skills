@@ -381,6 +381,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "related": ("toolbox.py",),
+        "references": ("Tool Pod preparation",),
         "required_tools": ("kubectl",),
         "returns": "Plan or actual Pod identity, tool observations, per-callback results and cleanup.",
         "execution_surface": "installed skill controls a Pod in the selected Kubernetes cluster",
@@ -1019,6 +1020,10 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Toolbox dependencies, installation methods and build inputs.",
             "pointer": "schemas/toolbox.schema.json",
         },
+        "Tool Pod preparation": {
+            "summary": "Tool input, preparation, reuse and removal examples.",
+            "pointer": "references/tool-pod.md",
+        },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",
             "pointer": "references/mcp.md",
@@ -1081,10 +1086,13 @@ def command_authorities(script: str) -> Sequence[str]:
     return DISCOVERY_COMMANDS[script]["requires_authorities"]
 
 
-def _proposition_offering(scripts: Sequence[str]) -> MutableMapping[str, JSONValue]:
-    """Offer installed commands with references for their declared providers.
+def _proposition_offering(
+    scripts: Sequence[str], commands: Mapping[str, Mapping[str, object]]
+) -> MutableMapping[str, JSONValue]:
+    """Offer immediate commands with their provider and task references.
 
     :param scripts: Command keys selected for a cluster or related-command node.
+    :param commands: Existing catalogue definitions for the offered commands.
     :returns: Compact tools and optional reference mappings.
     """
     authorities = {name for script in scripts for name in command_authorities(script)}
@@ -1093,6 +1101,8 @@ def _proposition_offering(scripts: Sequence[str]) -> MutableMapping[str, JSONVal
         names.append("mcp")
     if "harbor" in authorities:
         names.append("toolbox specification")
+    for script in scripts:
+        names.extend(json_strings(commands[script].get("references", ())))
     return {
         "tools": {script: {} for script in sorted(scripts)},
         "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
@@ -1116,12 +1126,13 @@ def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
     authorities = {script: command_authorities(script) for script in commands}
     clusters = {
         cluster: _proposition_offering(
-            [script for script, names in authorities.items() if authority in names]
+            [script for script, names in authorities.items() if authority in names],
+            commands,
         )
         for cluster, authority in PROPOSITION_CLUSTERS.items()
     }
     clusters["offline"] = _proposition_offering(
-        [script for script, names in authorities.items() if not names]
+        [script for script, names in authorities.items() if not names], commands
     )
     if node is None:
         return {"schema_version": PROPOSITION_VERSION, **clusters}
@@ -1131,7 +1142,10 @@ def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
         raise ValueError("path_unknown")
     entry = copy_json_object(commands[node])
     scripts = [node, *json_strings(entry.get("related", ()))]
-    return {"schema_version": PROPOSITION_VERSION, **_proposition_offering(scripts)}
+    return {
+        "schema_version": PROPOSITION_VERSION,
+        **_proposition_offering(scripts, commands),
+    }
 
 
 STATUS_MEANING = {

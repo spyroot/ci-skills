@@ -78,6 +78,10 @@ class CommandDefinition(TypedDict):
 
         Command-specific options and help text.
 
+    .. attribute :: references
+
+        Names from the shared proposition reference registry; empty when none apply.
+
     .. attribute :: returns
 
         Result description.
@@ -118,6 +122,7 @@ class CommandDefinition(TypedDict):
     requires: Sequence[str]
     capabilities: Sequence[str]
     options: Mapping[str, str]
+    references: NotRequired[Sequence[str]]
     returns: str
     mutates: NotRequired[bool]
     subcommands: NotRequired[Mapping[str, VerbDefinition]]
@@ -151,6 +156,10 @@ class NodeDefinition(TypedDict):
 
         Native and in-Pod tools used by the diagnostic.
 
+    .. attribute :: references
+
+        Names from the shared proposition reference registry; empty when none apply.
+
     .. attribute :: returns
 
         Result description.
@@ -170,6 +179,7 @@ class NodeDefinition(TypedDict):
     purpose: str
     use_when: str
     required_tools: Sequence[str]
+    references: NotRequired[Sequence[str]]
     returns: str
     options: NotRequired[Mapping[str, str]]
     related: NotRequired[Sequence[str]]
@@ -226,6 +236,10 @@ class ReadDefinition(TypedDict):
 
         Invocation guidance.
 
+    .. attribute :: references
+
+        Names from the shared proposition reference registry; empty when none apply.
+
     .. attribute :: returns
 
         Result description.
@@ -256,6 +270,7 @@ class ReadDefinition(TypedDict):
     examples: Sequence[Mapping[str, str]]
     output_modes: Mapping[str, str]
     usage: str
+    references: NotRequired[Sequence[str]]
     returns: str
     read_only: bool
     side_effects: str
@@ -309,6 +324,10 @@ class DiscoveryDefinition(TypedDict):
 
         Invocation guidance.
 
+    .. attribute :: references
+
+        Names from the shared proposition reference registry; empty when none apply.
+
     .. attribute :: returns
 
         Result description.
@@ -338,6 +357,7 @@ class DiscoveryDefinition(TypedDict):
     examples: Sequence[Mapping[str, str]]
     output_modes: Mapping[str, str]
     usage: str
+    references: NotRequired[Sequence[str]]
     returns: str
     read_only: bool
     side_effects: str
