@@ -19,8 +19,10 @@ then the [selected section](final-d1b2c6f/pipeline-section.json). These outputs 
 the existing v3 schemas, and the [human renderer](final-d1b2c6f/command-human.txt) exited successfully.
 
 All 24 ordinary acceptance receipts carry this functional checksum; disposable resources were
-removed and [absence verified](final-d1b2c6f/acceptance-cleanup.json). The separate Podman receipt
-remains pending; no live-acceptance checkpoint PASS is claimed.
+removed and [absence verified](final-d1b2c6f/acceptance-cleanup.json). The matching
+[Podman receipt](../../podman-readiness/image-build-readiness.json) passed all eight runtime checks and Pod exit 0.
+[Independent cleanup](final-d1b2c6f/podman-cleanup.json) verified all five owned resources absent;
+the existing SCC and ClusterRole remained present. GitHub checks the complete receipt set before merge.
 [Checksums](final-d1b2c6f/sha256.txt) bind the published documents. CLI portable receipts are
 unchanged; final get uses the existing portable transform for local credential paths.
 
