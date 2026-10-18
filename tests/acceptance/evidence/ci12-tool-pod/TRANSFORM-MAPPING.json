@@ -120,7 +120,7 @@
     {
       "kind": "acceptance_receipt",
       "portable_name": "tests/acceptance/receipts/access-check.json",
-      "portable_sha256": "abf1186b93c32bd2832261193675e2fc4842e8036a5948499f59a1b86ffc4ba1",
+      "portable_sha256": "2daa992bd5092136639e53a6e59321f711dedb2df1f6348a17f58a5fa6acd7a0",
       "raw_name": "acceptance-refresh/receipts/access-check.json",
       "raw_sha256": "0936bb4da11fae120d481a09b7cad7c226e4cfc42febcd27c0fd20fcad219be0"
     },
