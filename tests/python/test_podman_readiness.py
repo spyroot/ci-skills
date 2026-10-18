@@ -234,7 +234,7 @@ def test_probe_defaults_to_live_plan_and_apply_requires_confirmation(
     """
     args = READINESS.build_parser().parse_args([])
 
-    assert READINESS._mode(args) == PODMAN.ProbeMode.LIVE_PLAN
+    assert PODMAN.resolve_probe_mode(args) == PODMAN.ProbeMode.LIVE_PLAN
     with pytest.raises(ValueError, match="confirm_plan_required"):
         replace(
             _action(tmp_path),
@@ -734,6 +734,10 @@ class FakeKubernetes:
             return {"items": self._labeled("pod", args)}
         if args[:2] == ("get", "configmaps") and "--all-namespaces" in args:
             return {"items": self._labeled("configmap", args)}
+        if args[:2] == ("get", "deployments") and "--all-namespaces" in args:
+            return {"items": self._labeled("deployment", args)}
+        if args[:2] == ("get", "rolebindings") and "--all-namespaces" in args:
+            return {"items": self._labeled("rolebinding", args)}
         if "pods" in args:
             if self.scc_rejected:
                 return {"items": []}
