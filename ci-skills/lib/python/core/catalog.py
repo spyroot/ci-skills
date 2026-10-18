@@ -21,6 +21,7 @@ the real one is a test failure rather than a surprise at runtime.
 
 from __future__ import annotations
 
+import re
 from argparse import Namespace
 from collections.abc import Mapping, MutableMapping, Sequence
 from types import MappingProxyType
@@ -1059,7 +1060,7 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
     },
 }
 
-PROPOSITION_VERSION: Final = "2.0"
+PROPOSITION_VERSION: Final = "3.0"
 PROPOSITION_CLUSTERS: Final = MappingProxyType(
     {
         "glab": "gitlab",
@@ -1108,64 +1109,6 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         },
     }
 )
-# Progressive navigation contains placements only; executable facts stay above.
-NAV_NODES: Final = MappingProxyType(
-    {
-        (): "Discover what ci-skills can inspect, run or read.",
-        ("gitlab",): "GitLab pipelines, jobs, runners, issues, milestones and wikis.",
-        ("gitlab", "access"): "Prove GitLab access and read back the selected target.",
-        ("gitlab", "api"): "Read one caller-selected GitLab or GitHub API resource.",
-        ("gitlab", "issue"): "Create or reuse exact bug issues.",
-        ("gitlab", "job"): "Inspect job state, output and failure evidence.",
-        ("gitlab", "milestone"): "Create or update milestones.",
-        ("gitlab", "pipeline"): "Inspect, watch and diagnose pipelines.",
-        ("gitlab", "runner"): "Inspect or manage runners.",
-        ("gitlab", "wiki"): "Create or update wiki pages.",
-        ("k8s",): "Cluster, workload, storage and network operations.",
-        ("k8s", "build"): "Plan exact-commit OpenShift binary builds.",
-        (
-            "k8s",
-            "ceph",
-        ): "Ceph health, OSDs, placement groups and host kernel messages.",
-        ("k8s", "cilium"): "Cilium agents, operator and per-node health.",
-        ("k8s", "events"): "What the cluster reported during an interval.",
-        ("k8s", "network"): "Physical uplink MTU consistency across nodes.",
-        ("k8s", "storage"): "Claims, volumes, attachments and the pods using them.",
-        ("github",): "GitHub operations and related combinations.",
-        ("harbor",): "Registry, images, charts and related operations.",
-    }
-)
-NAV_PLACEMENT: Final = MappingProxyType(
-    {
-        "access_check.py": (),
-        "gitlab_access.py": ("gitlab", "access"),
-        "bin/ci-api": ("gitlab", "api"),
-        "gitlab_issue.py": ("gitlab", "issue"),
-        "gitlab_job.py": ("gitlab", "job"),
-        "gitlab_milestone.py": ("gitlab", "milestone"),
-        "gitlab_pipeline.py": ("gitlab", "pipeline"),
-        "gitlab_runner.py": ("gitlab", "runner"),
-        "gitlab_wiki.py": ("gitlab", "wiki"),
-        "bin/ci-binary-build": ("k8s", "build"),
-        "ceph_cluster.py": ("k8s", "ceph"),
-        "ceph_kernel.py": ("k8s", "ceph"),
-        "cilium_status.py": ("k8s", "cilium"),
-        "cilium_node.py": ("k8s", "cilium"),
-        "event_trace.py": ("k8s", "events"),
-        "k8s_verify_mtu_consistency.py": ("k8s", "network"),
-        "storage_report.py": ("k8s", "storage"),
-    }
-)
-PLANNED_VERBS: Final = MappingProxyType(
-    {
-        "gitlab_job.py": dict.fromkeys(("get", "list", "watch", "logs"), "CI11-TOOLS"),
-        "gitlab_pipeline.py": dict.fromkeys(
-            ("list", "logs", "children", "start", "retry", "cancel"), "CI11-TOOLS"
-        ),
-        "gitlab_runner.py": {"reset-token": "CI11-TOOLS"},
-        "gitlab_milestone.py": {"list": "CI11-TOOLS"},
-    }
-)
 NAV_OPTIONS: Final = {
     "--page": "one-based discovery or section page",
     "--search": "literal search within one selected reference",
@@ -1176,8 +1119,8 @@ NAV_OPTIONS: Final = {
 DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
     "reference.py": {
         "report_kind": "reference_next",
-        "purpose": "Expand installed tools, required inputs and selected reference sections.",
-        "use_when": "Choose a capability, expand its optional inputs or read one reference section.",
+        "purpose": "Show what the agent can run and read at one node, or read one reference.",
+        "use_when": "Choose a cluster or command, list a reference's sections or read one section.",
         "requires_authorities": [],
         "required_tools": ["python3"],
         "required_options": [],
@@ -1196,7 +1139,7 @@ DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
             "--log-file",
             "--run-id",
         ],
-        "description": "Expand one node; optional references remain pointers until requested.",
+        "description": "One answer per node: installed tools to run and references to read, each a pointer to the next call.",
         "examples": [
             {"description": "Show available clusters", "command": "reference.py"},
             {"description": "Expand GitLab tools", "command": "reference.py glab"},
@@ -1204,14 +1147,18 @@ DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
                 "description": "Expand a command node",
                 "command": "reference.py gitlab_runner.py",
             },
+            {
+                "description": "List one reference's sections",
+                "command": "reference.py get mcp",
+            },
         ],
         "output_modes": {
-            "json": "Compact JSON with --json; default for legacy node propositions",
+            "json": "Compact JSON; default when stdout is not a terminal",
             "yaml": "Versioned YAML with --yaml",
-            "human": "Readable selected level; default for next/get",
+            "human": "Run and read lists; default on a terminal",
         },
-        "usage": "reference.py [node] | next [path ...] | get reference anchor [options]",
-        "returns": "A compact proposition, bounded discovery page or selected own-text reference section.",
+        "usage": "reference.py [node] | get reference [anchor] [options]",
+        "returns": "A node of tools and references, one reference's sections, or one section's own text.",
         "read_only": True,
         "side_effects": "Only an explicit log file is written; dry-run and describe do not write.",
         "execution_surface": "installed catalogue; no provider or credential access",
@@ -1238,14 +1185,37 @@ def command_authorities(script: str) -> Sequence[str]:
     return DISCOVERY_COMMANDS[script]["requires_authorities"]
 
 
+def reference_slug(name: str) -> str:
+    """Derive the stable identifier a pointer uses for one registered reference.
+
+    :param name: Registry key, the reference's display name.
+    :returns: Lowercase identifier made of letters, digits, hyphens and underscores.
+    """
+    return re.sub(r"[^a-z0-9_-]", "", name.casefold().replace(" ", "-")) or "reference"
+
+
+def reference_entry(name: str) -> MutableMapping[str, JSONValue]:
+    """Render one registered reference as a read entry of a proposition node.
+
+    :param name: Registry key in ``PROPOSITION_REFERENCES``.
+    :returns: Name, summary and the next ``reference.py`` call as a string.
+    """
+    record = PROPOSITION_REFERENCES[name]
+    return {
+        "name": name,
+        "summary": record["summary"],
+        "pointer": f"get {reference_slug(name)}",
+    }
+
+
 def _proposition_offering(
     scripts: Sequence[str], commands: Mapping[str, Mapping[str, object]]
 ) -> MutableMapping[str, JSONValue]:
-    """Offer immediate commands with their provider and task references.
+    """Offer what the agent can run and what it can read at one node.
 
     :param scripts: Command keys selected for a cluster or related-command node.
     :param commands: Existing catalogue definitions for the offered commands.
-    :returns: Compact tools and optional reference mappings.
+    :returns: Installed filenames under ``tools`` and an ordered array of read entries.
     """
     authorities = {name for script in scripts for name in command_authorities(script)}
     names = ["access", "project binding"] if authorities else []
@@ -1257,7 +1227,7 @@ def _proposition_offering(
         names.extend(json_strings(commands[script].get("references", ())))
     return {
         "tools": {script: {} for script in sorted(scripts)},
-        "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
+        "reference": [reference_entry(name) for name in dict.fromkeys(names)],
     }
 
 

@@ -1201,7 +1201,7 @@
       "use_when": "Run tooling in a retained cluster Pod for another callback or command."
     },
     "reference.py": {
-      "description": "Expand one node; optional references remain pointers until requested.",
+      "description": "One answer per node: installed tools to run and references to read, each a pointer to the next call.",
       "examples": [
         {
           "command": "reference.py",
@@ -1214,6 +1214,10 @@
         {
           "command": "reference.py gitlab_runner.py",
           "description": "Expand a command node"
+        },
+        {
+          "command": "reference.py get mcp",
+          "description": "List one reference's sections"
         }
       ],
       "execution_surface": "installed catalogue; no provider or credential access",
@@ -1233,11 +1237,11 @@
         "--run-id"
       ],
       "output_modes": {
-        "human": "Readable selected level; default for next/get",
-        "json": "Compact JSON with --json; default for legacy node propositions",
+        "human": "Run and read lists; default on a terminal",
+        "json": "Compact JSON; default when stdout is not a terminal",
         "yaml": "Versioned YAML with --yaml"
       },
-      "purpose": "Expand installed tools, required inputs and selected reference sections.",
+      "purpose": "Show what the agent can run and read at one node, or read one reference.",
       "read_only": true,
       "report_kind": "reference_next",
       "required_options": [],
@@ -1245,10 +1249,10 @@
         "python3"
       ],
       "requires_authorities": [],
-      "returns": "A compact proposition, bounded discovery page or selected own-text reference section.",
+      "returns": "A node of tools and references, one reference's sections, or one section's own text.",
       "side_effects": "Only an explicit log file is written; dry-run and describe do not write.",
-      "usage": "reference.py [node] | next [path ...] | get reference anchor [options]",
-      "use_when": "Choose a capability, expand its optional inputs or read one reference section."
+      "usage": "reference.py [node] | get reference [anchor] [options]",
+      "use_when": "Choose a cluster or command, list a reference's sections or read one section."
     },
     "storage_report.py": {
       "capabilities": [

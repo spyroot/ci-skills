@@ -27,8 +27,8 @@ adds the record, or `today` where the record exists in the tree.
 | `skill-frontmatter` | none, upstream shape | the YAML block in each `SKILL.md` | authors | missing |
 | `skill-manifest` | `skill_manifest` | `ci-skills/tools.json` | `tools/render_manifest.py` | implemented |
 | `skill-index` | `skill_index` | `bin/ci-skills list --json` | `tools/skillkit/discover.py` | implemented |
-| `reference-next` | `reference_next` | `next` answers and the shared pointer | `core/navigate.py` | implemented |
-| `reference-section` | `reference_section` | `reference.py get` answers | `core/navigate.py` | implemented |
+| `reference-next` | none, proposition | node answers and shared pointer definitions | `core/catalog.py` | implemented |
+| `reference-section` | `reference_section` | `reference.py get` answers | `core/navigate_references.py` | implemented |
 | `gitlab-pipeline-watch` | `gitlab_pipeline_watch` | `watch` results | `core/gitlab_pipelines.py` | implemented |
 | `vendor-lock` | `skill_vendor_lock` | `vendor/vendor.lock.json` | `bin/ci-skills update` | missing |
 | `vendor-declarations` | not named yet | `vendor/vendor.toml` | by hand | missing |
@@ -54,12 +54,12 @@ reuses another's `$defs`):
   `ci-skills/tools.json`; it accepts that file and refuses an unknown field, an entry without `purpose`, an option
   name without dashes, `read_only` as text and an unknown authority.
 - [`schemas/reference-next.schema.json`](../../schemas/reference-next.schema.json) and
-  [`schemas/reference-section.schema.json`](../../schemas/reference-section.schema.json), built from CI09-REFERENCE
-  section 3's renders; they accept all of them and a 1.1 answer, and refuse an unknown field, a capability without
-  `read_back`, a read choice without `when`, an unavailable verb with a pointer, 13 choices, a 101-character
-  summary, an unknown action or error reason, MAJOR 2 and an unknown tier. `reference-section` reuses the choice
-  and pointer of `reference-next`, so its commands add `--base-uri`. Their producer, `reference.py`, is not built
-  yet (CI09-REFERENCE).
+  [`schemas/reference-section.schema.json`](../../schemas/reference-section.schema.json) follow the
+  [CI11 v3 proposition contract](CI11-TOOLS.md#proposition-schema): `tools` is a filename mapping and `reference`
+  is an ordered array of `name`, `summary` and `pointer` entries. Pointers are `get` invocations, with no separate
+  `next` field. Both schemas require version `3.0`; the 1.x discovery envelope and 2.0 reference map are retired.
+  `reference-section` reuses `reference-next`'s entry and error definitions, so its commands add `--base-uri`.
+  `reference.py` is implemented; the legacy command-pointer definitions remain only for pipeline watch results.
 - [`schemas/gitlab-pipeline-watch.schema.json`](../../schemas/gitlab-pipeline-watch.schema.json), built from the
   pipeline watch result in CI11-TOOLS, Combos; it accepts that result and refuses an unknown `via` and a depth
   over 5. Its producer, `gitlab_pipeline.py watch`, is not built yet (CI11-TOOLS).
@@ -172,13 +172,13 @@ The report kinds, one `<kind>.schema.json` each:
 - `skill_vendor_check` and `skill_vendor_update` (`bin/ci-skills verify` and
   `update`, planned, CI05-VENDOR);
 - `reference_verify` (`ci-skills/bin/reference.py verify`, planned,
-  CI09-REFERENCE); `reference_next` and `reference_section` are in the table above.
+  CI09-REFERENCE); discovery propositions and `reference_section` are in the table above.
 
 ## Rules every schema follows
 
-- **Identity.** Every record we generate carries `kind`, a constant per
-  schema, and `schema_version`. The two upstream shapes carry neither: the
-  `SKILL.md` frontmatter, and `agents/openai.yaml`, whose fields the Agent
+- **Identity.** Generated records carry `kind`, a constant per schema, and `schema_version`, except v3
+  propositions, whose root and node shapes omit `kind` (CI11-TOOLS, Proposition schema). The two upstream shapes
+  carry neither: the `SKILL.md` frontmatter, and `agents/openai.yaml`, whose fields the Agent
   Skills specification fixes (CI01-CATALOG).
 - **Names.** Names match `^[a-z0-9]+(-[a-z0-9]+)*$`. A skill's `name` equals
   its directory name, which `tests/python/test_skill_package.py` already checks.
@@ -296,9 +296,9 @@ that changes the schema, the producer and the one owning document together:
 A reader built for an older MINOR skips a choice, pointer or relation whose enum value it does not know, ignores
 fields it does not know, and never fails the whole answer for them.
 
-Exhibit, a miss we already know of: the priority and severity sections say their meaning lives in another reference,
-and no relation can say so. The fix is one enum value in `schemas/reference-next.schema.json`, shown in that file's
-own formatting:
+Historical 1.x illustration, retired by [CI11 v3](CI11-TOOLS.md#proposition-schema): the priority and severity
+sections refer to another reference through a proposed relation enum addition. This is not a current discovery schema
+change:
 
 ```diff
          "rel": {
@@ -319,9 +319,9 @@ The producer then answers with `"schema_version": "1.1"`. Once the handbook's tr
 
 The `^1\.[0-9]+$` pattern accepts both 1.0 and 1.1 answers; nothing else changes.
 
-`reference-next`, `reference-section` and `gitlab-pipeline-watch` start at 1.0 although their producers are not
-built yet: we fixed their shape by example, so they are locked contracts, not shapes in review, and step 1
-below does not apply to them.
+`reference-next` and `reference-section` use `3.0` under CI11-TOOLS, Proposition schema;
+`gitlab-pipeline-watch` remains at `1.0`. These are locked contracts, not shapes in review, so step 1 below does not
+apply to them.
 
 How a version is promoted:
 
