@@ -511,12 +511,15 @@ def _report_file_lines(data: JSONObject) -> Sequence[str]:
     ]
 
 
-def render_value(data: JSONValue, mode: str, compact: bool = False) -> str:
+def render_value(
+    data: JSONValue, mode: str, compact: bool = False, *, ordered: bool = False
+) -> str:
     """Serialize selected provider data or a validated report for the caller.
 
     :param data: JSON-compatible value after the caller's validation or redaction.
     :param mode: Selected json, yaml, or text representation.
     :param compact: Whether JSON uses compact separators instead of indentation.
+    :param ordered: Preserve field insertion order and UTF-8 for bounded discovery output.
     :returns: One serialized value ending in a newline.
     :raises RuntimeError: If YAML output is requested without PyYAML.
     :raises ValueError: If the mode is unsupported, JSON contains nonfinite numbers,
@@ -542,7 +545,8 @@ def render_value(data: JSONValue, mode: str, compact: bool = False) -> str:
             copy_json(data),
             indent=None if compact else 2,
             separators=(",", ":") if compact else None,
-            sort_keys=True,
+            sort_keys=not ordered,
+            ensure_ascii=not ordered,
             allow_nan=False,
         )
         + "\n"
@@ -564,7 +568,11 @@ def emit(data: JSONObject, mode: str, output_dir: Optional[str] = None) -> str:
     :raises KeyError: If human rendering encounters a missing required report field.
     :raises yaml.YAMLError: If YAML cannot represent the report.
     """  # noqa: DOC502 - serializers, field readers, and file I/O propagate errors.
+    reference = data.get("kind") in ("reference_next", "reference_section")
+    selected_text = data.get("text", "")
     data = redact_tree(data)
+    if data.get("kind") == "reference_section":
+        data["text"] = selected_text
     if output_dir:
         destination = Path(output_dir).expanduser().resolve()
         stem = re.sub(r"[^A-Za-z0-9_-]", "_", str(data.get("kind") or "report"))
@@ -573,8 +581,13 @@ def emit(data: JSONObject, mode: str, output_dir: Optional[str] = None) -> str:
             "json": str(run_directory / f"{stem}.json"),
             "text": str(run_directory / f"{stem}.txt"),
         }
-    pretty_json = render_value(data, "json")
-    human_text = human(data)
+    pretty_json = render_value(data, "json", compact=reference, ordered=reference)
+    if reference:
+        from lib.python.core.navigate_render import human as reference_human
+
+        human_text = reference_human(data)
+    else:
+        human_text = human(data)
     rendered = (
         pretty_json
         if mode == "json"
