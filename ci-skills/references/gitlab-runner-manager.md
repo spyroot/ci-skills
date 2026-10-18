@@ -9,8 +9,9 @@ verified by `image_build_readiness.py probe`.
 
 Use the installed root and Python environment described in `SKILL.md`. The
 default command reads live provider state and returns `plan_digest`; `--dry-run`
-returns offline intent without an apply-ready confirmation. A missing run ID
-is generated only after confirmation and returned by successful apply:
+returns offline intent without an apply-ready confirmation. When `--run-id` is
+omitted, the command derives a stable run ID from the GitLab origin and runner
+ID. Repeating these inputs looks up the owned manager in the selected cluster:
 
 ```bash
 conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/gitlab_runner_manager.py" deploy \
@@ -46,13 +47,17 @@ conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/gitlab_runner_manager.py" dep
 ```
 
 If the caller selects `--run-id RUN_ID`, repeat it in both invocations; an
-explicit identity is part of confirmation. Use the same five resource values
+explicit identity is preserved and is part of confirmation. Use the same five resource values
 that the successful `image_build_readiness.py` probe used. The defaults shown
 above match that command's defaults.
 
+The shared runner lock serializes lookup, changes, and cleanup on the same
+execution host; it does not coordinate independent hosts.
+
 Add `--namespace EXISTING_NAMESPACE` to retain a caller-owned namespace. If it
-is omitted, confirmed apply creates and returns a run-owned namespace and run
-ID. Successful apply proves the exact Deployment placement, ServiceAccount, privilege,
+is omitted, confirmed apply reuses the resolved run-owned namespace or creates
+one when absent. Apply returns the namespace and run ID. Successful apply
+proves the exact Deployment placement, ServiceAccount, privilege,
 resources, Podman storage, immutable image ID, and exact GitLab runner online
 with contact evidence.
 

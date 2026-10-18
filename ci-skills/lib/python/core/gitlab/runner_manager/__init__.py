@@ -13,6 +13,7 @@ from .action import (
 from .callbacks import (
     GitLabManagerAuth,
     GitLabRunnerRuntime,
+    GuardGitLabRunnerManager,
     ObserveGitLabRunner,
     VerifyGitLabRunnerOnline,
     VerifyGitLabRunnerPreserved,
@@ -43,6 +44,7 @@ __all__ = (
     "GitLabRunnerManagerAction",
     "GitLabRunnerManagerState",
     "GitLabRunnerRuntime",
+    "GuardGitLabRunnerManager",
     "ManagerWorkloadAction",
     "NoRunnerToken",
     "ObserveGitLabRunner",

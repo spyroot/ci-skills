@@ -23,6 +23,7 @@ from lib.python.core.gitlab.runner_manager import (
     GitLabRunnerManagerAction,
     GitLabRunnerManagerState,
     GitLabRunnerRuntime,
+    GuardGitLabRunnerManager,
     ObserveGitLabRunner,
     OpenManagerRunScope,
     PullManagerImage,
@@ -77,17 +78,11 @@ def workflow(
                 action.args.timeout,
             )
         )
-    selected_run_id = action.requested_run_id
-    resolve = (
-        ResolveRunScopeAction(selected_run_id) if selected_run_id is not None else None
-    )
-    if resolve is not None:
-        callbacks.append(ResolveRunScopes(resolve))
+    resolve = ResolveRunScopeAction(action.scope_id)
+    callbacks.extend((GuardGitLabRunnerManager(action), ResolveRunScopes(resolve)))
     if action.args.action == "delete":
-        if resolve is None:
-            raise ValueError("runner_manager_run_id_required")
         callbacks.append(SelectResolvedManagerScope(workload))
-    elif resolve is not None:
+    else:
         callbacks.append(SelectManagerPlanScope(workload))
     callbacks.extend((ObserveGitLabRunner(action), ConfirmWorkflow(action)))
     if action.args.apply:
@@ -103,8 +98,6 @@ def workflow(
                 )
             )
         else:
-            if resolve is None:
-                raise ValueError("runner_manager_run_id_required")
             callbacks.extend(
                 (
                     DeleteManagerRunner(workload),

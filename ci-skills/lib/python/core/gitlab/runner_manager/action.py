@@ -22,6 +22,7 @@ from lib.python.core.kubernetes.podman_runtime import (
     PodmanRuntimeSettings,
 )
 from lib.python.core.kubernetes.run_scope import (
+    RUN_ID_LIMIT,
     RunScope,
     RunScopeState,
     validate_run_id,
@@ -143,14 +144,14 @@ class ManagerWorkloadAction(SkillAction):
         }
 
     def plan_document(self) -> JSONObject:
-        """Describe inputs before a generated run scope exists.
+        """Describe selected inputs without volatile namespace observations.
 
         :returns: Stable workload inputs bound by confirmation. A generated
-            namespace and resource name remain absent until confirmed apply.
+            namespace remains absent until confirmed apply.
         """
         workflow = self.workflow
         candidate = workflow.candidate_scope
-        run_id = workflow.requested_run_id
+        run_id = workflow.scope_id
         namespace = getattr(workflow.args, "namespace", "") or None
         return {
             "runner": {
@@ -190,7 +191,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
     .. attribute :: candidate_scope
         :type: Optional[RunScope]
 
-        Scope prepared for an explicit deploy run ID, otherwise absent.
+        Deploy scope prepared for the explicit or derived run ID, otherwise absent.
 
     .. attribute :: podman_runtime
         :type: Optional[PodmanRuntimeSettings]
@@ -267,19 +268,17 @@ class GitLabRunnerManagerAction(WorkflowAction):
         """Read the exact selected or resolved scope identity.
 
         :returns: DNS-safe run identifier.
-        :raises ValueError: The operation has not selected or opened a run scope.
-        """
+        :raises ValueError: The target, runner, or selected run identifier is invalid.
+        """  # noqa: DOC502 - Scope identity validation propagates input errors.
         if hasattr(self.context, "run_scope"):
             return self.context.run_scope.run_id
-        if self.requested_run_id is not None:
-            return self.requested_run_id
-        raise ValueError("runner_manager_run_id_unresolved")
+        return self.scope_id
 
     @property
     def requested_run_id(self) -> Optional[str]:
         """Read the caller-selected run identity without generating one.
 
-        :returns: Validated identifier, or ``None`` for deploy-time generation.
+        :returns: Validated identifier, or ``None`` for stable deploy derivation.
         :raises ValueError: Delete omitted the required run identifier or syntax
             is invalid.
         """
@@ -287,6 +286,29 @@ class GitLabRunnerManagerAction(WorkflowAction):
         if self.args.action == "delete" and value is None:
             raise ValueError("runner_manager_run_id_required")
         return validate_run_id(value) if value is not None else None
+
+    @property
+    def scope_id(self) -> str:
+        """Select the caller's identity or derive it from the exact GitLab runner.
+
+        Lookup remains confined to the selected Kubernetes cluster. Project and
+        group aliases for the same runner do not create another manager identity.
+
+        :returns: Caller-selected run ID or a stable DNS-safe runner identity.
+        :raises ValueError: The target is unresolved or a run ID is invalid.
+        """  # noqa: DOC503 - The selected identifier validates caller syntax.
+        selected = self.requested_run_id
+        if selected is not None:
+            return selected
+        if self.target.gitlab is None:
+            raise ValueError("runner_manager_target_unresolved")
+        return plan_digest(
+            {
+                "kind": MANAGER_ROLE,
+                "origin": self.target.gitlab.url,
+                "runner_id": self.runner_id,
+            }
+        )[:RUN_ID_LIMIT]
 
     def workload(self) -> ManagerWorkloadAction:
         """Build the typed deferred manager workload action.
@@ -309,14 +331,12 @@ class GitLabRunnerManagerAction(WorkflowAction):
         :raises ValueError: Namespace or run identifier syntax is invalid.
         """
         namespace = getattr(self.args, "namespace", "") or None
-        selected_run_id = self.requested_run_id
+        selected_run_id = self.scope_id
         if self.args.action == "deploy":
-            if selected_run_id is not None:
-                self.candidate_scope = RunScope.new(
-                    namespace=namespace,
-                    run_id=selected_run_id,
-                )
-            return
+            self.candidate_scope = RunScope.new(
+                namespace=namespace,
+                run_id=selected_run_id,
+            )
 
     def prepare(self) -> None:
         """Bind providers and typed manager inputs without mutating them.
@@ -413,27 +433,29 @@ class GitLabRunnerManagerAction(WorkflowAction):
         }
 
     def scope_plan(self) -> tuple[JSONObject, JSONObject]:
-        """Bind selected scope inputs without inventing generated apply state.
+        """Bind deploy selection and exact delete scope without volatile reuse state.
 
         :returns: Stable run-scope and workload plan documents.
         """
         found = tuple(self.context.found_scopes)
-        if found and hasattr(self.context, "run_scope"):
+        if (
+            self.args.action == "delete"
+            and found
+            and hasattr(self.context, "run_scope")
+        ):
             scope = self.context.run_scope
             return scope.as_dict(), self.workload().document(scope)
         namespace = getattr(self.args, "namespace", "") or None
         scope: JSONObject = {
-            "run_id": self.requested_run_id or "",
+            "run_id": self.scope_id,
             "namespace": namespace,
             "owns_namespace": namespace is None,
-            "state": "generated_on_apply"
-            if self.requested_run_id is None
-            else "selected",
+            "state": "selected",
         }
         return scope, self.workload().plan_document()
 
     def fingerprint(self) -> str:
-        """Bind provider, credential, image, scope, node, and before-state.
+        """Bind provider, credential, image, scope selection, and node inputs.
 
         :returns: Canonical nonsecret plan fingerprint.
         :raises ValueError: Preparation omitted required target or scope provenance.

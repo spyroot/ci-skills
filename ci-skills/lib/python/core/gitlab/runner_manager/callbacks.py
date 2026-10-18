@@ -9,17 +9,18 @@ from __future__ import annotations
 
 import time
 from collections.abc import MutableMapping
+from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Final, Optional
 
 from lib.python.access.gitlab import check_gitlab_operation_access
 from lib.python.access.gitlab_credentials import bind_gitlab_session
 from lib.python.core.abstract.callback import Callback
-from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.abstract.skill_action import ActionT_co
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.delivery_state import ProviderAuthAction
 from lib.python.core.gitlab.gitlab_actions import ActionError
-from lib.python.core.gitlab.gitlab_api import GlabAPIClient
+from lib.python.core.gitlab.gitlab_api import GlabAPIClient, runner_update_guard
 from lib.python.core.gitlab.gitlab_runners import read_runner_record
 from lib.python.core.gitlab.gitlab_session import GitLabService
 from lib.python.core.json_types import (
@@ -109,7 +110,7 @@ class GitLabManagerAuthAction(ProviderAuthAction):
     revision: Optional[str]
 
 
-class GitLabRunnerManagerCallback(Callback[GitLabRunnerManagerState, SkillAction]):
+class GitLabRunnerManagerCallback(Callback[GitLabRunnerManagerState, ActionT_co]):
     """Share the GitLab service retained by manager authentication."""
 
     @property
@@ -159,7 +160,7 @@ class GitLabRunnerManagerCallback(Callback[GitLabRunnerManagerState, SkillAction
         return self.manager_state.gitlab
 
 
-class GitLabManagerAuth(GitLabRunnerManagerCallback):
+class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
     """Bind and independently verify one GitLab runner target."""
 
     def __init__(self, workflow: GitLabRunnerManagerAction):
@@ -236,8 +237,8 @@ class GitLabManagerAuth(GitLabRunnerManagerCallback):
         return access
 
 
-class ObserveGitLabRunner(GitLabRunnerManagerCallback):
-    """Bind exact runner and manager ownership into the live plan."""
+class GitLabManagerComponent(GitLabRunnerManagerCallback[GitLabRunnerManagerAction]):
+    """Share typed manager inputs without mixing them with authentication inputs."""
 
     def __init__(self, workflow: GitLabRunnerManagerAction):
         """Retain prepared runner identity and scope selection.
@@ -256,6 +257,43 @@ class ObserveGitLabRunner(GitLabRunnerManagerCallback):
         if not isinstance(self.action, GitLabRunnerManagerAction):
             raise TypeError("gitlab_runner_manager_action_required")
         return self.action
+
+
+class GuardGitLabRunnerManager(GitLabManagerComponent):
+    """Hold the shared runner lock across lookup, mutation, and reverse cleanup."""
+
+    def __init__(self, workflow: GitLabRunnerManagerAction):
+        """Retain manager inputs and an initially inactive resource guard.
+
+        :param workflow: Prepared operation whose runner identity is serialized.
+        """
+        super().__init__(workflow)
+        self._guard: ExitStack = ExitStack()
+
+    def run(self) -> JSONObject:
+        """Acquire the existing same-host runner guard before scope observations.
+
+        :returns: Empty evidence; the lock changes no provider resource.
+        :raises GitLabAPIError: The shared runner lock cannot be acquired safely.
+        :raises OSError: Opening or locking the shared runner descriptor fails.
+        """  # noqa: DOC502 - Shared context management owns lock failures.
+        self._guard.enter_context(
+            runner_update_guard(self.gitlab.session.origin, self.workflow.runner_id)
+        )
+        return {}
+
+    def cleanup(self) -> JSONObject:
+        """Release the guard after all later callbacks have finished cleanup.
+
+        :returns: Empty evidence after releasing any acquired lock.
+        :raises OSError: Releasing the shared runner descriptor fails.
+        """  # noqa: DOC502 - Closing the shared guard releases its descriptor.
+        self._guard.close()
+        return {}
+
+
+class ObserveGitLabRunner(GitLabManagerComponent):
+    """Bind exact runner and manager ownership into the live plan."""
 
     def _require_owned_online_manager(self) -> None:
         """Require one exact manager in the resolved run scope.
@@ -304,32 +342,14 @@ class ObserveGitLabRunner(GitLabRunnerManagerCallback):
         scope, _ = workflow.scope_plan()
         return {
             "verified": True,
-            "run_id": workflow.requested_run_id or "",
+            "run_id": workflow.scope_id,
             "scope": scope,
             **runner_evidence(record),
         }
 
 
-class GitLabRunnerRuntime(GitLabRunnerManagerCallback):
+class GitLabRunnerRuntime(GitLabManagerComponent):
     """Prepare shell-executor bootstrap for the shared runner Deployment."""
-
-    def __init__(self, workflow: GitLabRunnerManagerAction):
-        """Retain the confirmed workflow whose token is revalidated.
-
-        :param workflow: Prepared live runner-manager operation.
-        """
-        super().__init__(workflow)
-
-    @property
-    def workflow(self) -> GitLabRunnerManagerAction:
-        """Read the concrete runner-manager action.
-
-        :returns: Prepared runner-manager action.
-        :raises TypeError: A direct caller supplied another action type.
-        """
-        if not isinstance(self.action, GitLabRunnerManagerAction):
-            raise TypeError("gitlab_runner_manager_action_required")
-        return self.action
 
     def run(self) -> JSONObject:
         """Recheck token identity and retain private provider runtime.
@@ -385,26 +405,8 @@ class GitLabRunnerRuntime(GitLabRunnerManagerCallback):
         return {}
 
 
-class VerifyGitLabRunnerOnline(GitLabRunnerManagerCallback):
+class VerifyGitLabRunnerOnline(GitLabManagerComponent):
     """Poll the exact runner until GitLab confirms online contact."""
-
-    def __init__(self, workflow: GitLabRunnerManagerAction):
-        """Retain the deployed runner identity.
-
-        :param workflow: Prepared runner-manager operation.
-        """
-        super().__init__(workflow)
-
-    @property
-    def workflow(self) -> GitLabRunnerManagerAction:
-        """Read the concrete runner-manager action.
-
-        :returns: Prepared runner-manager action.
-        :raises TypeError: A direct caller supplied another action type.
-        """
-        if not isinstance(self.action, GitLabRunnerManagerAction):
-            raise TypeError("gitlab_runner_manager_action_required")
-        return self.action
 
     def _retain_manager(self, workflow: GitLabRunnerManagerAction) -> None:
         """Retain only resources needed by the verified long-lived manager.
@@ -481,26 +483,8 @@ class VerifyGitLabRunnerOnline(GitLabRunnerManagerCallback):
             time.sleep(RUNNER_STATUS_POLL_SECONDS)
 
 
-class VerifyGitLabRunnerPreserved(GitLabRunnerManagerCallback):
+class VerifyGitLabRunnerPreserved(GitLabManagerComponent):
     """Prove owned workload deletion preserved the provider runner record."""
-
-    def __init__(self, workflow: GitLabRunnerManagerAction):
-        """Retain the runner identity selected for workload deletion.
-
-        :param workflow: Prepared runner-manager delete operation.
-        """
-        super().__init__(workflow)
-
-    @property
-    def workflow(self) -> GitLabRunnerManagerAction:
-        """Read the concrete runner-manager action.
-
-        :returns: Prepared runner-manager action.
-        :raises TypeError: A direct caller supplied another action type.
-        """
-        if not isinstance(self.action, GitLabRunnerManagerAction):
-            raise TypeError("gitlab_runner_manager_action_required")
-        return self.action
 
     def run(self) -> JSONObject:
         """Read the exact runner after shared callbacks delete owned resources.

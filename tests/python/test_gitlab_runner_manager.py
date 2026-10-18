@@ -9,14 +9,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import signal
 from argparse import Namespace
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
 
 import pytest
 from conftest import import_script_module
+from test_tool_pod import MemoryCluster
 
 ACTION = import_script_module("lib.python.core.gitlab.runner_manager.action")
 CALLBACKS = import_script_module("lib.python.core.gitlab.runner_manager.callbacks")
@@ -28,8 +33,13 @@ TARGET = import_script_module("lib.python.core.target")
 TOKEN = import_script_module("lib.python.core.gitlab.runner_manager.token")
 WORKLOAD = import_script_module("lib.python.core.gitlab.runner_manager.workload")
 SCRIPT = import_script_module("gitlab_runner_manager")
+KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
+GITLAB_API = import_script_module("lib.python.core.gitlab.gitlab_api")
+RUNTIME = import_script_module("lib.python.core.runtime")
+SCHEMA = import_script_module("lib.python.core.schema")
 
 PRIVATE_TOKEN = "glrt-private-unit-value"
+CHANGED_PRIVATE_TOKEN = "glrt-changed-unit"
 TOKEN_DIGEST = "sha256:" + hashlib.sha256(PRIVATE_TOKEN.encode()).hexdigest()
 RUN_ID = "manager-unit-run"
 NAMESPACE = "manager-unit-namespace"
@@ -314,7 +324,10 @@ def test_fingerprint_binds_exact_target_runner_image_scope_and_token_digest(
     plan = captured[0]
     assert plan["operation"] == "deploy"
     assert plan["image"] == IMAGE
-    assert plan["run_scope"] == action.candidate_scope.as_dict()
+    assert plan["run_scope"] == {
+        **action.candidate_scope.as_dict(),
+        "state": "selected",
+    }
     assert plan["registration"] == action.runner_token.document()
     assert plan["gitlab"] == {
         "origin": "https://gitlab.example.test",
@@ -323,7 +336,10 @@ def test_fingerprint_binds_exact_target_runner_image_scope_and_token_digest(
             "target_reference": "team/project",
             "credential_digest": "sha256:" + "d" * 64,
         },
-        "runner": ACTION.runner_evidence(state.gitlab_runner),
+        "runner": {
+            key: state.gitlab_runner[key]
+            for key in ("id", "description", "runner_type", "tag_list")
+        },
     }
     assert plan["workload"] == action.workload().document(action.candidate_scope)
     assert PRIVATE_TOKEN not in json.dumps(plan)
@@ -815,6 +831,7 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
                 "K8SAuth",
                 "GitLabManagerAuth",
                 "HarborAuth",
+                "GuardGitLabRunnerManager",
                 "ResolveRunScopes",
                 "SelectManagerPlanScope",
                 "ObserveGitLabRunner",
@@ -828,6 +845,7 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
                 "K8SAuth",
                 "GitLabManagerAuth",
                 "HarborAuth",
+                "GuardGitLabRunnerManager",
                 "ResolveRunScopes",
                 "SelectManagerPlanScope",
                 "ObserveGitLabRunner",
@@ -846,6 +864,7 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
             (
                 "K8SAuth",
                 "GitLabManagerAuth",
+                "GuardGitLabRunnerManager",
                 "ResolveRunScopes",
                 "SelectResolvedManagerScope",
                 "ObserveGitLabRunner",
@@ -897,3 +916,467 @@ def test_workflow_confirms_exact_plan_before_any_mutation(
             if isinstance(callback, CALLBACKS.VerifyGitLabRunnerPreserved)
         )
         assert verify.workflow is action
+
+
+class ManagerCluster(MemoryCluster):
+    """Extend the existing in-memory Kubernetes transport for manager workloads."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.target = replace(_target(), skill=None)
+        self.runner_online = False
+        self.fault = ""
+        self.guard_held = False
+        self.guard_checks: list[bool] = []
+        self.events: list[str] = []
+        self.runner_reads = 0
+        self.token_path: Path
+        self.caller_namespace = ""
+
+    def apply(self, document: dict) -> dict:
+        self.guard_checks.append(self.guard_held)
+        self.events.append("apply:" + document["kind"].casefold())
+        return super().apply(document)
+
+    def delete(self, kind: str, name: str, namespace: str) -> None:
+        self.guard_checks.append(self.guard_held)
+        self.events.append("delete:" + kind.casefold())
+        if self.fault == "cleanup" and kind.casefold() == "job":
+            raise KUBERNETES.KubernetesError("unit_cleanup_denied")
+        super().delete(kind, name, namespace)
+        if kind.casefold() == "deployment":
+            self.runner_online = False
+
+    def command(self, *args: str, openshift: bool = False) -> RUNTIME.CommandResult:
+        assert args == ("get", "--raw=/apis/security.openshift.io/v1")
+        return RUNTIME.CommandResult(args, 1, "", "404 Not Found")
+
+    def json(self, *args: str) -> dict:
+        self.guard_checks.append(self.guard_held)
+        if args[0] == "get":
+            kind = {
+                "pods": "pod",
+                "namespaces": "namespace",
+                "configmaps": "configmap",
+                "deployments": "deployment",
+                "rolebindings": "rolebinding",
+            }[args[1]]
+            selector = dict(
+                item.split("=", 1) for item in args[args.index("-l") + 1].split(",")
+            )
+            self.events.append("lookup:" + kind)
+            return {
+                "items": [
+                    deepcopy(document)
+                    for (resource_kind, _, _), document in self.objects.items()
+                    if resource_kind == kind
+                    and all(
+                        document["metadata"].get("labels", {}).get(key) == value
+                        for key, value in selector.items()
+                    )
+                ]
+            }
+        assert args[:4] == ("-n", args[1], "get", "pods")
+        namespace = args[1]
+        selector = args[args.index("-l") + 1]
+        label, name = selector.split("=", 1)
+        kind = "job" if label == "job-name" else "deployment"
+        workload = self.read(kind, name, namespace)
+        assert workload is not None
+        pod = deepcopy(workload["spec"]["template"])
+        pod["metadata"]["name"] = name + "-pod"
+        pod["spec"]["nodeName"] = "worker-ci13"
+        pod["status"] = {
+            "containerStatuses": [
+                {
+                    "name": "runner",
+                    "imageID": IMAGE if self.fault != "image" else "sha256:" + "0" * 64,
+                    "state": {"terminated": {"exitCode": 0}}
+                    if kind == "job"
+                    else {"running": {"startedAt": "2026-10-18T00:00:00Z"}},
+                }
+            ]
+        }
+        return {"items": [pod]}
+
+    def wait_job(self, name: str, namespace: str) -> None:
+        assert self.read("job", name, namespace) is not None
+        self.events.append("wait:job")
+        if self.fault == "token":
+            self.token_path.write_text(CHANGED_PRIVATE_TOKEN, encoding="utf-8")
+        elif self.fault in {"error", "timeout", "cleanup"}:
+            reason = (
+                "timeout"
+                if self.fault == "timeout"
+                else "unit_command_failed token=" + PRIVATE_TOKEN
+            )
+            raise KUBERNETES.KubernetesError(reason)
+        elif self.fault in {"term", "int"}:
+            signal.raise_signal(
+                signal.SIGTERM if self.fault == "term" else signal.SIGINT
+            )
+
+    def wait_rollout(self, kind: str, name: str, namespace: str) -> None:
+        assert kind == "deployment"
+        assert self.read(kind, name, namespace) is not None
+        self.runner_online = True
+
+
+def _manager_cli_harness(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> ManagerCluster:
+    """Bind finite provider transports below the real parser and callback lifecycle."""
+    cluster = ManagerCluster()
+    cluster.token_path = tmp_path / "runner.token"
+    cluster.token_path.write_text(PRIVATE_TOKEN, encoding="utf-8")
+    cluster.token_path.chmod(0o600)
+    session = SimpleNamespace(
+        origin="https://gitlab.example.test",
+        target_kind="project",
+        target_reference="team/project",
+        credential_digest="sha256:" + "d" * 64,
+    )
+
+    def k8s_config(callback: KUBERNETES.K8SAuth) -> dict:
+        callback.state.kubernetes_target = cluster.target
+        return {}
+
+    def k8s_auth(callback: KUBERNETES.K8SAuth) -> dict:
+        callback.state.kubernetes = cluster
+        callback.state.access_evidence["kubernetes"] = {"identity": "unit-user"}
+        return {"identity": "unit-user"}
+
+    def gitlab_config(callback: CALLBACKS.GitLabManagerAuth) -> dict:
+        callback.state.configured_session = session
+        return {}
+
+    def gitlab_auth(callback: CALLBACKS.GitLabManagerAuth) -> dict:
+        callback.state.gitlab = SimpleNamespace(
+            api=object(), session=session, target_id=42
+        )
+        callback.state.access_evidence["gitlab"] = {"identity": "unit-user"}
+        return {"identity": "unit-user"}
+
+    def harbor_config(callback: SCRIPT.HarborAuth) -> dict:
+        callback.state.harbor_target = cluster.target.harbor
+        callback.state.harbor_credential = object()
+        return {}
+
+    def harbor_auth(callback: SCRIPT.HarborAuth) -> dict:
+        callback.state.harbor = SimpleNamespace(dockerconfig=b'{"auths":{}}')
+        callback.state.access_evidence["harbor"] = {"identity": "unit-user"}
+        return {"identity": "unit-user"}
+
+    def runner_read(
+        api: object,
+        bound: object,
+        target_kind: str,
+        target_id: int,
+        runner_id: int,
+        *,
+        description: str,
+        expected_tags: Sequence[str],
+    ) -> dict:
+        assert (bound, target_kind, target_id, runner_id, description) == (
+            session,
+            "project",
+            42,
+            RUNNER_ID,
+            RUNNER_DESCRIPTION,
+        )
+        assert tuple(expected_tags) == RUNNER_LABELS
+        cluster.runner_reads += 1
+        return _runner_record(online=cluster.runner_online)
+
+    @contextmanager
+    def guard(origin: str, runner_id: int) -> Iterator[None]:
+        assert not cluster.guard_held
+        with GITLAB_API.runner_update_guard(origin, runner_id):
+            cluster.guard_held = True
+            cluster.events.append("guard:acquire")
+            try:
+                yield
+            finally:
+                cluster.events.append("guard:release")
+                cluster.guard_held = False
+
+    monkeypatch.setattr(
+        ACTION, "resolve_target", lambda *_args, **_kwargs: cluster.target
+    )
+    monkeypatch.setattr(ACTION, "bind_sources", lambda target, **_kwargs: target)
+    monkeypatch.setattr(KUBERNETES.K8SAuth, "read_config", k8s_config)
+    monkeypatch.setattr(KUBERNETES.K8SAuth, "run", k8s_auth)
+    monkeypatch.setattr(CALLBACKS.GitLabManagerAuth, "read_config", gitlab_config)
+    monkeypatch.setattr(CALLBACKS.GitLabManagerAuth, "run", gitlab_auth)
+    monkeypatch.setattr(SCRIPT.HarborAuth, "read_config", harbor_config)
+    monkeypatch.setattr(SCRIPT.HarborAuth, "run", harbor_auth)
+    monkeypatch.setattr(CALLBACKS, "read_runner_record", runner_read)
+    monkeypatch.setattr(CALLBACKS, "runner_update_guard", guard, raising=False)
+    monkeypatch.setattr(GITLAB_API, "_lock_root", lambda: tmp_path / "locks")
+    return cluster
+
+
+def _manager_cli_arguments(
+    cluster: ManagerCluster,
+    *,
+    action: str = "deploy",
+    run_id: Optional[str] = None,
+    flags: Sequence[str] = (),
+) -> list[str]:
+    """Build public arguments without bypassing command preparation or confirmation."""
+    args = [
+        action,
+        "--runner-id",
+        str(RUNNER_ID),
+        "--description",
+        RUNNER_DESCRIPTION,
+        "--project",
+        "team/project",
+        "--target",
+        "/unit/target.toml",
+        "--json",
+        "--label",
+        RUNNER_LABELS[0],
+        "--label",
+        RUNNER_LABELS[1],
+        "--timeout",
+        "30",
+    ]
+    if action == "deploy":
+        args.extend(
+            (
+                "--image",
+                IMAGE,
+                "--node",
+                "worker-ci13",
+                "--token-file",
+                str(cluster.token_path),
+            )
+        )
+    if run_id is not None:
+        args.extend(("--run-id", run_id))
+    if cluster.caller_namespace:
+        args.extend(("--namespace", cluster.caller_namespace))
+    args.extend(flags)
+    return args
+
+
+def _manager_cli_report(
+    cluster: ManagerCluster,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    action: str = "deploy",
+    run_id: Optional[str] = None,
+    flags: Sequence[str] = (),
+) -> tuple[int, dict]:
+    """Decode and validate the actual command report using the installed result schema."""
+    code = SCRIPT.main(
+        _manager_cli_arguments(cluster, action=action, run_id=run_id, flags=flags)
+    )
+    captured = capsys.readouterr()
+    assert PRIVATE_TOKEN not in captured.out + captured.err
+    assert CHANGED_PRIVATE_TOKEN not in captured.out + captured.err
+    result = json.loads(captured.out)
+    SCHEMA.validate_specification(result, "results/toolbox-workflow.schema.json")
+    return code, result
+
+
+def _confirmed_manager(
+    cluster: ManagerCluster,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    action: str = "deploy",
+    run_id: Optional[str] = None,
+) -> tuple[int, dict]:
+    """Obtain the real live plan and confirm its exact fingerprint through main."""
+    code, plan = _manager_cli_report(cluster, capsys, action=action, run_id=run_id)
+    assert (code, plan["status"]) == (0, "PLANNED")
+    return _manager_cli_report(
+        cluster,
+        capsys,
+        action=action,
+        run_id=run_id,
+        flags=("--apply", "--confirm-plan", plan["plan_digest"]),
+    )
+
+
+@pytest.mark.parametrize("mode", ("offline", "live-plan", "unconfirmed", "mismatch"))
+def test_manager_main_plans_and_confirmation_refusal_never_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    mode: str,
+) -> None:
+    """Actual public plans and denied applies leave every provider object untouched."""
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    flags = {
+        "offline": ("--dry-run",),
+        "live-plan": (),
+        "unconfirmed": ("--apply",),
+        "mismatch": ("--apply", "--confirm-plan", "0" * 64),
+    }[mode]
+    code, result = _manager_cli_report(cluster, capsys, flags=flags)
+    assert (
+        result["status"]
+        == {
+            "offline": "DRY_RUN",
+            "live-plan": "PLANNED",
+            "unconfirmed": "BLOCKED",
+            "mismatch": "BLOCKED",
+        }[mode]
+    )
+    assert code == (2 if mode in {"unconfirmed", "mismatch"} else 0)
+    assert cluster.applied == cluster.deleted == []
+    assert cluster.objects == {}
+    assert cluster.runner_reads == (0 if mode == "offline" else 1)
+    assert not cluster.guard_held
+
+
+@pytest.mark.parametrize("run_id", (None, "explicit-manager-run"))
+def test_manager_main_repeat_keeps_identity_plan_and_deployment_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    run_id: Optional[str],
+) -> None:
+    """Omitted or explicit identities reuse the observed manager on a second apply."""
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    code, first = _confirmed_manager(cluster, capsys, run_id=run_id)
+    assert (code, first["status"]) == (0, "PASS")
+    first_deploy = next(
+        item for item in first["records"] if item["callback"] == "DeployManagerRunner"
+    )
+    first_scope = next(
+        item for item in first["records"] if item["callback"] == "OpenManagerRunScope"
+    )
+    if run_id is not None:
+        assert first_scope["run_id"] == run_id
+    before = deepcopy(cluster.objects)
+    cluster.applied.clear()
+    code, repeated = _confirmed_manager(cluster, capsys, run_id=run_id)
+    assert (code, repeated["status"]) == (0, "PASS")
+    repeat_deploy = next(
+        item
+        for item in repeated["records"]
+        if item["callback"] == "DeployManagerRunner"
+    )
+    repeat_scope = next(
+        item
+        for item in repeated["records"]
+        if item["callback"] == "OpenManagerRunScope"
+    )
+    assert repeated["plan_digest"] == first["plan_digest"]
+    assert repeat_deploy["action"] == "NO_OP"
+    assert repeat_deploy["namespace"] == first_deploy["namespace"]
+    assert repeat_scope["run_id"] == first_scope["run_id"]
+    assert not any(
+        kind in {"deployment", "namespace"} for kind, _, _ in cluster.applied
+    )
+    assert cluster.objects == before
+    assert cluster.guard_checks and all(cluster.guard_checks)
+    assert cluster.events[-1] == "guard:release"
+    assert not cluster.guard_held
+
+
+@pytest.mark.parametrize("fault", ("error", "timeout", "token", "image", "cleanup"))
+def test_manager_main_failures_report_blocked_and_clean_only_owned_resources(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    fault: str,
+) -> None:
+    """Native failures and changed token input produce schema-valid blocked evidence."""
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    cluster.fault = fault
+    code, result = _confirmed_manager(cluster, capsys)
+    assert (code, result["status"]) == (2, "BLOCKED")
+    assert result["errors"]
+    assert result["cleanup"]["status"] == ("BLOCKED" if fault == "cleanup" else "PASS")
+    if fault == "error":
+        assert "[REDACTED]" in result["errors"][0]["reason"]
+    elif fault == "token":
+        assert result["errors"][0]["reason"] == "runner_token_changed_rerun_plan"
+        assert not any(kind == "deployment" for kind, _, _ in cluster.applied)
+    elif fault == "image":
+        assert result["errors"][0]["reason"] == "running_image_readback_missing"
+    if fault != "cleanup":
+        assert cluster.objects == {}
+    else:
+        assert result["cleanup"]["failures"]
+        assert any(
+            "unit_cleanup_denied" in item["reason"]
+            for item in result["cleanup"]["failures"]
+        )
+    assert cluster.guard_checks and all(cluster.guard_checks)
+    assert cluster.events[-1] == "guard:release"
+    assert not cluster.guard_held
+
+
+@pytest.mark.parametrize("fault", ("term", "int"))
+def test_manager_main_signal_cleans_resources_releases_guard_and_restores_handler(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    fault: str,
+) -> None:
+    """Real signal handling unwinds the entered callback chain before propagating exit."""
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    code, plan = _manager_cli_report(cluster, capsys)
+    assert code == 0
+    selected = signal.SIGTERM if fault == "term" else signal.SIGINT
+    previous = signal.getsignal(selected)
+    cluster.fault = fault
+    with pytest.raises(SystemExit) as caught:
+        SCRIPT.main(
+            _manager_cli_arguments(
+                cluster, flags=("--apply", "--confirm-plan", plan["plan_digest"])
+            )
+        )
+    assert caught.value.code == 128 + selected
+    assert signal.getsignal(selected) == previous
+    assert cluster.objects == {}
+    assert cluster.deleted
+    assert cluster.guard_checks and all(cluster.guard_checks)
+    assert cluster.events[-1] == "guard:release"
+    assert not cluster.guard_held
+    assert PRIVATE_TOKEN not in capsys.readouterr().out
+
+
+def test_manager_main_delete_preserves_runner_caller_namespace_and_unowned_objects(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Confirmed delete removes owned workload while leaving caller storage and GitLab intact."""
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    cluster.caller_namespace = NAMESPACE
+    cluster.objects[("namespace", "", NAMESPACE)] = {
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {"name": NAMESPACE, "uid": "caller"},
+    }
+    unrelated = {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {"name": "caller-data", "namespace": NAMESPACE, "uid": "unowned"},
+        "data": {"important": "preserve"},
+    }
+    cluster.objects[("configmap", NAMESPACE, "caller-data")] = unrelated
+    code, deployed = _confirmed_manager(cluster, capsys, run_id=RUN_ID)
+    assert code == 0
+    code, removed = _confirmed_manager(cluster, capsys, action="delete", run_id=RUN_ID)
+    assert (code, removed["status"]) == (0, "PASS")
+    preserved = next(
+        item
+        for item in removed["records"]
+        if item["callback"] == "VerifyGitLabRunnerPreserved"
+    )
+    assert preserved["runner_preserved"] is True
+    assert preserved["current_status"]["id"] == RUNNER_ID
+    assert cluster.objects[("configmap", NAMESPACE, "caller-data")] == unrelated
+    assert ("namespace", "", NAMESPACE) in cluster.objects
+    assert {kind for kind, _, _ in cluster.objects} == {"namespace", "configmap"}
+    assert not any(kind == "namespace" for kind, _, _ in cluster.deleted)
+    assert cluster.runner_reads >= 4
+    assert removed["cleanup"] == {"status": "PASS", "failures": []}
+    assert deployed["plan_digest"] != removed["plan_digest"]

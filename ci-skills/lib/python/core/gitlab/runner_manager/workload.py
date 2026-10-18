@@ -13,7 +13,6 @@ from lib.python.core.json_types import JSONObject
 from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
 from lib.python.core.kubernetes.run_scope import (
     OpenRunScope,
-    RunScope,
     RunScopeAction,
 )
 from lib.python.core.kubernetes.runner import DeleteRunner, DeployRunner, PullImage
@@ -44,6 +43,8 @@ class SelectManagerPlanScope(K8SCallback[ManagerWorkloadAction]):
         if len(scopes) > 1:
             raise KubernetesError("runner_manager_scope_not_unique")
         candidate = self.action.workflow.candidate_scope
+        if candidate is None:
+            raise KubernetesError("runner_manager_scope_not_prepared")
         if scopes:
             observed = scopes[0]
             if not candidate.owns_namespace and (
@@ -58,12 +59,12 @@ class SelectManagerPlanScope(K8SCallback[ManagerWorkloadAction]):
 
 
 class OpenManagerRunScope(K8SCallback[ManagerWorkloadAction]):
-    """Generate any missing run identity, then delegate shared scope opening."""
+    """Delegate opening the previously selected shared run scope."""
 
     def __init__(self, action: ManagerWorkloadAction):
         """Retain deferred manager inputs and empty child ownership.
 
-        :param action: Workflow whose scope is generated only after confirmation.
+        :param action: Workflow whose selected scope opens only after confirmation.
         """
         super().__init__(action)
         self.child: Optional[OpenRunScope] = None
@@ -80,17 +81,11 @@ class OpenManagerRunScope(K8SCallback[ManagerWorkloadAction]):
         return self.state
 
     def run(self) -> JSONObject:
-        """Open the selected scope or generate it after confirmation.
+        """Open the selected scope after its exact ownership lookup and confirmation.
 
         :returns: Existing shared scope-open evidence with the actual run ID.
         """
         state = self.manager_state
-        if not hasattr(state, "run_scope"):
-            workflow = self.action.workflow
-            state.run_scope = RunScope.new(
-                namespace=getattr(workflow.args, "namespace", "") or None,
-                run_id=workflow.requested_run_id,
-            )
         self.child = OpenRunScope(RunScopeAction(state.run_scope))
         self.child.bind(state)
         return self.child.run()
