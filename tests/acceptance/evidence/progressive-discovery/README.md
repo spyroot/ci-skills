@@ -1,5 +1,27 @@
 # Installed progressive discovery evidence
 
+## Current v3 consumer proof
+
+Installed source `8fea10f7bba9a84b09f211ae8c0ee14b67ff8867` returns the existing v3
+contract: an ordered reference array with `name`, `summary` and `pointer`.
+Its functional checksum is
+`d4c527c90862055ad91b9c01313e20505fd10b8eea6173f4f3851a220e07ce21`.
+
+The [root](v3-8fea10f/root.json), [runner node](v3-8fea10f/command.json),
+[returned reference](v3-8fea10f/sections.json) and
+[selected section](v3-8fea10f/section.json) were captured from a fresh installation
+outside the checkout and validated against the existing v3 schemas.
+The [human renderer](v3-8fea10f/command-human.txt) exited successfully.
+[Checksums](v3-8fea10f/sha256.txt) bind those outputs and the
+[ordinary acceptance cleanup](v3-8fea10f/acceptance-cleanup.json).
+All 24 ordinary acceptance receipts passed and are saved unchanged in their existing paths.
+The matching [Podman receipt](https://github.com/spyroot/ci-skills/blob/4374a39932a2151463db3c32f476a30dd40d5afd/tests/acceptance/podman-readiness/image-build-readiness.json)
+passed all eight runtime checks.
+The Pod exited 0; [independent cleanup](v3-8fea10f/podman-cleanup.json) verified all five owned resources absent.
+The existing SCC and ClusterRole remained present. GitHub checks the complete receipt set before merge.
+
+## Historical pre-v3 capture
+
 Captured from installed revision `0017df813f5ef0beacc581745c3a16590bfb4229` on 2026-10-18.
 The functional checksum is `e5523516780793f388c33e81cde0747b44571f6f380339a01a04be4bfde5bf9b`;
 the package checksum is `33c82b7da68ad46124877127d01e62b4a1e0b03fdd6a47ff95fc682566ed5547`.
