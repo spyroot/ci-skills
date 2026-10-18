@@ -1,0 +1,95 @@
+{
+  "kind": "pr81_term_supplemental_pod_readback",
+  "original_observer": {
+    "path": "path:64f006e65321",
+    "signal_sent": false,
+    "status": "BLOCKED",
+    "unchanged": true
+  },
+  "other_cleanup": {
+    "exact_label_survivors": [],
+    "exact_labels_absent": true,
+    "namespace": {
+      "absent": true,
+      "captured": {
+        "kind": "Namespace",
+        "name": "ci-skills-run-021172f8150b48da837e",
+        "namespace": "",
+        "uid": "31ec7d3b-b397-46db-a754-a6522ceadb5a"
+      },
+      "survivors": []
+    },
+    "resources": {
+      "configmaps": {
+        "absent": true,
+        "captured": [
+          {
+            "kind": "ConfigMap",
+            "name": "ci-skills-run-podman-scripts-272a3dd2c9961224",
+            "namespace": "ci-skills-run-021172f8150b48da837e",
+            "uid": "f4180c08-f454-4317-9368-34424280893a"
+          }
+        ],
+        "exact_name_survivors": []
+      },
+      "jobs": {
+        "absent": true,
+        "captured": [
+          {
+            "kind": "Job",
+            "name": "ci-skills-run-podman-probe-272a3dd2c9961224",
+            "namespace": "ci-skills-run-021172f8150b48da837e",
+            "uid": "bf552316-c140-4eb5-8248-af407c66220d"
+          }
+        ],
+        "exact_name_survivors": []
+      },
+      "pods": {
+        "absent": true,
+        "captured": [],
+        "exact_name_survivors": []
+      },
+      "rolebindings": {
+        "absent": true,
+        "captured": [
+          {
+            "kind": "RoleBinding",
+            "name": "ci-skills-run-scc-permission-5f4add9322d9458c-272a3dd2c9961224",
+            "namespace": "ci-skills-run-021172f8150b48da837e",
+            "uid": "63e31eed-8ad9-4a3d-97ae-27e5df04f812"
+          }
+        ],
+        "exact_name_survivors": []
+      }
+    }
+  },
+  "pod_identity": {
+    "exit_code": 0,
+    "image_id": "quay.io/podman/stable@sha256:5118bdbb154b115d77f58107a2e69d65df4375bcb0d89a8da10b055754e8b9f3",
+    "name": "ci-skills-run-podman-probe-272a3dd2c9961224-wwttp",
+    "source": "receipt.records.RunPodmanProbe.pod",
+    "uid": "532e319e-282d-4ee2-9cdf-f5d56ece67f7"
+  },
+  "read": {
+    "absent": true,
+    "arguments": [
+      "get",
+      "pod",
+      "ci-skills-run-podman-probe-272a3dd2c9961224-wwttp",
+      "--ignore-not-found",
+      "-o",
+      "json"
+    ],
+    "returncode": 0,
+    "stderr": "",
+    "stdout": ""
+  },
+  "receipt": {
+    "path": "path:76d030d5e026",
+    "status": "PASS"
+  },
+  "schema_version": "1.0",
+  "scope": "cleanup_readback_only",
+  "status": "PASS",
+  "term_behavior_proven": false
+}
