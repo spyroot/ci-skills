@@ -38,6 +38,7 @@ from lib.python.core.kubernetes.ocp_csr import (
     approve_csr,
     canonical_ip,
     read_csr_inventory,
+    remaining_join_timeout,
 )
 from lib.python.core.kubernetes.ocp_invocation import NodeOperation
 from lib.python.core.kubernetes.ocp_lifecycle_workflow import artifact_callbacks
@@ -171,9 +172,9 @@ def read_node(
     :returns: Safe node observation, or ``None`` before the Node exists.
     :raises KubernetesError: Native node fields are malformed or identity drifts.
     """
-    if deadline is not None and time.monotonic() >= deadline:
-        raise KubernetesError("node_join_deadline_exceeded")
-    document = service.read("node", selector.node_name, "")
+    document = service.read(
+        "node", selector.node_name, "", timeout=remaining_join_timeout(deadline)
+    )
     if document is None:
         return None
     try:
@@ -405,6 +406,48 @@ class ReadNodeState(K8SCallback[NodeJoinAction]):
 
     def cleanup(self) -> JSONObject:
         """Leave provider Node state unchanged.
+
+        :returns: Empty cleanup evidence.
+        """
+        return {}
+
+
+def _require_join_artifact(state: OCPJoinState) -> None:
+    """Require a build record only while the selected Node still needs joining.
+
+    :param state: Resolved node and build-record observations.
+    :raises KubernetesError: A non-ready Node lacks a complete build record.
+    """
+    if state.join_existing_ready or state.artifact_record_present:
+        return
+    if state.recovery_record_present:
+        raise KubernetesError("node_recovery_requires_verify_or_remove")
+    if state.found_scopes:
+        raise KubernetesError("node_artifact_records_missing")
+    raise KubernetesError("node_artifact_record_not_found")
+
+
+class CheckJoinArtifact(K8SCallback[NodeJoinAction]):
+    """Check the resolved build prerequisite before planning or applying join."""
+
+    def run(self) -> JSONObject:
+        """Accept a Ready Node or the complete record needed by the pending join.
+
+        :returns: Observed readiness and artifact-record presence.
+        :raises TypeError: Shared state is not join-aware.
+        :raises KubernetesError: A pending join has no complete build record.
+        """  # noqa: DOC502 - shared state and prerequisite validation propagate failures.
+        state = _state(self)
+        _require_join_artifact(state)
+        return {
+            "action": VERIFIED,
+            "verified": True,
+            "already_ready": state.join_existing_ready,
+            "artifact_record_present": state.artifact_record_present,
+        }
+
+    def cleanup(self) -> JSONObject:
+        """Leave the observed Node and build records unchanged.
 
         :returns: Empty cleanup evidence.
         """
@@ -716,6 +759,7 @@ def resolve_join(
         ResolveRunScopes(lookup),
         ResolveNodeArtifactRecord(lookup),
         ResolveNodeRecoveryRecord(lookup),
+        CheckJoinArtifact(action),
     ]
     if observe_requests:
         callbacks.append(ObserveJoinRequests(action))
@@ -731,12 +775,7 @@ def execute_join(state: OCPJoinState, action: NodeJoinAction) -> None:
         join read-back is incomplete, or owned cleanup fails.
     :raises BaseException: Native approval, monitor or cleanup operations fail.
     """  # noqa: DOC502,DOC503 - callbacks preserve provider and transport failures.
-    if not state.join_existing_ready and not state.artifact_record_present:
-        if state.recovery_record_present:
-            raise KubernetesError("node_recovery_requires_verify_or_remove")
-        if state.found_scopes:
-            raise KubernetesError("node_artifact_records_missing")
-        raise KubernetesError("node_artifact_record_not_found")
+    _require_join_artifact(state)
     callbacks = join_callbacks(action)
     callbacks.extend(
         artifact_callbacks(
@@ -755,6 +794,7 @@ def execute_join(state: OCPJoinState, action: NodeJoinAction) -> None:
 
 __all__ = [
     "ApproveJoinRequests",
+    "CheckJoinArtifact",
     "NodeJoinAction",
     "NodeObservation",
     "OCPJoinState",

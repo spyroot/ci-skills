@@ -7,14 +7,21 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import json
+import signal
 import time
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Optional
 
 import pytest
 from conftest import import_script_module
+from test_artifact_storage import FilePodCluster
+from test_ocp_artifact_lifecycle import artifact_state
+from test_ocp_csr import CSRService, csr_document, described_subject
+from test_ocp_node_onboard import bind_provider, run_cli
 from test_tool_pod import MemoryCluster
 
 CSR = import_script_module("lib.python.core.kubernetes.ocp_csr")
@@ -23,6 +30,8 @@ INVOCATION = import_script_module("lib.python.core.kubernetes.ocp_invocation")
 ONBOARD = import_script_module("lib.python.core.kubernetes.ocp_onboard")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 RUNTIME = import_script_module("lib.python.core.runtime")
+SCHEMA = import_script_module("lib.python.core.schema")
+ARTIFACT = import_script_module("lib.python.core.kubernetes.ocp_artifact_models")
 
 
 def node_document(
@@ -89,10 +98,14 @@ class JoinService(MemoryCluster):
         self.node_reads = 0
         self.events: list[str] = []
         self.commands: list[tuple[str, ...]] = []
+        self.read_timeouts: list[Optional[float]] = []
 
-    def read(self, kind: str, name: str, namespace: str) -> Optional[dict[str, object]]:
+    def read(
+        self, kind: str, name: str, namespace: str, *, timeout: Optional[float] = None
+    ) -> Optional[dict[str, object]]:
         """Read only the selected cluster-scoped Node identity."""
         assert (kind, namespace) == ("node", "")
+        self.read_timeouts.append(timeout)
         self.events.append("read-node")
         selected = self.nodes[min(self.node_reads, len(self.nodes) - 1)]
         self.node_reads += 1
@@ -102,7 +115,9 @@ class JoinService(MemoryCluster):
         """Reject an unmocked CSR collection read."""
         pytest.fail("join orchestration reached an unmocked CSR collection")
 
-    def command(self, *args: str, openshift: bool = False) -> RUNTIME.CommandResult:
+    def command(
+        self, *args: str, openshift: bool = False, timeout: Optional[float] = None
+    ) -> RUNTIME.CommandResult:
         """Accept only the native selected-address monitor after CSR completion."""
         assert openshift
         assert args[:4] == ("adm", "node-image", "monitor", "--ip-addresses")
@@ -422,3 +437,307 @@ def test_confirmation_mismatch_precedes_join_reads_and_mutations(
         invocation._join(INVOCATION.ActionMode.APPLY, cluster.target)
 
     assert cluster.applied == cluster.deleted == cluster.executed == []
+
+
+@dataclass
+class CommandJoin:
+    """Reuse artifact and CSR provider fixtures through the real command lifecycle."""
+
+    artifact: ARTIFACT.OCPArtifactState
+    cluster: FilePodCluster
+    selector: CSR.JoinSelector
+    csrs: CSRService
+    ready: bool = False
+    monitor_fault: str = ""
+    monitors: list[tuple[str, ...]] = field(default_factory=list)
+
+    def argv(self, *extra: str) -> list[str]:
+        """Select the existing build and exact native node through public options."""
+        return [
+            "join",
+            "--run-id",
+            self.artifact.run_scope.run_id,
+            "--node-name",
+            self.selector.node_name,
+            "--ip-address",
+            self.selector.ip_addresses[0],
+            "--json",
+            *extra,
+        ]
+
+
+@pytest.fixture
+def command_join(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CommandJoin:
+    """Bind existing native object/file fixtures without replacing join callbacks."""
+    artifact, cluster = artifact_state(tmp_path, temporary=True)
+    selector = CSR.JoinSelector("worker-command", ("192.0.2.31",))
+    csrs = CSRService(
+        {
+            "items": [
+                csr_document("client", CSR.CLIENT_SIGNER),
+                csr_document("serving", CSR.SERVING_SIGNER),
+            ]
+        },
+        {
+            name: described_subject(selector.common_name)
+            for name in ("client", "serving")
+        },
+    )
+    fixture = CommandJoin(artifact, cluster, selector, csrs)
+    original_read = cluster.read
+    original_json = cluster.json
+
+    def read(
+        kind: str, name: str, namespace: str, *, timeout: Optional[float] = None
+    ) -> Optional[dict[str, object]]:
+        """Keep artifact reads real and simulate only native Node/CSR responses."""
+        if kind == "node":
+            assert name == selector.node_name and namespace == ""
+            return node_document(name, selector.ip_addresses, ready=fixture.ready)
+        if kind == "certificatesigningrequest":
+            return csrs.read(kind, name, namespace, timeout=timeout)
+        return original_read(kind, name, namespace)
+
+    def read_json(
+        *args: str, openshift: bool = False, timeout: Optional[float] = None
+    ) -> object:
+        """Retain real ownership lookup and the finite native CSR collection."""
+        assert not openshift
+        if args[:2] == ("get", "certificatesigningrequests"):
+            return csrs.json(*args, timeout=timeout)
+        return original_json(*args)
+
+    def command(
+        *args: str, openshift: bool = False, timeout: Optional[float] = None
+    ) -> RUNTIME.CommandResult:
+        """Expose approved certificate issuance and a finite native monitor."""
+        assert openshift
+        if args[:3] == ("adm", "node-image", "monitor"):
+            fixture.monitors.append(args)
+            if fixture.monitor_fault in ("failure", "timeout"):
+                raise KUBERNETES.KubernetesError(
+                    "fixture_monitor_failed"
+                    if fixture.monitor_fault == "failure"
+                    else "node_join_deadline_exceeded"
+                )
+            if fixture.monitor_fault in ("term", "int"):
+                signal.raise_signal(
+                    signal.SIGTERM if fixture.monitor_fault == "term" else signal.SIGINT
+                )
+                pytest.fail("executor did not translate the process signal")
+            return RUNTIME.CommandResult(args, 0, "joined\n", "")
+        result = csrs.command(*args, openshift=openshift, timeout=timeout)
+        if args[:3] == ("adm", "certificate", "approve"):
+            for item in csrs.payload["items"]:
+                if item["metadata"]["name"] == args[3]:
+                    item["status"]["certificate"] = "fixture-issued"
+            fixture.ready = set(csrs.approved) == {"client", "serving"}
+        return result
+
+    monkeypatch.setattr(cluster, "read", read)
+    monkeypatch.setattr(cluster, "json", read_json)
+    monkeypatch.setattr(cluster, "command", command, raising=False)
+    monkeypatch.setattr(
+        ONBOARD, "resolve_target", lambda *_args, **_kwargs: cluster.target
+    )
+    bind_provider(monkeypatch, cluster)
+    cluster.applied.clear()
+    cluster.deleted.clear()
+    cluster.executed.clear()
+    return fixture
+
+
+def test_live_join_plan_writes_requested_receipt_without_mutation(
+    command_join: CommandJoin,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A saved live plan observes Node, build and CSRs without approval or cleanup."""
+    receipt = tmp_path / "join-plan.json"
+    before = deepcopy(command_join.cluster.objects)
+
+    code, result = run_cli(
+        command_join.argv("--live-plan", "--receipt-out", str(receipt)), capsys
+    )
+
+    assert code == 0, result
+    assert result["status"] == "PLANNED"
+    assert result["join"]["already_ready"] is False
+    assert len(result["join"]["csr_inventory"]["requests"]) == 2
+    assert json.loads(receipt.read_text(encoding="utf-8")) == result
+    assert command_join.csrs.approved == command_join.monitors == []
+    assert command_join.cluster.applied == command_join.cluster.deleted == []
+    assert command_join.cluster.objects == before
+    SCHEMA.validate_specification(result, "results/ocp-node-onboard.schema.json")
+
+
+def test_join_command_verifies_ready_and_repeat_is_noop_after_cleanup(
+    command_join: CommandJoin, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The actual CLI approves the selected CSRs, verifies Ready and repeats safely."""
+    _, planned = run_cli(command_join.argv("--live-plan"), capsys)
+    apply = command_join.argv("--apply", "--confirm-plan", planned["plan_digest"])
+
+    code, result = run_cli(apply, capsys)
+
+    assert code == 0, result
+    assert result["status"] == "PASS"
+    assert command_join.csrs.approved == ["client", "serving"]
+    assert result["join"]["serving_issued"] is True
+    assert result["join"]["node"]["name"] == command_join.selector.node_name
+    assert result["join"]["node"]["ready"] is True
+    assert result["cleanup"]["status"] == "PASS"
+    assert command_join.cluster.deleted
+    SCHEMA.validate_specification(result, "results/ocp-node-onboard.schema.json")
+    monitored = list(command_join.monitors)
+    remaining = deepcopy(command_join.cluster.objects)
+    command_join.cluster.deleted.clear()
+
+    repeated_code, repeated = run_cli(apply, capsys)
+
+    assert repeated_code == 0, repeated
+    assert repeated["status"] == "PASS"
+    assert repeated["join"]["already_ready"] is True
+    assert repeated["join"]["client_completion_source"] == "already_ready"
+    assert any(record.get("action") == "NO_OP" for record in repeated["records"])
+    assert command_join.csrs.approved == ["client", "serving"]
+    assert command_join.monitors == monitored
+    assert command_join.cluster.deleted == []
+    assert command_join.cluster.objects == remaining
+    SCHEMA.validate_specification(repeated, "results/ocp-node-onboard.schema.json")
+
+
+@pytest.mark.parametrize("mode", ("--live-plan", "--apply"))
+def test_nonready_join_requires_build_record_before_csr_read(
+    command_join: CommandJoin,
+    mode: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Missing build correlation blocks planning and apply before CSR access."""
+    _, planned = run_cli(command_join.argv(), capsys)
+    command_join.cluster.objects.clear()
+    extra = (
+        (mode, "--confirm-plan", planned["plan_digest"])
+        if mode == "--apply"
+        else (mode,)
+    )
+
+    code, result = run_cli(command_join.argv(*extra), capsys)
+
+    assert code == 2
+    assert result["status"] == "BLOCKED"
+    assert result["errors"][0]["reason"] == "node_artifact_record_not_found"
+    assert command_join.csrs.json_calls == []
+    assert command_join.csrs.approved == command_join.monitors == []
+    assert command_join.cluster.applied == command_join.cluster.deleted == []
+    SCHEMA.validate_specification(result, "results/ocp-node-onboard.schema.json")
+
+
+def test_join_command_refuses_changed_selector_before_provider_work(
+    command_join: CommandJoin, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A digest for one monitor address cannot authorize a different address."""
+    _, planned = run_cli(command_join.argv("--live-plan"), capsys)
+    command_join.csrs.json_calls.clear()
+    before = deepcopy(command_join.cluster.objects)
+    argv = command_join.argv("--apply", "--confirm-plan", planned["plan_digest"])
+    argv[argv.index("--ip-address") + 1] = "192.0.2.99"
+
+    code, result = run_cli(argv, capsys)
+
+    assert code == 2
+    assert result["errors"][0]["reason"] == "confirm_plan_mismatch_rerun_plan"
+    assert command_join.csrs.json_calls == []
+    assert command_join.csrs.approved == command_join.monitors == []
+    assert command_join.cluster.objects == before
+    SCHEMA.validate_specification(result, "results/ocp-node-onboard.schema.json")
+
+
+@pytest.mark.parametrize("fault", ("failure", "timeout", "term", "int"))
+def test_join_executor_failure_preserves_build_and_reports_blocked(
+    command_join: CommandJoin,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fault: str,
+) -> None:
+    """Actual executor cleanup runs after native errors, deadline and process signals."""
+    _, planned = run_cli(command_join.argv("--live-plan"), capsys)
+    before = deepcopy(command_join.cluster.objects)
+    cleanup: list[str] = []
+    original_cleanup = JOIN.WaitForJoiner.cleanup
+    handlers = {
+        signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGINT)
+    }
+
+    def observed_cleanup(callback: JOIN.WaitForJoiner) -> dict[str, object]:
+        """Record entry into the unchanged production cleanup hook."""
+        cleanup.append("monitor")
+        return original_cleanup(callback)
+
+    monkeypatch.setattr(JOIN.WaitForJoiner, "cleanup", observed_cleanup)
+    command_join.monitor_fault = fault
+    code, result = run_cli(
+        command_join.argv("--apply", "--confirm-plan", planned["plan_digest"]),
+        capsys,
+    )
+
+    assert code == 2
+    assert result["status"] == "BLOCKED"
+    assert (
+        result["errors"][0]["reason"]
+        == {
+            "failure": "fixture_monitor_failed",
+            "timeout": "node_join_deadline_exceeded",
+            "term": "interrupted",
+            "int": "interrupted",
+        }[fault]
+    )
+    assert cleanup == ["monitor"]
+    assert result["cleanup"]["status"] == "PASS"
+    assert command_join.cluster.objects == before
+    assert command_join.cluster.deleted == []
+    assert {signum: signal.getsignal(signum) for signum in handlers} == handlers
+    SCHEMA.validate_specification(result, "results/ocp-node-onboard.schema.json")
+
+
+def test_join_cleanup_failure_overrides_success_in_final_report(
+    command_join: CommandJoin,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A verified Ready Node cannot turn failed cleanup into command success."""
+    _, planned = run_cli(command_join.argv("--live-plan"), capsys)
+
+    def failed_cleanup(_callback: JOIN.WaitForJoiner) -> dict[str, object]:
+        """Simulate an observed cleanup failure within the real executor."""
+        raise KUBERNETES.KubernetesError("fixture_join_cleanup_failed")
+
+    monkeypatch.setattr(JOIN.WaitForJoiner, "cleanup", failed_cleanup)
+    code, result = run_cli(
+        command_join.argv("--apply", "--confirm-plan", planned["plan_digest"]),
+        capsys,
+    )
+
+    assert code == 2
+    assert result["status"] == "BLOCKED"
+    assert result["join"]["node"]["ready"] is True
+    assert result["cleanup"]["status"] == "BLOCKED"
+    assert any(
+        failure["reason"] == "fixture_join_cleanup_failed"
+        for failure in result["cleanup"]["failures"]
+    )
+    SCHEMA.validate_specification(result, "results/ocp-node-onboard.schema.json")
+
+
+def test_node_read_passes_remaining_join_budget_to_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Node GET receives the fractional remaining bound without changing defaults."""
+    selector = CSR.JoinSelector("worker-bounded", ("192.0.2.32",))
+    service = JoinService((node_document(selector.node_name, selector.ip_addresses),))
+    monkeypatch.setattr(CSR, "time", SimpleNamespace(monotonic=lambda: 10.0))
+
+    result = JOIN.read_node(service, selector, deadline=10.25)
+
+    assert result is not None and result.ready
+    assert service.read_timeouts == [0.25]

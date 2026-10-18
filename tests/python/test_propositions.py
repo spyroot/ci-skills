@@ -193,16 +193,24 @@ def test_iso_proposition_offers_native_input_and_destination_guidance() -> None:
     """
     selected = CATALOG.proposition("ocp_node_onboard.py")
     expected = {
-        "summary": "Native OCP YAML, cluster destination and ISO lifecycle examples.",
-        "pointer": "references/ocp-node-image.md",
+        "Native OCP YAML example": {
+            "summary": "Node MAC/NIC, disk and network inputs passed unchanged to OpenShift.",
+            "pointer": "references/ocp-node-input.md",
+        },
+        "Native OCP command flags": {
+            "summary": "OpenShift flags, ci-skills input mapping and upstream procedure.",
+            "pointer": "references/ocp-node-image-flags.md",
+        },
     }
 
-    assert selected["reference"]["OpenShift node image"] == expected
     cluster = CATALOG.proposition()["kubernetes"]
-    assert cluster["reference"]["OpenShift node image"] == expected
-    assert "toolbox.py" not in selected["tools"]
     unrelated = CATALOG.proposition("gitlab_runner.py")
-    assert "OpenShift node image" not in unrelated["reference"]
+    for name, reference in expected.items():
+        assert selected["reference"][name] == reference
+        assert cluster["reference"][name] == reference
+        assert (SCRIPT_ROOT.parent / reference["pointer"]).is_file()
+        assert name not in unrelated["reference"]
+    assert "toolbox.py" not in selected["tools"]
 
 
 def test_reference_cli_expands_nodes_without_fetching_optional_references(

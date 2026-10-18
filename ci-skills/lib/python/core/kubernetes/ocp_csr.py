@@ -46,18 +46,19 @@ def canonical_ip(value: str) -> str:
     return ipaddress.ip_address(value).compressed
 
 
-def _before_deadline(deadline: Optional[float]) -> None:
-    """Reject a new provider call after the approval-loop deadline.
-
-    Each native call retains the Kubernetes service's command timeout; this
-    guard prevents the next call from starting once the loop's total bound has
-    expired.
+def remaining_join_timeout(deadline: Optional[float]) -> Optional[float]:
+    """Bound the next provider call by the approval loop's remaining time.
 
     :param deadline: Optional monotonic approval-loop deadline.
+    :returns: Remaining seconds, or ``None`` to retain the service command bound.
     :raises KubernetesError: The deadline has already expired.
     """
-    if deadline is not None and time.monotonic() >= deadline:
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
         raise KubernetesError("node_join_deadline_exceeded")
+    return remaining
 
 
 @dataclass(frozen=True)
@@ -350,8 +351,13 @@ def _describe_subject(
     :returns: Decoded request identity.
     :raises KubernetesError: Native describe fails or its identity is malformed.
     """
-    _before_deadline(deadline)
-    result = service.command("describe", "csr", name, openshift=True)
+    result = service.command(
+        "describe",
+        "csr",
+        name,
+        openshift=True,
+        timeout=remaining_join_timeout(deadline),
+    )
     if result.returncode:
         raise KubernetesError(error_class(result))
     return decode_described_subject(result.stdout)
@@ -498,8 +504,13 @@ def read_csr_inventory(
     :returns: One immutable provider snapshot.
     :raises KubernetesError: The list is malformed or the deadline expires.
     """
-    _before_deadline(deadline)
-    value = service.json("get", "certificatesigningrequests", "-o", "json")
+    value = service.json(
+        "get",
+        "certificatesigningrequests",
+        "-o",
+        "json",
+        timeout=remaining_join_timeout(deadline),
+    )
     try:
         document = json_object(value)
         items = json_objects(document.get("items", []))
@@ -530,7 +541,6 @@ def read_csr_inventory(
             unrelated += 1
     observations = []
     for item in candidates:
-        _before_deadline(deadline)
         observations.append(observe_csr(service, item, deadline=deadline))
     return CSRInventory(selector, tuple(observations), unrelated)
 
@@ -551,8 +561,12 @@ def approve_csr(
     :returns: Same-UID request with an Approved condition.
     :raises KubernetesError: Identity drift, denial, mutation failure or read-back mismatch.
     """
-    _before_deadline(deadline)
-    observed = service.read("certificatesigningrequest", request.name, "")
+    observed = service.read(
+        "certificatesigningrequest",
+        request.name,
+        "",
+        timeout=remaining_join_timeout(deadline),
+    )
     if observed is None:
         raise KubernetesError("node_join_csr_disappeared")
     current = observe_csr(service, observed, deadline=deadline)
@@ -562,14 +576,22 @@ def approve_csr(
         raise KubernetesError("node_join_csr_denied")
     if current.approved or current.issued:
         return current
-    _before_deadline(deadline)
     result = service.command(
-        "adm", "certificate", "approve", current.name, openshift=True
+        "adm",
+        "certificate",
+        "approve",
+        current.name,
+        openshift=True,
+        timeout=remaining_join_timeout(deadline),
     )
     if result.returncode:
         raise KubernetesError(error_class(result))
-    _before_deadline(deadline)
-    readback = service.read("certificatesigningrequest", current.name, "")
+    readback = service.read(
+        "certificatesigningrequest",
+        current.name,
+        "",
+        timeout=remaining_join_timeout(deadline),
+    )
     if readback is None:
         raise KubernetesError("node_join_csr_readback_missing")
     approved = observe_csr(service, readback, deadline=deadline)
@@ -595,4 +617,5 @@ __all__ = [
     "decode_described_subject",
     "observe_csr",
     "read_csr_inventory",
+    "remaining_join_timeout",
 ]

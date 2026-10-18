@@ -8,7 +8,7 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Final, Optional
@@ -41,6 +41,11 @@ MODE_POLICY: Final = ActionModePolicy(
     default_mode=ActionMode.OFFLINE,
     receipt_modes=frozenset((ActionMode.APPLY, ActionMode.READ)),
     allow_offline_output=True,
+)
+
+JOIN_MODE_POLICY: Final = replace(
+    MODE_POLICY,
+    receipt_modes=MODE_POLICY.receipt_modes | frozenset((ActionMode.LIVE_PLAN,)),
 )
 
 
@@ -180,7 +185,7 @@ def execution_mode(args: argparse.Namespace) -> ActionMode:
         receipt_requested=bool(args.receipt_out),
         output_requested=bool(args.output_dir or args.log_file),
         timeout=args.timeout,
-        policy=MODE_POLICY,
+        policy=JOIN_MODE_POLICY if operation == NodeOperation.JOIN else MODE_POLICY,
         read_only=operation == NodeOperation.VERIFY,
     )
 

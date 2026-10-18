@@ -7,6 +7,8 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Optional
@@ -85,16 +87,21 @@ class CSRService:
         self.json_calls: list[tuple[str, ...]] = []
         self.described: list[str] = []
         self.approved: list[str] = []
+        self.timeouts: list[tuple[str, Optional[float]]] = []
 
-    def json(self, *args: str) -> object:
+    def json(self, *args: str, timeout: Optional[float] = None) -> object:
         """Return one native list result for the exact CSR collection read."""
         assert args == ("get", "certificatesigningrequests", "-o", "json")
         self.json_calls.append(args)
+        self.timeouts.append(("list", timeout))
         return deepcopy(self.payload)
 
-    def read(self, kind: str, name: str, namespace: str) -> Optional[dict[str, object]]:
+    def read(
+        self, kind: str, name: str, namespace: str, *, timeout: Optional[float] = None
+    ) -> Optional[dict[str, object]]:
         """Read one exact CSR from the current detached provider snapshot."""
         assert (kind, namespace) == ("certificatesigningrequest", "")
+        self.timeouts.append(("read", timeout))
         if not isinstance(self.payload, dict):
             return None
         items = self.payload.get("items", [])
@@ -109,9 +116,12 @@ class CSRService:
                 return deepcopy(item)
         return None
 
-    def command(self, *args: str, openshift: bool = False) -> RUNTIME.CommandResult:
+    def command(
+        self, *args: str, openshift: bool = False, timeout: Optional[float] = None
+    ) -> RUNTIME.CommandResult:
         """Decode one subject or approve only the explicitly named request."""
         assert openshift
+        self.timeouts.append(("command", timeout))
         if args[:2] == ("describe", "csr"):
             name = args[2]
             self.described.append(name)
@@ -121,7 +131,7 @@ class CSRService:
         assert args[:3] == ("adm", "certificate", "approve")
         name = args[3]
         self.approved.append(name)
-        current = self.read("certificatesigningrequest", name, "")
+        current = self.read("certificatesigningrequest", name, "", timeout=timeout)
         assert current is not None
         status = current["status"]
         assert isinstance(status, dict)
@@ -286,3 +296,67 @@ def test_native_subject_decode_failure_is_reported_without_approval() -> None:
         CSR.observe_csr(service, document)
 
     assert service.approved == []
+
+
+@pytest.mark.parametrize("operation", ("inventory", "approval"))
+def test_each_csr_provider_call_receives_the_remaining_join_deadline(
+    operation: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CSR collection, decoding, approval and read-back share the remaining bound."""
+    selector = CSR.JoinSelector("worker-budget", ("192.0.2.33",))
+    document = csr_document("client", CSR.CLIENT_SIGNER)
+    service = CSRService(
+        {"items": [document]}, {"client": described_subject(selector.common_name)}
+    )
+    monkeypatch.setattr(CSR, "time", SimpleNamespace(monotonic=lambda: 10.0))
+
+    if operation == "inventory":
+        result = CSR.read_csr_inventory(service, selector, deadline=10.25)
+        assert result.selected(CSR.CLIENT_SIGNER) is not None
+        assert {kind for kind, _timeout in service.timeouts} == {"list", "command"}
+    else:
+        selected = CSR.observe_csr(service, document)
+        service.timeouts.clear()
+        result = CSR.approve_csr(service, selector, selected, deadline=10.25)
+        assert result.approved
+        assert service.approved == ["client"]
+        assert {kind for kind, _timeout in service.timeouts} == {"read", "command"}
+    assert service.timeouts
+    assert all(timeout == 0.25 for _kind, timeout in service.timeouts)
+
+
+@pytest.mark.parametrize(("remaining", "expected"), ((0.25, 0.25), (100.0, 30.0)))
+def test_csr_deadline_caps_the_real_service_native_request_timeout(
+    remaining: float,
+    expected: float,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow native list is bounded by both the join budget and service default."""
+    from test_tool_pod import MemoryCluster
+
+    service = KUBERNETES.KubernetesService(MemoryCluster().target, timeout=30)
+    timeouts: list[float] = []
+
+    def native(
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        env: Mapping[str, Optional[str]],
+    ) -> RUNTIME.CommandResult:
+        """Replace only native process execution and retain its exact timeout."""
+        del env
+        timeouts.append(timeout)
+        return RUNTIME.CommandResult(tuple(argv), 0, json.dumps({"items": []}), "")
+
+    monkeypatch.setattr(KUBERNETES, "run_command_bounded", native)
+    monkeypatch.setattr(CSR, "time", SimpleNamespace(monotonic=lambda: 10.0))
+
+    inventory = CSR.read_csr_inventory(
+        service,
+        CSR.JoinSelector("worker-transport", ("192.0.2.34",)),
+        deadline=10.0 + remaining,
+    )
+
+    assert inventory.requests == ()
+    assert timeouts == [expected]
+    assert service.timeout == 30
