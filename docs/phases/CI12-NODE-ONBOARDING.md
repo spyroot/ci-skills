@@ -1,4 +1,4 @@
-# NOT_IMPLEMENTED: CI12 — Onboard a host into OpenShift from one machine specification
+# NOT_IMPLEMENTED: CI12 — Prepare reusable cluster tooling, then build and use an OpenShift node ISO
 
 - grounding: GROUNDED
 - verification: UNVERIFIED
@@ -6,14 +6,22 @@
 
 ## Authority
 
-The phase identity `CI12` continues the project's `CI01` to `CI11` numbering and is a proposal until the project
-owner approves it. The project has no `.coordination/roadmap.md`, `.coordination/phases.md` or
-`.coordination/priorities.md`; that is recorded as a blocker in `Open Decisions and Scope Boundary`, and this
-document plans only from the authority that does exist:
+Delivery revision, 2026-10-17: reusable download/install operations and the ci-skills-owned tool Pod land as
+PR-CI12-0 before the ISO combo. Native OCP MAC flags or a native YAML file are passed to `oc`; ci-skills
+validates only its invocation and execution inputs, not the OCP document. ISO artifacts stay in caller-selected
+or temporary cluster storage. CI12.1 checks that destination before building and reads the delivered ISO back
+from it before reporting success; a build exit code or an ISO left only in scratch space is insufficient.
+These operator-selected changes replace the earlier custom machine-schema and
+workstation-fetch design in this phase. Existing join selection and its mocked-live exception remain.
+
+The phase identity `CI12` continues the project's `CI01` to `CI11` numbering. The delivery revision above records
+the operator-selected order. Earlier descriptions of a custom machine schema or local ISO fetch are superseded
+by this revision; they are not alternate implementation paths. This document plans from:
 
 - the owner's direction of 2026-10-15, recorded in [`docs/combos.md`](../combos.md) chain 2 ("OpenShift node
   from one spec"): a user who installed ci-skills asks their agent to onboard a new host, the agent passes one
-  machine specification, and the combo carries it to a joined, Ready node, ending with the served ISO removed;
+  native node configuration, and the combo carries it to a joined, Ready node, ending with the served ISO removed.
+  That catalogue's earlier custom-input details are superseded by this delivery revision;
 - the owner's directions of 2026-10-15 on run-scoped names and agent-chosen locations, on CI12 checking the
   generated ISO against the specification with the supported tooling for the selected image, on the certificate
   approval and the node join being the one part of the chain that cannot be tested live (it needs a real host to
@@ -41,11 +49,13 @@ document plans only from the authority that does exist:
 - the live-acceptance gate as it exists: the policy
   [`inventory/ci/live-acceptance.json`](../../inventory/ci/live-acceptance.json) and the checker
   [`tools/check_live_acceptance.py`](../../tools/check_live_acceptance.py); how this command's evidence enters that
-  gate is an open question for the owner, recorded below, not a decision of this document;
+  gate follows the existing registration contract; this document does not add a gate or silently widen it;
 - the shared standards pinned by `standards-binding.yaml` at revision `56a579c`. The architecture and plan formats
   this document follows are taken from standards revision `cae52b2`, the `main` the owner named on 2026-10-15; the
-  gap between pin and format revision is recorded as a blocker in `Open Decisions and Scope Boundary`.
+  selected architecture format does not add or replace a pinned validation gate.
 
+<!-- markdownlint-configure-file {"MD046": {"style": "fenced"}} -->
+<!-- markdownlint-disable MD046 -->
 <!-- architecture-map:v1 -->
     requirements:
       - id: R-CI12-001
@@ -55,8 +65,8 @@ document plans only from the authority that does exist:
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: One machine specification is loaded and validated against a schema, the target pool's machine objects are read from the cluster and compared with it (role, image, network settings), and drift is reported per field.
-        owner: ci-skills/lib/python/core/ocp_machines.py
+        deliverable: The calling agent selects native MAC-address flags or a nodes-config.yaml file. ci-skills validates its invocation wrapper and stages referenced native files unchanged; oc owns native input validation and errors. No custom OCP machine schema or mandatory machine-pool comparison is introduced.
+        owner: ci-skills/lib/python/core/kubernetes/ocp_onboard.py
         preserve: [The target and credential resolver, the result envelope, the exit-code contract]
         prIds: [PR-CI12-1]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
@@ -68,8 +78,8 @@ document plans only from the authority that does exist:
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: The cluster's boot image is read from its published stream (URL and digest), and the cluster pull secret is resolved by name and digest and copied into the run namespace as a dockerconfigjson Secret owned by the scope, without printing any value.
-        owner: ci-skills/lib/python/core/ocp_iso.py
+        deliverable: The combo resolves release-compatible tooling through native cluster/provider data and prepares workload access plus the pull-secret file reference required by oc. Native oc fetches the matching release. Credentials never appear in reports.
+        owner: ci-skills/lib/python/core/kubernetes/ocp_boot_image.py
         preserve: [Credential references never become values in reports or receipts]
         prIds: [PR-CI12-1]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
@@ -81,9 +91,9 @@ document plans only from the authority that does exist:
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: A self-installing node ISO is built inside the cluster from the release and a node configuration rendered from the specification, in the same run-scoped Pod that then serves it through a NodePort Service; the ISO is fetched over the served URL into the agent-chosen ISO directory and read back by digest and size, which also proves the serving, and the whole scope is kept across a successful build so the host can boot from it.
-        owner: ci-skills/lib/python/core/ocp_iso.py
-        preserve: [Every run-scoped object is removed on a failed build by the callback that created it and kept on a successful one; the ISO file persists]
+        deliverable: The ISO combo consumes the reusable prepared Pod and runs oc adm node-image create with caller-supplied native inputs. A shared storage callback checks the caller-selected destination; native oc/rsync writes there directly or writes to cluster scratch followed by a shared copy callback. Destination read-back proves the generated ISO is at the requested location with matching size and digest. The result returns evidence, never an ISO copy on the agent computer.
+        owner: ci-skills/lib/python/core/kubernetes/ocp_iso.py
+        preserve: [Native OCP behavior, Caller-selected storage, Metadata-only return to the agent]
         prIds: [PR-CI12-1]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
         evidence: []
@@ -94,10 +104,10 @@ document plans only from the authority that does exist:
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: Every temporary name (namespace, ServiceAccount, ClusterRoleBinding, Secret, ConfigMap, Pod, Service, labels) derives deterministically from one random run identifier generated after confirmation; a later verb reconstructs the same scope from that identifier alone and removes everything carrying it, cluster-scoped objects included, with absence read-back; the ISO and the ISO directory are never removed.
+        deliverable: Run-owned resources use the existing run identifier and ResourceSet ownership. Successful standalone preparation or build retains its requested Pod or artifact until removal; failure cleans resources created by that run, except the sole verified ISO copy retained for recovery after a delivery failure. Remove verifies absence of owned resources and preserves caller-owned storage.
         owner: ci-skills/lib/python/core/kubernetes/run_scope.py
         preserve: [ResourceSet ownership semantics and its operation label; the executor's reverse cleanup order; the shared --run-id option's existing meaning as a correlation identifier]
-        prIds: [PR-CI12-1]
+        prIds: [PR-CI12-0, PR-CI12-1, PR-CI12-2]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
         evidence: []
       - id: R-CI12-005
@@ -107,8 +117,8 @@ document plans only from the authority that does exist:
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: A joining node's certificate signing requests are approved by a digest-stable selector (the hostname the specification declares and the two signers) over the pending list, re-collected until the joiner's serving request reads back approved and issued and the node reads Ready within a deadline; any other signer is reported, never approved.
-        owner: ci-skills/lib/python/core/ocp_csr.py
+        deliverable: A joining node's certificate signing requests are approved by a digest-stable selector (the exact node identity supplied for join and the two signers) over the pending list, re-collected until the joiner's serving request reads back approved and issued and the node reads Ready within a deadline; any other signer is reported, never approved.
+        owner: ci-skills/lib/python/core/kubernetes/ocp_csr.py
         preserve: [Plan, apply and read-back with the shared APPLIED and NO_OP values]
         prIds: [PR-CI12-2]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
@@ -120,8 +130,8 @@ document plans only from the authority that does exist:
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: Given the run identifier of a build and the same specification, the combo waits for the joiner's first client request after the host boots from the served ISO, drives the approval to a node that reads back Ready with the hostname and role the specification declares (OS version and kernel recorded for the report), and removes the whole scope with absence read-back.
-        owner: ci-skills/lib/python/core/ocp_join.py
+        deliverable: After the user boots the host, the join combo consumes the run identifier and caller-selected node identity, drives the existing selected approval sequence, reads back Ready state and hostname/role, and releases the owned build scope. Hardware boot and node deletion remain outside this phase.
+        owner: ci-skills/lib/python/core/kubernetes/ocp_join.py
         preserve: [No interaction with the host's management controller is implemented; the boot is the user's action; a joined node is never deleted]
         prIds: [PR-CI12-2]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
@@ -146,27 +156,49 @@ document plans only from the authority that does exist:
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: The generated ISO is checked against the specification it was built from, the node configuration the build embedded is extracted from the ISO and every declared field (hostname, first NIC hardware address, install device, build interface, role) is compared and reported as match or drift per field, both as the last step of build and as a standalone verb that needs no cluster; on drift the result is PARTIAL and the scope is kept so the agent can decide.
-        owner: ci-skills/lib/python/core/ocp_iso.py
-        preserve: [The ISO file is read, never rewritten; drift is reported as PARTIAL, never corrected]
+        deliverable: The generated ISO is inspected inside the cluster with supported tooling for the selected image. Return artifact identity and actual embedded-configuration evidence so declared inputs can be checked against the generated result. This is output verification, not a replacement validator for native OCP input. Verify also consumes a cluster artifact reference.
+        owner: ci-skills/lib/python/core/kubernetes/ocp_iso_verify.py
+        preserve: [The ISO is inspected without rewriting it, No input-schema policy is introduced by output verification]
         prIds: [PR-CI12-1]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
         evidence: []
+      - id: R-CI12-009
+        authority: [This document's delivery revision of 2026-10-17, docs/contribution_guide.md]
+        phaseId: CI12
+        classification:
+          grounding: GROUNDED
+          implementation: NOT_IMPLEMENTED
+          verification: UNVERIFIED
+        deliverable: One shared implementation downloads and installs tools for internal Pod staging and agent-facing combos. The installed prepare/remove capability stages a ci-skills-owned Pod, reads tools back, exposes its live handle to another callback and verifies owned-resource cleanup without requiring an ISO build.
+        owner: ci-skills/lib/python/core/kubernetes/tool_pod.py
+        preserve: [Existing callback and state interfaces, Existing dependency schema, Toolbox behavior through the extracted implementation]
+        prIds: [PR-CI12-0]
+        gateIds: [G-CI12-STATIC, G-CI12-LIVE]
+        evidence: []
     pullRequests:
+      - id: PR-CI12-0
+        requirementIds: [R-CI12-004, R-CI12-009]
+        dependsOn: []
+        waveId: W-CI12-0
+        owns: [ci-skills/lib/python/core/tooling/, ci-skills/lib/python/core/toolbox.py, ci-skills/lib/python/core/kubernetes/tool_pod.py, ci-skills/lib/python/core/kubernetes/tool_pod_resources.py, ci-skills/lib/python/core/kubernetes/run_scope.py, ci-skills/lib/python/core/kubernetes/kubernetes.py, ci-skills/lib/bash/kubernetes/, ci-skills/bin/prepare_tool_pod.py, ci-skills/schemas/tool-pod.schema.json, ci-skills/schemas/results/tool-pod.schema.json, ci-skills/lib/python/core/catalog.py, ci-skills/tools.json, tests/python/test_tool_pod.py]
       - id: PR-CI12-1
         requirementIds: [R-CI12-001, R-CI12-002, R-CI12-003, R-CI12-004, R-CI12-007, R-CI12-008]
-        dependsOn: []
+        dependsOn: [PR-CI12-0]
         waveId: W-CI12-1
-        owns: [ci-skills/lib/python/core/kubernetes/run_scope.py, ci-skills/lib/python/core/action_modes.py, ci-skills/lib/python/core/gitlab/gitlab_action.py, ci-skills/lib/python/core/ocp_machines.py, ci-skills/lib/python/core/ocp_iso.py, ci-skills/lib/python/core/ocp_onboard.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/ocp_node_onboard.py, ci-skills/schemas/machine-spec.schema.json, ci-skills/schemas/results/ocp-node-onboard.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_run_scope.py, tests/python/test_action_modes.py, tests/python/test_ocp_node_onboard.py, tests/acceptance/receipts/, tests/acceptance/runner-tag/, tests/acceptance/runner-lifecycle/, .github/workflows/validate.yml, lib/bash/automation/bless.bash]
+        owns: [ci-skills/lib/python/core/action_modes.py, ci-skills/lib/python/core/gitlab/gitlab_action.py, ci-skills/lib/python/core/kubernetes/artifact_storage.py, ci-skills/lib/python/core/kubernetes/ocp_boot_image.py, ci-skills/lib/python/core/kubernetes/ocp_iso_verify.py, ci-skills/lib/python/core/kubernetes/ocp_iso.py, ci-skills/lib/python/core/kubernetes/ocp_onboard.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/ocp_node_onboard.py, ci-skills/schemas/node-image-input.schema.json, ci-skills/schemas/results/ocp-node-onboard.schema.json, ci-skills/references/ocp-node-image.md, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_run_scope.py, tests/python/test_action_modes.py, tests/python/test_ocp_node_onboard.py, tests/acceptance/receipts/, tests/acceptance/runner-tag/, tests/acceptance/runner-lifecycle/, .github/workflows/validate.yml, lib/bash/automation/bless.bash]
       - id: PR-CI12-2
         requirementIds: [R-CI12-005, R-CI12-006, R-CI12-007]
         dependsOn: [PR-CI12-1]
         waveId: W-CI12-2
-        owns: [ci-skills/lib/python/core/ocp_csr.py, ci-skills/lib/python/core/ocp_join.py, ci-skills/lib/python/core/ocp_onboard.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/ocp_node_onboard.py, ci-skills/schemas/results/ocp-node-onboard.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_ocp_join.py, tests/acceptance/receipts/, tests/acceptance/runner-tag/, tests/acceptance/runner-lifecycle/]
+        owns: [ci-skills/lib/python/core/kubernetes/ocp_csr.py, ci-skills/lib/python/core/kubernetes/ocp_join.py, ci-skills/lib/python/core/kubernetes/ocp_onboard.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/ocp_node_onboard.py, ci-skills/schemas/results/ocp-node-onboard.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_ocp_join.py, tests/acceptance/receipts/, tests/acceptance/runner-tag/, tests/acceptance/runner-lifecycle/]
     waves:
+      - id: W-CI12-0
+        prIds: [PR-CI12-0]
+        after: []
+        gateIds: [G-CI12-STATIC, G-CI12-LIVE, G-CI12-GATE]
       - id: W-CI12-1
         prIds: [PR-CI12-1]
-        after: []
+        after: [W-CI12-0]
         gateIds: [G-CI12-STATIC, G-CI12-LIVE, G-CI12-GATE]
       - id: W-CI12-2
         prIds: [PR-CI12-2]
@@ -174,601 +206,730 @@ document plans only from the authority that does exist:
         gateIds: [G-CI12-STATIC, G-CI12-LIVE, G-CI12-GATE]
     gates:
       - id: G-CI12-STATIC
-        requirementIds: [R-CI12-001, R-CI12-002, R-CI12-003, R-CI12-004, R-CI12-005, R-CI12-006, R-CI12-007, R-CI12-008]
+        requirementIds: [R-CI12-001, R-CI12-002, R-CI12-003, R-CI12-004, R-CI12-005, R-CI12-006, R-CI12-007, R-CI12-008, R-CI12-009]
         command: ./bless.sh --all locally; the validate workflow on the pull request head (static gate, docstrings, manifests and schemas including the catalogue render check, unit tests, installer fixtures, endpoint gate, aggregated required result)
         environment: GitHub Actions on the pull request head; ruleset "protected" (id 25130553) on main requires the ci-skills/required status with the strict up-to-date policy
         enforcement: Existing
         evidence: [Exact head SHA, validate run URL, every job green, ci-skills/required SUCCESS, the new schemas listed in the metaschema step per the existing pairing rule, tools.json regenerated from the catalogue source]
       - id: G-CI12-LIVE
-        requirementIds: [R-CI12-001, R-CI12-002, R-CI12-003, R-CI12-004, R-CI12-005, R-CI12-006, R-CI12-007, R-CI12-008]
-        command: The build apply, the verify and the remove apply under "Invocation and the result the agent reads", each with --receipt-out, run from the installed candidate against the live cluster; dry runs write no receipt
-        environment: The user's live smoke setup against the live cluster for build, verify and remove; CSR handling and join are the sole live exception and are mocked in GitHub tests by the owner's decision
-        enforcement: Proposed; the live run precedes the merge and its receipts are attached to the pull request; whether and how those receipts are committed into the gate is open question 2 in "Open Decisions and Scope Boundary", because the checker today accepts only its declared GitLab kinds and rejects any other receipt in a declared directory
-        evidence: [One receipt per live verb and result action, each row's read-back (ISO digest and size from the ISO directory, the per-field match of the ISO against the specification, scope removal), the mocked CSR and join cases from GitHub tests marked as such, the run identifier shared by the live receipts, the functional checksum of the installed candidate]
+        requirementIds: [R-CI12-001, R-CI12-002, R-CI12-003, R-CI12-004, R-CI12-005, R-CI12-006, R-CI12-007, R-CI12-008, R-CI12-009]
+        command: Installed tool preparation and ISO build/verify/remove operations described below; each live operation records actual evidence through the existing report writer
+        environment: The user's live test cluster for preparation/build/verify/remove; CSR handling and join remain mocked in GitHub tests
+        enforcement: Applicable installed live proof before merge; attach reports to the PR and reuse the existing committed-receipt contract without adding a new gate
+        evidence: [Installed functional checksum, BEFORE and AFTER, Same-Pod tool consumption, Native input pass-through, In-cluster artifact inspection, Requested destination read-back, Source and destination size and digest, Verified retention and cleanup, CSR and join cases marked mocked]
       - id: G-CI12-GATE
         requirementIds: [R-CI12-007]
         command: python tools/check_live_acceptance.py --root . --json
         environment: The live_acceptance step of the validate job, on the committed receipts
-        enforcement: Existing for the current operation set and unchanged by this phase until the owner answers open question 2; until then no receipt of this command is committed under a declared receipt directory, while the existing set is refreshed by the README rerun because each pull request changes the functional checksum
-        evidence: [Checker PASS on the pull request head after the README rerun refreshes the existing receipt set at this head's functional checksum; the new receipts enter only after the owner's answer]
+        enforcement: Existing required operation set remains unchanged; attach new capability reports to the PR until their kinds are registered through the existing contract, and keep current required receipts valid for the functional checksum
+        evidence: [Checker PASS on the pull request head after the README rerun refreshes the existing receipt set at this head's functional checksum]
 <!-- /architecture-map:v1 -->
+<!-- markdownlint-enable MD046 -->
 
 ## Consumer
 
-The consumer is an agent, a Codex or Claude session, acting for a user who installed ci-skills and asked for help
-onboarding a new host into their OpenShift cluster. The agent calls the installed command with the user's machine
-specification and an ISO directory, and receives the shared result envelope: the evidence rows of the chain, the
-ISO on disk checked field by field against the specification, the run identifier to hand to the next verb, and
-finally a node that reads Ready with the hostname and role the specification declares. The exact invocations and
-the JSON the agent reads are under "Invocation and the result the agent reads".
+A user installs ci-skills and creates their target file (default `~/.ci-skills/target.toml`) with Kubernetes
+configuration. The existing resolver preserves project-before-user selection and relative credential paths.
+Other providers remain optional. The calling agent supplies tool preparation inputs and the native OpenShift
+node inputs. ci-skills prepares the execution environment and performs the native procedure; OpenShift owns
+the interpretation and validation of its node configuration.
 
-The motivations, in the contract's categories: the capability it adds (a node from one specification, where today
-the agent would hand-roll a dozen `oc` reads and writes and the user would assemble an ISO by hand); the necessity
-it addresses (every manual onboarding repeats the same error-prone steps, and the certificate approval step is
-the one most often done wrong); and the limitation in established code it resolves (the skill has Kubernetes
-readers and a toolbox-backed runner deployment but nothing that builds an ISO, waits for a joiner or approves its
-certificate requests). Each traces to chain 2 of the catalogue and the README motivation.
+Delivery is ordered: reusable tool Pod first, ISO build second, node join third. The first delivery works and
+has its own live proof without generating an ISO. This document is an implementation specification, not a
+claim that the current unmerged draft or any new command has passed acceptance.
+
+**Delivery boundary:** PR-CI12-0 contains the complete reusable preparation capability, its thin installed
+command and its own live evidence. PR-CI12-1 starts from that merged capability. Schemas or helper functions
+alone do not complete PR-CI12-0, and the ISO implementation must not absorb its downloader or installer.
 
 ## Motivation
 
-A user adds hosts to a cluster to run CI workloads: machine-learning jobs, GPU jobs, container builds. Today that
-is a sequence of reads from the cluster, a boot-image lookup, a pull-secret copy, an ISO build on a workstation
-that cannot reach the host's management network, a manual boot, two rounds of certificate approval, and a check
-that the node came up with the expected role and versions. Each step is a place to make a mistake, and none of it
-is reusable by an agent. After this phase the agent runs one command per slice, every step is an atomic callback
-with its own plan, apply and read-back, and the chain is proven by linked evidence rows bound to the installed
-runtime's checksum. The observable outcome for the user: a specification goes in, an ISO comes out of the ISO
-directory with its digest recorded, the host boots from it, and the node reads Ready.
+Downloading and installing a tool is reusable independently of OpenShift. Preparing `oc` and `rsync` inside a
+Pod must use the same generic dependency operations that another combo can use for different tools. An ISO
+callback consumes that prepared environment; it must not also implement a downloader, package manager,
+credential resolver, OCP input schema and workstation artifact transfer.
+
+Internal use means any ci-skills workflow that pre-stages a Pod for subsequent work. Agent-facing use means an
+installed capability, such as toolbox preparation or the ISO combo, composes the same operations. These are two
+consumers of one implementation, not separate internal/external downloaders or installers.
+
+The caller supplies the right values. ci-skills executes the correct native procedure and reports its actual
+outcome. It neither invents missing MAC/network/disk values nor repairs a rejected native configuration.
 
 ## Diagram
 
-    agent ─ ocp_node_onboard.py build --spec S --iso-dir D ──► OnboardWorkflow (prepare → callbacks → execute)
-                                                                    │ mode: --dry-run | --live-plan | --apply --confirm-plan
-              OnboardState(DeliveryState), bound once; prepare() compares the digest, then state.run_scope = RunScope.new()
-                                                                    │
-      K8SAuth ─► ConfirmOnboardOperation ─► LoadMachineSpec ─► ReadMachinePool ─► ReadBootImage ─► OpenRunScope
-                     │ target re-verified       │ state.spec        │ state.pool        │ state.boot_image  │ namespace, SA, binding
-      ─► ResolvePullSecret ─► BuildNodeImage ──────────────────► ServeNodeImage ─► FetchNodeImage ─► VerifyNodeImage
-             │ state.pull_secret_ref   │ ConfigMap (node config) + Pod:  │ Service;         │ ISO fetched over   │ embedded config
-             │ (Secret in namespace)   │ init container builds into a    │ state.served_url │ served_url into    │ vs state.spec,
-                                       │ volume, serving container       │                  │ the ISO directory; │ per field;
-                                       │ serves it                       │                  │ state.iso          │ state.iso_check;
-                                       │                                 │                  │                    │ cleanup records
-                                       │                                 │                  │                    │ serving_kept
-      cleanup, reverse: on a failed build each callback removes what it created; on success everything stays (serving_kept)
-                                                        ▼ result and receipt carry run_id, namespace, served_url
-                                                        ▼ (the user boots the host; outside the API)
-    agent ─ ocp_node_onboard.py join --run-id <run_id> --spec S [--node N] ──► OnboardWorkflow
-              state.run_scope = RunScope.from_id(run_id)
-      K8SAuth ─► ConfirmOnboardOperation ─► WaitForJoiner ─► ApproveJoinRequests ─► ReadNodeState ─► RemoveScope
-                                                │ state.joiner (first client request)  │ state.approved  │ state.node   │ absence read-back
-    agent ─ ocp_node_onboard.py remove --run-id <run_id> ──► K8SAuth ─► ConfirmOnboardOperation ─► RemoveScope   (recovery)
-    agent ─ ocp_node_onboard.py verify --iso P --spec S ──► LoadMachineSpec ─► VerifyNodeImage      (no cluster; any ISO)
-                                                                    │
-                                      shared report ─► JSON result, sanitized receipt (schema ocp-node-onboard)
+The first diagram is the complete first delivery. Internal workflows and the installed preparation command
+enter the same composition; ci-skills creates the Pod before any download or installation callback uses it.
 
-Data flow runs left to right through named state fields; control flow is the executor's `collect → run → update`
-per callback and reverse `cleanup` for every entered callback on success and on failure; construction dependency
-is the callback order the adapter declares per verb. The hand-off between the verbs is the run identifier:
-`build` returns it, the agent passes it to `join` or `remove`, and the scope is reconstructed from it. The boot
-itself is the user's action on their hypervisor or hardware and crosses the system boundary: the combo records
-what to mount and waits for the joiner's first certificate request.
+```mermaid
+flowchart TD
+    Internal["Internal ci-skills capability<br/>Resolved tool requirements"]
+    External["Agent invokes preparation command<br/>Generic tool specification"]
+    Combo["Shared preparation combo — PR-CI12-0"]
+    subgraph Cluster["User-selected Kubernetes cluster"]
+        Create["StageToolPod<br/>ci-skills creates and owns the Pod"]
+        Read["ReadToolState<br/>Observe commands, install route and prerequisites"]
+        Download["DownloadArtifact<br/>Artifact route: download and verify<br/>Otherwise NO_OP"]
+        Install["InstallArtifact<br/>Install missing tools through shared operations<br/>Present tools: NO_OP"]
+        Verify["VerifyTools<br/>Read executable paths and probe results"]
+        State["Same Pod handle and tool results<br/>Shared executor state"]
+        Consumer["Composed workflow: next callback<br/>Uses that prepared Pod"]
+        Retain["Standalone prepare: retain Pod<br/>Return handle and run identifier"]
+        Remove["Explicit remove"]
+        Cleanup["Run-owned resource cleanup<br/>Verify absence"]
+        Create --> Read --> Download --> Install --> Verify --> State --> Consumer
+        State --> Retain --> Remove --> Cleanup
+        Consumer -- "Reverse cleanup when workflow finishes" --> Cleanup
+    end
+    Internal --> Combo
+    External --> Combo
+    Combo --> Create
+```
+
+The chain uses the dependency's declared route. Already-present tools skip installation; package-manager
+routes use the same installation operation without a separate artifact download. `oc` and `rsync` are tool
+entries for the OCP consumer, not special cases inside the generic preparation callbacks.
+
+The second diagram shows the later ISO consumer and where its artifact remains:
+
+```mermaid
+flowchart TD
+    Caller["Calling agent<br/>Supplies tool inputs, native node inputs and storage selection"]
+    Target["User target file<br/>Default ~/.ci-skills/target.toml"]
+    Skill["Installed ci-skills<br/>Shared executor and ordered callbacks"]
+    Ref["Command help and official OCP reference<br/>MAC flags or nodes-config.yaml; native options"]
+    subgraph Cluster["User-selected cluster"]
+        Prepare["Merged PR-CI12-0<br/>Shared Pod preparation combo"]
+        Ready["Prepared Pod handle in shared state"]
+        Other["Other ci-skills capability<br/>Same generic callbacks, different tools"]
+        OCP["PR-CI12-1: oc adm node-image create<br/>Caller flags or native YAML passed through"]
+        Native["OCP validates inputs and generates ISO<br/>Native temporary node-joiner workload"]
+        Check["CheckDestinationStorage<br/>Mounted destination, access and lifetime"]
+        Output["Build output inside prepared Pod<br/>Inspect ISO contents, measure size and digest"]
+        Direct{"Build at destination?"}
+        Copy["CopyArtifact<br/>Cluster scratch to requested cluster destination"]
+        Inspect["VerifyStoredArtifact<br/>Read requested destination; compare size and digest"]
+        Ready --> Other
+        Prepare --> Ready --> Check --> OCP --> Native
+        Native -- "Native oc/rsync transfer" --> Output --> Direct
+        Direct -- "Yes: same artifact" --> Inspect
+        Direct -- "No" --> Copy --> Inspect
+    end
+    Caller --> Skill
+    Ref -. "Accepted inputs and prerequisites" .-> Caller
+    Target --> Skill
+    Skill --> Prepare
+    Inspect -- "Metadata and evidence only; no ISO copy" --> Skill
+```
+
+The tool-location diagram makes the execution boundary explicit:
+
+```mermaid
+flowchart LR
+    subgraph Agent["Environment running installed ci-skills"]
+        Client["Existing Kubernetes client adapter"]
+        Config["Existing target and credential resolver"]
+        Client --- Config
+    end
+    subgraph Pod["Prepared container inside the cluster"]
+        OC["oc installed here"]
+        RS["rsync installed here"]
+        Auth["Workload cluster access and pull-secret reference<br/>Prepared by the OCP combo"]
+        Assets["Mounted artifact directory"]
+        Auth --> OC
+        OC --> RS --> Assets
+    end
+    Client -- "Create, exec and read back through existing transport" --> Pod
+```
+
+The agent environment uses the existing Kubernetes client. Tool download and installation happen inside the
+selected Pod/container. `oc` and `rsync` used by `oc adm node-image create` run there. The generated ISO remains
+in cluster storage. Installing these tools on the agent's computer is not part of this delivery.
 
 ## Implementation Plan
 
-### Current State and Intended Outcome
+### Existing code and reuse boundary
 
-NOT_IMPLEMENTED: the chain as a whole. Inspected at main `e5fb154` (documentation only for this phase). The
-relevant tree, with the files this phase adds marked NEW:
+The current source supplies these facilities. Extend them rather than introduce a parallel framework:
 
-    ci-skills/
-      bin/
-        ocp_node_onboard.py                      NEW  thin main: build, join, remove, verify
-      lib/python/core/
-        abstract/                                     callback lifecycle, executor, state, action
-        executor.py                                   WorkflowExecutor(context, Callbacks([...]))
-        delivery_state.py                             DeliveryState, ProviderAuthAction
-        catalog.py                                    the catalogue source; tools.json is rendered from it
-        cli.py                                        shared parser; --output-dir means paired report output
-        toolbox_actions.py                            WorkflowAction, EnsureNamespace (toolbox domain)
-        provenance.py                                 functional checksum
-        portable.py                                   portable receipts
-        gitlab/gitlab_action.py                       GitLabWorkflow: the domain action adapter this phase mirrors
-        kubernetes/kubernetes.py                      K8SCallback, K8SAuth
-        kubernetes/resources.py                       ResourceSet, OPERATION_LABEL
-        kubernetes/runner.py                          PullImage temporary Job, dockerconfigjson Secret copy
-        kubernetes/run_scope.py                  NEW  RunScope over ResourceSet; OpenRunScope, RemoveScope
-        ocp_machines.py                          NEW  CI11 owner; LoadMachineSpec, ReadMachinePool
-        ocp_iso.py                               NEW  CI11 owner; ReadBootImage, ResolvePullSecret, BuildNodeImage, ServeNodeImage, FetchNodeImage, VerifyNodeImage
-        ocp_csr.py                               NEW  CI11 owner; ApproveJoinRequests
-        ocp_join.py                              NEW  WaitForJoiner, ReadNodeState
-        ocp_onboard.py                           NEW  OnboardState, OnboardAction, ConfirmOnboardOperation, OnboardWorkflow
-      schemas/
-        machine-spec.schema.json                 NEW
-        results/ocp-node-onboard.schema.json     NEW
-      lib/python/sys/status.py                        PASS, DRY_RUN, PLANNED, PARTIAL, BLOCKED, APPLIED, NO_OP
-    tools/check_live_acceptance.py                    required operation set, GATE_SURFACES, the GitLab receipt validator
-    tools/render_manifest.py                          renders tools.json; --check fails on a stale copy
-    inventory/ci/live-acceptance.json                 declared receipt directories, freshness
-    tests/acceptance/receipts/                        committed sanitized receipts, all bound to one functional checksum
+- **Responsibility:** Ordered callbacks and shared state
+  - **Existing owner:** `core/abstract/`, `core/executor.py`, `core/delivery_state.py`
+  - **Required work:** Preserve interfaces and serialization.
 
-CI topology, from `.github/workflows/validate.yml`, existing elements plain and the two entries this phase adds
-marked `+`:
+- **Responsibility:** Provider configuration and transport
+  - **Existing owner:** `core/kubernetes/kubernetes.py`
+  - **Required work:** Reuse `K8SAuth`, `K8SCallback`, `KubernetesService`; add shared Pod exec only if needed.
 
-    pull request head (exact SHA)
-      ├─ validate ────────────────┐ static gate → docstrings → manifests and schemas (render check of tools.json;
-      │                           │ metaschema list + ocp-node-onboard result schema, + machine-spec schema)
-      │                           │ → unit tests (tests/python; + test_run_scope, + test_ocp_node_onboard, + test_ocp_join)
-      │                           │ → offline acceptance tests → live_acceptance: checker over the committed receipts (unchanged)
-      ├─ gate-ci-skills-endpoints ┤ endpoint declarations, unchanged
-      ├─ test-install ────────────┤ installer fixtures and toolchain schema, unchanged
-      │        each job writes its evidence file (artifact) ▼
-      └─ required-result ─────────┴─► aggregates the three evidence files → publishes the final ci-skills/required status
-                                          │ ruleset "protected": ci-skills/required SUCCESS on the up-to-date head, else no merge
+- **Responsibility:** Apply, read-back and cleanup ownership
+  - **Existing owner:** `core/kubernetes/resources.py`
+  - **Required work:** Reuse `ResourceSet`.
 
-The three jobs run in parallel and share nothing but the head; `required-result` consumes their evidence
-artifacts and publishes the final required status (validate publishes a pending one at its start), so a red step
-in any job stops advancement there. The local pre-commit gate `./bless.sh` runs the same whitespace, JSON, schema,
-markdown, shell, Python and endpoint checks on the working tree; its schema selector matches only `schemas/*.json`
-today, so the existing pairing rule for the two new schemas needs the selector to include `ci-skills/schemas/`,
-which is open question 4 because it also changes what the gate checks for the existing result schemas.
+- **Responsibility:** Run naming and recovery
+  - **Existing owner:** `core/kubernetes/run_scope.py` in the unmerged draft
+  - **Required work:** Deliver the reusable scope in PR-CI12-0; do not grant a role merely to install tooling.
 
-Nothing reads machine specifications, builds or serves an ISO, waits for a joiner or approves certificate
-requests. CI11 plans `ocp_machine.py`, `ocp_iso.py` and `ocp_csr.py` as single commands owned by
-`core/ocp_machines.py`, `core/ocp_iso.py` and `core/ocp_csr.py`; none exists. This phase creates those three
-modules with the callbacks the chain needs, so each path has one owner: CI11 keeps the single-command verbs on
-top of the same callbacks, and CI12 owns the composition. The command is declared in `core/catalog.py`, the single
-source from which `tools.json`, `--help` and `--describe` are rendered; a hand-edited `tools.json` fails the
-render check in the validate workflow.
+- **Responsibility:** Dependency types and installation operations
+  - **Existing owner:** `core/toolbox.py`: `Dependency`, `LinuxInstall`
+  - **Required work:** Extract shared tool operations; keep toolbox behavior using that same implementation.
 
-The gate today accepts a receipt only when its kind, operation and result action are in the checker's required
-operation set, its functional checksum equals the candidate's, it passes the GitLab receipt validator and it
-binds to exactly one setup context built from a `gitlab_access` receipt (the host, origin, identity and target
-that access receipt recorded); any other receipt in a declared directory turns the gate red, and every committed
-receipt turns red once anything under `ci-skills/bin`, `lib` or `schemas` changes until the README rerun
-procedure refreshes it. Those are facts about the existing gate; what this phase does about them is open question
-2. Three more facts shape the adapter: the GitLab adapter's mode rule refuses `--receipt-out` on a live plan, and
-the mode rules exist today in several copies with diverging reasons (the apply-against-dry-run conflict in the
-toolbox actions, the GitLab adapter and the MTU check, the live-plan and receipt rules in the GitLab adapter
-alone, the dry-run output rule at six sites); an interrupt raises a signal exit from the executor's recoverable
-guard, which the GitLab adapter's boundary does not catch, so an interrupted apply exits 128 plus the signal with
-no result, where the MTU check converts it into a rendered `interrupted` reason; and the Kubernetes service has
-no call that waits for a Pod's init container, so the build's wait is a poll of the Pod status through `json`,
-shaped like the existing build wait.
+- **Responsibility:** Dependency input contract
+  - **Existing owner:** `ci-skills/schemas/toolchain-dependencies.schema.json`
+  - **Required work:** Reference its existing dependency definition; do not copy it.
 
-Intended outcome: eight requirements, two pull requests, two waves, one command with the proposed verbs `build`,
-`join`, `remove` and `verify` sharing the mode flags of the GitLab actions (`--dry-run`, `--live-plan`, `--apply
---confirm-plan`), each callback reusable by other chains, and the run scope reusable by the image-build readiness
-probe (chain 11) and the GitLab runner manager (block 7). The command surface is open question 1 until the owner
-approves it; the invocations below show the proposal exactly.
+- **Responsibility:** CLI, modes, output and evidence
+  - **Existing owner:** `core/cli.py`, `core/action_modes.py`, `core/portable.py`, `core/provenance.py`
+  - **Required work:** Reuse current options, result envelope and functional checksum.
 
-### Design and Decomposition
+The `core/` paths above are relative to `ci-skills/lib/python/`. Existing `LinuxInstall._artifact_operation()`
+combines download, checksum verification, installation and temporary-file removal for Containerfile output.
+PR-CI12-0 separates those operations once so both toolbox rendering and in-Pod callbacks use them. Existing
+package-manager handling and command-presence probes also stay shared. No OCP import belongs in this layer.
+The generic layer builds the ordered dependency operations; the toolbox adapter renders them for a Containerfile
+and the Kubernetes adapter executes those same operations in the prepared Pod.
 
-One concrete state. `OnboardState(DeliveryState)` adds the named fields the diagram shows: `spec`, `pool`,
-`run_scope`, `boot_image`, `pull_secret_ref`, `iso`, `served_url`, `iso_check`, `serving_kept`, `joiner`,
-`approved`, `node`. Every callback reads earlier fields and writes its own; the fields are the only hand-off.
+### Phase CI12.0 — reusable tool Pod (PR-CI12-0)
 
-One action. `OnboardAction(SkillAction)` is a frozen dataclass with `spec_path`, `iso_dir` (the ISO destination;
-distinct from the shared `--output-dir`, which keeps its one meaning, paired report output), `run_id` (required by
-`join` and `remove`; generated by `build`, and whether `build` may also accept a caller value through the shared
-`--run-id` option, as the MTU command uses it for its temporary Pod, is open question 1), `node` (optional
-override of the hostname the specification declares), `build_timeout`, `join_timeout`, `approve_timeout`,
-`overwrite`, `iso_path` (the ISO to check, for `verify`), and the shared mode flags. Every environment specific
-arrives here as an argument or through the target resolver; none is hardcoded.
+**Observable delivery:** installed `prepare_tool_pod.py prepare` creates a usable Pod with the requested tools;
+`remove` releases its owned resources. Another callback or a later invocation can consume its returned Pod
+reference. The command and callbacks are delivered together with their input/result contracts and live proof.
 
-One adapter. `OnboardWorkflow` in `core/ocp_onboard.py` mirrors `GitLabWorkflow` in `core/gitlab/gitlab_action.py`:
-`prepare()` validates the mode, resolves the Kubernetes target (offline for `--dry-run`), and builds the plan and
-its digest from the caller's inputs and the resolved target, the fields the GitLab plan binds plus this command's
-own: the kind, the verb, the specification bytes, the ISO directory, the timeouts, the node, the caller-supplied
-`--run-id` of `join` and `remove`, the target file and source, the revision, and the resolved context and server.
-For an apply, `prepare()` compares `--confirm-plan` with that digest before any callback runs, exactly as the
-GitLab adapter does for plans without a live snapshot; only then does `build` generate its identifier
-(`RunScope.new()`), which is therefore outside `build`'s digest, while `join` and `remove` reconstruct theirs
-(`RunScope.from_id(run_id)`) from the identifier inside their digest, so a digest confirmed for one run never
-authorizes another. The modes are explicit per callback sequence: a live plan runs `K8SAuth` and the verb's
-reads only, which for `join` is a read of the pending requests matching the selector, the snapshot pattern the
-GitLab access callback uses, returning `PLANNED` with the pending-request rows and no approval; an apply runs
-`K8SAuth`, then `ConfirmOnboardOperation` (re-verifies the target against the plan, as `ConfirmGitLabOperation`
-does), then the verb's sequence. The mode-by-option table: `--dry-run` refuses `--receipt-out`, `--output-dir`
-and `--log-file`; `--live-plan` accepts `--receipt-out` for this command, which is where this adapter's receipt
-policy differs from the GitLab adapter's; an apply accepts all of them. The mode rules are not copied again:
-`prepare()` calls one shared validator, `core/action_modes.py`, which carries one canonical reason per rule and a
-per-adapter policy naming the adapter's read operations and which options need a live run; the GitLab adapter
-switches to it in the same
-pull request (the CI13 proposal names the same validator; whichever merges first delivers it). `execute()` runs
-the executor inside the recoverable-signal guard and renders the shared report; a signal exit raised by the
-guard after cleanup is converted at the boundary into a `BLOCKED` result with reason `interrupted`, the absence
-read-back and the receipt, exit code 2, as the MTU check converts its interrupt; the result validates against
-`schemas/results/ocp-node-onboard.schema.json`. The toolbox adapter `WorkflowAction` is not reused: it parses
-`--spec` as a toolbox specification and requires a toolbox catalogue kind, as the contribution guide states; its
-report shape is followed, not its class. `EnsureNamespace` is not reused: it is bound
-to the toolbox action and preserves a namespace that already exists, while a run-scoped namespace must not
-pre-exist and is removed by the scope; its mechanism, a cluster-scoped `ResourceSet(service, "", operation)`
-applying the Namespace document, is copied.
+Proposed implementation locations, all within the same feature PR:
 
-Callbacks, each a `K8SCallback[OnboardAction]` unless stated, each owning its hooks only, with their module:
+```text
+ci-skills/bin/prepare_tool_pod.py                 thin prepare/remove composition
+ci-skills/lib/python/core/tooling/                existing dependency models and separated shared operations
+ci-skills/lib/python/core/kubernetes/tool_pod.py   actions, Pod handle and atomic K8s callbacks
+ci-skills/lib/python/core/kubernetes/tool_pod_resources.py
+                                                Pod/input resource rendering if needed for decomposition
+ci-skills/lib/bash/kubernetes/                   independently linted Pod-side scripts when needed
+ci-skills/schemas/tool-pod.schema.json            ci-skills invocation wrapper; reuses dependency definition
+ci-skills/schemas/results/tool-pod.schema.json    existing envelope with Pod/tool/read-back records
+tests/python/test_tool_pod.py                    focused mocked behavior in existing GitHub test job
+```
 
-- `LoadMachineSpec` (`LocalCallback`, `core/ocp_machines.py`): `collect` loads and schema-validates the
-  specification and writes `state.spec`. No cluster access.
-- `ReadMachinePool` (`core/ocp_machines.py`): `run` reads the target pool's machine objects and compares role,
-  image and network settings with `state.spec`, as CI11's `ocp_machine.py --node-spec` defines the comparison;
-  `update` writes `state.pool` and the drift rows.
-- `ReadBootImage` (`core/ocp_iso.py`): `run` reads the published boot-image stream and writes `state.boot_image`
-  (URL, digest, version); `update` records that install must use this version, not the running nodes' version.
-- `OpenRunScope` (`K8SCallback[RunScopeAction]`, `core/kubernetes/run_scope.py`; its action carries the scope and
-  an optional role name, so other chains compose it): `run` applies the Namespace through the scope's
-  cluster-scoped set, the run's ServiceAccount, and, when the role argument is set, a ClusterRoleBinding to that
-  role; CI11's source binds cluster-admin to its build-and-serve manifest, and the least role that works is pinned
-  by the first live run and recorded in the receipt. `update` reads the objects back; `cleanup` removes them when
-  `state.failed` is set and `state.serving_kept` is not, each with absence read-back.
-- `ResolvePullSecret` (`core/ocp_iso.py`): `run` reads the cluster pull secret and copies it into the run namespace
-  as a `dockerconfigjson` Secret owned by the scope, the pattern of `PullImage`; `update` writes
-  `state.pull_secret_ref` as name and digest; `cleanup` removes the Secret under the same rule. The value never
-  enters state, report or disk.
-- `BuildNodeImage` (`core/ocp_iso.py`): `collect` renders the node configuration from `state.spec` into a
-  ConfigMap owned by the scope; `run` creates the run-scoped Pod, as CI11's source does: an init container that
-  builds the ISO from the release's boot image, the ConfigMap and the Secret into a Pod-local volume, and a serving
-  container that serves that volume; it waits for the init container within `build_timeout`; `update` reads the
-  Pod back; `cleanup` removes the Pod and the ConfigMap under the same rule.
-- `ServeNodeImage` (`core/ocp_iso.py`): `run` creates the NodePort Service for the serving container; `update`
-  reads the URL back and writes `state.served_url`; `cleanup` removes the Service with absence read-back under the
-  same rule.
-- `FetchNodeImage` (`core/ocp_iso.py`): `run` fetches the ISO from `state.served_url` into the ISO directory
-  (blocked with a classified reason when the file exists and `overwrite` is unset, or when the served URL is not
-  reachable from the agent's machine); `update` reads the file back (exists, digest, size) and writes `state.iso`.
-  The Kubernetes service has no dedicated copy call, though its command runner could exec into the Pod; the
-  fetch is the chosen route because it doubles as the serving proof; it requires the agent's machine to reach
-  the NodePort.
-- `VerifyNodeImage` (`LocalCallback`, `core/ocp_iso.py`): `run` extracts the node configuration the build embedded
-  in the ISO at `state.iso` (or `iso_path` for `verify`), by the means open question 7 settles, and compares every
-  field the specification declares (hostname, first NIC hardware address, install device, build interface, role)
-  with `state.spec`; `update` writes `state.iso_check` as match or drift per field, `PASS` when all match and
-  `PARTIAL` with the drift rows otherwise; on drift the callback is complete, so the scope is kept and the agent
-  decides; the ISO is read, never rewritten. In `build` it is the last callback, so its `cleanup` runs first in
-  reverse order and sets `state.serving_kept` when the run succeeded, which every earlier callback's cleanup reads.
-- `WaitForJoiner` (`core/ocp_join.py`): `run` first reads the node by the hostname the specification declares (or
-  `node`); when it is already Ready it writes `state.joiner` as already joined, so the approval step is `NO_OP`
-  and a repeated `join` ends there; otherwise it polls, within `join_timeout`, for the first pending client
-  certificate request whose subject matches that hostname, because the Node object exists only after that request
-  is approved, and writes `state.joiner` (request name, hostname).
-- `ApproveJoinRequests` (`core/ocp_csr.py`): the plan carries a selector, the hostname and the two signers
-  (client, then serving), which is digest-stable because request names are not known in advance; `collect` lists
-  the pending requests matching the selector; `run` is one bounded loop within `approve_timeout`, because the
-  executor runs each hook once and the serving request appears only after the client request is approved: it
-  approves the matching client request, polls for the serving request matching the selector, approves it, then
-  polls until that request reads back approved and issued and the node reads Ready; `update` reads the final
-  state back once; any other signer is reported. The selector never widens; the set of requests it matches grows
-  by one. `NO_OP` when the joiner was already Ready and nothing is pending.
-- `ReadNodeState` (`core/ocp_join.py`): `run` reads the node back and compares its hostname and role with
-  `state.spec`, `PARTIAL` on a mismatch; Ready, OS version and kernel are recorded in the report.
-- `RemoveScope` (`core/kubernetes/run_scope.py`): `run` deletes every object carrying the run identifier, the
-  namespaced set first (Service, Pod, ConfigMap, Secret, ServiceAccount), then the cluster-scoped set (binding,
-  namespace), with absence read-back; `NO_OP` when nothing carries it. `join` runs it last; `remove` runs it
-  alone, without a joiner wait.
+The standalone invocation wrapper contains `image` (the selected execution image) and `dependencies` (the
+existing dependency objects). An internal workflow supplies the same typed inputs from its action or provider
+discovery; it does not ask the calling agent to repeat already-resolved values. ci-skills owns the Pod manifest,
+creation, readiness and cleanup. The caller does not supply a Pod YAML just to use this capability.
 
-Reuse: `K8SAuth` first in every cluster verb; `ResourceSet` for everything created; the Secret-copy pattern of
-`PullImage`; the statuses from `ci-skills/lib/python/sys/status.py`; the existing report renderer and the
-portable receipt writer in `core/portable.py`; the catalogue declaration and render tool.
+`ci-skills-pod` names the internal role, not a global fixed Pod name. The shared run scope supplies generated
+names and ownership labels. An internal consumer can pass an existing namespace in its typed Pod action;
+`RunScope.new(namespace=...)` reads and uses that namespace without claiming ownership of it. With no namespace
+selection, the scope creates and owns a generated namespace. The Pod and other resources created by the run
+remain run-owned in either case. `remove` deletes only those resources, never a selected existing namespace.
+A later run lookup resolves labeled resources and observed ownership from the API, rather than deriving an
+existing namespace name from the run identifier. `StageToolPod` renders the selected image, container command
+and required volume mounts through the Kubernetes resource owner. Downstream callbacks consume its live Pod
+handle from the same
+state. Kubernetes validates the resulting native resource; no Kubernetes schema is copied into ci-skills.
+The dependency schema remains ours because it describes our installation inputs, not OCP inputs.
 
-Scope lifetime, decided as mechanism: every run-scoped object has one owner, the run identifier, and one lifetime,
-from the build to the end of `join` or `remove`. The executor runs cleanup for every entered callback on success and
-on failure and sets `state.failed` before cleanup on failure, and it also sets `state.failed` when a cleanup hook
-raises mid-way. So the keep-or-remove decision cannot rest on `state.failed` alone: `VerifyNodeImage.cleanup`, the
-last callback of `build`, runs first in reverse order and records `state.serving_kept` on a successful run; every
-earlier callback's cleanup removes what it created only when the run failed and the serving was not kept. A run that
-fails before `serving_kept` is recorded leaves nothing behind, because each creator removes its own object and cleanup
-runs only for entered callbacks. When a later cleanup hook fails after the serving was kept, the scope stays intact,
-the result is `BLOCKED` with the run identifier, and `remove --run-id` is the recovery. `join` and `remove`
-reconstruct `ResourceSet(namespace, operation=run_id)` from `--run-id`, and `RemoveScope` deletes only what carries
-that label. No discovery by any other label, and a new run never changes or deletes another run's objects, because
-`ResourceSet` refuses to modify an existing object whose operation label differs.
+The execution image must support the preparation route: a shell and a long-lived command keep the selected
+container available for exec. Use the existing shared script mechanism for that process. `ReadToolState` reads
+the image's OS/package manager, executable availability and effective write permissions before installing.
+For the existing artifact route, inspect `curl` and `sha256sum`, plus `tar` or the selected installer when that
+route needs them; package routes inspect their native manager. Verify the declared destination is writable.
+Report the actual missing prerequisite or permission with the selected route; do not assume root access,
+silently switch images or add an OCP-specific bootstrap installer.
 
-Concrete statuses, from the shared adapter rule: `--dry-run` returns `DRY_RUN` in phase `OFFLINE_PLAN` with the plan
-digest and no API call; `--live-plan` returns `PLANNED` in phase `LIVE_PLAN` after `K8SAuth` reads the identity back
-and the verb's reads ran (for `join`, the pending requests matching the selector); `--apply --confirm-plan <digest>`
-returns `PASS` with `APPLIED` or `NO_OP` rows when the operation record is verified, has no errors and its own cleanup
-field is neither `BLOCKED` nor `PARTIAL`, and `PARTIAL` otherwise; a cleanup hook that raises is rendered as `BLOCKED`
-with `cleanup.status` `BLOCKED`; an interrupt is rendered as `BLOCKED` with reason `interrupted`; the exit code is 0
-for `PASS`, `DRY_RUN` and `PLANNED`, and 2 for `PARTIAL` and `BLOCKED`.
+Reference `toolchain-dependencies.schema.json#/$defs/dependency` for each dependency. Preserve its `probe` field
+when extracting the typed model; use the declared probe to read a tool's version rather than assuming every
+executable accepts the same version flag. Reject no native OCP fields here: none are part of this input.
 
-#### Invocation and the result the agent reads
+The caller flow is `prepare_tool_pod.py prepare --spec TOOL_POD_INPUT --dry-run`, then the same command with
+`--apply --confirm-plan DIGEST --json`. `TOOL_POD_INPUT` is the wrapper described above; `DIGEST` is returned by
+the existing planning path. The result includes the run identifier, Pod handle and tool observations. A later
+consumer supplies that returned `--run-id` to resolve the same live scope; it re-probes required tools before
+using the selected container. The identifier correlates the scope, not its current readiness.
+`prepare_tool_pod.py remove --run-id RUN_ID` uses the existing plan/apply
+confirmation path and verifies absence. Every mode also uses the existing shared logging and output options.
 
-The agent invokes the command the way SKILL.md routes every installed command, from the skill root, and reads the
-shared envelope the result schema declares; no new output format. The option names below are the proposal under
-open question 1. The top-level keys and their shapes are the existing envelope's (`summary` is an object of
-counts, `errors` entries carry `source` and `reason` only, `plan_digest` is 64 bare hex characters that
-`--confirm-plan` takes as is); the rows inside `records` and `readback` are the paired `ocp-node-onboard`
-schema's to declare, sketched here. `<SPEC>`, `<DIR>`, `<ISO>`, `<RECEIPT>` and `<digest>` are placeholders,
-never examples.
+For each dependency, the existing input already names its commands and either native package names or a Linux
+installation route. Artifact routes carry source URL, expected checksum and installation destination. Package
+routes use the package manager actually available in the Pod. Values come from caller inputs or a provider's
+published release metadata; do not pin the smoke machine's values in production code. Already-present tools
+are observed and reused. A missing package or failed install is reported with the underlying tool error.
 
-    conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" --describe
+Use a concrete `PodHandle(namespace, name, uid, container)` and `ArtifactHandle(pod, path, sha256, size)`.
+Actions inherit `SkillAction`; Kubernetes callbacks inherit `K8SCallback[ActionT]`. Their shared state retains
+these handles, tool observations and the existing results. Collections initialize empty; hooks return
+`SkillResult`, including `{}` for unused hooks. A producer assigns its concrete handle before a consumer runs;
+there is no nullable callback action or result and no second state/serialization mechanism.
 
-returns the command contract as every installed command does: `kind: command_contract`, `command`, `purpose`,
-`options` with one line each, `status_values`, `exit_codes` (`0` for `PASS`, `DRY_RUN` and `PLANNED`; `2` for
-`BLOCKED` and `PARTIAL`), `requires_authorities: [kubernetes]`, `mutates: true`, `report_kind: ocp_node_onboard`,
-`side_effects`. The verb is a positional argument, shown in the `--help` usage line as
-`{build,join,remove,verify}` the way the GitLab runner command shows `{assign,create,delete,get,list,tag}`.
+- **Callback:** `StageToolPod`
+  - **Input and one responsibility:** Selected image and workflow execution/storage requirements; render/create through
+    `ResourceSet`, wait for usable container.
+  - **Shared result and ownership:** Exact Pod UID/container; owns created Pod and staging resources.
 
-    conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" build --spec <SPEC> --iso-dir <DIR> --dry-run --json
+- **Callback:** `ReadToolState`
+  - **Input and one responsibility:** Declared dependencies and Pod handle; read installed commands and available
+    package manager.
+  - **Shared result and ownership:** Observed commands and installation routes; no installation.
 
-    {
-      "schema_version": "1.0", "kind": "ocp_node_onboard", "status": "DRY_RUN", "phase": "OFFLINE_PLAN",
-      "operation": "build", "mutated": false,
-      "plan": { "spec_digest": "sha256:<...>", "iso_dir": "<DIR>", "target": "<context> -> <server>",
-                "names": "<pattern derived from the run identifier>",
-                "objects": ["Namespace", "ServiceAccount", "ClusterRoleBinding", "Secret", "ConfigMap", "Pod", "Service"] },
-      "plan_digest": "<64 hex characters>",
-      "summary": { "record_count": 0, "error_count": 0 }, "errors": [], "captured_at": "<time>"
-    }
+- **Callback:** `DownloadArtifact`
+  - **Input and one responsibility:** Artifact source, checksum and destination inside the Pod; transfer and verify.
+  - **Shared result and ownership:** Artifact handle; owns only its staging download. No installation or OCP behavior.
 
-    conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" build --spec <SPEC> --iso-dir <DIR> \
-      --apply --confirm-plan <digest> --json --receipt-out <RECEIPT>
+- **Callback:** `InstallArtifact`
+  - **Input and one responsibility:** Dependency and downloaded artifact, or native package route; install only when
+    needed.
+  - **Shared result and ownership:** Installed paths and operation outcome; no independent downloader.
 
-    {
-      "schema_version": "1.0", "kind": "ocp_node_onboard", "status": "PASS", "phase": "APPLY",
-      "operation": "build", "result_action": "APPLIED", "mutated": true,
-      "plan_digest": "<64 hex characters>", "verified_target": { "context": "<context>", "server": "<server>" },
-      "identity": { "<the identity K8SAuth read back>": "..." },
-      "records": [ { "step": "ReadMachinePool", "action": "NO_OP", "verified": true, "drift": [] },
-                   { "step": "ReadBootImage", "verified": true, "version": "<v>", "digest": "sha256:<...>" },
-                   { "step": "ResolvePullSecret", "action": "APPLIED", "verified": true, "secret": "<name>", "digest": "sha256:<...>" },
-                   { "step": "BuildNodeImage", "action": "APPLIED", "verified": true, "pod": "<name>" },
-                   { "step": "ServeNodeImage", "action": "APPLIED", "verified": true, "served_url": "<node address>:<port>/<file>" },
-                   { "step": "FetchNodeImage", "action": "APPLIED", "verified": true, "iso": "<DIR>/<file>", "digest": "sha256:<...>", "size": <bytes> },
-                   { "step": "VerifyNodeImage", "verified": true, "match": true,
-                     "fields": [ { "field": "hostname", "spec": "<value>", "iso": "<value>", "match": true },
-                                 { "field": "nic_hardware_address", "spec": "<value>", "iso": "<value>", "match": true },
-                                 { "field": "install_device", "spec": "<value>", "iso": "<value>", "match": true },
-                                 { "field": "build_interface", "spec": "<value>", "iso": "<value>", "match": true },
-                                 { "field": "role", "spec": "<value>", "iso": "<value>", "match": true } ] } ],
-      "readback": { "verified": true, "run_id": "<run identifier>", "namespace": "<name>", "served_url": "<url>",
-                    "iso_digest": "sha256:<...>", "iso_matches_spec": true },
-      "cleanup": { "status": "NOT_APPLICABLE" },
-      "summary": { "record_count": <count>, "error_count": 0 }, "errors": [], "captured_at": "<time>"
-    }
+- **Callback:** `VerifyTools`
+  - **Input and one responsibility:** Declared commands and prepared Pod; execute probes and read back the result.
+  - **Shared result and ownership:** Required-versus-observed tools and versions for that Pod/container.
 
-The agent then tells the user what to mount (`served_url`) and waits for the boot. After it:
+- **Callback:** `RemoveToolPod`
+  - **Input and one responsibility:** Returned run identifier; remove the run-owned resources through shared cleanup.
+  - **Shared result and ownership:** Verified absence; repeated removal is `NO_OP`.
 
-    conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" join --run-id <run identifier> --spec <SPEC> \
-      --apply --confirm-plan <digest> --json --receipt-out <RECEIPT>
+The small composition helper expands the selected dependencies in order. An artifact dependency uses
+`DownloadArtifact → InstallArtifact`; a native package route uses `InstallArtifact`, whose package manager performs its
+normal package retrieval. A consumer may omit `InstallArtifact`, but `DownloadArtifact` requires the live
+`PodHandle` already produced by `StageToolPod` in shared state. The shared operations know nothing
+about ISO files, host MAC addresses, node roles, GitLab or Harbor. Kubernetes transport belongs only in the
+Kubernetes adapter, so toolbox rendering consumes the same installation operations without creating a Pod.
 
-    {
-      "schema_version": "1.0", "kind": "ocp_node_onboard", "status": "PASS", "phase": "APPLY",
-      "operation": "join", "result_action": "APPLIED", "mutated": true,
-      "records": [ { "step": "WaitForJoiner", "verified": true, "request": "<csr name>", "hostname": "<host>" },
-                   { "step": "ApproveJoinRequests", "action": "APPLIED", "verified": true,
-                     "approved": [ { "name": "<csr>", "signer": "<client signer>" },
-                                   { "name": "<csr>", "signer": "<serving signer>" } ], "other_signers": [] },
-                   { "step": "ReadNodeState", "verified": true, "node": "<name>", "ready": true,
-                     "hostname_matches_spec": true, "role_matches_spec": true, "os": "<version>", "kernel": "<version>" },
-                   { "step": "RemoveScope", "action": "APPLIED", "verified": true,
-                     "removed": ["Service", "Pod", "ConfigMap", "Secret", "ServiceAccount", "ClusterRoleBinding", "Namespace"] } ],
-      "readback": { "verified": true, "run_id": "<run identifier>", "node": "<name>", "ready": true, "absent": true },
-      "cleanup": { "status": "PASS" },
-      "summary": { "record_count": <count>, "error_count": 0 }, "errors": [], "captured_at": "<time>"
-    }
+```python
+# Compose only; hooks perform provider reads, creation and installation.
+scope = RunScope.new(namespace=pod_action.namespace, run_id=pod_action.run_id)
+callbacks = [K8SAuth(target)]
+if pod_action.run_id is not None:
+    callbacks.append(ResolveRunScopes(ResolveRunScopeAction(pod_action.run_id)))
+callbacks.extend([
+    OpenRunScope(RunScopeAction(scope)),
+    StageToolPod(pod_action),
+    ReadToolState(tools_action),
+])
+callbacks.extend(tool_callbacks(tools_action))
+callbacks.append(VerifyTools(tools_action))
+return WorkflowExecutor(context=state, callbacks=Callbacks(callbacks)).run()
+```
 
-A rerun of `join` against the joined node returns `status: PASS`, `result_action: NO_OP`, `mutated: false`.
-Production `join --live-plan` remains available; it is mocked for acceptance:
+The removal chain is `K8SAuth → ResolveRunScopes → RemoveToolPod → RemoveScope`: the tool callback removes
+its Pod and ConfigMap; shared scope removal handles only owned namespaces. The
+[shared scope interface](../exec-plans/active/ci12-node-onboarding.md#interfaces-and-dependencies) defines
+lookup, ambiguity and recovery behavior for both preparation and later consumers.
 
-    conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" join --run-id <run identifier> --spec <SPEC> \
-      --live-plan --json --receipt-out <RECEIPT>
+Configuration checks during binding concern Kubernetes only. Downloads are not performed by `read_config()` or
+`is_configured()`. Preparation uses the existing plan/confirm/apply path. The same executor can run downstream
+callbacks before reverse cleanup. It stages the execution Pod once; subsequent callbacks reuse the state handle
+instead of creating a private Pod or repeating download/install logic. A successful standalone `prepare`
+deliberately retains its requested Pod and returns its run identifier; `remove` is its recovery/cleanup
+operation. Shared state starts with an empty set of retained resource identities. Before reverse cleanup,
+successful standalone preparation records the returned Pod and any owned resources needed to keep it usable
+in that set. `StageToolPod.cleanup` and scope cleanup skip exactly those retained identities; other owned
+resources are removed normally. Explicit `remove` releases retention and removes the owned scope. The executor's
+hook order stays unchanged. Failure before preparation succeeds removes resources created by that run. A later
+command resolves the run from live resources and checks the Pod
+UID and container, then runs the required tool probes again. A container restart can lose installed tools
+without changing the Pod UID, so an old receipt never substitutes for that read-back.
 
-    {
-      "schema_version": "1.0", "kind": "ocp_node_onboard", "status": "PLANNED", "phase": "LIVE_PLAN",
-      "operation": "join", "mutated": false, "plan_digest": "<64 hex characters>",
-      "plan": { "selector": { "hostname": "<host>", "signers": ["<client signer>", "<serving signer>"] },
-                "pending": [ { "name": "<csr>", "signer": "<signer>", "matches": true }, "<one row per pending request>" ] },
-      "readback": { "verified": true, "run_id": "<run identifier>", "pending_count": <count> },
-      "summary": { "record_count": <count>, "error_count": 0 }, "errors": [], "captured_at": "<time>"
-    }
+Required delivery proof, using the installed candidate against the configured cluster:
 
-When a step blocks, the envelope carries `status: BLOCKED`, a classified reason in `errors` (`source` and `reason`
-only), the run identifier under `readback` and the `cleanup` record, and the exit code is 2; an interrupted apply
-carries `reason: interrupted` after cleanup ran. A dry run refuses `--receipt-out`.
+1. Capture BEFORE: selected image/tool availability and absence of the run-owned Pod.
+2. Exercise a declared missing-tool route so the download/install callbacks actually run; record artifact digest
+   and installation result inside the Pod. Also exercise the existing-tool `NO_OP` route.
+3. Prepare `oc` and `rsync`, then independently read their paths and versions in the same Pod/container.
+4. A separate consumer callback uses that Pod: copy a small fixture with `rsync` and verify the copied bytes.
+   Tool versions alone do not establish the reusable execution claim.
+5. Capture AFTER, remove the owned resources, and verify absence. Repeat removal is `NO_OP`.
 
-    conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" remove --run-id <run identifier> \
-      --apply --confirm-plan <digest> --json --receipt-out <RECEIPT>
+GitHub mocked tests cover command order, shared-state identity, no duplicate installation, failed transfer or
+checksum, native package-manager errors, restarted-container re-probing, downstream callbacks not running after
+failure, and cleanup. Existing
+toolbox tests must continue to pass after extraction. Tests, schemas, help/catalog entries and scripts accompany
+this runnable capability; they are not separate forward PRs. No ISO build or node join is required for PR-CI12-0.
 
-returns the same envelope with `operation: remove` and the `RemoveScope` record, `NO_OP` when nothing carries the
-identifier. The standalone check needs no cluster and no credentials:
+The extraction is incomplete if toolbox rendering and the Pod callbacks retain separate transfer/checksum or
+installation algorithms. Their focused tests exercise the same extracted operations through both consumers.
 
-    conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" verify --iso <ISO> --spec <SPEC> --json --receipt-out <RECEIPT>
+### Phase CI12.1 — native OCP ISO combo (PR-CI12-1)
 
-    {
-      "schema_version": "1.0", "kind": "ocp_node_onboard", "status": "PASS", "phase": "READ",
-      "operation": "verify", "mutated": false,
-      "records": [ { "step": "VerifyNodeImage", "verified": true, "iso": "<ISO>", "digest": "sha256:<...>", "match": true,
-                     "fields": [ { "field": "hostname", "spec": "<value>", "iso": "<value>", "match": true }, "<one row per field>" ] } ],
-      "readback": { "verified": true, "iso_matches_spec": true },
-      "summary": { "record_count": <count>, "error_count": 0 }, "errors": [], "captured_at": "<time>"
-    }
+Depends on merged PR-CI12-0 and its live evidence. `ocp_node_onboard.py build` composes the prepared tool Pod with
+the native OCP operation. It must not restore the earlier custom `MachineSpec` validator or a downloader inside
+the OCP build callback. OCP-specific callbacks belong under `core/kubernetes/ocp_*.py`.
 
-`status: PARTIAL` with `match: false` rows and exit code 2 when a field differs. Every mutating verb also accepts
-`--live-plan` (`status: PLANNED`, identity read back, no mutation); every verb accepts `--yaml`, `--human`,
-`--output-dir` for paired reports, and the shared diagnostic options.
+#### Caller input and schema boundary
 
-#### When to Decompose
+The ci-skills invocation schema describes our execution/storage wrapper and native input selection.
+`--destination FILE` reads the destination wrapper below. `--tool-pod-spec FILE` optionally overrides the
+CI12.0 tool inputs. Without that override, the internal consumer resolves compatible tool inputs through the
+provider/release discovery in `core/kubernetes/ocp_boot_image.py` (R-CI12-002). That ISO adapter resolves the
+selected cluster release into CI12.0's typed image and dependency inputs; it does not ask the agent to repeat
+already-resolved values. An unresolved
+tool prerequisite is reported before mutation, not replaced with an invented image or download URL.
+Native node input uses one of these routes:
 
-Two slices, because they have independent reasons to change and independent proofs: `build` (reads and the ISO,
-with `remove` as its recovery) is provable with nothing but the cluster and an ISO directory; `join` needs a host
-that boots. Each is one pull request with live ISO proof or GitHub mocked CSR/join coverage, respectively.
+- **Native path:** Single node with flags
+  - **Caller supplies:** `--mac-address MAC`; optional `--network-config-path FILE`
+  - **What ci-skills does:** Preserve native argument values; stage the referenced file unchanged and adjust only its
+    execution path.
 
-#### When to Introduce Abstraction
+- **Native path:** Native node configuration
+  - **Caller supplies:** `--spec FILE`, a `nodes-config.yaml` file
+  - **What ci-skills does:** Stage the exact bytes as `nodes-config.yaml` in the Pod's asset directory and invoke `oc`
+    there.
 
-The options for run-scoped naming and cleanup, compared:
+The calling agent owns the correct MAC, NIC/network settings, disk hints and any other native values. Help must
+say this explicitly and link the native reference. Pass supported argument values as tokens without shell
+interpolation. The combo supplies its cluster asset-directory and credential-file paths; this specification
+does not introduce an arbitrary native flag-forwarding interface. No copied MAC regex, hostname rules,
+NMState schema, disk allowlist, required role/architecture policy or per-host JSON model is introduced.
 
-- Bare `ResourceSet(operation=<run id>)` with each callback choosing its own names: ownership and cleanup of the
-  created set exist today, but identifier generation, deterministic name derivation per kind, the cluster-scoped
-  set for the Namespace and the binding, and reconstruction from an identifier would be repeated in every callback
-  and in the two other consumers (chain 11 probe, block 7 runner manager).
-- Extending `ResourceSet` with those behaviours: couples a general ownership type to naming policy and to the
-  keep-or-remove decision, which only this chain needs.
-- A small `RunScope` over `ResourceSet`, chosen: one frozen dataclass (`run_id`, `namespace`, `labels`), two
-  constructors (`RunScope.new()`, `RunScope.from_id(run_id)`), `scope.name(kind)` for deterministic names,
-  `scope.resources(service)` for the namespaced set and `scope.cluster_resources(service)` for the cluster-scoped
-  set (Namespace, ClusterRoleBinding), both bound to the operation label, and two callbacks with their own small
-  action (`RunScopeAction`: the scope and an optional role): `OpenRunScope` and `RemoveScope`. No hierarchy, no
-  factory. The adapter's `prepare()` constructs the scope and stores it in `state.run_scope`; callbacks only read
-  it. Consumers: this phase's callbacks, the image-build readiness probe and the GitLab runner manager.
+ci-skills checks its own invocation shape, that a named file can be read/staged and that its execution/storage
+references are usable. It does not parse, normalize, rewrite or validate the OCP/NMState YAML. Invalid native
+input reaches `oc`; a nonzero result returns the provider's sanitized error and exit status through the shared
+report. The caller corrects the values and invokes again. Missing MAC in the flags route is a usage error, not
+a reason to invent a value. The file route does not require a redundant MAC flag.
 
-`MachineSpec` is a typed loader with a JSON schema under `ci-skills/schemas/`, not an abstraction: one consumer,
-one shape, validated at `collect`.
+The result schema describes our evidence. It is not a schema for an OCP node or an Ignition document.
+Do not deliver `machine-spec.schema.json` or a custom native YAML loader for this flow. A separate machine-pool
+comparison capability is not an unconditional preflight for building an ISO.
 
-### Open Decisions and Scope Boundary
+#### Agent discovery control check
 
-    BLOCKER: Deriving the phase identity and priority of CI12 from project authority
-    Authority checked:
-    - docs/agents/contracts/system-architecture.md at standards revision cae52b2 (Authority section inputs)
-    Observation:
-    - .coordination/roadmap.md, .coordination/phases.md and .coordination/priorities.md do not exist in the project
-    Risk:
-    - CI12 could be numbered or prioritised against work the owner has not approved, and a later phase could reuse the identity
-    Safe next step:
-    - The project owner names the authority this phase derives from (the three files, or another document)
+The user-visible goal is simple: build an ISO from the caller's native node specification and save it where the
+caller asks. Booting that ISO is the caller's decision. `--help` and `--describe` must expose the input choices,
+required destination and a pointer to the installed `references/ocp-node-image.md`, delivered in CI12.1. That
+reference owns the worked input/output examples and links the official OCP procedure for the selected version.
+Other skill docs point there instead of duplicating a second native field specification.
 
-    BLOCKER: Running bin/check-system-architecture.py against this document at the project's pin
-    Authority checked:
-    - standards-binding.yaml (pin 56a579c); the contract was added at standards f39203a (2026-10-13) and the checker at a2256a8 (2026-10-14)
-    Observation:
-    - At the pin the contract and checker are absent; the checker reports ARCH-INPUT UNAVAILABLE for this project
-    Risk:
-    - This document's conformance is asserted, not enforced, until the pin moves
-    Safe next step:
-    - The owner bumps standards-binding.yaml to a revision at or after a2256a8 in its own pull request
+The help summary must convey these three inputs in one short view:
 
-Open questions for the owner. Each is a requirement, a user-facing contract or a gate behaviour that only the
-owner decides; the document records the options and the finding that raised each, and decides none of them:
+```text
+Build an OpenShift node ISO inside your cluster and verify it at your chosen destination.
+Node input: --spec nodes-config.yaml OR --mac-address MAC [--network-config-path FILE]
+Save to:    --destination destination.json (cluster storage; temporary storage is explicit)
+Examples:   references/ocp-node-image.md (native YAML, destination, build/verify/remove)
+```
 
-1. The command surface: the verbs `build`, `join`, `remove` and `verify` and the options `--spec`, `--iso-dir`,
-   `--iso`, `--run-id` (reused with its existing meaning plus the scope key, as the MTU command uses it for its
-   temporary Pod), `--node`, `--overwrite` and the three timeouts, as "Invocation and the result the agent reads"
-   shows them. The owner asked for the ISO check on 2026-10-15; its verb name and options are still part of this
-   question.
-   Raised by the review that found `--output-dir` already taken by the shared parser. The `remove` verb exists
-   only as the recovery path the review asked for; without it the recovery is deleting by the operation label.
-   Sub-option for the identifier on `build`: generate only; or accept a caller value through the shared `--run-id`
-   (hashed into the derived names to fit label limits), which sits against the direction that names are
-   generated; or a separate flag.
-2. How this command's live evidence enters the gate. Facts: the checker accepts only its declared GitLab kinds
-   and rejects any other receipt in a declared directory; it fails on a missing required operation; every
-   committed receipt turns red when anything under `ci-skills/bin`, `lib` or `schemas` changes, so each of these
-   pull requests triggers the README rerun of the whole set; CSR handling and join are mocked in GitHub tests
-   by the owner's decision, with no required live pending-request read. The owner's follow-up of 2026-10-15 directs
-   the existing GitHub test and check path with no new gate and no separate plan, so a separate receipt directory
-   with its own freshness policy is withdrawn. What remains open:
-   whether this command's receipts are committed into the existing gate, which needs the checker to accept the
-   kind (a validator, a kubernetes setup context and required operations for `build` `APPLIED`, `verify`,
-   `remove`), or stay attached to the pull request only. Until answered, the pull requests
-   attach their live evidence and commit no receipt under a declared directory.
-3. Which receipts prove the chain for the six-row model: the build receipt with the ISO read-back and its
-   per-field match, the verify and remove receipts linked by the run identifier, plus the mocked CSR and join
-   rows from GitHub tests marked as mocked, are the proposal.
-4. The local gate's schema selector matches only `schemas/*.json`, so the existing pairing rule cannot cover the
-   two new schemas without widening it to `ci-skills/schemas/`, which also starts checking the existing result
-   schemas locally. Raised by the review of the pairing claim.
-5. Four places where this phase diverges from CI11's merged rows when those are built: the ISO flag (`--iso-dir`
-   instead of the row's `--output-dir`); a second build with the same inputs being a new run that blocks on an
-   existing ISO instead of `NO_OP`; the pull secret copied as a Secret instead of the row's 0600 files on disk;
-   certificate approval by selector instead of the row's planned names.
-6. Which workload needs cluster API access and with which role; CI11's source binds cluster-admin to its
-   build-and-serve manifest, and the first live run pins the least role that works.
-7. Where the supported tooling for the selected image runs when the ISO's embedded configuration is inspected,
-   for `verify` and for the build's last step. The owner's follow-up of 2026-10-15 directs inspecting the ISO
-   with the supported tooling for the selected image and comparing the declared hostname, network and hardware
-   address, install device and the other supported fields with the embedded values, since file existence, size
-   and checksum alone prove nothing about the embedding. The repository has no ISO reader today, and that
-   tooling needs the release. Options: run it on the agent's machine, which is an install step; or run it inside
-   the build Pod, serving the extracted configuration beside the ISO and fetching both, with the standalone verb
-   limited to that sidecar and the ISO digest.
+The reference includes this illustrative native `nodes-config.yaml`. Replace the node name, NIC/MAC, disk and
+network settings with the intended host's values; this is an example, not a ci-skills schema or defaults. The
+interface mapping and network definition refer to the same NIC, as the
+[OCP cluster configuration reference](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/nodes/working-with-nodes)
+requires. For the single-MAC flags route, show that separate native invocation too.
 
-Decided as mechanism inside the library, recorded so no step hides a choice:
+```yaml
+hosts:
+  - hostname: worker-01
+    rootDeviceHints:
+      deviceName: /dev/sda
+    interfaces:
+      - name: ens3
+        macAddress: "02:00:00:10:00:01"
+    networkConfig:
+      interfaces:
+        - name: ens3
+          type: ethernet
+          state: up
+          mac-address: "02:00:00:10:00:01"
+          mtu: 9000
+          ipv4:
+            enabled: true
+            dhcp: true
+          ipv6:
+            enabled: false
+```
 
-- Comparison baseline: the cluster's own machine pool, read and compared as CI11's `ocp_machine.py --node-spec`
-  defines; no reference file and no capture verb. OS version and kernel of the joined node are recorded, not
-  compared, because no recorded authority defines a baseline for them.
-- Cross-verb hand-off: the run identifier, generated after confirmation and returned by `build`, passed to `join`
-  and `remove`; the namespace and the served URL are also in the result for the agent's records, but the
-  identifier alone reconstructs the scope. `build`'s generated identifier is outside its digest; the
-  caller-supplied `--run-id` of `join` and `remove` is inside theirs, with the resolved target.
-- Ownership against CI11: the callbacks live in the CI11-owned modules whose behaviour they implement, and CI11's
-  single-command verbs become thin mains over the same callbacks when they are built; no second module tree.
-  `RemoveScope` is delivered by PR-CI12-1 (it is `remove`'s only callback) and composed by PR-CI12-2.
-- One Pod builds and serves, as CI11's source does, so the ISO never crosses workloads: the init container builds
-  into a Pod-local volume and the serving container serves it; the node configuration reaches the init container
-  as a ConfigMap and the pull secret as a Secret; the ISO reaches the ISO directory by a fetch over the served
-  URL, chosen over an exec-based copy because the fetch is also the serving proof.
-- Where the ISO build runs: in-cluster, because a workstation build cannot reach the host's network and streams
-  gigabytes over a slow tunnel.
-- The host's boot is the user's action; automating the management controller is out of scope for this phase.
-- The live-ISO alternative (a hand-built Ignition document installed from the stock live ISO) is out of scope; no
-  planned verb exists for it.
-- CSR handling and join are mocked in GitHub tests, by the owner's decision of 2026-10-15: they need a real host
-  to join. No live pending-request read is required; production `join --live-plan` remains available.
-- Post-join CI preparation (labels and taints from the specification, then verification) is a separate proposal:
-  chain 2 ends at the served ISO's removal and no recorded authority carries the preparation step, so it is
-  UNGROUNDED here and gets its own requirement when the owner records it.
+Acceptance of discovery: an agent starting with only the installed skill can find that example, identify which
+host/MAC and destination values it still needs, ask the user for those values, and construct a plan without
+reading implementation source. Missing destination is an actionable usage result; the command does not choose
+storage for the user. Native YAML is passed unchanged to OCP; native rejection tells the agent what to correct.
+The final report confirms where the actual ISO was saved. This is part of existing command/help and live
+acceptance, not another gate.
 
-The boundary is the two slices above. A third pull request for the single-command CI11 verbs is a separate
-proposal.
+#### Destination input and lifetime
+
+`--destination FILE` names a ci-skills JSON document describing cluster storage. It is separate from `--spec`,
+which remains the untouched native OCP YAML. The destination is explicit: the caller chooses existing storage
+or temporary storage; there is no implicit laptop path or substitution when a selected destination fails.
+
+This planned input has five required fields:
+
+| Field | Meaning |
+| --- | --- |
+| `namespace` | Namespace for the prepared Pod and any referenced namespaced volume. |
+| `volumeSource` | Native Kubernetes VolumeSource passed to the Pod API; Kubernetes validates it. |
+| `mountPath` | Absolute container path at which the selected volume is mounted. |
+| `artifactPath` | Exact final ISO path within that mount, including its filename. |
+| `buildOutput` | `destination` writes there directly; `scratch` builds in run-owned cluster scratch first. |
+
+The ci-skills wrapper validates these fields and their path relationship. It does not clone the Kubernetes
+volume schema or restrict the caller to a new storage-provider allowlist. The prepared Pod declares this mount
+before creation; storage checking does not try to add a volume to a running Pod. Existing namespaces, PVCs and
+other caller resources remain caller-owned. Ownership is derived from the shared resource set, never from an
+input claiming permission to delete existing storage.
+
+`CheckDestinationStorage` runs before the native build, in the prepared container. Its checks answer:
+
+1. Which protocol and mounted volume actually back the requested path? Confirm the selected mount, not a
+   container-directory fallback, and record its protocol/access route and observed identity.
+2. Can this workload write there? Write and read a small uniquely named run-owned probe, then remove only that
+   probe. A declared RWX access mode alone is not proof of a successful write.
+3. Does the exact output path already contain a file? Report a conflict before building rather than overwrite
+   unrelated data; the caller decides how to resolve the destination.
+
+Return these observations, the selected path and lifetime through the typed `StorageHandle`. Available capacity
+may be reported for the caller's decision; do not invent a fixed ISO-size threshold. Reuse existing Kubernetes
+transport, storage inventory and resource ownership. API rejection, a read-only mount or failed I/O returns an
+actionable result before the build starts. Later storage failures are reported by the operation encountering them.
+
+Persistent storage keeps the final ISO after the tool Pod is removed. For an `emptyDir` destination, successful
+build retains the prepared Pod until explicit removal. The result states that Pod removal or loss destroys the
+ISO; it must not describe `emptyDir` as durable storage. Caller-owned artifact deletion is outside scope removal.
+`VerifyNodeImage` records retention of the verified source and its backing resources in shared state before
+another callback can fail. After successful copy and destination verification, `VerifyStoredArtifact` releases
+scratch retention; it retains final Pod-backed output when that is the selected destination. On copy/read-back
+failure, reverse cleanup therefore preserves the sole verified source and reports its recovery handle. Explicit
+`remove` releases retained run-owned resources. Caller-owned storage never enters the deletion set.
+
+#### Concrete caller examples
+
+These are planned installed-command examples, not claims that CI12.1 is already implemented. This illustrative
+destination uses an existing PVC named `iso-store` in namespace `node-build`; those names are examples, not defaults.
+
+```json
+{
+  "namespace": "node-build",
+  "volumeSource": {"persistentVolumeClaim": {"claimName": "iso-store"}},
+  "mountPath": "/mnt/iso",
+  "artifactPath": "/mnt/iso/run-42/node.x86_64.iso",
+  "buildOutput": "destination"
+}
+```
+
+Save that wrapper as `destination.json`. The agent discovers the command with `--help`/`--describe`, supplies
+MAC or native YAML and destination, then uses the existing plan/confirmation flow with resolved tools:
+
+```bash
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" build \
+  --destination destination.json \
+  --mac-address 02:00:00:10:00:01 --live-plan --json
+
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" build \
+  --destination destination.json \
+  --mac-address 02:00:00:10:00:01 \
+  --apply --confirm-plan "$PLAN_DIGEST" --json
+```
+
+Use `CI_SKILLS_ROOT` and the `ci-skills` conda environment established by the
+[installation steps](../../README.md#install-and-first-run). `PLAN_DIGEST` is the digest returned by that live
+plan. It binds the supplied input contents, destination and target using the existing action contract. The MAC is
+illustrative; the caller must supply the joining host's actual NIC address. For the native YAML route, replace
+`--mac-address ...` with `--spec nodes-config.yaml` in both invocations; ci-skills stages that file unchanged.
+The tool Pod uses the caller's Kubernetes target through the existing resolver; no GitLab, Harbor or GitHub
+configuration is needed.
+
+**Optional tool override when discovery cannot resolve inputs.** Add `--tool-pod-spec tool-pod.json` to both
+plan and apply. The file uses the CI12.0 contract. For a selected image already containing the tools, its complete
+shape is:
+
+```bash
+jq -n --arg image "$TOOL_IMAGE" '{
+  image: $image,
+  dependencies: [
+    {name: "oc", commands: ["oc"], probe: ["oc", "version", "--client"]},
+    {name: "rsync", commands: ["rsync"], probe: ["rsync", "--version"]},
+    {name: "coreos-installer", commands: ["coreos-installer"],
+     probe: ["coreos-installer", "--version"]}
+  ]
+}' > tool-pod.json
+```
+
+Set `TOOL_IMAGE` to the selected image reference before rendering this input. The example uses `coreos-installer`
+for native ISO inspection; verify its support for the selected image. Missing tools use the dependency object's
+existing package or artifact installation fields described in CI12.0, not a second OCP installer.
+
+For **scratch then copy**, use the same destination document with `"buildOutput": "scratch"`. The ISO is built
+and inspected on run-owned storage, copied to `/mnt/iso/run-42/node.x86_64.iso`, then read back there. Both paths
+produce the same caller-visible destination. Direct output skips the copy callback.
+
+For **temporary final storage**, replace `volumeSource` with `{"emptyDir": {}}` and use `buildOutput: destination`.
+The same `artifactPath` is now a path in the retained Pod, not in `iso-store`. The result names the Pod UID,
+container, volume and path, with lifetime `until Pod removal or loss`. The caller can consume that mounted
+artifact through another in-cluster callback before calling `remove`; no local ISO download is added.
+
+`verify --run-id RUN_ID` resolves that run's artifact reference from its live labeled resources and performs
+cluster-side inspection. `remove --run-id RUN_ID` uses the same scope lookup and the existing plan/apply flow:
+
+```bash
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" \
+  verify --run-id "$RUN_ID" --json
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" \
+  remove --run-id "$RUN_ID" --live-plan --json
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" \
+  remove --run-id "$RUN_ID" --apply --confirm-plan "$REMOVE_PLAN_DIGEST" --json
+```
+
+`RUN_ID` is returned by build; `REMOVE_PLAN_DIGEST` is returned by the removal plan. The live run resources carry
+only non-secret artifact location/ownership metadata needed to resolve this handle. For persistent output,
+removal reads the delivered ISO back before and after releasing the build Pod, using an owned temporary reader
+if necessary, then cleans that reader. For temporary output it verifies removal of the backing Pod. Repeated
+scope removal is `NO_OP`; it does not require an already-deleted run record. No hidden local state file is used.
+
+The report always returns a typed cluster artifact reference: observed namespace, Pod UID/container when
+applicable, volume identity, exact artifact path, byte size, SHA-256, delivery route and lifetime. A caller that
+requests serving also receives the address read back from its selected serving resources. Do not claim a private
+Pod path is a boot URL. The caller chooses how its boot consumer accesses the retained artifact.
+
+#### Native procedure and callback composition
+
+Use the [OCP 4.19 node-image procedure](https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/nodes/working-with-nodes),
+sections 6.4.1–6.4.3, as the provider reference. Ship a short pointer and both input examples in the installed
+skill's references and link it from command discovery; do not copy its field table as a ci-skills specification.
+The release-compatible `oc` help is the native option reference. Record the selected tool/release versions.
+
+1. Resolve Kubernetes target/access using the existing resolver and `K8SAuth`.
+2. Prepare the tool Pod through CI12.0 with the selected destination mount and optional scratch mount. Read back
+   `oc`, `rsync` and the selected inspection tools inside its container; check destination storage there.
+3. Establish workload cluster access and resolve the pull secret through existing provider facilities.
+   Give `oc` a registry-config file or `REGISTRY_AUTH_FILE` reference; never put credential values in the report.
+   Caller kubeconfig authentication does not establish the Pod's permissions. Read back the selected workload
+   identity's required native operations. The workload credential/role choice belongs to the ISO delivery;
+   generic preparation neither grants `cluster-admin` nor treats a running Pod as permission to grant it.
+4. Stage the caller's native input unchanged in the build asset directory. For direct output, derive `--dir`
+   and `--output-name` from the selected artifact path. For scratch output, those paths refer to run-owned
+   cluster scratch; the final destination stays unchanged. Track staged native files as run-owned artifacts.
+   A different pre-existing `nodes-config.yaml` at that path is a staging conflict, reported before building;
+   identical existing bytes can be reused without claiming ownership. Remove only files staged by this run on
+   success, failure or explicit removal, preserving the final ISO and caller files.
+5. Run the native command in the prepared Pod:
+
+   ```bash
+   oc adm node-image create --mac-address="$MAC_ADDRESS" \
+     --dir="$ASSET_DIRECTORY" --output-name="$ISO_FILENAME"
+   ```
+
+   For the file route, omit `--mac-address` and place the supplied `nodes-config.yaml` in that directory.
+   `--registry-config` or `REGISTRY_AUTH_FILE` supplies the resolved pull-secret file. The optional native network
+   file uses `--network-config-path` with its staged path. The native command performs its own workload creation
+   and rsync transfer into this Pod's asset directory.
+6. Inspect the generated ISO with supported native tooling and record actual embedded-configuration evidence,
+   size and digest. This verifies output; it does not introduce an OCP input validator.
+7. If scratch was selected, copy the verified ISO to the exact requested cluster destination. Read the final
+   destination back and compare size and SHA-256 with the verified build output. For direct output, use the
+   same observed artifact; no redundant copy or repeated ISO-content inspection is needed.
+8. Return the final location, lifetime, run identifier and evidence. Release build scratch only after verified
+   delivery. Retain the requested final artifact for the caller. No ISO is transferred to the agent computer.
+
+The thin combo composes these responsibilities in order:
+
+```text
+CI12.0 tool preparation (destination mount declared before Pod creation)
+  -> CheckDestinationStorage
+  -> ResolvePullSecret
+  -> StageNodeInput
+  -> BuildNodeImage
+  -> VerifyNodeImage
+  -> CopyArtifact             [only when build output differs from destination]
+  -> VerifyStoredArtifact
+  -> optional requested serving
+```
+
+`CheckDestinationStorage`, `CopyArtifact` and `VerifyStoredArtifact` are reusable Kubernetes storage callbacks
+in `core/kubernetes/artifact_storage.py`, delivered with CI12.1 and usable independently of OCP. Extend existing
+storage inventory, transport and `ResourceSet` facilities; do not duplicate them. `ResolvePullSecret` uses shared
+credential facilities and remains reusable. OCP-specific staging, build and embedded-image verification stay in
+`core/kubernetes/ocp_*.py`. `BuildNodeImage` only executes/waits for the provider operation; it does not install
+tools, validate native YAML, copy the final artifact, serve it or approve certificates.
+
+Shared typed state carries the prepared Pod, storage handle, build artifact and delivered artifact. A successful
+build result requires verified delivery, not just successful generation. `verify` consumes the cluster artifact
+reference and inspects it there. `remove` uses existing run ownership: it removes owned temporary resources,
+reads their absence back, and preserves the caller's destination storage and delivered ISO. Workload credentials
+and permissions remain the ISO implementation's explicit native prerequisite; storage selection does not grant
+any cluster rights or change credential resolution.
+
+### Phase CI12.2 — monitor and join (PR-CI12-2)
+
+This remains the existing separate join delivery, after PR-CI12-1. The user boots the host from the cluster-held
+ISO. The command consumes the run identifier and caller-selected node identity, monitors the join, approves the
+selected node's certificate requests, reads back Ready state and releases the owned build scope. It never boots
+hardware or deletes a joined node.
+
+Use the native `oc adm node-image monitor --ip-addresses ...` and `oc adm certificate approve ...` operations.
+When reverse DNS is unavailable, the native monitor can skip its CSR checks; use an explicit CSR read for this
+production path. Preserve the existing hostname/two-signer selection and bounded client-then-serving approval
+loop; never widen it to every pending request. Repeat join of an already Ready node is `NO_OP`. Keep these in
+`WaitForJoiner`, `ApproveJoinRequests` and `ReadNodeState`, with shared scope removal last.
+
+CSR handling and node joining remain the operator's sole live-test exception: they require a real joining host,
+so their acceptance is mocked on GitHub, including missing reverse DNS, the two-request sequence, unrelated
+requests, expiry and already-Ready repetition. No live CSR read or approval is required as acceptance evidence.
+This exception does not cover tool preparation, ISO generation, artifact inspection or cleanup.
 
 ## PR Order
 
-PR-CI12-1 (wave W-CI12-1) delivers the run scope with its two callbacks, the specification loader and pool comparison,
-the boot-image read, the pull-secret copy, the ISO build and serving, the adapter and the thin main with the `build`,
-`remove` and `verify` verbs, the catalogue declaration with its regenerated `tools.json` and result schema, the schema
-entries in the validate workflow per the existing pairing rule, and the routing; its live proof is the build run from
-the installed candidate with the ISO read back from the ISO directory, checked field by field against the
-specification, and the scope removed afterwards. PR-CI12-2 (wave W-CI12-2) depends on it for the state fields, the run
-scope and the scope to remove, and delivers the `join` verb: the joiner wait, certificate approval and node state
-compared with the specification, with the result schema extended for the join fields; CSR handling and join are
-mocked in GitHub tests by the owner's decision. Per the owner's rule, applicable live proof comes from the installed
-candidate before merge; a change under `ci-skills/bin`, `lib` or `schemas` invalidates the proof, because the functional
-checksum covers those paths, while a documentation or test-only change does not. What each pull request commits into
-the gate follows the owner's answer to open question 2; until then the evidence is attached to the pull request. Each
-pull request leaves the installed command coherent under the existing gates, with the unimplemented verb absent from
-the catalogue rather than stubbed.
+- **Phase / PR:** CI12.0 / PR-CI12-0
+  - **Runnable delivery:** `prepare_tool_pod.py prepare/remove` and shared download/install callbacks
+  - **Dependency:** Existing framework
+  - **Acceptance before advancing:** Installed live tool preparation, same-Pod consumer, no-op and cleanup.
+
+- **Phase / PR:** CI12.1 / PR-CI12-1
+  - **Runnable delivery:** `ocp_node_onboard.py build/verify/remove` using native OCP inputs
+  - **Dependency:** PR-CI12-0
+  - **Acceptance before advancing:** Live MAC and native-file routes, ISO inspection, exact destination read-back
+    for direct and copied output, retained temporary output, and ownership-aware cleanup.
+
+- **Phase / PR:** CI12.2 / PR-CI12-2
+  - **Runnable delivery:** `ocp_node_onboard.py join`
+  - **Dependency:** PR-CI12-1
+  - **Acceptance before advancing:** GitHub mocked CSR/join exception; preserve prior live evidence when functional
+    checksum is unchanged.
+
+Each PR includes its production command, shared callbacks, help/discovery, own input/result schema where needed,
+focused tests and applicable live evidence. The command catalogue in `core/catalog.py` remains the single source;
+regenerate `tools.json`. Unimplemented verbs stay unavailable. Do not create schema-only or gate-only deliveries.
 
 ## Gates
 
-The traceability map in `Authority` is the canonical map. `G-CI12-STATIC` is the existing validate workflow and the
-local pre-commit gate; its enforcement is the main ruleset's required `ci-skills/required` status with the strict
-up-to-date policy, read back from the repository's branch rules on 2026-10-15. `G-CI12-LIVE` is the live run of each
-ISO slice from the installed candidate on the user's live smoke setup, with one receipt per live verb and result
-action; CSR handling and join are mocked in GitHub tests as the sole live exception. It is proposed, its evidence is
-attached to the pull request, and whether its receipts enter the committed gate is open question 2. `G-CI12-GATE` is
-the existing live-acceptance step, unchanged by this phase until that question is answered.
+Reuse `G-CI12-STATIC`, `G-CI12-LIVE` and `G-CI12-GATE` below and the existing GitHub validation jobs. No new gate,
+workflow job, credential policy or target requirement is introduced by this delivery split. GitHub runs static
+checks and mocked tests. Live proof runs the installed candidate against the user's selected test target.
 
-Per-requirement gaps today, all of the same kind: no module, no unit test and no live run exists for any of
-`R-CI12-001` to `R-CI12-007`, so every row records `UNVERIFIED`. The specific evidence each needs: `R-CI12-001` a
-loader test (valid, invalid) and a pool comparison test (match, drift per field); `R-CI12-002` a result row with the
-stream digest and the Secret's name and digest and no value; `R-CI12-003` the ISO digest and size read back and the
-serving URL; `R-CI12-004` a scope test (names derive from the identifier, `from_id` reproduces them, removal deletes
-exactly the owned set including the cluster-scoped objects) and nothing carrying the identifier after `join` or
-`remove`; `R-CI12-005` an approval-loop test against a simulated two-request sequence, a foreign signer and an expired
-deadline (the approval is never run live), and mocked live-plan pending-request rows; `R-CI12-006` the mocked joiner
-and the mocked node read-back with hostname and role matching the specification; `R-CI12-007` the catalogue
-consistency test, the render check and `--describe` without credentials;
-`R-CI12-008` a test that builds a known configuration into a fixture ISO and asserts the comparison reports a changed
-hostname and a changed hardware address as drift, and the live build's per-field match rows.
+The installer package checksum remains separate from functional evidence. The existing functional checksum over
+`ci-skills/bin`, `lib` and `schemas` binds live reports to executed behavior. Documentation/test-only changes do
+not require live reruns. After a functional correction, review the corrected candidate and refresh the affected
+proof before merge under the existing acceptance rules; never fabricate or hand-edit a successful receipt.
+
+The existing committed-receipt gate remains unchanged. Until a Kubernetes receipt kind is registered through its
+existing contract, attach these capability reports to the PR rather than placing an unsupported kind in a declared
+GitLab receipt directory. Existing required evidence remains required. This is not permission to bypass a gate.
 
 ## Live Smoke Evidence
 
-Planned, not observed. `build`: the command run from the installed candidate against the live cluster with a
-specification the agent passes and an ISO directory it chooses; evidence is the result's rows plus the ISO's digest
-and size read back from that directory, its per-field match against the specification, and the run identifier.
-`verify`: the fetched ISO checked against the specification; `remove`: nothing left carrying the identifier. CSR
-handling and `join` are not run live, by the owner's decision, because they need a real host to join. Their rows come
-from GitHub mocked tests with a simulated two-request sequence and an already Ready repeat, marked as mocked in the
-evidence; no live pending-request read is required.
-Each receipt is sanitized with the portable writer and carries the functional checksum of the installed candidate;
-where it is committed is open question 2.
+Planned, not observed. PR-CI12-0 produces linked BEFORE/AFTER, download/install/read-back, downstream consumption
+and cleanup records for one actual prepared Pod. PR-CI12-1 exercises both native input routes and records provider
+execution, native inspection output and requested-versus-observed destination evidence. Cover direct output,
+scratch-to-destination transfer and explicit temporary final storage without rebuilding for unrelated docs edits.
+For copied output, read source and destination sizes/digests independently and show equality; for direct output,
+record the one actual destination observation. Read persistent output back after build-scope cleanup. For temporary
+output, prove it remains consumable until removal, then verify Pod/artifact absence. A failed destination check
+must show that native build never started; a failed transfer must expose the retained source recovery handle.
+A bad native input case must reach `oc` and return its rejection to the caller;
+it must not be intercepted by an invented OCP validator.
+
+Use existing portable reports and the shared `--log-level`, `--log-format` and `--log-file` options. Trace artifacts
+identify the actual operations and outcomes without credentials. Reports carry the installed functional checksum,
+run identifier, target identity and evidence pointers. For the positive persistent-storage test in this delivery,
+use the operator-selected existing NFS export, which exposes a PVC containing shared data. Resolve the export
+and backing claim from live configuration; no lab address or path becomes a product default. The test caller
+selects an isolated run-specific subdirectory and exact ISO path on that export. Preserve the NFS service/export,
+backing PVC/PV and every pre-existing file. Limit probes and staged-file cleanup to identities created by the run;
+never recursively clean the shared export. Keep the delivered ISO available and read it back after build-Pod
+removal. Native acceptance/ISO inspection is distinct from successful node joining; CSR/join rows are marked as
+mocked. No live result is claimed by this specification.
 
 ## End-to-End Test
 
-The consumer journey: the agent passes a specification and an ISO directory, runs `build`, hands the returned run
-identifier to `join` after the user boots the host, and the final read-back is an ISO that matched the specification
-field by field, then a Ready node with the declared hostname and role and no resource left carrying the identifier.
-The proposed test combines live `build`, `verify` and `remove` receipts, linked by the run identifier and functional
-checksum, with GitHub mocked CSR/join tests under the owner's sole live exception. Its acceptance route is
-`G-CI12-LIVE` with the mocked cases in `G-CI12-STATIC`. No execution is recorded yet.
+Install the candidate as a user would. Supply only Kubernetes configuration in the selected target file. Prepare
+the tools in a Pod and prove a different callback can use that same Pod; remove it and verify absence. Then run the
+ISO combo with a real caller MAC and native network input for the test environment, keeping the ISO in cluster
+storage. Inspect the ISO and read it back at the caller's exact requested destination; return metadata/evidence
+only. Repeat with native `nodes-config.yaml` input, exercising the other delivery route. Use the shared storage
+callbacks to cover temporary output and transfer failure without unnecessary ISO rebuilds. Remove the owned scope,
+read persistent output back again, preserve caller-owned storage, and verify actual cleanup. Complete the join
+coverage in
+GitHub using the existing mock exception. No GitLab, Harbor or GitHub target configuration is required for these
+Kubernetes-only operations.

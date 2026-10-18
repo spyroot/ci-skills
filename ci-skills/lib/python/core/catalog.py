@@ -264,6 +264,61 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
         "are cleaned on exit.",
     },
+    "prepare_tool_pod.py": {
+        "kind": "tool_pod",
+        "purpose": "Prepare, reuse or remove a cluster Pod with declared tools.",
+        "use_when": "Run tooling in a retained cluster Pod for another callback or command.",
+        "requires": ("kubernetes",),
+        "capabilities": (),
+        "mutates": True,
+        "options": {
+            "--spec": "JSON with image and dependencies; schemas/tool-pod.schema.json",
+            "--run-id": "returned run identifier for reuse/removal, also used in logs",
+            "--live-plan": "verify Kubernetes access without creating resources",
+            "--apply": "perform the exact confirmed operation",
+            "--confirm-plan": "plan digest binding target, inputs, run ID and functional code",
+            "--timeout": "positive operation timeout in seconds (default: 300)",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "prepare": {
+                "required_options": ["--spec"],
+                "result_schema": "schemas/results/tool-pod.schema.json",
+            },
+            "remove": {
+                "required_options": ["--run-id"],
+                "result_schema": "schemas/results/tool-pod.schema.json",
+            },
+        },
+        "related": ("toolbox.py",),
+        "references": ("Tool Pod preparation",),
+        "required_tools": ("kubectl",),
+        "returns": "Plan or actual Pod identity, tool observations, per-callback results and cleanup.",
+        "execution_surface": "installed skill controls a Pod in the selected Kubernetes cluster",
+        "side_effects": "Confirmed prepare creates and retains run-owned resources; remove deletes "
+        "only those resources. Failure removes resources created by the failed run.",
+        "description": "Supply image and dependencies in the input JSON. Each dependency uses the "
+        "existing toolchain schema (name, commands, optional probe and installation route). "
+        "Tools are installed inside the Pod, never on this computer. See references/tool-pod.md.",
+        "examples": (
+            {
+                "description": "Plan without provider calls",
+                "command": "prepare_tool_pod.py prepare --spec tools.json --dry-run --json",
+            },
+            {
+                "description": "Prepare the confirmed tools",
+                "command": "prepare_tool_pod.py prepare --spec tools.json --apply --confirm-plan DIGEST --json",
+            },
+            {
+                "description": "Reuse and re-probe the same Pod",
+                "command": "prepare_tool_pod.py prepare --spec tools.json --run-id RUN_ID --dry-run --json",
+            },
+            {
+                "description": "Plan removal of owned resources",
+                "command": "prepare_tool_pod.py remove --run-id RUN_ID --dry-run --json",
+            },
+        ),
+    },
     "toolbox.py": {
         "kind": "toolbox",
         "purpose": "Build or delete a toolbox using the configured OpenShift and Harbor.",
@@ -398,6 +453,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "related": ("toolbox.py", "harbor_pull.py"),
+        "references": ("Nested Podman readiness",),
         "required_tools": ("kubectl", "oc on OpenShift"),
         "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows "
         "and cleanup read-back; does not prove runner or image-publication behavior.",
@@ -916,6 +972,14 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Toolbox dependencies, installation methods and build inputs.",
             "pointer": "schemas/toolbox.schema.json",
         },
+        "Tool Pod preparation": {
+            "summary": "Tool input, preparation, reuse and removal examples.",
+            "pointer": "references/tool-pod.md",
+        },
+        "Nested Podman readiness": {
+            "summary": "Nested Podman readiness section: inputs, execution and evidence.",
+            "pointer": "SKILL.md",
+        },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",
             "pointer": "references/mcp.md",
@@ -978,10 +1042,13 @@ def command_authorities(script: str) -> Sequence[str]:
     return DISCOVERY_COMMANDS[script]["requires_authorities"]
 
 
-def _proposition_offering(scripts: Sequence[str]) -> MutableMapping[str, JSONValue]:
-    """Offer installed commands with references for their declared providers.
+def _proposition_offering(
+    scripts: Sequence[str], commands: Mapping[str, Mapping[str, object]]
+) -> MutableMapping[str, JSONValue]:
+    """Offer immediate commands with their provider and task references.
 
     :param scripts: Command keys selected for a cluster or related-command node.
+    :param commands: Existing catalogue definitions for the offered commands.
     :returns: Compact tools and optional reference mappings.
     """
     authorities = {name for script in scripts for name in command_authorities(script)}
@@ -990,6 +1057,8 @@ def _proposition_offering(scripts: Sequence[str]) -> MutableMapping[str, JSONVal
         names.append("mcp")
     if "harbor" in authorities:
         names.append("toolbox specification")
+    for script in scripts:
+        names.extend(json_strings(commands[script].get("references", ())))
     return {
         "tools": {script: {} for script in sorted(scripts)},
         "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
@@ -1013,12 +1082,13 @@ def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
     authorities = {script: command_authorities(script) for script in commands}
     clusters = {
         cluster: _proposition_offering(
-            [script for script, names in authorities.items() if authority in names]
+            [script for script, names in authorities.items() if authority in names],
+            commands,
         )
         for cluster, authority in PROPOSITION_CLUSTERS.items()
     }
     clusters["offline"] = _proposition_offering(
-        [script for script, names in authorities.items() if not names]
+        [script for script, names in authorities.items() if not names], commands
     )
     if node is None:
         return {"schema_version": PROPOSITION_VERSION, **clusters}
@@ -1028,7 +1098,10 @@ def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
         raise ValueError("path_unknown")
     entry = copy_json_object(commands[node])
     scripts = [node, *json_strings(entry.get("related", ()))]
-    return {"schema_version": PROPOSITION_VERSION, **_proposition_offering(scripts)}
+    return {
+        "schema_version": PROPOSITION_VERSION,
+        **_proposition_offering(scripts, commands),
+    }
 
 
 STATUS_MEANING = {
@@ -1151,7 +1224,11 @@ def describe(script: str) -> MutableMapping[str, JSONValue]:
                 "usage": entry["usage"],
             }
             if discovery or read
-            else {}
+            else {
+                key: entry[key]
+                for key in ("description", "examples", "output_modes", "usage")
+                if key in entry
+            }
         ),
     }
 
@@ -1272,6 +1349,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
             },
             "routing": {
                 "prove nested Podman runtime readiness": "image_build_readiness.py",
+                "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
                 "build or delete a toolbox": "toolbox.py",
                 "publish an image to Harbor": "harbor_push.py",
                 "verify a Harbor toolbox pull": "harbor_pull.py",

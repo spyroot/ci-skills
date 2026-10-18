@@ -1,0 +1,175 @@
+{
+  "access": {
+    "kubernetes": {
+      "context": "context:611e49b22818",
+      "identity": "identity:547a4b6a7894",
+      "server": "server:6076e1dcf760"
+    }
+  },
+  "captured_at": "2026-10-18T02:00:21.790433+00:00",
+  "cleanup": {
+    "failures": [],
+    "resources": [
+      {
+        "absent": true,
+        "kind": "Pod",
+        "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "ConfigMap",
+        "name": "ci-skills-run-tool-pod-scripts-26e7a420ae06c99b",
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "Namespace",
+        "name": "ci-skills-run-14ed29858f5541e5aa67",
+        "namespace": "",
+        "status": "PASS"
+      }
+    ],
+    "retained": [],
+    "status": "PASS"
+  },
+  "errors": [],
+  "filters": {},
+  "kind": "tool_pod",
+  "operation": "remove",
+  "plan": {
+    "functional_digest": "1bd593cf493b854d921cb2d08eea333d6f08c3f3033fa474e09f28e921c1e052",
+    "kind": "tool_pod",
+    "operation": "remove",
+    "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+    "spec": {},
+    "target": {
+      "context": "context:611e49b22818",
+      "server": "server:6076e1dcf760"
+    },
+    "timeout_seconds": 600
+  },
+  "plan_digest": "391c426a7f72c639ea2d3858e2dbfe964f4d0792d361361135bbbe65afff5f10",
+  "readback": {
+    "action": "APPLIED",
+    "resources": [
+      {
+        "absent": true,
+        "kind": "Pod",
+        "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "ConfigMap",
+        "name": "ci-skills-run-tool-pod-scripts-26e7a420ae06c99b",
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+        "status": "PASS"
+      }
+    ],
+    "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+    "scopes": [
+      {
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+        "owns_namespace": true,
+        "run_id": "a4d6162b88ea446c899e53ccaa2cd792"
+      }
+    ],
+    "verified": true
+  },
+  "records": [
+    {
+      "callback": "K8SAuth",
+      "context": "context:611e49b22818",
+      "identity": "identity:547a4b6a7894",
+      "server": "server:6076e1dcf760"
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveRunScopes",
+      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "scopes": [
+        {
+          "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+          "owns_namespace": true,
+          "run_id": "a4d6162b88ea446c899e53ccaa2cd792"
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "RemoveToolPod",
+      "resources": [
+        {
+          "absent": true,
+          "kind": "Pod",
+          "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+          "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+          "status": "PASS"
+        },
+        {
+          "absent": true,
+          "kind": "ConfigMap",
+          "name": "ci-skills-run-tool-pod-scripts-26e7a420ae06c99b",
+          "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+          "status": "PASS"
+        }
+      ],
+      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "scopes": [
+        {
+          "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+          "owns_namespace": true,
+          "run_id": "a4d6162b88ea446c899e53ccaa2cd792"
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "RemoveScope",
+      "preserved_scopes": [],
+      "resources": [
+        {
+          "absent": true,
+          "kind": "Namespace",
+          "name": "ci-skills-run-14ed29858f5541e5aa67",
+          "namespace": "",
+          "status": "PASS"
+        }
+      ],
+      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "verified": true
+    }
+  ],
+  "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "1cb30887851e9edb58fbb0d08c9679d8dd736d82314b53bf1c7aff5e33ef6cc3",
+    "file_count": 159,
+    "functional_digest": "1bd593cf493b854d921cb2d08eea333d6f08c3f3033fa474e09f28e921c1e052",
+    "revision": {
+      "source": "installer_record",
+      "value": "9aa288084328a9c44d38d78bd86b5e8785d810b3",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 4
+  },
+  "target": "target:7bd724cadedd",
+  "target_file": "path:5e5380df1eda",
+  "target_source": "env:CI_SKILLS_TARGET",
+  "tested_revision": "9aa288084328a9c44d38d78bd86b5e8785d810b3"
+}

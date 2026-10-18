@@ -305,7 +305,7 @@ Combination). Authorities are the catalog's (`gitlab`, `kubernetes`, `harbor`);
 | OpenShift HA view | `ocp_ha.py` | `core/ocp_ha.py` | kubernetes | no | port | visibility |
 | OpenShift machine view | `ocp_machine.py` | `core/ocp_machines.py` | kubernetes | no | port | visibility |
 | OpenShift ISO report | `ocp_iso.py rhcos-report` | `core/ocp_iso.py` | kubernetes | no | port | visibility |
-| OpenShift ISO actions | `ocp_iso.py` action verbs (bullet) | `core/ocp_iso.py` | kubernetes | yes | port | toolchain |
+| OpenShift ISO actions | `ocp_iso.py` RHCOS verbs; [node onboarding](CI12-NODE-ONBOARDING.md) | `core/ocp_iso.py` | kubernetes | yes | port | toolchain |
 | CSR approval | `ocp_csr.py` | `core/ocp_csr.py` | kubernetes | yes | port | generic |
 | NIC MTU config | `k8s_verify_mtu_consistency.py` | `core/nic_mtu_config.py` | kubernetes | yes | port | generic |
 | k8s state snapshot | `k8s_state.py` | `core/k8s_state.py` | kubernetes | no | port | visibility |
@@ -376,10 +376,9 @@ with config keys and concurrency:
   machine config pools read in parallel.
 - `ocp_machine.py`: `--node-spec PATH`, `--search`; `[kubernetes]`;
   per-machine reads in parallel.
-- `ocp_iso.py rhcos-report|rhcos-download|rhcos-serve|node-build|node-serve|delete`:
-  `--node NAME` (repeatable), `--output-dir`; the apply flags on every verb
-  but `rhcos-report`; `[kubernetes]`, caller-selected ISO inputs; the plan's reads in parallel, builds
-  inside the Pod serial.
+- `ocp_iso.py rhcos-report|rhcos-download|rhcos-serve`: standalone RHCOS port inventory; `[kubernetes]`;
+  the apply flags on every verb but `rhcos-report`.
+  Native node ISO inputs and delivery follow [CI12](CI12-NODE-ONBOARDING.md#phase-ci121--native-ocp-iso-combo-pr-ci12-1).
 - `ocp_csr.py`: `--search` over names and signers; the apply flags (approve
   only the planned names and signers); `[kubernetes]`; one CSR list.
 - `k8s_verify_mtu_consistency.py` (extended): the MachineConfig rendering in the plan
@@ -1079,10 +1078,8 @@ configuration. Relative credential filenames resolve beside the selected file.
   pool status; one duration per concurrent read.
 - `ocp_machine.py --node-spec <declared path>`: each machine's match or
   mismatch against the spec, by field.
-- `ocp_iso.py rhcos-report`: the bootimage stream's ISO URL and sha256;
-  `node-build --node <declared>` then `node-serve`: the ISO file's sha256
-  recorded, `HEAD` on the served URL returns 200, `delete` reads back absence;
-  a second build with the same inputs `NO_OP`.
+- `ocp_iso.py rhcos-report`: the bootimage stream's ISO URL and sha256.
+  Node ISO acceptance follows [CI12 live smoke evidence](CI12-NODE-ONBOARDING.md#live-smoke-evidence).
 - `ocp_csr.py`: the pending CSR list as `PLANNED`; apply on a CSR created for
   the smoke reads back `Approved`.
 - `k8s_verify_mtu_consistency.py` extended: the rendered MachineConfig's
@@ -1216,23 +1213,9 @@ that no source script performs; it is built to the sentence and nothing more.
   ISOs in the cluster, delete, joiner read-back), `scripts/ocp/node_iso_proof.py:34`
   (proof; its library was not inventoried), `automation/lib/deploy/node_iso_smoke.bash:312`
   (the acceptance shape: plan, build, fetch, verify, cleanup).
-- `core/ocp_iso.py` renders nodes-config and the server manifest in Python
-  (replacing `nodes-config.jq:12-31`, `server.yq:15-19`).
-- Adapt: every `--confirm-plan` names the namespace, the cluster-admin
-  ClusterRoleBinding (`node-iso-server.yaml:36-40`), the pull-secret copy
-  (`serve-node-iso.sh:208-213`), the 0600 pull-secret files on disk
-  (`node-image.sh:99-111`, `ocp_lib.bash:194-207`, `serve-node-iso.sh:241-249`),
-  the NodePort, the images and the rollout timeout; delete ports the
-  UID-precondition delete and absence read-back
-  (`automation/lib/core/k8s_lifecycle.bash:25,280`) plus the joiner read-back
-  (`node_iso.bash:187`), and drops `serve-iso.sh:80-90`'s requirement that
-  delete needs a Ready node.
-- Inputs: caller-selected ISO workflow arguments or specification; cluster endpoint and access come from the target.
-- Concurrency: in the plan, the serving node, the API URL (read three times
-  in the source, `serve-node-iso.sh:506-531`), the version, the bootimage
-  ConfigMap (read twice, `serve-iso.sh:80-81`), the release image and the
-  pull secret in parallel; builds inside the pod stay serial
-  (`build.sh:21-35`); one Pod per ISO is not added (no source).
+- The source inventory above records the earlier procedures. Native node onboarding now follows
+  [CI12](CI12-NODE-ONBOARDING.md#phase-ci121--native-ocp-iso-combo-pr-ci12-1), including unchanged native input,
+  prepared tooling, caller-selected cluster storage, artifact inspection and owned-resource cleanup.
 
 ### `k8s_state.py`
 

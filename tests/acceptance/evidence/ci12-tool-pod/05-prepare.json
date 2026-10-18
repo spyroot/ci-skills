@@ -1,0 +1,497 @@
+{
+  "access": {
+    "kubernetes": {
+      "context": "context:611e49b22818",
+      "identity": "identity:547a4b6a7894",
+      "server": "server:6076e1dcf760"
+    }
+  },
+  "captured_at": "2026-10-18T01:55:22.576349+00:00",
+  "cleanup": {
+    "failures": [],
+    "resources": [
+      {
+        "absent": true,
+        "kind": "PodFixture",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "index": 3,
+        "kind": "PodArtifact",
+        "path": "/tmp/ci-skills-dependency-3",
+        "status": "PASS"
+      }
+    ],
+    "retained": [
+      {
+        "kind": "namespace",
+        "name": "ci-skills-run-14ed29858f5541e5aa67",
+        "namespace": ""
+      },
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-tool-pod-scripts-26e7a420ae06c99b",
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+      },
+      {
+        "kind": "pod",
+        "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+      }
+    ],
+    "status": "PASS"
+  },
+  "errors": [],
+  "filters": {},
+  "kind": "tool_pod",
+  "operation": "prepare",
+  "plan": {
+    "functional_digest": "1bd593cf493b854d921cb2d08eea333d6f08c3f3033fa474e09f28e921c1e052",
+    "kind": "tool_pod",
+    "operation": "prepare",
+    "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+    "spec": {
+      "dependencies": [
+        {
+          "commands": [
+            "sh"
+          ],
+          "name": "shell",
+          "probe": [
+            "sh",
+            "-c",
+            "printf 'tool-pod-ready\\n'"
+          ]
+        },
+        {
+          "commands": [
+            "oc"
+          ],
+          "name": "oc",
+          "probe": [
+            "oc",
+            "version",
+            "--client",
+            "-o",
+            "json"
+          ]
+        },
+        {
+          "commands": [
+            "rsync"
+          ],
+          "name": "rsync",
+          "probe": [
+            "rsync",
+            "--version"
+          ]
+        },
+        {
+          "commands": [
+            "/tmp/ci-skills-tools/bin/yq"
+          ],
+          "linux": {
+            "destination": "/tmp/ci-skills-tools/bin/yq",
+            "method": "download",
+            "sha256": "1bb99e1019e23de33c7e6afc23e93dad72aad6cf2cb03c797f068ea79814ddb0",
+            "url": "https://github.com/mikefarah/yq/releases/download/v4.47.2/yq_linux_amd64"
+          },
+          "name": "yq",
+          "probe": [
+            "/tmp/ci-skills-tools/bin/yq",
+            "--version"
+          ]
+        }
+      ],
+      "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b"
+    },
+    "target": {
+      "context": "context:611e49b22818",
+      "server": "server:6076e1dcf760"
+    },
+    "timeout_seconds": 600
+  },
+  "plan_digest": "f9b3bf57926a2c9ced5fb090f8a35dd7ae74af8fce207dd415306581c5c06c52",
+  "pod": {
+    "container": "ci-skills-pod",
+    "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b",
+    "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+    "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+    "restart_count": 0,
+    "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+  },
+  "readback": {
+    "consumer": {
+      "action": "VERIFIED",
+      "bytes": 34,
+      "pod_after": {
+        "restart_count": 0,
+        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+      },
+      "pod_before": {
+        "restart_count": 0,
+        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+      },
+      "sha256": "94731147f3b1260a8419454105592b0b2ab1de91d4c7cb63bf1636fd0fb28f2c",
+      "transport": "in_pod_rsync",
+      "verified": true
+    },
+    "owns_namespace": true,
+    "pod": {
+      "container": "ci-skills-pod",
+      "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b",
+      "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+      "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+      "restart_count": 0,
+      "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+    },
+    "retained_resources": [
+      {
+        "kind": "namespace",
+        "name": "ci-skills-run-14ed29858f5541e5aa67",
+        "namespace": ""
+      },
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-tool-pod-scripts-26e7a420ae06c99b",
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+      },
+      {
+        "kind": "pod",
+        "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+      }
+    ],
+    "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+    "tools": [
+      {
+        "index": 0,
+        "name": "shell",
+        "observed": "tool-pod-ready\n",
+        "probe": [
+          "sh",
+          "-c",
+          "printf 'tool-pod-ready\\n'"
+        ],
+        "verified": true
+      },
+      {
+        "index": 1,
+        "name": "oc",
+        "observed": "{\n  \"clientVersion\": {\n    \"major\": \"\",\n    \"minor\": \"\",\n    \"gitVersion\": \"4.19.0-202602262001.p2.g24755b6.assembly.stream.el9-24755b6\",\n    \"gitCommit\": \"24755b6e82745a4dfa5a6db4b467564c237f244c\",\n    \"gitTreeState\": \"clean\",\n    \"buildDate\": \"2026-02-27T04:43:37Z\",\n    \"goVersion\": \"go1.23.10 (Red Hat 1.23.10-10.el9) X:strictfipsruntime\",\n    \"compiler\": \"gc\",\n    \"platform\": \"linux/amd64\"\n  },\n  \"kustomizeVersion\": \"v5.5.0\"\n}\n",
+        "probe": [
+          "oc",
+          "version",
+          "--client",
+          "-o",
+          "json"
+        ],
+        "verified": true
+      },
+      {
+        "index": 2,
+        "name": "rsync",
+        "observed": "rsync  version 3.2.3  protocol version 31\nCopyright (C) 1996-2020 by Andrew Tridgell, Wayne Davison, and others.\nWeb site: https://rsync.samba.org/\nCapabilities:\n    64-bit files, 64-bit inums, 64-bit timestamps, 64-bit long ints,\n    socketpairs, hardlinks, hardlink-specials, symlinks, IPv6, atimes,\n    batchfiles, inplace, append, ACLs, xattrs, optional protect-args, iconv,\n    symtimes, prealloc, stop-at, no crtimes\nOptimizations:\n    SIMD, asm, openssl-crypto\nChecksum list:\n    md5 md4 none\nCompress list:\n    zstd lz4 zlibx zlib none\n\nrsync comes with ABSOLUTELY NO WARRANTY.  This is free software, and you\nare welcome to redistribute it under certain conditions.  See the GNU\nGeneral Public Licence for details.\n",
+        "probe": [
+          "rsync",
+          "--version"
+        ],
+        "verified": true
+      },
+      {
+        "index": 3,
+        "name": "yq",
+        "observed": "yq (https://github.com/mikefarah/yq/) version v4.47.2\n",
+        "probe": [
+          "/tmp/ci-skills-tools/bin/yq",
+          "--version"
+        ],
+        "verified": true
+      }
+    ]
+  },
+  "records": [
+    {
+      "callback": "K8SAuth",
+      "context": "context:611e49b22818",
+      "identity": "identity:547a4b6a7894",
+      "server": "server:6076e1dcf760"
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveRunScopes",
+      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "scopes": [],
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "OpenRunScope",
+      "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+      "owns_namespace": true,
+      "reused": false,
+      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "StageToolPod",
+      "owns_namespace": true,
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b",
+        "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+        "restart_count": 0,
+        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+      },
+      "reused": false,
+      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ReadToolState",
+      "environment": {
+        "package_manager": "dnf",
+        "pod_uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d",
+        "restart_count": 0,
+        "runtime": "uid=0\ngid=0\nLinux 5.14.0-570.98.1.el9_6.x86_64 x86_64\nos=rhel\nos_version=9.4\n",
+        "search_paths": [
+          "/tmp/ci-skills-tools/bin"
+        ]
+      },
+      "tools": [
+        {
+          "commands": [
+            "sh"
+          ],
+          "index": 0,
+          "name": "shell",
+          "pod_uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d",
+          "present": true,
+          "restart_count": 0,
+          "route": "present",
+          "writable": []
+        },
+        {
+          "commands": [
+            "oc"
+          ],
+          "index": 1,
+          "name": "oc",
+          "pod_uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d",
+          "present": true,
+          "restart_count": 0,
+          "route": "present",
+          "writable": []
+        },
+        {
+          "commands": [
+            "rsync"
+          ],
+          "index": 2,
+          "name": "rsync",
+          "pod_uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d",
+          "present": true,
+          "restart_count": 0,
+          "route": "present",
+          "writable": []
+        },
+        {
+          "commands": [
+            "/tmp/ci-skills-tools/bin/yq"
+          ],
+          "index": 3,
+          "name": "yq",
+          "pod_uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d",
+          "present": false,
+          "restart_count": 0,
+          "route": "artifact",
+          "writable": [
+            {
+              "observed": "/tmp",
+              "requested": "/tmp/ci-skills-tools/bin"
+            },
+            {
+              "observed": "/tmp",
+              "requested": "/tmp"
+            }
+          ]
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "InstallArtifact",
+      "index": 0,
+      "name": "shell",
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "InstallArtifact",
+      "index": 1,
+      "name": "oc",
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "InstallArtifact",
+      "index": 2,
+      "name": "rsync",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "artifact": {
+        "path": "/tmp/ci-skills-dependency-3",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b",
+          "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+          "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+          "restart_count": 0,
+          "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+        },
+        "sha256": "1bb99e1019e23de33c7e6afc23e93dad72aad6cf2cb03c797f068ea79814ddb0",
+        "size": 11477176
+      },
+      "callback": "DownloadArtifact",
+      "index": 3,
+      "name": "yq",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "InstallArtifact",
+      "commands": [
+        "/tmp/ci-skills-tools/bin/yq"
+      ],
+      "index": 3,
+      "name": "yq",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "VerifyTools",
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b",
+        "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+        "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+        "restart_count": 0,
+        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+      },
+      "retained_resources": [
+        {
+          "kind": "namespace",
+          "name": "ci-skills-run-14ed29858f5541e5aa67",
+          "namespace": ""
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-tool-pod-scripts-26e7a420ae06c99b",
+          "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+        },
+        {
+          "kind": "pod",
+          "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
+          "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+        }
+      ],
+      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "tools": [
+        {
+          "index": 0,
+          "name": "shell",
+          "observed": "tool-pod-ready\n",
+          "probe": [
+            "sh",
+            "-c",
+            "printf 'tool-pod-ready\\n'"
+          ],
+          "verified": true
+        },
+        {
+          "index": 1,
+          "name": "oc",
+          "observed": "{\n  \"clientVersion\": {\n    \"major\": \"\",\n    \"minor\": \"\",\n    \"gitVersion\": \"4.19.0-202602262001.p2.g24755b6.assembly.stream.el9-24755b6\",\n    \"gitCommit\": \"24755b6e82745a4dfa5a6db4b467564c237f244c\",\n    \"gitTreeState\": \"clean\",\n    \"buildDate\": \"2026-02-27T04:43:37Z\",\n    \"goVersion\": \"go1.23.10 (Red Hat 1.23.10-10.el9) X:strictfipsruntime\",\n    \"compiler\": \"gc\",\n    \"platform\": \"linux/amd64\"\n  },\n  \"kustomizeVersion\": \"v5.5.0\"\n}\n",
+          "probe": [
+            "oc",
+            "version",
+            "--client",
+            "-o",
+            "json"
+          ],
+          "verified": true
+        },
+        {
+          "index": 2,
+          "name": "rsync",
+          "observed": "rsync  version 3.2.3  protocol version 31\nCopyright (C) 1996-2020 by Andrew Tridgell, Wayne Davison, and others.\nWeb site: https://rsync.samba.org/\nCapabilities:\n    64-bit files, 64-bit inums, 64-bit timestamps, 64-bit long ints,\n    socketpairs, hardlinks, hardlink-specials, symlinks, IPv6, atimes,\n    batchfiles, inplace, append, ACLs, xattrs, optional protect-args, iconv,\n    symtimes, prealloc, stop-at, no crtimes\nOptimizations:\n    SIMD, asm, openssl-crypto\nChecksum list:\n    md5 md4 none\nCompress list:\n    zstd lz4 zlibx zlib none\n\nrsync comes with ABSOLUTELY NO WARRANTY.  This is free software, and you\nare welcome to redistribute it under certain conditions.  See the GNU\nGeneral Public Licence for details.\n",
+          "probe": [
+            "rsync",
+            "--version"
+          ],
+          "verified": true
+        },
+        {
+          "index": 3,
+          "name": "yq",
+          "observed": "yq (https://github.com/mikefarah/yq/) version v4.47.2\n",
+          "probe": [
+            "/tmp/ci-skills-tools/bin/yq",
+            "--version"
+          ],
+          "verified": true
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "bytes": 34,
+      "callback": "SamePodRsync",
+      "pod_after": {
+        "restart_count": 0,
+        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+      },
+      "pod_before": {
+        "restart_count": 0,
+        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+      },
+      "sha256": "94731147f3b1260a8419454105592b0b2ab1de91d4c7cb63bf1636fd0fb28f2c",
+      "transport": "in_pod_rsync",
+      "verified": true
+    }
+  ],
+  "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "1cb30887851e9edb58fbb0d08c9679d8dd736d82314b53bf1c7aff5e33ef6cc3",
+    "file_count": 159,
+    "functional_digest": "1bd593cf493b854d921cb2d08eea333d6f08c3f3033fa474e09f28e921c1e052",
+    "revision": {
+      "source": "installer_record",
+      "value": "9aa288084328a9c44d38d78bd86b5e8785d810b3",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 12
+  },
+  "target": "target:7bd724cadedd",
+  "target_file": "path:5e5380df1eda",
+  "target_source": "env:CI_SKILLS_TARGET",
+  "tested_revision": "9aa288084328a9c44d38d78bd86b5e8785d810b3"
+}

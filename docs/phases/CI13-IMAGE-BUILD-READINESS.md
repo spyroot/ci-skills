@@ -6,10 +6,10 @@
 
 ## Authority
 
-The phase identity `CI13` continues the project's `CI01` to `CI12` numbering (`CI12` is itself a proposal on its
-own pull request) and is a proposal until the project owner approves it. The project has no
-`.coordination/roadmap.md`, `.coordination/phases.md` or `.coordination/priorities.md`; that is recorded as a
-blocker in `Open Decisions and Scope Boundary`, and this document plans only from the authority that does exist:
+CI13 is the approved Podman/readiness delivery, separate from the native OCP delivery in
+[CI12](CI12-NODE-ONBOARDING.md). CI12.0 owns the reusable tool preparation and run scope; this phase consumes
+that foundation. Specification approval does not claim implementation or successful live verification.
+This document plans from:
 
 - the owner's direction of 2026-10-15, recorded in [`docs/combos.md`](../combos.md) chain 11 ("Can this cluster
   build images from a GitLab job?"): a user who installed ci-skills asks their agent to prepare CI so the project's
@@ -31,15 +31,15 @@ blocker in `Open Decisions and Scope Boundary`, and this document plans only fro
   (`--binding`, `--json`, `--yaml`, `--human`, `--dry-run`, `--revision`, `--log-*`, `--run-id`, `--output-dir`),
   the status values and the exit codes, as `ci-skills/lib/python/core/catalog.py` declares them, and the MTU
   command's precedent of a confirmed plan that creates temporary privileged Pods and verifies their cleanup;
-- the CI12 proposal [`CI12-NODE-ONBOARDING`](CI12-NODE-ONBOARDING.md) (on its own pull request), which specifies
-  the run scope abstraction this phase shares;
+- the merged [`CI12-NODE-ONBOARDING`](CI12-NODE-ONBOARDING.md#phase-ci120--reusable-tool-pod-pr-ci12-0)
+  delivery specification, whose CI12.0 owns the shared run scope and reusable tool preparation;
 - the live-acceptance gate as it exists: the policy
   [`inventory/ci/live-acceptance.json`](../../inventory/ci/live-acceptance.json) and the checker
   [`tools/check_live_acceptance.py`](../../tools/check_live_acceptance.py); how this command's evidence enters that
   gate is an open question for the owner, recorded below, not a decision of this document;
 - the shared standards pinned by `standards-binding.yaml` at revision `56a579c`. The architecture and plan formats
   this document follows are taken from standards revision `cae52b2`, the `main` the owner named on 2026-10-15; the
-  gap between pin and format revision is recorded as a blocker in `Open Decisions and Scope Boundary`.
+  selected format does not add a validation gate absent from the pinned binding.
 
 <!-- architecture-map:v1 -->
     requirements:
@@ -137,9 +137,9 @@ blocker in `Open Decisions and Scope Boundary`, and this document plans only fro
     pullRequests:
       - id: PR-CI13-1
         requirementIds: [R-CI13-001, R-CI13-002, R-CI13-003, R-CI13-004, R-CI13-005, R-CI13-006]
-        dependsOn: []
+        dependsOn: [PR-CI12-0]
         waveId: W-CI13-1
-        owns: [ci-skills/lib/python/core/kubernetes/run_scope.py, ci-skills/lib/python/core/kubernetes/scc_access.py, ci-skills/lib/python/core/kubernetes/image_build_probe.py, ci-skills/lib/python/core/image_build_action.py, ci-skills/lib/python/core/action_modes.py, ci-skills/lib/python/core/gitlab/gitlab_action.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/image_build_readiness.py, ci-skills/schemas/results/image-build-readiness.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_run_scope.py, tests/python/test_action_modes.py, tests/python/test_image_build_probe.py, .github/workflows/validate.yml, lib/bash/automation/bless.bash]
+        owns: [ci-skills/lib/python/core/kubernetes/scc_access.py, ci-skills/lib/python/core/kubernetes/image_build_probe.py, ci-skills/lib/python/core/image_build_action.py, ci-skills/lib/python/core/action_modes.py, ci-skills/lib/python/core/gitlab/gitlab_action.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/image_build_readiness.py, ci-skills/schemas/results/image-build-readiness.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_run_scope.py, tests/python/test_action_modes.py, tests/python/test_image_build_probe.py, .github/workflows/validate.yml, lib/bash/automation/bless.bash]
       - id: PR-CI13-2
         requirementIds: [R-CI13-006, R-CI13-007]
         dependsOn: [PR-CI13-1]
@@ -148,7 +148,7 @@ blocker in `Open Decisions and Scope Boundary`, and this document plans only fro
     waves:
       - id: W-CI13-1
         prIds: [PR-CI13-1]
-        after: []
+        after: [W-CI12-0]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE, G-CI13-GATE]
       - id: W-CI13-2
         prIds: [PR-CI13-2]
@@ -250,7 +250,7 @@ relevant tree, with the files this phase adds marked NEW:
         kubernetes/resources.py                       ResourceSet, OPERATION_LABEL
         kubernetes/runner.py                          PullImage: temporary Job with cleanup on every exit
         kubernetes/mtu_consistency.py                 privileged debug Pods, marker-based cleanup, interrupt handling
-        kubernetes/run_scope.py                  NEW  RunScope over ResourceSet; OpenRunScope (shared with CI12)
+        kubernetes/run_scope.py                       RunScope over ResourceSet; OpenRunScope (delivered by CI12.0)
         kubernetes/image_build_probe.py          NEW  SelectNode, RunProbeJob, ReadProbeResult, ParseMarkers
         kubernetes/image_build_chain.py          NEW  PR-CI13-2: composition over chain 1 and block 7
         image_build_action.py                    NEW  ReadinessState, ReadinessAction, ConfirmReadinessOperation, ReadinessWorkflow
@@ -475,9 +475,9 @@ and Harbor. Each is one pull request with its own live proof.
 
 #### When to Introduce Abstraction
 
-The run scope is the abstraction CI12 specifies (`RunScope` over `ResourceSet` with `OpenRunScope`), and this
-phase is its second consumer, which is why CI12 justified it; nothing new is introduced here. Which pull request
-delivers `core/kubernetes/run_scope.py` first is open question 5. The marker parser is a pure function over the
+[CI12.0](CI12-NODE-ONBOARDING.md#pr-order) delivers `RunScope` over `ResourceSet` and `OpenRunScope`.
+CI13 consumes that shared implementation and its tool preparation callbacks where needed; it does not create
+another run scope, downloader or installer. The marker parser is a pure function over the
 log with a table of expected markers, not an abstraction: one consumer, one shape, tested against fixture logs.
 The checked probe scripts live in `ci-skills/lib/bash/kubernetes/`. A read-only ConfigMap mounts them with the
 shared Bash runtime; the Job invokes the script file directly. The plan digest binds all script bytes as well as
@@ -485,25 +485,9 @@ the image digests, and the run's existing `ResourceSet` removes the Job then its
 
 ### Open Decisions and Scope Boundary
 
-    BLOCKER: Deriving the phase identity and priority of CI13 from project authority
-    Authority checked:
-    - docs/agents/contracts/system-architecture.md at standards revision cae52b2 (Authority section inputs)
-    Observation:
-    - .coordination/roadmap.md, .coordination/phases.md and .coordination/priorities.md do not exist in the project
-    Risk:
-    - CI13 could be numbered or prioritised against work the owner has not approved, and a later phase could reuse the identity
-    Safe next step:
-    - The project owner names the authority this phase derives from (the three files, or another document)
-
-    BLOCKER: Running bin/check-system-architecture.py against this document at the project's pin
-    Authority checked:
-    - standards-binding.yaml (pin 56a579c); the contract was added at standards f39203a (2026-10-13) and the checker at a2256a8 (2026-10-14)
-    Observation:
-    - At the pin the contract and checker are absent; the checker reports ARCH-INPUT UNAVAILABLE for this project
-    Risk:
-    - This document's conformance is asserted, not enforced, until the pin moves
-    Safe next step:
-    - The owner bumps standards-binding.yaml to a revision at or after a2256a8 in its own pull request
+The phase identity and shared-foundation delivery order are settled by the operator-approved CI12/CI13
+specifications. Missing optional roadmap files do not create another approval requirement. The architecture
+format is documented above; the existing pinned checks remain authoritative.
 
 Open questions for the owner. Each is a requirement, a user-facing contract or a gate behaviour that only the
 owner decides; the document records the options and the finding that raised each, and decides none of them:
@@ -528,10 +512,9 @@ owner decides; the document records the options and the finding that raised each
    setup is diagnostic evidence only and cannot make the capability pass. The selected identity therefore needs
    read access to the exact SCC ClusterRole and ServiceAccount authorization; when permission is absent it also
    needs create/delete RoleBinding and bind rights for that exact ClusterRole in the selected namespace.
-5. Which pull request delivers the shared pieces first: `core/kubernetes/run_scope.py` is specified in CI12 and
-   owned by PR-CI12-1 there and by PR-CI13-1 here, and the shared mode validator `core/action_modes.py` serves
-   both adapters; whichever pull request merges first delivers them to the stated interface and the other
-   consumes them.
+5. Resolved delivery order: CI12.0 delivers `core/kubernetes/run_scope.py` and reusable tool preparation.
+   CI13 consumes them. The shared mode validator `core/action_modes.py` serves both adapters; reuse the existing
+   implementation if already delivered rather than introduce a duplicate.
 6. Chain 11's later steps (runner with the same setup, build-and-push job, digest read-back) depend on chain 1's
    runner manager and block 7's registration and test job, which are not delivered; PR-CI13-2 waits for them and
    its verb, `chain`, is a proposal.
@@ -555,16 +538,18 @@ The boundary is the two slices above. The runner manager and block 7 stay their 
 
 ## PR Order
 
-PR-CI13-1 (wave W-CI13-1) delivers the run scope (or consumes CI12's, per open question 5), the node selection,
+PR-CI13-1 (wave W-CI13-1) consumes the merged CI12.0 foundation and delivers the node selection,
 the probe Job and its script, the result and log read-back, the marker parser, the adapter and the thin main with
 the `probe` verb, the catalogue declaration with its regenerated `tools.json` and result schema, the schema entry
 in the validate workflow per the existing pairing rule, and the routing; its live proof is the probe run from
 the installed candidate on one node of the live cluster with every row present and the Pod exited 0, and the
 namespace, RoleBinding and Job absent afterwards. A permission preflight failure is a blocked capability and is
 not accepted as live proof. PR-CI13-2 (wave W-CI13-2) depends on it and on chain 1 and block 7, and delivers the
-`chain` verb that composes the probe with the runner, the build-and-push job and the digest read-back; its live proof needs the
-test project and Harbor. Per the owner's rule, each pull request is live-tested on its own head from the
-installed candidate before it merges, and a head change invalidates the proof. What each pull request commits
+`chain` verb that composes the probe with the runner, the build-and-push job and the digest read-back; its live
+proof needs the test project and Harbor. Per the owner's rule, each pull request is live-tested on its own head
+from the
+installed candidate before it merges. Live proof is bound to the functional checksum; wording-only docs or
+test changes do not invalidate unchanged executable behavior. What each pull request commits
 into the gate follows the owner's answer to open question 2; until then the evidence is attached to the pull
 request. Each pull request leaves the installed command coherent under the existing gates, with the
 unimplemented verb absent from the catalogue rather than stubbed.
@@ -598,9 +583,9 @@ Planned, not observed. `probe`: the command run from the installed candidate aga
 the agent names; evidence is the result's rows with the Pod's terminated exit code, the chosen node, the run
 identifier, the permission source, and the namespace, run-owned RoleBinding and Job absent afterwards. External
 authorization setup is not capability proof. A second run interrupted during the Job proves cleanup on interrupt
-by the same absence read-back. Each receipt is sanitized with the portable writer and carries the functional checksum of the
-installed candidate; where it is committed is open question 2. The chain's evidence (runner, job, digest) waits
-for PR-CI13-2.
+by the same absence read-back. Each receipt is sanitized with the portable writer and carries the functional
+checksum of the installed candidate; where it is committed is open question 2. The chain's evidence
+(runner, job, digest) waits for PR-CI13-2.
 
 ## End-to-End Test
 

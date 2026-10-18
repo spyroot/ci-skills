@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-15T04:14:32.263887+00:00",
+  "captured_at": "2026-10-18T02:02:06.982921+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -10,7 +10,7 @@
     "gitlab": "file:path:29f247d18d3c",
     "kubernetes": "target:kubernetes.kubeconfigs"
   },
-  "execution_host": "1.0.0.127.in-addr.arpa",
+  "execution_host": "mac.lan",
   "kind": "access_check",
   "live_checks": {
     "ceph_cluster": {
@@ -22,7 +22,7 @@
       "namespace": "openshift-storage",
       "osd_count": 12,
       "pod_count": 15,
-      "readback_sha256": "d71ab376b054804ef4e3aae51f803d61fec0b9e5fbf70513d301f6d709a91838",
+      "readback_sha256": "10e73edd0fdd2fa14d780a711c23a68f7aa9ca9d539bf39de5ee70fa565f1336",
       "record_count": 15,
       "status": "PASS"
     },
@@ -35,7 +35,7 @@
       "ciliumnode_count": 9,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "02a1802f034071a20285e68d9943cf52737c259a4498bc45fdced785a0371979",
+      "readback_sha256": "9892811817f7a6547b0382492cfab9154ca8093e1a5fd9f5a7eae100c945030a",
       "record_count": 9,
       "status": "PASS"
     },
@@ -43,8 +43,8 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "ca98a3035c52ea8319c94783a61c998e3084b7a35a602ce2f369ed836a878d1a",
-      "record_count": 559,
+      "readback_sha256": "e548166bc4f89730d99db952920c7a94e905e776872fdd8017c870b6f7d61900",
+      "record_count": 571,
       "status": "PASS"
     },
     "gitlab_job": {
@@ -58,7 +58,7 @@
         "trace_line_count": 59
       },
       "job_url": "https://gitlab.dcloud.run/hott/test/-/jobs/59277",
-      "readback_sha256": "77646873fcd109b4cc4610b12ca988d3bead1a4865d7cb0151fbdc7b59e14415",
+      "readback_sha256": "38058fc3abfbe19df70f94da2cd37bfe8b378a3578c6de1b9ac4e783da31c2ef",
       "record_count": 1,
       "status": "PASS"
     },
@@ -66,20 +66,20 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "9f682808ed5254107b11fefc96581dd2fce9e69215be9d88ea03b1e36659dd3f",
-      "record_count": 63,
+      "readback_sha256": "1174e1953728dfb887756033cd81b48687d0bda565e283104e56c7c64e0e6da3",
+      "record_count": 65,
       "resource_counts": {
-        "attachments": 32,
+        "attachments": 35,
         "csidrivers": 4,
         "csinodes": 9,
         "daemonsets": 41,
         "deployments": 195,
         "nodes": 9,
-        "pods": 656,
-        "pvcs": 58,
-        "pvs": 63,
+        "pods": 658,
+        "pvcs": 60,
+        "pvs": 65,
         "replicasets": 457,
-        "statefulsets": 13,
+        "statefulsets": 15,
         "storageclasses": 8
       },
       "status": "PASS"
@@ -94,12 +94,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
-    "file_count": 139,
-    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+    "digest": "1cb30887851e9edb58fbb0d08c9679d8dd736d82314b53bf1c7aff5e33ef6cc3",
+    "file_count": 159,
+    "functional_digest": "1bd593cf493b854d921cb2d08eea333d6f08c3f3033fa474e09f28e921c1e052",
     "revision": {
       "source": "installer_record",
-      "value": "8791959aec53b37117a57513a5dab7d226807e43",
+      "value": "9aa288084328a9c44d38d78bd86b5e8785d810b3",
       "verified": true
     }
   },
@@ -172,8 +172,8 @@
       "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin -> https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "target_file": "path:d5d66d4789c0",
-  "target_selection": "project:path:d5d66d4789c0",
+  "target_file": "path:aef5c479ccee",
+  "target_selection": "project:path:aef5c479ccee",
   "target_source": "project",
   "targets": {
     "github": "github.com/spyroot/test_project_creation_linux",
@@ -183,5 +183,5 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "8791959aec53b37117a57513a5dab7d226807e43"
+  "tested_revision": "9aa288084328a9c44d38d78bd86b5e8785d810b3"
 }

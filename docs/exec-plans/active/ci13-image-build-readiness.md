@@ -21,7 +21,7 @@ node through a runner, a build-and-push job and a pushed digest.
 
 ## Progress
 
-- [ ] Milestone 1, code: the shared mode validator, the run scope (or CI12's), node selection, the probe Job and
+- [ ] Milestone 1, code: the shared mode validator, reuse of CI12.0's run scope, node selection, the probe Job and
       its script, the result and log read-back, the marker parser, the adapter, the thin main with the `probe`
       verb, the catalogue declaration with regenerated `tools.json`, result schema, routing.
 - [ ] Milestone 1, gates: unit tests; the new schema listed in the validate metaschema step per the existing
@@ -35,8 +35,8 @@ node through a runner, a build-and-push job and a pushed digest.
 - [ ] Open question 1 (command surface and default digests) answered by the owner.
 - [ ] Open question 2 (gate wiring for this command's receipts) answered by the owner.
 - [x] Open question 4 answered: reuse existing permission or create, verify and clean one run-owned RoleBinding.
-- [ ] Phase identity `CI13` and its authority named by the owner (blocker in the phase document).
-- [ ] The standards pin moved to a revision carrying the architecture contract (blocker in the phase document).
+- [x] Phase identity `CI13` approved; CI12.0 owns the shared foundation (see the phase's Authority and PR Order).
+      The selected architecture format adds no gate outside the pinned binding.
 
 ## Surprises & Discoveries
 
@@ -109,8 +109,8 @@ run-scoped service account can use it and creates a temporary RoleBinding only w
 
 Milestone 1 adds `ci-skills/lib/python/core/action_modes.py` (the shared mode validator with its per-adapter
 read and receipt policy, consumed by `ci-skills/lib/python/core/gitlab/gitlab_action.py` in the same change),
-`ci-skills/lib/python/core/kubernetes/run_scope.py` as CI12 specifies it unless CI12's pull request lands first
-(open question 5), `ci-skills/lib/python/core/kubernetes/image_build_probe.py` (`SelectNode`, `RunProbeJob` with
+then consumes `ci-skills/lib/python/core/kubernetes/run_scope.py` delivered by CI12.0 and adds
+`ci-skills/lib/python/core/kubernetes/image_build_probe.py` (`SelectNode`, `RunProbeJob` with
 the probe script, `ReadProbeResult`, `ParseMarkers`), `ci-skills/lib/python/core/image_build_action.py`
 (`ReadinessState`, `ReadinessAction`, `ConfirmReadinessOperation`, `ReadinessWorkflow`), the thin main
 `ci-skills/bin/image_build_readiness.py` with the `probe` verb, the declaration in
@@ -139,6 +139,7 @@ Proof: the unit tests named under Validation and Acceptance, the
 validate workflow green on the exact head, and the live `probe` result on one node of the live cluster with every
 row present and the Pod exited 0, plus a second run interrupted during the Job with the same absence read-back,
 both attached to the pull request as receipts. A blocked authorization result does not stand in for execution.
+Reuse proof when the functional checksum is unchanged.
 
 ### Milestone 2: `chain`, from the proven node to a pushed digest
 
@@ -193,17 +194,18 @@ rejecting another target, the parser against fixture logs (all markers, one miss
 propagation 7 and not 7, remaining containers non-empty), the verdict (`PASS` only with exit 0 and every row
 `ok`, `PARTIAL` otherwise), existing SCC permission as a preserved no-op, temporary RoleBinding read-back and
 cleanup, and authorization denial before Job creation; when the catalogue consistency test and the render check
-pass; when the validate workflow is green on the exact head; and when the live results attached to the pull request show the rows with the Pod's exit code
-and nothing left carrying the identifier, including after the interrupted run. Milestone 2 is accepted when the
-composition tests pass and the live chain result shows the runner online, the job succeeded on that runner, and
+pass; when the validate workflow is green on the exact head; and when the live results attached to the pull
+request show the rows with the Pod's exit code and nothing left carrying the identifier, including after the
+interrupted run. Milestone 2 is accepted when the composition tests pass and the live chain result shows the
+runner online, the job succeeded on that runner, and
 the pushed digest read back. A green build alone demonstrates nothing; the live results do.
 
 ## Idempotence and Recovery
 
 Every apply generates a new identifier, so repeated probes do not collide and two probes can run on two nodes at
 once. Resources owned by the work: the run-scoped namespace, optional run-owned SCC RoleBinding, read-only script
-ConfigMap and Job, with its Pod and emptyDirs. The confirmed plan binds the script bytes. These resources are removed on success, on failure and on
-interrupt by their creators' cleanup hooks, with absence read-back; the
+ConfigMap and Job, with its Pod and emptyDirs. The confirmed plan binds the script bytes. These resources are
+removed on success, on failure and on interrupt by their creators' cleanup hooks, with absence read-back; the
 evidence directory, when named, is never removed. The probe changes nothing on the node: podman's storage lives on
 the Pod's emptyDir and leaves with the Pod, and the two inner containers are removed by the script before it
 exits. Recovery: if a cleanup hook fails, the result is `BLOCKED` with the run identifier and the objects still
@@ -227,7 +229,8 @@ code, the run identifier, the absence read-back.
 `ReadinessAction(SkillAction)`: `node` (optional), `probe_image`, `inner_image` (digests), `timeout`,
 `evidence_dir` (optional), the resource bounds (`cpu`, `memory`, `storage`, with defaults), and the shared mode
 flags `dry_run`, `live_plan`, `apply`, `confirm_plan`. `ReadinessState(DeliveryState)`: `node`, `run_scope`,
-`job`, `log`, `exit_code`, `rows`, `verdict`. `RunScope` and `OpenRunScope` as CI12's ExecPlan declares them.
+`job`, `log`, `exit_code`, `rows`, `verdict`. CI12.0 owns `RunScope` and `OpenRunScope`; their interface is
+recorded in [CI12's ExecPlan](ci12-node-onboarding.md#interfaces-and-dependencies).
 The shared validator: `resolve_mode(args, policy) -> Mode` in `core/action_modes.py`, where `policy` names the
 adapter's read operations and its receipt rule, returning one of `describe`, `offline`, `live-plan`, `read`,
 `apply`, and raising the shared reasons. `ReadinessWorkflow`: `prepare()`, `callbacks() ->

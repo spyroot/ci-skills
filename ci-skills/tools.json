@@ -1055,6 +1055,57 @@
       "subcommands": {},
       "use_when": "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; plan the selected nodes, then run the exact confirmed plan."
     },
+    "prepare_tool_pod.py": {
+      "capabilities": [],
+      "execution_surface": "installed skill controls a Pod in the selected Kubernetes cluster",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--live-plan",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--output-dir",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--spec",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Prepare, reuse or remove a cluster Pod with declared tools.",
+      "read_only": false,
+      "report_kind": "tool_pod",
+      "required_options": [],
+      "required_tools": [
+        "kubectl"
+      ],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "Plan or actual Pod identity, tool observations, per-callback results and cleanup.",
+      "side_effects": "Confirmed prepare creates and retains run-owned resources; remove deletes only those resources. Failure removes resources created by the failed run.",
+      "subcommands": {
+        "prepare": {
+          "required_options": [
+            "--spec"
+          ],
+          "result_schema": "schemas/results/tool-pod.schema.json"
+        },
+        "remove": {
+          "required_options": [
+            "--run-id"
+          ],
+          "result_schema": "schemas/results/tool-pod.schema.json"
+        }
+      },
+      "use_when": "Run tooling in a retained cluster Pod for another callback or command."
+    },
     "reference.py": {
       "description": "Expand one node; optional references remain pointers until requested.",
       "examples": [
@@ -1232,6 +1283,7 @@
     "open a GitLab bug": "gitlab_issue.py",
     "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
     "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
+    "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
     "prove all three authorities": "access_check.py",
     "prove nested Podman runtime readiness": "image_build_readiness.py",
     "publish an image to Harbor": "harbor_push.py",
