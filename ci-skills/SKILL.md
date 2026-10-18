@@ -106,7 +106,7 @@ Routing, in short:
 | Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
 | Build a schema-declared toolbox | `bin/toolbox.py` |
 | Prove nested Podman execution on a worker | `bin/image_build_readiness.py` |
-| Build or inspect an OpenShift ISO | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
+| Build an OpenShift ISO or join its node | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | proof of access across all three authorities | `access_check.py` |
 | a named CI job's own facts | `gitlab_job.py --job-url URL` |

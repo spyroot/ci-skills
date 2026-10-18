@@ -16,7 +16,6 @@ from lib.python.core.action_modes import ActionMode
 from lib.python.core.catalog import describe
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.kubernetes import KubernetesError
-from lib.python.core.kubernetes.ocp_artifact_run import OCPArtifactState
 from lib.python.core.kubernetes.ocp_build_workflow import (
     build_callbacks,
     execute_callbacks,
@@ -26,10 +25,17 @@ from lib.python.core.kubernetes.ocp_invocation import (
     NODE_IMAGE_COMMAND,
     NODE_IMAGE_KIND,
     NodeBuildInputs,
+    NodeJoinInputs,
     NodeOperation,
     build_parser,
     execution_mode,
     operation_plan,
+)
+from lib.python.core.kubernetes.ocp_join import (
+    NodeJoinAction,
+    OCPJoinState,
+    execute_join,
+    resolve_join,
 )
 from lib.python.core.kubernetes.ocp_lifecycle_workflow import (
     artifact_callbacks,
@@ -54,7 +60,7 @@ class NodeInvocation:
         :param args: Parsed invocation and existing output/logging controls.
         """
         self.args = args
-        self.state = OCPArtifactState.from_args(args)
+        self.state = OCPJoinState.from_args(args)
         self.plan: JSONObject = {}
         self.target: Optional[Target] = None
 
@@ -149,6 +155,33 @@ class NodeInvocation:
                 ),
             )
 
+    def _join(self, mode: ActionMode, target: Target) -> None:
+        """Plan and execute one exact node join over an existing ISO run.
+
+        :param mode: Offline plan, live plan or confirmed apply.
+        :param target: Resolved Kubernetes-only target.
+        :raises BaseException: Input validation, provider reads, approval, native
+            monitoring or owned cleanup fails.
+        """  # noqa: DOC502 - shared join helpers preserve provider failures.
+        inputs = NodeJoinInputs.read(self.args)
+        self.plan = operation_plan(self.args, target, inputs.evidence())
+        self._confirm(mode)
+        if mode == ActionMode.OFFLINE:
+            return
+        action = NodeJoinAction(
+            run_id=self.args.run_id,
+            selector=inputs.selector,
+            timeout=self.args.timeout,
+        )
+        resolve_join(
+            self.state,
+            target,
+            action,
+            observe_requests=mode == ActionMode.LIVE_PLAN,
+        )
+        if mode == ActionMode.APPLY:
+            execute_join(self.state, action)
+
     def run(self) -> MutableMapping[str, JSONValue]:
         """Resolve the selected target and execute only the requested operation.
 
@@ -169,6 +202,8 @@ class NodeInvocation:
         operation = NodeOperation(args.action)
         if operation == NodeOperation.BUILD:
             self._build(mode, target)
+        elif operation == NodeOperation.JOIN:
+            self._join(mode, target)
         else:
             self._existing(mode, target, operation)
         status = {ActionMode.OFFLINE: DRY_RUN, ActionMode.LIVE_PLAN: PLANNED}.get(
@@ -202,6 +237,8 @@ class NodeInvocation:
             output["native_exit_code"] = self.state.native_exit_code
         if self.state.native_completion_unknown:
             output["native_completion_unknown"] = True
+        if self.args.action == NodeOperation.JOIN.value:
+            output["join"] = self.state.join_result()
         return output
 
 
