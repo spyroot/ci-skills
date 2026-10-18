@@ -448,7 +448,7 @@ def test_task_references_route_to_related_commands_and_read_installed_text(
     expected_names = {references[stem][0] for stem in expected_stems}
     offered = CATALOG.proposition(command)["reference"]
     assert set(offered) & names == expected_names
-    assert not names & set(CATALOG.proposition("prepare_tool_pod.py")["reference"])
+    assert not names & set(CATALOG.proposition("storage_report.py")["reference"])
 
     node = _reference_cli(capsys, "next", command, "--json")
     readable = _choices(_progressive_json(*node["path"], "read"))
@@ -456,7 +456,7 @@ def test_task_references_route_to_related_commands_and_read_installed_text(
     assert set(readable) & slugs == {
         name.lower().replace(" ", "-") for name in expected_names
     }
-    unrelated = _reference_cli(capsys, "next", "prepare_tool_pod.py", "read", "--json")
+    unrelated = _reference_cli(capsys, "next", "storage_report.py", "read", "--json")
     assert not slugs & set(_choices(unrelated))
 
     for stem in expected_stems:
