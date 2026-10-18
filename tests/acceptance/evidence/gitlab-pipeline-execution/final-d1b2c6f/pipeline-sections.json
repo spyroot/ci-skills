@@ -1,0 +1,1 @@
+{"schema_version":"3.0","tools":{},"reference":[{"name":"Start and watch GitLab pipelines","summary":"Read when you need Start and watch GitLab pipelines.","pointer":"get gitlab-pipeline-execution start-and-watch-gitlab-pipelines"}],"continuation":null}

@@ -653,11 +653,14 @@ def test_installed_reference_schema_validates_v3_and_resolves_watch_pointers(
         {"schema_version": "3.0", "tools": {}, "reference": {}}
     )
 
-    watch = json.loads(
-        (REPO_ROOT / "schemas" / "gitlab-pipeline-watch.schema.json").read_text(
-            encoding="utf-8"
-        )
+    watch_bytes = (
+        installed / "schemas" / "results" / "gitlab-pipeline-watch.schema.json"
+    ).read_bytes()
+    assert (
+        watch_bytes
+        == (REPO_ROOT / "schemas" / "gitlab-pipeline-watch.schema.json").read_bytes()
     )
+    watch = json.loads(watch_bytes)
     registry = Registry().with_resource(schema["$id"], Resource.from_contents(schema))
     resolver = registry.resolver(base_uri=watch["$id"])
     choice_ref = watch["properties"]["choices"]["items"]["$ref"]

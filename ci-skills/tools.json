@@ -674,35 +674,72 @@
       "capabilities": [],
       "execution_surface": "selected authority API",
       "options": [
+        "--apply",
         "--binding",
+        "--confirm-plan",
         "--describe",
         "--dry-run",
+        "--expected-sha",
         "--human",
+        "--interval",
         "--json",
+        "--live-plan",
         "--log-file",
         "--log-format",
         "--log-level",
         "--output-dir",
         "--pipeline-id",
         "--project",
+        "--receipt-out",
+        "--ref",
+        "--related-name",
+        "--require-protected-ref",
         "--revision",
         "--run-id",
+        "--timeout",
+        "--variable",
         "--yaml"
       ],
-      "purpose": "Read one CI pipeline and bounded job progress by stage.",
-      "read_only": true,
+      "purpose": "Read, start, or watch an exact GitLab CI pipeline.",
+      "read_only": false,
       "report_kind": "gitlab_pipeline",
-      "required_options": [
-        "--pipeline-id"
+      "required_options": [],
+      "required_tools": [
+        "glab"
       ],
-      "required_tools": [],
       "requires_authorities": [
         "gitlab"
       ],
-      "returns": "One validated pipeline with stage and job status counts, up to 500 job records, and a PARTIAL result when the job cap is exceeded.",
-      "side_effects": "none",
-      "subcommands": {},
-      "use_when": "You need the status and progress of an exact GitLab pipeline."
+      "returns": "Get returns one validated pipeline and bounded jobs. Start returns an offline or live plan, or a verified new or existing plan identity. Watch returns bounded graph completion, success, changes and retrieve choices.",
+      "side_effects": "Confirmed start may create one pipeline on the selected ref.",
+      "subcommands": {
+        "get": {
+          "mutates": false,
+          "purpose": "Read one exact pipeline and its bounded jobs.",
+          "read_back": "GitLab pipeline and job APIs for the selected numeric ID.",
+          "required_options": [
+            "--pipeline-id"
+          ]
+        },
+        "start": {
+          "mutates": true,
+          "purpose": "Resolve an exact ref and commit, then start one confirmed pipeline.",
+          "read_back": "GET the exact pipeline and variables; require project, ref, SHA and plan marker.",
+          "required_options": [],
+          "result_schema": "schemas/results/gitlab-action.schema.json",
+          "side_effects": "Confirmed apply creates one pipeline or returns NO_OP for its verified plan marker."
+        },
+        "watch": {
+          "mutates": false,
+          "purpose": "Watch one bounded pipeline graph to settlement or timeout.",
+          "read_back": "Poll root, child, related and job state through bounded GitLab reads.",
+          "required_options": [
+            "--pipeline-id"
+          ],
+          "result_schema": "schemas/results/gitlab-pipeline-watch.schema.json"
+        }
+      },
+      "use_when": "You need exact pipeline state, a confirmed start, or bounded completion evidence."
     },
     "gitlab_runner.py": {
       "capabilities": [],

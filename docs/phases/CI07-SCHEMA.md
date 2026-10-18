@@ -62,7 +62,7 @@ reuses another's `$defs`):
   `reference.py` is implemented; the legacy command-pointer definitions remain only for pipeline watch results.
 - [`schemas/gitlab-pipeline-watch.schema.json`](../../schemas/gitlab-pipeline-watch.schema.json), built from the
   pipeline watch result in CI11-TOOLS, Combos; it accepts that result and refuses an unknown `via` and a depth
-  over 5. Its producer, `gitlab_pipeline.py watch`, is not built yet (CI11-TOOLS).
+  over 5. Its producer is the installed `gitlab_pipeline.py watch` command (CI11-TOOLS).
 - [`schemas/ci_skills_endpoints.schema.json`](../../schemas/ci_skills_endpoints.schema.json), the result of
   `gates/gate-ci-skills-endpoints.py` (CI03-GATES, gate-ci-skills-endpoints); its producer is built. The gate's job
   checks the schema against its metaschema and validates every result it prints; the fixtures in

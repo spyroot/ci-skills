@@ -15,7 +15,8 @@ The [human renderer](v3-8fea10f/command-human.txt) exited successfully.
 [Checksums](v3-8fea10f/sha256.txt) bind those outputs and the
 [ordinary acceptance cleanup](v3-8fea10f/acceptance-cleanup.json).
 All 24 ordinary acceptance receipts passed and are saved unchanged in their existing paths.
-The matching [Podman receipt](../../podman-readiness/image-build-readiness.json) passed all eight runtime checks.
+The matching [Podman receipt](https://github.com/spyroot/ci-skills/blob/4374a39932a2151463db3c32f476a30dd40d5afd/tests/acceptance/podman-readiness/image-build-readiness.json)
+passed all eight runtime checks.
 The Pod exited 0; [independent cleanup](v3-8fea10f/podman-cleanup.json) verified all five owned resources absent.
 The existing SCC and ClusterRole remained present. GitHub checks the complete receipt set before merge.
 

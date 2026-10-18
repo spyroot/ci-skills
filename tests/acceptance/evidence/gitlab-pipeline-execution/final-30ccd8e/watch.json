@@ -1,0 +1,105 @@
+{
+  "access": {
+    "captured_at": "2026-10-18T19:17:05.042468+00:00",
+    "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+    "credential_source": "file:path:29f247d18d3c",
+    "errors": [],
+    "execution_host": "mac.lan",
+    "identity": {
+      "id": 6,
+      "username": "spyroot",
+      "web_url": "https://gitlab.dcloud.run/spyroot"
+    },
+    "kind": "gitlab_access",
+    "observed_capability": [
+      "identity_read",
+      "target_read"
+    ],
+    "origin": "https://gitlab.dcloud.run",
+    "schema_version": "1.0",
+    "skill": {
+      "algorithm": "sha256-tree-v1",
+      "consuming_project": {
+        "commit": null,
+        "source": null
+      },
+      "digest": "b19198a7e05e618d470c090d31baac0511e4fc867e562be0fbbfd14991af03a8",
+      "file_count": 219,
+      "functional_digest": "33dd8b7910f6936f2b513408e92b6748781ea908179f35b33ea8c1014eb53bc4",
+      "revision": {
+        "source": "installer_record",
+        "value": "30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58",
+        "verified": true
+      }
+    },
+    "status": "PASS",
+    "target": {
+      "full_path": "hott/test",
+      "id": 123,
+      "kind": "project",
+      "web_url": "https://gitlab.dcloud.run/hott/test"
+    },
+    "target_file": "path:37eaf6f0e828",
+    "target_source": "project;argv:--project"
+  },
+  "captured_at": "2026-10-18T19:17:13.662516+00:00",
+  "changes": [
+    {
+      "at_seconds": 4.216,
+      "pipeline_id": 3922,
+      "status": "success"
+    }
+  ],
+  "choices": [],
+  "complete": true,
+  "continuation": null,
+  "elapsed_seconds": 4.216,
+  "errors": [],
+  "execution_host": "mac.lan",
+  "filters": {
+    "pipeline_id": 3922,
+    "project": "hott/test"
+  },
+  "kind": "gitlab_pipeline_watch",
+  "polls": 1,
+  "records": [
+    {
+      "depth": 0,
+      "jobs": {
+        "by_status": {
+          "success": 5
+        },
+        "total": 5
+      },
+      "pipeline_id": 3922,
+      "project_id": 123,
+      "status": "success",
+      "via": "root"
+    }
+  ],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "b19198a7e05e618d470c090d31baac0511e4fc867e562be0fbbfd14991af03a8",
+    "file_count": 219,
+    "functional_digest": "33dd8b7910f6936f2b513408e92b6748781ea908179f35b33ea8c1014eb53bc4",
+    "revision": {
+      "source": "installer_record",
+      "value": "30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "success": true,
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": "https://gitlab.dcloud.run",
+  "target_source": "project;argv:--project",
+  "tested_revision": "30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58"
+}
