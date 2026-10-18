@@ -6,7 +6,7 @@
       "server": "server:6076e1dcf760"
     }
   },
-  "captured_at": "2026-10-18T01:55:22.576349+00:00",
+  "captured_at": "2026-10-18T02:43:44.176444+00:00",
   "cleanup": {
     "failures": [],
     "resources": [
@@ -26,18 +26,18 @@
     "retained": [
       {
         "kind": "namespace",
-        "name": "ci-skills-run-14ed29858f5541e5aa67",
+        "name": "ci-skills-run-f22af9d644d64fb289dc",
         "namespace": ""
       },
       {
         "kind": "configmap",
-        "name": "ci-skills-run-tool-pod-scripts-26e7a420ae06c99b",
-        "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+        "name": "ci-skills-run-tool-pod-scripts-f669cea49ae538d1",
+        "namespace": "ci-skills-run-f22af9d644d64fb289dc"
       },
       {
         "kind": "pod",
-        "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
-        "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+        "name": "ci-skills-run-tool-pod-f669cea49ae538d1",
+        "namespace": "ci-skills-run-f22af9d644d64fb289dc"
       }
     ],
     "status": "PASS"
@@ -47,10 +47,10 @@
   "kind": "tool_pod",
   "operation": "prepare",
   "plan": {
-    "functional_digest": "1bd593cf493b854d921cb2d08eea333d6f08c3f3033fa474e09f28e921c1e052",
+    "functional_digest": "856dadd68651a9c393636c97bc9fe9aa51c44470f105148347c774f8fa69fc30",
     "kind": "tool_pod",
     "operation": "prepare",
-    "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+    "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
     "spec": {
       "dependencies": [
         {
@@ -112,14 +112,14 @@
     },
     "timeout_seconds": 600
   },
-  "plan_digest": "f9b3bf57926a2c9ced5fb090f8a35dd7ae74af8fce207dd415306581c5c06c52",
+  "plan_digest": "3e320dc0502ca09fb3d14cf0b49e81782b20f221323ab87b6ebc441e6a6da339",
   "pod": {
     "container": "ci-skills-pod",
     "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b",
-    "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
-    "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+    "name": "ci-skills-run-tool-pod-f669cea49ae538d1",
+    "namespace": "ci-skills-run-f22af9d644d64fb289dc",
     "restart_count": 0,
-    "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+    "uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b"
   },
   "readback": {
     "consumer": {
@@ -127,11 +127,11 @@
       "bytes": 34,
       "pod_after": {
         "restart_count": 0,
-        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+        "uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b"
       },
       "pod_before": {
         "restart_count": 0,
-        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+        "uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b"
       },
       "sha256": "94731147f3b1260a8419454105592b0b2ab1de91d4c7cb63bf1636fd0fb28f2c",
       "transport": "in_pod_rsync",
@@ -141,29 +141,29 @@
     "pod": {
       "container": "ci-skills-pod",
       "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b",
-      "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
-      "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+      "name": "ci-skills-run-tool-pod-f669cea49ae538d1",
+      "namespace": "ci-skills-run-f22af9d644d64fb289dc",
       "restart_count": 0,
-      "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+      "uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b"
     },
     "retained_resources": [
       {
         "kind": "namespace",
-        "name": "ci-skills-run-14ed29858f5541e5aa67",
+        "name": "ci-skills-run-f22af9d644d64fb289dc",
         "namespace": ""
       },
       {
         "kind": "configmap",
-        "name": "ci-skills-run-tool-pod-scripts-26e7a420ae06c99b",
-        "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+        "name": "ci-skills-run-tool-pod-scripts-f669cea49ae538d1",
+        "namespace": "ci-skills-run-f22af9d644d64fb289dc"
       },
       {
         "kind": "pod",
-        "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
-        "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+        "name": "ci-skills-run-tool-pod-f669cea49ae538d1",
+        "namespace": "ci-skills-run-f22af9d644d64fb289dc"
       }
     ],
-    "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+    "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
     "tools": [
       {
         "index": 0,
@@ -221,17 +221,17 @@
     {
       "action": "VERIFIED",
       "callback": "ResolveRunScopes",
-      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
       "scopes": [],
       "verified": true
     },
     {
       "action": "APPLIED",
       "callback": "OpenRunScope",
-      "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+      "namespace": "ci-skills-run-f22af9d644d64fb289dc",
       "owns_namespace": true,
       "reused": false,
-      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
       "verified": true
     },
     {
@@ -241,13 +241,13 @@
       "pod": {
         "container": "ci-skills-pod",
         "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b",
-        "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
-        "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+        "name": "ci-skills-run-tool-pod-f669cea49ae538d1",
+        "namespace": "ci-skills-run-f22af9d644d64fb289dc",
         "restart_count": 0,
-        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+        "uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b"
       },
       "reused": false,
-      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
       "verified": true
     },
     {
@@ -255,7 +255,7 @@
       "callback": "ReadToolState",
       "environment": {
         "package_manager": "dnf",
-        "pod_uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d",
+        "pod_uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b",
         "restart_count": 0,
         "runtime": "uid=0\ngid=0\nLinux 5.14.0-570.98.1.el9_6.x86_64 x86_64\nos=rhel\nos_version=9.4\n",
         "search_paths": [
@@ -269,7 +269,7 @@
           ],
           "index": 0,
           "name": "shell",
-          "pod_uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d",
+          "pod_uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b",
           "present": true,
           "restart_count": 0,
           "route": "present",
@@ -281,7 +281,7 @@
           ],
           "index": 1,
           "name": "oc",
-          "pod_uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d",
+          "pod_uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b",
           "present": true,
           "restart_count": 0,
           "route": "present",
@@ -293,7 +293,7 @@
           ],
           "index": 2,
           "name": "rsync",
-          "pod_uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d",
+          "pod_uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b",
           "present": true,
           "restart_count": 0,
           "route": "present",
@@ -305,7 +305,7 @@
           ],
           "index": 3,
           "name": "yq",
-          "pod_uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d",
+          "pod_uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b",
           "present": false,
           "restart_count": 0,
           "route": "artifact",
@@ -351,10 +351,10 @@
         "pod": {
           "container": "ci-skills-pod",
           "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b",
-          "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
-          "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+          "name": "ci-skills-run-tool-pod-f669cea49ae538d1",
+          "namespace": "ci-skills-run-f22af9d644d64fb289dc",
           "restart_count": 0,
-          "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+          "uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b"
         },
         "sha256": "1bb99e1019e23de33c7e6afc23e93dad72aad6cf2cb03c797f068ea79814ddb0",
         "size": 11477176
@@ -380,29 +380,29 @@
       "pod": {
         "container": "ci-skills-pod",
         "image": "quay.io/openshift-release-dev/ocp-v4.0-art-dev@sha256:2379c467638b9bd6c10a2a1016d199357e3334d2f5f7332209b7cce2021f116b",
-        "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
-        "namespace": "ci-skills-run-14ed29858f5541e5aa67",
+        "name": "ci-skills-run-tool-pod-f669cea49ae538d1",
+        "namespace": "ci-skills-run-f22af9d644d64fb289dc",
         "restart_count": 0,
-        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+        "uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b"
       },
       "retained_resources": [
         {
           "kind": "namespace",
-          "name": "ci-skills-run-14ed29858f5541e5aa67",
+          "name": "ci-skills-run-f22af9d644d64fb289dc",
           "namespace": ""
         },
         {
           "kind": "configmap",
-          "name": "ci-skills-run-tool-pod-scripts-26e7a420ae06c99b",
-          "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+          "name": "ci-skills-run-tool-pod-scripts-f669cea49ae538d1",
+          "namespace": "ci-skills-run-f22af9d644d64fb289dc"
         },
         {
           "kind": "pod",
-          "name": "ci-skills-run-tool-pod-26e7a420ae06c99b",
-          "namespace": "ci-skills-run-14ed29858f5541e5aa67"
+          "name": "ci-skills-run-tool-pod-f669cea49ae538d1",
+          "namespace": "ci-skills-run-f22af9d644d64fb289dc"
         }
       ],
-      "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+      "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
       "tools": [
         {
           "index": 0,
@@ -457,18 +457,18 @@
       "callback": "SamePodRsync",
       "pod_after": {
         "restart_count": 0,
-        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+        "uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b"
       },
       "pod_before": {
         "restart_count": 0,
-        "uid": "ef739f71-d4b2-40d3-8349-6bb7db0b683d"
+        "uid": "3a4bf056-c9fc-4cad-b833-d1213846c42b"
       },
       "sha256": "94731147f3b1260a8419454105592b0b2ab1de91d4c7cb63bf1636fd0fb28f2c",
       "transport": "in_pod_rsync",
       "verified": true
     }
   ],
-  "run_id": "a4d6162b88ea446c899e53ccaa2cd792",
+  "run_id": "c5639c8c32af4cfab8ca8a3dff4abdc5",
   "schema_version": "1.0",
   "skill": {
     "algorithm": "sha256-tree-v1",
@@ -476,12 +476,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "1cb30887851e9edb58fbb0d08c9679d8dd736d82314b53bf1c7aff5e33ef6cc3",
+    "digest": "e5aaa500d9b9aa69b61b95683595ce54442f9d28c8ad0f3ac25b499f3644de9f",
     "file_count": 159,
-    "functional_digest": "1bd593cf493b854d921cb2d08eea333d6f08c3f3033fa474e09f28e921c1e052",
+    "functional_digest": "856dadd68651a9c393636c97bc9fe9aa51c44470f105148347c774f8fa69fc30",
     "revision": {
       "source": "installer_record",
-      "value": "9aa288084328a9c44d38d78bd86b5e8785d810b3",
+      "value": "2c615ffcc0c9ec16e323e8e72c7e6e0962897bca",
       "verified": true
     }
   },
@@ -491,7 +491,7 @@
     "record_count": 12
   },
   "target": "target:7bd724cadedd",
-  "target_file": "path:5e5380df1eda",
-  "target_source": "env:CI_SKILLS_TARGET",
-  "tested_revision": "9aa288084328a9c44d38d78bd86b5e8785d810b3"
+  "target_file": "path:8617612df58d",
+  "target_source": "project",
+  "tested_revision": "2c615ffcc0c9ec16e323e8e72c7e6e0962897bca"
 }
