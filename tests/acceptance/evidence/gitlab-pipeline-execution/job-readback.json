@@ -17,14 +17,14 @@
       "web_url": "https://gitlab.dcloud.run/hott/test"
     }
   },
-  "captured_at": "2026-10-18T13:52:17.138323+00:00",
+  "captured_at": "2026-10-18T14:08:08.888916+00:00",
   "errors": [],
   "execution_host": "mac.lan",
   "filters": {
     "from": null,
     "limit": 50,
     "name_glob": null,
-    "pipeline_id": 3916,
+    "pipeline_id": 3918,
     "project": "hott/test",
     "ref": null,
     "search": null,
@@ -36,99 +36,99 @@
   "operation": "list",
   "records": [
     {
-      "created_at": "2026-10-18T13:44:27.243000+00:00",
-      "duration": 4.325,
+      "created_at": "2026-10-18T14:05:47.354000+00:00",
+      "duration": 4.420773,
       "failure_reason": null,
-      "finished_at": "2026-10-18T13:44:42.767000+00:00",
-      "id": 60254,
+      "finished_at": "2026-10-18T14:06:03.572000+00:00",
+      "id": 60264,
       "name": "hello_world_05",
-      "pipeline_id": 3916,
+      "pipeline_id": 3918,
       "ref": "neroshige/ci-skills-job-list-smoke-20261007",
       "runner": {
         "description": "cai-gitlab-runner02",
         "id": 75
       },
       "stage": "smoke",
-      "started_at": "2026-10-18T13:44:38.442000+00:00",
+      "started_at": "2026-10-18T14:05:59.151000+00:00",
       "status": "success",
       "stuck": false,
-      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60254"
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60264"
     },
     {
-      "created_at": "2026-10-18T13:44:27.235000+00:00",
-      "duration": 4.376607,
+      "created_at": "2026-10-18T14:05:47.345000+00:00",
+      "duration": 4.208706,
       "failure_reason": null,
-      "finished_at": "2026-10-18T13:44:38.867000+00:00",
-      "id": 60253,
+      "finished_at": "2026-10-18T14:05:59.364000+00:00",
+      "id": 60263,
       "name": "hello_world_04",
-      "pipeline_id": 3916,
+      "pipeline_id": 3918,
       "ref": "neroshige/ci-skills-job-list-smoke-20261007",
       "runner": {
         "description": "cai-gitlab-runner01",
         "id": 74
       },
       "stage": "smoke",
-      "started_at": "2026-10-18T13:44:34.490000+00:00",
+      "started_at": "2026-10-18T14:05:55.155000+00:00",
       "status": "success",
       "stuck": false,
-      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60253"
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60263"
     },
     {
-      "created_at": "2026-10-18T13:44:27.227000+00:00",
-      "duration": 4.52358,
+      "created_at": "2026-10-18T14:05:47.334000+00:00",
+      "duration": 4.501293,
       "failure_reason": null,
-      "finished_at": "2026-10-18T13:44:38.263000+00:00",
-      "id": 60252,
+      "finished_at": "2026-10-18T14:05:58.974000+00:00",
+      "id": 60262,
       "name": "hello_world_03",
-      "pipeline_id": 3916,
+      "pipeline_id": 3918,
       "ref": "neroshige/ci-skills-job-list-smoke-20261007",
       "runner": {
         "description": "cai-gitlab-runner02",
         "id": 75
       },
       "stage": "smoke",
-      "started_at": "2026-10-18T13:44:33.739000+00:00",
+      "started_at": "2026-10-18T14:05:54.473000+00:00",
       "status": "success",
       "stuck": false,
-      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60252"
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60262"
     },
     {
-      "created_at": "2026-10-18T13:44:27.216000+00:00",
-      "duration": 4.658705,
+      "created_at": "2026-10-18T14:05:47.323000+00:00",
+      "duration": 4.168334,
       "failure_reason": null,
-      "finished_at": "2026-10-18T13:44:34.299000+00:00",
-      "id": 60251,
+      "finished_at": "2026-10-18T14:05:54.953000+00:00",
+      "id": 60261,
       "name": "hello_world_02",
-      "pipeline_id": 3916,
+      "pipeline_id": 3918,
       "ref": "neroshige/ci-skills-job-list-smoke-20261007",
       "runner": {
         "description": "cai-gitlab-runner01",
         "id": 74
       },
       "stage": "smoke",
-      "started_at": "2026-10-18T13:44:29.640000+00:00",
+      "started_at": "2026-10-18T14:05:50.784000+00:00",
       "status": "success",
       "stuck": false,
-      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60251"
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60261"
     },
     {
-      "created_at": "2026-10-18T13:44:27.191000+00:00",
-      "duration": 4.731031,
+      "created_at": "2026-10-18T14:05:47.302000+00:00",
+      "duration": 4.326972,
       "failure_reason": null,
-      "finished_at": "2026-10-18T13:44:33.575000+00:00",
-      "id": 60250,
+      "finished_at": "2026-10-18T14:05:54.242000+00:00",
+      "id": 60260,
       "name": "hello_world_01",
-      "pipeline_id": 3916,
+      "pipeline_id": 3918,
       "ref": "neroshige/ci-skills-job-list-smoke-20261007",
       "runner": {
         "description": "cai-gitlab-runner02",
         "id": 75
       },
       "stage": "smoke",
-      "started_at": "2026-10-18T13:44:28.844000+00:00",
+      "started_at": "2026-10-18T14:05:49.915000+00:00",
       "status": "success",
       "stuck": false,
-      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60250"
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60260"
     }
   ],
   "schema_version": "1.0",
@@ -138,12 +138,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "86eeff94d94240f04cad123064ac6cb233cc47182f66a2f685c4f010cd9cfda1",
-    "file_count": 203,
-    "functional_digest": "6e940688a3c787ca63728040f5445ec95376b6b6b240a456d420ecad406da080",
+    "digest": "0d343fe1d4c8dc6bda5172f572306f6e1f2b50dfdf0d6b0a0d5938a624fab0a8",
+    "file_count": 207,
+    "functional_digest": "5c8a13b2c648a054c1988092cb72af4dff6b6c6c1394d3de4692ee51709e6b9a",
     "revision": {
       "source": "installer_record",
-      "value": "6ca1d7778d07c417815618452b3dbee96170e8d5",
+      "value": "d8ab14b2d4d408975bc378ce871737bd014bbe44",
       "verified": true
     }
   },
@@ -154,6 +154,6 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "project;argv:--project",
-  "tested_revision": "6ca1d7778d07c417815618452b3dbee96170e8d5",
+  "tested_revision": "d8ab14b2d4d408975bc378ce871737bd014bbe44",
   "truncated": false
 }

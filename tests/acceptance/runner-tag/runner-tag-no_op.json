@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-18T13:55:13.650583+00:00",
+  "captured_at": "2026-10-18T14:06:12.833076+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,36 +18,36 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "e8087a3480d11ab19fdb0ca5065016f6914cc1ded353f72dac9ae25095e4d567",
+    "body_sha256": "c74c10991a05003537950a0c006e5c1d7347e651f7cdfb147e17912fc3cb179a",
     "confirmation_ready": true,
     "fields": [
       "tag_list"
     ],
     "one_time_sink_required": false,
     "operation": "tag",
-    "plan_digest": "ebd06dcce4d86c22b57835a51c1cbb791b6e7ee19b74335527d7ff3bafd222ae",
+    "plan_digest": "4d88101a57f8aa1f5bde232e1bfa61ad97a07485a7a37356dfd5edb809d5914c",
     "project_ids": null,
     "requested_tags": [
       "ci-skills",
-      "6ca1d777"
+      "d8ab14b2"
     ],
-    "resource_id": 89,
+    "resource_id": 90,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "ebd06dcce4d86c22b57835a51c1cbb791b6e7ee19b74335527d7ff3bafd222ae",
+  "plan_digest": "4d88101a57f8aa1f5bde232e1bfa61ad97a07485a7a37356dfd5edb809d5914c",
   "readback": {
     "action": "NO_OP",
     "added_tags": [],
     "after_tags": [
       "ci-skills",
-      "6ca1d777"
+      "d8ab14b2"
     ],
     "before_tags": [
       "ci-skills",
-      "6ca1d777"
+      "d8ab14b2"
     ],
-    "id": 89,
+    "id": 90,
     "mutated": false,
     "verified": true
   },
@@ -57,13 +57,13 @@
       "added_tags": [],
       "after_tags": [
         "ci-skills",
-        "6ca1d777"
+        "d8ab14b2"
       ],
       "before_tags": [
         "ci-skills",
-        "6ca1d777"
+        "d8ab14b2"
       ],
-      "id": 89,
+      "id": 90,
       "mutated": false,
       "verified": true
     }
@@ -76,12 +76,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "86eeff94d94240f04cad123064ac6cb233cc47182f66a2f685c4f010cd9cfda1",
-    "file_count": 203,
-    "functional_digest": "6e940688a3c787ca63728040f5445ec95376b6b6b240a456d420ecad406da080",
+    "digest": "0d343fe1d4c8dc6bda5172f572306f6e1f2b50dfdf0d6b0a0d5938a624fab0a8",
+    "file_count": 207,
+    "functional_digest": "5c8a13b2c648a054c1988092cb72af4dff6b6c6c1394d3de4692ee51709e6b9a",
     "revision": {
       "source": "installer_record",
-      "value": "6ca1d7778d07c417815618452b3dbee96170e8d5",
+      "value": "d8ab14b2d4d408975bc378ce871737bd014bbe44",
       "verified": true
     }
   },
@@ -94,9 +94,9 @@
     "kind": "project",
     "reference": "hott/test"
   },
-  "target_file": "path:a9d3a059049d",
+  "target_file": "path:331790f9f63b",
   "target_source": "project;argv:--project",
-  "tested_revision": "6ca1d7778d07c417815618452b3dbee96170e8d5",
+  "tested_revision": "d8ab14b2d4d408975bc378ce871737bd014bbe44",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,
