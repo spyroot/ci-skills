@@ -12,7 +12,7 @@ import re
 from collections.abc import MutableSequence
 from dataclasses import replace
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from lib.python.core.abstract.callback import AbstractCallback
 from lib.python.core.abstract.callbacks import Callbacks
@@ -31,8 +31,15 @@ from lib.python.core.gitlab.gitlab_action import (
 from lib.python.core.gitlab.gitlab_actions import (
     ActionError,
     ActionPlan,
+    _array,
+    _pages,
     _result,
     _verified_skill_revision,
+)
+from lib.python.core.gitlab.gitlab_api import (
+    GitLabAPIError,
+    create_guard,
+    uncertain_write,
 )
 from lib.python.core.json_types import (
     JSONObject,
@@ -45,6 +52,7 @@ from lib.python.core.target import GitLabOperationTarget
 from lib.python.sys.status import DRY_RUN, PLANNED
 
 PIPELINE_KIND = "gitlab_pipeline"
+PIPELINE_PLAN_VARIABLE = "CI_SKILLS_PIPELINE_PLAN_DIGEST"
 DEFAULT_REQUEST_TIMEOUT = 25
 _FULL_SHA = re.compile(r"[0-9a-f]{40}")
 _VARIABLE_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -63,6 +71,8 @@ def _variables(values: list[str]) -> list[JSONObject]:
         key, separator, content = value.partition("=")
         if not separator or not _VARIABLE_KEY.fullmatch(key):
             raise ActionError("pipeline_variable_must_be_key_value")
+        if key == PIPELINE_PLAN_VARIABLE:
+            raise ActionError("pipeline_variable_reserved_for_plan_identity")
         if key in names:
             raise ActionError("pipeline_variable_key_repeated")
         names.add(key)
@@ -109,6 +119,7 @@ def prepare_start_plan(
         raise ActionError("expected_sha_must_be_full_lowercase_commit_sha")
     body: dict[str, JSONValue] = {
         "requested_ref": args.ref,
+        "run_id": args.run_id,
         "variables": _variables(args.variable),
         "require_protected_ref": args.require_protected_ref,
         "expected_sha": expected_sha,
@@ -240,50 +251,100 @@ def _pipeline_readback(value: JSONValue, project_id: int) -> JSONObject:
     return item
 
 
-def start_pipeline(state: GitLabState) -> JSONObject:
-    """Create one pipeline and independently read its exact identity back.
+def _pipeline_has_plan(state: GitLabState, pipeline_id: int) -> bool:
+    """Read the managed variable that associates a pipeline with one plan.
 
-    :param state: Confirmed, access-verified pipeline workflow state.
-    :returns: Mutation record with the new pipeline ID, SHA, and GET read-back.
-    :raises ActionError: The plan is unresolved or provider identity differs.
-    :raises GitLabAPIError: The POST or independent GET fails.
-    """  # noqa: DOC503 - provider transport errors propagate unchanged.
+    :param state: Access-verified state holding the confirmed plan.
+    :param pipeline_id: Exact candidate pipeline ID in the selected project.
+    :returns: Whether this pipeline carries the confirmed plan digest.
+    :raises ActionError: Variable evidence is malformed or repeats the managed key.
+    :raises GitLabAPIError: Provider variable read-back fails.
+    """  # noqa: DOC503 - provider errors propagate unchanged.
+    service = state.gitlab
+    variables = _array(
+        service.api.get_json(
+            service.session,
+            f"projects/{service.target_id}/pipelines/{pipeline_id}/variables",
+        ),
+        "pipeline_variables",
+    )
+    markers = [item for item in variables if item.get("key") == PIPELINE_PLAN_VARIABLE]
+    if len(markers) > 1:
+        raise ActionError("pipeline_plan_marker_repeated")
+    if markers and not isinstance(markers[0].get("value"), str):
+        raise ActionError("pipeline_plan_marker_invalid")
+    return bool(markers) and markers[0].get("value") == state.plan.digest
+
+
+def _find_started_pipeline(state: GitLabState) -> Optional[int]:
+    """Find one exact plan marker after completely reading the bounded candidates.
+
+    :param state: Access-verified state with live-resolved ref and SHA.
+    :returns: Matching pipeline ID, or None after a complete unmatched read.
+    :raises ActionError: Candidate identities are malformed or multiple IDs match.
+    :raises GitLabAPIError: Candidate or variable reads cannot prove the result.
+    """  # noqa: DOC502,DOC503 - shared validators and provider errors propagate.
     service, plan = state.gitlab, state.plan
     ref = _provider_text(plan.body.get("ref"), "ref")
     sha = _provider_text(plan.body.get("resolved_sha"), "resolved_sha")
-    variables = plan.body.get("variables")
-    if not isinstance(variables, list):
-        raise ActionError("pipeline_variables_invalid")
-    request: dict[str, JSONValue] = {"ref": ref, "variables": copy_json(variables)}
-    state.mutated = None
-    created = _pipeline_readback(
-        service.api.post_json(
-            service.session, f"projects/{service.target_id}/pipeline", request
-        ),
-        service.target_id,
+    query = urlencode({"ref": ref, "sha": sha, "source": "api"})
+    candidates = _pages(
+        service.api, service.session, f"projects/{service.target_id}/pipelines?{query}"
     )
-    state.mutated = True
-    pipeline_id = _positive_id(created.get("id"), "id")
+    matches: set[int] = set()
+    seen: set[int] = set()
+    for candidate in candidates:
+        pipeline_id = _positive_id(candidate.get("id"), "id")
+        if pipeline_id in seen:
+            continue
+        seen.add(pipeline_id)
+        if (
+            candidate.get("ref") != ref
+            or candidate.get("sha") != sha
+            or candidate.get("project_id", service.target_id) != service.target_id
+        ):
+            raise ActionError("pipeline_list_reference_mismatch")
+        if _pipeline_has_plan(state, pipeline_id):
+            matches.add(pipeline_id)
+    if len(matches) > 1:
+        raise ActionError("pipeline_plan_identity_ambiguous")
+    return next(iter(matches)) if matches else None
+
+
+def _started_pipeline_result(
+    state: GitLabState, pipeline_id: int, *, applied: bool
+) -> JSONObject:
+    """Independently verify one exact pipeline before reporting apply or replay.
+
+    :param state: Access-verified workflow state and confirmed operation plan.
+    :param pipeline_id: Positive pipeline identity from creation or reconciliation.
+    :param applied: Whether this invocation dispatched the creating POST.
+    :returns: Verified pipeline record with truthful mutation evidence.
+    :raises ActionError: The observed ID, project, ref, SHA or plan marker differs.
+    :raises GitLabAPIError: Independent provider read-back fails.
+    """  # noqa: DOC503 - provider errors propagate unchanged.
+    service, plan = state.gitlab, state.plan
     observed = _pipeline_readback(
         service.api.get_json(
-            service.session,
-            f"projects/{service.target_id}/pipelines/{pipeline_id}",
+            service.session, f"projects/{service.target_id}/pipelines/{pipeline_id}"
         ),
         service.target_id,
     )
     if (
         observed.get("id") != pipeline_id
-        or observed.get("ref") != ref
-        or observed.get("sha") != sha
+        or observed.get("ref") != plan.body.get("ref")
+        or observed.get("sha") != plan.body.get("resolved_sha")
+        or not _pipeline_has_plan(state, pipeline_id)
     ):
         raise ActionError("pipeline_readback_identity_mismatch")
+    state.mutated = applied
     return {
-        "action": "APPLIED",
-        "mutated": True,
+        "action": "APPLIED" if applied else "NO_OP",
+        "mutated": applied,
         "verified": True,
         "id": pipeline_id,
-        "ref": ref,
-        "sha": sha,
+        "ref": observed["ref"],
+        "sha": observed["sha"],
         "status": observed["status"],
         "after": {
             "id": pipeline_id,
@@ -295,6 +356,74 @@ def start_pipeline(state: GitLabState) -> JSONObject:
         "cleanup": {"status": "NOT_APPLICABLE"},
         "errors": [],
     }
+
+
+def _start_request(plan: ActionPlan) -> JSONObject:
+    """Add the plan marker without changing caller variables or hashing itself.
+
+    :param plan: Confirmed pipeline inputs before adding provider correlation.
+    :returns: Native create-pipeline request with one managed plan variable.
+    :raises ActionError: Variables are malformed or collide with the managed key.
+    """  # noqa: DOC502 - shared validators propagate malformed input failures.
+    variables = _array(plan.body.get("variables"), "pipeline_variables")
+    if any(item.get("key") == PIPELINE_PLAN_VARIABLE for item in variables):
+        raise ActionError("pipeline_variable_reserved_for_plan_identity")
+    return {
+        "ref": _provider_text(plan.body.get("ref"), "ref"),
+        "variables": [
+            *variables,
+            {
+                "key": PIPELINE_PLAN_VARIABLE,
+                "value": plan.digest,
+                "variable_type": "env_var",
+            },
+        ],
+    }
+
+
+def start_pipeline(state: GitLabState) -> JSONObject:
+    """Create or reconcile one confirmed pipeline without replaying a POST.
+
+    :param state: Confirmed, access-verified pipeline workflow state.
+    :returns: Verified APPLIED or NO_OP record for the exact confirmed plan.
+    :raises ActionError: Inputs, ambiguous matches or provider identities are invalid.
+    :raises GitLabAPIError: Provider reads fail or an uncertain create remains unresolved.
+    :raises OSError: The shared create guard or pending marker cannot be accessed.
+    """  # noqa: DOC503 - shared transport and guard I/O failures propagate.
+    service, plan = state.gitlab, state.plan
+    request = _start_request(plan)
+    state.mutated = False
+    with create_guard(
+        plan.origin, plan.target_kind, service.target_id, PIPELINE_KIND, plan.digest
+    ) as guard:
+        existing_id = _find_started_pipeline(state)
+        if existing_id is not None:
+            result = _started_pipeline_result(state, existing_id, applied=False)
+            guard.clear()
+            return result
+        guard.reconcile_absent()
+        guard.mark_pending()
+        state.mutated = None
+        try:
+            response = service.api.post_json(
+                service.session, f"projects/{service.target_id}/pipeline", request
+            )
+        except GitLabAPIError as exc:
+            if not uncertain_write(exc):
+                guard.clear()
+                state.mutated = False
+                raise
+            reconciled_id = _find_started_pipeline(state)
+            if reconciled_id is None:
+                raise GitLabAPIError("pipeline_start_outcome_uncertain") from exc
+            result = _started_pipeline_result(state, reconciled_id, applied=True)
+        else:
+            state.mutated = True
+            created = _pipeline_readback(response, service.target_id)
+            pipeline_id = _positive_id(created.get("id"), "id")
+            result = _started_pipeline_result(state, pipeline_id, applied=True)
+        guard.clear()
+        return result
 
 
 class StartPipeline(GitlabCallback[ActionPlan]):
@@ -319,9 +448,10 @@ class StartPipeline(GitlabCallback[ActionPlan]):
     def run(self) -> JSONObject:
         """Create and independently verify the selected pipeline.
 
-        :returns: Provider mutation and read-back record.
+        :returns: Provider creation or replay record with independent read-back.
         :raises ActionError: Provider identity differs from the confirmed plan.
         :raises GitLabAPIError: The provider mutation or read-back fails.
+        :raises OSError: The shared create guard cannot be acquired or updated.
         """  # noqa: DOC502,DOC503 - delegated operation propagates provider failures.
         return start_pipeline(self.state)
 
@@ -332,7 +462,7 @@ class StartPipeline(GitlabCallback[ActionPlan]):
         """
         self.state.operation_result = self.result
         self.state.operation_completed = True
-        self.state.mutated = True
+        self.state.mutated = self.result.get("mutated") is True
         return self.result
 
 

@@ -8,7 +8,7 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from math import isfinite
 
 from lib.python.core.abstract.callbacks import Callbacks
@@ -179,6 +179,56 @@ class WatchPipeline(GitlabCallback[PipelineWatchAction]):
         )
 
 
+def _empty_watch_report(
+    target: str,
+    filters: JSONObject,
+    status: str,
+    errors: Sequence[JSONObject],
+) -> JSONObject:
+    """Render a watch outcome before any pipeline observation is available.
+
+    :param target: Selected GitLab URL, or ``unresolved`` before target selection.
+    :param filters: Valid selectors known at the failure or planning boundary.
+    :param status: Blocked or dry-run outcome.
+    :param errors: Classified failures, empty for non-contacting planning.
+    :returns: Watch envelope with no fabricated observation or completion.
+    """
+    data = report(PIPELINE_WATCH_KIND, target, filters, [], errors)
+    data.update(
+        status=status,
+        complete=False,
+        success=False,
+        polls=0,
+        elapsed_seconds=0,
+        changes=[],
+        choices=[],
+        continuation=None,
+    )
+    return data
+
+
+def watch_failure_report(args: argparse.Namespace, reason: str) -> JSONObject:
+    """Describe a failure before watch target and action resolution complete.
+
+    :param args: Parsed arguments whose selection values may still be invalid.
+    :param reason: Sanitized preflight failure reason.
+    :returns: BLOCKED watch report retaining only valid requested selectors.
+    """
+    filters: JSONObject = {}
+    if isinstance(args.project, str) and args.project.strip():
+        filters["project"] = args.project
+    if type(args.pipeline_id) is int and args.pipeline_id > 0:
+        filters["pipeline_id"] = args.pipeline_id
+    if isinstance(args.related_name, str) and args.related_name.strip():
+        filters["related_name"] = args.related_name
+    return _empty_watch_report(
+        "unresolved",
+        filters,
+        BLOCKED,
+        [{"source": "pipeline.watch", "reason": reason}],
+    )
+
+
 def _offline_watch_report(
     target: GitLabOperationTarget,
     target_source: str,
@@ -193,16 +243,8 @@ def _offline_watch_report(
     :param filters: Public root and related-pipeline selectors.
     :returns: Complete DRY_RUN report for the watch result schema.
     """
-    data = report(PIPELINE_WATCH_KIND, target.gitlab.url, filters, [], [])
+    data = _empty_watch_report(target.gitlab.url, filters, DRY_RUN, [])
     data.update(
-        status=DRY_RUN,
-        complete=False,
-        success=False,
-        polls=0,
-        elapsed_seconds=0,
-        changes=[],
-        choices=[],
-        continuation=None,
         target_source=target_source,
         access={
             "status": DRY_RUN,
@@ -237,17 +279,7 @@ def _blocked_watch_report(
     errors: list[JSONObject] = [
         {"source": state.failure_source, "reason": sanitize(str(exc), 240)}
     ]
-    data = report(PIPELINE_WATCH_KIND, target.gitlab.url, filters, [], errors)
-    data.update(
-        status=BLOCKED,
-        complete=False,
-        success=False,
-        polls=0,
-        elapsed_seconds=0,
-        changes=[],
-        choices=[],
-        continuation=None,
-    )
+    data = _empty_watch_report(target.gitlab.url, filters, BLOCKED, errors)
     if state.access:
         data["access"] = state.access
     if state.session is not None:

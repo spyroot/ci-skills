@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass, field
 
+from lib.python.core.cli_api import REQUEST_DEADLINE_EXCEEDED, RequestDeadline
 from lib.python.core.gitlab.gitlab_actions import ActionError
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.gitlab.gitlab_pipeline_graph import _choices, _scope
@@ -246,7 +247,7 @@ def watch_pipeline(
     except re.error as exc:
         raise ActionError("pipeline_related_name_invalid_regex") from exc
     started = monotonic()
-    deadline = started + action.timeout
+    deadline = RequestDeadline(started + action.timeout, monotonic)
     progress = WatchProgress()
     polls = 0
     final: Sequence[PipelineObservation] = ()
@@ -254,17 +255,23 @@ def watch_pipeline(
     elapsed = 0.0
     while True:
         polls += 1
-        final, errors = _scope(
+        observed, errors = _scope(
             api,
             session,
             PipelineRoute(PipelineKey(project_id, action.pipeline_id), "root", 0),
             action.related_name,
+            deadline=deadline,
         )
+        expired = any(
+            item.get("reason") == REQUEST_DEADLINE_EXCEEDED for item in errors
+        )
+        if observed or not expired:
+            final = observed
         final_errors = errors
         now = monotonic()
         elapsed = max(0.0, now - started)
         _capture_poll(progress, final, elapsed, settled)
-        if _complete(final, final_errors) or now >= deadline:
+        if _complete(final, final_errors) or now >= deadline.expires_at:
             break
-        sleep(min(action.interval, max(0.0, deadline - now)))
+        sleep(min(action.interval, max(0.0, deadline.expires_at - now)))
     return _watch_result(progress, final, final_errors, polls, elapsed)

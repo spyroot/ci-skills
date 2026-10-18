@@ -23,6 +23,12 @@
     "errors",
     "summary"
   ],
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"enum": ["PASS", "PARTIAL", "DRY_RUN"]}}},
+      "then": {"properties": {"filters": {"required": ["project", "pipeline_id"]}}}
+    }
+  ],
   "properties": {
     "schema_version": {
       "type": "string",
@@ -42,10 +48,6 @@
     "filters": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "project",
-        "pipeline_id"
-      ],
       "properties": {
         "project": {
           "type": [

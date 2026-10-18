@@ -710,7 +710,7 @@
       "requires_authorities": [
         "gitlab"
       ],
-      "returns": "Get returns one validated pipeline and bounded jobs. Start returns an offline or live plan, or a verified new pipeline identity. Watch returns bounded graph completion, success, changes and retrieve choices.",
+      "returns": "Get returns one validated pipeline and bounded jobs. Start returns an offline or live plan, or a verified new or existing plan identity. Watch returns bounded graph completion, success, changes and retrieve choices.",
       "side_effects": "Confirmed start may create one pipeline on the selected ref.",
       "subcommands": {
         "get": {
@@ -724,10 +724,10 @@
         "start": {
           "mutates": true,
           "purpose": "Resolve an exact ref and commit, then start one confirmed pipeline.",
-          "read_back": "GET the created pipeline ID and require its project, ref and SHA.",
+          "read_back": "GET the exact pipeline and variables; require project, ref, SHA and plan marker.",
           "required_options": [],
           "result_schema": "schemas/results/gitlab-action.schema.json",
-          "side_effects": "Confirmed apply creates one pipeline on the resolved ref."
+          "side_effects": "Confirmed apply creates one pipeline or returns NO_OP for its verified plan marker."
         },
         "watch": {
           "mutates": false,

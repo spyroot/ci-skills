@@ -10,9 +10,11 @@ from __future__ import annotations
 import re
 from collections import deque
 from collections.abc import MutableMapping, MutableSequence, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 from urllib.parse import urlencode
 
+from lib.python.core.cli_api import REQUEST_DEADLINE_EXCEEDED, RequestDeadline
 from lib.python.core.gitlab.gitlab_actions import ActionError, _required_text
 from lib.python.core.gitlab.gitlab_api import GitLabAPIError, GlabAPIClient
 from lib.python.core.gitlab.gitlab_pipeline_watch_types import (
@@ -89,6 +91,8 @@ def _paged(
     session: BoundGitLabSession,
     endpoint: str,
     source: str,
+    *,
+    deadline: Optional[RequestDeadline] = None,
 ) -> tuple[Sequence[JSONValue], Sequence[JSONObject]]:
     """Read at most five pages and preserve explicit overflow evidence.
 
@@ -96,6 +100,7 @@ def _paged(
     :param session: Exact-host credential session.
     :param endpoint: Collection endpoint without pagination fields.
     :param source: Collection name used by an overflow error.
+    :param deadline: Optional absolute deadline shared by every graph request.
     :returns: Decoded items and an overflow error when an extra page is nonempty.
     :raises ActionError: A page is not an array or exceeds the page size.
     :raises GitLabAPIError: A provider page read fails.
@@ -104,9 +109,19 @@ def _paged(
     errors: MutableSequence[JSONObject] = []
     separator = "&" if "?" in endpoint else "?"
     for page in range(1, MAX_PAGES + 2):
-        value = api.get_json(
-            session, f"{endpoint}{separator}per_page={PAGE_SIZE}&page={page}"
-        )
+        try:
+            if deadline is not None:
+                deadline.remaining()
+            value = api.get_json(
+                session,
+                f"{endpoint}{separator}per_page={PAGE_SIZE}&page={page}",
+                deadline=deadline,
+            )
+        except GitLabAPIError as exc:
+            if exc.reason != REQUEST_DEADLINE_EXCEEDED:
+                raise
+            errors.append({"source": source, "reason": exc.reason})
+            break
         if not isinstance(value, list) or len(value) > PAGE_SIZE:
             raise ActionError(f"pipeline_{source}_envelope_invalid")
         if page > MAX_PAGES:
@@ -123,12 +138,15 @@ def _bridges(
     api: GlabAPIClient,
     session: BoundGitLabSession,
     route: PipelineRoute,
+    *,
+    deadline: Optional[RequestDeadline] = None,
 ) -> tuple[Sequence[PipelineRoute], Sequence[JSONObject]]:
     """Read downstream pipelines started by this pipeline's bridge jobs.
 
     :param api: Bound GitLab transport.
     :param session: Exact-host credential session.
     :param route: Parent pipeline and its current graph depth.
+    :param deadline: Optional absolute deadline shared by every graph request.
     :returns: Child routes and bounded bridge errors.
     :raises ActionError: A bridge or downstream identity is malformed.
     :raises GitLabAPIError: A provider page read fails.
@@ -139,6 +157,7 @@ def _bridges(
         session,
         f"projects/{key.project_id}/pipelines/{key.pipeline_id}/bridges",
         "bridges",
+        deadline=deadline,
     )
     children: MutableSequence[PipelineRoute] = []
     for value in values:
@@ -160,35 +179,53 @@ def _observe(
     api: GlabAPIClient,
     session: BoundGitLabSession,
     route: PipelineRoute,
+    *,
+    deadline: Optional[RequestDeadline] = None,
 ) -> PipelineObservation:
     """Read one pipeline, its jobs, and its direct bridge children.
 
     :param api: Bound GitLab transport.
     :param session: Exact-host credential session.
     :param route: Pipeline graph identity to inspect.
+    :param deadline: Optional absolute deadline shared by every graph request.
     :returns: Validated pipeline observation.
     :raises ActionError: Provider response identity or fields are invalid.
     :raises GitLabAPIError: A required provider read fails.
     """  # noqa: DOC503 - provider transport errors propagate unchanged.
     key = route.key
+    if deadline is not None:
+        deadline.remaining()
     item = json_object(
-        api.get_json(session, f"projects/{key.project_id}/pipelines/{key.pipeline_id}")
+        api.get_json(
+            session,
+            f"projects/{key.project_id}/pipelines/{key.pipeline_id}",
+            deadline=deadline,
+        )
     )
     if (
         _positive_id(item.get("id"), "id") != key.pipeline_id
         or _positive_id(item.get("project_id"), "project_id") != key.project_id
     ):
         raise ActionError("pipeline_response_identity_mismatch")
-    values, job_errors = _paged(
-        api,
-        session,
-        f"projects/{key.project_id}/pipelines/{key.pipeline_id}/jobs",
-        "jobs",
-    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs_future = pool.submit(
+            _paged,
+            api,
+            session,
+            f"projects/{key.project_id}/pipelines/{key.pipeline_id}/jobs",
+            "jobs",
+            deadline=deadline,
+        )
+        bridges_future = pool.submit(_bridges, api, session, route, deadline=deadline)
+        try:
+            values, job_errors = jobs_future.result()
+            children, bridge_errors = bridges_future.result()
+        finally:
+            jobs_future.cancel()
+            bridges_future.cancel()
     jobs = tuple(_job(value, key.pipeline_id) for value in values)
     if len({job.id for job in jobs}) != len(jobs):
         raise ActionError("pipeline_jobs_duplicate_id")
-    children, bridge_errors = _bridges(api, session, route)
     return PipelineObservation(
         route=route,
         status=_required_text(item.get("status"), "pipeline_status"),
@@ -205,6 +242,8 @@ def _related(
     session: BoundGitLabSession,
     root: PipelineObservation,
     pattern: re.Pattern[str],
+    *,
+    deadline: Optional[RequestDeadline] = None,
 ) -> tuple[Sequence[PipelineRoute], Sequence[JSONObject]]:
     """Select newer root-project pipelines whose provider name matches.
 
@@ -212,6 +251,7 @@ def _related(
     :param session: Exact-host credential session.
     :param root: Root pipeline supplying project, ref, and lower ID bound.
     :param pattern: Caller-compiled related pipeline expression.
+    :param deadline: Optional absolute deadline shared by every graph request.
     :returns: Related routes and bounded list errors.
     :raises ActionError: A listed pipeline has malformed identity or name.
     :raises GitLabAPIError: A provider page read fails.
@@ -219,7 +259,11 @@ def _related(
     key = root.route.key
     query = urlencode({"ref": root.ref})
     values, errors = _paged(
-        api, session, f"projects/{key.project_id}/pipelines?{query}", "related"
+        api,
+        session,
+        f"projects/{key.project_id}/pipelines?{query}",
+        "related",
+        deadline=deadline,
     )
     selected: MutableSequence[PipelineRoute] = []
     for value in values:
@@ -246,6 +290,8 @@ def _scope(
     session: BoundGitLabSession,
     root: PipelineRoute,
     related_name: Optional[str],
+    *,
+    deadline: Optional[RequestDeadline] = None,
 ) -> tuple[Sequence[PipelineObservation], Sequence[JSONObject]]:
     """Discover and observe the complete bounded graph for one poll.
 
@@ -253,6 +299,7 @@ def _scope(
     :param session: Exact-host credential session.
     :param root: Required root pipeline route.
     :param related_name: Optional root-project pipeline-name expression.
+    :param deadline: Optional absolute deadline shared by every graph request.
     :returns: Sorted observations and explicit collection or scope errors.
     :raises ActionError: The root read or provider evidence is invalid.
     :raises GitLabAPIError: The root provider read fails.
@@ -262,11 +309,18 @@ def _scope(
     routes: MutableMapping[PipelineKey, PipelineRoute] = {root.key: root}
     observations: MutableMapping[PipelineKey, PipelineObservation] = {}
     errors: MutableSequence[JSONObject] = []
+    dropped: set[PipelineKey] = set()
     while pending:
         route = pending.popleft()
         try:
-            observation = _observe(api, session, route)
+            observation = _observe(api, session, route, deadline=deadline)
         except (ActionError, GitLabAPIError) as exc:
+            if (
+                isinstance(exc, GitLabAPIError)
+                and exc.reason == REQUEST_DEADLINE_EXCEEDED
+            ):
+                errors.append({"source": "scope", "reason": exc.reason})
+                break
             if route.key == root.key:
                 raise
             errors.append(
@@ -282,23 +336,23 @@ def _scope(
         errors.extend(observation.errors)
         discovered: Sequence[PipelineRoute] = observation.children
         if route.key == root.key and pattern is not None:
-            related, related_errors = _related(api, session, observation, pattern)
+            related, related_errors = _related(
+                api, session, observation, pattern, deadline=deadline
+            )
             discovered = (*discovered, *related)
             errors.extend(related_errors)
         for child in discovered:
             if child.depth > MAX_GRAPH_DEPTH or child.key in routes:
                 continue
             if len(routes) >= MAX_PIPELINES:
-                errors.append(
-                    {
-                        "source": "scope",
-                        "reason": "scope_limit_exceeded",
-                        "count": len(routes) + 1,
-                    }
-                )
+                dropped.add(child.key)
                 continue
             routes[child.key] = child
             pending.append(child)
+    if dropped:
+        errors.append(
+            {"source": "scope", "reason": "scope_limit_exceeded", "count": len(dropped)}
+        )
     ordered = sorted(
         observations.values(),
         key=lambda item: (

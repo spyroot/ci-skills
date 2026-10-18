@@ -49,12 +49,29 @@ conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/gitlab_pipeline.py" start \
 
 When `--ref` is absent, live planning reads the project's current default branch. `--expected-sha` requires one full
 lowercase commit SHA; `--require-protected-ref` requires the resolved branch to be protected. Start requests default to
-25 seconds and reject `--timeout` values above 300 seconds. Apply creates one pipeline, then independently reads that
-pipeline ID and requires the same project, ref and SHA.
+25 seconds and reject `--timeout` values above 300 seconds. Apply creates one pipeline or returns `NO_OP` for the same
+confirmed plan, then independently verifies its ID, project, ref, SHA and plan marker.
 
 Supply a variable with repeatable `--variable KEY=VALUE` arguments on every phase. Variable values are kept in the
 private provider request and plan digest; reports, receipts and logs expose only the selected field names and body
 digest.
+
+## Retry or start a new identical build
+
+For `start`, the existing optional `--run-id` also identifies the caller's operation. Use the same value and inputs for
+live-plan and apply. Repeating that confirmed plan returns `NO_OP` when its pipeline is verified. To intentionally start
+another build with identical ref, SHA and variables, choose a new `--run-id` and confirm the new live plan. Omitting
+`--run-id` gives the same resolved inputs the same operation identity; no random diagnostic ID enters the plan.
+
+Start supplies the GitLab variable `CI_SKILLS_PIPELINE_PLAN_DIGEST` as its server-visible correlation marker. Caller
+variables cannot use that key. Its value is the confirmed digest, and reports do not expose other variable values.
+
+A failed or incomplete lookup sends no POST. An uncertain POST is reconciled once by provider read-back and is never
+resent in that invocation. If the pipeline is not yet visible, the existing create guard keeps its pending marker.
+A later invocation reads again: a match returns `NO_OP`; a complete empty read clears the pending marker and stops with
+`create_outcome_uncertain_absent_after_readback_retry`, requiring another invocation before any create. Provider failure
+or incomplete pagination keeps the pending marker. The shared guard serializes callers on one host; it is not a
+cross-host GitLab transaction.
 
 ## Watch to settlement
 

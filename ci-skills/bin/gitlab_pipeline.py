@@ -32,6 +32,7 @@ from lib.python.core.gitlab.gitlab_pipeline_watch import (
     DEFAULT_WATCH_INTERVAL,
     DEFAULT_WATCH_TIMEOUT,
     execute_pipeline_watch,
+    watch_failure_report,
 )
 from lib.python.core.gitlab.gitlab_pipelines import (
     MAX_JOB_PAGES,
@@ -65,7 +66,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     :returns: Parser preserving the historical bare ``--pipeline-id`` read.
     """
-    cli = parser("Read, start, or watch one selected GitLab pipeline.", kind=KIND)
+    cli = parser(
+        "Read, start, or watch one selected GitLab pipeline. "
+        "For start, --run-id also identifies the confirmed operation: "
+        "reuse it for a retry, or change it to request a new identical build.",
+        kind=KIND,
+    )
     cli.set_defaults(kind=KIND)
     cli.add_argument(
         "action",
@@ -275,6 +281,24 @@ def _watch(args: argparse.Namespace) -> int:
     )
 
 
+def _pipeline_failure(args: argparse.Namespace, reason: str) -> int:
+    """Preserve the selected operation's report shape for preflight failures.
+
+    :param args: Parsed operation and output controls.
+    :param reason: Sanitized failure description.
+    :returns: Blocked exit status after rendering without persisting invalid inputs.
+    :raises OSError: Even the final blocked report cannot be written to stdout.
+    """  # noqa: DOC503 - final stdout writes can still fail.
+    if args.action != "watch":
+        return _failure(args, KIND, f"pipeline.{args.action}", reason)
+    data = watch_failure_report(args, reason)
+    try:
+        sys.stdout.write(emit(data, output_mode(args)))
+    except (RuntimeError, OSError):
+        sys.stdout.write(json.dumps(data, sort_keys=True) + "\n")
+    return exit_code(BLOCKED)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Dispatch the selected pipeline operation through its exact boundary.
 
@@ -309,11 +333,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         TypeError,
         KeyError,
     ) as exc:
-        return _failure(args, KIND, f"pipeline.{args.action}", sanitize(str(exc), 240))
+        return _pipeline_failure(args, sanitize(str(exc), 240))
     except Exception:  # noqa: BLE001 - keep unexpected failures machine-readable
-        return _failure(
-            args, KIND, f"pipeline.{args.action}", "unexpected_runtime_failure"
-        )
+        return _pipeline_failure(args, "unexpected_runtime_failure")
 
 
 if __name__ == "__main__":

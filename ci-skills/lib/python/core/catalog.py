@@ -586,10 +586,13 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--project": (
                 "exact project path or numeric ID; otherwise use gitlab.project"
             ),
+            "--run-id": (
+                "diagnostic identifier; start reuses it for a retry and changes it for a new identical build"
+            ),
             "--pipeline-id": "numeric pipeline ID for get or watch",
             "--ref": "start ref; otherwise the live project default branch",
             "--variable": (
-                "pipeline variable as KEY=VALUE; repeat for additional variables"
+                "pipeline variable as KEY=VALUE; CI_SKILLS_PIPELINE_PLAN_DIGEST is managed by start"
             ),
             "--require-protected-ref": (
                 "require the resolved start branch to be protected"
@@ -624,10 +627,10 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "result_schema": GITLAB_ACTION_SCHEMA,
                 "mutates": True,
                 "side_effects": (
-                    "Confirmed apply creates one pipeline on the resolved ref."
+                    "Confirmed apply creates one pipeline or returns NO_OP for its verified plan marker."
                 ),
                 "read_back": (
-                    "GET the created pipeline ID and require its project, ref and SHA."
+                    "GET the exact pipeline and variables; require project, ref, SHA and plan marker."
                 ),
             },
             "watch": {
@@ -642,7 +645,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         },
         "returns": (
             "Get returns one validated pipeline and bounded jobs. Start returns an "
-            "offline or live plan, or a verified new pipeline identity. Watch returns "
+            "offline or live plan, or a verified new or existing plan identity. Watch returns "
             "bounded graph completion, success, changes and retrieve choices."
         ),
     },

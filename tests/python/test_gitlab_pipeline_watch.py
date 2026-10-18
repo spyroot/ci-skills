@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, MutableSequence
-from typing import TYPE_CHECKING
+import json
+from collections.abc import Callable, Mapping, MutableSequence, Sequence
+from pathlib import Path
+from threading import Barrier
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Optional
 
 import pytest
 from conftest import import_script_module
@@ -17,6 +21,10 @@ WATCH = import_script_module("lib.python.core.gitlab.gitlab_pipeline_watch")
 WATCH_RUNTIME = import_script_module(
     "lib.python.core.gitlab.gitlab_pipeline_watch_runtime"
 )
+API = import_script_module("lib.python.core.gitlab.gitlab_api")
+RUNTIME = import_script_module("lib.python.core.runtime")
+SCHEMA = import_script_module("lib.python.core.schema")
+TARGET = import_script_module("lib.python.core.target")
 
 if TYPE_CHECKING:
     from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
@@ -33,8 +41,15 @@ class WatchAPI:
         self.answer = answer
         self.calls: MutableSequence[str] = []
 
-    def get_json(self, _session: BoundGitLabSession, endpoint: str) -> JSONValue:
+    def get_json(
+        self,
+        _session: BoundGitLabSession,
+        endpoint: str,
+        *,
+        deadline: object = None,
+    ) -> JSONValue:
         """Record and answer one provider read."""
+        del deadline
         self.calls.append(endpoint)
         return self.answer(endpoint, len(self.calls))
 
@@ -316,3 +331,196 @@ def test_scope_follows_children_and_related_names_without_project_confusion() ->
     ]
     assert len(api.calls) == 10
     assert not any(endpoint.startswith("projects/99/") for endpoint in api.calls)
+
+
+def test_watch_starts_no_more_reads_after_the_shared_deadline() -> None:
+    """A slow root read cannot start jobs or bridge requests after timeout."""
+    clock = Clock()
+
+    def answer(endpoint: str, _call: int) -> JSONValue:
+        """Return a root only after consuming the entire invocation budget."""
+        assert endpoint == "projects/42/pipelines/17"
+        clock.value = 1.0
+        return _pipeline(42, 17, "running")
+
+    api = WatchAPI(answer)
+    result = WATCH_RUNTIME.watch_pipeline(
+        api,
+        object(),
+        42,
+        TYPES.PipelineWatchAction(17, None, 0.5, 1.0),
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+    assert api.calls == ["projects/42/pipelines/17"]
+    assert result["complete"] is False
+    assert result["success"] is False
+    assert any("deadline" in error["reason"] for error in result["errors"])
+    assert result["elapsed_seconds"] == 1.0
+    assert clock.sleeps == []
+
+
+def test_watch_transport_caps_requests_and_retry_delays_by_whole_timeout() -> None:
+    """A retryable read cannot exceed the remaining watch budget."""
+    clock = Clock()
+    timeouts: MutableSequence[float] = []
+
+    def command(
+        _argv: Sequence[str],
+        *,
+        timeout: float,
+        env: Mapping[str, Optional[str]],
+        max_stdout_bytes: int = API.MAX_RESPONSE_BYTES,
+    ) -> RUNTIME.CommandResult:
+        """Spend part of the budget and ask for an over-budget provider delay."""
+        del env, max_stdout_bytes
+        timeouts.append(timeout)
+        clock.value += 0.75
+        return RUNTIME.CommandResult(
+            ("glab",),
+            1,
+            "HTTP/2 429 Too Many Requests\r\nRetry-After: 1\r\n\r\n{}",
+            "",
+        )
+
+    api = API.GlabAPIClient(command=command, timeout=25, sleep=clock.sleep)
+    result = WATCH_RUNTIME.watch_pipeline(
+        api,
+        SimpleNamespace(host="gitlab.example.test", environment={}),
+        42,
+        TYPES.PipelineWatchAction(17, None, 0.5, 1.0),
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+    assert timeouts == [1.0]
+    assert sum(clock.sleeps) <= 0.25
+    assert result["complete"] is False
+    assert result["success"] is False
+    assert any("deadline" in error["reason"] for error in result["errors"])
+    assert result["elapsed_seconds"] <= 1.0
+
+
+def test_watch_reads_jobs_and_bridges_concurrently_and_retains_both() -> None:
+    """Independent collections rendezvous before either response is available."""
+    both_started = Barrier(2, timeout=5)
+
+    def answer(endpoint: str, _call: int) -> JSONValue:
+        """Require two active collection readers without using fixed sleeps."""
+        if endpoint == "projects/42/pipelines/17":
+            return _pipeline(42, 17, "success")
+        both_started.wait()
+        if "/jobs?" in endpoint:
+            return [_job(101, 17)]
+        assert "/bridges?" in endpoint
+        return []
+
+    api = WatchAPI(answer)
+    result = WATCH_RUNTIME.watch_pipeline(
+        api,
+        object(),
+        42,
+        TYPES.PipelineWatchAction(17, None, 1.0, 10.0),
+        monotonic=lambda: 0.0,
+        sleep=lambda _seconds: pytest.fail("settled graph requested sleep"),
+    )
+    assert result["complete"] is True
+    assert result["success"] is True
+    assert result["records"][0]["jobs"] == {
+        "total": 1,
+        "by_status": {"success": 1},
+    }
+    assert len(api.calls) == 3
+
+
+def test_scope_overflow_reports_unique_dropped_pipelines_once() -> None:
+    """Repeated bridge identities cannot inflate or repeat the overflow warning."""
+    children = [
+        {
+            "name": f"child-{pipeline_id}",
+            "downstream_pipeline": {"id": pipeline_id, "project_id": 42},
+        }
+        for pipeline_id in range(100, 100 + TYPES.MAX_PIPELINES + 3)
+    ]
+
+    def answer(endpoint: str, _call: int) -> JSONValue:
+        """Offer fifty-three children and repeat the final four bridge routes."""
+        if "/jobs?" in endpoint:
+            return []
+        if "/bridges?" in endpoint:
+            return children + children[-4:] if "/17/" in endpoint else []
+        pipeline_id = int(endpoint.rsplit("/", 1)[1])
+        return _pipeline(42, pipeline_id, "success")
+
+    observations, errors = GRAPH._scope(
+        WatchAPI(answer),
+        object(),
+        TYPES.PipelineRoute(TYPES.PipelineKey(42, 17), "root", 0),
+        None,
+    )
+    assert len(observations) == TYPES.MAX_PIPELINES
+    assert errors == [{"source": "scope", "reason": "scope_limit_exceeded", "count": 4}]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "reason"),
+    (
+        ([], "pipeline_id_must_be_positive"),
+        (["--pipeline-id", "-1"], "pipeline_id_must_be_positive"),
+        (
+            ["--pipeline-id", "17", "--interval", "nan"],
+            "pipeline_watch_interval_and_timeout_must_be_positive",
+        ),
+    ),
+)
+def test_invalid_watch_arguments_emit_schema_valid_blocked_report(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    arguments: list[str],
+    reason: str,
+) -> None:
+    """Preflight failures retain the complete advertised watch envelope."""
+    target = TARGET.GitLabOperationTarget(
+        gitlab=TARGET.GitLabTarget(
+            url="https://gitlab.example.test",
+            host="gitlab.example.test",
+            project="unit/repo",
+        ),
+        source_file=Path("/selected/target.toml"),
+    )
+    monkeypatch.setattr(
+        SCRIPT, "_select_target", lambda _args: (target, "fixture", "unit/repo")
+    )
+    code = SCRIPT.main(["watch", *arguments, "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert data["kind"] == "gitlab_pipeline_watch"
+    assert data["status"] == "BLOCKED"
+    assert data["complete"] is False
+    assert data["success"] is False
+    assert data["polls"] == 0
+    assert data["records"] == []
+    assert any(reason in error["reason"] for error in data["errors"])
+    SCHEMA.validate_specification(data, "results/gitlab-pipeline-watch.schema.json")
+
+
+def test_missing_watch_target_emits_schema_valid_blocked_report(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Missing optional GitLab configuration yields usable watch failure evidence."""
+
+    def missing_target(_args: object) -> None:
+        """Represent the target resolver's classified configuration failure."""
+        raise TARGET.TargetError("gitlab_configuration_missing")
+
+    monkeypatch.setattr(SCRIPT, "_select_target", missing_target)
+    code = SCRIPT.main(["watch", "--pipeline-id", "17", "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert data["kind"] == "gitlab_pipeline_watch"
+    assert data["status"] == "BLOCKED"
+    assert data["complete"] is False
+    assert data["success"] is False
+    assert data["records"] == []
+    assert data["errors"][0]["reason"] == "gitlab_configuration_missing"
+    SCHEMA.validate_specification(data, "results/gitlab-pipeline-watch.schema.json")
