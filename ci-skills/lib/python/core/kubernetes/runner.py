@@ -13,7 +13,17 @@ from typing import Final, Optional
 
 from lib.python.core.json_types import JSONDocument, JSONObject, JSONValue
 from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
-from lib.python.core.kubernetes.resources import ResourceSet
+from lib.python.core.kubernetes.podman_runtime import (
+    PodmanRuntimeSettings,
+    podman_runtime_readback,
+)
+from lib.python.core.kubernetes.resources import (
+    MANAGER_LABEL,
+    MANAGER_VALUE,
+    OPERATION_LABEL,
+    ResourceSet,
+)
+from lib.python.core.kubernetes.run_scope import RUN_ID_LABEL
 from lib.python.core.runner import (
     REGISTRATION_SECRET_SUFFIX,
     RUNTIME_ROOT,
@@ -52,20 +62,27 @@ class DeployRunner(K8SCallback[RunnerAction]):
         :param runtime: Private registration inputs supplied by the provider callback.
         :raises KubernetesError: If ownership, apply, or independent read-back fails.
         :raises TargetError: If the bound kubeconfig changes before a provider command.
-        :raises OSError: If a native provider process or temporary apply file cannot be accessed.
-        :raises AttributeError: If Harbor authentication did not populate the workflow state.
+        :raises OSError: If a native provider process or temporary apply file
+            cannot be accessed.
+        :raises AttributeError: If Harbor authentication did not populate the
+            workflow state.
         """  # noqa: DOC502 - ResourceSet.apply propagates resource and target errors.
+        labels = _operation_labels(self.action)
         resources.apply(
             registry_secret(
                 self.action.name + REGISTRY_SECRET_SUFFIX,
                 self.state.harbor.dockerconfig,
+                labels,
             )
         )
         resources.apply(
             {
                 "apiVersion": POD_API,
                 "kind": "Secret",
-                "metadata": {"name": self.action.name + REGISTRATION_SECRET_SUFFIX},
+                "metadata": {
+                    "name": self.action.name + REGISTRATION_SECRET_SUFFIX,
+                    "labels": labels,
+                },
                 "type": "Opaque",
                 "data": {
                     key: base64.b64encode(value.encode()).decode()
@@ -81,7 +98,15 @@ class DeployRunner(K8SCallback[RunnerAction]):
         :param image: Verified immutable image from the publication producer.
         :returns: Deployment manifest without raw credential values.
         """
-        mounts = [{"name": WORK_VOLUME, "mountPath": RUNTIME_ROOT}]
+        action = self.action
+        ownership = _operation_labels(action)
+        labels = {"app": action.name, **ownership}
+        work_mounts = [{"name": WORK_VOLUME, "mountPath": RUNTIME_ROOT}]
+        mounts = list(work_mounts)
+        volumes: list[JSONObject] = [{"name": WORK_VOLUME, "emptyDir": {}}]
+        if action.podman is not None:
+            mounts.extend(action.podman.volume_mounts())
+            volumes.extend(action.podman.volumes())
         container: MutableMapping[str, JSONValue] = {
             "name": RUNNER_CONTAINER,
             "image": image,
@@ -90,11 +115,13 @@ class DeployRunner(K8SCallback[RunnerAction]):
             "command": list(runtime.command),
             "volumeMounts": mounts,
         }
+        if action.podman is not None:
+            container.update(action.podman.container_fields())
         if runtime.readiness_command:
             container["readinessProbe"] = {
                 "exec": {"command": list(runtime.readiness_command)}
             }
-        init: JSONObject = {
+        init: MutableMapping[str, JSONValue] = {
             "name": "register",
             "image": image,
             "imagePullPolicy": "IfNotPresent",
@@ -103,25 +130,28 @@ class DeployRunner(K8SCallback[RunnerAction]):
             "env": list(runtime.environment),
             "volumeMounts": mounts,
         }
+        if action.podman is not None:
+            init.update(action.podman.container_fields())
+        pod_spec: MutableMapping[str, JSONValue] = {
+            "automountServiceAccountToken": False,
+            "imagePullSecrets": [{"name": action.name + REGISTRY_SECRET_SUFFIX}],
+            "initContainers": [init],
+            "containers": [container],
+            "volumes": volumes,
+        }
+        if action.podman is not None:
+            pod_spec.update(action.podman.pod_fields())
         return {
             "apiVersion": DEPLOYMENT_API,
             "kind": "Deployment",
-            "metadata": {"name": self.action.name},
+            "metadata": {"name": action.name, "labels": ownership},
             "spec": {
                 "replicas": 1,
                 "strategy": {"type": "Recreate"},
-                "selector": {"matchLabels": {"app": self.action.name}},
+                "selector": {"matchLabels": {"app": action.name}},
                 "template": {
-                    "metadata": {"labels": {"app": self.action.name}},
-                    "spec": {
-                        "automountServiceAccountToken": False,
-                        "imagePullSecrets": [
-                            {"name": self.action.name + REGISTRY_SECRET_SUFFIX}
-                        ],
-                        "initContainers": [init],
-                        "containers": [container],
-                        "volumes": [{"name": WORK_VOLUME, "emptyDir": {}}],
-                    },
+                    "metadata": {"labels": labels},
+                    "spec": pod_spec,
                 },
             },
         }
@@ -134,11 +164,12 @@ class DeployRunner(K8SCallback[RunnerAction]):
         :raises ValueError: If the publication output is not immutable.
         :raises KubernetesError: If apply, rollout, or image read-back fails.
         :raises TargetError: If the bound kubeconfig changes before a provider command.
-        :raises OSError: If a native provider process or temporary apply file cannot be accessed.
+        :raises OSError: If a native provider process or temporary apply file
+            cannot be accessed.
         """  # noqa: DOC502 - State, resource, image, and workload readers propagate failures.
         action, runtime = self.action, self.state.runner_runtime
         image = published_image(self.state.published_image)
-        resources = ResourceSet(self.kubernetes, action.namespace, action.name)
+        resources = ResourceSet(self.kubernetes, action.namespace, action.operation)
         self.resources = resources
         self._secrets(resources, runtime)
         resources.apply(self._document(runtime, image))
@@ -153,7 +184,12 @@ class DeployRunner(K8SCallback[RunnerAction]):
             "-o",
             "json",
         )
-        evidence = running_images(pods, image)
+        evidence = running_images(
+            pods,
+            image,
+            podman=action.podman,
+            container_name=RUNNER_CONTAINER,
+        )
         changed = any(item["action"] == APPLIED for item in resources.evidence)
         result: JSONObject = {
             "action": APPLIED if changed else NO_OP,
@@ -187,11 +223,13 @@ class DeleteRunner(K8SCallback[RunnerAction]):
         :returns: Applied/no-op deletion evidence for the selected workload.
         :raises KubernetesError: If ownership, deletion, or absence read-back fails.
         :raises TargetError: If the bound kubeconfig changes before a provider command.
-        :raises OSError: If a native provider process or temporary apply file cannot be accessed.
-        :raises AttributeError: If Kubernetes authentication did not populate the workflow state.
+        :raises OSError: If a native provider process or temporary apply file
+            cannot be accessed.
+        :raises AttributeError: If Kubernetes authentication did not populate
+            the workflow state.
         """  # noqa: DOC502 - ResourceSet.delete propagates ownership and target failures.
         action = self.action
-        resources = ResourceSet(self.kubernetes, action.namespace, action.name)
+        resources = ResourceSet(self.kubernetes, action.namespace, action.operation)
         changed = resources.delete("Deployment", action.name)
         for suffix in (REGISTRATION_SECRET_SUFFIX, REGISTRY_SECRET_SUFFIX):
             changed = resources.delete("Secret", action.name + suffix) or changed
@@ -222,14 +260,16 @@ class PullImage(K8SCallback[RunnerAction]):
         :param image: Immutable image selected by the preceding producer.
         :returns: Job manifest invoking the installed toolbox doctor.
         """
+        labels = _operation_labels(self.action)
         return {
             "apiVersion": JOB_API,
             "kind": "Job",
-            "metadata": {"name": name},
+            "metadata": {"name": name, "labels": labels},
             "spec": {
                 "backoffLimit": 0,
                 "activeDeadlineSeconds": self.action.timeout,
                 "template": {
+                    "metadata": {"labels": labels},
                     "spec": {
                         "restartPolicy": "Never",
                         "automountServiceAccountToken": False,
@@ -241,7 +281,7 @@ class PullImage(K8SCallback[RunnerAction]):
                                 "command": list(DOCTOR_COMMAND),
                             }
                         ],
-                    }
+                    },
                 },
             },
         }
@@ -250,20 +290,28 @@ class PullImage(K8SCallback[RunnerAction]):
         """Require completed doctor execution and actual image digest evidence.
 
         :returns: Verified immutable image and successful Pod read-back.
-        :raises AttributeError: If required authentication or image producers did not run.
+        :raises AttributeError: If required authentication or image producers
+            did not run.
         :raises ValueError: If the selected image is not immutable.
         :raises KubernetesError: If owned resource apply, doctor, or read-back fails.
         :raises TargetError: If the bound kubeconfig changes before a provider command.
-        :raises OSError: If a native provider process or temporary apply file cannot be accessed.
+        :raises OSError: If a native provider process or temporary apply file
+            cannot be accessed.
         """  # noqa: DOC502 - Resource and image readers propagate their declared failures.
         action = self.action
         image = published_image(self.state.published_image)
-        resources = ResourceSet(self.kubernetes, action.namespace, action.name)
+        resources = ResourceSet(self.kubernetes, action.namespace, action.operation)
         self.resources = resources
         name = action.name + "-pull"
         secret = name + REGISTRY_SECRET_SUFFIX
         resources.delete("Job", name)
-        resources.apply(registry_secret(secret, self.state.harbor.dockerconfig))
+        resources.apply(
+            registry_secret(
+                secret,
+                self.state.harbor.dockerconfig,
+                _operation_labels(action),
+            )
+        )
         resources.apply(self._document(name, secret, image))
         self.kubernetes.wait_job(name, action.namespace)
         pods = self.kubernetes.json(
@@ -309,30 +357,42 @@ def published_image(image: str) -> str:
     return image
 
 
-def registry_secret(name: str, dockerconfig: bytes) -> JSONObject:
+def registry_secret(
+    name: str,
+    dockerconfig: bytes,
+    labels: Optional[Mapping[str, str]] = None,
+) -> JSONObject:
     """Build a native pull/push Secret from resolved private credentials.
 
     :param name: Exact operation-selected resource name.
     :param dockerconfig: Private native configuration bytes from Harbor authentication.
+    :param labels: Optional run labels used by scope discovery.
     :returns: Internal Secret manifest; its encoded data is never reportable.
     """
     return {
         "apiVersion": POD_API,
         "kind": "Secret",
-        "metadata": {"name": name},
+        "metadata": {"name": name, "labels": dict(labels or {})},
         "type": PULL_SECRET_TYPE,
         "data": {PULL_SECRET_KEY: base64.b64encode(dockerconfig).decode()},
     }
 
 
 def running_images(
-    document: JSONDocument, image: str, completed: bool = False
-) -> Sequence[Mapping[str, str]]:
+    document: JSONDocument,
+    image: str,
+    completed: bool = False,
+    *,
+    podman: Optional[PodmanRuntimeSettings] = None,
+    container_name: str = RUNNER_CONTAINER,
+) -> Sequence[JSONObject]:
     """Read actual container image and state from a native PodList.
 
     :param document: Provider PodList read-back requiring shape validation.
     :param image: Expected digest-pinned image selected by this operation.
     :param completed: Whether successful termination proves a doctor Job's result.
+    :param podman: Optional exact runtime settings to verify on each selected Pod.
+    :param container_name: Container whose Podman runtime must be verified.
     :returns: Safe Pod names and observed image IDs matching the expected digest.
     :raises KubernetesError: If the PodList is malformed or no image/state is verified.
     """
@@ -340,7 +400,7 @@ def running_images(
     if not isinstance(items, list):
         raise KubernetesError("pod_list_invalid")
     digest = image.rsplit("@", 1)[-1]
-    evidence = []
+    evidence: list[JSONObject] = []
     for pod in items:
         if not isinstance(pod, Mapping):
             raise KubernetesError("pod_list_invalid")
@@ -373,7 +433,30 @@ def running_images(
                 and isinstance(name, str)
                 and name
             ):
-                evidence.append({"name": name, "image_id": image_id})
+                row: JSONObject = {"name": name, "image_id": image_id}
+                if podman is not None:
+                    row["podman"] = podman_runtime_readback(
+                        pod,
+                        podman,
+                        container_name,
+                        init_container_name="register",
+                    )
+                evidence.append(row)
     if not evidence:
         raise KubernetesError("running_image_readback_missing")
     return evidence
+
+
+def _operation_labels(action: RunnerAction) -> Mapping[str, str]:
+    """Render run labels only when a caller supplied an operation identity.
+
+    :param action: Runner workload with an optional run-scope identity.
+    :returns: Empty labels for legacy consumers, or exact run ownership labels.
+    """
+    if action.ownership_id is None:
+        return {}
+    return {
+        MANAGER_LABEL: MANAGER_VALUE,
+        OPERATION_LABEL: action.ownership_id,
+        RUN_ID_LABEL: action.ownership_id,
+    }

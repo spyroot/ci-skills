@@ -301,9 +301,34 @@ class RunScope:
             ),
             "configmap",
         )
+        deployments = _items(
+            service.json(
+                "get",
+                "deployments",
+                "--all-namespaces",
+                "-l",
+                selector,
+                "-o",
+                "json",
+            ),
+            "deployment",
+        )
+        rolebindings = _items(
+            service.json(
+                "get",
+                "rolebindings",
+                "--all-namespaces",
+                "-l",
+                selector,
+                "-o",
+                "json",
+            ),
+            "rolebinding",
+        )
         owned_namespaces = {str(_metadata(item).get("name")) for item in namespaces}
         resource_namespaces = {
-            str(_metadata(item).get("namespace")) for item in (*pods, *configmaps)
+            str(_metadata(item).get("namespace"))
+            for item in (*pods, *configmaps, *deployments, *rolebindings)
         }
         candidates = (owned_namespaces | resource_namespaces) - {"", "None"}
         if "None" in owned_namespaces or "" in owned_namespaces:

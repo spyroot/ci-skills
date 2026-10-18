@@ -189,16 +189,17 @@ evidence rows, each consuming the previous step's actual outputs:
 The report binds all six rows to the same installed functional checksum with
 pointers to their traces. Six separate operations returning success do not
 prove the combo; the linked chain does. Steps 1 and 2 reuse the toolbox and
-Harbor commands. Step 3 reuses the toolbox-backed deployment of
-`create_selfhosted_runner.py` for a GitLab runner manager with the token
-written by `--token-out`, for both runner types the create command produces,
-`project_type` and `group_type`. Step 4 depends on `gitlab_pipeline.py start`
+Harbor commands. Step 3 uses the toolbox-backed
+`gitlab_runner_manager.py deploy` adapter with the token written by
+`gitlab_runner.py create --token-out TOKEN_PATH`, for either its
+`project_type` or `group_type` runner. Step 4 depends on `gitlab_pipeline.py start`
 and `watch` from CI11 (plan, apply, read-back of the new pipeline ID and sha;
 a pipeline that runs a marker job on the test project). Step 5 reads the job
 back with `gitlab_job.py get`, which must name the created runner's numeric
 ID; that read-back is the evidence, not the deployment. Step 6 removes the
-deployment through the toolbox-backed `DeleteRunner` path and the runner
-record through `gitlab_runner.py delete`, which has the APPLIED and NO_OP
+deployment through `gitlab_runner_manager.py delete`, which composes the shared
+`DeleteRunner` callback, and the runner record through `gitlab_runner.py delete`,
+which has the APPLIED and NO_OP
 receipts. Configuration the create command does
 not accept today, such as paused, locked, run-untagged, access level, and
 maximum timeout, is a gap this block closes or records.

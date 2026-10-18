@@ -24,6 +24,7 @@ from lib.python.core.kubernetes.resources import ResourceSet
 from lib.python.core.kubernetes.run_scope import (
     RunScope,
     RunScopeState,
+    resource_identity,
 )
 from lib.python.core.runtime import error_class
 from lib.python.sys.status import APPLIED, NO_OP, PASS
@@ -345,9 +346,13 @@ class EnsureSCCAccess(K8SCallback[SCCAccessAction]):
         }
 
     def cleanup(self) -> JSONObject:
-        """Remove only the RoleBinding created by this callback.
+        """Remove an unretained RoleBinding created by this callback.
 
-        :returns: Verified absence evidence, or an empty mapping after a no-op.
+        A long-lived consumer retains the exact binding identity only after its
+        own runtime read-back succeeds. Failed or one-shot consumers preserve the
+        existing reverse-cleanup behavior.
+
+        :returns: Verified removed and retained resource evidence.
         :raises TypeError: If workflow state does not provide run-scope evidence.
         :raises KubernetesError: If owned binding deletion or absence read-back fails.
         """  # noqa: DOC503 - resource cleanup propagates KubernetesError.
@@ -356,7 +361,16 @@ class EnsureSCCAccess(K8SCallback[SCCAccessAction]):
             return {}
         scope = self._scope()
         created = tuple(reversed(resources.created))
-        resources.cleanup_created()
+        state = self.state
+        if not isinstance(state, RunScopeState):
+            raise TypeError("run_scope_state_required")
+        selected = tuple(
+            (kind, name)
+            for kind, name in created
+            if resource_identity(kind, name, scope.namespace)
+            not in state.retained_resources
+        )
+        resources.cleanup_owned(selected)
         evidence = [
             {
                 "kind": kind,
@@ -365,10 +379,66 @@ class EnsureSCCAccess(K8SCallback[SCCAccessAction]):
                 "status": PASS,
                 "absent": True,
             }
-            for kind, name in created
+            for kind, name in selected
         ]
+        state.cleanup_resources.extend(evidence)
+        retained = [
+            resource_identity(kind, name, scope.namespace).as_dict()
+            for kind, name in created
+            if resource_identity(kind, name, scope.namespace)
+            in state.retained_resources
+        ]
+        return {"resources": evidence, "retained": retained}
+
+
+class RemoveSCCAccess(K8SCallback[SCCAccessAction]):
+    """Remove only this run's exact temporary SCC RoleBinding."""
+
+    def run(self) -> JSONObject:
+        """Delete one run-owned binding and independently verify its absence.
+
+        Existing provider-wide or separately granted SCC permission is untouched.
+
+        :returns: Applied or idempotent no-op deletion evidence.
+        :raises TypeError: The workflow state has no concrete run scope.
+        :raises KubernetesError: Ownership, deletion, or absence read-back fails.
+        """
         state = self.state
         if not isinstance(state, RunScopeState):
             raise TypeError("run_scope_state_required")
-        state.cleanup_resources.extend(evidence)
-        return {"resources": evidence}
+        scope = state.run_scope
+        binding = role_binding_document(self.action, scope)
+        metadata = json_object(binding["metadata"])
+        name = metadata.get("name")
+        if not isinstance(name, str):
+            raise KubernetesError("scc_role_binding_identity_invalid")
+        resources = scope.resources(self.kubernetes)
+        current = self.kubernetes.read("RoleBinding", name, scope.namespace)
+        if current is not None and not resources.owns(current):
+            return {
+                "action": NO_OP,
+                "verified": True,
+                "resource": {
+                    "kind": "RoleBinding",
+                    "name": name,
+                    "namespace": scope.namespace,
+                    "owned": False,
+                    "preserved": True,
+                },
+            }
+        changed = resources.delete("RoleBinding", name)
+        identity = resource_identity("RoleBinding", name, scope.namespace)
+        state.retained_resources.discard(identity)
+        evidence = {
+            "kind": "RoleBinding",
+            "name": name,
+            "namespace": scope.namespace,
+            "status": PASS,
+            "absent": True,
+        }
+        state.cleanup_resources.append(evidence)
+        return {
+            "action": APPLIED if changed else NO_OP,
+            "verified": True,
+            "resource": evidence,
+        }

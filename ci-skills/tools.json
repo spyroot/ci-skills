@@ -844,6 +844,96 @@
       },
       "use_when": "A job names a runner to inspect, or a project needs runner record management."
     },
+    "gitlab_runner_manager.py": {
+      "capabilities": [
+        "namespaced",
+        "node_scoped"
+      ],
+      "execution_surface": "installed skill, configured provider APIs, and the caller-selected digest-pinned toolbox image",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--cpu-limit",
+        "--cpu-request",
+        "--describe",
+        "--description",
+        "--dry-run",
+        "--group",
+        "--human",
+        "--image",
+        "--json",
+        "--label",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--memory-limit",
+        "--memory-request",
+        "--namespace",
+        "--node",
+        "--output-dir",
+        "--project",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--runner-id",
+        "--storage-size",
+        "--timeout",
+        "--token-file",
+        "--yaml"
+      ],
+      "purpose": "Deploy or remove one toolbox-backed GitLab shell runner.",
+      "read_only": false,
+      "report_kind": "gitlab_runner_manager",
+      "required_options": [],
+      "required_tools": [
+        "glab",
+        "kubectl",
+        "oc on OpenShift"
+      ],
+      "requires_authorities": [
+        "gitlab",
+        "kubernetes",
+        "harbor"
+      ],
+      "returns": "A run ID and confirmed plan, or verified workload and exact GitLab runner read-back with cleanup evidence.",
+      "side_effects": "Deploy uses GitLab, Kubernetes and Harbor; delete uses GitLab and Kubernetes only. Provider runner deletion remains gitlab_runner.py delete.",
+      "subcommands": {
+        "delete": {
+          "read_back": "Owned Deployment and Secrets absent, exact runner record preserved with its current cached status, run-owned SCC RoleBinding absent, and owned generated namespace absent.",
+          "required_options": [
+            "--runner-id",
+            "--description",
+            "--run-id"
+          ],
+          "requires_authorities": [
+            "gitlab",
+            "kubernetes"
+          ],
+          "result_schema": "schemas/results/toolbox-workflow.schema.json",
+          "side_effects": "Confirmed apply removes only run-owned manager resources and preserves the GitLab runner record."
+        },
+        "deploy": {
+          "read_back": "Exact-node privileged Deployment and immutable Pod image, then the exact scoped GitLab runner online with contact evidence.",
+          "required_options": [
+            "--runner-id",
+            "--description",
+            "--label",
+            "--image",
+            "--token-file",
+            "--node"
+          ],
+          "requires_authorities": [
+            "gitlab",
+            "kubernetes",
+            "harbor"
+          ],
+          "result_schema": "schemas/results/toolbox-workflow.schema.json",
+          "side_effects": "Confirmed apply opens or reuses one run scope, creates a run-owned SCC RoleBinding only when required, and retains the verified manager workload."
+        }
+      },
+      "use_when": "A pre-created project or group runner must execute on the exact worker proven ready for Podman."
+    },
     "gitlab_wiki.py": {
       "capabilities": [],
       "execution_surface": "selected authority API",
@@ -1136,7 +1226,7 @@
     },
     "ocp_node_onboard.py": {
       "capabilities": [],
-      "execution_surface": "installed skill controls tools and ISO generation inside the selected Kubernetes cluster",
+      "execution_surface": "installed skill controls tools, ISO generation and node join in the selected cluster",
       "options": [
         "--apply",
         "--binding",
@@ -1145,6 +1235,7 @@
         "--destination",
         "--dry-run",
         "--human",
+        "--ip-address",
         "--json",
         "--live-plan",
         "--log-file",
@@ -1152,6 +1243,7 @@
         "--log-level",
         "--mac-address",
         "--network-config-path",
+        "--node-name",
         "--output-dir",
         "--pull-secret-key",
         "--pull-secret-name",
@@ -1164,7 +1256,7 @@
         "--tool-pod-spec",
         "--yaml"
       ],
-      "purpose": "Build an OpenShift node ISO in-cluster and verify its delivery to selected storage.",
+      "purpose": "Build an OpenShift node ISO in-cluster, join its node, and verify selected storage.",
       "read_only": false,
       "report_kind": "ocp_node_onboard",
       "required_options": [],
@@ -1176,8 +1268,8 @@
       "requires_authorities": [
         "kubernetes"
       ],
-      "returns": "Shared workflow report with native completion, callback observations, final cluster artifact identity/lifetime, plan, provenance and cleanup evidence.",
-      "side_effects": "Build/remove use plan confirmation. Native oc creates its temporary workload and RBAC; the wrapper grants no additional cluster rights. ISO bytes stay in the cluster.",
+      "returns": "Shared workflow report with native completion, join read-back, final cluster artifact identity/lifetime, plan, provenance and cleanup evidence.",
+      "side_effects": "Build/join/remove use plan confirmation. Native oc creates temporary build resources; join approves only the selected node's two signers. ISO bytes stay in the cluster.",
       "subcommands": {
         "build": {
           "mutates": true,
@@ -1188,6 +1280,18 @@
           ],
           "result_schema": "schemas/results/ocp-node-onboard.schema.json",
           "side_effects": "Confirmed build stages a tool Pod and native OpenShift temporary resources, writes the requested ISO, and retains its run record; temporary final storage retains its Pod."
+        },
+        "join": {
+          "mutates": true,
+          "purpose": "Approve the booted node's selected CSRs and verify its Ready identity.",
+          "read_back": "Client bootstrap-completion evidence, issued serving request state and exact Ready Node hostname, roles and observed IPs.",
+          "required_options": [
+            "--run-id",
+            "--node-name",
+            "--ip-address"
+          ],
+          "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+          "side_effects": "Confirmed join approves only the exact hostname's client and serving signers, then removes the owned build scope; it never boots or deletes a node."
         },
         "remove": {
           "mutates": true,
@@ -1210,7 +1314,7 @@
           "side_effects": "Persistent storage can require a temporary reader Pod, cleaned after inspection."
         }
       },
-      "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; inspect or release a previous run. See references/ocp-node-image.md."
+      "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; join its booted node, inspect it or release a previous run. See references/ocp-node-image.md."
     },
     "prepare_tool_pod.py": {
       "capabilities": [],
@@ -1443,6 +1547,7 @@
     "create or change a GitLab milestone": "gitlab_milestone.py",
     "create or change a GitLab wiki page": "gitlab_wiki.py",
     "create or delete a GitHub runner": "create_selfhosted_runner.py",
+    "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
     "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
     "open a GitLab bug": "gitlab_issue.py",
     "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",

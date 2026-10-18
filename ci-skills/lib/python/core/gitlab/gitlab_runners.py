@@ -966,6 +966,49 @@ def _runner_readback(
     return observed
 
 
+def read_runner_record(
+    api: GlabAPIClient,
+    session: BoundGitLabSession,
+    target_kind: str,
+    target_id: int,
+    runner_id: int,
+    *,
+    description: Optional[str] = None,
+    expected_tags: Optional[Sequence[str]] = None,
+) -> RunnerRecord:
+    """Read one runner through its selected project or group membership.
+
+    :param api: Bound GitLab API client.
+    :param session: Authenticated GitLab session.
+    :param target_kind: Selected ``project`` or ``group`` scope.
+    :param target_id: Access-verified numeric project or group ID.
+    :param runner_id: Positive runner ID selected by the caller.
+    :param description: Optional exact runner description.
+    :param expected_tags: Optional exact runner tag set.
+    :returns: Typed public runner fields after global and scoped read-back.
+    :raises ActionError: The scope, identity, type, description, or tags differ.
+    :raises GitLabAPIError: GitLab runner or membership reads fail.
+    """  # noqa: DOC503 - The shared native reader propagates GitLabAPIError.
+    if target_kind not in {"project", "group"}:
+        raise ActionError("runner_target_kind_invalid")
+    selected_id = _positive(target_id, f"{target_kind}_id")
+    selected_runner = _positive(runner_id, "runner_id")
+    scope = f"{target_kind}s/{selected_id}/runners"
+    record = _record(
+        _runner_readback(
+            api,
+            session,
+            scope,
+            selected_runner,
+            description,
+            expected_tags,
+        )
+    )
+    if record["runner_type"] != f"{target_kind}_type":
+        raise ActionError("runner_scope_type_mismatch")
+    return record
+
+
 class SetTag(GitLabOperation):
     """Add requested tags while retaining concurrent provider additions."""
 
