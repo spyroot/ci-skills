@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-18T04:10:42.717537+00:00",
+  "captured_at": "2026-10-18T06:01:24.831478+00:00",
   "cleanup": {
     "reason": "no_mutation",
     "status": "NOT_APPLICABLE"
@@ -24,13 +24,13 @@
     "fields": [],
     "one_time_sink_required": false,
     "operation": "assign",
-    "plan_digest": "f5d41881b7a67848bcbb0815a1bcb556a624ce963bb4afea21a1d35f6b3889dd",
+    "plan_digest": "c5ed16dfdb414778ab71bca5df64dc92b6e58b4900e2cd37bf92802c61668a9f",
     "project_ids": null,
-    "resource_id": 82,
+    "resource_id": 84,
     "target_kind": "project",
     "target_reference": "hott/ci-skills-runner-proof"
   },
-  "plan_digest": "f5d41881b7a67848bcbb0815a1bcb556a624ce963bb4afea21a1d35f6b3889dd",
+  "plan_digest": "c5ed16dfdb414778ab71bca5df64dc92b6e58b4900e2cd37bf92802c61668a9f",
   "readback": {
     "action": "NO_OP",
     "cleanup": {
@@ -38,7 +38,7 @@
       "status": "NOT_APPLICABLE"
     },
     "errors": [],
-    "id": 82,
+    "id": 84,
     "mutated": false,
     "projects": [
       {
@@ -57,7 +57,7 @@
         "status": "NOT_APPLICABLE"
       },
       "errors": [],
-      "id": 82,
+      "id": 84,
       "mutated": false,
       "projects": [
         {
@@ -77,12 +77,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ab0640b86de635a743383bf7543fb67c99b0ad98461d8a5be78e43d9b7f69564",
+    "digest": "283d8dc7e89936a1d1b7eb613a8509b76ba925d217c8b99fdf83f41b956f0825",
     "file_count": 176,
-    "functional_digest": "49525a9ed253dd627ee4c75b2a46fa9dab9494883e6fa4f789ee8fe3e4f547d3",
+    "functional_digest": "f339ff330eadfc63d526be494aeff8529a2305b11ee7b9656f6502b3cca97a0f",
     "revision": {
       "source": "installer_record",
-      "value": "855f00b4d2fad7c54764b33df256236e1f9b412d",
+      "value": "97e78472199b1da1bc9aa1bfe8c49b774d1ebc7d",
       "verified": true
     }
   },
@@ -97,7 +97,7 @@
   },
   "target_file": "path:8617612df58d",
   "target_source": "project;argv:--project",
-  "tested_revision": "855f00b4d2fad7c54764b33df256236e1f9b412d",
+  "tested_revision": "97e78472199b1da1bc9aa1bfe8c49b774d1ebc7d",
   "verified_target": {
     "full_path": "hott/ci-skills-runner-proof",
     "id": 124,
