@@ -135,6 +135,8 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_milestones.py \
             ci-skills/lib/python/core/gitlab/gitlab_api.py \
             ci-skills/lib/python/core/catalog.py \
+            ci-skills/lib/python/core/navigate*.py \
+            ci-skills/bin/reference.py \
             ci-skills/lib/python/core/report.py \
             ci-skills/bin/gitlab_runner.py \
             tools/check_live_acceptance.py

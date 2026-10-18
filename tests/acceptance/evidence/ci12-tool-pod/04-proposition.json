@@ -1,0 +1,25 @@
+{
+  "reference": {
+    "Tool Pod preparation": {
+      "pointer": "references/tool-pod.md",
+      "summary": "Tool input, preparation, reuse and removal examples."
+    },
+    "access": {
+      "pointer": "references/access.md",
+      "summary": "Selected authority and credential sources."
+    },
+    "project binding": {
+      "pointer": "references/project-binding.md",
+      "summary": "Project target and credential binding."
+    },
+    "toolbox specification": {
+      "pointer": "schemas/toolbox.schema.json",
+      "summary": "Toolbox dependencies, installation methods and build inputs."
+    }
+  },
+  "schema_version": "2.0",
+  "tools": {
+    "prepare_tool_pod.py": {},
+    "toolbox.py": {}
+  }
+}
