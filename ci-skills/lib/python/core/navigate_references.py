@@ -1,4 +1,4 @@
-"""Read only selected own-text Markdown sections from registered references.
+"""Read registered references one section at a time, never the whole file.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -7,6 +7,7 @@ spyroot@gmail.com
 
 import hashlib
 import re
+import shlex
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,17 +16,21 @@ from typing import Final
 from lib.python.core import catalog
 from lib.python.core.json_types import JSONObject
 from lib.python.core.navigate_common import (
-    MAX_CHOICES,
+    MAX_ENTRIES,
+    MAX_QUERY,
     MAX_TEXT_BYTES,
+    SCHEMA_VERSION,
     NavigationError,
-    choice,
-    pointer,
+    entry,
+    node,
+    paginate,
 )
 from lib.python.core.provenance import ProvenanceError, skill_identity
 
 SKILL_ROOT: Path = Path(__file__).resolve().parents[3]
 HEADING: Final = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*(?:\r?\n)?$")
 FENCE: Final = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+WHOLE_DOCUMENT: Final = "document"
 
 
 @dataclass(frozen=True)
@@ -67,23 +72,22 @@ class Section:
 
 
 def slug(text: str) -> str:
-    """Produce a stable lowercase identifier from a heading or reference name.
+    """Produce a stable lowercase identifier from a heading.
 
-    :param text: Display name from a trusted installed reference.
+    :param text: Heading text from a trusted installed reference.
     :returns: Heading identifier without Markdown punctuation.
     """
     return re.sub(r"[^a-z0-9_-]", "", text.casefold().replace(" ", "-")) or "section"
 
 
 def references() -> Mapping[str, Mapping[str, str]]:
-    """Expose readable Markdown references from the single proposition registry.
+    """Expose every registered reference by the identifier its pointer uses.
 
-    :returns: Stable reference identifiers with their existing summary and path.
+    :returns: Stable reference identifiers with their registry summary and path.
     """
     return {
-        slug(name): record
+        catalog.reference_slug(name): record
         for name, record in catalog.PROPOSITION_REFERENCES.items()
-        if Path(record["pointer"]).suffix == ".md"
     }
 
 
@@ -91,16 +95,16 @@ def resolve(reference: str) -> tuple[str, Mapping[str, str]]:
     """Resolve a registered reference id or an unambiguous filename stem.
 
     :param reference: Requested reference identifier.
-    :returns: Canonical identifier and its existing registry record.
+    :returns: Canonical identifier and its registry record.
     :raises NavigationError: If no unique registered reference matches.
     """
     entries = references()
     if reference in entries:
         return reference, entries[reference]
     matches = [
-        (name, entry)
-        for name, entry in entries.items()
-        if Path(entry["pointer"]).stem == reference
+        (name, record)
+        for name, record in entries.items()
+        if Path(record["pointer"]).stem == reference
     ]
     if len(matches) != 1:
         raise NavigationError("reference_unknown", reference)
@@ -171,57 +175,101 @@ def sections(text: str) -> Sequence[Section]:
 
 
 def load(reference: str) -> tuple[str, Sequence[Section], str]:
-    """Read one registered document, preserving exact source bytes and provenance.
+    """Read one registered document, preserving exact source bytes and a content pin.
 
     :param reference: Registered id or filename stem.
-    :returns: Canonical id, parsed own-text sections, and source revision or content pin.
+    :returns: Canonical id, its sections, and their content pin.
+        A document that is not Markdown is one section named ``document``.
     :raises NavigationError: If the reference is unregistered.
     :raises OSError: If the registered local document cannot be read.
     :raises UnicodeError: If source bytes are not UTF-8.
     """  # noqa: DOC502 - Registry lookup and source reads propagate these errors.
-    name, entry = resolve(reference)
-    raw = (SKILL_ROOT / entry["pointer"]).read_bytes()
+    name, record = resolve(reference)
+    path = SKILL_ROOT / record["pointer"]
+    raw = path.read_bytes()
     pin = f"sha256:{hashlib.sha256(raw).hexdigest()}"
+    text = raw.decode("utf-8")
+    if path.suffix != ".md":
+        return name, (Section(WHOLE_DOCUMENT, path.name, 1, text, ""),), pin
+    return name, sections(text), pin
+
+
+def source_pin(content_pin: str) -> str:
+    """Prefer a verified installed revision when returning source text.
+
+    :param content_pin: Digest of the exact registered document bytes.
+    :returns: Verified source revision, or the supplied content digest.
+    """
     try:
         identity = skill_identity(SKILL_ROOT)
-        if identity["revision"]["verified"] and identity["revision"]["value"]:
-            pin = identity["revision"]["value"]
     except ProvenanceError:
-        pass
-    return name, sections(raw.decode("utf-8")), pin
+        return content_pin
+    revision = identity["revision"]
+    if revision["verified"] and revision["value"]:
+        return str(revision["value"])
+    return content_pin
 
 
-def section_choice(reference: str, section: Section, query: str = "") -> JSONObject:
-    """Offer one section without expanding its source text.
+def section_entry(reference: str, section: Section, query: str = "") -> JSONObject:
+    """Offer one section as a read entry without expanding its text.
 
     :param reference: Canonical document id.
     :param section: Selected heading and its own text.
-    :param query: Optional search query used to explain the hit.
-    :returns: Read pointer with a short when-to-read hint.
+    :param query: Optional search query that selected the section.
+    :returns: Read entry whose pointer is the call that reads the section.
     """
-    hint = (
+    summary = (
         f'Read for the passage that contains "{query}".'
         if query
         else f"Read when you need {section.title}."
     )
-    if query and len(hint) > 120:
-        hint = "Read for the passage matching the query."
-    return {
-        **choice(
-            section.anchor, section.title, ["get", reference, section.anchor], "read"
-        ),
-        "when": hint,
-    }
+    if len(summary) > MAX_QUERY:
+        summary = (
+            "Read for the passage matching the query."
+            if query
+            else "Read when you need this section."
+        )
+    return entry(section.title, summary, f"get {reference} {section.anchor}")
+
+
+def reference_document(
+    reference: str, *, page: int = 1, search: str = ""
+) -> JSONObject:
+    """Offer one reference's sections, or the sections that contain a query.
+
+    :param reference: Registered reference identifier or filename stem.
+    :param page: One-based entry page.
+    :param search: Literal query; empty lists the top-level sections only.
+    :returns: A node with no tools and one read entry per offered section.
+    :raises NavigationError: If the reference, query length or page cannot be resolved.
+    :raises OSError: If the registered reference cannot be read.
+    :raises UnicodeError: If the selected source is not UTF-8.
+    """  # noqa: DOC503 - Source reading and paging propagate these errors.
+    if len(search) > MAX_QUERY:
+        raise NavigationError("path_unknown", search)
+    name, entries, _ = load(reference)
+    query = search.casefold()
+    selected = [
+        section
+        for section in entries
+        if (query in section.text.casefold() if query else not section.parent)
+    ]
+    result = node((), [section_entry(name, section, search) for section in selected])
+    call = f"get {name}"
+    if search:
+        result["query"] = search
+        call += f" --search {shlex.quote(search)}"
+    return paginate(result, page, call)
 
 
 def section_pages(
     section: Section, children: Sequence[JSONObject]
 ) -> Sequence[tuple[str, Sequence[JSONObject]]]:
-    """Partition own-text at line ends and page child pointers without omission.
+    """Partition own-text at line ends and page child entries without omission.
 
     :param section: Selected source slice.
     :param children: Immediate subsections in document order.
-    :returns: Text pages followed by any remaining child-pointer pages.
+    :returns: Text pages followed by any remaining child-entry pages.
     :raises ValueError: If one source line exceeds the declared text-page budget.
     """
     texts: list[str] = []
@@ -236,11 +284,11 @@ def section_pages(
         current += line
         size += length
     texts.append(current)
-    count = max(len(texts), (len(children) + MAX_CHOICES - 1) // MAX_CHOICES)
+    count = max(len(texts), (len(children) + MAX_ENTRIES - 1) // MAX_ENTRIES)
     return [
         (
             texts[index] if index < len(texts) else "",
-            children[index * MAX_CHOICES : (index + 1) * MAX_CHOICES],
+            children[index * MAX_ENTRIES : (index + 1) * MAX_ENTRIES],
         )
         for index in range(count)
     ]
@@ -249,13 +297,13 @@ def section_pages(
 def section_document(
     reference: str, anchor: str, *, page: int = 1, tier: str = ""
 ) -> JSONObject:
-    """Return one selected section and pointers to its immediate children.
+    """Return one selected section's own text and entries for its subsections.
 
     :param reference: Registered reference identifier.
     :param anchor: Selected heading identifier.
-    :param page: One-based text and child-pointer page.
-    :param tier: Requested card or part; unavailable for unannotated local Markdown.
-    :returns: Existing reference-section schema document.
+    :param page: One-based text and subsection-entry page.
+    :param tier: Requested card or part; unavailable for unannotated local documents.
+    :returns: A reference-section document.
     :raises NavigationError: If reference, anchor, tier or page cannot be resolved.
     :raises OSError: If the registered reference cannot be read.
     :raises UnicodeError: If the selected source is not UTF-8.
@@ -267,20 +315,20 @@ def section_document(
         raise NavigationError("anchor_unknown", anchor)
     if tier:
         raise NavigationError("tier_unavailable", tier)
-    children = [section_choice(name, item) for item in entries if item.parent == anchor]
+    children = [section_entry(name, item) for item in entries if item.parent == anchor]
     pages = section_pages(selected[0], children)
     if page < 1 or page > len(pages):
         raise NavigationError("page_out_of_range", str(page))
-    text, choices = pages[page - 1]
+    text, subsections = pages[page - 1]
     return {
+        "schema_version": SCHEMA_VERSION,
         "kind": "reference_section",
-        "schema_version": "1.0",
-        "reference": name,
+        "document": name,
         "anchor": anchor,
-        "pinned": pin,
+        "pinned": source_pin(pin),
         "text": text,
-        "choices": list(choices),
-        "continuation": pointer("read", ["get", name, anchor, "--page", str(page + 1)])
+        "reference": list(subsections),
+        "continuation": f"get {name} {anchor} --page {page + 1}"
         if page < len(pages)
         else None,
     }

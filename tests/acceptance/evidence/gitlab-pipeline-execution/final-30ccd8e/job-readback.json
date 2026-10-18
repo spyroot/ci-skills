@@ -1,0 +1,159 @@
+{
+  "access": {
+    "identity": {
+      "id": 6,
+      "username": "spyroot",
+      "web_url": "https://gitlab.dcloud.run/spyroot"
+    },
+    "observed_capability": [
+      "identity_read",
+      "target_read"
+    ],
+    "status": "PASS",
+    "target": {
+      "full_path": "hott/test",
+      "id": 123,
+      "kind": "project",
+      "web_url": "https://gitlab.dcloud.run/hott/test"
+    }
+  },
+  "captured_at": "2026-10-18T19:17:39.032780+00:00",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "filters": {
+    "from": null,
+    "limit": 100,
+    "name_glob": null,
+    "pipeline_id": 3922,
+    "project": "hott/test",
+    "ref": null,
+    "search": null,
+    "status": [],
+    "stuck_after": 600,
+    "to": null
+  },
+  "kind": "gitlab_job",
+  "operation": "list",
+  "records": [
+    {
+      "created_at": "2026-10-18T19:16:02.141000+00:00",
+      "duration": 5.808024,
+      "failure_reason": null,
+      "finished_at": "2026-10-18T19:16:23.313000+00:00",
+      "id": 60280,
+      "name": "hello_world_05",
+      "pipeline_id": 3922,
+      "ref": "neroshige/ci-skills-job-list-smoke-20261007",
+      "runner": {
+        "description": "cai-gitlab-runner01",
+        "id": 74
+      },
+      "stage": "smoke",
+      "started_at": "2026-10-18T19:16:17.505000+00:00",
+      "status": "success",
+      "stuck": false,
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60280"
+    },
+    {
+      "created_at": "2026-10-18T19:16:02.130000+00:00",
+      "duration": 6.669409,
+      "failure_reason": null,
+      "finished_at": "2026-10-18T19:16:19.069000+00:00",
+      "id": 60279,
+      "name": "hello_world_04",
+      "pipeline_id": 3922,
+      "ref": "neroshige/ci-skills-job-list-smoke-20261007",
+      "runner": {
+        "description": "cai-gitlab-runner02",
+        "id": 75
+      },
+      "stage": "smoke",
+      "started_at": "2026-10-18T19:16:12.400000+00:00",
+      "status": "success",
+      "stuck": false,
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60279"
+    },
+    {
+      "created_at": "2026-10-18T19:16:02.116000+00:00",
+      "duration": 6.338538,
+      "failure_reason": null,
+      "finished_at": "2026-10-18T19:16:17.307000+00:00",
+      "id": 60278,
+      "name": "hello_world_03",
+      "pipeline_id": 3922,
+      "ref": "neroshige/ci-skills-job-list-smoke-20261007",
+      "runner": {
+        "description": "cai-gitlab-runner01",
+        "id": 74
+      },
+      "stage": "smoke",
+      "started_at": "2026-10-18T19:16:10.968000+00:00",
+      "status": "success",
+      "stuck": false,
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60278"
+    },
+    {
+      "created_at": "2026-10-18T19:16:02.100000+00:00",
+      "duration": 6.424803,
+      "failure_reason": null,
+      "finished_at": "2026-10-18T19:16:12.204000+00:00",
+      "id": 60277,
+      "name": "hello_world_02",
+      "pipeline_id": 3922,
+      "ref": "neroshige/ci-skills-job-list-smoke-20261007",
+      "runner": {
+        "description": "cai-gitlab-runner02",
+        "id": 75
+      },
+      "stage": "smoke",
+      "started_at": "2026-10-18T19:16:05.779000+00:00",
+      "status": "success",
+      "stuck": false,
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60277"
+    },
+    {
+      "created_at": "2026-10-18T19:16:02.082000+00:00",
+      "duration": 6.611867,
+      "failure_reason": null,
+      "finished_at": "2026-10-18T19:16:10.606000+00:00",
+      "id": 60276,
+      "name": "hello_world_01",
+      "pipeline_id": 3922,
+      "ref": "neroshige/ci-skills-job-list-smoke-20261007",
+      "runner": {
+        "description": "cai-gitlab-runner01",
+        "id": 74
+      },
+      "stage": "smoke",
+      "started_at": "2026-10-18T19:16:03.994000+00:00",
+      "status": "success",
+      "stuck": false,
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60276"
+    }
+  ],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "b19198a7e05e618d470c090d31baac0511e4fc867e562be0fbbfd14991af03a8",
+    "file_count": 219,
+    "functional_digest": "33dd8b7910f6936f2b513408e92b6748781ea908179f35b33ea8c1014eb53bc4",
+    "revision": {
+      "source": "installer_record",
+      "value": "30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 5
+  },
+  "target": "https://gitlab.dcloud.run",
+  "target_source": "project;argv:--project",
+  "tested_revision": "30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58",
+  "truncated": false
+}

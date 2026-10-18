@@ -44,6 +44,7 @@ from lib.python.core.runtime import (
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 READ_ATTEMPTS = 3
 MAX_RETRY_AFTER_SECONDS = 30
+REQUEST_DEADLINE_EXCEEDED = "request_deadline_exceeded"
 _RETRYABLE = frozenset(
     {"timeout", "transport", "rate_limited", "provider_408", "provider_5xx"}
 )
@@ -77,7 +78,7 @@ class CommandRunner(Protocol):
         self,
         argv: Sequence[str],
         *,
-        timeout: int,
+        timeout: float,
         env: Mapping[str, Optional[str]],
         max_stdout_bytes: int = MAX_RESPONSE_BYTES,
     ) -> CommandResult:
@@ -134,6 +135,39 @@ class APIError(RuntimeError):
         self.reason = reason
         self.attempts = attempts
         super().__init__(reason)
+
+
+@dataclass(frozen=True)
+class RequestDeadline:
+    """Share an absolute read deadline without mutating a transport client.
+
+    :param expires_at: Expiration in the supplied clock's monotonic time domain.
+    :param monotonic: Clock used by every concurrent request sharing this deadline.
+
+    .. attribute :: expires_at
+        :type: float
+
+        Absolute monotonic expiration time.
+
+    .. attribute :: monotonic
+        :type: Callable[[], float]
+
+        Clock used to calculate the remaining request budget.
+    """
+
+    expires_at: float
+    monotonic: Callable[[], float] = time.monotonic
+
+    def remaining(self) -> float:
+        """Return the request budget, refusing a read after expiration.
+
+        :returns: Positive seconds remaining before the shared deadline.
+        :raises APIError: The shared request deadline has expired.
+        """
+        remaining = self.expires_at - self.monotonic()
+        if remaining <= 0:
+            raise APIError(REQUEST_DEADLINE_EXCEEDED)
+        return remaining
 
 
 def _reject_constant(_value: str) -> NoReturn:
@@ -458,18 +492,25 @@ class CLIAPIClient:
         """
         raise NotImplementedError("provider_cli_required")
 
-    def get_json(self, session: APISession, endpoint: str) -> JSONDocument:
+    def get_json(
+        self,
+        session: APISession,
+        endpoint: str,
+        *,
+        deadline: Optional[RequestDeadline] = None,
+    ) -> JSONDocument:
         """Call the bound provider through the shared JSON transport.
 
         :param session: Exact-host authenticated provider session.
         :param endpoint: Relative provider API endpoint.
+        :param deadline: Optional shared absolute deadline for all GET attempts.
         :returns: Decoded response object or array with validated JSON values.
         :raises APIError: If the endpoint is invalid, a provider failure is terminal
             or exhausts GET retries, response bytes exceed the configured limit,
             or the response is not a valid JSON object or array.
         :raises OSError: If the native runner cannot start or read the selected process.
         """  # noqa: DOC502 - Shared transport and request helpers propagate failures.
-        return self._request(session, "GET", endpoint)
+        return self._request(session, "GET", endpoint, deadline=deadline)
 
     def get_json_with_headers(
         self, session: APISession, endpoint: str
@@ -538,6 +579,8 @@ class CLIAPIClient:
         method: str,
         endpoint: str,
         body: Optional[JSONObject] = None,
+        *,
+        deadline: Optional[RequestDeadline] = None,
     ) -> JSONDocument:
         """Request and decode one provider object or array.
 
@@ -545,12 +588,13 @@ class CLIAPIClient:
         :param method: HTTP method; only GET requests may be retried.
         :param endpoint: Relative provider path validated before execution.
         :param body: Request fields; ``None`` sends no JSON body.
+        :param deadline: Optional absolute deadline bounding retries and each request.
         :returns: Decoded object or array; an empty DELETE body returns an empty mapping.
         :raises APIError: If request validation, transport, retry limits, or response
             decoding fails.
         :raises OSError: If private-body file I/O or the native command runner fails.
         """  # noqa: DOC502 - Shared transport and request helpers propagate failures.
-        response = self._exchange(session, method, endpoint, body)
+        response = self._exchange(session, method, endpoint, body, deadline=deadline)
         return self._decode_response(response.text, method)
 
     def _exchange(
@@ -562,6 +606,7 @@ class CLIAPIClient:
         *,
         raw: bool = False,
         paginate: bool = False,
+        deadline: Optional[RequestDeadline] = None,
     ) -> NativeResponse:
         """Execute a bounded request while owning its private body file.
 
@@ -571,6 +616,7 @@ class CLIAPIClient:
         :param body: Request fields; ``None`` omits the input file.
         :param raw: Whether to retain stdout verbatim without included headers.
         :param paginate: Whether the native client should collect all pages.
+        :param deadline: Optional absolute deadline shared by related reads.
         :returns: Successful response headers and text within the configured byte bound.
         :raises APIError: If the endpoint, body, transport, or response size is invalid.
         :raises OSError: If private-body file I/O or the native command runner fails.
@@ -583,7 +629,9 @@ class CLIAPIClient:
             argv.extend(self.pagination_arguments())
         with self._body_arguments(body) as arguments:
             argv.extend(arguments)
-            return self._read_response(session, method, selected, argv, raw=raw)
+            return self._read_response(
+                session, method, selected, argv, raw=raw, deadline=deadline
+            )
 
     @staticmethod
     @contextmanager
@@ -616,21 +664,27 @@ class CLIAPIClient:
             handle.flush()
             yield ("--header", "Content-Type: application/json", "--input", handle.name)
 
-    def _execute(self, argv: Sequence[str], session: APISession) -> CommandResult:
+    def _execute(
+        self,
+        argv: Sequence[str],
+        session: APISession,
+        deadline: Optional[RequestDeadline],
+    ) -> CommandResult:
         """Run a native request with the selected environment and output bound.
 
         :param argv: Complete provider CLI argument sequence.
         :param session: Credential environment selected for this exact provider.
+        :param deadline: Optional absolute deadline restricting this request.
+        :raises APIError: The shared request deadline has expired.
         :returns: Native exit status and bounded stdout/stderr.
         :raises OSError: If the injected runner cannot start the native process or read its pipes.
         """  # noqa: DOC502 - The injected native command runner may propagate OSError.
+        timeout = min(self.timeout, deadline.remaining()) if deadline else self.timeout
         if self.max_response_bytes == MAX_RESPONSE_BYTES:
-            return self._command(
-                argv, timeout=self.timeout, env=dict(session.environment)
-            )
+            return self._command(argv, timeout=timeout, env=dict(session.environment))
         return self._command(
             argv,
-            timeout=self.timeout,
+            timeout=timeout,
             env=dict(session.environment),
             max_stdout_bytes=self.max_response_bytes,
         )
@@ -643,6 +697,7 @@ class CLIAPIClient:
         argv: Sequence[str],
         *,
         raw: bool,
+        deadline: Optional[RequestDeadline] = None,
     ) -> NativeResponse:
         """Apply the shared retry policy and retain the successful native response.
 
@@ -651,6 +706,7 @@ class CLIAPIClient:
         :param endpoint: Validated relative path used in traces and retry jitter.
         :param argv: Native CLI request, reused unchanged across attempts.
         :param raw: Whether stdout is plain endpoint text without included headers.
+        :param deadline: Optional absolute deadline shared by requests and retry delays.
         :returns: Successful response text and any included HTTP headers.
         :raises APIError: If a failure is terminal, retry limits are reached,
             included headers are malformed, or stdout exceeds the response bound.
@@ -658,7 +714,7 @@ class CLIAPIClient:
         """  # noqa: DOC503 - The native command runner may propagate OSError.
         attempt = 0
         while True:
-            result = self._execute(argv, session)
+            result = self._execute(argv, session, deadline)
             if result.returncode == 124:
                 headers, text = "", ""
             elif raw and result.returncode == 0:
@@ -680,16 +736,17 @@ class CLIAPIClient:
                 if len(result.stdout.encode("utf-8")) > self.max_response_bytes:
                     raise APIError("response_too_large")
                 return NativeResponse(headers=headers, text=text)
-            self._sleep(
-                read_retry_delay(
-                    method,
-                    _failure(result, headers),
-                    headers or result.stderr,
-                    endpoint,
-                    attempt,
-                    maximum=self.max_retry_after,
-                )
+            if deadline is not None:
+                deadline.remaining()
+            delay = read_retry_delay(
+                method,
+                _failure(result, headers),
+                headers or result.stderr,
+                endpoint,
+                attempt,
+                maximum=self.max_retry_after,
             )
+            self._sleep(min(delay, deadline.remaining()) if deadline else delay)
             attempt += 1
 
     @staticmethod

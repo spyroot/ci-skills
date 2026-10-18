@@ -21,6 +21,7 @@ the real one is a test failure rather than a surprise at runtime.
 
 from __future__ import annotations
 
+import re
 from argparse import Namespace
 from collections.abc import Mapping, MutableMapping, Sequence
 from types import MappingProxyType
@@ -626,20 +627,88 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         ),
     },
     "gitlab_pipeline.py": {
-        "related": ("gitlab_job.py", "gitlab_milestone.py"),
+        "related": (
+            "gitlab_job.py",
+            "gitlab_milestone.py",
+            "gitlab_runner.py",
+        ),
         "kind": "gitlab_pipeline",
-        "purpose": "Read one CI pipeline and bounded job progress by stage.",
-        "use_when": "You need the status and progress of an exact GitLab pipeline.",
+        "purpose": "Read, start, or watch an exact GitLab CI pipeline.",
+        "use_when": (
+            "You need exact pipeline state, a confirmed start, or bounded "
+            "completion evidence."
+        ),
         "requires": ("gitlab",),
         "capabilities": (),
+        "required_tools": ("glab",),
+        "mutates": True,
+        "side_effects": "Confirmed start may create one pipeline on the selected ref.",
+        "references": ("GitLab pipeline execution",),
         "options": {
-            "--project": "exact project path or numeric ID; otherwise use gitlab.project",
-            "--pipeline-id": "numeric ID of the pipeline to read",
+            "--project": (
+                "exact project path or numeric ID; otherwise use gitlab.project"
+            ),
+            "--run-id": (
+                "diagnostic identifier; start reuses it for a retry and changes it for a new identical build"
+            ),
+            "--pipeline-id": "numeric pipeline ID for get or watch",
+            "--ref": "start ref; otherwise the live project default branch",
+            "--variable": (
+                "pipeline variable as KEY=VALUE; CI_SKILLS_PIPELINE_PLAN_DIGEST is managed by start"
+            ),
+            "--require-protected-ref": (
+                "require the resolved start branch to be protected"
+            ),
+            "--expected-sha": (
+                "require the ref to resolve to this full lowercase commit SHA"
+            ),
+            "--related-name": (
+                "watch newer same-ref pipelines whose names match this regex"
+            ),
+            "--interval": "positive watch polling interval in seconds (default 10)",
+            "--timeout": "positive watch deadline or start request timeout in seconds",
+            "--live-plan": (
+                "resolve the exact start ref and SHA without creating a pipeline"
+            ),
+            "--apply": "create the pipeline selected by the confirmed live plan",
+            "--confirm-plan": "exact SHA-256 digest printed by --live-plan",
+            "--receipt-out": "write one portable start or watch result",
         },
-        "required_options": ("--pipeline-id",),
+        "subcommands": {
+            "get": {
+                "purpose": "Read one exact pipeline and its bounded jobs.",
+                "required_options": ["--pipeline-id"],
+                "mutates": False,
+                "read_back": "GitLab pipeline and job APIs for the selected numeric ID.",
+            },
+            "start": {
+                "purpose": (
+                    "Resolve an exact ref and commit, then start one confirmed pipeline."
+                ),
+                "required_options": [],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "mutates": True,
+                "side_effects": (
+                    "Confirmed apply creates one pipeline or returns NO_OP for its verified plan marker."
+                ),
+                "read_back": (
+                    "GET the exact pipeline and variables; require project, ref, SHA and plan marker."
+                ),
+            },
+            "watch": {
+                "purpose": "Watch one bounded pipeline graph to settlement or timeout.",
+                "required_options": ["--pipeline-id"],
+                "result_schema": "schemas/results/gitlab-pipeline-watch.schema.json",
+                "mutates": False,
+                "read_back": (
+                    "Poll root, child, related and job state through bounded GitLab reads."
+                ),
+            },
+        },
         "returns": (
-            "One validated pipeline with stage and job status counts, up to 500 "
-            "job records, and a PARTIAL result when the job cap is exceeded."
+            "Get returns one validated pipeline and bounded jobs. Start returns an "
+            "offline or live plan, or a verified new or existing plan identity. Watch returns "
+            "bounded graph completion, success, changes and retrieve choices."
         ),
     },
     "gitlab_access.py": {
@@ -1136,7 +1205,7 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
     },
 }
 
-PROPOSITION_VERSION: Final = "2.0"
+PROPOSITION_VERSION: Final = "3.0"
 PROPOSITION_CLUSTERS: Final = MappingProxyType(
     {
         "glab": "gitlab",
@@ -1162,6 +1231,10 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         "Tool Pod preparation": {
             "summary": "Tool input, preparation, reuse and removal examples.",
             "pointer": "references/tool-pod.md",
+        },
+        "GitLab pipeline execution": {
+            "summary": "Exact pipeline read, confirmed start and bounded watch flow.",
+            "pointer": "references/gitlab-pipeline.md",
         },
         "Nested Podman readiness": {
             "summary": "Podman probe inputs, planning, execution and evidence.",
@@ -1189,65 +1262,6 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         },
     }
 )
-# Progressive navigation contains placements only; executable facts stay above.
-NAV_NODES: Final = MappingProxyType(
-    {
-        (): "Discover what ci-skills can inspect, run or read.",
-        ("gitlab",): "GitLab pipelines, jobs, runners, issues, milestones and wikis.",
-        ("gitlab", "access"): "Prove GitLab access and read back the selected target.",
-        ("gitlab", "api"): "Read one caller-selected GitLab or GitHub API resource.",
-        ("gitlab", "issue"): "Create or reuse exact bug issues.",
-        ("gitlab", "job"): "Inspect job state, output and failure evidence.",
-        ("gitlab", "milestone"): "Create or update milestones.",
-        ("gitlab", "pipeline"): "Inspect, watch and diagnose pipelines.",
-        ("gitlab", "runner"): "Inspect or manage runners.",
-        ("gitlab", "wiki"): "Create or update wiki pages.",
-        ("k8s",): "Cluster, workload, storage and network operations.",
-        ("k8s", "build"): "Plan exact-commit OpenShift binary builds.",
-        (
-            "k8s",
-            "ceph",
-        ): "Ceph health, OSDs, placement groups and host kernel messages.",
-        ("k8s", "cilium"): "Cilium agents, operator and per-node health.",
-        ("k8s", "events"): "What the cluster reported during an interval.",
-        ("k8s", "network"): "Physical uplink MTU consistency across nodes.",
-        ("k8s", "storage"): "Claims, volumes, attachments and the pods using them.",
-        ("github",): "GitHub operations and related combinations.",
-        ("harbor",): "Registry, images, charts and related operations.",
-    }
-)
-NAV_PLACEMENT: Final = MappingProxyType(
-    {
-        "access_check.py": (),
-        "gitlab_access.py": ("gitlab", "access"),
-        "bin/ci-api": ("gitlab", "api"),
-        "gitlab_issue.py": ("gitlab", "issue"),
-        "gitlab_job.py": ("gitlab", "job"),
-        "gitlab_milestone.py": ("gitlab", "milestone"),
-        "gitlab_pipeline.py": ("gitlab", "pipeline"),
-        "gitlab_runner.py": ("gitlab", "runner"),
-        "gitlab_runner_manager.py": ("gitlab", "runner"),
-        "gitlab_wiki.py": ("gitlab", "wiki"),
-        "bin/ci-binary-build": ("k8s", "build"),
-        "ceph_cluster.py": ("k8s", "ceph"),
-        "ceph_kernel.py": ("k8s", "ceph"),
-        "cilium_status.py": ("k8s", "cilium"),
-        "cilium_node.py": ("k8s", "cilium"),
-        "event_trace.py": ("k8s", "events"),
-        "k8s_verify_mtu_consistency.py": ("k8s", "network"),
-        "storage_report.py": ("k8s", "storage"),
-    }
-)
-PLANNED_VERBS: Final = MappingProxyType(
-    {
-        "gitlab_job.py": dict.fromkeys(("get", "list", "watch", "logs"), "CI11-TOOLS"),
-        "gitlab_pipeline.py": dict.fromkeys(
-            ("list", "logs", "children", "start", "retry", "cancel"), "CI11-TOOLS"
-        ),
-        "gitlab_runner.py": {"reset-token": "CI11-TOOLS"},
-        "gitlab_milestone.py": {"list": "CI11-TOOLS"},
-    }
-)
 NAV_OPTIONS: Final = {
     "--page": "one-based discovery or section page",
     "--search": "literal search within one selected reference",
@@ -1258,8 +1272,8 @@ NAV_OPTIONS: Final = {
 DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
     "reference.py": {
         "report_kind": "reference_next",
-        "purpose": "Expand installed tools, required inputs and selected reference sections.",
-        "use_when": "Choose a capability, expand its optional inputs or read one reference section.",
+        "purpose": "Show what the agent can run and read at one node, or read one reference.",
+        "use_when": "Choose a cluster or command, list a reference's sections or read one section.",
         "requires_authorities": [],
         "required_tools": ["python3"],
         "required_options": [],
@@ -1278,7 +1292,7 @@ DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
             "--log-file",
             "--run-id",
         ],
-        "description": "Expand one node; optional references remain pointers until requested.",
+        "description": "One answer per node: installed tools to run and references to read, each a pointer to the next call.",
         "examples": [
             {"description": "Show available clusters", "command": "reference.py"},
             {"description": "Expand GitLab tools", "command": "reference.py glab"},
@@ -1286,14 +1300,18 @@ DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
                 "description": "Expand a command node",
                 "command": "reference.py gitlab_runner.py",
             },
+            {
+                "description": "List one reference's sections",
+                "command": "reference.py get mcp",
+            },
         ],
         "output_modes": {
-            "json": "Compact JSON with --json; default for legacy node propositions",
+            "json": "Compact JSON; default when stdout is not a terminal",
             "yaml": "Versioned YAML with --yaml",
-            "human": "Readable selected level; default for next/get",
+            "human": "Run and read lists; default on a terminal",
         },
-        "usage": "reference.py [node] | next [path ...] | get reference anchor [options]",
-        "returns": "A compact proposition, bounded discovery page or selected own-text reference section.",
+        "usage": "reference.py [node] | get reference [anchor] [options]",
+        "returns": "A node of tools and references, one reference's sections, or one section's own text.",
         "read_only": True,
         "side_effects": "Only an explicit log file is written; dry-run and describe do not write.",
         "execution_surface": "installed catalogue; no provider or credential access",
@@ -1320,14 +1338,37 @@ def command_authorities(script: str) -> Sequence[str]:
     return DISCOVERY_COMMANDS[script]["requires_authorities"]
 
 
+def reference_slug(name: str) -> str:
+    """Derive the stable identifier a pointer uses for one registered reference.
+
+    :param name: Registry key, the reference's display name.
+    :returns: Lowercase identifier made of letters, digits, hyphens and underscores.
+    """
+    return re.sub(r"[^a-z0-9_-]", "", name.casefold().replace(" ", "-")) or "reference"
+
+
+def reference_entry(name: str) -> MutableMapping[str, JSONValue]:
+    """Render one registered reference as a read entry of a proposition node.
+
+    :param name: Registry key in ``PROPOSITION_REFERENCES``.
+    :returns: Name, summary and the next ``reference.py`` call as a string.
+    """
+    record = PROPOSITION_REFERENCES[name]
+    return {
+        "name": name,
+        "summary": record["summary"],
+        "pointer": f"get {reference_slug(name)}",
+    }
+
+
 def _proposition_offering(
     scripts: Sequence[str], commands: Mapping[str, Mapping[str, object]]
 ) -> MutableMapping[str, JSONValue]:
-    """Offer immediate commands with their provider and task references.
+    """Offer what the agent can run and what it can read at one node.
 
     :param scripts: Command keys selected for a cluster or related-command node.
     :param commands: Existing catalogue definitions for the offered commands.
-    :returns: Compact tools and optional reference mappings.
+    :returns: Installed filenames under ``tools`` and an ordered array of read entries.
     """
     authorities = {name for script in scripts for name in command_authorities(script)}
     names = ["access", "project binding"] if authorities else []
@@ -1339,7 +1380,7 @@ def _proposition_offering(
         names.extend(json_strings(commands[script].get("references", ())))
     return {
         "tools": {script: {} for script in sorted(scripts)},
-        "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
+        "reference": [reference_entry(name) for name in dict.fromkeys(names)],
     }
 
 

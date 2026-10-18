@@ -16,11 +16,11 @@ proven independently before the next one consumes it.
 
 ## Progress
 
-- [ ] CI12.0 / PR-CI12-0: deliver and prove the reusable tool Pod, shared download/install operations,
+- [x] CI12.0 / PR-CI12-0: deliver and prove the reusable tool Pod, shared download/install operations,
       same-Pod consumption, present-tool `NO_OP` and owned-resource cleanup.
-- [ ] CI12.1 / PR-CI12-1: consume merged CI12.0; deliver native ISO build/verify/remove with both native input
+- [x] CI12.1 / PR-CI12-1: consume merged CI12.0; deliver native ISO build/verify/remove with both native input
       routes, exact destination read-back, embedded-configuration inspection and cleanup.
-- [ ] CI12.2 / PR-CI12-2: deliver join with GitHub mocked CSR/join coverage, the sole live-test exception.
+- [x] CI12.2 / PR-CI12-2: deliver join with GitHub mocked CSR/join coverage, the sole live-test exception.
 
 ## Surprises & Discoveries
 
@@ -94,8 +94,9 @@ The current milestones below follow CI12.0, CI12.1 and CI12.2.
 
 ## Outcomes & Retrospective
 
-To be written when a milestone completes: compare the observed results with the purpose, state the gaps, and
-record what the next combo should copy or avoid.
+All three deliveries are merged; [delivery evidence](../../phases/CI12-NODE-ONBOARDING.md#live-smoke-evidence)
+links live preparation, ISO and storage results and mocked CSR/join acceptance.
+Unobserved native fields remain explicit.
 
 ## Context and Orientation
 

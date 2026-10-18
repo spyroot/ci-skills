@@ -1,0 +1,146 @@
+{
+  "access": {
+    "captured_at": "2026-10-18T19:18:38.604487+00:00",
+    "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+    "credential_source": "file:path:29f247d18d3c",
+    "errors": [],
+    "execution_host": "mac.lan",
+    "identity": {
+      "id": 6,
+      "username": "spyroot",
+      "web_url": "https://gitlab.dcloud.run/spyroot"
+    },
+    "kind": "gitlab_access",
+    "observed_capability": [
+      "identity_read",
+      "target_read"
+    ],
+    "origin": "https://gitlab.dcloud.run",
+    "schema_version": "1.0",
+    "skill": {
+      "algorithm": "sha256-tree-v1",
+      "consuming_project": {
+        "commit": null,
+        "source": null
+      },
+      "digest": "b19198a7e05e618d470c090d31baac0511e4fc867e562be0fbbfd14991af03a8",
+      "file_count": 219,
+      "functional_digest": "33dd8b7910f6936f2b513408e92b6748781ea908179f35b33ea8c1014eb53bc4",
+      "revision": {
+        "source": "installer_record",
+        "value": "30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58",
+        "verified": true
+      }
+    },
+    "status": "PASS",
+    "target": {
+      "full_path": "hott/test",
+      "id": 123,
+      "kind": "project",
+      "web_url": "https://gitlab.dcloud.run/hott/test"
+    },
+    "target_file": "path:37eaf6f0e828",
+    "target_source": "project;argv:--project"
+  },
+  "captured_at": "2026-10-18T19:18:48.250162+00:00",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "filters": {
+    "pipeline_id": 3922,
+    "project": "hott/test"
+  },
+  "kind": "gitlab_pipeline",
+  "records": [
+    {
+      "created_at": "2026-10-18T19:16:02.066Z",
+      "finished_at": "2026-10-18T19:16:23.512Z",
+      "id": 3922,
+      "jobs": [
+        {
+          "failure_reason": null,
+          "id": 60280,
+          "name": "hello_world_05",
+          "stage": "smoke",
+          "status": "success"
+        },
+        {
+          "failure_reason": null,
+          "id": 60279,
+          "name": "hello_world_04",
+          "stage": "smoke",
+          "status": "success"
+        },
+        {
+          "failure_reason": null,
+          "id": 60278,
+          "name": "hello_world_03",
+          "stage": "smoke",
+          "status": "success"
+        },
+        {
+          "failure_reason": null,
+          "id": 60277,
+          "name": "hello_world_02",
+          "stage": "smoke",
+          "status": "success"
+        },
+        {
+          "failure_reason": null,
+          "id": 60276,
+          "name": "hello_world_01",
+          "stage": "smoke",
+          "status": "success"
+        }
+      ],
+      "progress": {
+        "by_status": {
+          "success": 5
+        },
+        "terminal": 5,
+        "terminal_percent": 100.0,
+        "total": 5
+      },
+      "project_id": 123,
+      "ref": "neroshige/ci-skills-job-list-smoke-20261007",
+      "sha": "a9cd22f5a66395f9514102356ba8dd3e3573af5e",
+      "stages": [
+        {
+          "by_status": {
+            "success": 5
+          },
+          "name": "smoke",
+          "terminal": 5,
+          "terminal_percent": 100.0,
+          "total": 5
+        }
+      ],
+      "started_at": "2026-10-18T19:16:04.191Z",
+      "status": "success",
+      "updated_at": "2026-10-18T19:16:23.526Z"
+    }
+  ],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "b19198a7e05e618d470c090d31baac0511e4fc867e562be0fbbfd14991af03a8",
+    "file_count": 219,
+    "functional_digest": "33dd8b7910f6936f2b513408e92b6748781ea908179f35b33ea8c1014eb53bc4",
+    "revision": {
+      "source": "installer_record",
+      "value": "30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": "https://gitlab.dcloud.run",
+  "target_source": "project;argv:--project",
+  "tested_revision": "30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58"
+}
