@@ -21,19 +21,20 @@ node through a runner, a build-and-push job and a pushed digest.
 
 ## Progress
 
-- [ ] Milestone 1, code: the shared mode validator, reuse of CI12.0's run scope, node selection, the probe Job and
+- [x] Milestone 1, code: the shared mode validator, reuse of CI12.0's run scope, node selection, the probe Job and
       its script, the result and log read-back, the marker parser, the adapter, the thin main with the `probe`
       verb, the catalogue declaration with regenerated `tools.json`, result schema, routing.
-- [ ] Milestone 1, gates: unit tests; the new schema listed in the validate metaschema step per the existing
+- [x] Milestone 1, gates: unit tests; the new schema listed in the validate metaschema step per the existing
       pairing rule (the local selector is open question 3).
+- [x] Standalone probe and owned SCC cleanup passed in [PR81](https://github.com/spyroot/ci-skills/pull/81).
 - [ ] Milestone 1, proof: live `probe` from the installed candidate on one node with every row present and the
       Pod exited 0, plus an interrupted run with the same absence read-back, attached to the pull request. The
       command must reuse or prepare and clean its own SCC permission; an external grant is not accepted as proof.
 - [ ] Milestone 2, code: the `chain` verb composing the probe with chain 1's runner, the build-and-push job and
       the digest read-back; waits for chain 1 and block 7 (open question 6).
 - [ ] Milestone 2, proof: live chain on the test project with the pushed digest read back.
-- [ ] Open question 1 (command surface and default digests) answered by the owner.
-- [ ] Open question 2 (gate wiring for this command's receipts) answered by the owner.
+- [x] Open question 1 (command surface and default digests) answered by the owner.
+- [x] Open question 2 (gate wiring for this command's receipts) answered by the owner.
 - [x] Open question 4 answered: reuse existing permission or create, verify and clean one run-owned RoleBinding.
 - [x] Phase identity `CI13` approved; CI12.0 owns the shared foundation (see the phase's Authority and PR Order).
       The selected architecture format adds no gate outside the pinned binding.
@@ -71,8 +72,8 @@ admission message for a refused privileged Pod and the backing filesystem the em
 
 ## Outcomes & Retrospective
 
-To be written when a milestone completes: compare the observed rows with the purpose, state the gaps, and record
-what the next combo should copy or avoid.
+PR81 merged the standalone probe with [live proof](../../phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence).
+Interruption proof remains unestablished. Milestone 2's runner/job/push chain remains unmerged and unverified.
 
 ## Context and Orientation
 

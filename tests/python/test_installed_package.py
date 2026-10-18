@@ -18,7 +18,9 @@ from typing import TYPE_CHECKING, Union
 
 import pytest
 import yaml
-from conftest import REPO_ROOT, install_executable, load_module
+from conftest import REPO_ROOT, import_script_module, install_executable, load_module
+from jsonschema import Draft202012Validator
+from referencing import Registry, Resource
 
 SKILL_ROOT = REPO_ROOT / "ci-skills"
 
@@ -627,6 +629,41 @@ def test_installed_manifest_result_schemas_are_shipped_with_the_skill(
     for pointer in pointers:
         assert not Path(pointer).is_absolute()
         assert (installed / pointer).is_file(), pointer
+
+
+def test_installed_reference_schema_validates_v3_and_resolves_watch_pointers(
+    tmp_path: Path,
+) -> None:
+    """Keep the v3 discovery schema and shared watch definitions installable.
+
+    :param tmp_path: Isolated production installation destination.
+    :returns: None; installed bytes validate discovery and resolve existing references.
+    """
+    installed = _install_skill(tmp_path)
+    name = "reference-next.schema.json"
+    schema_path = installed / "schemas" / name
+    assert schema_path.read_bytes() == (REPO_ROOT / "schemas" / name).read_bytes()
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    validator = Draft202012Validator(schema)
+    catalog = import_script_module("lib.python.core.catalog")
+    root = catalog.proposition()
+    assert root["schema_version"] == "3.0"
+    validator.validate(root)
+    assert not validator.is_valid(
+        {"schema_version": "3.0", "tools": {}, "reference": {}}
+    )
+
+    watch = json.loads(
+        (REPO_ROOT / "schemas" / "gitlab-pipeline-watch.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    registry = Registry().with_resource(schema["$id"], Resource.from_contents(schema))
+    resolver = registry.resolver(base_uri=watch["$id"])
+    choice_ref = watch["properties"]["choices"]["items"]["$ref"]
+    pointer_ref = watch["properties"]["continuation"]["oneOf"][1]["$ref"]
+    assert resolver.lookup(choice_ref).contents == schema["$defs"]["choice"]
+    assert resolver.lookup(pointer_ref).contents == schema["$defs"]["pointer"]
 
 
 def test_installed_python_entrypoints_import_from_unrelated_directory(

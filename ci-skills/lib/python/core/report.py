@@ -633,12 +633,19 @@ def render_value(
     )
 
 
-def emit(data: JSONObject, mode: str, output_dir: Optional[str] = None) -> str:
+def emit(
+    data: JSONObject,
+    mode: str,
+    output_dir: Optional[str] = None,
+    discovery: bool = False,
+) -> str:
     """Redact and render a report, optionally persisting paired files.
 
     :param data: Report mapping to redact before serialization.
     :param mode: Selected ``json``, ``yaml``, or ``human`` output mode.
     :param output_dir: Parent directory for paired files, or ``None`` for text only.
+    :param discovery: Whether ``data`` is a discovery answer of ``reference.py``,
+        rendered compact and through the discovery human view.
     :returns: Redacted report text in the selected format.
     :raises RuntimeError: YAML output is requested without PyYAML.
     :raises OSError: The output directory or report files cannot be written.
@@ -648,7 +655,7 @@ def emit(data: JSONObject, mode: str, output_dir: Optional[str] = None) -> str:
     :raises KeyError: If human rendering encounters a missing required report field.
     :raises yaml.YAMLError: If YAML cannot represent the report.
     """  # noqa: DOC502 - serializers, field readers, and file I/O propagate errors.
-    reference = data.get("kind") in ("reference_next", "reference_section")
+    reference = discovery or data.get("kind") in ("reference_next", "reference_section")
     selected_text = data.get("text", "")
     data = redact_tree(data)
     if data.get("kind") == "reference_section":
