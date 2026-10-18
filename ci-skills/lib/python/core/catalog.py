@@ -317,7 +317,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "related": ("prepare_tool_pod.py", "storage_report.py"),
-        "references": ("OpenShift node image",),
+        "references": ("Native OCP YAML example", "Native OCP command flags"),
         "required_tools": ("kubectl", "oc", "curl (default tool discovery)"),
         "returns": "Shared workflow report with native completion, callback observations, final cluster artifact "
         "identity/lifetime, plan, provenance and cleanup evidence.",
@@ -1076,9 +1076,13 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
             "pointer": "references/openshift-scc.md",
         },
-        "OpenShift node image": {
-            "summary": "Native OCP YAML, cluster destination and ISO lifecycle examples.",
-            "pointer": "references/ocp-node-image.md",
+        "Native OCP YAML example": {
+            "summary": "Node MAC/NIC, disk and network inputs passed unchanged to OpenShift.",
+            "pointer": "references/ocp-node-input.md",
+        },
+        "Native OCP command flags": {
+            "summary": "OpenShift flags, ci-skills input mapping and upstream procedure.",
+            "pointer": "references/ocp-node-image-flags.md",
         },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",
