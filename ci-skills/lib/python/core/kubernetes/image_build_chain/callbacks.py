@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import tempfile
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Optional
@@ -338,13 +339,16 @@ class StartBuildPipeline(DeferredComponent):
 
     @staticmethod
     def _factory(state: ImageBuildChainState) -> StartPipeline:
-        """Restore the live pipeline plan and return its existing callback.
+        """Bind the live pipeline plan to this run and reuse its callback.
 
-        :param state: Shared state containing the exact-ref plan.
-        :returns: Existing start callback.
+        :param state: Shared state containing the exact-ref plan and run scope.
+        :returns: Existing start callback bound to the current run identity.
         """
-        state.plan = state.pipeline_plan
-        return StartPipeline(state.pipeline_plan)
+        state.plan = replace(
+            state.pipeline_plan,
+            body={**state.pipeline_plan.body, "run_id": state.run_scope.run_id},
+        )
+        return StartPipeline(state.plan)
 
     def update(self) -> Mapping[str, JSONValue]:
         """Retain the new pipeline ID after existing read-back succeeds.

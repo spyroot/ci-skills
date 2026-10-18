@@ -8,6 +8,8 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import signal
+from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
@@ -335,6 +337,53 @@ def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
     assert mutations == []
     assert not hasattr(action.state, "run_scope")
     assert not hasattr(action.state, "created_runner_id")
+
+
+@pytest.mark.parametrize("outer_run_id", (None, "caller-chain-run"))
+def test_pipeline_start_uses_execution_scope_without_changing_confirmation(
+    outer_run_id: Optional[str],
+) -> None:
+    """Reuse a pipeline only within one concrete chain execution scope.
+
+    :param outer_run_id: Omitted or caller-supplied identity in the stable template.
+    :returns: None; child digests distinguish runs while confirmation stays stable.
+    """
+    action = _prepared_action(apply=True)
+    action.args.run_id = outer_run_id
+    template = _pipeline_plan()
+    template = replace(template, body={**template.body, "run_id": outer_run_id})
+    template_body = deepcopy(template.body)
+    state = action.state
+    state.pipeline_plan = template
+    state.chain_plan = action.plan(NODE, template)
+    state.chain_plan_digest = action.fingerprint(NODE, template)
+    action.args.confirm_plan = state.chain_plan_digest
+    confirmed_plan = deepcopy(state.chain_plan)
+    confirmed_digest = state.chain_plan_digest
+    state.gitlab = SimpleNamespace(session=object())
+    child_plans: list[ActionPlan] = []
+
+    for run_id in (RUN_ID, RUN_ID, f"{RUN_ID}-next"):
+        state.run_scope = RUN_SCOPE.RunScope(run_id, CALLER_NAMESPACE, False)
+        callback = CALLBACKS.StartBuildPipeline(action)
+        callback.bind(state)
+
+        assert callback.collect() == {}
+
+        assert callback.child is not None
+        assert callback.child.action is state.plan
+        assert state.plan.body == {**template_body, "run_id": run_id}
+        child_plans.append(state.plan)
+
+    first, retry, next_run = child_plans
+    assert first.digest == retry.digest
+    assert first.digest != next_run.digest
+    assert state.pipeline_plan is template
+    assert template.body == template_body
+    assert state.chain_plan == confirmed_plan
+    assert state.chain_plan_digest == confirmed_digest
+    assert action.args.confirm_plan == confirmed_digest
+    assert action.fingerprint(NODE, template) == confirmed_digest
 
 
 def test_manager_reuses_probe_node_scope_account_and_resource_settings(
