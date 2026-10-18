@@ -112,7 +112,7 @@ class PreflightNodeImage(NodeImageCallback):
 
         :returns: Verified path-absence evidence for the selected native output.
         :raises KubernetesError: If the asset directory or any output path conflicts.
-        """
+        """  # noqa: DOC502 - preflight helpers propagate KubernetesError.
         state = self.ocp_state
         state.native_status_path = native_status_path(state)
         _verify_asset_preflight(self)

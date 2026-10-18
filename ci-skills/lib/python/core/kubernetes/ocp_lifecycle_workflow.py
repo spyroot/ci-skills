@@ -59,8 +59,9 @@ def resolve_artifact(
     :param operation: Verify requires a record; repeated remove permits absence.
     :param run_id: Exact caller-supplied build correlation identity.
     :param timeout: Positive native API operation bound.
+    :raises ValueError: If the requested operation cannot resolve an artifact.
     :raises BaseException: Authentication, lookup or record decoding fails.
-    """  # noqa: DOC502 - the common executor preserves provider failures.
+    """  # noqa: DOC502,DOC503 - direct validation and callbacks preserve failures.
     if operation not in (NodeOperation.VERIFY, NodeOperation.REMOVE):
         raise ValueError("node_artifact_operation_invalid")
     action = ResolveRunScopeAction(run_id)

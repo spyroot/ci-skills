@@ -101,6 +101,26 @@ class RecoveryArtifactAction(SkillAction):
     :param node: Exact native build output selection.
     :param destination: Caller-selected final storage wrapper.
     :param input_fingerprint: Digest of target, functional code, and build inputs.
+
+    .. attribute :: preparation
+        :type: PrepareToolPodAction
+
+        Exact tool Pod action used by the build.
+
+    .. attribute :: node
+        :type: NodeImageAction
+
+        Exact native build output selection.
+
+    .. attribute :: destination
+        :type: StorageDestination
+
+        Caller-selected final storage wrapper.
+
+    .. attribute :: input_fingerprint
+        :type: str
+
+        Digest of target, functional code, and build inputs.
     """
 
     preparation: PrepareToolPodAction
@@ -123,6 +143,16 @@ class ReuseNodeArtifactAction(SkillAction):
 
     :param run_id: Caller-selected existing build run.
     :param input_fingerprint: Digest of the currently confirmed build plan.
+
+    .. attribute :: run_id
+        :type: str
+
+        Caller-selected existing build run.
+
+    .. attribute :: input_fingerprint
+        :type: str
+
+        Digest of the currently confirmed build plan.
     """
 
     run_id: str
@@ -150,6 +180,46 @@ class NodeRecoveryRecord:
     :param pod: Immutable producer Pod identity.
     :param tool_pod_fingerprint: Full expected prepared-Pod fingerprint.
     :param tool_pod_fingerprint_label: Label-safe prepared-Pod fingerprint.
+
+    .. attribute :: run_id
+        :type: str
+
+        Exact ownership label value.
+
+    .. attribute :: input_fingerprint
+        :type: str
+
+        Confirmed target, code, and input identity.
+
+    .. attribute :: destination
+        :type: StorageDestination
+
+        Caller-selected final storage wrapper.
+
+    .. attribute :: build_path
+        :type: str
+
+        Exact native output path in the retained Pod.
+
+    .. attribute :: status_path
+        :type: str
+
+        Exact private native completion path.
+
+    .. attribute :: pod
+        :type: PodHandle
+
+        Immutable producer Pod identity.
+
+    .. attribute :: tool_pod_fingerprint
+        :type: str
+
+        Full expected prepared-Pod fingerprint.
+
+    .. attribute :: tool_pod_fingerprint_label
+        :type: str
+
+        Label-safe prepared-Pod fingerprint.
     """
 
     run_id: str
@@ -183,7 +253,7 @@ class NodeRecoveryRecord:
         :param document: Strictly decoded ConfigMap payload.
         :returns: Validated immutable recovery identity.
         :raises KubernetesError: If fields or cross-field identities are invalid.
-        """
+        """  # noqa: DOC503 - caught validation is normalized to KubernetesError.
         if set(document) != _FIELDS:
             raise KubernetesError("node_recovery_record_fields_invalid")
         try:
@@ -559,7 +629,7 @@ class PersistNodeRecoveryRecord(ToolPodK8SCallback[RecoveryArtifactAction]):
 
         :returns: Retained or removed recovery-record evidence.
         :raises KubernetesError: If exact owned deletion cannot be verified.
-        """
+        """  # noqa: DOC502 - exact deletion helpers propagate KubernetesError.
         state = _state(self)
         if not state.recovery_record_present:
             return {"action": NO_OP, "verified": True}

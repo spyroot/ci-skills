@@ -118,7 +118,7 @@ def decode_pod_handle(document: JSONObject) -> PodHandle:
     :param document: Persisted Pod identity.
     :returns: Typed immutable Pod handle.
     :raises KubernetesError: If any identity field is malformed.
-    """
+    """  # noqa: DOC503 - caught validation is normalized to KubernetesError.
     _fields(document, _POD_FIELDS, "pod")
     try:
         restart_count = json_integer(document["restart_count"])
