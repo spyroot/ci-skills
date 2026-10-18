@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-18T16:36:53.389702+00:00",
+  "captured_at": "2026-10-18T21:49:57.875053+00:00",
   "cleanup": {
     "reason": "persistent_runner_requested",
     "status": "NOT_APPLICABLE"
@@ -19,7 +19,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "ce9be9bb87459e338075eb33ac2dabc16b813ab39db76de3ba7da10b44375e7d",
+    "body_sha256": "a5cc5f8b38a6a54a7dd89b724ce457f6c3a007e69b1e598ebdcc8887b370e24c",
     "confirmation_ready": true,
     "fields": [
       "description",
@@ -28,7 +28,7 @@
     ],
     "one_time_sink_required": true,
     "operation": "create",
-    "plan_digest": "8add837540bb5134c907204817f805df7ddc4908ef1779d0f8f88ef11c8f0b95",
+    "plan_digest": "5c9dd148bdc4b16ae3332776eeb81bb0b7837c22b5066e9489be2c231dd8fea4",
     "project_ids": null,
     "requested_tags": [
       "ci-skills"
@@ -37,7 +37,7 @@
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "8add837540bb5134c907204817f805df7ddc4908ef1779d0f8f88ef11c8f0b95",
+  "plan_digest": "5c9dd148bdc4b16ae3332776eeb81bb0b7837c22b5066e9489be2c231dd8fea4",
   "readback": {
     "action": "APPLIED",
     "after_tags": [
@@ -47,7 +47,7 @@
       "reason": "persistent_runner_requested",
       "status": "NOT_APPLICABLE"
     },
-    "id": 92,
+    "id": 94,
     "mutated": true,
     "sink_persisted": true,
     "verified": true
@@ -62,7 +62,7 @@
         "reason": "persistent_runner_requested",
         "status": "NOT_APPLICABLE"
       },
-      "id": 92,
+      "id": 94,
       "mutated": true,
       "sink_persisted": true,
       "verified": true
@@ -76,12 +76,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "db811e2af1e4ec717956f409933a773429e2f813fb16baf9f8456fe4d54cdb11",
-    "file_count": 212,
-    "functional_digest": "e5a3d6b3cae147228cddb0fa0b1978c94f3c4cd776ca57113589acd7ef769720",
+    "digest": "a0ec62f6028426e79d62e6c1271fc9cfecff2109ea60946fcc9977cdb146960b",
+    "file_count": 211,
+    "functional_digest": "d4c527c90862055ad91b9c01313e20505fd10b8eea6173f4f3851a220e07ce21",
     "revision": {
       "source": "installer_record",
-      "value": "3570e1b7618e34a7d365002735c0df2fcb70667b",
+      "value": "8fea10f7bba9a84b09f211ae8c0ee14b67ff8867",
       "verified": true
     }
   },
@@ -96,8 +96,8 @@
       "access_level": "not_protected",
       "architecture": null,
       "contacted_at": null,
-      "description": "ci-skills-3570e1b7-20261018T163404Z-runner",
-      "id": 92,
+      "description": "ci-skills-8fea10f7-20261018T214701Z-runner",
+      "id": 94,
       "is_shared": false,
       "job_execution_status": "idle",
       "online": null,
@@ -115,25 +115,25 @@
       "status": "never_contacted",
       "tag_list": [
         "ci-skills",
-        "3570e1b7"
+        "8fea10f7"
       ],
       "version": null
     },
-    "captured_at": "2026-10-18T16:38:31.090057+00:00",
+    "captured_at": "2026-10-18T21:51:31.736796+00:00",
     "credential_source": "file:path:29f247d18d3c",
     "delete": {
-      "endpoint": "runners/92",
+      "endpoint": "runners/94",
       "exit_code": 0,
       "method": "DELETE"
     },
     "execution_host": "mac.lan",
     "kind": "gitlab_runner_smoke_cleanup",
     "origin": "https://gitlab.dcloud.run",
-    "runner_id": 92,
+    "runner_id": 94,
     "schema_version": "1.0",
-    "skill_digest": "db811e2af1e4ec717956f409933a773429e2f813fb16baf9f8456fe4d54cdb11",
+    "skill_digest": "a0ec62f6028426e79d62e6c1271fc9cfecff2109ea60946fcc9977cdb146960b",
     "status": "PASS",
-    "tested_revision": "3570e1b7618e34a7d365002735c0df2fcb70667b"
+    "tested_revision": "8fea10f7bba9a84b09f211ae8c0ee14b67ff8867"
   },
   "status": "PASS",
   "summary": {
@@ -144,9 +144,9 @@
     "kind": "project",
     "reference": "hott/test"
   },
-  "target_file": "path:836cb58faf1c",
+  "target_file": "path:e40fe816ada5",
   "target_source": "project;argv:--project",
-  "tested_revision": "3570e1b7618e34a7d365002735c0df2fcb70667b",
+  "tested_revision": "8fea10f7bba9a84b09f211ae8c0ee14b67ff8867",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,
