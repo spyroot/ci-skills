@@ -69,17 +69,16 @@ def portable_reference(value: str) -> str:
     """
     if value.startswith("binding:"):
         binding, mark, selected = value.removeprefix("binding:").partition("#")
+        reference = portable_reference(binding)
         if mark:
             index, separator, source = selected.partition(":")
             if separator:
-                return (
-                    f"binding:path:{path_token(binding)}#{index}:"
-                    f"{portable_reference(source)}"
-                )
-        return f"binding:path:{path_token(binding)}"
+                return f"binding:{reference}#{index}:{portable_reference(source)}"
+        return f"binding:{reference}"
     if " -> file:" in value:
         selector, _, path = value.partition(" -> file:")
-        return f"{portable_reference(selector)} -> file:path:{path_token(path)}"
+        source = portable_reference(f"file:{path}")
+        return f"{portable_reference(selector)} -> {source}"
     scheme, separator, remainder = value.partition(":")
     if scheme == "command" and remainder.startswith("/"):
         path, marker, digest = remainder.partition("#argv-sha256:")
@@ -102,7 +101,7 @@ def portable_command(argv: Sequence[JSONValue]) -> Sequence[JSONValue]:
     for index, item in enumerate(result[:-1]):
         argument = result[index + 1]
         if item == "--kubeconfig" and isinstance(argument, str):
-            result[index + 1] = f"path:{path_token(argument)}"
+            result[index + 1] = portable_reference(argument)
     return result
 
 

@@ -1,0 +1,168 @@
+{
+  "access": {
+    "kubernetes": {
+      "context": "context:611e49b22818",
+      "identity": "identity:547a4b6a7894",
+      "server": "server:6076e1dcf760"
+    }
+  },
+  "captured_at": "2026-10-18T03:47:27.522318+00:00",
+  "cleanup": {
+    "failures": [],
+    "resources": [
+      {
+        "absent": true,
+        "kind": "Job",
+        "name": "ci-skills-run-podman-probe-4c4a1aec47297094",
+        "namespace": "ci-skills-run-e15d72b9dfbf4784b4a1",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "ConfigMap",
+        "name": "ci-skills-run-podman-scripts-4c4a1aec47297094",
+        "namespace": "ci-skills-run-e15d72b9dfbf4784b4a1",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "RoleBinding",
+        "name": "ci-skills-run-scc-permission-5f4add9322d9458c-4c4a1aec47297094",
+        "namespace": "ci-skills-run-e15d72b9dfbf4784b4a1",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "Namespace",
+        "name": "ci-skills-run-e15d72b9dfbf4784b4a1",
+        "namespace": "",
+        "status": "PASS"
+      }
+    ],
+    "status": "PASS"
+  },
+  "errors": [
+    {
+      "reason": "timeout",
+      "source": "image_build_readiness"
+    }
+  ],
+  "filters": {},
+  "kind": "image_build_readiness",
+  "namespace": "ci-skills-run-e15d72b9dfbf4784b4a1",
+  "operation": "probe",
+  "plan": {
+    "authorization": {
+      "behavior": "reuse_existing_or_create_temporary_role_binding",
+      "cluster_role": "system:openshift:scc:privileged",
+      "constraint": "privileged",
+      "provider": "openshift_scc_access",
+      "service_account": "default"
+    },
+    "claim": "nested_podman_runtime_readiness",
+    "inner_image": "docker.io/library/busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e",
+    "kind": "image_build_readiness",
+    "operation": "probe",
+    "probe_image": "quay.io/podman/stable@sha256:24aa8442c468c62ffae6053c79942b3a53c169934098a80b93f653fd9f0f8783",
+    "resources": {
+      "cpu_limit": "1",
+      "cpu_request": "250m",
+      "memory_limit": "1Gi",
+      "memory_request": "256Mi",
+      "storage_size": "8Gi"
+    },
+    "run_scope": {
+      "namespace": null,
+      "namespace_mode": "generated",
+      "service_account": "default"
+    },
+    "script_digest": "56910939591e750f910e8a8313a569125e72e9dca439b35bd76af03913f71110",
+    "selected_node": "selected_node:6a2c50906795",
+    "side_effects_on_apply": [
+      "temporary_namespace",
+      "temporary_scc_role_binding_when_required",
+      "temporary_configmap",
+      "temporary_job"
+    ],
+    "target": {
+      "context": "context:611e49b22818",
+      "server": "server:6076e1dcf760"
+    },
+    "timeout_seconds": 300
+  },
+  "plan_digest": "23b80af87b715ee7f5394b47524b30f90b342415f09894990f17aced3d8c0d3c",
+  "records": [
+    {
+      "action": "VERIFIED",
+      "callback": "SelectReadyWorker",
+      "node": {
+        "kernelVersion": "5.14.0-570.98.1.el9_6.x86_64",
+        "name": "node:6a2c50906795",
+        "osImage": "Red Hat Enterprise Linux CoreOS 9.6.20260309-0 (Plow)"
+      },
+      "selected_node": "selected_node:6a2c50906795",
+      "selection": "requested",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ConfirmPodmanProbe",
+      "plan_digest": "23b80af87b715ee7f5394b47524b30f90b342415f09894990f17aced3d8c0d3c",
+      "selected_node": "selected_node:6a2c50906795",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "OpenProbeNamespace",
+      "namespace": "ci-skills-run-e15d72b9dfbf4784b4a1",
+      "owns_namespace": true,
+      "reused": false,
+      "run_id": "db194549255b408991f9e2edfa196b7b",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "EnsureSCCAccess",
+      "cluster_role": "system:openshift:scc:privileged",
+      "constraint": "privileged",
+      "outcome": "scc_access_ready",
+      "permission_source": "temporary_role_binding",
+      "role_binding": {
+        "action": "APPLIED",
+        "kind": "RoleBinding",
+        "name": "ci-skills-run-scc-permission-5f4add9322d9458c-4c4a1aec47297094",
+        "namespace": "ci-skills-run-e15d72b9dfbf4784b4a1",
+        "uid": "60522e74-cf21-4e37-8766-c0ce6385e1ce"
+      },
+      "service_account": "system:serviceaccount:ci-skills-run-e15d72b9dfbf4784b4a1:default",
+      "verified": true
+    }
+  ],
+  "run_id": "db194549255b408991f9e2edfa196b7b",
+  "schema_version": "1.0",
+  "selected_node": "selected_node:6a2c50906795",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "a803d128e34204673816bf78742837f08a1c011c2940a51caa3fb3d94d5a316f",
+    "file_count": 176,
+    "functional_digest": "4ff31de56ba4605abe43b0b035d6cabad866b274e889722f85cd75a5f911a88a",
+    "revision": {
+      "source": "installer_record",
+      "value": "23025b981392ee30c6d5902587abba6be2b92202",
+      "verified": true
+    }
+  },
+  "status": "BLOCKED",
+  "summary": {
+    "error_count": 1,
+    "record_count": 4
+  },
+  "target": "target:7bd724cadedd",
+  "target_file": "path:5e5380df1eda",
+  "target_source": "user",
+  "tested_revision": "23025b981392ee30c6d5902587abba6be2b92202"
+}

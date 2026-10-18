@@ -1,0 +1,145 @@
+{
+  "child_pid": 36408,
+  "cleanup": {
+    "exact_label_survivors": [],
+    "exact_labels_absent": true,
+    "namespace": {
+      "absent": true,
+      "captured": {
+        "kind": "Namespace",
+        "name": "ci-skills-run-021172f8150b48da837e",
+        "namespace": "",
+        "uid": "31ec7d3b-b397-46db-a754-a6522ceadb5a"
+      },
+      "survivors": []
+    },
+    "resources": {
+      "configmaps": {
+        "absent": true,
+        "captured": [
+          {
+            "kind": "ConfigMap",
+            "name": "ci-skills-run-podman-scripts-272a3dd2c9961224",
+            "namespace": "ci-skills-run-021172f8150b48da837e",
+            "uid": "f4180c08-f454-4317-9368-34424280893a"
+          }
+        ],
+        "exact_name_survivors": []
+      },
+      "jobs": {
+        "absent": true,
+        "captured": [
+          {
+            "kind": "Job",
+            "name": "ci-skills-run-podman-probe-272a3dd2c9961224",
+            "namespace": "ci-skills-run-021172f8150b48da837e",
+            "uid": "bf552316-c140-4eb5-8248-af407c66220d"
+          }
+        ],
+        "exact_name_survivors": []
+      },
+      "pods": {
+        "absent": true,
+        "captured": [],
+        "exact_name_survivors": []
+      },
+      "rolebindings": {
+        "absent": true,
+        "captured": [
+          {
+            "kind": "RoleBinding",
+            "name": "ci-skills-run-scc-permission-5f4add9322d9458c-272a3dd2c9961224",
+            "namespace": "ci-skills-run-021172f8150b48da837e",
+            "uid": "63e31eed-8ad9-4a3d-97ae-27e5df04f812"
+          }
+        ],
+        "exact_name_survivors": []
+      }
+    }
+  },
+  "command_exit": 0,
+  "command_status": "PASS",
+  "diagnostic_run_id": "pr81-3570e1b-interrupt",
+  "evidence_complete": false,
+  "excluded": [
+    "persistentvolumes",
+    "persistentvolumeclaims",
+    "nfs",
+    "files",
+    "other_namespaces"
+  ],
+  "expected_result": false,
+  "generated_run_id": "ddecf458d9124068ab17e36f1a1191b4",
+  "kind": "pr81_installed_live_proof",
+  "mode": "term",
+  "observed": {
+    "namespace": {
+      "kind": "Namespace",
+      "name": "ci-skills-run-021172f8150b48da837e",
+      "namespace": "",
+      "uid": "31ec7d3b-b397-46db-a754-a6522ceadb5a"
+    },
+    "objects": {
+      "configmaps": [
+        {
+          "kind": "ConfigMap",
+          "name": "ci-skills-run-podman-scripts-272a3dd2c9961224",
+          "namespace": "ci-skills-run-021172f8150b48da837e",
+          "uid": "f4180c08-f454-4317-9368-34424280893a"
+        }
+      ],
+      "jobs": [
+        {
+          "kind": "Job",
+          "name": "ci-skills-run-podman-probe-272a3dd2c9961224",
+          "namespace": "ci-skills-run-021172f8150b48da837e",
+          "uid": "bf552316-c140-4eb5-8248-af407c66220d"
+        }
+      ],
+      "pods": [],
+      "rolebindings": [
+        {
+          "kind": "RoleBinding",
+          "name": "ci-skills-run-scc-permission-5f4add9322d9458c-272a3dd2c9961224",
+          "namespace": "ci-skills-run-021172f8150b48da837e",
+          "uid": "63e31eed-8ad9-4a3d-97ae-27e5df04f812"
+        }
+      ]
+    }
+  },
+  "observer_errors": [],
+  "provider_identity": {
+    "after": {
+      "cluster_role": {
+        "kind": "ClusterRole",
+        "name": "system:openshift:scc:privileged",
+        "namespace": "",
+        "uid": "8f4125b7-d09a-4d59-aab2-5ecce566d0c6"
+      },
+      "scc": {
+        "kind": "SecurityContextConstraints",
+        "name": "privileged",
+        "namespace": "",
+        "uid": "3bd4207d-29ca-4278-8cb2-8454c239f493"
+      }
+    },
+    "before": {
+      "cluster_role": {
+        "kind": "ClusterRole",
+        "name": "system:openshift:scc:privileged",
+        "namespace": "",
+        "uid": "8f4125b7-d09a-4d59-aab2-5ecce566d0c6"
+      },
+      "scc": {
+        "kind": "SecurityContextConstraints",
+        "name": "privileged",
+        "namespace": "",
+        "uid": "3bd4207d-29ca-4278-8cb2-8454c239f493"
+      }
+    },
+    "preserved": true
+  },
+  "schema_version": "1.0",
+  "signal_sent": false,
+  "status": "BLOCKED"
+}

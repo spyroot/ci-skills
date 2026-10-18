@@ -959,6 +959,64 @@
       },
       "use_when": "Publish an existing image without building or creating a runner."
     },
+    "image_build_readiness.py": {
+      "capabilities": [
+        "node_scoped",
+        "namespaced"
+      ],
+      "execution_surface": "configured Kubernetes API and a temporary privileged Job",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--cpu-limit",
+        "--cpu-request",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--inner-image",
+        "--json",
+        "--live-plan",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--memory-limit",
+        "--memory-request",
+        "--namespace",
+        "--node",
+        "--output-dir",
+        "--probe-image",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--storage-size",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Probe nested Podman execution on one Kubernetes worker and clean up.",
+      "read_only": false,
+      "report_kind": "image_build_readiness",
+      "required_options": [],
+      "required_tools": [
+        "kubectl",
+        "oc on OpenShift"
+      ],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows and cleanup read-back; does not prove runner or image-publication behavior.",
+      "side_effects": "Apply creates a run-owned namespace, conditionally creates one namespaced SCC RoleBinding, then creates a script ConfigMap and Job; it removes only resources owned by the run.",
+      "subcommands": {
+        "probe": {
+          "mutates": true,
+          "purpose": "Run a temporary Podman Job on one selected worker.",
+          "read_back": "Exact permission source, optional RoleBinding UID, Job-owned Pod exit, probe rows and resource absence.",
+          "result_schema": "schemas/results/image-build-readiness.schema.json",
+          "side_effects": "Creates and removes a temporary namespace, conditional run-owned SCC RoleBinding, script ConfigMap and privileged Job."
+        }
+      },
+      "use_when": "Check container execution, bind mounts and exit propagation before building a runner workflow."
+    },
     "k8s_verify_mtu_consistency.py": {
       "capabilities": [
         "node_scoped"
@@ -998,6 +1056,98 @@
       "side_effects": "oc debug creates temporary Pods; apply verifies their cleanup",
       "subcommands": {},
       "use_when": "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; plan the selected nodes, then run the exact confirmed plan."
+    },
+    "ocp_node_onboard.py": {
+      "capabilities": [],
+      "execution_surface": "installed skill controls tools, ISO generation and node join in the selected cluster",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--destination",
+        "--dry-run",
+        "--human",
+        "--ip-address",
+        "--json",
+        "--live-plan",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--mac-address",
+        "--network-config-path",
+        "--node-name",
+        "--output-dir",
+        "--pull-secret-key",
+        "--pull-secret-name",
+        "--pull-secret-namespace",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--spec",
+        "--timeout",
+        "--tool-pod-spec",
+        "--yaml"
+      ],
+      "purpose": "Build an OpenShift node ISO in-cluster, join its node, and verify selected storage.",
+      "read_only": false,
+      "report_kind": "ocp_node_onboard",
+      "required_options": [],
+      "required_tools": [
+        "kubectl",
+        "oc",
+        "curl (default tool discovery)"
+      ],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "Shared workflow report with native completion, join read-back, final cluster artifact identity/lifetime, plan, provenance and cleanup evidence.",
+      "side_effects": "Build/join/remove use plan confirmation. Native oc creates temporary build resources; join approves only the selected node's two signers. ISO bytes stay in the cluster.",
+      "subcommands": {
+        "build": {
+          "mutates": true,
+          "purpose": "Build from either a MAC or native YAML and verify the exact cluster destination.",
+          "read_back": "Native completion, embedded Ignition, actual ISO size/SHA-256 and destination.",
+          "required_options": [
+            "--destination"
+          ],
+          "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+          "side_effects": "Confirmed build stages a tool Pod and native OpenShift temporary resources, writes the requested ISO, and retains its run record; temporary final storage retains its Pod."
+        },
+        "join": {
+          "mutates": true,
+          "purpose": "Approve the booted node's selected CSRs and verify its Ready identity.",
+          "read_back": "Client bootstrap-completion evidence, issued serving request state and exact Ready Node hostname, roles and observed IPs.",
+          "required_options": [
+            "--run-id",
+            "--node-name",
+            "--ip-address"
+          ],
+          "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+          "side_effects": "Confirmed join approves only the exact hostname's client and serving signers, then removes the owned build scope; it never boots or deletes a node."
+        },
+        "remove": {
+          "mutates": true,
+          "purpose": "Remove owned run resources while preserving persistent destination storage and ISO.",
+          "read_back": "Owned resource absence and, for persistent output, unchanged ISO before and after removal.",
+          "required_options": [
+            "--run-id"
+          ],
+          "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+          "side_effects": "Confirmed removal deletes only run-owned resources; temporary output ends with its Pod. Persistent ISO and caller storage remain."
+        },
+        "verify": {
+          "mutates": true,
+          "purpose": "Read and inspect the existing cluster-held ISO identified by its run.",
+          "read_back": "Exact stored artifact identity, size/SHA-256 and embedded Ignition.",
+          "required_options": [
+            "--run-id"
+          ],
+          "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+          "side_effects": "Persistent storage can require a temporary reader Pod, cleaned after inspection."
+        }
+      },
+      "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; join its booted node, inspect it or release a previous run. See references/ocp-node-image.md."
     },
     "prepare_tool_pod.py": {
       "capabilities": [],
@@ -1224,6 +1374,7 @@
     "a volume or claim is stuck": "storage_report.py",
     "browse tools and references": "reference.py",
     "build or delete a toolbox": "toolbox.py",
+    "build or inspect a cluster-held OpenShift node ISO": "ocp_node_onboard.py",
     "check GitLab pipeline progress": "gitlab_pipeline.py",
     "connectivity or CNI health": "cilium_status.py",
     "create or change a GitLab milestone": "gitlab_milestone.py",
@@ -1235,6 +1386,7 @@
     "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
     "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
     "prove all three authorities": "access_check.py",
+    "prove nested Podman runtime readiness": "image_build_readiness.py",
     "publish an image to Harbor": "harbor_push.py",
     "read a caller-selected Git API resource": "bin/ci-api",
     "read or manage a GitLab runner": "gitlab_runner.py",

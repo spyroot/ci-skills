@@ -119,7 +119,15 @@ class SkillExecutor(ABC, Generic[StateT]):
         failures: MutableSequence[BaseException] = []
         for callback in reversed(entered):
             try:
-                self._invoke(callback, "cleanup")
+                result = self._invoke(callback, "cleanup")
+                if result:
+                    self.state.cleanup_results.append(
+                        {
+                            **result,
+                            "callback": type(callback).__name__,
+                            "hook": "cleanup",
+                        }
+                    )
             except BaseException as exc:  # noqa: BLE001 - finish cleanup before raising
                 self.state.failed = True
                 self.state.cleanup_failures.append(
@@ -143,6 +151,7 @@ class SkillExecutor(ABC, Generic[StateT]):
         entered: AbstractCallbacks[StateT, SkillAction] = []
         self.state.failed = False
         self.state.cleanup_failures.clear()
+        self.state.cleanup_results.clear()
         with recoverable_signals(), execution_trace(self.state.trace):
             try:
                 self._execute(entered)

@@ -309,13 +309,37 @@ def _runner_delete(
     return receipt
 
 
+def _podman_receipt(setup: Mapping[str, JSONObject]) -> JSONObject:
+    """Reuse the captured probe shape with this fixture's time and candidate.
+
+    :param setup: Synthetic access setup supplying verified candidate identity.
+    :returns: A complete successful installed Podman probe receipt.
+    """
+    receipt = json.loads(
+        (
+            REPO_ROOT
+            / "tests/acceptance/evidence/podman-readiness-final/success/receipt.json"
+        ).read_text(encoding="utf-8")
+    )
+    receipt.update(
+        captured_at=(NOW - timedelta(days=1)).isoformat(),
+        tested_revision=setup["access.json"]["tested_revision"],
+    )
+    identity = setup["access.json"]["skill"]
+    receipt["skill"].update(
+        digest=identity["digest"], functional_digest=identity["functional_digest"]
+    )
+    receipt["skill"]["revision"].update(identity["revision"])
+    return receipt
+
+
 def _complete_receipts(
     setup: Mapping[str, JSONObject],
 ) -> MutableMapping[str, JSONObject]:
-    """Build receipts for every required GitLab operation from setup context.
+    """Build every required operation receipt with matching candidate identity.
 
     :param setup: Fixture full access and GitLab access receipts.
-    :returns: Setup plus all required read, applied, and no-op operation receipts.
+    :returns: Setup plus all required GitLab and Podman operation receipts.
     """
     receipts = deepcopy(setup)
     for kind, operation, action in ACCEPTANCE.REQUIRED_GITLAB_OPERATIONS:
@@ -329,6 +353,7 @@ def _complete_receipts(
         else:
             receipt = _base_operation(setup, kind, operation, action)
         receipts[name] = receipt
+    receipts["podman-probe.json"] = _podman_receipt(setup)
     return receipts
 
 
@@ -395,8 +420,156 @@ def test_full_required_operation_set_is_bound_to_initial_runtime_setup() -> None
     assert {
         (receipt.get("kind"), receipt.get("operation"), receipt.get("result_action"))
         for receipt in receipts.values()
-        if receipt.get("kind") != "access_check"
+        if receipt.get("kind") in ACCEPTANCE.GITLAB_RECEIPT_KINDS
     } == ACCEPTANCE.REQUIRED_GITLAB_OPERATIONS
+
+
+def test_required_podman_runtime_receipt_cannot_be_missing() -> None:
+    """Reject live acceptance when the installed Podman probe has no receipt.
+
+    :returns: None; assertions prove the capability cannot be omitted.
+    """
+    setup = _access_setup()
+    receipts = {
+        name: receipt
+        for name, receipt in _complete_receipts(setup).items()
+        if receipt.get("kind") != "image_build_readiness"
+    }
+
+    result = _evaluate(setup, receipts)
+
+    assert result["status"] == "BLOCKED"
+    assert "image_build_readiness:probe:check:receipt_missing" in result["problems"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    (
+        ("functional_digest", "b" * 64, "functional_digest_mismatch"),
+        ("nested_runtime_ready", False, "runtime_readback_unproven"),
+        ("exit_code", 7, "runtime_readback_unproven"),
+        ("rows", [], "runtime_checks_incomplete"),
+        ("resources", [], "cleanup_unproven"),
+        ("errors", "invalid", "result_schema_invalid"),
+    ),
+)
+def test_podman_receipt_requires_current_runtime_and_cleanup_proof(
+    field: str, value: JSONValue, reason: str
+) -> None:
+    """Reject malformed, stale-code, failed, or incomplete Podman proof.
+
+    :param field: Receipt field whose evidence is invalidated.
+    :param value: Invalid value replacing the otherwise valid captured field.
+    :param reason: Classified acceptance failure required for that field.
+    :returns: None; assertions prove valid proof passes before corruption.
+    """
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    baseline = _evaluate(setup, receipts)
+    assert baseline["status"] == "PASS", baseline["problems"]
+    assert "podman-probe.json" in baseline["accepted"]
+    receipt = receipts["podman-probe.json"]
+    probe = next(
+        record
+        for record in receipt["records"]
+        if record["callback"] == "RunPodmanProbe"
+    )
+    targets = {
+        "functional_digest": receipt["skill"],
+        "nested_runtime_ready": probe,
+        "exit_code": probe["pod"],
+        "rows": probe,
+        "resources": receipt["cleanup"],
+        "errors": receipt,
+    }
+    targets[field][field] = value
+
+    result = _evaluate(setup, receipts)
+
+    assert result["status"] == "BLOCKED"
+    assert f"podman-probe.json:{reason}" in result["problems"]
+    assert "podman-probe.json" not in result["accepted"]
+
+
+@pytest.mark.parametrize("kind", ("Job", "Namespace", "RoleBinding"))
+@pytest.mark.parametrize("change", ("missing", "mismatched"))
+def test_podman_cleanup_requires_each_owned_resource_identity(
+    kind: str, change: str
+) -> None:
+    """Reject absence evidence that omits or substitutes an owned resource.
+
+    :param kind: Probe-owned resource whose exact absence must be proved.
+    :param change: Remove its evidence or substitute another resource name.
+    :returns: None; assertions prove valid cleanup passes before corruption.
+    """
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    baseline = _evaluate(setup, receipts)
+    assert baseline["status"] == "PASS", baseline["problems"]
+    cleanup = receipts["podman-probe.json"]["cleanup"]
+    if change == "missing":
+        cleanup["resources"] = [
+            item for item in cleanup["resources"] if item["kind"] != kind
+        ]
+    else:
+        resource = next(item for item in cleanup["resources"] if item["kind"] == kind)
+        resource["name"] += "-unrelated"
+
+    result = _evaluate(setup, receipts)
+
+    assert result["status"] == "BLOCKED"
+    assert "podman-probe.json:cleanup_unproven" in result["problems"]
+    assert "podman-probe.json" not in result["accepted"]
+
+
+@pytest.mark.parametrize(
+    ("callback", "fields", "kind"),
+    (
+        ("OpenProbeNamespace", {"owns_namespace": False}, "Namespace"),
+        ("EnsureSCCAccess", {"permission_source": "existing"}, "RoleBinding"),
+        ("EnsureSCCAccess", {"permission_source": "not_applicable"}, "RoleBinding"),
+    ),
+)
+def test_podman_cleanup_preserves_caller_owned_resources(
+    callback: str, fields: Mapping[str, JSONValue], kind: str
+) -> None:
+    """Accept cleanup without claiming deletion of caller-owned resources.
+
+    :param callback: Ownership record changed to represent a preexisting resource.
+    :param fields: Observed ownership fields for this supported reuse case.
+    :param kind: Resource kind whose absence the probe must not require.
+    :returns: None; assertions prove ownership determines required cleanup.
+    """
+    setup = _access_setup()
+    receipts = _complete_receipts(setup)
+    receipt = receipts["podman-probe.json"]
+    record = next(item for item in receipt["records"] if item["callback"] == callback)
+    record.update(fields)
+    receipt["cleanup"]["resources"] = [
+        item for item in receipt["cleanup"]["resources"] if item["kind"] != kind
+    ]
+
+    result = _evaluate(setup, receipts)
+
+    assert result["status"] == "PASS", result["problems"]
+    assert "podman-probe.json" in result["accepted"]
+
+
+def test_policy_selected_directories_load_the_successful_podman_receipt() -> None:
+    """Require the normal gate route to load the delivered Podman evidence.
+
+    :returns: None; assertions prove the receipt is reachable through policy.
+    """
+    receipts = ACCEPTANCE._load_receipt_dirs(
+        [REPO_ROOT / directory for directory in POLICY["receipt_directories"]]
+    )
+
+    assert any(
+        receipt.get("kind") == "image_build_readiness"
+        and receipt.get("operation") == "probe"
+        and receipt.get("status") == "PASS"
+        for receipt in receipts.values()
+    )
 
 
 def test_operation_identity_must_match_the_initial_synthetic_setup() -> None:
