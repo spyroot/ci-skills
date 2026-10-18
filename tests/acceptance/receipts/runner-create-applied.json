@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-13T06:30:09.115129+00:00",
+  "captured_at": "2026-10-18T03:37:07.031655+00:00",
   "cleanup": {
     "reason": "persistent_runner_requested",
     "status": "NOT_APPLICABLE"
@@ -7,7 +7,7 @@
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
-  "execution_host": "spyroots-mbp.lan",
+  "execution_host": "mac.lan",
   "identity": {
     "id": 6,
     "username": "spyroot",
@@ -19,7 +19,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "13c9ccc16931997a404928f4c9c651f89723ee180fb6c4e34e9539289f5ca35e",
+    "body_sha256": "ba50fdb4fac9a90de280420c8c1672c2e7f8aa6e94d7a7f996152d713ea8f546",
     "confirmation_ready": true,
     "fields": [
       "description",
@@ -28,7 +28,7 @@
     ],
     "one_time_sink_required": true,
     "operation": "create",
-    "plan_digest": "a034c6e0f68126738b9240a3b422d1d1c41a870657faf28bd4d018d73af04c35",
+    "plan_digest": "ab93f0b90bc1d44994fbf8d707fc5e554d33bdc757a63f7e9fb0d65d0dd7f8f8",
     "project_ids": null,
     "requested_tags": [
       "ci-skills"
@@ -37,7 +37,7 @@
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "a034c6e0f68126738b9240a3b422d1d1c41a870657faf28bd4d018d73af04c35",
+  "plan_digest": "ab93f0b90bc1d44994fbf8d707fc5e554d33bdc757a63f7e9fb0d65d0dd7f8f8",
   "readback": {
     "action": "APPLIED",
     "after_tags": [
@@ -47,7 +47,7 @@
       "reason": "persistent_runner_requested",
       "status": "NOT_APPLICABLE"
     },
-    "id": 72,
+    "id": 81,
     "mutated": true,
     "sink_persisted": true,
     "verified": true
@@ -62,12 +62,16 @@
         "reason": "persistent_runner_requested",
         "status": "NOT_APPLICABLE"
       },
-      "id": 72,
+      "id": 81,
       "mutated": true,
       "sink_persisted": true,
       "verified": true
     }
   ],
+  "report_files": {
+    "json": "path:fc07ec74c446",
+    "text": "path:41c97a6325af"
+  },
   "result_action": "APPLIED",
   "schema_version": "1.0",
   "skill": {
@@ -76,12 +80,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
-    "file_count": 139,
-    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+    "digest": "33c82b7da68ad46124877127d01e62b4a1e0b03fdd6a47ff95fc682566ed5547",
+    "file_count": 164,
+    "functional_digest": "e5523516780793f388c33e81cde0747b44571f6f380339a01a04be4bfde5bf9b",
     "revision": {
       "source": "installer_record",
-      "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+      "value": "0017df813f5ef0beacc581745c3a16590bfb4229",
       "verified": true
     }
   },
@@ -96,8 +100,8 @@
       "access_level": "not_protected",
       "architecture": null,
       "contacted_at": null,
-      "description": "ci-skills-pr67-runner-a9ef7ff4",
-      "id": 72,
+      "description": "ci-skills-0017df81-20261018T033411Z-runner",
+      "id": 81,
       "is_shared": false,
       "job_execution_status": "idle",
       "online": null,
@@ -115,25 +119,25 @@
       "status": "never_contacted",
       "tag_list": [
         "ci-skills",
-        "pr67"
+        "0017df81"
       ],
       "version": null
     },
-    "captured_at": "2026-10-13T06:42:15.731611+00:00",
+    "captured_at": "2026-10-18T03:38:53.745797+00:00",
     "credential_source": "file:path:29f247d18d3c",
     "delete": {
-      "endpoint": "runners/72",
+      "endpoint": "runners/81",
       "exit_code": 0,
       "method": "DELETE"
     },
-    "execution_host": "spyroots-mbp.lan",
+    "execution_host": "mac.lan",
     "kind": "gitlab_runner_smoke_cleanup",
     "origin": "https://gitlab.dcloud.run",
-    "runner_id": 72,
+    "runner_id": 81,
     "schema_version": "1.0",
-    "skill_digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
+    "skill_digest": "33c82b7da68ad46124877127d01e62b4a1e0b03fdd6a47ff95fc682566ed5547",
     "status": "PASS",
-    "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7"
+    "tested_revision": "0017df813f5ef0beacc581745c3a16590bfb4229"
   },
   "status": "PASS",
   "summary": {
@@ -144,9 +148,9 @@
     "kind": "project",
     "reference": "hott/test"
   },
-  "target_file": "path:5e5380df1eda",
-  "target_source": "user;argv:--project",
-  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+  "target_file": "path:8617612df58d",
+  "target_source": "project;argv:--project",
+  "tested_revision": "0017df813f5ef0beacc581745c3a16590bfb4229",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

@@ -1,0 +1,71 @@
+{
+  "absolute_deltas": null,
+  "baseline_ref": null,
+  "baseline_values": null,
+  "blocking_reasons": [],
+  "candidate_ref": "0017df813f5ef0beacc581745c3a16590bfb4229",
+  "candidate_values": {
+    "initial_prepare": {
+      "unit": "milliseconds",
+      "value": 113046
+    },
+    "remove": {
+      "unit": "milliseconds",
+      "value": 36639
+    },
+    "repeat_prepare": {
+      "unit": "milliseconds",
+      "value": 51881
+    },
+    "repeat_remove": {
+      "unit": "milliseconds",
+      "value": 18617
+    }
+  },
+  "captured_at": "2026-10-18T03:40:10.279867+00:00",
+  "environment": {
+    "installed_functional_digest": "e5523516780793f388c33e81cde0747b44571f6f380339a01a04be4bfde5bf9b",
+    "installed_package_digest": "33c82b7da68ad46124877127d01e62b4a1e0b03fdd6a47ff95fc682566ed5547",
+    "instrumentation": "installed ci-skills JSONL debug trace",
+    "surface": "selected Kubernetes live target"
+  },
+  "evidence_sources": [
+    "traces/05-prepare.jsonl",
+    "traces/10-repeat-prepare.jsonl",
+    "traces/12-remove.jsonl",
+    "traces/15-repeat-remove.jsonl",
+    "05-prepare.json",
+    "10-repeat-prepare.json",
+    "12-remove.json",
+    "15-repeat-remove.json"
+  ],
+  "measurement_name": "pr84_tool_pod_live_proof",
+  "metrics": {
+    "initial_prepare": {
+      "unit": "milliseconds",
+      "value": 113046
+    },
+    "remove": {
+      "unit": "milliseconds",
+      "value": 36639
+    },
+    "repeat_prepare": {
+      "unit": "milliseconds",
+      "value": 51881
+    },
+    "repeat_remove": {
+      "unit": "milliseconds",
+      "value": 18617
+    }
+  },
+  "percentage_deltas": null,
+  "sample_count": 1,
+  "schema_version": "1.0",
+  "source_commit": "0017df813f5ef0beacc581745c3a16590bfb4229",
+  "status": "PASS",
+  "thresholds": null,
+  "warmup_count": 0,
+  "warnings": [
+    "One live correctness sample; no performance comparison or improvement claim."
+  ]
+}

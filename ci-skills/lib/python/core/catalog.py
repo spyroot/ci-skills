@@ -264,6 +264,61 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
         "are cleaned on exit.",
     },
+    "prepare_tool_pod.py": {
+        "kind": "tool_pod",
+        "purpose": "Prepare, reuse or remove a cluster Pod with declared tools.",
+        "use_when": "Run tooling in a retained cluster Pod for another callback or command.",
+        "requires": ("kubernetes",),
+        "capabilities": (),
+        "mutates": True,
+        "options": {
+            "--spec": "JSON with image and dependencies; schemas/tool-pod.schema.json",
+            "--run-id": "returned run identifier for reuse/removal, also used in logs",
+            "--live-plan": "verify Kubernetes access without creating resources",
+            "--apply": "perform the exact confirmed operation",
+            "--confirm-plan": "plan digest binding target, inputs, run ID and functional code",
+            "--timeout": "positive operation timeout in seconds (default: 300)",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "prepare": {
+                "required_options": ["--spec"],
+                "result_schema": "schemas/results/tool-pod.schema.json",
+            },
+            "remove": {
+                "required_options": ["--run-id"],
+                "result_schema": "schemas/results/tool-pod.schema.json",
+            },
+        },
+        "related": ("toolbox.py",),
+        "references": ("Tool Pod preparation",),
+        "required_tools": ("kubectl",),
+        "returns": "Plan or actual Pod identity, tool observations, per-callback results and cleanup.",
+        "execution_surface": "installed skill controls a Pod in the selected Kubernetes cluster",
+        "side_effects": "Confirmed prepare creates and retains run-owned resources; remove deletes "
+        "only those resources. Failure removes resources created by the failed run.",
+        "description": "Supply image and dependencies in the input JSON. Each dependency uses the "
+        "existing toolchain schema (name, commands, optional probe and installation route). "
+        "Tools are installed inside the Pod, never on this computer. See references/tool-pod.md.",
+        "examples": (
+            {
+                "description": "Plan without provider calls",
+                "command": "prepare_tool_pod.py prepare --spec tools.json --dry-run --json",
+            },
+            {
+                "description": "Prepare the confirmed tools",
+                "command": "prepare_tool_pod.py prepare --spec tools.json --apply --confirm-plan DIGEST --json",
+            },
+            {
+                "description": "Reuse and re-probe the same Pod",
+                "command": "prepare_tool_pod.py prepare --spec tools.json --run-id RUN_ID --dry-run --json",
+            },
+            {
+                "description": "Plan removal of owned resources",
+                "command": "prepare_tool_pod.py remove --run-id RUN_ID --dry-run --json",
+            },
+        ),
+    },
     "toolbox.py": {
         "kind": "toolbox",
         "purpose": "Build or delete a toolbox using the configured OpenShift and Harbor.",
@@ -875,23 +930,97 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Toolbox dependencies, installation methods and build inputs.",
             "pointer": "schemas/toolbox.schema.json",
         },
+        "Tool Pod preparation": {
+            "summary": "Tool input, preparation, reuse and removal examples.",
+            "pointer": "references/tool-pod.md",
+        },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",
             "pointer": "references/mcp.md",
         },
     }
 )
+# Progressive navigation contains placements only; executable facts stay above.
+NAV_NODES: Final = MappingProxyType(
+    {
+        (): "Discover what ci-skills can inspect, run or read.",
+        ("gitlab",): "GitLab pipelines, jobs, runners, issues, milestones and wikis.",
+        ("gitlab", "access"): "Prove GitLab access and read back the selected target.",
+        ("gitlab", "api"): "Read one caller-selected GitLab or GitHub API resource.",
+        ("gitlab", "issue"): "Create or reuse exact bug issues.",
+        ("gitlab", "job"): "Inspect job state, output and failure evidence.",
+        ("gitlab", "milestone"): "Create or update milestones.",
+        ("gitlab", "pipeline"): "Inspect, watch and diagnose pipelines.",
+        ("gitlab", "runner"): "Inspect or manage runners.",
+        ("gitlab", "wiki"): "Create or update wiki pages.",
+        ("k8s",): "Cluster, workload, storage and network operations.",
+        ("k8s", "build"): "Plan exact-commit OpenShift binary builds.",
+        (
+            "k8s",
+            "ceph",
+        ): "Ceph health, OSDs, placement groups and host kernel messages.",
+        ("k8s", "cilium"): "Cilium agents, operator and per-node health.",
+        ("k8s", "events"): "What the cluster reported during an interval.",
+        ("k8s", "network"): "Physical uplink MTU consistency across nodes.",
+        ("k8s", "storage"): "Claims, volumes, attachments and the pods using them.",
+        ("github",): "GitHub operations and related combinations.",
+        ("harbor",): "Registry, images, charts and related operations.",
+    }
+)
+NAV_PLACEMENT: Final = MappingProxyType(
+    {
+        "access_check.py": (),
+        "gitlab_access.py": ("gitlab", "access"),
+        "bin/ci-api": ("gitlab", "api"),
+        "gitlab_issue.py": ("gitlab", "issue"),
+        "gitlab_job.py": ("gitlab", "job"),
+        "gitlab_milestone.py": ("gitlab", "milestone"),
+        "gitlab_pipeline.py": ("gitlab", "pipeline"),
+        "gitlab_runner.py": ("gitlab", "runner"),
+        "gitlab_wiki.py": ("gitlab", "wiki"),
+        "bin/ci-binary-build": ("k8s", "build"),
+        "ceph_cluster.py": ("k8s", "ceph"),
+        "ceph_kernel.py": ("k8s", "ceph"),
+        "cilium_status.py": ("k8s", "cilium"),
+        "cilium_node.py": ("k8s", "cilium"),
+        "event_trace.py": ("k8s", "events"),
+        "k8s_verify_mtu_consistency.py": ("k8s", "network"),
+        "storage_report.py": ("k8s", "storage"),
+    }
+)
+PLANNED_VERBS: Final = MappingProxyType(
+    {
+        "gitlab_job.py": dict.fromkeys(("get", "list", "watch", "logs"), "CI11-TOOLS"),
+        "gitlab_pipeline.py": dict.fromkeys(
+            ("list", "logs", "children", "start", "retry", "cancel"), "CI11-TOOLS"
+        ),
+        "gitlab_runner.py": {"reset-token": "CI11-TOOLS"},
+        "gitlab_milestone.py": {"list": "CI11-TOOLS"},
+    }
+)
+NAV_OPTIONS: Final = {
+    "--page": "one-based discovery or section page",
+    "--search": "literal search within one selected reference",
+    "--card": "read a declared reference card",
+    "--part": "read one declared reference part",
+}
+
 DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
     "reference.py": {
         "report_kind": "reference_next",
-        "purpose": "Offer the current node's installed tools and optional reference pointers.",
-        "use_when": "Choose a capability cluster or expand one installed command.",
+        "purpose": "Expand installed tools, required inputs and selected reference sections.",
+        "use_when": "Choose a capability, expand its optional inputs or read one reference section.",
         "requires_authorities": [],
         "required_tools": ["python3"],
         "required_options": [],
         "options": [
             "--json",
             "--yaml",
+            "--human",
+            "--page",
+            "--search",
+            "--card",
+            "--part",
             "--describe",
             "--dry-run",
             "--log-format",
@@ -908,9 +1037,13 @@ DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
                 "command": "reference.py gitlab_runner.py",
             },
         ],
-        "output_modes": {"json": "Versioned JSON (default)", "yaml": "Versioned YAML"},
-        "usage": "reference.py [node] [options]",
-        "returns": "A versioned proposition with tools and reference mappings.",
+        "output_modes": {
+            "json": "Compact JSON with --json; default for legacy node propositions",
+            "yaml": "Versioned YAML with --yaml",
+            "human": "Readable selected level; default for next/get",
+        },
+        "usage": "reference.py [node] | next [path ...] | get reference anchor [options]",
+        "returns": "A compact proposition, bounded discovery page or selected own-text reference section.",
         "read_only": True,
         "side_effects": "Only an explicit log file is written; dry-run and describe do not write.",
         "execution_surface": "installed catalogue; no provider or credential access",
@@ -937,10 +1070,13 @@ def command_authorities(script: str) -> Sequence[str]:
     return DISCOVERY_COMMANDS[script]["requires_authorities"]
 
 
-def _proposition_offering(scripts: Sequence[str]) -> MutableMapping[str, JSONValue]:
-    """Offer installed commands with references for their declared providers.
+def _proposition_offering(
+    scripts: Sequence[str], commands: Mapping[str, Mapping[str, object]]
+) -> MutableMapping[str, JSONValue]:
+    """Offer immediate commands with their provider and task references.
 
     :param scripts: Command keys selected for a cluster or related-command node.
+    :param commands: Existing catalogue definitions for the offered commands.
     :returns: Compact tools and optional reference mappings.
     """
     authorities = {name for script in scripts for name in command_authorities(script)}
@@ -949,6 +1085,8 @@ def _proposition_offering(scripts: Sequence[str]) -> MutableMapping[str, JSONVal
         names.append("mcp")
     if "harbor" in authorities:
         names.append("toolbox specification")
+    for script in scripts:
+        names.extend(json_strings(commands[script].get("references", ())))
     return {
         "tools": {script: {} for script in sorted(scripts)},
         "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
@@ -972,12 +1110,13 @@ def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
     authorities = {script: command_authorities(script) for script in commands}
     clusters = {
         cluster: _proposition_offering(
-            [script for script, names in authorities.items() if authority in names]
+            [script for script, names in authorities.items() if authority in names],
+            commands,
         )
         for cluster, authority in PROPOSITION_CLUSTERS.items()
     }
     clusters["offline"] = _proposition_offering(
-        [script for script, names in authorities.items() if not names]
+        [script for script, names in authorities.items() if not names], commands
     )
     if node is None:
         return {"schema_version": PROPOSITION_VERSION, **clusters}
@@ -987,7 +1126,10 @@ def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
         raise ValueError("path_unknown")
     entry = copy_json_object(commands[node])
     scripts = [node, *json_strings(entry.get("related", ()))]
-    return {"schema_version": PROPOSITION_VERSION, **_proposition_offering(scripts)}
+    return {
+        "schema_version": PROPOSITION_VERSION,
+        **_proposition_offering(scripts, commands),
+    }
 
 
 STATUS_MEANING = {
@@ -1077,7 +1219,7 @@ def describe(script: str) -> MutableMapping[str, JSONValue]:
         "required_options": list(json_strings(entry.get("required_options", ()))),
         "options": (
             {
-                option: UNIVERSAL_OPTIONS[option]
+                option: {**UNIVERSAL_OPTIONS, **NAV_OPTIONS}[option]
                 for option in json_strings(entry["options"])
             }
             if discovery
@@ -1094,8 +1236,10 @@ def describe(script: str) -> MutableMapping[str, JSONValue]:
         "status_values": STATUS_MEANING,
         "exit_codes": dict(READ_EXIT_CODES) if read else EXIT_CODES,
         "default_output": (
-            "json"
-            if discovery or read
+            "json for legacy nodes; human for next/get"
+            if discovery
+            else "json"
+            if read
             else "json when stdout is not a terminal, human when it is"
         ),
         "target_protocol": []
@@ -1110,7 +1254,11 @@ def describe(script: str) -> MutableMapping[str, JSONValue]:
                 "usage": entry["usage"],
             }
             if discovery or read
-            else {}
+            else {
+                key: entry[key]
+                for key in ("description", "examples", "output_modes", "usage")
+                if key in entry
+            }
         ),
     }
 
@@ -1230,6 +1378,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 **DISCOVERY_COMMANDS,
             },
             "routing": {
+                "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
                 "build or delete a toolbox": "toolbox.py",
                 "publish an image to Harbor": "harbor_push.py",
                 "verify a Harbor toolbox pull": "harbor_pull.py",

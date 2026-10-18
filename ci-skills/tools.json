@@ -999,6 +999,57 @@
       "subcommands": {},
       "use_when": "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; plan the selected nodes, then run the exact confirmed plan."
     },
+    "prepare_tool_pod.py": {
+      "capabilities": [],
+      "execution_surface": "installed skill controls a Pod in the selected Kubernetes cluster",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--live-plan",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--output-dir",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--spec",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Prepare, reuse or remove a cluster Pod with declared tools.",
+      "read_only": false,
+      "report_kind": "tool_pod",
+      "required_options": [],
+      "required_tools": [
+        "kubectl"
+      ],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "Plan or actual Pod identity, tool observations, per-callback results and cleanup.",
+      "side_effects": "Confirmed prepare creates and retains run-owned resources; remove deletes only those resources. Failure removes resources created by the failed run.",
+      "subcommands": {
+        "prepare": {
+          "required_options": [
+            "--spec"
+          ],
+          "result_schema": "schemas/results/tool-pod.schema.json"
+        },
+        "remove": {
+          "required_options": [
+            "--run-id"
+          ],
+          "result_schema": "schemas/results/tool-pod.schema.json"
+        }
+      },
+      "use_when": "Run tooling in a retained cluster Pod for another callback or command."
+    },
     "reference.py": {
       "description": "Expand one node; optional references remain pointers until requested.",
       "examples": [
@@ -1019,6 +1070,11 @@
       "options": [
         "--json",
         "--yaml",
+        "--human",
+        "--page",
+        "--search",
+        "--card",
+        "--part",
         "--describe",
         "--dry-run",
         "--log-format",
@@ -1027,10 +1083,11 @@
         "--run-id"
       ],
       "output_modes": {
-        "json": "Versioned JSON (default)",
-        "yaml": "Versioned YAML"
+        "human": "Readable selected level; default for next/get",
+        "json": "Compact JSON with --json; default for legacy node propositions",
+        "yaml": "Versioned YAML with --yaml"
       },
-      "purpose": "Offer the current node's installed tools and optional reference pointers.",
+      "purpose": "Expand installed tools, required inputs and selected reference sections.",
       "read_only": true,
       "report_kind": "reference_next",
       "required_options": [],
@@ -1038,10 +1095,10 @@
         "python3"
       ],
       "requires_authorities": [],
-      "returns": "A versioned proposition with tools and reference mappings.",
+      "returns": "A compact proposition, bounded discovery page or selected own-text reference section.",
       "side_effects": "Only an explicit log file is written; dry-run and describe do not write.",
-      "usage": "reference.py [node] [options]",
-      "use_when": "Choose a capability cluster or expand one installed command."
+      "usage": "reference.py [node] | next [path ...] | get reference anchor [options]",
+      "use_when": "Choose a capability, expand its optional inputs or read one reference section."
     },
     "storage_report.py": {
       "capabilities": [
@@ -1176,6 +1233,7 @@
     "open a GitLab bug": "gitlab_issue.py",
     "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
     "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
+    "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
     "prove all three authorities": "access_check.py",
     "publish an image to Harbor": "harbor_push.py",
     "read a caller-selected Git API resource": "bin/ci-api",

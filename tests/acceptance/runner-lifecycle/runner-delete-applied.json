@@ -1,12 +1,12 @@
 {
-  "captured_at": "2026-10-13T06:32:38.855672+00:00",
+  "captured_at": "2026-10-18T03:38:19.348118+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
-  "execution_host": "spyroots-mbp.lan",
+  "execution_host": "mac.lan",
   "identity": {
     "id": 6,
     "username": "spyroot",
@@ -25,12 +25,12 @@
     ],
     "one_time_sink_required": false,
     "operation": "delete",
-    "plan_digest": "8b4d43891a4c6062df5c88af87991ce785fd98752fe3be4912cfb275b88edf4d",
+    "plan_digest": "9e34d8ad3d9b20338df366b639fc6edb2403b43a5fafab509e7c1715b6bff44a",
     "project_ids": null,
-    "resource_id": 72,
+    "resource_id": 81,
     "runner_snapshot": {
-      "description": "ci-skills-pr67-runner-a9ef7ff4",
-      "id": 72,
+      "description": "ci-skills-0017df81-20261018T033411Z-runner",
+      "id": 81,
       "present": true,
       "project_ids": [
         123,
@@ -41,7 +41,7 @@
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "8b4d43891a4c6062df5c88af87991ce785fd98752fe3be4912cfb275b88edf4d",
+  "plan_digest": "9e34d8ad3d9b20338df366b639fc6edb2403b43a5fafab509e7c1715b6bff44a",
   "readback": {
     "action": "APPLIED",
     "after": {
@@ -54,8 +54,8 @@
       "access_level": "not_protected",
       "architecture": null,
       "contacted_at": null,
-      "description": "ci-skills-pr67-runner-a9ef7ff4",
-      "id": 72,
+      "description": "ci-skills-0017df81-20261018T033411Z-runner",
+      "id": 81,
       "is_shared": false,
       "job_execution_status": "idle",
       "online": null,
@@ -69,11 +69,11 @@
       "status": "never_contacted",
       "tag_list": [
         "ci-skills",
-        "pr67"
+        "0017df81"
       ],
       "version": null
     },
-    "id": 72,
+    "id": 81,
     "mutated": true,
     "verified": true
   },
@@ -90,8 +90,8 @@
         "access_level": "not_protected",
         "architecture": null,
         "contacted_at": null,
-        "description": "ci-skills-pr67-runner-a9ef7ff4",
-        "id": 72,
+        "description": "ci-skills-0017df81-20261018T033411Z-runner",
+        "id": 81,
         "is_shared": false,
         "job_execution_status": "idle",
         "online": null,
@@ -105,11 +105,11 @@
         "status": "never_contacted",
         "tag_list": [
           "ci-skills",
-          "pr67"
+          "0017df81"
         ],
         "version": null
       },
-      "id": 72,
+      "id": 81,
       "mutated": true,
       "verified": true
     }
@@ -122,12 +122,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ff9ebce1733492ac83a6e49a5c630260367c526d604142b761ea52d27be1aef8",
-    "file_count": 139,
-    "functional_digest": "37a22309da7bd79cc36ca1da4549f713cec7cf0a8f36ebf128bbfc6602a9461e",
+    "digest": "33c82b7da68ad46124877127d01e62b4a1e0b03fdd6a47ff95fc682566ed5547",
+    "file_count": 164,
+    "functional_digest": "e5523516780793f388c33e81cde0747b44571f6f380339a01a04be4bfde5bf9b",
     "revision": {
       "source": "installer_record",
-      "value": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+      "value": "0017df813f5ef0beacc581745c3a16590bfb4229",
       "verified": true
     }
   },
@@ -140,9 +140,9 @@
     "kind": "project",
     "reference": "hott/test"
   },
-  "target_file": "path:5e5380df1eda",
-  "target_source": "user;argv:--project",
-  "tested_revision": "a9ef7ff49dbed26726f327a19485a9ab801fc9d7",
+  "target_file": "path:8617612df58d",
+  "target_source": "project;argv:--project",
+  "tested_revision": "0017df813f5ef0beacc581745c3a16590bfb4229",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

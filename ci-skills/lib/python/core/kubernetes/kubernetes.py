@@ -257,6 +257,68 @@ class KubernetesService:
         if self.read(kind, name, namespace) is not None:
             raise KubernetesError("resource_delete_incomplete")
 
+    def pod_exec(
+        self,
+        namespace: str,
+        pod: str,
+        container: str,
+        *argv: str,
+    ) -> CommandResult:
+        """Execute one bounded argument vector in an exact Pod container.
+
+        The caller chooses whether an argument vector invokes a shell. This
+        transport never interpolates command text or selects another Pod.
+
+        :param namespace: Exact observed Pod namespace.
+        :param pod: Exact observed Pod name.
+        :param container: Exact selected container name.
+        :param *argv: Command and arguments after the native ``--`` separator.
+        :returns: Bounded native process result.
+        :raises ValueError: If the command vector is empty.
+        :raises TargetError: If the bound kubeconfig changed before execution.
+        :raises OSError: If the native process cannot start or read its output.
+        """  # noqa: DOC503 - command propagates target binding and process failures.
+        if not argv:
+            raise ValueError("pod_exec_command_missing")
+        return self.command(
+            *self._namespace_args(namespace),
+            "exec",
+            f"pod/{pod}",
+            "-c",
+            container,
+            "--",
+            *argv,
+        )
+
+    def wait_pod_ready(self, name: str, namespace: str) -> JSONObject:
+        """Wait for one exact Pod's Ready condition and read it back.
+
+        :param name: Exact Pod name.
+        :param namespace: Exact Pod namespace.
+        :returns: Ready Pod read back from the API.
+        :raises KubernetesError: If the wait fails, the Pod is absent, or its
+            read-back does not retain a true Ready condition.
+        :raises TargetError: If the bound kubeconfig changes during the wait.
+        """  # noqa: DOC503 - command and read-back propagate target binding errors.
+        result = self.command(
+            *self._namespace_args(namespace),
+            "wait",
+            "--for=condition=Ready",
+            f"pod/{name}",
+            f"--timeout={self._native_timeout()}s",
+        )
+        pod = self._waited_object(result, "pod", name, namespace)
+        status = pod.get("status")
+        conditions = status.get("conditions", []) if isinstance(status, dict) else []
+        if not isinstance(conditions, list) or not any(
+            isinstance(condition, dict)
+            and condition.get("type") == "Ready"
+            and condition.get("status") == "True"
+            for condition in conditions
+        ):
+            raise KubernetesError("pod_not_ready_after_wait")
+        return pod
+
     def wait_rollout(self, kind: str, name: str, namespace: str) -> JSONObject:
         """Wait for a native rollout, then read the exact workload back.
 

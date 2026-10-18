@@ -168,9 +168,20 @@ and artifact references; CI12.2 owns join selection. Use the interfaces and file
 [CI12 implementation plan](../../phases/CI12-NODE-ONBOARDING.md#implementation-plan), including the shared run
 scope. The planned shared scope interface supports generated or caller-selected namespaces as CI12.0 specifies:
 
-`RunScope`: `RunScope.new(*, namespace: Optional[str] = None) -> RunScope`,
-`RunScope.resolve(service: KubernetesService, run_id: str) -> RunScope`, `scope.run_id`, `scope.owns_namespace`,
-`scope.namespace`, `scope.labels -> Mapping[str, str]`, `scope.name(kind: str) -> str`,
-`scope.resources(service) -> ResourceSet` (namespaced), `scope.cluster_resources(service) -> ResourceSet`
-(cluster-scoped); `RunScopeAction(SkillAction)`: `scope`, `role` (optional); `OpenRunScope` and `RemoveScope`,
-each a `K8SCallback[RunScopeAction]` composable by any chain.
+`RunScope.new(*, namespace: Optional[str] = None, run_id: Optional[str] = None) -> RunScope` constructs a
+candidate without provider access. `RunScope.resolve(service, run_id) -> RunScope` requires one live scope;
+`RunScope.find_all(service, run_id) -> tuple[RunScope, ...]` returns observed scopes, including an empty tuple.
+Each scope exposes `run_id`, `namespace`, `owns_namespace`, `labels`, `name(kind)`, namespaced
+`resources(service)` and `cluster_resources(service)`.
+
+`RunScopeAction(SkillAction)` carries a concrete `scope` for `OpenRunScope`. `ResolveRunScopeAction(SkillAction)`
+carries a `run_id` for `ResolveRunScopes` and `RemoveScope`; removal therefore needs no fabricated namespace
+before the API lookup. These Kubernetes callbacks share `RunScopeState`, which retains the lookup identity,
+observed scopes and retained resource identities. CI12.0 exposes no unused role input and creates no RBAC;
+the ISO consumer's authorization belongs to CI12.1.
+
+Preparation requires one unambiguous live scope. After creating a generated namespace, opening reads the labels
+back before staging resources; an ambiguous result fails and cleanup removes only that invocation's created
+namespace. This check is not an atomic reservation. Explicit removal processes the scopes found for the selected
+run identifier, rechecks ownership labels before deletion and preserves caller-selected namespaces. Empty lookup
+is verified `NO_OP`.
