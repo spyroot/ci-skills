@@ -1126,6 +1126,11 @@
       "options": [
         "--json",
         "--yaml",
+        "--human",
+        "--page",
+        "--search",
+        "--card",
+        "--part",
         "--describe",
         "--dry-run",
         "--log-format",
@@ -1134,10 +1139,11 @@
         "--run-id"
       ],
       "output_modes": {
-        "json": "Versioned JSON (default)",
-        "yaml": "Versioned YAML"
+        "human": "Readable selected level; default for next/get",
+        "json": "Compact JSON with --json; default for legacy node propositions",
+        "yaml": "Versioned YAML with --yaml"
       },
-      "purpose": "Offer the current node's installed tools and optional reference pointers.",
+      "purpose": "Expand installed tools, required inputs and selected reference sections.",
       "read_only": true,
       "report_kind": "reference_next",
       "required_options": [],
@@ -1145,10 +1151,10 @@
         "python3"
       ],
       "requires_authorities": [],
-      "returns": "A versioned proposition with tools and reference mappings.",
+      "returns": "A compact proposition, bounded discovery page or selected own-text reference section.",
       "side_effects": "Only an explicit log file is written; dry-run and describe do not write.",
-      "usage": "reference.py [node] [options]",
-      "use_when": "Choose a capability cluster or expand one installed command."
+      "usage": "reference.py [node] | next [path ...] | get reference anchor [options]",
+      "use_when": "Choose a capability, expand its optional inputs or read one reference section."
     },
     "storage_report.py": {
       "capabilities": [

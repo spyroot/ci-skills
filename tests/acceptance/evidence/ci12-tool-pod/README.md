@@ -1,11 +1,19 @@
 # Installed tool Pod live evidence
 
-Captured on 2026-10-18 from installed candidate `9aa288084328a9c44d38d78bd86b5e8785d810b3`.
+Captured on 2026-10-18 from installed candidate `2c615ffcc0c9ec16e323e8e72c7e6e0962897bca`.
 
-- Package checksum: `1cb30887851e9edb58fbb0d08c9679d8dd736d82314b53bf1c7aff5e33ef6cc3`.
-- Functional checksum: `1bd593cf493b854d921cb2d08eea333d6f08c3f3033fa474e09f28e921c1e052`.
-- Run ID: `a4d6162b88ea446c899e53ccaa2cd792`.
-- Pod UID: `ef739f71-d4b2-40d3-8349-6bb7db0b683d`; restart count remained zero.
+- Package checksum: `e5aaa500d9b9aa69b61b95683595ce54442f9d28c8ad0f3ac25b499f3644de9f`.
+- Functional checksum: `856dadd68651a9c393636c97bc9fe9aa51c44470f105148347c774f8fa69fc30`.
+- Run ID: `c5639c8c32af4cfab8ca8a3dff4abdc5`.
+- Pod UID: `3a4bf056-c9fc-4cad-b833-d1213846c42b`; restart count remained zero.
+
+## Installed discovery
+
+The installed [proposition][proposition] offers `prepare_tool_pod.py` and the
+task reference `references/tool-pod.md`. The [installed help][help] explains the
+input specification, plan/apply confirmation and lifecycle commands. The
+[installed identity][identity] binds both outputs to the candidate revision,
+package checksum and functional checksum above.
 
 ## Observed lifecycle
 
@@ -37,6 +45,9 @@ records `PASS` with no errors. No shared storage or RBAC object was touched.
 [Timing evidence](measurement.json) contains one correctness sample and makes no
 performance comparison.
 
+[identity]: 03-installed-provenance.json
+[proposition]: 04-proposition.json
+[help]: 05-help.txt
 [before-ns]: 04-before-namespaces.json
 [before-pod]: 04-before-pods.json
 [before-cm]: 04-before-configmaps.json

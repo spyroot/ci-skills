@@ -1,0 +1,15 @@
+{
+  "algorithm": "sha256-tree-v1",
+  "consuming_project": {
+    "commit": null,
+    "source": null
+  },
+  "digest": "e5aaa500d9b9aa69b61b95683595ce54442f9d28c8ad0f3ac25b499f3644de9f",
+  "file_count": 159,
+  "functional_digest": "856dadd68651a9c393636c97bc9fe9aa51c44470f105148347c774f8fa69fc30",
+  "revision": {
+    "source": "installer_record",
+    "value": "2c615ffcc0c9ec16e323e8e72c7e6e0962897bca",
+    "verified": true
+  }
+}
