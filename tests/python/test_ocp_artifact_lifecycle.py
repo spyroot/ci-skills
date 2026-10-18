@@ -8,7 +8,7 @@ spyroot@gmail.com
 from __future__ import annotations
 
 from dataclasses import replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from conftest import import_script_module
@@ -32,8 +32,116 @@ KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 CALLBACKS = import_script_module("lib.python.core.abstract.callback")
 ISO = import_script_module("lib.python.core.kubernetes.ocp_iso")
 ISO_VERIFY = import_script_module("lib.python.core.kubernetes.ocp_iso_verify")
+ISO_BUILD = import_script_module("lib.python.core.kubernetes.ocp_iso_build")
 NATIVE = import_script_module("lib.python.core.kubernetes.ocp_native_input")
 COMMANDS = import_script_module("lib.python.core.runtime")
+BUILD_WORKFLOW = import_script_module("lib.python.core.kubernetes.ocp_build_workflow")
+ONBOARD = import_script_module("lib.python.core.kubernetes.ocp_onboard")
+POD_FILES = import_script_module("lib.python.core.kubernetes.pod_files")
+
+
+def test_native_failure_removes_exact_partial_output_and_report(
+    tmp_path: Path,
+) -> None:
+    """A known native failure cannot leave its partial ISO on shared storage."""
+    base, cluster = storage_state(tmp_path)
+    state = MODELS.OCPArtifactState()
+    state.kubernetes = cluster
+    state.pod = base.pod
+    state.run_scope = base.run_scope
+    private = tmp_path / "private"
+    private.mkdir()
+    state.kubeconfig_file = POD_FILES.write_pod_file(
+        state, PurePosixPath(private / "kubeconfig"), b"fixture kubeconfig"
+    )
+    state.pull_secret_file = POD_FILES.write_pod_file(
+        state, PurePosixPath(private / "pull-secret"), b"{}"
+    )
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    native = tools / "oc"
+    native.write_text(
+        "#!/bin/sh\n"
+        "while [ $# -gt 0 ]; do\n"
+        "  case $1 in\n"
+        "    --dir) directory=$2; shift 2 ;;\n"
+        "    --output-name) output=$2; shift 2 ;;\n"
+        "    *) shift ;;\n"
+        "  esac\n"
+        "done\n"
+        'printf partial > "$directory/$output"\n'
+        'printf native-report > "$directory/report.json"\n'
+        "exit 17\n",
+        encoding="utf-8",
+    )
+    native.chmod(0o700)
+    state.search_paths.append(str(tools))
+    output = tmp_path / "selected.iso"
+    report = tmp_path / "report.json"
+    neighbor = tmp_path / "caller-model-data"
+    neighbor.write_bytes(b"preserve shared data")
+    callback = ISO_BUILD.BuildNodeImage(
+        ISO.NodeImageAction(
+            NATIVE.NativeNodeInput.read(mac_address="02:00:00:00:00:01"),
+            str(output),
+        )
+    )
+    callback.bind(state)
+
+    with pytest.raises(KUBERNETES.KubernetesError, match="native_failed:exit=17"):
+        callback.run()
+
+    assert output.read_bytes() == b"partial"
+    assert report.read_bytes() == b"native-report"
+    callback.cleanup()
+
+    assert not output.exists()
+    assert not report.exists()
+    assert not Path(state.native_status_path).exists()
+    assert neighbor.read_bytes() == b"preserve shared data"
+
+
+def test_final_iso_receipt_preserves_successful_cleanup_hook_evidence(
+    tmp_path: Path,
+) -> None:
+    """The final report retains cleanup outcomes emitted by the real executor."""
+    base, cluster = storage_state(tmp_path)
+    state = MODELS.OCPArtifactState()
+    state.kubernetes = cluster
+    state.pod = base.pod
+    state.run_scope = base.run_scope
+    action = PODS.RemoveToolPodAction(state.run_scope.run_id)
+
+    class CleanupEvidence(KUBERNETES.K8SCallback):
+        """Supply distinct hook results without replacing executor or reporting."""
+
+        def run(self) -> dict[str, object]:
+            """Return an execution result distinct from cleanup evidence."""
+            return {"action": "VERIFIED", "verified": True}
+
+        def cleanup(self) -> dict[str, object]:
+            """Return an observed exact private-file cleanup result."""
+            return {
+                "action": "APPLIED",
+                "verified": True,
+                "completion_record_removed": True,
+            }
+
+    callback = CleanupEvidence(action)
+    BUILD_WORKFLOW.execute_callbacks(state, [callback])
+    invocation = ONBOARD.NodeInvocation(
+        ONBOARD.build_parser().parse_args(["remove", "--run-id", action.run_id])
+    )
+    invocation.state = state
+
+    receipt = invocation.report("PASS", ())
+
+    assert any(
+        item.get("callback") == "CleanupEvidence"
+        and item.get("hook") == "cleanup"
+        and item.get("completion_record_removed") is True
+        for item in receipt["records"]
+    )
 
 
 def invoke(

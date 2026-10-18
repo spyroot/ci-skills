@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Optional
 
 import pytest
 from conftest import import_script_module
+from test_artifact_storage import FilePodCluster
 from test_tool_pod import MemoryCluster
 
 CLI = import_script_module("lib.python.core.kubernetes.ocp_onboard")
@@ -24,6 +25,8 @@ INVOCATION = import_script_module("lib.python.core.kubernetes.ocp_invocation")
 DISCOVERY = import_script_module("lib.python.core.kubernetes.ocp_boot_image")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 PLAN = import_script_module("lib.python.core.report")
+BUILD_WORKFLOW = import_script_module("lib.python.core.kubernetes.ocp_build_workflow")
+RUNTIME = import_script_module("lib.python.core.runtime")
 
 
 if TYPE_CHECKING:
@@ -455,3 +458,212 @@ def test_unconfirmed_apply_never_constructs_mutating_callbacks(
     assert code == 2
     assert result["errors"][0]["reason"] == "confirm_plan_mismatch_rerun_plan"
     assert cluster.applied == cluster.deleted == cluster.executed == []
+
+
+class NativeLifecycleCluster(FilePodCluster, PlanningCluster):
+    """Use real Pod file operations with finite native transport responses."""
+
+    def __init__(self, mount: Path) -> None:
+        """Bind storage to the test directory and initialize native call evidence.
+
+        :param mount: Test-owned directory representing the caller's mounted volume.
+        """
+        super().__init__()
+        self.mount = mount
+        self.identity = "unit-user"
+        self.native_timeout = False
+        self.native_calls = 0
+        self.native_status_path = Path()
+        self.apply({"kind": "Namespace", "metadata": {"name": "consumer-storage"}})
+        self.apply(
+            {
+                "kind": "Secret",
+                "metadata": {"name": "pull-secret", "namespace": "openshift-config"},
+                "data": {".dockerconfigjson": "e30="},
+            }
+        )
+
+    def command(self, *argv: str) -> RUNTIME.CommandResult:
+        """Export a fixture inline credential at the existing native CLI boundary.
+
+        :param *argv: Exact flattened kubeconfig request.
+        :returns: A deterministic private kubeconfig without real credentials.
+        """
+        assert argv == (
+            "config",
+            "view",
+            "--raw",
+            "--minify",
+            "--flatten",
+            "-o",
+            "json",
+        )
+        return RUNTIME.CommandResult(
+            tuple(argv), 0, '{"users":[{"user":{"token":"fixture"}}]}', ""
+        )
+
+    def json(self, *argv: str, openshift: bool = False) -> dict[str, object]:
+        """Retain both native image discovery and real labeled object lookup.
+
+        :param *argv: Existing discovery or resource-list arguments.
+        :param openshift: Select the native OpenShift discovery transport.
+        :returns: Deterministic native response from the existing fixture helper.
+        """
+        if argv[0] == "get":
+            return MemoryCluster.json(self, *argv)
+        return PlanningCluster.json(self, *argv, openshift=openshift)
+
+    def pod_exec(
+        self,
+        namespace: str,
+        name: str,
+        container: str,
+        *argv: str,
+        input_data: Optional[bytes] = None,
+    ) -> RUNTIME.CommandResult:
+        """Replace the external cluster/native process and run installed file logic.
+
+        :param namespace: Exact fixture namespace selected by the command.
+        :param name: Exact prepared Pod name.
+        :param container: Selected prepared container.
+        :param *argv: Installed script operation and literal arguments.
+        :param input_data: Optional private stdin for file staging or removal.
+        :returns: Controlled native response or real installed filesystem result.
+        """
+        label = argv[3] if len(argv) > 3 else ""
+        if label == "artifact-storage" and argv[4] == "mount-info":
+            self.executed.append(argv)
+            return RUNTIME.CommandResult(
+                tuple(argv),
+                0,
+                json.dumps(
+                    {
+                        "filesystems": [
+                            {
+                                "target": str(self.mount),
+                                "fstype": "nfs4",
+                                "source": "fixture:/data",
+                            }
+                        ]
+                    }
+                ),
+                "",
+            )
+        if label == "pod-credential":
+            self.executed.append(argv)
+            output = (
+                '{"status":{"userInfo":{"username":"unit-user"}}}'
+                if "whoami" in argv
+                else ""
+            )
+            return RUNTIME.CommandResult(tuple(argv), 0, output, "")
+        if label == "ocp-node-image" and argv[4] == "run":
+            self.executed.append(argv)
+            self.native_calls += 1
+            Path(argv[5], argv[6]).write_bytes(b"fixture node ISO")
+            self.native_status_path = Path(argv[9])
+            if self.native_timeout:
+                return RUNTIME.CommandResult(
+                    tuple(argv), 124, "", "fixture transport timeout"
+                )
+            self.native_status_path.write_text('{"exit_code":0}', encoding="utf-8")
+            return RUNTIME.CommandResult(tuple(argv), 0, "", "")
+        if label == "ocp-node-image" and argv[4] == "inspect":
+            self.executed.append(argv)
+            return RUNTIME.CommandResult(
+                tuple(argv), 0, '{"ignition":{"version":"3.4.0"}}', ""
+            )
+        if label in ("artifact-storage", "pod-file", "ocp-node-image"):
+            return FilePodCluster.pod_exec(
+                self, namespace, name, container, *argv, input_data=input_data
+            )
+        assert input_data is None
+        return MemoryCluster.pod_exec(self, namespace, name, container, *argv)
+
+
+def lifecycle_inputs(
+    caller_inputs: CallerInputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> NativeLifecycleCluster:
+    """Select isolated paths while retaining the real build callback composition.
+
+    :param caller_inputs: Existing caller-file fixture and Kubernetes-only target.
+    :param tmp_path: Every in-Pod file operation remains under this test directory.
+    :param monkeypatch: Restore provider doubles and the temporary work root.
+    :returns: Cluster transport journal used by both command invocations.
+    """
+    selected = json.loads(caller_inputs.destination.read_text())
+    selected.update(mountPath=str(tmp_path), artifactPath=str(tmp_path / "node.iso"))
+    caller_inputs.destination.write_text(json.dumps(selected), encoding="utf-8")
+    monkeypatch.setattr(BUILD_WORKFLOW, "WORK_DIRECTORY", tmp_path / "work")
+    cluster = NativeLifecycleCluster(tmp_path)
+    bind_provider(monkeypatch, cluster)
+    return cluster
+
+
+def test_same_run_and_input_rebuild_reads_verified_iso_without_native_rerun(
+    caller_inputs: CallerInputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Repeating a successful build verifies the saved ISO and returns a no-op."""
+    cluster = lifecycle_inputs(caller_inputs, tmp_path, monkeypatch)
+    argv = caller_inputs.argv(
+        "--tool-pod-spec", str(caller_inputs.tools), "--run-id", "repeat-build"
+    )
+    code, planned = run_cli([*argv, "--live-plan"], capsys)
+    assert code == 0
+    applied = [*argv, "--apply", "--confirm-plan", planned["plan_digest"]]
+    first_code, first = run_cli(applied, capsys)
+    assert first_code == 0, first
+    assert cluster.native_calls == 1
+    expected = (tmp_path / "node.iso").read_bytes()
+    original = first["artifact"]
+
+    second_code, second = run_cli(applied, capsys)
+
+    assert second_code == 0, second
+    assert second["status"] == "PASS"
+    assert second["artifact"]["sha256"] == original["sha256"]
+    assert any(record.get("action") == "NO_OP" for record in second["records"])
+    assert cluster.native_calls == 1
+    assert (tmp_path / "node.iso").read_bytes() == expected
+
+
+def test_timed_out_native_run_is_removable_by_run_id_after_observed_completion(
+    caller_inputs: CallerInputs,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A transport timeout retains ownership until native failure is read back."""
+    cluster = lifecycle_inputs(caller_inputs, tmp_path, monkeypatch)
+    cluster.native_timeout = True
+    argv = caller_inputs.argv(
+        "--tool-pod-spec", str(caller_inputs.tools), "--run-id", "timed-native"
+    )
+    code, planned = run_cli([*argv, "--live-plan"], capsys)
+    assert code == 0
+    code, interrupted = run_cli(
+        [*argv, "--apply", "--confirm-plan", planned["plan_digest"]], capsys
+    )
+    assert code == 2
+    assert interrupted["native_completion_unknown"] is True
+    assert interrupted["cleanup"]["retained"]
+    assert cluster.native_calls == 1
+    cluster.native_status_path.write_text('{"exit_code":17}', encoding="utf-8")
+
+    remove = ["remove", "--run-id", "timed-native", "--json"]
+    planned_code, removal = run_cli([*remove, "--live-plan"], capsys)
+
+    assert planned_code == 0, removal
+    code, removed = run_cli(
+        [*remove, "--apply", "--confirm-plan", removal["plan_digest"]], capsys
+    )
+    assert code == 0, removed
+    assert removed["cleanup"]["status"] == "PASS"
+    assert cluster.native_calls == 1
+    assert not any(kind in ("pod", "configmap") for kind, _, _ in cluster.objects)
+    assert not (tmp_path / "node.iso").exists()

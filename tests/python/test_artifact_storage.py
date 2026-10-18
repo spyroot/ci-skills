@@ -12,6 +12,7 @@ import json
 import subprocess
 from dataclasses import replace
 from pathlib import Path
+from typing import Optional
 
 import pytest
 from conftest import SKILL_ROOT, import_script_module
@@ -37,30 +38,39 @@ class FilePodCluster(MemoryCluster):
         self.reported_size_delta = 0
 
     def pod_exec(
-        self, namespace: str, name: str, container: str, *argv: str
+        self,
+        namespace: str,
+        name: str,
+        container: str,
+        *argv: str,
+        input_data: Optional[bytes] = None,
     ) -> COMMANDS.CommandResult:
         """Replace only Kubernetes transport with a bounded local child.
 
         :param namespace: Exact fixture namespace.
         :param name: Fixture Pod name.
         :param container: Selected fixture container.
-        :param *argv: Installed storage script and literal file arguments.
+        :param *argv: Installed Pod script and literal file arguments.
+        :param input_data: Optional private bytes passed to the installed file script.
         :returns: Native result with optional malformed provider-size evidence.
         """
         assert ("pod", namespace, name) in self.objects
         assert container == "ci-skills-pod"
-        assert argv[3] == "artifact-storage"
         self.executed.append(argv)
         result = subprocess.run(
-            argv, capture_output=True, text=True, check=False, timeout=5
+            argv, input=input_data, capture_output=True, check=False, timeout=5
         )
-        stdout = result.stdout
-        if self.reported_size_delta and argv[4] == "verify" and not result.returncode:
+        stdout = result.stdout.decode("utf-8")
+        if (
+            self.reported_size_delta
+            and argv[3:5] == ("artifact-storage", "verify")
+            and not result.returncode
+        ):
             document = json.loads(stdout)
             document["size"] += self.reported_size_delta
             stdout = json.dumps(document)
         return COMMANDS.CommandResult(
-            tuple(argv), result.returncode, stdout, result.stderr
+            tuple(argv), result.returncode, stdout, result.stderr.decode("utf-8")
         )
 
 
