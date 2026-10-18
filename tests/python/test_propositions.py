@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 import yaml
 from conftest import (
     REPO_ROOT,
@@ -50,7 +51,6 @@ SECTION_VALIDATOR = Draft202012Validator(
 if TYPE_CHECKING:
     from types import ModuleType
 
-    import pytest
     from lib.python.core.json_types import JSONObject
 
 
@@ -393,6 +393,87 @@ def _choices(payload: JSONObject) -> dict[str, JSONObject]:
     choices = payload["choices"]
     assert len({item["id"] for item in choices}) == len(choices)
     return {item["id"]: item for item in choices}
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_stems"),
+    [
+        (
+            command,
+            (
+                "gitlab-runner-config",
+                "gitlab-runner-feature-flags",
+                "gitlab-runner-cache",
+                "gitlab-runner-operator",
+            ),
+        )
+        for command in ("gitlab_runner.py", "gitlab_job.py")
+    ]
+    + [
+        ("gitlab_milestone.py", ("gitlab-milestones",)),
+        ("gitlab_issue.py", ("gitlab-milestones",)),
+        ("gitlab_wiki.py", ("gitlab-wiki",)),
+    ]
+    + [
+        (command, ("harbor-authentication", "harbor-helm-oci"))
+        for command in ("toolbox.py", "harbor_push.py", "harbor_pull.py")
+    ],
+)
+def test_task_references_route_to_related_commands_and_read_installed_text(
+    command: str,
+    expected_stems: tuple[str, ...],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Resolve focused task references from their command without unrelated offers.
+
+    :param command: Installed command whose task references must be discoverable.
+    :param expected_stems: Exact reference files expected at this related-tool node.
+    :param capsys: Captures public parser output while following returned pointers.
+    :returns: None; assertions prove routing, exclusion and installed section reads.
+    """
+    references = {
+        "gitlab-runner-config": ("GitLab runner configuration", "Record fields"),
+        "gitlab-runner-feature-flags": (
+            "GitLab Runner feature flags",
+            "Selected keys",
+        ),
+        "gitlab-runner-cache": ("GitLab Runner cache tuning", "Keys"),
+        "gitlab-runner-operator": ("GitLab Runner Operator", "Properties"),
+        "gitlab-milestones": ("GitLab milestone dates", "Fields and dates"),
+        "gitlab-wiki": ("GitLab wiki content", "Fields and format"),
+        "harbor-authentication": ("Harbor authentication", "Select credentials"),
+        "harbor-helm-oci": ("Harbor Helm OCI", "Values"),
+    }
+    names = {name for name, _ in references.values()}
+    expected_names = {references[stem][0] for stem in expected_stems}
+    offered = CATALOG.proposition(command)["reference"]
+    assert set(offered) & names == expected_names
+    assert not names & set(CATALOG.proposition("prepare_tool_pod.py")["reference"])
+
+    node = _reference_cli(capsys, "next", command, "--json")
+    readable = _choices(_progressive_json(*node["path"], "read"))
+    slugs = {name.lower().replace(" ", "-") for name in names}
+    assert set(readable) & slugs == {
+        name.lower().replace(" ", "-") for name in expected_names
+    }
+    unrelated = _reference_cli(capsys, "next", "prepare_tool_pod.py", "read", "--json")
+    assert not slugs & set(_choices(unrelated))
+
+    for stem in expected_stems:
+        name, heading = references[stem]
+        pointer = f"references/{stem}.md"
+        assert offered[name]["pointer"] == pointer
+        assert offered[name]["summary"]
+        slug = name.lower().replace(" ", "-")
+        sections = _reference_cli(capsys, *readable[slug]["next"]["args"])
+        anchor = heading.lower().replace(" ", "-")
+        section = _reference_cli(capsys, *_choices(sections)[anchor]["next"]["args"])
+        assert section["reference"] == slug
+        assert section["anchor"] == anchor
+        source = (SCRIPT_ROOT.parent / pointer).read_text(encoding="utf-8")
+        start = source.index(f"## {heading}\n")
+        end = source.find("\n## ", start + 1)
+        assert section["text"] == source[start : end + 1 if end >= 0 else None]
 
 
 def _local_reference(
