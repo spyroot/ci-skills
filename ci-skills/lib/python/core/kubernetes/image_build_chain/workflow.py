@@ -20,7 +20,7 @@ from lib.python.core.gitlab.runner_manager import (
     workload_action,
 )
 from lib.python.core.harbor.registry_mirror import HarborAuth, HarborPush, PushAction
-from lib.python.core.kubernetes.kubernetes import DEFAULT_COMMAND_TIMEOUT, K8SAuth
+from lib.python.core.kubernetes.kubernetes import K8SAuth
 from lib.python.core.kubernetes.podman_callbacks import (
     ConfirmPodmanProbe,
     OpenProbeNamespace,
@@ -59,7 +59,7 @@ def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainS
     """  # noqa: DOC502 - callback constructors enforce their contracts.
     state = action.state
     callbacks: AbstractCallbacks[ImageBuildChainState, SkillAction] = [
-        K8SAuth(action.target, min(action.args.timeout, DEFAULT_COMMAND_TIMEOUT)),
+        K8SAuth(action.target, action.args.timeout),
         HarborAuth(
             action.target,
             action.toolbox.repository,
