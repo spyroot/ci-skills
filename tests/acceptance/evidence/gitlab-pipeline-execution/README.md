@@ -1,5 +1,28 @@
 # Installed pipeline execution proof
 
+## Latest exact candidate
+
+The `final-30ccd8e` directory records the installed candidate at source
+`30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58`, package checksum
+`b19198a7e05e618d470c090d31baac0511e4fc867e562be0fbbfd14991af03a8`, and
+functional checksum
+`33dd8b7910f6936f2b513408e92b6748781ea908179f35b33ea8c1014eb53bc4`.
+
+Pipeline 3922 ran the existing protected test ref at exact commit
+`a9cd22f5a66395f9514102356ba8dd3e3573af5e`. The confirmed start was APPLIED,
+the watch and final get observed success, all five jobs succeeded on existing
+runners 74 and 75, and the same confirmed plan returned NO_OP without creating
+a second pipeline. [Checksums](final-30ccd8e/sha256.txt) cover the six current
+evidence documents. The refreshed 24 ordinary receipts carry the same package
+and functional identities; their cleanup report records successful deletion
+and absence checks for disposable resources.
+
+This publication does not claim a current-candidate Podman or live-acceptance
+gate PASS. The standalone Podman run that would exercise the temporary SCC
+RoleBinding remains pending separately.
+
+## Historical pipeline captures
+
 Captured on 2026-10-18 after merging current main into the candidate, from a fresh installation of
 source `d8ab14b2d4d408975bc378ce871737bd014bbe44`.
 

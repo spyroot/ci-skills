@@ -1,0 +1,119 @@
+{
+  "captured_at": "2026-10-18T19:18:27.962171+00:00",
+  "cleanup": {
+    "status": "NOT_APPLICABLE"
+  },
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:29f247d18d3c",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_pipeline",
+  "mutated": false,
+  "operation": "start",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "APPLY",
+  "plan": {
+    "body_sha256": "e5704cbb515c93ac540f15b01bf43ad78ebc688402fdb223e8d53b84fa0542a9",
+    "confirmation_ready": true,
+    "fields": [
+      "expected_sha",
+      "protected_ref",
+      "ref",
+      "requested_ref",
+      "require_protected_ref",
+      "resolved_sha",
+      "run_id",
+      "variables"
+    ],
+    "one_time_sink_required": false,
+    "operation": "start",
+    "plan_digest": "dab971f91e8e66d22f53776b8123e61c1d6b6a720b6fed5a37518f7386f66495",
+    "project_ids": null,
+    "resource_id": null,
+    "target_kind": "project",
+    "target_reference": "hott/test"
+  },
+  "plan_digest": "dab971f91e8e66d22f53776b8123e61c1d6b6a720b6fed5a37518f7386f66495",
+  "readback": {
+    "action": "NO_OP",
+    "after": {
+      "id": 3922,
+      "project_id": 123,
+      "ref": "neroshige/ci-skills-job-list-smoke-20261007",
+      "sha": "a9cd22f5a66395f9514102356ba8dd3e3573af5e",
+      "status": "success"
+    },
+    "cleanup": {
+      "status": "NOT_APPLICABLE"
+    },
+    "errors": [],
+    "id": 3922,
+    "mutated": false,
+    "ref": "neroshige/ci-skills-job-list-smoke-20261007",
+    "sha": "a9cd22f5a66395f9514102356ba8dd3e3573af5e",
+    "status": "success",
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "NO_OP",
+      "after": {
+        "id": 3922,
+        "project_id": 123,
+        "ref": "neroshige/ci-skills-job-list-smoke-20261007",
+        "sha": "a9cd22f5a66395f9514102356ba8dd3e3573af5e",
+        "status": "success"
+      },
+      "cleanup": {
+        "status": "NOT_APPLICABLE"
+      },
+      "errors": [],
+      "id": 3922,
+      "mutated": false,
+      "ref": "neroshige/ci-skills-job-list-smoke-20261007",
+      "sha": "a9cd22f5a66395f9514102356ba8dd3e3573af5e",
+      "status": "success",
+      "verified": true
+    }
+  ],
+  "result_action": "NO_OP",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "b19198a7e05e618d470c090d31baac0511e4fc867e562be0fbbfd14991af03a8",
+    "file_count": 219,
+    "functional_digest": "33dd8b7910f6936f2b513408e92b6748781ea908179f35b33ea8c1014eb53bc4",
+    "revision": {
+      "source": "installer_record",
+      "value": "30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": {
+    "kind": "project",
+    "reference": "hott/test"
+  },
+  "target_file": "path:37eaf6f0e828",
+  "target_source": "project;argv:--project",
+  "tested_revision": "30ccd8e19f8674c0e8cab2d6bcd79f0ef59b1d58",
+  "verified_target": {
+    "full_path": "hott/test",
+    "id": 123,
+    "kind": "project",
+    "web_url": "https://gitlab.dcloud.run/hott/test"
+  }
+}
