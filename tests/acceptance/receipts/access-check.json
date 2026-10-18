@@ -118,7 +118,7 @@
       ],
       "reason": null,
       "status": "PASS",
-      "target": "target:6ea8b0928772"
+      "target": "github.com/spyroot/test_project_creation_linux"
     },
     "gitlab": {
       "credential_source": "file:path:29f247d18d3c",
@@ -169,7 +169,7 @@
       ],
       "reason": null,
       "status": "PASS",
-      "target": "target:ca7fae9b57af"
+      "target": "context:611e49b22818 -> server:6076e1dcf760"
     }
   },
   "target_file": "path:8617612df58d",
@@ -177,7 +177,7 @@
   "target_source": "project",
   "targets": {
     "github": "github.com/spyroot/test_project_creation_linux",
-    "gitlab": "https://gitlab.dcloud.run",
+    "gitlab": "target:d299ffb36355",
     "kubernetes": {
       "context": "context:611e49b22818",
       "server": "server:6076e1dcf760"

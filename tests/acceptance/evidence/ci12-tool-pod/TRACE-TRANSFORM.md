@@ -13,7 +13,9 @@ It tokenizes kubeconfig paths, operator-local absolute paths, and private
 Kubernetes context, server, combined target and access identity selectors. The
 same path-token algorithm removes local report paths from acceptance receipts.
 Tokens contain the first twelve hexadecimal characters of the original value's
-SHA-256 digest.
+SHA-256 digest. Structured access targets preserve their composition, and
+duplicate identity values receive the same token, so equality remains testable
+after publication.
 
 The installed proposition and help outputs contain only public catalogue values,
 so they are copied without a selector transform. The prepare receipt and trace
