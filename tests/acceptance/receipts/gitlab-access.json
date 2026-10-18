@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-18T03:35:14.265617+00:00",
+  "captured_at": "2026-10-18T11:39:22.700046+00:00",
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
@@ -22,12 +22,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "33c82b7da68ad46124877127d01e62b4a1e0b03fdd6a47ff95fc682566ed5547",
-    "file_count": 164,
-    "functional_digest": "e5523516780793f388c33e81cde0747b44571f6f380339a01a04be4bfde5bf9b",
+    "digest": "ca60a9cf729239fe161121f72d094b2bf1f4b9f075507bc03fe9fa2daa944972",
+    "file_count": 196,
+    "functional_digest": "87f13c4f55a8e965c3e719e8a5b0e7a11b498082cfec1442e3b79d2fe12d240a",
     "revision": {
       "source": "installer_record",
-      "value": "0017df813f5ef0beacc581745c3a16590bfb4229",
+      "value": "48c4489afdf339d016cdc713affa5c1acdc9405b",
       "verified": true
     }
   },

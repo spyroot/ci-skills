@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/artifact-destination.schema.json",
+  "title": "Caller-selected in-cluster artifact destination",
+  "description": "The ci-skills storage wrapper. Native Kubernetes volumeSource fields pass unchanged to Kubernetes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "namespace",
+    "volumeSource",
+    "mountPath",
+    "artifactPath",
+    "buildOutput"
+  ],
+  "properties": {
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Existing namespace in which the tool Pod accesses the selected volume."
+    },
+    "volumeSource": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Unchanged native Kubernetes VolumeSource, such as persistentVolumeClaim, nfs or emptyDir."
+    },
+    "mountPath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute mount point inside the Pod."
+    },
+    "artifactPath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Exact absolute final artifact filename below mountPath; never a laptop path."
+    },
+    "buildOutput": {
+      "enum": [
+        "destination",
+        "scratch"
+      ],
+      "description": "Produce directly at artifactPath, or on owned scratch then copy and verify artifactPath."
+    }
+  }
+}

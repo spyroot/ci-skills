@@ -1,0 +1,103 @@
+Summary:
+  Build an OpenShift node ISO in-cluster and verify its delivery to selected
+  storage.
+
+Description:
+  Build requires --destination and exactly one of --mac-address or --spec.
+  The caller selects real NIC/network/disk values; ci-skills passes native
+  YAML unchanged to OpenShift and returns native errors. Tools are prepared
+  inside the Pod through CI12.0. The destination wrapper selects storage and
+  an exact final path; it does not define an OCP schema. Native input and
+  destination examples: references/ocp-node-image.md.
+
+Examples:
+  Plan a MAC-based build at the selected cluster destination:
+  ocp_node_onboard.py build --mac-address 02:00:00:10:00:01 --destination
+  destination.json --live-plan --json
+
+  Plan a build from the caller's unchanged native YAML: ocp_node_onboard.py
+  build --spec nodes-config.yaml --destination destination.json --live-plan
+  --json
+
+  Build from the same inputs after inspecting the plan: ocp_node_onboard.py
+  build --spec nodes-config.yaml --destination destination.json --apply
+  --confirm-plan DIGEST --json
+
+  Inspect a previous run's cluster-held artifact: ocp_node_onboard.py verify
+  --run-id RUN_ID --json
+
+  Plan removal while preserving persistent output: ocp_node_onboard.py
+  remove --run-id RUN_ID --live-plan --json
+
+Options:
+  -h, --help            show this help message and exit
+  --binding PATH        project-declared target and ordered kubeconfig source
+                        resolver
+  --json                versioned JSON document
+  --yaml                versioned YAML document
+  --human               human summary even when stdout is not a terminal
+  --describe            this command's machine-readable contract, then exit
+  --dry-run             list planned probes without contacting any API; never
+                        access evidence
+  --revision SHA        exact source commit of the installed copy, recorded as
+                        a claim
+  --log-format {text,json}
+                        diagnostic log format: text or JSON Lines (default:
+                        text)
+  --log-level {debug,info,warning,error}
+                        minimum diagnostic level: debug, info, warning, or
+                        error
+  --log-file PATH       also append sanitized diagnostics to this exact path
+  --run-id ID           returned run identifier for verification/removal, also
+                        used in logs
+  --output-dir PATH     write paired JSON and text reports to this explicit
+                        path
+  {build,verify,remove}
+  --spec FILE           native nodes-config.yaml passed unchanged; alternative
+                        to --mac-address
+  --mac-address MAC     joining host's actual NIC MAC; alternative to --spec
+  --network-config-path FILE
+                        native network YAML used with the MAC route, passed
+                        unchanged
+  --destination FILE    five-field cluster storage JSON; schemas/artifact-
+                        destination.schema.json
+  --tool-pod-spec FILE  optional CI12.0 tool override; schemas/tool-
+                        pod.schema.json
+  --pull-secret-namespace PULL_SECRET_NAMESPACE
+                        existing registry Secret namespace; default openshift-
+                        config
+  --pull-secret-name PULL_SECRET_NAME
+                        existing registry Secret name; default pull-secret
+  --pull-secret-key PULL_SECRET_KEY
+                        existing registry Secret data key; default
+                        .dockerconfigjson
+  --timeout TIMEOUT     positive operation timeout in seconds (default: 1800)
+  --live-plan           resolve live prerequisites and produce the
+                        confirmation digest
+  --apply               perform the exact confirmed build or removal
+  --confirm-plan SHA256
+                        plan digest binding target, native inputs, storage,
+                        tools and functional code
+  --receipt-out PATH    write the sanitized result to this exact path
+
+Output modes:
+  json: versioned JSON document
+
+  yaml: versioned YAML document
+
+  human: human summary even when stdout is not a terminal
+
+Usage:
+  usage: ocp_node_onboard.py [-h] [--binding PATH] [--json | --yaml |
+  --human] [--describe] [--dry-run] [--revision SHA] [--log-format
+  {text,json}] [--log-level {debug,info,warning,error}] [--log-file PATH]
+  [--run-id ID] [--output-dir PATH] [--spec FILE | --mac-address MAC]
+  [--network-config-path FILE] [--destination FILE] [--tool-pod-spec FILE]
+  [--pull-secret-namespace PULL_SECRET_NAMESPACE] [--pull-secret-name
+  PULL_SECRET_NAME] [--pull-secret-key PULL_SECRET_KEY] [--timeout TIMEOUT]
+  [--live-plan] [--apply] [--confirm-plan SHA256] [--receipt-out PATH]
+  [{build,verify,remove}]
+
+  Exit 0: PASS, DRY_RUN, or a live read-only PLANNED result.
+
+  Exit 2: BLOCKED or PARTIAL, or an input that could not be used.
