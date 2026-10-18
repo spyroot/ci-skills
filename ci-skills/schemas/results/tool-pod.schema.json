@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/spyroot/ci-skills/ci-skills/schemas/results/tool-pod.schema.json",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/tool-pod.schema.json",
   "title": "Tool Pod preparation and removal result",
   "type": "object",
   "additionalProperties": false,
