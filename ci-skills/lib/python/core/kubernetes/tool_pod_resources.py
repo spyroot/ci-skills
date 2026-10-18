@@ -7,7 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Final, Protocol
 
 from lib.python.core.json_types import JSONObject, copy_json_object
@@ -80,12 +80,18 @@ class ToolPodResourceSpec(Protocol):
         :type: Sequence[ToolPodMountSpec]
 
         Ordered native mounts selected by the internal consumer.
+
+    .. attribute :: node_selector
+        :type: Mapping[str, str]
+
+        Native Pod placement labels selected by the internal consumer.
     """
 
     image: str
     fingerprint: str
     fingerprint_label: str
     mounts: Sequence[ToolPodMountSpec]
+    node_selector: Mapping[str, str]
 
 
 def tool_pod_script_configmap(scope: RunScope) -> JSONObject:
@@ -138,6 +144,24 @@ def tool_pod_document(scope: RunScope, spec: ToolPodResourceSpec) -> JSONObject:
             for mount in spec.mounts
         ),
     ]
+    pod_spec: JSONObject = {
+        "automountServiceAccountToken": False,
+        "restartPolicy": "Never",
+        "containers": [
+            {
+                "name": TOOL_POD_CONTAINER,
+                "image": spec.image,
+                "command": [
+                    "/bin/sh",
+                    f"{TOOL_POD_SCRIPT_MOUNT}/{TOOL_POD_SCRIPT_NAME}",
+                ],
+                "volumeMounts": volume_mounts,
+            }
+        ],
+        "volumes": volumes,
+    }
+    if spec.node_selector:
+        pod_spec["nodeSelector"] = dict(spec.node_selector)
     return {
         "apiVersion": "v1",
         "kind": "Pod",
@@ -150,20 +174,5 @@ def tool_pod_document(scope: RunScope, spec: ToolPodResourceSpec) -> JSONObject:
             },
             "annotations": {SPEC_FINGERPRINT_ANNOTATION: spec.fingerprint},
         },
-        "spec": {
-            "automountServiceAccountToken": False,
-            "restartPolicy": "Never",
-            "containers": [
-                {
-                    "name": TOOL_POD_CONTAINER,
-                    "image": spec.image,
-                    "command": [
-                        "/bin/sh",
-                        f"{TOOL_POD_SCRIPT_MOUNT}/{TOOL_POD_SCRIPT_NAME}",
-                    ],
-                    "volumeMounts": volume_mounts,
-                }
-            ],
-            "volumes": volumes,
-        },
+        "spec": pod_spec,
     }

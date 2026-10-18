@@ -1147,6 +1147,84 @@
       "subcommands": {},
       "use_when": "An OpenShift Ceph or Cilium symptom may involve physical NIC MTUs; plan the selected nodes, then run the exact confirmed plan."
     },
+    "ocp_node_onboard.py": {
+      "capabilities": [],
+      "execution_surface": "installed skill controls tools and ISO generation inside the selected Kubernetes cluster",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--destination",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--live-plan",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--mac-address",
+        "--network-config-path",
+        "--output-dir",
+        "--pull-secret-key",
+        "--pull-secret-name",
+        "--pull-secret-namespace",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--spec",
+        "--timeout",
+        "--tool-pod-spec",
+        "--yaml"
+      ],
+      "purpose": "Build an OpenShift node ISO in-cluster and verify its delivery to selected storage.",
+      "read_only": false,
+      "report_kind": "ocp_node_onboard",
+      "required_options": [],
+      "required_tools": [
+        "kubectl",
+        "oc",
+        "curl (default tool discovery)"
+      ],
+      "requires_authorities": [
+        "kubernetes"
+      ],
+      "returns": "Shared workflow report with native completion, callback observations, final cluster artifact identity/lifetime, plan, provenance and cleanup evidence.",
+      "side_effects": "Build/remove use plan confirmation. Native oc creates its temporary workload and RBAC; the wrapper grants no additional cluster rights. ISO bytes stay in the cluster.",
+      "subcommands": {
+        "build": {
+          "mutates": true,
+          "purpose": "Build from either a MAC or native YAML and verify the exact cluster destination.",
+          "read_back": "Native completion, embedded Ignition, actual ISO size/SHA-256 and destination.",
+          "required_options": [
+            "--destination"
+          ],
+          "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+          "side_effects": "Confirmed build stages a tool Pod and native OpenShift temporary resources, writes the requested ISO, and retains its run record; temporary final storage retains its Pod."
+        },
+        "remove": {
+          "mutates": true,
+          "purpose": "Remove owned run resources while preserving persistent destination storage and ISO.",
+          "read_back": "Owned resource absence and, for persistent output, unchanged ISO before and after removal.",
+          "required_options": [
+            "--run-id"
+          ],
+          "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+          "side_effects": "Confirmed removal deletes only run-owned resources; temporary output ends with its Pod. Persistent ISO and caller storage remain."
+        },
+        "verify": {
+          "mutates": true,
+          "purpose": "Read and inspect the existing cluster-held ISO identified by its run.",
+          "read_back": "Exact stored artifact identity, size/SHA-256 and embedded Ignition.",
+          "required_options": [
+            "--run-id"
+          ],
+          "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+          "side_effects": "Persistent storage can require a temporary reader Pod, cleaned after inspection."
+        }
+      },
+      "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; inspect or release a previous run. See references/ocp-node-image.md."
+    },
     "prepare_tool_pod.py": {
       "capabilities": [],
       "execution_surface": "installed skill controls a Pod in the selected Kubernetes cluster",
@@ -1372,6 +1450,7 @@
     "a volume or claim is stuck": "storage_report.py",
     "browse tools and references": "reference.py",
     "build or delete a toolbox": "toolbox.py",
+    "build or inspect a cluster-held OpenShift node ISO": "ocp_node_onboard.py",
     "check GitLab pipeline progress": "gitlab_pipeline.py",
     "connectivity or CNI health": "cilium_status.py",
     "create or change a GitLab milestone": "gitlab_milestone.py",

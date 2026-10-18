@@ -1,0 +1,2 @@
+pod "ci-skills-pr85-iso-cleanup-48c4489a" deleted from namespace:b115cbf8fccd namespace
+configmap "ci-skills-pr85-iso-cleanup-48c4489a-script" deleted from namespace:b115cbf8fccd namespace

@@ -129,7 +129,13 @@ class SelectResolvedManagerScope(K8SCallback[ManagerWorkloadAction]):
 
 
 class ScopedRunnerCallback(K8SCallback[ManagerWorkloadAction]):
-    """Bind one shared runner callback after the run scope is concrete."""
+    """Bind one shared runner callback after the run scope is concrete.
+
+    .. attribute :: child_type
+        :type: ClassVar[type[K8SCallback[RunnerAction]]]
+
+        Shared runner callback selected by the concrete operation.
+    """
 
     child_type: ClassVar[type[K8SCallback[RunnerAction]]]
 
@@ -179,19 +185,34 @@ class ScopedRunnerCallback(K8SCallback[ManagerWorkloadAction]):
 
 
 class PullManagerImage(ScopedRunnerCallback):
-    """Verify the immutable toolbox image through shared pull/read-back."""
+    """Verify the immutable toolbox image through shared pull/read-back.
+
+    .. attribute :: child_type
+
+        Shared PullImage callback used after scope resolution.
+    """
 
     child_type = PullImage
 
 
 class DeployManagerRunner(ScopedRunnerCallback):
-    """Deploy the exact-node privileged manager through shared runner logic."""
+    """Deploy the exact-node privileged manager through shared runner logic.
+
+    .. attribute :: child_type
+
+        Shared DeployRunner callback used after scope resolution.
+    """
 
     child_type = DeployRunner
 
 
 class DeleteManagerRunner(ScopedRunnerCallback):
-    """Delete only the resolved manager Deployment and private Secrets."""
+    """Delete only the resolved manager Deployment and private Secrets.
+
+    .. attribute :: child_type
+
+        Shared DeleteRunner callback used after scope resolution.
+    """
 
     child_type = DeleteRunner
 

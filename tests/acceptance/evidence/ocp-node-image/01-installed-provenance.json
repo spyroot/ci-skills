@@ -1,0 +1,26 @@
+{
+  "action": "install",
+  "agent": {
+    "destination": "path:aeed0eaee81c",
+    "host": "ready",
+    "skills": {
+      "glab-stack": "installed"
+    }
+  },
+  "algorithm": "sha256-tree-v1",
+  "destination": "path:c4c977effecf",
+  "digest": "dbaf02d4a9ab24fb4ee5980c66f42425fd84a4f5c1e4c7e6f73735c4942d5b6b",
+  "file_count": 196,
+  "fingerprint": "0946305f88fca21cbe102c5072a4fcb97b8541a0205dee480b8b7a01793885a7",
+  "kind": "skill_install",
+  "mutable_link": false,
+  "revision": {
+    "source": "git_head",
+    "value": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
+    "verified": true
+  },
+  "schema_version": "1.0",
+  "source": "path:cd6c4e2e9589",
+  "source_revision": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
+  "status": "PASS"
+}

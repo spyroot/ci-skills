@@ -1,0 +1,26 @@
+{
+  "configured_timeout_seconds": 1800,
+  "diagnosis": null,
+  "kind": "runtime_observation",
+  "operation": "ocp_node_onboard remove",
+  "outcome": {
+    "error_count": 0,
+    "record_count": 36,
+    "status": "PASS"
+  },
+  "plan_captured_at": "2026-10-18T04:28:13.787292+00:00",
+  "plan_to_receipt_elapsed_seconds": 379.061641,
+  "process_snapshot": {
+    "artifact_records_present_at_snapshot": true,
+    "observed_elapsed_at_least_seconds": 325,
+    "provider_child_process_observed": false,
+    "python_process_active": true,
+    "run_owned_pod_observed": false
+  },
+  "receipt_captured_at": "2026-10-18T04:34:32.848933+00:00",
+  "run_id": "ci12-final-mac-bf69d6d5-20261018",
+  "schema_version": "1.0",
+  "single_apply_invocation": true,
+  "status": "OBSERVED",
+  "warning": "Plan-to-receipt elapsed time is an upper bound including dispatch; the internal wait location was not diagnosed."
+}

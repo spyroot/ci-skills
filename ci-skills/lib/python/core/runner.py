@@ -100,6 +100,16 @@ class RunnerAction(SkillAction):
         :type: int
 
         Positive maximum seconds for readiness and temporary Jobs.
+
+    .. attribute :: ownership_id
+        :type: Optional[str]
+
+        Explicit run ownership identity; the workload name is the fallback.
+
+    .. attribute :: podman
+        :type: Optional[PodmanRuntimeSettings]
+
+        Podman runtime settings for consumers that require them.
     """
 
     namespace: str

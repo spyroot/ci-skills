@@ -75,6 +75,31 @@ class GitLabManagerAuthAction(ProviderAuthAction):
     :param target_reference: Project or group path or numeric ID.
     :param target_source: Reportable source for the selected target.
     :param revision: Optional installed source revision override.
+
+    .. attribute :: operation_target
+        :type: GitLabOperationTarget
+
+        GitLab-only view of the selected runtime target.
+
+    .. attribute :: target_kind
+        :type: str
+
+        Project or group selector used for authentication.
+
+    .. attribute :: target_reference
+        :type: str
+
+        Selected project or group path or numeric ID.
+
+    .. attribute :: target_source
+        :type: str
+
+        Reportable origin of the selected target.
+
+    .. attribute :: revision
+        :type: Optional[str]
+
+        Explicit source revision override, when supplied.
     """
 
     operation_target: GitLabOperationTarget
@@ -261,7 +286,7 @@ class ObserveGitLabRunner(GitLabRunnerManagerCallback):
         :raises ActionError: Runner identity, scope, tags, or ownership differs.
         :raises GitLabAPIError: Exact runner or membership reads fail.
         :raises KubernetesError: Online manager ownership cannot be read.
-        """  # noqa: DOC503 - Provider readers propagate typed failures.
+        """  # noqa: DOC502,DOC503 - Provider readers propagate typed failures.
         workflow, service = self.workflow, self.gitlab
         expected_tags = workflow.labels or None
         record = read_runner_record(
@@ -487,7 +512,7 @@ class VerifyGitLabRunnerPreserved(GitLabRunnerManagerCallback):
         :returns: Preserved runner identity and current provider status.
         :raises ActionError: Runner identity, scope, or tags changed.
         :raises GitLabAPIError: Exact runner or membership reads fail.
-        """  # noqa: DOC503 - The shared provider reader propagates GitLabAPIError.
+        """  # noqa: DOC502,DOC503 - The shared reader propagates typed failures.
         workflow, service = self.workflow, self.gitlab
         record = read_runner_record(
             service.api,

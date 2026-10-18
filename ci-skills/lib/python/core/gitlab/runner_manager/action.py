@@ -70,6 +70,21 @@ class GitLabRunnerManagerState(RunScopeState):
 
     Authentication assigns the private session and service. Scope callbacks
     assign the concrete namespace before workload callbacks derive a runner action.
+
+    .. attribute :: configured_session
+        :type: BoundGitLabSession
+
+        Authenticated session populated by the GitLab callback.
+
+    .. attribute :: gitlab
+        :type: GitLabService
+
+        GitLab API service populated by authentication.
+
+    .. attribute :: gitlab_runner
+        :type: RunnerRecord
+
+        Exact runner record retained by the observation callback.
     """
 
     configured_session: BoundGitLabSession = field(init=False, repr=False)
@@ -82,6 +97,11 @@ class ManagerWorkloadAction(SkillAction):
     """Select the exact long-lived manager workload from a resolved run scope.
 
     :param workflow: Prepared command inputs shared by all manager callbacks.
+
+    .. attribute :: workflow
+        :type: GitLabRunnerManagerAction
+
+        Prepared command inputs shared by manager callbacks.
     """
 
     workflow: GitLabRunnerManagerAction
@@ -156,6 +176,26 @@ class GitLabRunnerManagerAction(WorkflowAction):
 
     :param args: Catalogue-backed command arguments.
     :param context: Shared provider and run-scope state.
+
+    .. attribute :: context
+        :type: GitLabRunnerManagerState
+
+        Shared provider and run-scope state for this invocation.
+
+    .. attribute :: runner_token
+        :type: RunnerTokenSelection
+
+        Absent, deferred, or privately bound registration token.
+
+    .. attribute :: candidate_scope
+        :type: Optional[RunScope]
+
+        Scope prepared for an explicit deploy run ID, otherwise absent.
+
+    .. attribute :: podman_runtime
+        :type: Optional[PodmanRuntimeSettings]
+
+        Exact deploy settings; deletion has no Podman runtime input.
     """
 
     context: GitLabRunnerManagerState = field(default_factory=GitLabRunnerManagerState)

@@ -119,6 +119,13 @@ jobs:
             ci-skills/lib/python/core/action_modes.py \
             ci-skills/lib/python/core/runner.py \
             ci-skills/lib/python/core/kubernetes/tool_pod*.py \
+            ci-skills/lib/python/core/kubernetes/artifact_storage*.py \
+            ci-skills/lib/python/core/kubernetes/pod_credential*.py \
+            ci-skills/lib/python/core/kubernetes/pod_files.py \
+            ci-skills/lib/python/core/kubernetes/ocp_*.py \
+            ci-skills/lib/python/core/kubernetes/workflow_report.py \
+            ci-skills/lib/python/core/runtime_streams.py \
+            ci-skills/bin/ocp_node_onboard.py \
             ci-skills/lib/python/core/kubernetes/run_scope.py \
             ci-skills/lib/python/core/kubernetes/runner.py \
             ci-skills/lib/python/core/kubernetes/script_resources.py \
@@ -161,6 +168,8 @@ jobs:
             schemas/ci-result.schema.json \
             ci-skills/schemas/tool-pod.schema.json \
             ci-skills/schemas/results/tool-pod.schema.json \
+            ci-skills/schemas/artifact-destination.schema.json \
+            ci-skills/schemas/results/ocp-node-onboard.schema.json \
             schemas/smoke-result.schema.json \
             schemas/live-acceptance-policy.schema.json \
             ci-skills/schemas/results/gitlab-action.schema.json \

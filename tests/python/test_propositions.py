@@ -212,6 +212,25 @@ def test_podman_proposition_offers_installed_readiness_procedure() -> None:
     assert "create_selfhosted_runner.py" not in selected["tools"]
 
 
+def test_iso_proposition_offers_native_input_and_destination_guidance() -> None:
+    """Offer this installed procedure within the immediate proposition node.
+
+    :returns: None; assertions check task references and node-local discovery.
+    """
+    selected = CATALOG.proposition("ocp_node_onboard.py")
+    expected = {
+        "summary": "Native OCP YAML, cluster destination and ISO lifecycle examples.",
+        "pointer": "references/ocp-node-image.md",
+    }
+
+    assert selected["reference"]["OpenShift node image"] == expected
+    cluster = CATALOG.proposition()["kubernetes"]
+    assert cluster["reference"]["OpenShift node image"] == expected
+    assert "toolbox.py" not in selected["tools"]
+    unrelated = CATALOG.proposition("gitlab_runner.py")
+    assert "OpenShift node image" not in unrelated["reference"]
+
+
 def test_reference_cli_expands_nodes_without_fetching_optional_references(
     fake_bin: Path, call_journal: Path, tmp_path: Path
 ) -> None:

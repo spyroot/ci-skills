@@ -33,6 +33,11 @@ class DeferredRunnerToken:
     """Retain a selected token path without reading it in offline mode.
 
     :param path: Explicit file whose private contents a live plan binds.
+
+    .. attribute :: path
+        :type: Path
+
+        Selected token file, unread in offline mode.
     """
 
     path: Path
@@ -52,6 +57,21 @@ class BoundRunnerToken:
     :param path: Explicit caller-selected token file.
     :param digest: SHA-256 identity used to bind plan and apply.
     :param value: Registration token kept out of representations and comparisons.
+
+    .. attribute :: path
+        :type: Path
+
+        Caller-selected token file consumed by the shared reader.
+
+    .. attribute :: digest
+        :type: str
+
+        SHA-256 identity binding plan and apply to the same token.
+
+    .. attribute :: value
+        :type: str
+
+        Private registration token excluded from representations.
     """
 
     path: Path
@@ -95,7 +115,7 @@ def read_runner_token(path: Path) -> BoundRunnerToken:
     :param path: Caller-selected registration-token file.
     :returns: Private token plus a confirmation-safe SHA-256 identity.
     :raises TargetError: The shared reader rejects the selected token file.
-    """  # noqa: DOC503 - Shared token validation raises TargetError.
+    """  # noqa: DOC502,DOC503 - Shared token validation raises TargetError.
     value = read_token_file(path)
     digest = "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
     return BoundRunnerToken(path, digest, value)

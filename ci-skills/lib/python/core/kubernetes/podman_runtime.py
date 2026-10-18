@@ -50,7 +50,33 @@ def _quantity(value: str, field_name: str) -> Decimal:
 
 @dataclass(frozen=True)
 class PodmanResources:
-    """Bound requests, limits, and Podman storage size for one workload."""
+    """Bound requests, limits, and Podman storage size for one workload.
+
+    .. attribute :: cpu_request
+        :type: str
+
+        Requested CPU quantity for the Podman container.
+
+    .. attribute :: cpu_limit
+        :type: str
+
+        Maximum CPU quantity for the Podman container.
+
+    .. attribute :: memory_request
+        :type: str
+
+        Requested memory quantity for the Podman container.
+
+    .. attribute :: memory_limit
+        :type: str
+
+        Maximum memory quantity for the Podman container.
+
+    .. attribute :: storage_size
+        :type: str
+
+        Size limit for the Podman graph-root emptyDir volume.
+    """
 
     cpu_request: str = DEFAULT_CPU_REQUEST
     cpu_limit: str = DEFAULT_CPU_LIMIT
@@ -90,7 +116,23 @@ class PodmanResources:
 
 @dataclass(frozen=True)
 class PodmanRuntimeSettings:
-    """Select one exact node, account, resource set, and Podman storage layout."""
+    """Select one exact node, account, resource set, and Podman storage layout.
+
+    .. attribute :: node_name
+        :type: str
+
+        Exact Kubernetes node selected by the caller.
+
+    .. attribute :: service_account
+        :type: str
+
+        ServiceAccount used by the workload Pod.
+
+    .. attribute :: resources
+        :type: PodmanResources
+
+        Validated requests, limits, and graph-root storage size.
+    """
 
     node_name: str
     service_account: str = DEFAULT_SERVICE_ACCOUNT

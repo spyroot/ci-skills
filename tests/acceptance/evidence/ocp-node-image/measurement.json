@@ -1,0 +1,85 @@
+{
+  "absolute_deltas": null,
+  "baseline_ref": null,
+  "baseline_values": null,
+  "blocking_reasons": [],
+  "candidate_ref": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
+  "candidate_values": {
+    "build_node_image_median_seconds": 71.5851675
+  },
+  "environment": {
+    "artifact_size_bytes": 1379328000,
+    "functional_digest": "8dde2e6f7389ab60a1cf978d7ead63366e6b045cb422b2a7f82705f209084ff1",
+    "namespace": "namespace:b115cbf8fccd",
+    "provider": "OpenShift",
+    "storage_class": "ocs-storagecluster-ceph-nfs"
+  },
+  "evidence_sources": [
+    "path:a00100dd1362",
+    "path:468d07b2eedd",
+    "path:bb36a945e74b"
+  ],
+  "measurement_name": "ci12_native_iso_live_callbacks",
+  "metrics": {
+    "build_node_image": {
+      "median": 71.5851675,
+      "p95": null,
+      "samples": [
+        {
+          "route": "yaml",
+          "value": 68.905733
+        },
+        {
+          "route": "mac",
+          "value": 74.264602
+        }
+      ],
+      "unit": "seconds"
+    },
+    "cleanup_reclaimed": {
+      "unit": "bytes",
+      "value": 5517312000
+    },
+    "verify_node_image": {
+      "samples": [
+        {
+          "route": "yaml",
+          "value": 11.885402
+        },
+        {
+          "route": "mac",
+          "value": 18.949895
+        }
+      ],
+      "unit": "seconds"
+    },
+    "verify_stored_artifact": {
+      "samples": [
+        {
+          "route": "yaml",
+          "value": 6.066692
+        },
+        {
+          "route": "mac",
+          "value": 4.798347
+        }
+      ],
+      "unit": "seconds"
+    },
+    "yaml_copy_artifact": {
+      "unit": "seconds",
+      "value": 13.597561
+    }
+  },
+  "percentage_deltas": null,
+  "sample_count": 2,
+  "schema_version": "1.0",
+  "source_commit": "bf69d6d52e8cc04cafd0d0a24d640762e73fb3df",
+  "status": "PASS",
+  "thresholds": {},
+  "warmup_count": 0,
+  "warnings": [
+    "Capability validation only; no baseline or optimization claim.",
+    "Two samples are insufficient for a p95 estimate."
+  ]
+}
