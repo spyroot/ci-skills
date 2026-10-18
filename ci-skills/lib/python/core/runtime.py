@@ -316,7 +316,7 @@ def run_command(
 def run_command_bounded(
     argv: Sequence[str],
     *,
-    timeout: int = 25,
+    timeout: float = 25,
     env: Optional[Mapping[str, Optional[str]]] = None,
     max_stdout_bytes: int = 8 * 1024 * 1024,
     input_data: Optional[bytes] = None,
@@ -324,7 +324,7 @@ def run_command_bounded(
     """Run a native command with a strict stdout byte limit.
 
     :param argv: Executable and arguments; each item is converted to text.
-    :param timeout: Maximum command runtime in seconds.
+    :param timeout: Maximum command runtime in seconds, including fractional seconds.
     :param env: Child environment overrides; ``None`` values remove variables.
     :param max_stdout_bytes: Maximum stdout bytes before the child is killed.
     :param input_data: Optional exact stdin bytes; ``None`` keeps stdin disconnected.

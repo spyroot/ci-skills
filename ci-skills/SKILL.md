@@ -107,7 +107,7 @@ Routing, in short:
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | proof of access across all three authorities | `access_check.py` |
 | a named CI job's own facts | `gitlab_job.py --job-url URL` |
-| pipeline progress | `gitlab_pipeline.py --project PATH --pipeline-id ID` |
+| pipeline read, confirmed start, or bounded watch | `gitlab_pipeline.py get\|start\|watch` |
 | why a volume or claim is stuck | `storage_report.py` |
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |

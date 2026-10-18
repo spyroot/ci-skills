@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/spyroot/ci-skills/schemas/results/gitlab-action.schema.json",
-  "title": "GitLab milestone, issue, wiki and runner create or assign result",
+  "title": "GitLab milestone, issue, wiki, runner and pipeline action result",
   "description": "Existing action envelopes. PASS requires independent read-back; runner tag, read and delete retain their dedicated schemas.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "kind", "status", "captured_at", "errors", "summary"],
   "properties": {
     "schema_version": {"$ref": "gitlab-runner-tag.schema.json#/properties/schema_version"},
-    "kind": {"enum": ["gitlab_milestone", "gitlab_issue", "gitlab_wiki", "gitlab_runner"]},
+    "kind": {"enum": ["gitlab_milestone", "gitlab_issue", "gitlab_wiki", "gitlab_runner", "gitlab_pipeline"]},
     "status": {"$ref": "gitlab-runner-delete.schema.json#/properties/status"},
     "captured_at": {"$ref": "gitlab-runner-tag.schema.json#/properties/captured_at"},
     "execution_host": {"$ref": "gitlab-runner-tag.schema.json#/properties/execution_host"},
@@ -18,12 +18,12 @@
     "target_file": {"$ref": "gitlab-runner-tag.schema.json#/properties/target_file"},
     "target_source": {"$ref": "gitlab-runner-tag.schema.json#/properties/target_source"},
     "phase": {"$ref": "gitlab-runner-delete.schema.json#/properties/phase"},
-    "operation": {"enum": ["create", "update", "adjust-time", "open-bug", "create-bug", "assign"]},
+    "operation": {"enum": ["create", "update", "adjust-time", "open-bug", "create-bug", "assign", "start"]},
     "plan_digest": {"$ref": "gitlab-runner-tag.schema.json#/properties/plan_digest"},
     "plan": {"$ref": "#/$defs/plan"},
     "mutated": {"$ref": "gitlab-runner-tag.schema.json#/properties/mutated"},
     "records": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/record"}},
-    "readback": {"anyOf": [{"$ref": "#/$defs/record"}, {"$ref": "gitlab-runner-tag.schema.json#/$defs/failed_readback"}, {"$ref": "#/$defs/planned_readback"}]},
+    "readback": {"anyOf": [{"$ref": "#/$defs/record"}, {"$ref": "gitlab-runner-tag.schema.json#/$defs/failed_readback"}, {"$ref": "#/$defs/planned_readback"}, {"$ref": "#/$defs/pipeline_planned_readback"}]},
     "result_action": {"$ref": "#/$defs/record/properties/action"},
     "identity": {"$ref": "gitlab-runner-tag.schema.json#/$defs/identity"},
     "verified_target": {"$ref": "gitlab-runner-tag.schema.json#/$defs/verified_target"},
@@ -41,6 +41,7 @@
     {"if": {"properties": {"kind": {"const": "gitlab_issue"}}}, "then": {"properties": {"operation": {"enum": ["open-bug", "create-bug"]}}}},
     {"if": {"properties": {"kind": {"const": "gitlab_wiki"}}}, "then": {"properties": {"operation": {"enum": ["create", "update"]}}}},
     {"if": {"properties": {"kind": {"const": "gitlab_runner"}}}, "then": {"properties": {"operation": {"enum": ["create", "assign"]}}}},
+    {"if": {"properties": {"kind": {"const": "gitlab_pipeline"}}}, "then": {"properties": {"operation": {"const": "start"}}}},
     {
       "if": {"required": ["operation"]},
       "then": {"required": ["phase", "plan", "plan_digest", "origin", "target", "target_file", "target_source", "records", "mutated"]}
@@ -71,7 +72,13 @@
     },
     {
       "if": {"properties": {"status": {"const": "PLANNED"}}},
-      "then": {"properties": {"kind": {"const": "gitlab_runner"}, "operation": {"const": "assign"}, "phase": {"const": "LIVE_PLAN"}, "mutated": {"const": false}, "records": {"maxItems": 0}, "readback": {"$ref": "#/$defs/planned_readback"}, "errors": {"maxItems": 0}, "summary": {"properties": {"record_count": {"const": 0}, "error_count": {"const": 0}}}}}
+      "then": {
+        "properties": {"phase": {"const": "LIVE_PLAN"}, "mutated": {"const": false}, "records": {"maxItems": 0}, "errors": {"maxItems": 0}, "summary": {"properties": {"record_count": {"const": 0}, "error_count": {"const": 0}}}},
+        "oneOf": [
+          {"properties": {"kind": {"const": "gitlab_runner"}, "operation": {"const": "assign"}, "readback": {"$ref": "#/$defs/planned_readback"}}},
+          {"properties": {"kind": {"const": "gitlab_pipeline"}, "operation": {"const": "start"}, "readback": {"$ref": "#/$defs/pipeline_planned_readback"}}}
+        ]
+      }
     },
     {
       "if": {"properties": {"status": {"const": "BLOCKED"}}},
@@ -111,6 +118,15 @@
         {"anyOf": [{"required": ["id"], "properties": {"id": {"type": "integer"}}}, {"required": ["iid"]}, {"required": ["slug"]}]},
         {"properties": {"verified": {"const": true}, "action": {"enum": ["APPLIED", "NO_OP"]}, "errors": {"maxItems": 0}, "cleanup": {"properties": {"status": {"not": {"enum": ["BLOCKED", "PARTIAL"]}}}}}}
       ]
+    },
+    "pipeline_planned_readback": {
+      "type": "object", "additionalProperties": false,
+      "required": ["verified", "project_id", "ref", "sha", "protected"],
+      "properties": {
+        "verified": {"const": true}, "project_id": {"type": "integer", "minimum": 1},
+        "ref": {"type": "string", "minLength": 1}, "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "protected": {"type": "boolean"}
+      }
     },
     "planned_readback": {
       "type": "object", "additionalProperties": false, "required": ["verified", "project_ids"],
