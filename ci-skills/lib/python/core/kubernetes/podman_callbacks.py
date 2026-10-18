@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Mapping, MutableSequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Final, Optional
 
 from lib.python.core.abstract.skill_action import ActionT_co
-from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.json_types import JSONObject
 from lib.python.core.kubernetes.kubernetes import (
     DEFAULT_COMMAND_TIMEOUT,
@@ -31,6 +30,7 @@ from lib.python.core.kubernetes.podman_evidence import (
     scc_admission_reason,
 )
 from lib.python.core.kubernetes.podman_probe import (
+    DEFAULT_SERVICE_ACCOUNT,
     NESTED_RUNTIME_CLAIM,
     PROBE_POLL_SECONDS,
     PodmanProbeAction,
@@ -40,16 +40,20 @@ from lib.python.core.kubernetes.podman_probe import (
     select_ready_worker,
 )
 from lib.python.core.kubernetes.resources import ResourceSet
-from lib.python.core.kubernetes.run_scope import RunScope
+from lib.python.core.kubernetes.run_scope import (
+    OpenRunScope,
+    RunScope,
+    RunScopeAction,
+    RunScopeState,
+)
 from lib.python.core.runtime import error_class
 from lib.python.sys.status import APPLIED, PASS, VERIFIED
 
-DEFAULT_SERVICE_ACCOUNT: Final = "default"
 PRIVILEGED_CONSTRAINT: Final = "privileged"
 
 
 @dataclass
-class PodmanProbeState(DeliveryState):
+class PodmanProbeState(RunScopeState):
     """Typed shared state for the ordered Podman readiness callbacks.
 
     Values with ordering dependencies use ``init=False``: a callback cannot read
@@ -76,11 +80,6 @@ class PodmanProbeState(DeliveryState):
 
         SHA-256 digest required to confirm the live plan.
 
-    .. attribute :: run_scope
-        :type: RunScope
-
-        Generated namespace, labels, and resource names.
-
     .. attribute :: job_uid
         :type: str
 
@@ -106,23 +105,17 @@ class PodmanProbeState(DeliveryState):
 
         Final probe outcome emitted by the run callback.
 
-    .. attribute :: cleanup_resources
-        :type: MutableSequence[JSONObject]
-
-        Independently removed resource identities.
     """
 
     selected_node: str = field(init=False)
     node_evidence: JSONObject = field(init=False)
     plan: JSONObject = field(init=False)
     plan_digest: str = field(init=False)
-    run_scope: RunScope = field(init=False)
     job_uid: str = field(init=False)
     termination: PodTermination = field(init=False)
     probe_log: str = field(init=False, repr=False)
     marker_evidence: MarkerEvidence = field(init=False)
     probe_record: JSONObject = field(init=False)
-    cleanup_resources: MutableSequence[JSONObject] = field(default_factory=list)
 
 
 class PodmanK8SCallback(K8SCallback[ActionT_co]):
@@ -191,67 +184,41 @@ class ConfirmPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
 
 
 class OpenProbeNamespace(PodmanK8SCallback[PodmanProbeAction]):
-    """Create one generated namespace owned only by this probe invocation."""
+    """Open a generated or selected namespace through the shared run scope."""
 
     def __init__(self, action: PodmanProbeAction):
-        """Retain the action and initialize empty resource ownership.
+        """Retain the action and initialize the deferred shared callback.
 
         :param action: Confirmed probe inputs.
         """
         super().__init__(action)
-        self.resources: Optional[ResourceSet] = None
+        self.scope_callback: Optional[OpenRunScope] = None
 
     def run(self) -> JSONObject:
-        """Create and read back a fresh run-scoped namespace.
+        """Create the run identity after confirmation and open its namespace.
 
-        :returns: Namespace identity, native UID, run identifier, and action.
-        :raises KubernetesError: If the generated namespace unexpectedly exists or
-            apply/read-back fails.
-        """
-        state = self.probe_state
-        scope = RunScope.new()
-        resources = scope.cluster_resources(self.kubernetes)
-        if self.kubernetes.read("Namespace", scope.namespace, "") is not None:
-            raise KubernetesError("run_scope_namespace_conflict")
-        state.run_scope = scope
-        self.resources = resources
-        evidence = resources.apply(
-            {
-                "apiVersion": "v1",
-                "kind": "Namespace",
-                "metadata": {
-                    "name": scope.namespace,
-                    "labels": dict(scope.labels),
-                },
-            }
+        :returns: Shared scope identity, ownership, reuse, and namespace action.
+        :raises KubernetesError: If a generated namespace cannot be created and
+            re-resolved or a selected namespace is absent.
+        :raises TypeError: If the shared state cannot retain run-scope evidence.
+        """  # noqa: DOC502 - The shared callback propagates declared failures.
+        callback = OpenRunScope(
+            RunScopeAction(scope=RunScope.new(namespace=self.action.namespace))
         )
-        return {
-            "action": APPLIED,
-            "verified": True,
-            "run_id": scope.run_id,
-            "namespace": scope.namespace,
-            "resource": evidence,
-        }
+        callback.bind(self.probe_state)
+        self.scope_callback = callback
+        return callback.run()
 
     def cleanup(self) -> JSONObject:
-        """Delete the generated namespace and prove absence on every exit.
+        """Delegate generated-namespace cleanup and preserve selected namespaces.
 
-        :returns: Verified cleanup identity, or an empty mapping before creation.
-        :raises KubernetesError: If deletion or absence read-back fails.
-        """  # noqa: DOC502 - ResourceSet propagates cleanup and read-back failures.
-        if self.resources is None:
+        :returns: Shared removed and retained resource evidence, or an empty mapping.
+        :raises KubernetesError: If owned namespace cleanup cannot prove absence.
+        :raises TypeError: If the shared state cannot retain run-scope evidence.
+        """  # noqa: DOC502,DOC503 - Shared cleanup propagates declared failures.
+        if self.scope_callback is None:
             return {}
-        scope = self.probe_state.run_scope
-        self.resources.cleanup_created()
-        evidence: JSONObject = {
-            "kind": "Namespace",
-            "name": scope.namespace,
-            "namespace": "",
-            "status": PASS,
-            "absent": True,
-        }
-        self.probe_state.cleanup_resources.append(evidence)
-        return evidence
+        return self.scope_callback.cleanup()
 
 
 class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
@@ -294,7 +261,10 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
                 "selected_node": state.selected_node,
                 "node": state.node_evidence,
                 "namespace": scope.namespace,
-                "service_account": _service_account(scope.namespace),
+                "service_account": _service_account(
+                    scope.namespace, self.action.service_account
+                ),
+                "owns_namespace": scope.owns_namespace,
                 "job": {"name": scope.name("podman-probe"), "uid": uid},
                 "rows": [],
             }
@@ -317,7 +287,10 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
             "selected_node": state.selected_node,
             "node": state.node_evidence,
             "namespace": scope.namespace,
-            "service_account": _service_account(scope.namespace),
+            "service_account": _service_account(
+                scope.namespace, self.action.service_account
+            ),
+            "owns_namespace": scope.owns_namespace,
             "job": {"name": scope.name("podman-probe"), "uid": uid},
             "pod": {
                 "name": observed.pod_name,
@@ -456,13 +429,14 @@ class RunPodmanProbe(PodmanK8SCallback[PodmanProbeAction]):
         return result.stdout
 
 
-def _service_account(namespace: str) -> str:
-    """Name the default service account in Kubernetes authorization form.
+def _service_account(namespace: str, name: str = DEFAULT_SERVICE_ACCOUNT) -> str:
+    """Name the selected service account in Kubernetes authorization form.
 
-    :param namespace: Generated run namespace.
+    :param namespace: Generated or caller-selected run namespace.
+    :param name: ServiceAccount name fixed by the execution contract.
     :returns: Exact service-account subject evaluated by OpenShift admission.
     """
-    return f"system:serviceaccount:{namespace}:{DEFAULT_SERVICE_ACCOUNT}"
+    return f"system:serviceaccount:{namespace}:{name}"
 
 
 def _job_failed(document: JSONObject) -> bool:

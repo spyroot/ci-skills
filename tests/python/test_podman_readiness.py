@@ -95,6 +95,7 @@ def _action(tmp_path: Path) -> PodmanProbeAction:
         ),
         mode=PODMAN.ProbeMode.DRY_RUN,
         confirm_plan=None,
+        namespace=None,
     )
 
 
@@ -103,10 +104,12 @@ def test_run_scope_derives_all_owned_names_from_one_identifier() -> None:
 
     :returns: None; assertions verify deterministic run ownership.
     """
-    scope = RUN_SCOPE.RunScope.from_id("unit123")
+    scope = RUN_SCOPE.RunScope.new(namespace="unit-namespace", run_id="unit123")
+    same_run = RUN_SCOPE.RunScope.new(namespace="other-namespace", run_id="unit123")
 
-    assert scope.namespace == "ci-skills-run-unit123"
-    assert scope.name("podman-probe") == "ci-skills-run-unit123-podman-probe"
+    assert scope.namespace == "unit-namespace"
+    assert scope.owns_namespace is False
+    assert scope.name("podman-probe") == same_run.name("podman-probe")
     assert dict(scope.labels) == {"ci-skills.spyroot.dev/run-id": "unit123"}
 
 
@@ -123,7 +126,7 @@ def test_run_scope_rejects_identifiers_that_cannot_own_kubernetes_objects(
     :returns: None; the expected exception is the behavior under test.
     """
     with pytest.raises(ValueError, match="run_scope_id_invalid"):
-        RUN_SCOPE.RunScope.from_id(run_id)
+        RUN_SCOPE.RunScope.new(namespace="unit-namespace", run_id=run_id)
 
 
 def test_probe_action_requires_digest_pinned_images(tmp_path: Path) -> None:
@@ -159,7 +162,9 @@ def test_probe_inputs_accept_positive_timeout_and_native_decimal_quantities(
     resources = PODMAN.ProbeResources(*quantities)
     action = replace(_action(tmp_path), timeout=1800, resources=resources)
     document = PODMAN.probe_job(
-        action, RUN_SCOPE.RunScope.from_id("unit123"), "worker-a"
+        action,
+        RUN_SCOPE.RunScope.new(namespace="unit-namespace", run_id="unit123"),
+        "worker-a",
     )
     specification = document["spec"]["template"]["spec"]
     observed = specification["containers"][0]["resources"]
@@ -253,6 +258,11 @@ def test_probe_plan_needs_only_kubernetes_configuration(tmp_path: Path) -> None:
     }
     assert plan["selected_node"] == "worker-a"
     assert plan["claim"] == "nested_podman_runtime_readiness"
+    assert plan["run_scope"] == {
+        "namespace_mode": "generated",
+        "namespace": None,
+        "service_account": "default",
+    }
     assert plan["side_effects_on_apply"] == [
         "temporary_namespace",
         "temporary_configmap",
@@ -347,7 +357,7 @@ def test_probe_job_is_bounded_owned_and_pinned_to_selected_worker(
     :returns: None; assertions cover ownership, scheduling, resources, and storage.
     """
     action = _action(tmp_path)
-    scope = RUN_SCOPE.RunScope.from_id("unit123")
+    scope = RUN_SCOPE.RunScope.new(namespace="unit-namespace", run_id="unit123")
 
     document = PODMAN.probe_job(action, scope, "worker-a")
     metadata = document["metadata"]
@@ -374,6 +384,7 @@ def test_probe_job_is_bounded_owned_and_pinned_to_selected_worker(
     assert spec["ttlSecondsAfterFinished"] == 600
     assert pod_spec["nodeName"] == "worker-a"
     assert pod_spec["restartPolicy"] == "Never"
+    assert pod_spec["serviceAccountName"] == "default"
     assert pod_spec["automountServiceAccountToken"] is False
     assert container["image"] == action.probe_image
     assert container["securityContext"] == {
@@ -624,6 +635,12 @@ class FakeKubernetes:
         assert openshift is False
         if args == ("get", "nodes", "-o", "json"):
             return {"items": [_node("worker-a")]}
+        if args[:2] == ("get", "namespaces"):
+            return {"items": self._labeled("namespace", args)}
+        if args[:2] == ("get", "pods") and "--all-namespaces" in args:
+            return {"items": self._labeled("pod", args)}
+        if args[:2] == ("get", "configmaps") and "--all-namespaces" in args:
+            return {"items": self._labeled("configmap", args)}
         if "pods" in args:
             if self.scc_rejected:
                 return {"items": []}
@@ -642,6 +659,27 @@ class FakeKubernetes:
                 )
             return {"items": items}
         raise AssertionError(f"unexpected provider read: {args}")
+
+    def _labeled(self, kind: str, args: tuple[str, ...]) -> list[JSONObject]:
+        """Return retained objects matching one exact native label selector.
+
+        :param kind: Case-normalized resource kind selected by a list operation.
+        :param args: Native list arguments containing one ``-l`` selector.
+        :returns: Deep copies of matching retained objects.
+        """
+        selector = args[args.index("-l") + 1]
+        expected = dict(item.split("=", 1) for item in selector.split(","))
+        result = []
+        for (resource_kind, _name, _namespace), document in self.resources.items():
+            if resource_kind != kind:
+                continue
+            metadata = document.get("metadata")
+            labels = metadata.get("labels", {}) if isinstance(metadata, dict) else {}
+            if isinstance(labels, dict) and all(
+                labels.get(key) == value for key, value in expected.items()
+            ):
+                result.append(deepcopy(document))
+        return result
 
     def command(self, *args: str, openshift: bool = False) -> CommandResult:
         """Return bounded logs for the exact probe Pod.
@@ -779,15 +817,19 @@ def test_scc_rejection_uses_actual_event_for_the_exact_job() -> None:
 
 
 def _apply_action(
-    tmp_path: Path, *, confirmation: Optional[str] = None
+    tmp_path: Path,
+    *,
+    confirmation: Optional[str] = None,
+    namespace: Optional[str] = None,
 ) -> PodmanProbeAction:
     """Build an apply action confirmed for the selected fixture worker.
 
     :param tmp_path: Directory used by the Kubernetes-only target.
     :param confirmation: Explicit digest override; omitted computes the valid digest.
+    :param namespace: Existing caller-owned namespace, or ``None`` for generation.
     :returns: Apply-mode probe action.
     """
-    planned = _action(tmp_path)
+    planned = replace(_action(tmp_path), namespace=namespace)
     digest = planned.fingerprint("worker-a") if confirmation is None else confirmation
     return replace(
         planned,
@@ -828,6 +870,49 @@ def test_confirm_mismatch_blocks_before_any_resource_mutation(
     assert service.mutations == []
     assert service.deletions == []
     assert service.resources == {}
+
+
+def test_apply_uses_and_preserves_caller_selected_namespace(tmp_path: Path) -> None:
+    """Run in an existing namespace without adopting or deleting it.
+
+    :param tmp_path: Directory used by the Kubernetes-only target.
+    :returns: None; the plan, Job account, and cleanup retain caller ownership.
+    """
+    namespace = "existing-podman"
+    action = _apply_action(tmp_path, namespace=namespace)
+    service = FakeKubernetes(_target(tmp_path))
+    service.resources[("namespace", namespace, "")] = {
+        "apiVersion": "v1",
+        "kind": "Namespace",
+        "metadata": {"name": namespace, "uid": "existing-namespace-uid"},
+    }
+    executor = _executor(action, service)
+
+    executor.run()
+
+    assert action.plan("worker-a")["run_scope"] == {
+        "namespace_mode": "selected",
+        "namespace": namespace,
+        "service_account": "default",
+    }
+    assert action.plan("worker-a")["side_effects_on_apply"] == [
+        "temporary_configmap",
+        "temporary_job",
+    ]
+    assert executor.state.run_scope.owns_namespace is False
+    assert executor.state.probe_record["namespace"] == namespace
+    assert executor.state.probe_record["service_account"] == (
+        f"system:serviceaccount:{namespace}:default"
+    )
+    assert [kind for kind, _name, _namespace in service.mutations] == [
+        "ConfigMap",
+        "Job",
+    ]
+    assert [kind for kind, _name, _namespace in service.deletions] == [
+        "Job",
+        "ConfigMap",
+    ]
+    assert service.read("Namespace", namespace, "") is not None
 
 
 def test_apply_verifies_probe_then_cleans_job_before_namespace(tmp_path: Path) -> None:

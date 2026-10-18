@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Final, Optional
@@ -24,7 +24,11 @@ from lib.python.core.kubernetes.podman_evidence import (
     MARKER_PREFIX,
     PROBE_CONTAINER,
 )
-from lib.python.core.kubernetes.run_scope import RUN_ID_LABEL, RunScope
+from lib.python.core.kubernetes.run_scope import (
+    RUN_ID_LABEL,
+    RunScope,
+    validate_namespace,
+)
 from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.report import plan_digest
 from lib.python.core.target import Target
@@ -45,6 +49,7 @@ DEFAULT_CPU_LIMIT: Final = "1"
 DEFAULT_MEMORY_REQUEST: Final = "256Mi"
 DEFAULT_MEMORY_LIMIT: Final = "1Gi"
 DEFAULT_STORAGE_SIZE: Final = "8Gi"
+DEFAULT_SERVICE_ACCOUNT: Final = "default"
 PROBE_TTL_SECONDS: Final = 600
 PROBE_POLL_SECONDS: Final = 2
 PROBE_SCRIPT_ROOT: Final = SKILL_ROOT / "lib/bash/kubernetes"
@@ -210,6 +215,16 @@ class PodmanProbeAction(SkillAction):
         :type: Optional[str]
 
         Exact live-plan digest required by apply.
+
+    .. attribute :: namespace
+        :type: Optional[str]
+
+        Existing caller-selected namespace, or ``None`` for a generated scope.
+
+    .. attribute :: service_account
+        :type: str
+
+        Fixed default account selected by the CI13 execution contract.
     """
 
     target: Target
@@ -220,11 +235,13 @@ class PodmanProbeAction(SkillAction):
     resources: ProbeResources
     mode: ProbeMode
     confirm_plan: Optional[str]
+    namespace: Optional[str]
+    service_account: str = field(init=False, default=DEFAULT_SERVICE_ACCOUNT)
 
     def __post_init__(self) -> None:
-        """Validate immutable images, node text, and the supported time bound.
+        """Validate immutable images, selected names, and the supported time bound.
 
-        :raises ValueError: If an image, node, or timeout is invalid.
+        :raises ValueError: If an image, node, namespace, or timeout is invalid.
         """
         immutable_image(self.probe_image)
         immutable_image(self.inner_image)
@@ -232,6 +249,12 @@ class PodmanProbeAction(SkillAction):
             raise ValueError("node_invalid")
         if self.node is not None:
             object.__setattr__(self, "node", self.node.strip())
+        if self.namespace is not None:
+            object.__setattr__(
+                self,
+                "namespace",
+                validate_namespace(self.namespace.strip()),
+            )
         if self.timeout <= 0:
             raise ValueError("timeout_must_be_positive")
         if self.mode == ProbeMode.APPLY and self.confirm_plan is None:
@@ -249,6 +272,9 @@ class PodmanProbeAction(SkillAction):
         kubernetes = self.target.kubernetes
         if kubernetes is None:
             raise ValueError("kubernetes_target_missing")
+        side_effects = ["temporary_configmap", "temporary_job"]
+        if self.namespace is None:
+            side_effects.insert(0, "temporary_namespace")
         return {
             "kind": PROBE_KIND,
             "operation": "probe",
@@ -268,11 +294,14 @@ class PodmanProbeAction(SkillAction):
                 "storage_size": self.resources.storage_size,
             },
             "script_digest": plan_digest(probe_scripts()),
-            "side_effects_on_apply": [
-                "temporary_namespace",
-                "temporary_configmap",
-                "temporary_job",
-            ],
+            "run_scope": {
+                "namespace_mode": (
+                    "selected" if self.namespace is not None else "generated"
+                ),
+                "namespace": self.namespace,
+                "service_account": self.service_account,
+            },
+            "side_effects_on_apply": side_effects,
             "claim": NESTED_RUNTIME_CLAIM,
         }
 
@@ -474,6 +503,7 @@ def probe_job(
                 "spec": {
                     "nodeName": selected_node,
                     "restartPolicy": "Never",
+                    "serviceAccountName": action.service_account,
                     "automountServiceAccountToken": False,
                     "containers": [
                         {

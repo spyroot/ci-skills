@@ -83,6 +83,11 @@ def build_parser() -> argparse.ArgumentParser:
     result.add_argument("action", nargs="?", choices=("probe",), default="probe")
     result.add_argument("--node", metavar="NAME", help="Ready worker; default discover")
     result.add_argument(
+        "--namespace",
+        metavar="NAME",
+        help="existing namespace; default creates a temporary namespace",
+    )
+    result.add_argument(
         "--probe-image",
         default=DEFAULT_PROBE_IMAGE,
         metavar="IMAGE@SHA256",
@@ -231,6 +236,7 @@ class ImageBuildReadiness:
             resources=_resources(self.args),
             mode=mode,
             confirm_plan=self.args.confirm_plan,
+            namespace=self.args.namespace,
         )
         return mode
 
