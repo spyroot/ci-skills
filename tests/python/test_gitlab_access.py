@@ -364,7 +364,10 @@ def test_gitlab_only_target_does_not_weaken_full_diagnostic_target(
     path = _target(tmp_path, body='project = "team/repo"\n')
     selected = TARGET.load_gitlab_target(path)
     assert selected.gitlab.project == "team/repo"
-    with pytest.raises(TARGET.TargetError, match="selected authority tables"):
+    with pytest.raises(
+        TARGET.TargetError,
+        match="^target is missing required authority tables: github, kubernetes$",
+    ):
         TARGET.load_target(path)
 
 
@@ -422,7 +425,9 @@ def test_gitlab_access_rejects_unknown_top_level_table(tmp_path: Path) -> None:
     :returns: None; assertions in the body validate the regression.
     """
     path = _target(tmp_path, body='project = "team/repo"\n[other]\nvalue = "x"\n')
-    with pytest.raises(TARGET.TargetError, match="without extra tables"):
+    with pytest.raises(
+        TARGET.TargetError, match="^target contains unsupported tables: other$"
+    ):
         TARGET.load_gitlab_target(path)
 
 

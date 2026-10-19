@@ -54,11 +54,14 @@ target needs only `[gitlab]`. The selected target file never inherits missing
 tables from a lower tier. For a selected GitLab operation, its command also
 reads back GitLab identity and target before applying a change.
 
-For one receipt proving all three authorities, run:
+For one receipt covering configured GitHub, GitLab and Kubernetes providers, run:
 
 ```bash
 conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/access_check.py" --json
 ```
+
+Only configured providers are checked; unrelated provider tables and tools are not required.
+Harbor authorization is checked by the selected Harbor operation.
 
 Add `--publication` when repository administration and required-check read-back
 are part of the requested proof. Add `--ceph-namespace NAME` when the receipt
@@ -108,7 +111,7 @@ Routing, in short:
 | Prove nested Podman execution on a worker | `bin/image_build_readiness.py` |
 | Build an OpenShift ISO or join its node | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
-| proof of access across all three authorities | `access_check.py` |
+| access to configured GitHub, GitLab and Kubernetes providers | `access_check.py` |
 | a named CI job's own facts | `gitlab_job.py --job-url URL` |
 | pipeline read, confirmed start, or bounded watch | `gitlab_pipeline.py get\|start\|watch` |
 | why a volume or claim is stuck | `storage_report.py` |

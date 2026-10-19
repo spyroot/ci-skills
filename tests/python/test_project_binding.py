@@ -437,7 +437,10 @@ def test_invalid_higher_tier_blocks_lower_target_fallback(
     else:
         _write_invalid_target(project / ".ci-skills" / "target.toml")
 
-    with pytest.raises(project_binding.TargetError, match="target must contain"):
+    with pytest.raises(
+        project_binding.TargetError,
+        match="^target contains unsupported tables: schema_version$",
+    ):
         project_binding.resolve_target(None, None)
 
     assert user_target.exists()

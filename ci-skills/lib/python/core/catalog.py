@@ -119,7 +119,7 @@ ACCESS_PROTOCOL: Mapping[str, Union[str, Sequence[Mapping[str, str]]]] = {
     "no_search": (
         "Do not hunt for credentials. Run the diagnostic you need: its access "
         "receipt names the effective source for each required authority. "
-        "Use access_check.py when you need the full three-authority receipt."
+        "Use access_check.py to check the configured GitHub, GitLab and Kubernetes authorities."
     ),
     "github": [
         {
@@ -576,15 +576,16 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "access_check",
         "purpose": "Prove access to every selected authority and emit one receipt.",
         "use_when": (
-            "When you need one live receipt proving GitHub, GitLab, and "
-            "Kubernetes access on the execution host."
+            "When you need one live receipt for the configured GitHub, GitLab "
+            "or Kubernetes authorities on the execution host."
         ),
-        "requires": DEFAULT_AUTHORITIES,
+        "requires": (),
+        "optional_requires": DEFAULT_AUTHORITIES,
         "capabilities": (),
         "options": {
-            "--publication": "also require repository administration and the declared required checks",
-            "--job-url": "also prove access to one job, its pipeline, runner and trace",
-            "--ceph-namespace": "also prove Ceph health, OSD, PG and Pod reads in the selected namespace",
+            "--publication": "require GitHub, repository administration and the declared required checks",
+            "--job-url": "require GitLab and prove access to one job, its pipeline, runner and trace",
+            "--ceph-namespace": "require Kubernetes and prove Ceph health, OSD, PG and Pod reads",
             "--receipt-out": "write the committable receipt, with host paths digested",
         },
         "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
@@ -1328,7 +1329,10 @@ def command_authorities(script: str) -> Sequence[str]:
     :raises KeyError: If the command is not registered.
     """  # noqa: DOC502 - Dictionary lookup rejects unknown command keys.
     if script in COMMANDS:
-        return COMMANDS[script]["requires"]
+        entry = COMMANDS[script]
+        return tuple(
+            dict.fromkeys((*entry["requires"], *entry.get("optional_requires", ())))
+        )
     if script in NODE_LOCAL_COMMANDS:
         return NODE_LOCAL_COMMANDS[script]["requires"]
     if script == "bin/ci-api":
@@ -1692,7 +1696,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 "verify a Harbor toolbox pull": "harbor_pull.py",
                 "create or delete a GitHub runner": "create_selfhosted_runner.py",
                 "browse tools and references": "reference.py",
-                "prove all three authorities": "access_check.py",
+                "prove configured access authorities": "access_check.py",
                 "a named CI job failed": "gitlab_job.py",
                 "check GitLab pipeline progress": "gitlab_pipeline.py",
                 "GitLab operation access": "gitlab_access.py",
