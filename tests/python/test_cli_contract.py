@@ -345,7 +345,9 @@ def test_help_offers_same_reference_pointers_as_command_proposition(
         )
 
     monkeypatch.setattr(Path, "read_text", forbid_document_read)
-    help_text = " ".join(command.build_parser().format_help().split())
+    parser = command.build_parser()
+    parser.prog = script_name
+    help_text = " ".join(parser.format_help().split())
 
     for reference in references:
         assert " ".join(reference["name"].split()) in help_text

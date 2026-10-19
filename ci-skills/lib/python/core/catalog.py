@@ -1801,6 +1801,8 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 "GitLab operation access": "gitlab_access.py",
                 "create or change a GitLab milestone": "gitlab_milestone.py",
                 "open a GitLab bug": "gitlab_issue.py",
+                "commit files to a GitLab branch": "gitlab_repository.py",
+                "create a GitLab MR or assign its milestone": "gitlab_mr.py",
                 "create or change a GitLab wiki page": "gitlab_wiki.py",
                 "read or manage a GitLab runner": "gitlab_runner.py",
                 "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
