@@ -1,7 +1,7 @@
 {
   "captured_at": "2026-10-19T05:49:50.864622+00:00",
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
-  "credential_source": "file:/Users/spyroot/.ci-skills/gitlab.dcloud.run.token.env",
+  "credential_source": "file:path:29f247d18d3c",
   "errors": [],
   "execution_host": "mac.lan",
   "identity": {
@@ -83,7 +83,7 @@
     "kind": "project",
     "reference": "123"
   },
-  "target_file": "/Users/spyroot/.ci-skills/target.toml",
+  "target_file": "path:5e5380df1eda",
   "target_source": "env:CI_SKILLS_TARGET;argv:--project",
   "tested_revision": "ffeebba45573a46f2b8f103bbe8140b83482f7c6",
   "verified_target": {
