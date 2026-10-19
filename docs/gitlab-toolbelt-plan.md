@@ -66,7 +66,9 @@ Blocks 1 to 6 are delivered. Each has a sanitized live receipt under
 [`tests/acceptance/receipts`](../tests/acceptance/receipts), recorded from the
 installed skill against the user's selected GitLab target, and the
 [evidence index](../tests/acceptance/evidence/README.md) lists every case.
-Block 7 is planned: it pairs runner creation with the action that proves it.
+Block 7 pairs runner creation with manager deployment and a real test job. The
+[runner-manager evidence](../tests/acceptance/evidence/runner-manager/README.md)
+records the online runner, exact job linkage, and cleanup.
 
 | Block | Agent action | Proof before merge | Receipts |
 | --- | --- | --- | --- |
@@ -76,7 +78,8 @@ Block 7 is planned: it pairs runner creation with the action that proves it.
 | 4 | `wiki.create/update` | GET exact page slug | `wiki-*-applied`, `wiki-*-no_op` |
 | 5 | `runner.assign` | GET membership for each project | `runner-assign-applied`, `runner-assign-no_op` |
 | 6 | `runner.create` | GET ID, description, scope; `sink_persisted` | `runner-create-applied` |
-| 7 | `runner.register` + test job (planned) | GET runner `online`; GET job with runner ID and success | none yet |
+| 7 | `gitlab_runner_manager.py deploy` + test job | GET runner `online` | `manager-deploy` |
+| | | GET job with runner ID and success | `job-get` |
 
 Runner creation has no `no_op` receipt by design: an existing runner with the
 requested description blocks instead of repeating.
@@ -267,8 +270,8 @@ own calculation for the candidate, and blocks on an empty or incomplete set. Moc
 1. **Token sink for runner creation:** closed. The live run supplied
    `--token-out PATH` on plan and apply; `runner-create-applied.json` records
    `sink_persisted: true` and a verified read-back of the created record.
-   Registering a runner manager with that token and an online job on the GitLab
-   test project are not covered by any receipt; they are block 7.
+   Block 7 additionally records manager deployment with that token and a
+   successful job on the exact runner; see the runner-manager evidence above.
 2. **Live smoke route:** closed. The user's `~/.ci-skills/target.toml` selects
    the GitLab instance; every stage 2–6 operation named a test project with
    `--project` (project 123, and 124 for assignment), recorded as

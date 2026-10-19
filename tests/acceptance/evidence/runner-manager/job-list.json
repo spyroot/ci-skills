@@ -1,0 +1,83 @@
+{
+  "access": {
+    "identity": {
+      "id": 6,
+      "username": "spyroot",
+      "web_url": "https://gitlab.dcloud.run/spyroot"
+    },
+    "observed_capability": [
+      "identity_read",
+      "target_read"
+    ],
+    "status": "PASS",
+    "target": {
+      "full_path": "hott/test",
+      "id": 123,
+      "kind": "project",
+      "web_url": "https://gitlab.dcloud.run/hott/test"
+    }
+  },
+  "captured_at": "2026-10-19T01:37:06.840166+00:00",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "filters": {
+    "from": null,
+    "limit": 10,
+    "name_glob": "podman-consumer",
+    "pipeline_id": 3956,
+    "project": "123",
+    "ref": null,
+    "search": null,
+    "status": [],
+    "stuck_after": 600,
+    "to": null
+  },
+  "kind": "gitlab_job",
+  "operation": "list",
+  "records": [
+    {
+      "created_at": "2026-10-19T01:36:11.495000+00:00",
+      "duration": 4.387252,
+      "failure_reason": null,
+      "finished_at": "2026-10-19T01:36:17.799000+00:00",
+      "id": 60694,
+      "name": "podman-consumer",
+      "pipeline_id": 3956,
+      "ref": "pr97-manager-d2a16be-20261019-v2",
+      "runner": {
+        "description": "pr97-manager-d2a16be-20261019-v2",
+        "id": 99
+      },
+      "stage": "smoke",
+      "started_at": "2026-10-19T01:36:13.412000+00:00",
+      "status": "success",
+      "stuck": false,
+      "web_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60694"
+    }
+  ],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
+    "file_count": 227,
+    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "revision": {
+      "source": "installer_record",
+      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": "https://gitlab.dcloud.run",
+  "target_source": "project;argv:--project",
+  "tested_revision": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+  "truncated": false
+}
