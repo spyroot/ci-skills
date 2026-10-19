@@ -26,6 +26,7 @@ from lib.python.core.kubernetes.artifact_storage_callbacks import (
 )
 from lib.python.core.kubernetes.artifact_storage_runtime import observe_artifact
 from lib.python.core.kubernetes.kubernetes import KubernetesError
+from lib.python.core.kubernetes.ocp_artifact_models import NativeComparisonStatus
 from lib.python.core.kubernetes.ocp_iso import (
     NodeImageCallback,
     OCPState,
@@ -540,6 +541,16 @@ def _native_input_comparison(
             host = host_value
             prefix = f"hosts[{index}]"
             path_mac, expected_mac = _first_host_mac(host)
+            if not expected_mac:
+                unverified.extend(
+                    f"{prefix}.{name}"
+                    for name in sorted(set(host) & _COMPARED_HOST_FIELDS)
+                )
+                unverified.extend(
+                    f"{prefix}.{name}"
+                    for name in sorted(set(host) - _COMPARED_HOST_FIELDS)
+                )
+                continue
             selected_roots = _host_roots_for_mac(files, expected_mac)
             host_root = selected_roots[0] if len(selected_roots) == 1 else ""
             expected_interfaces = host.get("interfaces")
@@ -682,16 +693,16 @@ def _native_input_comparison(
         unverified.extend(sorted(set(expected) - _COMPARED_NODE_FIELDS))
 
     result: MutableMapping[str, JSONValue] = {
-        "status": "matched"
+        "status": NativeComparisonStatus.MATCHED
         if matched and not unverified and not mismatched
-        else "unverified",
+        else NativeComparisonStatus.UNVERIFIED,
         "artifact_sha256": artifact_sha256,
         "input_identity": node_input.evidence(),
         "matched_fields": matched,
         "unverified_fields": unverified,
     }
     if mismatched:
-        result["status"] = "mismatch"
+        result["status"] = NativeComparisonStatus.MISMATCH
         result["mismatched_fields"] = mismatched
     return result
 
@@ -747,7 +758,7 @@ def inspect_verified_node_image(
             ) from exc
         state.readback["native_input_comparison"] = comparison
         evidence["native_input_comparison"] = comparison
-        if comparison["status"] == "mismatch":
+        if comparison["status"] == NativeComparisonStatus.MISMATCH:
             fields = comparison.get("mismatched_fields", [])
             detail = ",".join(str(item) for item in fields)
             raise KubernetesError(f"node_image_native_input_mismatch:{detail}")

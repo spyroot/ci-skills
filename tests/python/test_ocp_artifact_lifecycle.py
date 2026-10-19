@@ -699,6 +699,42 @@ def test_native_yaml_without_network_config_accepts_mac_and_reports_unobserved_n
     assert "mismatched_fields" not in comparison
 
 
+def test_native_build_without_mac_association_reports_host_settings_unverified(
+    tmp_path: Path,
+    native_output: tuple[JSONObject, JSONObject],
+    verify_native_output: Callable[[NATIVE.NativeNodeInput, JSONObject], JSONObject],
+) -> None:
+    """Unavailable host association cannot contradict a successful native build."""
+    _expected, output = native_output
+    requested = {
+        "hosts": [
+            {
+                "hostname": "worker-01",
+                "rootDeviceHints": {"deviceName": "/dev/disk/by-id/disk-1"},
+                "role": "worker",
+            }
+        ]
+    }
+    output["storage"]["files"].append(
+        _embedded_file("/etc/assisted/hostconfig/worker-01/role", "worker")
+    )
+    node_input = _caller_input(tmp_path, requested)
+
+    result = verify_native_output(node_input, output)
+
+    comparison = result["native_input_comparison"]
+    assert result["verified"] is True
+    assert comparison["status"] == "unverified"
+    assert comparison["input_identity"] == node_input.evidence()
+    assert comparison["matched_fields"] == []
+    assert set(comparison["unverified_fields"]) == {
+        "hosts[0].hostname",
+        "hosts[0].rootDeviceHints",
+        "hosts[0].role",
+    }
+    assert "mismatched_fields" not in comparison
+
+
 def test_native_build_rejects_hostnames_swapped_between_mac_paths(
     tmp_path: Path,
     native_output: tuple[JSONObject, JSONObject],

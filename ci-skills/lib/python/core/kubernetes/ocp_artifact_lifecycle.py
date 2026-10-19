@@ -17,6 +17,7 @@ from lib.python.core.kubernetes.artifact_storage_runtime import (
 )
 from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
 from lib.python.core.kubernetes.objects import KubernetesObject
+from lib.python.core.kubernetes.ocp_artifact_models import NativeComparisonStatus
 from lib.python.core.kubernetes.ocp_artifact_run import (
     ARTIFACT_RECORD_ROLE,
     ArtifactLifetime,
@@ -164,7 +165,7 @@ def _comparison_readback(record: NodeArtifactRecord) -> JSONObject:
     """
     if record.native_input_comparison is None:
         return {
-            "status": "unverified",
+            "status": NativeComparisonStatus.UNVERIFIED,
             "artifact_sha256": record.artifact.sha256,
             "input_identity": {},
             "matched_fields": [],

@@ -95,6 +95,30 @@ class ArtifactLifetime(StrEnum):
     CALLER_SELECTED_VOLUME = "caller_selected_volume"
 
 
+class NativeComparisonStatus(StrEnum):
+    """Name every post-build native-input comparison outcome.
+
+    .. attribute :: MATCHED
+        :type: str
+
+        Every mapped caller field matched embedded native output.
+
+    .. attribute :: UNVERIFIED
+        :type: str
+
+        At least one caller field has no demonstrated embedded mapping.
+
+    .. attribute :: MISMATCH
+        :type: str
+
+        A mapped caller field differs from or is missing in native output.
+    """
+
+    MATCHED = "matched"
+    UNVERIFIED = "unverified"
+    MISMATCH = "mismatch"
+
+
 def _fields(
     document: Mapping[str, JSONValue], expected: frozenset[str], source: str
 ) -> None:
@@ -245,15 +269,15 @@ def _native_comparison(document: JSONObject, artifact_sha256: str) -> JSONObject
     """
     _fields(document, _COMPARISON_FIELDS, "native_comparison")
     try:
-        status = json_string(document["status"])
-        if status not in ("matched", "unverified"):
+        status = NativeComparisonStatus(json_string(document["status"]))
+        if status is NativeComparisonStatus.MISMATCH:
             raise ValueError("unsupported comparison status")
         digest = normalized_digest(json_string(document["artifact_sha256"]))
         if digest != normalized_digest(artifact_sha256):
             raise ValueError("comparison artifact mismatch")
         matched = list(json_strings(document["matched_fields"]))
         unverified = list(json_strings(document["unverified_fields"]))
-        if status == "matched" and (not matched or unverified):
+        if status is NativeComparisonStatus.MATCHED and (not matched or unverified):
             raise ValueError("matched comparison has incomplete coverage")
         return {
             "status": status,
@@ -576,6 +600,7 @@ class OCPArtifactState(OCPState):
 
 __all__ = [
     "ArtifactLifetime",
+    "NativeComparisonStatus",
     "NodeArtifactRecord",
     "OCPArtifactState",
     "RecordArtifactAction",
