@@ -124,6 +124,11 @@ class ImageBuildChainState(GitLabRunnerManagerState):
 
         Authenticated Harbor service for the toolbox image.
 
+    .. attribute :: selected_node
+        :type: str
+
+        Ready worker selected for the runner workload.
+
     .. attribute :: created_runner_id
         :type: int
 
