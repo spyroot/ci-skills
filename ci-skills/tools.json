@@ -64,7 +64,7 @@
         "when": "nothing above applies"
       }
     ],
-    "no_search": "Do not hunt for credentials. Run the diagnostic you need: its access receipt names the effective source for each required authority. Use access_check.py when you need the full three-authority receipt.",
+    "no_search": "Do not hunt for credentials. Run the diagnostic you need: its access receipt names the effective source for each required authority. Use access_check.py to check the configured GitHub, GitLab and Kubernetes authorities.",
     "rule": "first match wins; the resolved source is reported in credential_sources",
     "warning": "The default kubeconfig may name another cluster. The selected context and API server are always verified before collection."
   },
@@ -117,15 +117,11 @@
       "report_kind": "access_check",
       "required_options": [],
       "required_tools": [],
-      "requires_authorities": [
-        "github",
-        "gitlab",
-        "kubernetes"
-      ],
+      "requires_authorities": [],
       "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
       "side_effects": "none",
       "subcommands": {},
-      "use_when": "When you need one live receipt proving GitHub, GitLab, and Kubernetes access on the execution host."
+      "use_when": "When you need one live receipt for the configured GitHub, GitLab or Kubernetes authorities on the execution host."
     },
     "bin/ci-api": {
       "execution_surface": "installed Python command and one caller-selected provider API",
@@ -1557,7 +1553,7 @@
     "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
     "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",
     "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
-    "prove all three authorities": "access_check.py",
+    "prove configured access authorities": "access_check.py",
     "prove nested Podman runtime readiness": "image_build_readiness.py",
     "publish an image to Harbor": "harbor_push.py",
     "read a caller-selected Git API resource": "bin/ci-api",

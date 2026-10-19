@@ -183,6 +183,13 @@ def test_root_clusters_offer_every_manifest_command_by_declared_authority() -> N
     """
     root = CATALOG.proposition()
     commands = _commands()
+    provider_references = {
+        "glab": ["access", "project binding", "mcp"],
+        "kubernetes": ["access", "project binding"],
+        "github": ["access", "project binding"],
+        "harbor": ["access", "project binding", "toolbox specification"],
+        "offline": [],
+    }
 
     _validate(root)
     assert root["schema_version"] == "3.0"
@@ -198,6 +205,7 @@ def test_root_clusters_offer_every_manifest_command_by_declared_authority() -> N
         )
         assert set(node) == {"tools", "reference"}
         assert node["tools"] == {command: {} for command in expected}
+        assert list(_entries(node)) == provider_references[cluster]
         offered.update(node["tools"])
         for command in node["tools"]:
             assert _installed_command_path(command).is_file()
@@ -211,6 +219,7 @@ def test_root_clusters_offer_every_manifest_command_by_declared_authority() -> N
     )
     assert set(offline) == {"tools", "reference"}
     assert offline["tools"] == {command: {} for command in expected_offline}
+    assert list(_entries(offline)) == provider_references["offline"]
     offered.update(offline["tools"])
     assert offered == set(commands)
 
@@ -241,7 +250,10 @@ def test_selected_cluster_and_command_are_small_schema_valid_propositions() -> N
 
     _validate(cluster)
     _validate(selected)
-    assert cluster == {"schema_version": "3.0", **root["glab"]}
+    assert cluster["schema_version"] == "3.0"
+    assert cluster["tools"] == root["glab"]["tools"]
+    assert "GitLab pipeline execution" not in _entries(root["glab"])
+    assert "GitLab pipeline execution" in _entries(cluster)
     assert selected["tools"] == {
         script: {}
         for script in [command, *CATALOG.COMMANDS[command].get("related", ())]
@@ -252,6 +264,53 @@ def test_selected_cluster_and_command_are_small_schema_valid_propositions() -> N
     assert list(entries) == [item["name"] for item in selected["reference"]]
     compact = json.dumps(selected, separators=(",", ":"), ensure_ascii=False)
     assert len(compact.encode("utf-8")) <= 4096
+
+
+def test_selected_clusters_keep_their_own_provider_references() -> None:
+    """Multi-provider tools do not import other providers' baseline references.
+
+    :returns: None; assertions prove provider scope without hiding shared tools.
+    """
+    for cluster, unrelated in (
+        ("glab", {"toolbox specification"}),
+        ("kubernetes", {"mcp", "toolbox specification"}),
+        ("github", {"mcp", "toolbox specification"}),
+        ("harbor", {"mcp"}),
+    ):
+        selected = CATALOG.proposition(cluster)
+        _validate(selected)
+        assert unrelated.isdisjoint(_entries(selected)), cluster
+    for cluster in ("glab", "kubernetes", "harbor"):
+        assert "gitlab_runner_manager.py" in CATALOG.proposition(cluster)["tools"]
+
+
+def test_runner_manager_proposition_retains_shared_task_references() -> None:
+    """Selecting the manager retains its cross-provider tools and one SCC pointer.
+
+    :returns: None; assertions prove task expansion and shared-reference identity.
+    """
+    selected = CATALOG.proposition("gitlab_runner_manager.py")
+    _validate(selected)
+    assert {
+        "gitlab_runner_manager.py",
+        "gitlab_runner.py",
+        "image_build_readiness.py",
+    } <= selected["tools"].keys()
+    entries = _entries(selected)
+    assert {
+        "access",
+        "project binding",
+        "mcp",
+        "toolbox specification",
+        "GitLab runner manager",
+        "OpenShift SCC access",
+    } <= entries.keys()
+    assert entries["GitLab runner manager"]["pointer"] == "get gitlab-runner-manager"
+    scc = entries["OpenShift SCC access"]
+    assert scc["pointer"] == "get openshift-scc-access"
+    readiness = CATALOG.proposition("image_build_readiness.py")
+    assert _entries(readiness)["OpenShift SCC access"] == scc
+    assert sum(item["pointer"] == scc["pointer"] for item in selected["reference"]) == 1
 
 
 def test_tool_pod_proposition_offers_installed_usage() -> None:
@@ -267,8 +326,9 @@ def test_tool_pod_proposition_offers_installed_usage() -> None:
     }
 
     assert _entries(selected)["Tool Pod preparation"] == expected
-    cluster = CATALOG.proposition()["kubernetes"]
+    cluster = CATALOG.proposition("kubernetes")
     assert _entries(cluster)["Tool Pod preparation"] == expected
+    assert "Tool Pod preparation" not in _entries(CATALOG.proposition()["kubernetes"])
     assert "create_selfhosted_runner.py" not in selected["tools"]
     unrelated = CATALOG.proposition("gitlab_runner.py")
     assert "Tool Pod preparation" not in _entries(unrelated)
@@ -292,13 +352,14 @@ def test_podman_proposition_offers_installed_readiness_procedure() -> None:
     }
 
     root = CATALOG.proposition()
-    cluster = root["kubernetes"]
+    cluster = CATALOG.proposition("kubernetes")
     unrelated = CATALOG.proposition("gitlab_runner.py")
     for payload in (root, selected, unrelated):
         _validate(payload)
     for name, record in expected.items():
         assert _entries(selected)[name] == {"name": name, **record}
         assert _entries(cluster)[name] == {"name": name, **record}
+        assert name not in _entries(root["kubernetes"])
         assert name not in _entries(unrelated)
     assert "create_selfhosted_runner.py" not in selected["tools"]
 
@@ -321,13 +382,14 @@ def test_iso_proposition_offers_native_input_and_destination_guidance() -> None:
     }
 
     root = CATALOG.proposition()
-    cluster = root["kubernetes"]
+    cluster = CATALOG.proposition("kubernetes")
     unrelated = CATALOG.proposition("gitlab_runner.py")
     for payload in (root, selected, unrelated):
         _validate(payload)
     for name, reference in expected.items():
         assert _entries(selected)[name] == {"name": name, **reference}
         assert _entries(cluster)[name] == {"name": name, **reference}
+        assert name not in _entries(root["kubernetes"])
         assert _registered_file(name).is_file()
         assert name not in _entries(unrelated)
     assert "toolbox.py" not in selected["tools"]

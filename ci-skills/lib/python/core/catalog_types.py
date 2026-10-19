@@ -74,7 +74,11 @@ class CommandDefinition(TypedDict):
 
     .. attribute :: requires
 
-        Runtime authorities used by this command.
+        Runtime authorities required by this command.
+
+    .. attribute :: optional_requires
+
+        Supported authorities checked only when configured in the selected target.
 
     .. attribute :: capabilities
 
@@ -126,6 +130,7 @@ class CommandDefinition(TypedDict):
     purpose: str
     use_when: str
     requires: Sequence[str]
+    optional_requires: NotRequired[Sequence[str]]
     capabilities: Sequence[str]
     options: Mapping[str, str]
     references: NotRequired[Sequence[str]]

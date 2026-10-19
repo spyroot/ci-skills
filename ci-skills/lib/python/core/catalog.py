@@ -119,7 +119,7 @@ ACCESS_PROTOCOL: Mapping[str, Union[str, Sequence[Mapping[str, str]]]] = {
     "no_search": (
         "Do not hunt for credentials. Run the diagnostic you need: its access "
         "receipt names the effective source for each required authority. "
-        "Use access_check.py when you need the full three-authority receipt."
+        "Use access_check.py to check the configured GitHub, GitLab and Kubernetes authorities."
     ),
     "github": [
         {
@@ -625,15 +625,16 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "kind": "access_check",
         "purpose": "Prove access to every selected authority and emit one receipt.",
         "use_when": (
-            "When you need one live receipt proving GitHub, GitLab, and "
-            "Kubernetes access on the execution host."
+            "When you need one live receipt for the configured GitHub, GitLab "
+            "or Kubernetes authorities on the execution host."
         ),
-        "requires": DEFAULT_AUTHORITIES,
+        "requires": (),
+        "optional_requires": DEFAULT_AUTHORITIES,
         "capabilities": (),
         "options": {
-            "--publication": "also require repository administration and the declared required checks",
-            "--job-url": "also prove access to one job, its pipeline, runner and trace",
-            "--ceph-namespace": "also prove Ceph health, OSD, PG and Pod reads in the selected namespace",
+            "--publication": "require GitHub, repository administration and the declared required checks",
+            "--job-url": "require GitLab and prove access to one job, its pipeline, runner and trace",
+            "--ceph-namespace": "require Kubernetes and prove Ceph health, OSD, PG and Pod reads",
             "--receipt-out": "write the committable receipt, with host paths digested",
         },
         "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
@@ -1381,7 +1382,10 @@ def command_authorities(script: str) -> Sequence[str]:
     :raises KeyError: If the command is not registered.
     """  # noqa: DOC502 - Dictionary lookup rejects unknown command keys.
     if script in COMMANDS:
-        return COMMANDS[script]["requires"]
+        entry = COMMANDS[script]
+        return tuple(
+            dict.fromkeys((*entry["requires"], *entry.get("optional_requires", ())))
+        )
     if script in NODE_LOCAL_COMMANDS:
         return NODE_LOCAL_COMMANDS[script]["requires"]
     if script == "bin/ci-api":
@@ -1415,22 +1419,33 @@ def reference_entry(name: str) -> MutableMapping[str, JSONValue]:
 
 
 def _proposition_offering(
-    scripts: Sequence[str], commands: Mapping[str, Mapping[str, object]]
+    scripts: Sequence[str],
+    commands: Mapping[str, Mapping[str, object]],
+    *,
+    provider: Optional[str] = None,
+    include_command_references: bool = True,
 ) -> MutableMapping[str, JSONValue]:
     """Offer what the agent can run and what it can read at one node.
 
     :param scripts: Command keys selected for a cluster or related-command node.
     :param commands: Existing catalogue definitions for the offered commands.
+    :param provider: Selected provider; command nodes derive their own dependencies.
+    :param include_command_references: Expand task references after a node is selected.
     :returns: Installed filenames under ``tools`` and an ordered array of read entries.
     """
-    authorities = {name for script in scripts for name in command_authorities(script)}
+    authorities = (
+        {provider}
+        if provider is not None
+        else {name for script in scripts for name in command_authorities(script)}
+    )
     names = ["access", "project binding"] if authorities else []
     if "gitlab" in authorities:
         names.append("mcp")
     if "harbor" in authorities:
         names.append("toolbox specification")
-    for script in scripts:
-        names.extend(json_strings(commands[script].get("references", ())))
+    if include_command_references:
+        for script in scripts:
+            names.extend(json_strings(commands[script].get("references", ())))
     return {
         "tools": {script: {} for script in sorted(scripts)},
         "reference": [reference_entry(name) for name in dict.fromkeys(names)],
@@ -1456,11 +1471,15 @@ def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
         cluster: _proposition_offering(
             [script for script, names in authorities.items() if authority in names],
             commands,
+            provider=authority,
+            include_command_references=node is not None,
         )
         for cluster, authority in PROPOSITION_CLUSTERS.items()
     }
     clusters["offline"] = _proposition_offering(
-        [script for script, names in authorities.items() if not names], commands
+        [script for script, names in authorities.items() if not names],
+        commands,
+        include_command_references=node is not None,
     )
     if node is None:
         return {"schema_version": PROPOSITION_VERSION, **clusters}
@@ -1731,7 +1750,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 "verify a Harbor toolbox pull": "harbor_pull.py",
                 "create or delete a GitHub runner": "create_selfhosted_runner.py",
                 "browse tools and references": "reference.py",
-                "prove all three authorities": "access_check.py",
+                "prove configured access authorities": "access_check.py",
                 "a named CI job failed": "gitlab_job.py",
                 "check GitLab pipeline progress": "gitlab_pipeline.py",
                 "GitLab operation access": "gitlab_access.py",

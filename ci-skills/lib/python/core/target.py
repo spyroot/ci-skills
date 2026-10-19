@@ -476,17 +476,18 @@ def _table(value: object, name: str, keys: frozenset[str]) -> Mapping[str, objec
     return value
 
 
-def _string(table: Mapping[str, object], key: str) -> str:
+def _string(table: Mapping[str, object], key: str, name: str) -> str:
     """Read a required nonempty string from a target table.
 
     :param table: Parsed authority table.
     :param key: Required field name.
+    :param name: Table name qualifying the field in validation diagnostics.
     :returns: Field value with surrounding whitespace removed.
     :raises TargetError: The field is absent, is not text, or is blank.
     """
     value = table.get(key)
     if not isinstance(value, str) or not value.strip():
-        raise TargetError(f"{key} must be a nonempty string")
+        raise TargetError(f"{name}.{key} must be a nonempty string")
     return value.strip()
 
 
@@ -674,7 +675,7 @@ def _parse_gitlab(
     :raises TargetError: If a GitLab setting or token path is invalid.
     """
     gitlab = _table(value, "gitlab", TARGET_CONTRACT.names("gitlab"))
-    url, host = _https_url(_string(gitlab, "url"), "gitlab.url")
+    url, host = _https_url(_string(gitlab, "url", "gitlab"), "gitlab.url")
     runner_id = gitlab.get("runner_id")
     if runner_id is not None and (
         isinstance(runner_id, bool) or not isinstance(runner_id, int) or runner_id <= 0
@@ -718,12 +719,11 @@ def load_gitlab_target(path: Union[str, Path]) -> GitLabOperationTarget:
     :returns: GitLab settings and the canonical source-file path.
     :raises TargetError: If the target is unreadable, invalid, inside the skill,
         or contains invalid GitLab settings or an internal credential path.
-    """
+    """  # noqa: DOC502 - Shared table and field parsers raise TargetError.
     source = Path(path).expanduser()
     skill_root = SKILL_ROOT
     data = _read_target_data(source, skill_root)
-    if "gitlab" not in data or set(data) - set(AUTHORITIES):
-        raise TargetError("GitLab operations need a gitlab table without extra tables")
+    _select_surfaces(data, ("gitlab",), ())
     selected = _parse_gitlab(data["gitlab"], skill_root, target_directory=source.parent)
     return GitLabOperationTarget(selected, source.resolve())
 
@@ -773,7 +773,7 @@ def _node_diagnostics(value: object) -> Optional[NodeDiagnosticsTarget]:
         return None
     name = "kubernetes.node_diagnostics"
     table = _table(value, name, TARGET_CONTRACT.names(name))
-    node = _string(table, "node")
+    node = _string(table, "node", name)
     if any(character.isspace() for character in node):
         raise TargetError(
             "kubernetes.node_diagnostics.node must not contain whitespace"
@@ -788,8 +788,12 @@ def _node_diagnostics(value: object) -> Optional[NodeDiagnosticsTarget]:
         )
         journal = JournalPodRoute(
             pod=_node_pod_route(journal_table, "journal"),
-            directory=_absolute_path(_string(journal_table, "directory"), "directory"),
-            host_path=_absolute_path(_string(journal_table, "host_path"), "host_path"),
+            directory=_absolute_path(
+                _string(journal_table, "directory", f"{name}.journal"), "directory"
+            ),
+            host_path=_absolute_path(
+                _string(journal_table, "host_path", f"{name}.journal"), "host_path"
+            ),
         )
     return NodeDiagnosticsTarget(node=node, cilium=cilium, journal=journal)
 
@@ -804,9 +808,9 @@ def _node_pod_route(value: object, kind: str) -> NodePodRoute:
     """
     name = f"kubernetes.node_diagnostics.{kind}"
     table = _table(value, name, TARGET_CONTRACT.names(name))
-    namespace = _string(table, "namespace")
-    selector = _string(table, "selector")
-    container = _string(table, "container")
+    namespace = _string(table, "namespace", name)
+    selector = _string(table, "selector", name)
+    container = _string(table, "container", name)
     if any(character.isspace() for character in namespace + container):
         raise TargetError(f"kubernetes.node_diagnostics.{kind} has invalid name")
     return NodePodRoute(namespace=namespace, selector=selector, container=container)
@@ -840,10 +844,10 @@ def _parse_github(
     :raises TargetError: A required field, selector, path, or table entry is invalid.
     """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
     github = _table(value, "github", TARGET_CONTRACT.names("github"))
-    github_host = _string(github, "host").lower()
+    github_host = _string(github, "host", "github").lower()
     if "." not in github_host or "/" in github_host or ":" in github_host:
         raise TargetError("github.host must be a full hostname")
-    repository = _string(github, "repository")
+    repository = _string(github, "repository", "github")
     if len(repository.split("/")) != 2 or any(
         not part for part in repository.split("/")
     ):
@@ -870,7 +874,7 @@ def _parse_harbor(
     :raises TargetError: A required field, selector, path, or table entry is invalid.
     """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
     harbor = _table(value, "harbor", TARGET_CONTRACT.names("harbor"))
-    url, host = _https_url(_string(harbor, "url"), "harbor.url")
+    url, host = _https_url(_string(harbor, "url", "harbor"), "harbor.url")
     files = {
         key: _optional_file(harbor, key, skill_root, target_directory=target_directory)
         for key in ("credential_file", "username_file", "password_file")
@@ -881,7 +885,7 @@ def _parse_harbor(
         combined and any(files[key] for key in ("username_file", "password_file"))
     ):
         raise TargetError("harbor_credential_selection_invalid")
-    return HarborTarget(url, host, _string(harbor, "project"), **files)
+    return HarborTarget(url, host, _string(harbor, "project", "harbor"), **files)
 
 
 def _parse_kubernetes(value: object, skill_root: Path) -> KubernetesTarget:
@@ -893,13 +897,15 @@ def _parse_kubernetes(value: object, skill_root: Path) -> KubernetesTarget:
     :raises TargetError: A required field, selector, path, or table entry is invalid.
     """  # noqa: DOC503 - Shared field parsers validate their declared contracts.
     kubernetes = _table(value, "kubernetes", TARGET_CONTRACT.names("kubernetes"))
-    server, _ = _https_url(_string(kubernetes, "server"), "kubernetes.server")
+    server, _ = _https_url(
+        _string(kubernetes, "server", "kubernetes"), "kubernetes.server"
+    )
     kubeconfig = _optional_file(kubernetes, "kubeconfig", skill_root)
     kubeconfigs = _optional_files(kubernetes, "kubeconfigs", skill_root)
     if kubeconfig and kubeconfigs:
         raise TargetError("declare kubernetes.kubeconfig or kubeconfigs, not both")
     return KubernetesTarget(
-        context=_string(kubernetes, "context"),
+        context=_string(kubernetes, "context", "kubernetes"),
         server=server,
         kubeconfig=kubeconfig,
         kubeconfigs=kubeconfigs,
@@ -907,8 +913,42 @@ def _parse_kubernetes(value: object, skill_root: Path) -> KubernetesTarget:
     )
 
 
+def _select_surfaces(
+    data: Mapping[str, object],
+    required: tuple[str, ...],
+    optional: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Select required authorities and configured optional authorities once.
+
+    :param data: Target tables from the selected TOML file.
+    :param required: Authority names that must be configured for this invocation.
+    :param optional: Additional supported authorities selected when their table exists.
+    :returns: Distinct selected authorities in requirement and declaration order.
+    :raises TargetError: Unknown tables, absent required tables, or no selected authority.
+    """
+    unknown = set(data) - set(AUTHORITIES)
+    if unknown:
+        raise TargetError(
+            "target contains unsupported tables: " + ", ".join(sorted(unknown))
+        )
+    missing = set(required) - set(data)
+    if missing:
+        raise TargetError(
+            "target is missing required authority tables: " + ", ".join(sorted(missing))
+        )
+    selected = tuple(
+        dict.fromkeys((*required, *(name for name in optional if name in data)))
+    )
+    if not selected:
+        raise TargetError("target has no configured authority tables for this command")
+    return selected
+
+
 def load_target(
-    path: Union[str, Path], *, required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES
+    path: Union[str, Path],
+    *,
+    required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES,
+    optional_surfaces: tuple[str, ...] = (),
 ) -> Target:
     """Load requested authorities with relative tokens beside the target file.
 
@@ -917,49 +957,45 @@ def load_target(
 
     :param path: Selected TOML target file, including an optional home prefix.
     :param required_surfaces: Distinct declared authorities the command needs.
+    :param optional_surfaces: Supported authorities selected only when configured.
     :returns: Validated settings for the requested authorities.
     :raises TargetError: If the requested authorities or target data are invalid,
         unreadable, missing, or select a target or credential inside the skill.
     """
-    if (
-        not required_surfaces
-        or len(set(required_surfaces)) != len(required_surfaces)
-        or set(required_surfaces) - set(AUTHORITIES)
+    if not (required_surfaces or optional_surfaces) or any(
+        len(set(surfaces)) != len(surfaces) or set(surfaces) - set(AUTHORITIES)
+        for surfaces in (required_surfaces, optional_surfaces)
     ):
         raise TargetError("required_target_surfaces_invalid")
     source = Path(path).expanduser()
     skill_root = SKILL_ROOT
     data = _read_target_data(source, skill_root)
-    if set(data) - set(AUTHORITIES) or set(required_surfaces) - set(data):
-        raise TargetError(
-            "target must contain the selected authority tables only: "
-            + ", ".join(required_surfaces)
-        )
+    selected = _select_surfaces(data, required_surfaces, optional_surfaces)
 
     github_target = (
         _parse_github(data["github"], skill_root, target_directory=source.parent)
-        if "github" in required_surfaces
+        if "github" in selected
         else None
     )
     gitlab_target = (
         _parse_gitlab(data["gitlab"], skill_root, target_directory=source.parent)
-        if "gitlab" in required_surfaces
+        if "gitlab" in selected
         else None
     )
     harbor_target = (
         _parse_harbor(data["harbor"], skill_root, target_directory=source.parent)
-        if "harbor" in required_surfaces
+        if "harbor" in selected
         else None
     )
     kubernetes_target = (
         _parse_kubernetes(data["kubernetes"], skill_root)
-        if "kubernetes" in required_surfaces
+        if "kubernetes" in selected
         else None
     )
     return Target(
         github=github_target,
         gitlab=gitlab_target,
         kubernetes=kubernetes_target,
-        active_surfaces=required_surfaces,
+        active_surfaces=selected,
         harbor=harbor_target,
     )

@@ -730,14 +730,19 @@ class FakeKubernetes:
             return {"items": [_node("worker-a")]}
         if args[:2] == ("get", "namespaces"):
             return {"items": self._labeled("namespace", args)}
-        if args[:2] == ("get", "pods") and "--all-namespaces" in args:
-            return {"items": self._labeled("pod", args)}
-        if args[:2] == ("get", "configmaps") and "--all-namespaces" in args:
-            return {"items": self._labeled("configmap", args)}
-        if args[:2] == ("get", "deployments") and "--all-namespaces" in args:
-            return {"items": self._labeled("deployment", args)}
-        if args[:2] == ("get", "rolebindings") and "--all-namespaces" in args:
-            return {"items": self._labeled("rolebinding", args)}
+        scope_resources = {
+            "pods": "pod",
+            "configmaps": "configmap",
+            "deployments": "deployment",
+            "rolebindings": "rolebinding",
+        }
+        if (
+            len(args) >= 2
+            and args[0] == "get"
+            and args[1] in scope_resources
+            and "--all-namespaces" in args
+        ):
+            return {"items": self._labeled(scope_resources[args[1]], args)}
         if "pods" in args:
             if self.scc_rejected:
                 return {"items": []}
