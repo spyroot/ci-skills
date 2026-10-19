@@ -1,4 +1,10 @@
-"""Command boundary for the CI13 image-build chain.
+"""Run the image-build chain from CLI arguments and report its outcome.
+
+Connect ``image_build_readiness.py chain`` to the reusable workflow. This
+module creates the chain action, selects dry-run, live-plan or apply, and
+collects callback results, cleanup evidence and errors into one report.
+It keeps command execution and output handling separate from the workflow
+and provider callbacks.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
