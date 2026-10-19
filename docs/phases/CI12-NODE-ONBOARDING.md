@@ -583,10 +583,13 @@ does not introduce an arbitrary native flag-forwarding interface. No copied MAC 
 NMState schema, disk allowlist, required role/architecture policy or per-host JSON model is introduced.
 
 ci-skills checks its own invocation shape, that a named file can be read/staged and that its execution/storage
-references are usable. It does not parse, normalize, rewrite or validate the OCP/NMState YAML. Invalid native
-input reaches `oc`; a nonzero result returns the provider's sanitized error and exit status through the shared
-report. The caller corrects the values and invokes again. Missing MAC in the flags route is a usage error, not
-a reason to invent a value. The file route does not require a redundant MAC flag.
+references are usable. Before provider execution it does not parse, normalize, rewrite or validate the OCP/NMState
+YAML. Invalid native input reaches `oc`; a nonzero result returns the provider's sanitized error and exit status
+through the shared report. After a successful build, output verification compares supported caller fields with
+their native embedded representations and binds the non-secret comparison outcome to the ISO digest. Unsupported
+or unavailable mappings remain explicitly unverified. The caller corrects rejected or mismatched values and invokes
+again. Missing MAC in the flags route is a usage error, not a reason to invent a value. The file route does not
+require a redundant MAC flag.
 
 The result schema describes our evidence. It is not a schema for an OCP node or an Ignition document.
 Do not deliver `machine-spec.schema.json` or a custom native YAML loader for this flow. A separate machine-pool

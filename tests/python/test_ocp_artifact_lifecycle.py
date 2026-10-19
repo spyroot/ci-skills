@@ -7,10 +7,16 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import base64
+import json
+from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 import pytest
+import yaml
 from conftest import import_script_module
 from test_artifact_storage import (
     FilePodCluster,
@@ -19,6 +25,9 @@ from test_artifact_storage import (
     source_artifact,
     storage_state,
 )
+
+if TYPE_CHECKING:
+    from lib.python.core.json_types import JSONObject
 
 LIFECYCLE = import_script_module("lib.python.core.kubernetes.ocp_artifact_lifecycle")
 RECORDS = import_script_module("lib.python.core.kubernetes.ocp_artifact_run")
@@ -472,7 +481,19 @@ def test_iso_inspection_cleans_reader_resources_but_retains_verified_producer(
         return COMMANDS.CommandResult(
             ("coreos-installer", "iso", "ignition", "show", artifact.path),
             0,
-            '{"ignition":{"version":"3.4.0"}}',
+            json.dumps(
+                {
+                    "ignition": {"version": "3.4.0"},
+                    "storage": {
+                        "files": [
+                            _embedded_file(
+                                "/etc/assisted/hostconfig/node/mac_addresses",
+                                "02:00:00:00:00:01\n",
+                            )
+                        ]
+                    },
+                }
+            ),
             "",
         )
 
@@ -507,3 +528,298 @@ def test_iso_inspection_cleans_reader_resources_but_retains_verified_producer(
         assert state.build_artifact == artifact
         assert state.source_artifact == artifact
     assert Path(artifact.path).read_bytes() == b"verified native ISO\x00\xff"
+
+
+def _embedded_file(path: str, content: str) -> JSONObject:
+    """Encode one native provider file without replacing the production decoder."""
+    return {
+        "path": path,
+        "contents": {
+            "source": "data:;base64," + base64.b64encode(content.encode()).decode()
+        },
+    }
+
+
+@pytest.fixture
+def native_output() -> tuple[JSONObject, JSONObject]:
+    """Provide two distinct native hosts and independently path-bound output."""
+    hosts = []
+    files = []
+    manifests = []
+    for index in (1, 2):
+        mac = f"02:00:00:10:00:0{index}"
+        hostname = f"worker-0{index}"
+        interfaces = [{"name": "ens3", "macAddress": mac}]
+        network = {
+            "interfaces": [
+                {
+                    "name": "ens3",
+                    "type": "ethernet",
+                    "state": "up",
+                    "mac-address": mac,
+                    "mtu": 9000,
+                    "ipv4": {"enabled": True, "dhcp": True},
+                }
+            ]
+        }
+        disk = {"deviceName": f"/dev/disk/by-id/disk-{index}"}
+        hosts.append(
+            {
+                "hostname": hostname,
+                "interfaces": interfaces,
+                "networkConfig": network,
+                "rootDeviceHints": disk,
+            }
+        )
+        files.extend(
+            (
+                _embedded_file(
+                    f"/etc/assisted/hostconfig/{hostname}/mac_addresses", mac
+                ),
+                _embedded_file(f"/etc/assisted/hostnames/{mac}", hostname),
+                _embedded_file(
+                    f"/etc/assisted/hostconfig/{hostname}/root-device-hints.yaml",
+                    yaml.safe_dump(disk),
+                ),
+            )
+        )
+        manifests.append(
+            {
+                "apiVersion": "agent-install.openshift.io/v1beta1",
+                "kind": "NMStateConfig",
+                "metadata": {"name": hostname},
+                "spec": {
+                    "interfaces": deepcopy(interfaces),
+                    "config": deepcopy(network),
+                },
+            }
+        )
+    files.append(
+        _embedded_file(
+            "/etc/assisted/manifests/nmstateconfig.yaml", yaml.safe_dump_all(manifests)
+        )
+    )
+    return {"hosts": hosts}, {
+        "ignition": {"version": "3.4.0"},
+        "storage": {"files": files},
+    }
+
+
+@pytest.fixture
+def verify_native_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[NATIVE.NativeNodeInput, JSONObject], JSONObject]:
+    """Run the real build verifier against actual fixture ISO bytes and native output."""
+    state, _cluster = artifact_state(tmp_path)
+    state.build_completed = True
+
+    def verify(node_input: NATIVE.NativeNodeInput, document: JSONObject) -> JSONObject:
+        def inspect(
+            selected: ISO.OCPState, operation: str, *arguments: str
+        ) -> COMMANDS.CommandResult:
+            assert selected is state
+            assert (operation, arguments) == ("inspect", (state.stored_artifact.path,))
+            return COMMANDS.CommandResult(
+                ("coreos-installer", "iso", "ignition", "show", *arguments),
+                0,
+                json.dumps(document),
+                "",
+            )
+
+        monkeypatch.setattr(ISO_VERIFY, "run_node_image_script", inspect)
+        return invoke(
+            ISO_VERIFY.VerifyNodeImage(
+                ISO.NodeImageAction(node_input, state.stored_artifact.path)
+            ),
+            state,
+        )
+
+    return verify
+
+
+def _caller_input(tmp_path: Path, document: JSONObject) -> NATIVE.NativeNodeInput:
+    """Read exact caller-native YAML through the public input boundary."""
+    path = tmp_path / "nodes-config.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    return NATIVE.NativeNodeInput.read(spec=path)
+
+
+@pytest.mark.parametrize("route", ("mac", "yaml"))
+def test_native_build_verifies_supplied_values_for_the_correct_host(
+    route: str,
+    tmp_path: Path,
+    native_output: tuple[JSONObject, JSONObject],
+    verify_native_output: Callable[[NATIVE.NativeNodeInput, JSONObject], JSONObject],
+) -> None:
+    """Accept actual MAC or native YAML settings only when their output matches."""
+    expected, output = native_output
+    node_input = (
+        NATIVE.NativeNodeInput.read(mac_address="02:00:00:10:00:01")
+        if route == "mac"
+        else _caller_input(tmp_path, expected)
+    )
+    result = verify_native_output(node_input, output)
+    comparison = result["native_input_comparison"]
+    assert result["verified"] is True
+    assert comparison["status"] == "matched"
+    assert comparison["artifact_sha256"] == result["artifact"]["sha256"]
+    assert comparison["input_identity"] == node_input.evidence()
+    assert comparison["unverified_fields"] == []
+    assert comparison["matched_fields"]
+
+
+def test_native_yaml_without_network_config_accepts_mac_and_reports_unobserved_name(
+    tmp_path: Path,
+    verify_native_output: Callable[[NATIVE.NativeNodeInput, JSONObject], JSONObject],
+) -> None:
+    """Native DHCP input has no NMState manifest from which to prove interface names."""
+    expected = {
+        "hosts": [{"interfaces": [{"name": "ens3", "macAddress": "02:00:00:10:00:01"}]}]
+    }
+    output = {
+        "ignition": {"version": "3.4.0"},
+        "storage": {
+            "files": [
+                _embedded_file(
+                    "/etc/assisted/hostconfig/host-0/mac_addresses", "02:00:00:10:00:01"
+                )
+            ]
+        },
+    }
+    node_input = _caller_input(tmp_path, expected)
+
+    result = verify_native_output(node_input, output)
+
+    comparison = result["native_input_comparison"]
+    assert result["verified"] is True
+    assert comparison["status"] == "unverified"
+    assert comparison["input_identity"] == node_input.evidence()
+    assert comparison["matched_fields"] == ["hosts[0].interfaces[0].macAddress"]
+    assert comparison["unverified_fields"] == ["hosts[0].interfaces[0].name"]
+    assert "mismatched_fields" not in comparison
+
+
+def test_native_build_rejects_hostnames_swapped_between_mac_paths(
+    tmp_path: Path,
+    native_output: tuple[JSONObject, JSONObject],
+    verify_native_output: Callable[[NATIVE.NativeNodeInput, JSONObject], JSONObject],
+) -> None:
+    """The expected names elsewhere in the ISO do not prove the right host binding."""
+    expected, output = native_output
+    files = output["storage"]["files"]
+    files[1]["contents"], files[4]["contents"] = (
+        files[4]["contents"],
+        files[1]["contents"],
+    )
+    with pytest.raises(KUBERNETES.KubernetesError, match="native_input_mismatch"):
+        verify_native_output(_caller_input(tmp_path, expected), output)
+
+
+def test_mac_network_comparison_rejects_a_matching_network_on_another_host(
+    tmp_path: Path,
+    native_output: tuple[JSONObject, JSONObject],
+    verify_native_output: Callable[[NATIVE.NativeNodeInput, JSONObject], JSONObject],
+) -> None:
+    """A MAC selection cannot borrow another host's correct network values."""
+    expected, output = native_output
+    selected_network = expected["hosts"][1]["networkConfig"]
+    path = tmp_path / "network.yaml"
+    path.write_text(yaml.safe_dump(selected_network), encoding="utf-8")
+    node_input = NATIVE.NativeNodeInput.read(
+        mac_address="02:00:00:10:00:01", network_config=path
+    )
+    with pytest.raises(KUBERNETES.KubernetesError, match="native_input_mismatch"):
+        verify_native_output(node_input, output)
+
+
+@pytest.mark.parametrize("defect", ("missing", "unreadable", "bool-as-integer"))
+def test_native_build_rejects_missing_unreadable_or_wrongly_typed_requested_values(
+    defect: str,
+    tmp_path: Path,
+    native_output: tuple[JSONObject, JSONObject],
+    verify_native_output: Callable[[NATIVE.NativeNodeInput, JSONObject], JSONObject],
+) -> None:
+    """Requested native fields need readable output with the same native value types."""
+    expected, output = native_output
+    files = output["storage"]["files"]
+    if defect == "missing":
+        del files[2]
+    elif defect == "unreadable":
+        files[2]["contents"] = {"source": "https://example.test/private-disk-data"}
+    else:
+        documents = list(
+            yaml.safe_load_all(
+                base64.b64decode(files[-1]["contents"]["source"].split(",", 1)[1])
+            )
+        )
+        documents[0]["spec"]["config"]["interfaces"][0]["ipv4"]["dhcp"] = 1
+        files[-1] = _embedded_file(files[-1]["path"], yaml.safe_dump_all(documents))
+    with pytest.raises(
+        KUBERNETES.KubernetesError,
+        match="native_(input_mismatch|output_comparison_unreadable)",
+    ):
+        verify_native_output(_caller_input(tmp_path, expected), output)
+
+
+@pytest.mark.parametrize(
+    "legacy", (False, True), ids=("compared-artifact", "legacy-record")
+)
+def test_standalone_verify_reuses_only_comparison_bound_to_unchanged_iso(
+    legacy: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fresh artifact reads preserve matched proof while legacy records stay unverified."""
+    state, _cluster = artifact_state(tmp_path)
+    document = {
+        "ignition": {"version": "3.4.0"},
+        "storage": {
+            "files": [
+                _embedded_file(
+                    "/etc/assisted/hostconfig/node/mac_addresses", "02:00:00:10:00:01"
+                )
+            ]
+        },
+    }
+    inspections = []
+
+    def inspect(
+        _selected: ISO.OCPState, _operation: str, *arguments: str
+    ) -> COMMANDS.CommandResult:
+        inspections.append(arguments)
+        return COMMANDS.CommandResult(
+            ("inspect", *arguments), 0, json.dumps(document), ""
+        )
+
+    monkeypatch.setattr(ISO_VERIFY, "run_node_image_script", inspect)
+    if not legacy:
+        state.build_completed = True
+        initial = invoke(
+            ISO_VERIFY.VerifyNodeImage(
+                ISO.NodeImageAction(
+                    NATIVE.NativeNodeInput.read(mac_address="02:00:00:10:00:01"),
+                    state.stored_artifact.path,
+                )
+            ),
+            state,
+        )["native_input_comparison"]
+        record = replace(state.artifact_record, native_input_comparison=initial)
+        state.artifact_record = MODELS.NodeArtifactRecord.from_document(
+            record.as_dict()
+        )
+    action = SCOPES.ResolveRunScopeAction(state.artifact_record.run_id)
+    result = invoke(LIFECYCLE.VerifyArtifactReference(action), state)
+    comparison = result["native_input_comparison"]
+    assert comparison["artifact_unchanged"] is True
+    assert comparison["artifact_sha256"] == state.artifact_record.artifact.sha256
+    assert comparison["status"] == ("unverified" if legacy else "matched")
+    if legacy:
+        assert comparison["unverified_fields"] == [
+            "legacy_record_without_input_comparison"
+        ]
+    else:
+        assert comparison["input_identity"] == initial["input_identity"]
+        assert comparison["matched_fields"] == initial["matched_fields"]
+    before = len(inspections)
+    Path(state.artifact_record.artifact.path).write_bytes(b"different ISO")
+    with pytest.raises(KUBERNETES.KubernetesError, match="content_readback_mismatch"):
+        invoke(LIFECYCLE.VerifyArtifactReference(action), state)
+    assert len(inspections) == before

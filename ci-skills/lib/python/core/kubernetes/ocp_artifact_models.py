@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Optional
 
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import (
@@ -21,6 +21,7 @@ from lib.python.core.json_types import (
     json_integer,
     json_object,
     json_string,
+    json_strings,
 )
 from lib.python.core.kubernetes.artifact_storage_models import (
     StorageDestination,
@@ -44,8 +45,9 @@ from lib.python.core.kubernetes.tool_pod_models import (
 if TYPE_CHECKING:
     from lib.python.core.kubernetes.ocp_recovery import NodeRecoveryRecord
 
-ARTIFACT_RECORD_VERSION: Final = "1.0"
-_RECORD_FIELDS: Final = frozenset(
+LEGACY_ARTIFACT_RECORD_VERSION: Final = "1.0"
+ARTIFACT_RECORD_VERSION: Final = "1.1"
+_LEGACY_RECORD_FIELDS: Final = frozenset(
     {
         "schema_version",
         "run_id",
@@ -58,11 +60,21 @@ _RECORD_FIELDS: Final = frozenset(
         "node_selector",
     }
 )
+_RECORD_FIELDS: Final = _LEGACY_RECORD_FIELDS | {"native_input_comparison"}
 _POD_FIELDS: Final = frozenset(
     {"namespace", "name", "uid", "container", "image", "restart_count"}
 )
 _ARTIFACT_FIELDS: Final = frozenset({"pod", "path", "sha256", "size"})
 _MOUNT_FIELDS: Final = frozenset({"name", "volumeSource", "mountPath", "readOnly"})
+_COMPARISON_FIELDS: Final = frozenset(
+    {
+        "status",
+        "artifact_sha256",
+        "input_identity",
+        "matched_fields",
+        "unverified_fields",
+    }
+)
 
 
 class ArtifactLifetime(StrEnum):
@@ -223,6 +235,37 @@ def _node_selector(document: JSONObject) -> Mapping[str, str]:
     return MappingProxyType(dict(document))
 
 
+def _native_comparison(document: JSONObject, artifact_sha256: str) -> JSONObject:
+    """Decode one non-secret post-build input comparison.
+
+    :param document: Persisted comparison and coverage.
+    :param artifact_sha256: Artifact digest the comparison must describe.
+    :returns: Operation-owned comparison after strict shape validation.
+    :raises KubernetesError: If status, digest, identity, or coverage is invalid.
+    """
+    _fields(document, _COMPARISON_FIELDS, "native_comparison")
+    try:
+        status = json_string(document["status"])
+        if status not in ("matched", "unverified"):
+            raise ValueError("unsupported comparison status")
+        digest = normalized_digest(json_string(document["artifact_sha256"]))
+        if digest != normalized_digest(artifact_sha256):
+            raise ValueError("comparison artifact mismatch")
+        matched = list(json_strings(document["matched_fields"]))
+        unverified = list(json_strings(document["unverified_fields"]))
+        if status == "matched" and (not matched or unverified):
+            raise ValueError("matched comparison has incomplete coverage")
+        return {
+            "status": status,
+            "artifact_sha256": digest,
+            "input_identity": copy_json_object(json_object(document["input_identity"])),
+            "matched_fields": matched,
+            "unverified_fields": unverified,
+        }
+    except (KeyError, TypeError, ValueError, KubernetesError) as exc:
+        raise KubernetesError("node_artifact_native_comparison_invalid") from exc
+
+
 @dataclass(frozen=True)
 class NodeArtifactRecord:
     """Retain the exact verified ISO and inputs needed for later cluster reads.
@@ -235,6 +278,7 @@ class NodeArtifactRecord:
     :param storage: Safe observed destination identity.
     :param lifetime: Provider resource that bounds artifact availability.
     :param node_selector: Exact native Pod placement labels used by the build.
+    :param native_input_comparison: Optional post-build comparison bound to the ISO.
 
     .. attribute :: run_id
         :type: str
@@ -275,6 +319,11 @@ class NodeArtifactRecord:
         :type: Mapping[str, str]
 
         Immutable native Pod placement labels used by the build and later readers.
+
+    .. attribute :: native_input_comparison
+        :type: Optional[JSONObject]
+
+        Non-secret initial input comparison, absent for legacy records.
     """
 
     run_id: str
@@ -288,6 +337,7 @@ class NodeArtifactRecord:
         default_factory=lambda: MappingProxyType({}),
         repr=False,
     )
+    native_input_comparison: Optional[JSONObject] = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Reject internally inconsistent persisted evidence.
@@ -322,6 +372,15 @@ class NodeArtifactRecord:
             "node_selector",
             MappingProxyType(dict(self.node_selector)),
         )
+        if self.native_input_comparison is not None:
+            comparison = _native_comparison(
+                self.native_input_comparison, self.artifact.sha256
+            )
+            object.__setattr__(
+                self,
+                "native_input_comparison",
+                MappingProxyType(copy_json_object(comparison)),
+            )
 
     @classmethod
     def from_document(cls, document: JSONObject) -> NodeArtifactRecord:
@@ -331,9 +390,13 @@ class NodeArtifactRecord:
         :returns: Typed record after cross-field validation.
         :raises KubernetesError: If the record version, fields, or evidence differ.
         """  # noqa: DOC503 - caught validation is normalized to KubernetesError.
-        _fields(document, _RECORD_FIELDS, "record")
         try:
-            if document["schema_version"] != ARTIFACT_RECORD_VERSION:
+            version = json_string(document["schema_version"])
+            if version == LEGACY_ARTIFACT_RECORD_VERSION:
+                _fields(document, _LEGACY_RECORD_FIELDS, "record")
+            elif version == ARTIFACT_RECORD_VERSION:
+                _fields(document, _RECORD_FIELDS, "record")
+            else:
                 raise ValueError("unsupported record version")
             destination = StorageDestination.from_document(
                 json_object(document["destination"])
@@ -348,17 +411,26 @@ class NodeArtifactRecord:
                 raise TypeError("tool mounts must be an array")
             mounts = tuple(_mount(json_object(item)) for item in mounts_value)
             lifetime = ArtifactLifetime(json_string(document["lifetime"]))
+            artifact = _artifact(json_object(document["artifact"]))
+            comparison = (
+                None
+                if version == LEGACY_ARTIFACT_RECORD_VERSION
+                else _native_comparison(
+                    json_object(document["native_input_comparison"]), artifact.sha256
+                )
+            )
             return cls(
                 run_id=json_string(document["run_id"]),
                 destination=destination,
                 tool_spec=tool_spec,
                 tool_mounts=mounts,
-                artifact=_artifact(json_object(document["artifact"])),
+                artifact=artifact,
                 storage=_storage(json_object(document["storage"]), destination),
                 lifetime=lifetime,
                 node_selector=_node_selector(
                     copy_json_object(json_object(document["node_selector"]))
                 ),
+                native_input_comparison=comparison,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise KubernetesError("node_artifact_record_invalid") from exc
@@ -368,8 +440,12 @@ class NodeArtifactRecord:
 
         :returns: Exact destination, tool, artifact, storage, and lifetime evidence.
         """
-        return {
-            "schema_version": ARTIFACT_RECORD_VERSION,
+        result: dict[str, JSONValue] = {
+            "schema_version": (
+                ARTIFACT_RECORD_VERSION
+                if self.native_input_comparison is not None
+                else LEGACY_ARTIFACT_RECORD_VERSION
+            ),
             "run_id": self.run_id,
             "destination": self.destination.as_dict(),
             "tool_spec": self.tool_spec.as_dict(),
@@ -379,6 +455,11 @@ class NodeArtifactRecord:
             "lifetime": self.lifetime.value,
             "node_selector": dict(self.node_selector),
         }
+        if self.native_input_comparison is not None:
+            result["native_input_comparison"] = copy_json_object(
+                self.native_input_comparison
+            )
+        return result
 
 
 @dataclass(frozen=True)
