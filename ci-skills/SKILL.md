@@ -35,6 +35,8 @@ Installing the skill does not install all of those native clients.
 Diagnose a Kubernetes-backed CI, storage, or network symptom, or act on an
 explicit GitLab request. GitLab operation commands default to an offline
 dry-run and write only with `--apply` and the printed plan fingerprint.
+`gitlab_runner_manager.py` instead defaults to a live read-only plan;
+`--dry-run` requests offline intent, and confirmed `--apply` performs changes.
 `k8s_verify_mtu_consistency.py --apply` creates temporary OpenShift debug Pods
 and verifies cleanup; its default invocation reads the selected node inventory
 and returns a plan.
@@ -103,6 +105,7 @@ Routing, in short:
 
 | You need | Command |
 | --- | --- |
+| Deploy or remove a toolbox-backed GitLab runner | `bin/gitlab_runner_manager.py` |
 | Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
 | Build a schema-declared toolbox | `bin/toolbox.py` |
 | Prove nested Podman execution on a worker | `bin/image_build_readiness.py` |
@@ -272,6 +275,10 @@ relative endpoint; host and token references resolve from the selected
 `--field` for a dotted JSON field, `--decode-base64` for encoded file content,
 `--lines START:END` for a bounded text slice, and `--paginate` for array pages.
 Its output is the selected provider value, not an access-receipt envelope.
+
+`reference.py gitlab_runner_manager.py` offers the focused runner-manager and
+SCC references. Use `--help` for arguments; read the focused reference when the
+runner deployment or cleanup sequence is needed.
 
 `bin/ci-binary-build` uses Git and PyYAML to validate the caller's BuildConfig,
 source repository, full commit, and commit-label key. It checks the Dockerfile

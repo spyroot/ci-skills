@@ -24,6 +24,7 @@
     "kind": {
       "enum": [
         "create_selfhosted_runner",
+        "gitlab_runner_manager",
         "toolbox",
         "harbor_push",
         "harbor_pull"

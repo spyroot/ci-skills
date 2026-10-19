@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Final, Optional
 
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import JSONObject
+from lib.python.core.kubernetes.podman_runtime import PodmanRuntimeSettings
 
 RUNTIME_ROOT: Final = "/ci-skills/runner"
 
@@ -72,6 +73,8 @@ class RunnerAction(SkillAction):
     :param source_root: Runner installation directory inside the supplied image.
     :param labels: Provider labels required during independent read-back.
     :param timeout: Positive maximum seconds for readiness and temporary Jobs.
+    :param ownership_id: Optional shared operation identity for run-owned resources.
+    :param podman: Optional exact Podman placement and runtime settings.
 
     .. attribute :: namespace
         :type: str
@@ -97,6 +100,16 @@ class RunnerAction(SkillAction):
         :type: int
 
         Positive maximum seconds for readiness and temporary Jobs.
+
+    .. attribute :: ownership_id
+        :type: Optional[str]
+
+        Explicit run ownership identity; the workload name is the fallback.
+
+    .. attribute :: podman
+        :type: Optional[PodmanRuntimeSettings]
+
+        Podman runtime settings for consumers that require them.
     """
 
     namespace: str
@@ -104,3 +117,13 @@ class RunnerAction(SkillAction):
     source_root: str
     labels: Sequence[str]
     timeout: int
+    ownership_id: Optional[str] = None
+    podman: Optional[PodmanRuntimeSettings] = None
+
+    @property
+    def operation(self) -> str:
+        """Select the ownership label used by shared Kubernetes resources.
+
+        :returns: Explicit run identity, or the existing workload name fallback.
+        """
+        return self.ownership_id or self.name

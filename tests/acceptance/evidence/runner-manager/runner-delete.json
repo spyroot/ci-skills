@@ -1,0 +1,141 @@
+{
+  "captured_at": "2026-10-19T01:40:27.566557+00:00",
+  "cleanup": {
+    "status": "NOT_APPLICABLE"
+  },
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:29f247d18d3c",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_runner",
+  "mutated": true,
+  "operation": "delete",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "APPLY",
+  "plan": {
+    "body_sha256": "62faba5c6b37436df73346dc65a66ecb29e36982b600db1c72fb9e21cf967e71",
+    "confirmation_ready": true,
+    "fields": [
+      "description"
+    ],
+    "one_time_sink_required": false,
+    "operation": "delete",
+    "plan_digest": "8764bf8fb516e2fcf8824932633d2d6f7211c982fb4cf311a35b1c0381d0d6c0",
+    "project_ids": null,
+    "resource_id": 99,
+    "runner_snapshot": {
+      "description": "pr97-manager-d2a16be-20261019-v2",
+      "id": 99,
+      "present": true,
+      "project_ids": [],
+      "runner_type": "group_type"
+    },
+    "target_kind": "group",
+    "target_reference": "38"
+  },
+  "plan_digest": "8764bf8fb516e2fcf8824932633d2d6f7211c982fb4cf311a35b1c0381d0d6c0",
+  "readback": {
+    "action": "APPLIED",
+    "after": {
+      "global_get_status": 404,
+      "scoped_absent": true,
+      "verified": true,
+      "write_error": null
+    },
+    "before": {
+      "access_level": "not_protected",
+      "architecture": "amd64",
+      "contacted_at": "2026-10-19T01:39:00.532Z",
+      "description": "pr97-manager-d2a16be-20261019-v2",
+      "id": 99,
+      "is_shared": false,
+      "job_execution_status": "idle",
+      "online": true,
+      "paused": false,
+      "platform": "linux",
+      "projects": [],
+      "runner_type": "group_type",
+      "status": "online",
+      "tag_list": [
+        "pr97-manager-d2a16be-20261019-v2"
+      ],
+      "version": "19.4.1"
+    },
+    "id": 99,
+    "mutated": true,
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "APPLIED",
+      "after": {
+        "global_get_status": 404,
+        "scoped_absent": true,
+        "verified": true,
+        "write_error": null
+      },
+      "before": {
+        "access_level": "not_protected",
+        "architecture": "amd64",
+        "contacted_at": "2026-10-19T01:39:00.532Z",
+        "description": "pr97-manager-d2a16be-20261019-v2",
+        "id": 99,
+        "is_shared": false,
+        "job_execution_status": "idle",
+        "online": true,
+        "paused": false,
+        "platform": "linux",
+        "projects": [],
+        "runner_type": "group_type",
+        "status": "online",
+        "tag_list": [
+          "pr97-manager-d2a16be-20261019-v2"
+        ],
+        "version": "19.4.1"
+      },
+      "id": 99,
+      "mutated": true,
+      "verified": true
+    }
+  ],
+  "result_action": "APPLIED",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
+    "file_count": 227,
+    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "revision": {
+      "source": "installer_record",
+      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": {
+    "kind": "group",
+    "reference": "38"
+  },
+  "target_file": "path:9f3098ba4860",
+  "target_source": "project;argv:--group",
+  "tested_revision": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+  "verified_target": {
+    "full_path": "hott",
+    "id": 38,
+    "kind": "group",
+    "web_url": "https://gitlab.dcloud.run/groups/hott"
+  }
+}

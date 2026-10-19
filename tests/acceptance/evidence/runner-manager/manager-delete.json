@@ -1,0 +1,186 @@
+{
+  "access": {
+    "gitlab": {
+      "captured_at": "2026-10-19T01:38:44.412586+00:00",
+      "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+      "credential_source": "file:path:29f247d18d3c",
+      "errors": [],
+      "execution_host": "mac.lan",
+      "identity": {
+        "id": 6,
+        "username": "spyroot",
+        "web_url": "https://gitlab.dcloud.run/spyroot"
+      },
+      "kind": "gitlab_access",
+      "observed_capability": [
+        "identity_read",
+        "target_read"
+      ],
+      "origin": "https://gitlab.dcloud.run",
+      "schema_version": "1.0",
+      "skill": {
+        "algorithm": "sha256-tree-v1",
+        "consuming_project": {
+          "commit": null,
+          "source": null
+        },
+        "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
+        "file_count": 227,
+        "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+        "revision": {
+          "source": "installer_record",
+          "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+          "verified": true
+        }
+      },
+      "status": "PASS",
+      "target": {
+        "full_path": "hott",
+        "id": 38,
+        "kind": "group",
+        "web_url": "https://gitlab.dcloud.run/groups/hott"
+      },
+      "target_file": "path:9f3098ba4860",
+      "target_source": "project;argv:--group"
+    },
+    "kubernetes": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "captured_at": "2026-10-19T01:38:43.440853+00:00",
+  "cleanup": {
+    "failures": [],
+    "status": "PASS"
+  },
+  "errors": [],
+  "filters": {},
+  "kind": "gitlab_runner_manager",
+  "operation": "delete",
+  "plan_digest": "830f67b800f86338be85fd0cffcfef7006516004b1dff73af5faa59326ccead7",
+  "records": [
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveRunScopes",
+      "run_id": "d8896a0495dd5ce1861923d4aee9d3c0",
+      "scopes": [
+        {
+          "namespace": "ci-skills-run-da8d8ca32dc049e69cab",
+          "owns_namespace": true,
+          "run_id": "d8896a0495dd5ce1861923d4aee9d3c0"
+        }
+      ],
+      "verified": true
+    },
+    {
+      "callback": "SelectResolvedManagerScope",
+      "namespace": "ci-skills-run-da8d8ca32dc049e69cab",
+      "owns_namespace": true,
+      "run_id": "d8896a0495dd5ce1861923d4aee9d3c0",
+      "verified": true
+    },
+    {
+      "architecture": "amd64",
+      "callback": "ObserveGitLabRunner",
+      "contacted_at": "2026-10-19T01:38:50.503Z",
+      "description": "pr97-manager-d2a16be-20261019-v2",
+      "id": 99,
+      "online": true,
+      "paused": false,
+      "platform": "linux",
+      "run_id": "d8896a0495dd5ce1861923d4aee9d3c0",
+      "runner_type": "group_type",
+      "scope": {
+        "namespace": "ci-skills-run-da8d8ca32dc049e69cab",
+        "owns_namespace": true,
+        "run_id": "d8896a0495dd5ce1861923d4aee9d3c0"
+      },
+      "status": "online",
+      "tag_list": [
+        "pr97-manager-d2a16be-20261019-v2"
+      ],
+      "verified": true,
+      "version": "19.4.1"
+    },
+    {
+      "action": "APPLIED",
+      "callback": "DeleteManagerRunner",
+      "name": "ci-skills-run-gitlab-runner-manager-9b690e1f0f9d9d79",
+      "namespace": "ci-skills-run-da8d8ca32dc049e69cab",
+      "verified": true
+    },
+    {
+      "callback": "VerifyGitLabRunnerPreserved",
+      "current_status": {
+        "architecture": "amd64",
+        "contacted_at": "2026-10-19T01:39:00.532Z",
+        "description": "pr97-manager-d2a16be-20261019-v2",
+        "id": 99,
+        "online": true,
+        "paused": false,
+        "platform": "linux",
+        "runner_type": "group_type",
+        "status": "online",
+        "tag_list": [
+          "pr97-manager-d2a16be-20261019-v2"
+        ],
+        "version": "19.4.1"
+      },
+      "run_id": "d8896a0495dd5ce1861923d4aee9d3c0",
+      "runner_preserved": true,
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "RemoveSCCAccess",
+      "resource": {
+        "absent": true,
+        "kind": "RoleBinding",
+        "name": "ci-skills-run-scc-permission-5f4add9322d9458c-9b690e1f0f9d9d79",
+        "namespace": "ci-skills-run-da8d8ca32dc049e69cab",
+        "status": "PASS"
+      },
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "RemoveScope",
+      "preserved_scopes": [],
+      "resources": [
+        {
+          "absent": true,
+          "kind": "Namespace",
+          "name": "ci-skills-run-da8d8ca32dc049e69cab",
+          "namespace": "",
+          "status": "PASS"
+        }
+      ],
+      "run_id": "d8896a0495dd5ce1861923d4aee9d3c0",
+      "verified": true
+    }
+  ],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
+    "file_count": 227,
+    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "revision": {
+      "source": "installer_record",
+      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 7
+  },
+  "target": "path:9f3098ba4860",
+  "tested_revision": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3"
+}

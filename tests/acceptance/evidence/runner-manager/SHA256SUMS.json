@@ -1,0 +1,62 @@
+{
+  "consumer-fixture-create.json": {
+    "bytes": 373,
+    "sha256": "32ad820c9d62e41d220521710c786221d49679f3ddb5c626a7acd444f654b93f"
+  },
+  "consumer-fixture-delete.json": {
+    "bytes": 186,
+    "sha256": "1872fe313cf6507e5d576802c8b11d00d88f8ae5fa6ec59c73c4af9c5c5d9cf9"
+  },
+  "consumer-trace-proof.json": {
+    "bytes": 1598,
+    "sha256": "798afc43f2e963e1b710650656439d1282a1f865a9ef757de547b72aef661f51"
+  },
+  "final-cleanup.json": {
+    "bytes": 1439,
+    "sha256": "273b5e4eb5e95ca8868aed98de8ff408425feaa044ca18f253a49377656f2565"
+  },
+  "job-get.json": {
+    "bytes": 6052,
+    "sha256": "ce94388ae4d1aa30733fa072ae18ce39c42af19b1578cbbe5949324fc9e7b1a5"
+  },
+  "job-list.json": {
+    "bytes": 2160,
+    "sha256": "18d4eafc3d24aa790601f5ab12a58dffb49ad485577271ef47a3398bb8797880"
+  },
+  "manager-delete.json": {
+    "bytes": 5481,
+    "sha256": "2da65a2a95b7b0e3ba9d1326b58712df70202751ca94df05f99fe63817bbdffa"
+  },
+  "manager-deploy-applied.json": {
+    "bytes": 10196,
+    "sha256": "e58857fe5a617c6bc570544b88ba364a0e5c8083374b6c9186587c75a71fc429"
+  },
+  "manager-deploy-noop.json": {
+    "bytes": 10072,
+    "sha256": "c3b1c22b9c2baf56a6ba35bd83a6bb54a73c3d790372f0606c4cc77542c36df0"
+  },
+  "old-toolbox-delete.json": {
+    "bytes": 1671,
+    "sha256": "f476ac03c959fb1b7e05afedf6da63445d1b389d1bcc6d58f4c41b110de39550"
+  },
+  "pipeline-start.json": {
+    "bytes": 3244,
+    "sha256": "8cd14fed1e0c0054a29e810cea1cd98e877957d85dd939cef6086d4f20f382ba"
+  },
+  "pipeline-watch.json": {
+    "bytes": 2758,
+    "sha256": "709f0ee2b62a7e4a795eee02ef9d1eb5cc72cd9c5667245ba4880477622c3e28"
+  },
+  "runner-create.json": {
+    "bytes": 2820,
+    "sha256": "3db9b712f025d78123d8ea6b7741818cbbcc6f812d98ddf166d84198f21b6076"
+  },
+  "runner-delete.json": {
+    "bytes": 3819,
+    "sha256": "f9fcad30936fcd80eeaa9c68156d538596b81361d7bc5fd7c1307ec67f13f99c"
+  },
+  "toolbox-create.json": {
+    "bytes": 2427,
+    "sha256": "b4050ef4eb80a7374cd2f5d578fae743e25c772f0d8f515c0c3980ff63ed18c5"
+  }
+}
