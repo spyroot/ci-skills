@@ -383,12 +383,26 @@ def _diagnostic_target(args: argparse.Namespace, script: Optional[str]) -> Targe
     :raises TargetError: If target selection, credentials, or source identity is invalid.
     :raises OSError: If selected source files cannot be read.
     """  # noqa: DOC502 - Target/source resolution propagates validation and I/O.
-    required = tuple(COMMANDS[script]["requires"]) if script else DEFAULT_AUTHORITIES
+    command = COMMANDS[script] if script else None
+    required = tuple(command["requires"]) if command else DEFAULT_AUTHORITIES
+    optional = tuple(command.get("optional_requires", ())) if command else ()
+    if script == COMMAND_BY_KIND[ACCESS_CHECK_KIND]:
+        extensions = {
+            "publication": "github",
+            "job_url": "gitlab",
+            "ceph_namespace": "kubernetes",
+        }
+        required += tuple(
+            name
+            for option, name in extensions.items()
+            if getattr(args, option, None) and name not in required
+        )
     target = resolve_project_target(
         args.target,
         getattr(args, "binding", None),
         dry_run=args.dry_run,
         required_surfaces=required,
+        optional_surfaces=optional,
     )
     if not args.dry_run:
         target = bind_sources(target, revision=getattr(args, "revision", None))

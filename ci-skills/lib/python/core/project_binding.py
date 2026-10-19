@@ -272,6 +272,7 @@ def load_project_binding(
     *,
     dry_run: bool = False,
     required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES,
+    optional_surfaces: tuple[str, ...] = (),
 ) -> Target:
     """Load a binding and select its first available kubeconfig source.
 
@@ -279,8 +280,9 @@ def load_project_binding(
     :param dry_run: Record a command source without executing it when true.
     :param required_surfaces: Authority tables required from the target named by
         the binding; Kubernetes source selection is skipped if absent.
+    :param optional_surfaces: Supported authorities selected when configured in the target.
     :returns: Target with binding provenance and the selected Kubernetes source
-        when Kubernetes is required.
+        when Kubernetes is selected.
     :raises TargetError: The binding, target, or source is invalid, conflicting,
         unavailable, or unreadable, or no declared source is usable.
     """
@@ -302,8 +304,12 @@ def load_project_binding(
     if not isinstance(sources, list) or not sources:
         raise TargetError("binding_sources_missing")
     target_path = _path(data["target"], binding.parent)
-    target = load_target(target_path, required_surfaces=required_surfaces)
-    if "kubernetes" not in required_surfaces:
+    target = load_target(
+        target_path,
+        required_surfaces=required_surfaces,
+        optional_surfaces=optional_surfaces,
+    )
+    if "kubernetes" not in target.active_surfaces:
         return replace(
             target,
             target_reference=f"binding:{binding}",
@@ -353,6 +359,7 @@ def resolve_target(
     *,
     dry_run: bool = False,
     required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES,
+    optional_surfaces: tuple[str, ...] = (),
 ) -> Target:
     """Resolve one target or binding using the caller and environment selectors.
 
@@ -361,6 +368,7 @@ def resolve_target(
     :param explicit_binding: Caller-selected binding path, or ``None``.
     :param dry_run: Suppress execution of a binding command source when true.
     :param required_surfaces: Authority tables the selected target must provide.
+    :param optional_surfaces: Additional supported authorities selected when configured.
     :returns: Validated target with its selection source and binding provenance.
     :raises TargetError: Selectors conflict or the selected target, binding, or
         required authority cannot be loaded.
@@ -370,7 +378,11 @@ def resolve_target(
     if explicit_target:
         selected, source = resolve_target_file(explicit_target)
         return replace(
-            load_target(selected, required_surfaces=required_surfaces),
+            load_target(
+                selected,
+                required_surfaces=required_surfaces,
+                optional_surfaces=optional_surfaces,
+            ),
             target_reference=f"cli:{selected.resolve()}",
             source_file=selected,
             source_kind=source,
@@ -380,6 +392,7 @@ def resolve_target(
             explicit_binding,
             dry_run=dry_run,
             required_surfaces=required_surfaces,
+            optional_surfaces=optional_surfaces,
         )
     if TARGET_ENV in os.environ and BINDING_ENV in os.environ:
         raise TargetError("environment_selector_conflict")
@@ -388,6 +401,7 @@ def resolve_target(
             os.environ[BINDING_ENV],
             dry_run=dry_run,
             required_surfaces=required_surfaces,
+            optional_surfaces=optional_surfaces,
         )
     selected, source = resolve_target_file(None)
     reference = (
@@ -396,7 +410,11 @@ def resolve_target(
         else f"{source}:{selected.resolve()}"
     )
     return replace(
-        load_target(selected, required_surfaces=required_surfaces),
+        load_target(
+            selected,
+            required_surfaces=required_surfaces,
+            optional_surfaces=optional_surfaces,
+        ),
         target_reference=reference,
         source_file=selected,
         source_kind=source,
