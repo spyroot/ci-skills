@@ -20,6 +20,7 @@ from referencing import Registry, Resource
 from test_image_build_chain import (
     ABSTRACT_CALLBACKS,
     CALLBACKS,
+    CALLER_NAMESPACE,
     CHAIN,
     EXECUTOR,
     NODE,
@@ -82,7 +83,7 @@ def _apply_report(
     status = command.execute()
     output = json.loads(capsys.readouterr().out)
     assert cleanup == ["manager", "scc", "runner"]
-    assert kubernetes.calls == []
+    assert kubernetes.calls == [("Namespace", CALLER_NAMESPACE, "")]
     assert not action.state.token_path.exists()
     assert not action.state.token_directory.exists()
     _validator().validate(output)
