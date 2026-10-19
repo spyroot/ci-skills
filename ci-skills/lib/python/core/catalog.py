@@ -1362,22 +1362,33 @@ def reference_entry(name: str) -> MutableMapping[str, JSONValue]:
 
 
 def _proposition_offering(
-    scripts: Sequence[str], commands: Mapping[str, Mapping[str, object]]
+    scripts: Sequence[str],
+    commands: Mapping[str, Mapping[str, object]],
+    *,
+    provider: Optional[str] = None,
+    include_command_references: bool = True,
 ) -> MutableMapping[str, JSONValue]:
     """Offer what the agent can run and what it can read at one node.
 
     :param scripts: Command keys selected for a cluster or related-command node.
     :param commands: Existing catalogue definitions for the offered commands.
+    :param provider: Selected provider; command nodes derive their own dependencies.
+    :param include_command_references: Expand task references after a node is selected.
     :returns: Installed filenames under ``tools`` and an ordered array of read entries.
     """
-    authorities = {name for script in scripts for name in command_authorities(script)}
+    authorities = (
+        {provider}
+        if provider is not None
+        else {name for script in scripts for name in command_authorities(script)}
+    )
     names = ["access", "project binding"] if authorities else []
     if "gitlab" in authorities:
         names.append("mcp")
     if "harbor" in authorities:
         names.append("toolbox specification")
-    for script in scripts:
-        names.extend(json_strings(commands[script].get("references", ())))
+    if include_command_references:
+        for script in scripts:
+            names.extend(json_strings(commands[script].get("references", ())))
     return {
         "tools": {script: {} for script in sorted(scripts)},
         "reference": [reference_entry(name) for name in dict.fromkeys(names)],
@@ -1403,11 +1414,15 @@ def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
         cluster: _proposition_offering(
             [script for script, names in authorities.items() if authority in names],
             commands,
+            provider=authority,
+            include_command_references=node is not None,
         )
         for cluster, authority in PROPOSITION_CLUSTERS.items()
     }
     clusters["offline"] = _proposition_offering(
-        [script for script, names in authorities.items() if not names], commands
+        [script for script, names in authorities.items() if not names],
+        commands,
+        include_command_references=node is not None,
     )
     if node is None:
         return {"schema_version": PROPOSITION_VERSION, **clusters}
