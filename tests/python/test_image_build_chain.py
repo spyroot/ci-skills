@@ -686,7 +686,7 @@ def test_job_and_digest_readback_fail_closed(
 
 
 class CallerScopeKubernetes:
-    """Reject any attempt to read or remove a caller-owned namespace."""
+    """Allow the initial namespace lookup and reject later namespace access."""
 
     def __init__(self, target: TARGET.KubernetesTarget) -> None:
         """Retain target identity and initialize a mutation journal.
@@ -696,16 +696,18 @@ class CallerScopeKubernetes:
         self.target = target
         self.calls: list[tuple[str, str, str]] = []
 
-    def read(self, kind: str, name: str, namespace: str) -> None:
-        """Fail if cleanup touches a caller-owned namespace.
+    def read(self, kind: str, name: str, namespace: str) -> JSONObject:
+        """Read the caller namespace once when the real opening callback runs.
 
-        :param kind: Unexpected native resource kind.
-        :param name: Unexpected resource name.
-        :param namespace: Unexpected namespace argument.
-        :raises AssertionError: Always; caller scope must be preserved directly.
+        :param kind: Native Namespace resource kind.
+        :param name: Caller-selected namespace name.
+        :param namespace: Empty cluster-scope namespace argument.
+        :returns: Existing caller-owned namespace without ci-skills labels.
+        :raises AssertionError: A later operation touches the caller namespace.
         """
         self.calls.append((kind, name, namespace))
-        raise AssertionError("caller_owned_namespace_was_touched")
+        assert self.calls == [("Namespace", CALLER_NAMESPACE, "")]
+        return {"metadata": {"name": CALLER_NAMESPACE}}
 
 
 def _lifecycle_executor(
@@ -725,12 +727,20 @@ def _lifecycle_executor(
     :returns: Action, real executor, stage journal, cleanup journal, and fake Kubernetes.
     """
     action = _prepared_action(apply=True)
+    action.probe = PODMAN.PodmanProbeAction(
+        target=action.target,
+        node=NODE,
+        probe_image=action.args.probe_image,
+        inner_image=action.args.inner_image,
+        timeout=action.args.timeout,
+        resources=PODMAN.probe_resources_from_args(action.args),
+        mode=PODMAN.ProbeMode.LIVE_PLAN,
+        confirm_plan=None,
+        namespace=CALLER_NAMESPACE,
+    )
     state = action.state
-    scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, False)
     kubernetes = CallerScopeKubernetes(action.target.kubernetes)
     state.kubernetes = kubernetes
-    state.resolved_run_id = RUN_ID
-    state.found_scopes = (scope,)
     state.selected_node = NODE
     state.pipeline_plan = _pipeline_plan()
     action.args.confirm_plan = action.fingerprint(NODE, state.pipeline_plan)
@@ -738,15 +748,16 @@ def _lifecycle_executor(
     cleanup: list[str] = []
 
     def probe(current: ImageBuildChainState) -> None:
-        """Retain the probe-selected node and caller-owned run scope."""
+        """Retain probe evidence after the real callback opens the caller scope."""
+        assert current.run_scope.namespace == CALLER_NAMESPACE
+        assert current.run_scope.owns_namespace is False
         current.selected_node = NODE
-        current.run_scope = scope
         current.probe_record = {"verified": True, "node": NODE}
 
     def toolbox(current: ImageBuildChainState) -> None:
         """Retain the digest-pinned toolbox image published for the manager."""
         assert current.selected_node == NODE
-        assert current.run_scope is scope
+        assert current.run_scope.namespace == CALLER_NAMESPACE
         current.published_image = TOOLBOX_IMAGE
 
     def manager(current: ImageBuildChainState) -> None:
@@ -826,6 +837,7 @@ def _lifecycle_executor(
         [
             VERIFICATION.CleanupChain(action),
             CALLBACKS.ResolveChainPlan(action),
+            WORKFLOW.OpenProbeNamespace(action.probe),
             JournalCallback(action, stages, "probe", probe),
             JournalCallback(action, stages, "toolbox", toolbox),
             JournalCallback(action, stages, "manager", manager),
@@ -885,7 +897,7 @@ def test_chain_cleanup_runs_on_success_failure_timeout_and_signals(
         if item.get("callback") == "RemoveScope"
     )
     assert scope_cleanup["preserved_scopes"] == [state.run_scope.as_dict()]
-    assert kubernetes.calls == []
+    assert kubernetes.calls == [("Namespace", CALLER_NAMESPACE, "")]
     assert not state.token_path.exists()
     assert not state.token_directory.exists()
     assert {number: signal.getsignal(number) for number in previous} == previous
