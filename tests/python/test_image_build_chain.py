@@ -17,6 +17,7 @@ import pytest
 import test_gitlab_runner_lifecycle as runner_lifecycle
 import test_gitlab_runner_manager as runner_manager
 from conftest import import_script_module
+from test_podman_readiness import _node
 
 ABSTRACT_CALLBACK = import_script_module("lib.python.core.abstract.callback")
 ABSTRACT_CALLBACKS = import_script_module("lib.python.core.abstract.callbacks")
@@ -57,6 +58,16 @@ NODE = "worker-ci13"
 CALLER_NAMESPACE = "caller-builds"
 RUNNER_ID = 73
 TOOLBOX_IMAGE = "harbor.example.test/toolbox/ci@sha256:" + "a" * 64
+
+
+def _read_nodes(*args: str) -> JSONObject:
+    """Return the existing Ready-worker fixture for the exact node-list read.
+
+    :param args: Kubernetes node-list command issued by chain planning.
+    :returns: Native NodeList containing the requested Ready worker.
+    """
+    assert args == ("get", "nodes", "-o", "json")
+    return {"items": [_node(NODE)]}
 
 
 class JournalCallback(ABSTRACT_CALLBACK.LocalCallback):
@@ -354,6 +365,7 @@ def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
     action = _prepared_action(apply=True)
     action.args.confirm_plan = confirmation
     action.state.selected_node = NODE
+    action.state.kubernetes = SimpleNamespace(json=_read_nodes)
     mutations: list[str] = []
     callbacks = ABSTRACT_CALLBACKS.Callbacks(
         [
@@ -474,6 +486,19 @@ def _lifecycle_executor(
     action = _prepared_action(apply=True)
     state = action.state
     kubernetes = runner_manager.ManagerCluster()
+    cluster_json = kubernetes.json
+
+    def read_cluster(*args: str) -> JSONObject:
+        """Serve worker discovery and retain the existing manager transport.
+
+        :param args: Kubernetes read issued by the real chain or manager callback.
+        :returns: Ready NodeList or the existing in-memory provider response.
+        """
+        if args == ("get", "nodes", "-o", "json"):
+            return _read_nodes(*args)
+        return cluster_json(*args)
+
+    monkeypatch.setattr(kubernetes, "json", read_cluster)
     state.kubernetes = kubernetes
     state.selected_node = NODE
     state.run_scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, owns_namespace)
@@ -488,7 +513,14 @@ def _lifecycle_executor(
         },
     }
     state.gitlab = SimpleNamespace(
-        session=SimpleNamespace(target_kind="project"), api=object(), target_id=42
+        session=SimpleNamespace(
+            origin="https://gitlab.example.test", target_kind="project"
+        ),
+        api=object(),
+        target_id=42,
+    )
+    monkeypatch.setattr(
+        runner_manager.GITLAB_API, "_lock_root", lambda: tmp_path / "locks"
     )
     state.harbor = SimpleNamespace(dockerconfig=b'{"auths":{}}')
     state.runner_runtime = runner_manager.CALLBACKS.RunnerRuntime(
@@ -536,6 +568,8 @@ def _lifecycle_executor(
         selected.args.description = action.args.runner_description
         selected.args.label = list(action.args.runner_label)
         selected.args.image = TOOLBOX_IMAGE
+        selected.args.run_id = current.run_scope.run_id
+        selected.args.namespace = current.run_scope.namespace
         current.manager_action = selected
         binding = runner_manager.SCC_ACCESS.role_binding_document(
             selected.scc_access(), current.run_scope

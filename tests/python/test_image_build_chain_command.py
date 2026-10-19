@@ -31,6 +31,7 @@ from test_image_build_chain import (
     _args,
     _lifecycle_executor,
     _prepared_action,
+    _read_nodes,
     _target,
 )
 
@@ -259,6 +260,7 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         :param state: Shared chain state receiving the observed worker identity.
         """
         state.selected_node = NODE
+        state.kubernetes = SimpleNamespace(json=_read_nodes)
 
     def workflow(action):
         assert not explicit, "dry-run entered provider callbacks"
