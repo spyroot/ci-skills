@@ -13,8 +13,10 @@ spyroot@gmail.com
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableSequence, Sequence
+from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Optional
+from unittest.mock import Mock
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
@@ -163,11 +165,12 @@ def test_a_partial_with_no_errors_blocks() -> None:
 
 
 def test_the_receipt_records_which_checks_blocked(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, target_file: Path
 ) -> None:
     """Name the failed event trace while preserving proven other checks.
 
     :param monkeypatch: Pytest fixture replacing live collectors.
+    :param target_file: Existing complete target fixture selecting all default providers.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -198,7 +201,8 @@ def test_the_receipt_records_which_checks_blocked(
     monkeypatch.setattr(live, "collect_events", lambda *_a: results["event_trace"])
     monkeypatch.setattr(live, "collect_cilium", lambda *_a: results["cilium_status"])
 
-    receipt = live.collect_live_checks(object(), object(), {})
+    target = import_script_module("lib.python.core.target").load_target(target_file)
+    receipt = live.collect_live_checks(target, object(), {})
 
     assert receipt["status"] == status.BLOCKED
     assert receipt["blocking_live_checks"] == ["event_trace"]
@@ -208,11 +212,12 @@ def test_the_receipt_records_which_checks_blocked(
 
 
 def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, target_file: Path
 ) -> None:
     """Use selected Ceph namespace and block denied status query.
 
     :param monkeypatch: Pytest fixture replacing live collector functions.
+    :param target_file: Existing complete target fixture selecting cluster access.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -266,14 +271,44 @@ def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(
         }
 
     monkeypatch.setattr(live, "collect_ceph_cluster", fake_ceph)
+    target = import_script_module("lib.python.core.target").load_target(target_file)
     receipt = live.collect_live_checks(
-        object(), type("Options", (), {"ceph_namespace": "selected-ceph"})(), {}
+        target, type("Options", (), {"ceph_namespace": "selected-ceph"})(), {}
     )
 
     assert selected == ["selected-ceph"]
     assert receipt["status"] == status.BLOCKED
     assert receipt["blocking_live_checks"] == ["ceph_cluster"]
     assert receipt["live_checks"]["ceph_cluster"]["namespace"] == "selected-ceph"
+
+
+@pytest.mark.parametrize("access_status", ("PASS", "BLOCKED"))
+def test_no_extra_collectors_preserve_the_provider_access_result(
+    monkeypatch: pytest.MonkeyPatch, access_status: str
+) -> None:
+    """Keep empty optional reads from probing Kubernetes or promoting denied access.
+
+    :param monkeypatch: Fixture replacing collectors that must never run.
+    :param access_status: Prior provider result, including an actual denial.
+    :returns: None; assertions preserve access status without any collector call.
+    """
+    live, _status = _live()
+    target_mod = import_script_module("lib.python.core.target")
+    target = target_mod.Target(
+        github=None, gitlab=None, kubernetes=None, active_surfaces=("gitlab",)
+    )
+    collector = Mock(side_effect=AssertionError("unselected collector was called"))
+    for name in ("storage", "events", "cilium", "gitlab_job", "ceph_cluster"):
+        monkeypatch.setattr(live, f"collect_{name}", collector)
+    receipt = {"status": access_status}
+
+    result = live.collect_live_checks(target, object(), receipt)
+
+    assert result is receipt
+    assert result["status"] == access_status
+    assert result["live_checks"] == {}
+    assert result["blocking_live_checks"] == []
+    collector.assert_not_called()
 
 
 def test_cluster_wide_list_reads_use_a_bound_sized_for_a_real_cluster(
