@@ -666,6 +666,68 @@
       },
       "use_when": "A selected project or group milestone needs a requested change."
     },
+    "gitlab_mr.py": {
+      "capabilities": [],
+      "execution_surface": "selected authority API",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--milestone-id",
+        "--mr-iid",
+        "--output-dir",
+        "--project",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--source-branch",
+        "--target-branch",
+        "--timeout",
+        "--title",
+        "--yaml"
+      ],
+      "purpose": "Create a GitLab merge request or attach it to a milestone.",
+      "read_only": false,
+      "report_kind": "gitlab_merge_request",
+      "required_options": [],
+      "required_tools": [
+        "glab"
+      ],
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "returns": "A plan or verified MR ID, project-local IID and milestone ID.",
+      "side_effects": "Confirmed apply creates one MR or changes only the selected MR's milestone.",
+      "subcommands": {
+        "create": {
+          "mutates": true,
+          "read_back": "Read the exact MR IID, branches, title and requested milestone.",
+          "required_options": [
+            "--source-branch",
+            "--target-branch",
+            "--title"
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json"
+        },
+        "update": {
+          "mutates": true,
+          "read_back": "Read the selected MR and its assigned milestone ID.",
+          "required_options": [
+            "--mr-iid",
+            "--milestone-id"
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json"
+        }
+      },
+      "use_when": "Open an MR for selected branches or assign an existing MR's milestone."
+    },
     "gitlab_pipeline.py": {
       "capabilities": [],
       "execution_surface": "selected authority API",
@@ -736,6 +798,58 @@
         }
       },
       "use_when": "You need exact pipeline state, a confirmed start, or bounded completion evidence."
+    },
+    "gitlab_repository.py": {
+      "capabilities": [],
+      "execution_surface": "selected authority API",
+      "options": [
+        "--actions-file",
+        "--apply",
+        "--binding",
+        "--branch",
+        "--commit-message",
+        "--confirm-plan",
+        "--describe",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--output-dir",
+        "--project",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--start-branch",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Commit caller-supplied files to a GitLab branch and verify their bytes.",
+      "read_only": false,
+      "report_kind": "gitlab_repository",
+      "required_options": [],
+      "required_tools": [
+        "glab"
+      ],
+      "requires_authorities": [
+        "gitlab"
+      ],
+      "returns": "A plan or verified branch, commit SHA and per-file content digests.",
+      "side_effects": "Confirmed apply creates one commit and optionally its requested branch; GitLab may trigger the project's configured pipeline.",
+      "subcommands": {
+        "commit": {
+          "mutates": true,
+          "read_back": "Read the commit, exact file bytes and final branch head.",
+          "required_options": [
+            "--branch",
+            "--commit-message",
+            "--actions-file"
+          ],
+          "result_schema": "schemas/results/gitlab-action.schema.json"
+        }
+      },
+      "use_when": "Create or update project source, a Dockerfile or pipeline configuration."
     },
     "gitlab_runner.py": {
       "capabilities": [],

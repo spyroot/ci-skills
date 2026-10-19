@@ -797,6 +797,97 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         },
         "returns": "A sanitized plan or verified issue IID and independent GET evidence.",
     },
+    "gitlab_repository.py": {
+        "kind": "gitlab_repository",
+        "purpose": "Commit caller-supplied files to a GitLab branch and verify their bytes.",
+        "use_when": "Create or update project source, a Dockerfile or pipeline configuration.",
+        "requires": ("gitlab",),
+        "capabilities": (),
+        "mutates": True,
+        "related": ("gitlab_pipeline.py", "gitlab_mr.py"),
+        "references": ("GitLab repository commits",),
+        "required_tools": ("glab",),
+        "side_effects": "Confirmed apply creates one commit and optionally its requested branch; GitLab may trigger the project's configured pipeline.",
+        "options": {
+            "--project": "exact project path or numeric ID",
+            "--branch": "destination branch",
+            "--start-branch": "existing branch or commit to start a new branch from",
+            "--commit-message": "message for this commit",
+            "--actions-file": "JSON array of native GitLab create/update file actions",
+            "--apply": "perform the confirmed commit",
+            "--confirm-plan": "SHA-256 fingerprint printed by the dry-run plan",
+            "--timeout": "maximum seconds for each external request",
+            "--receipt-out": "write the verified branch, commit and file digests",
+        },
+        "subcommands": {
+            "commit": {
+                "required_options": ["--branch", "--commit-message", "--actions-file"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "mutates": True,
+                "read_back": "Read the commit, exact file bytes and final branch head.",
+            },
+        },
+        "examples": [
+            {
+                "description": "Plan files on a new branch",
+                "command": 'gitlab_repository.py commit --project "$PROJECT" --branch "$BRANCH" --start-branch "$BASE" --commit-message "Add consumer example" --actions-file actions.json',
+            },
+        ],
+        "returns": "A plan or verified branch, commit SHA and per-file content digests.",
+    },
+    "gitlab_mr.py": {
+        "kind": "gitlab_merge_request",
+        "purpose": "Create a GitLab merge request or attach it to a milestone.",
+        "use_when": "Open an MR for selected branches or assign an existing MR's milestone.",
+        "requires": ("gitlab",),
+        "capabilities": (),
+        "mutates": True,
+        "related": (
+            "gitlab_repository.py",
+            "gitlab_milestone.py",
+            "gitlab_pipeline.py",
+        ),
+        "references": ("GitLab merge requests",),
+        "required_tools": ("glab",),
+        "side_effects": "Confirmed apply creates one MR or changes only the selected MR's milestone.",
+        "options": {
+            "--project": "exact project path or numeric ID",
+            "--source-branch": "existing source branch for create",
+            "--target-branch": "existing target branch for create",
+            "--title": "MR title for create",
+            "--mr-iid": "project-local MR number for update, not its global ID",
+            "--milestone-id": "global milestone ID, not its project-local IID",
+            "--apply": "perform the confirmed MR change",
+            "--confirm-plan": "SHA-256 fingerprint printed by the dry-run plan",
+            "--timeout": "maximum seconds for each external request",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "create": {
+                "required_options": ["--source-branch", "--target-branch", "--title"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "mutates": True,
+                "read_back": "Read the exact MR IID, branches, title and requested milestone.",
+            },
+            "update": {
+                "required_options": ["--mr-iid", "--milestone-id"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "mutates": True,
+                "read_back": "Read the selected MR and its assigned milestone ID.",
+            },
+        },
+        "examples": [
+            {
+                "description": "Plan an MR",
+                "command": 'gitlab_mr.py create --project "$PROJECT" --source-branch "$BRANCH" --target-branch "$BASE" --title "Consumer example"',
+            },
+            {
+                "description": "Plan its milestone assignment",
+                "command": 'gitlab_mr.py update --project "$PROJECT" --mr-iid "$MR_IID" --milestone-id "$MILESTONE_ID"',
+            },
+        ],
+        "returns": "A plan or verified MR ID, project-local IID and milestone ID.",
+    },
     "gitlab_wiki.py": {
         "kind": "gitlab_wiki",
         "purpose": "Create or update an exact GitLab wiki page with independent read-back.",
@@ -1256,6 +1347,14 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         "Native OCP command flags": {
             "summary": "OpenShift flags, ci-skills input mapping and upstream procedure.",
             "pointer": "references/ocp-node-image-flags.md",
+        },
+        "GitLab repository commits": {
+            "summary": "Native file-action keys, text/base64 content and branch examples.",
+            "pointer": "references/gitlab-repository.md",
+        },
+        "GitLab merge requests": {
+            "summary": "Source/target branches, MR IID and milestone ID examples.",
+            "pointer": "references/gitlab-merge-requests.md",
         },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",

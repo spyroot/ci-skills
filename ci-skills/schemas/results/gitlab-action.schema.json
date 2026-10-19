@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/spyroot/ci-skills/schemas/results/gitlab-action.schema.json",
-  "title": "GitLab milestone, issue, wiki, runner and pipeline action result",
+  "title": "GitLab action result",
   "description": "Existing action envelopes. PASS requires independent read-back; runner tag, read and delete retain their dedicated schemas.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "kind", "status", "captured_at", "errors", "summary"],
   "properties": {
     "schema_version": {"$ref": "gitlab-runner-tag.schema.json#/properties/schema_version"},
-    "kind": {"enum": ["gitlab_milestone", "gitlab_issue", "gitlab_wiki", "gitlab_runner", "gitlab_pipeline"]},
+    "kind": {"enum": ["gitlab_milestone", "gitlab_issue", "gitlab_wiki", "gitlab_runner", "gitlab_pipeline", "gitlab_repository", "gitlab_merge_request"]},
     "status": {"$ref": "gitlab-runner-delete.schema.json#/properties/status"},
     "captured_at": {"$ref": "gitlab-runner-tag.schema.json#/properties/captured_at"},
     "execution_host": {"$ref": "gitlab-runner-tag.schema.json#/properties/execution_host"},
@@ -18,7 +18,7 @@
     "target_file": {"$ref": "gitlab-runner-tag.schema.json#/properties/target_file"},
     "target_source": {"$ref": "gitlab-runner-tag.schema.json#/properties/target_source"},
     "phase": {"$ref": "gitlab-runner-delete.schema.json#/properties/phase"},
-    "operation": {"enum": ["create", "update", "adjust-time", "open-bug", "create-bug", "assign", "start"]},
+    "operation": {"enum": ["create", "update", "adjust-time", "open-bug", "create-bug", "assign", "start", "commit"]},
     "plan_digest": {"$ref": "gitlab-runner-tag.schema.json#/properties/plan_digest"},
     "plan": {"$ref": "#/$defs/plan"},
     "mutated": {"$ref": "gitlab-runner-tag.schema.json#/properties/mutated"},
@@ -37,6 +37,8 @@
     "smoke_cleanup": {"type": "object", "description": "Independent cleanup evidence attached by existing acceptance captures."}
   },
   "allOf": [
+    {"if": {"properties": {"kind": {"const": "gitlab_repository"}}}, "then": {"properties": {"operation": {"const": "commit"}}}},
+    {"if": {"properties": {"kind": {"const": "gitlab_merge_request"}}}, "then": {"properties": {"operation": {"enum": ["create", "update"]}}}},
     {"if": {"properties": {"kind": {"const": "gitlab_milestone"}}}, "then": {"properties": {"operation": {"enum": ["create", "update", "adjust-time"]}}}},
     {"if": {"properties": {"kind": {"const": "gitlab_issue"}}}, "then": {"properties": {"operation": {"enum": ["open-bug", "create-bug"]}}}},
     {"if": {"properties": {"kind": {"const": "gitlab_wiki"}}}, "then": {"properties": {"operation": {"enum": ["create", "update"]}}}},
@@ -59,11 +61,20 @@
       "then": {
         "properties": {
           "result_action": {"enum": ["APPLIED", "NO_OP"]},
-          "records": {"items": {"$ref": "#/$defs/verified_record"}},
-          "readback": {"$ref": "#/$defs/verified_record"},
           "cleanup": {"properties": {"status": {"not": {"enum": ["BLOCKED", "PARTIAL"]}}}},
           "errors": {"maxItems": 0}, "summary": {"properties": {"error_count": {"const": 0}}}
-        }
+        },
+        "allOf": [{
+          "if": {"properties": {"kind": {"const": "gitlab_repository"}}},
+          "then": {"properties": {
+            "records": {"items": {"$ref": "#/$defs/verified_repository_record"}},
+            "readback": {"$ref": "#/$defs/verified_repository_record"}
+          }},
+          "else": {"properties": {
+            "records": {"items": {"$ref": "#/$defs/verified_record"}},
+            "readback": {"$ref": "#/$defs/verified_record"}
+          }}
+        }]
       }
     },
     {
@@ -108,9 +119,19 @@
       "properties": {
         "action": {"enum": ["APPLIED", "NO_OP", "PARTIAL", "UNVERIFIED"]}, "verified": {"type": "boolean"},
         "id": {"type": ["integer", "null"], "minimum": 1}, "iid": {"type": "integer", "minimum": 1}, "slug": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "commit_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "milestone_id": {"type": ["integer", "null"], "minimum": 1},
         "mutated": {"$ref": "#/properties/mutated"}, "cleanup": {"$ref": "#/$defs/cleanup"},
         "errors": {"type": "array", "items": {"$ref": "gitlab-runner-tag.schema.json#/$defs/project_error"}}
       }
+    },
+    "verified_repository_record": {
+      "allOf": [
+        {"$ref": "#/$defs/record"},
+        {"required": ["branch", "commit_sha"], "properties": {"commit_sha": {"type": "string"}}},
+        {"properties": {"verified": {"const": true}, "action": {"enum": ["APPLIED", "NO_OP"]}, "errors": {"maxItems": 0}, "cleanup": {"properties": {"status": {"not": {"enum": ["BLOCKED", "PARTIAL"]}}}}}}
+      ]
     },
     "verified_record": {
       "allOf": [
