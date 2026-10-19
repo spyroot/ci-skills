@@ -162,6 +162,7 @@ def _delete_runner_record(
     :returns: None after verified deletion or recorded failure.
     """
     previous = state.gitlab
+    previous_plan = state.plan
     state.gitlab = state.runner_gitlab
     state.configured_session = state.runner_gitlab.session
     try:
@@ -179,13 +180,15 @@ def _delete_runner_record(
             request,
             state.runner_gitlab.target_id,
         )
-        callback = DeleteRunner(action=replace(request, runner_snapshot=snapshot))
+        state.plan = replace(request, runner_snapshot=snapshot)
+        callback = DeleteRunner(action=state.plan)
         _attempt_cleanup_component(state, callback, records, failures)
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         failures.append({"callback": "DeleteRunner", "reason": sanitize(str(exc), 240)})
     finally:
         state.gitlab = previous
         state.configured_session = previous.session
+        state.plan = previous_plan
 
 
 def _remove_token_sink(

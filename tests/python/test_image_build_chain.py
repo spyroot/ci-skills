@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
 import pytest
+import test_gitlab_runner_lifecycle as runner_lifecycle
 from conftest import import_script_module
 
 ABSTRACT_CALLBACK = import_script_module("lib.python.core.abstract.callback")
@@ -867,3 +868,77 @@ def test_chain_cleanup_runs_on_success_failure_timeout_and_signals(
     assert not state.token_path.exists()
     assert not state.token_directory.exists()
     assert {number: signal.getsignal(number) for number in previous} == previous
+
+
+@pytest.mark.parametrize(
+    "delete_failure", (False, True), ids=("deleted", "delete-failed")
+)
+def test_chain_runner_cleanup_uses_delete_plan_and_restores_execution_context(
+    delete_failure: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real cleanup deletes only its runner and restores the caller's active context.
+
+    :param delete_failure: Whether the provider rejects the DELETE request.
+    :param tmp_path: Isolated resource-lock directory used by the real callback.
+    :param monkeypatch: Fixture selecting only the temporary lock directory.
+    """
+    monkeypatch.setattr(runner_lifecycle.API, "_lock_root", lambda: tmp_path / "locks")
+    state = _prepared_action(apply=True).state
+    state.runner_create_plan = runner_lifecycle._plan(
+        "create", {"description": "owned-runner"}
+    )
+    state.created_runner_id = RUNNER_ID
+    original_plan = _pipeline_plan()
+    original_provider = SimpleNamespace(session=object())
+    state.plan = original_plan
+    state.gitlab = original_provider
+    state.configured_session = original_provider.session
+    endpoint = f"runners/{RUNNER_ID}"
+    scope = runner_lifecycle._list()
+    details = [runner_lifecycle._runner(RUNNER_ID), runner_lifecycle._runner(RUNNER_ID)]
+    memberships = [[{"id": RUNNER_ID}], [{"id": RUNNER_ID}]]
+    if not delete_failure:
+        details.append(runner_lifecycle.API.GitLabAPIError("provider_404"))
+        memberships.append([])
+    api = runner_lifecycle.FakeAPI(
+        {
+            ("GET", endpoint): details,
+            ("GET", scope): memberships,
+            ("DELETE", endpoint): [runner_lifecycle.API.GitLabAPIError("provider_403")]
+            if delete_failure
+            else [{}],
+        }
+    )
+    state.runner_gitlab = SimpleNamespace(api=api, session=object(), target_id=42)
+    records: list[JSONObject] = []
+    failures: list[JSONObject] = []
+
+    VERIFICATION._delete_runner_record(state, records, failures)
+
+    assert state.plan is original_plan
+    assert state.gitlab is original_provider
+    assert state.configured_session is original_provider.session
+    expected_calls = [
+        ("GET", endpoint),
+        ("GET", scope),
+        ("GET", endpoint),
+        ("GET", scope),
+        ("DELETE", endpoint),
+    ]
+    if delete_failure:
+        assert records == []
+        assert failures == [{"callback": "DeleteRunner", "reason": "provider_403"}]
+    else:
+        expected_calls.extend((("GET", endpoint), ("GET", scope)))
+        assert failures == []
+        assert len(records) == 1
+        record = records[0]
+        assert record["callback"] == "DeleteRunner"
+        assert record["action"] == "APPLIED"
+        assert record["id"] == RUNNER_ID
+        assert record["verified"] is True
+        assert record["after"]["global_get_status"] == 404
+        assert record["after"]["scoped_absent"] is True
+    assert api.calls == expected_calls
