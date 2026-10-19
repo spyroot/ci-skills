@@ -6,35 +6,35 @@
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "captured_at": "2026-10-19T01:02:48.113895+00:00",
+  "captured_at": "2026-10-19T05:09:49.344552+00:00",
   "cleanup": {
     "failures": [],
     "resources": [
       {
         "absent": true,
         "kind": "Job",
-        "name": "ci-skills-run-podman-probe-811371c387355757",
-        "namespace": "ci-skills-run-612f7279afaf448c9364",
+        "name": "ci-skills-run-podman-probe-920e3c1e35343fa8",
+        "namespace": "ci-skills-run-13ce60fb1d4546389065",
         "status": "PASS"
       },
       {
         "absent": true,
         "kind": "ConfigMap",
-        "name": "ci-skills-run-podman-scripts-811371c387355757",
-        "namespace": "ci-skills-run-612f7279afaf448c9364",
+        "name": "ci-skills-run-podman-scripts-920e3c1e35343fa8",
+        "namespace": "ci-skills-run-13ce60fb1d4546389065",
         "status": "PASS"
       },
       {
         "absent": true,
         "kind": "RoleBinding",
-        "name": "ci-skills-run-scc-permission-5f4add9322d9458c-811371c387355757",
-        "namespace": "ci-skills-run-612f7279afaf448c9364",
+        "name": "ci-skills-run-scc-permission-5f4add9322d9458c-920e3c1e35343fa8",
+        "namespace": "ci-skills-run-13ce60fb1d4546389065",
         "status": "PASS"
       },
       {
         "absent": true,
         "kind": "Namespace",
-        "name": "ci-skills-run-612f7279afaf448c9364",
+        "name": "ci-skills-run-13ce60fb1d4546389065",
         "namespace": "",
         "status": "PASS"
       }
@@ -45,7 +45,7 @@
   "errors": [],
   "filters": {},
   "kind": "image_build_readiness",
-  "namespace": "ci-skills-run-612f7279afaf448c9364",
+  "namespace": "ci-skills-run-13ce60fb1d4546389065",
   "operation": "probe",
   "plan": {
     "authorization": {
@@ -88,8 +88,8 @@
   },
   "plan_digest": "1df59ce9212a91d8a8a85a3e6f3fff5db4430bde4c35d3826703642acad3cd30",
   "probe_artifacts": {
-    "log": "image_build_readiness-da99988f7f22497faaf71e42bef7c324.probe.log",
-    "markers": "image_build_readiness-da99988f7f22497faaf71e42bef7c324.markers.json"
+    "log": "image_build_readiness-0e9af80599274c04818b81da15948462.probe.log",
+    "markers": "image_build_readiness-0e9af80599274c04818b81da15948462.markers.json"
   },
   "records": [
     {
@@ -114,10 +114,10 @@
     {
       "action": "APPLIED",
       "callback": "OpenProbeNamespace",
-      "namespace": "ci-skills-run-612f7279afaf448c9364",
+      "namespace": "ci-skills-run-13ce60fb1d4546389065",
       "owns_namespace": true,
       "reused": false,
-      "run_id": "da99988f7f22497faaf71e42bef7c324",
+      "run_id": "0e9af80599274c04818b81da15948462",
       "verified": true
     },
     {
@@ -130,11 +130,11 @@
       "role_binding": {
         "action": "APPLIED",
         "kind": "RoleBinding",
-        "name": "ci-skills-run-scc-permission-5f4add9322d9458c-811371c387355757",
-        "namespace": "ci-skills-run-612f7279afaf448c9364",
-        "uid": "6bad8f50-9dca-419c-a415-f3c6f1cfc3c2"
+        "name": "ci-skills-run-scc-permission-5f4add9322d9458c-920e3c1e35343fa8",
+        "namespace": "ci-skills-run-13ce60fb1d4546389065",
+        "uid": "2c14a5f2-9030-4f4d-9245-2f51aa96a966"
       },
-      "service_account": "system:serviceaccount:ci-skills-run-612f7279afaf448c9364:default",
+      "service_account": "system:serviceaccount:ci-skills-run-13ce60fb1d4546389065:default",
       "verified": true
     },
     {
@@ -142,10 +142,10 @@
       "callback": "RunPodmanProbe",
       "claim": "nested_podman_runtime_readiness",
       "job": {
-        "name": "ci-skills-run-podman-probe-811371c387355757",
-        "uid": "0b460ba5-9664-4ea5-8175-c842f86797a3"
+        "name": "ci-skills-run-podman-probe-920e3c1e35343fa8",
+        "uid": "921d225a-fa3e-4e0c-9e18-efa17173e347"
       },
-      "namespace": "ci-skills-run-612f7279afaf448c9364",
+      "namespace": "ci-skills-run-13ce60fb1d4546389065",
       "nested_runtime_ready": true,
       "node": {
         "kernelVersion": "5.14.0-570.98.1.el9_6.x86_64",
@@ -157,8 +157,8 @@
       "pod": {
         "exit_code": 0,
         "image_id": "quay.io/podman/stable@sha256:5118bdbb154b115d77f58107a2e69d65df4375bcb0d89a8da10b055754e8b9f3",
-        "name": "ci-skills-run-podman-probe-811371c387355757-v29kj",
-        "uid": "089ee2a4-975b-4183-8a79-33baea6f12eb"
+        "name": "ci-skills-run-podman-probe-920e3c1e35343fa8-98nwg",
+        "uid": "61dce008-7dbb-4c53-a336-05d8c5bbb832"
       },
       "rows": [
         {
@@ -183,7 +183,7 @@
         },
         {
           "check": "inner_runtime",
-          "observed": "id=610063b7b59cb9fee0bcb29298b04d9ebb978a919b4d6856d0614e2bf86f11dd;marker=inner-ok;cgroup=0::/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod089ee2a4_975b_4183_8a79_33baea6f12eb.slice/crio-3b41e02b3fa50acf213d238acd1b5beda1b1cbcc606ce1fdebffa37380a8100d.scope,;root=21712 21388 0:1392 / / rw,relatime - overlay overlay rw,seclabel,lowerdir=/var/lib/containers/storage/overlay/l/GUTAKEO2IWGIVEOSCQAVUUZVF3,upperdir=/var/lib/containers/storage/overlay/620978a7ae15af290d920bf95f626e891db3980565e37e3c220c1408dc8e369d/diff,workdir=/var/lib/containers/storage/overlay/620978a7ae15af290d920bf95f626e891db3980565e37e3c220c1408dc8e369d/work",
+          "observed": "id=e70e9bf27570a482767ffbbf51c20e5f26c0ff27dd1ed8767851f5969838cea9;marker=inner-ok;cgroup=0::/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod61dce008_7dbb_4c53_a336_05d8c5bbb832.slice/crio-b11ebc8434d482842fa24e0b97b4b7f9a3732baa07c5b4e9d3de6e5e61ef9398.scope,;root=21354 20065 0:1197 / / rw,relatime - overlay overlay rw,seclabel,lowerdir=/var/lib/containers/storage/overlay/l/DIYPKUOAFATP76NAUY6SDEU5EC,upperdir=/var/lib/containers/storage/overlay/8b05cd9f9b95796994abbd62a98456585a2b276b9f466a82c8abaf12acdb92b6/diff,workdir=/var/lib/containers/storage/overlay/8b05cd9f9b95796994abbd62a98456585a2b276b9f466a82c8abaf12acdb92b6/work",
           "status": "PASS"
         },
         {
@@ -203,11 +203,11 @@
         }
       ],
       "selected_node": "node-1.ww-cai-cisco-live.dcloud.local",
-      "service_account": "system:serviceaccount:ci-skills-run-612f7279afaf448c9364:default",
+      "service_account": "system:serviceaccount:ci-skills-run-13ce60fb1d4546389065:default",
       "verified": true
     }
   ],
-  "run_id": "da99988f7f22497faaf71e42bef7c324",
+  "run_id": "0e9af80599274c04818b81da15948462",
   "schema_version": "1.0",
   "selected_node": "node-1.ww-cai-cisco-live.dcloud.local",
   "skill": {
@@ -216,12 +216,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
-    "file_count": 227,
-    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "digest": "39de6f3b5f6a310222dba33ddb45ed894f8a8a1642c3f0574ecd0962881cf992",
+    "file_count": 234,
+    "functional_digest": "972b1e04f7c859dd97472031cb0d49c8e78228320a5488702e2c7309bc625959",
     "revision": {
       "source": "installer_record",
-      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "value": "92871b23992c391edbab940ae32893f754179f0b",
       "verified": true
     }
   },
@@ -232,6 +232,6 @@
   },
   "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin@https://api.ww-cai-cisco-live.dcloud.local:6443",
   "target_file": "path:5e5380df1eda",
-  "target_source": "user",
-  "tested_revision": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3"
+  "target_source": "env:CI_SKILLS_TARGET",
+  "tested_revision": "92871b23992c391edbab940ae32893f754179f0b"
 }
