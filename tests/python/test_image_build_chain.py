@@ -426,7 +426,6 @@ def test_manager_reuses_selected_node_scope_account_and_resource_settings(
         "runner_id": RUNNER_ID,
         "node": NODE,
         "image": TOOLBOX_IMAGE,
-        "run_id": RUN_ID,
     }
     assert workload["runner"]["namespace"] == CALLER_NAMESPACE
     assert workload["runner"]["ownership_id"] == RUN_ID
