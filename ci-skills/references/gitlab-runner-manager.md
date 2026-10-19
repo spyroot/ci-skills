@@ -1,6 +1,7 @@
 # GitLab runner manager
 
-Use this command after `gitlab_runner.py create` returns a runner ID and writes
+This command runs a GitLab shell executor inside Kubernetes. Use it after
+`gitlab_runner.py create` returns a runner ID and writes
 its one-time token. The selected toolbox image must be pinned by digest and
 contain both `gitlab-runner` and `podman`. Supply the exact worker already
 verified by `image_build_readiness.py probe`.

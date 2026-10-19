@@ -1,0 +1,110 @@
+{
+  "access": {
+    "captured_at": "2026-10-19T01:37:03.463795+00:00",
+    "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+    "credential_source": "file:path:29f247d18d3c",
+    "errors": [],
+    "execution_host": "mac.lan",
+    "identity": {
+      "id": 6,
+      "username": "spyroot",
+      "web_url": "https://gitlab.dcloud.run/spyroot"
+    },
+    "kind": "gitlab_access",
+    "observed_capability": [
+      "identity_read",
+      "target_read"
+    ],
+    "origin": "https://gitlab.dcloud.run",
+    "schema_version": "1.0",
+    "skill": {
+      "algorithm": "sha256-tree-v1",
+      "consuming_project": {
+        "commit": null,
+        "source": null
+      },
+      "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
+      "file_count": 227,
+      "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+      "revision": {
+        "source": "installer_record",
+        "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+        "verified": true
+      }
+    },
+    "status": "PASS",
+    "target": {
+      "full_path": "hott/test",
+      "id": 123,
+      "kind": "project",
+      "web_url": "https://gitlab.dcloud.run/hott/test"
+    },
+    "target_file": "path:9f3098ba4860",
+    "target_source": "project;argv:--job-url"
+  },
+  "captured_at": "2026-10-19T01:37:12.366779+00:00",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "filters": {
+    "job_url": "https://gitlab.dcloud.run/hott/test/-/jobs/60694",
+    "search": null
+  },
+  "kind": "gitlab_job",
+  "records": [
+    {
+      "created_at": "2026-10-19T01:36:11.495Z",
+      "failure_reason": null,
+      "finished_at": "2026-10-19T01:36:17.799Z",
+      "job_id": 60694,
+      "name": "podman-consumer",
+      "pipeline": {
+        "created_at": "2026-10-19T01:36:11.481Z",
+        "id": 3956,
+        "ref": "pr97-manager-d2a16be-20261019-v2",
+        "sha": "e34a95dccadd57288bd7c75db029855ae27b7cc0",
+        "status": "success",
+        "updated_at": "2026-10-19T01:36:18.023Z"
+      },
+      "runner": {
+        "active": true,
+        "contacted_at": "2026-10-19T01:37:00.546Z",
+        "description": "pr97-manager-d2a16be-20261019-v2",
+        "id": 99,
+        "online": true,
+        "paused": false,
+        "runner_type": "group_type",
+        "status": "online",
+        "tag_list": [
+          "pr97-manager-d2a16be-20261019-v2"
+        ]
+      },
+      "started_at": "2026-10-19T01:36:13.412Z",
+      "status": "success",
+      "trace_tail": "2026-10-19T01:36:13.696204Z 00O Running with gitlab-runner 19.4.1 (3c39fceb)\n2026-10-19T01:36:13.696306Z 00O   on ci-skills-run-gitlab-runner-manager-9b690e1f0f9d9d79 xvepah7yU, system ID: r_h0qxAxcHy3p1\n2026-10-19T01:36:13.696313Z 00O   UUID: not supported with this GitLab version\n2026-10-19T01:36:13.696648Z 00O section_start:1792373773:prepare_executor\n\n2026-10-19T01:36:13.696658Z 00O+Preparing the \"shell\" executor\n2026-10-19T01:36:13.701015Z 00O Using Shell (bash) executor...\n2026-10-19T01:36:13.701040Z 00O section_end:1792373773:prepare_executor\n\n2026-10-19T01:36:13.708980Z 00O+section_start:1792373773:prepare_script\n\n2026-10-19T01:36:13.709007Z 00O+Preparing environment\n2026-10-19T01:36:13.804048Z 01O Running on ci-skills-run-gitlab-runner-manager-9b690e1f0f9d9d79-59498x2zhj...\n2026-10-19T01:36:13.818016Z 00O section_end:1792373773:prepare_script\n\n2026-10-19T01:36:13.819185Z 00O+section_start:1792373773:get_sources\n\n2026-10-19T01:36:13.819197Z 00O+Getting source from Git repository\n2026-10-19T01:36:14.067500Z 01O Gitaly correlation ID: 01M58WTN0KH82QM8CPTGSQ2P40\n2026-10-19T01:36:14.081642Z 01O Fetching changes with git depth set to 20...\n2026-10-19T01:36:14.086766Z 01O Reinitialized existing Git repository in /ci-skills/runner/builds/xvepah7yU/0/hott/test/.git/\n2026-10-19T01:36:14.622903Z 01O Checking out e34a95dc as detached HEAD (ref is pr97-manager-d2a16be-20261019-v2)...\n2026-10-19T01:36:14.640506Z 01O Removing .probe-data/\n2026-10-19T01:36:14.649554Z 01O Skipping Git submodules setup\n2026-10-19T01:36:14.657101Z 00O section_end:1792373774:get_sources\n\n2026-10-19T01:36:14.659271Z 00O+section_start:1792373774:step_script\n\n2026-10-19T01:36:14.659291Z 00O+Executing \"step_script\" stage of the job script\n2026-10-19T01:36:14.863324Z 01O $ set -Eeuo pipefail # collapsed multi-line command\n2026-10-19T01:36:14.867594Z 01O HOSTNAME_TOOL=/usr/bin/hostname\n2026-10-19T01:36:14.889409Z 01O RUNNER_HOST=ci-skills-run-gitlab-runner-manager-9b690e1f0f9d9d79-59498x2zhj\n2026-10-19T01:36:14.951088Z 01O podman version 5.8.7\n2026-10-19T01:36:15.286568Z 01O DRIVER=overlay\n2026-10-19T01:36:15.526641Z 01O PODMAN_CONSUMER_OK\n2026-10-19T01:36:15.570061Z 01O BIND_MOUNT_READBACK=PASS\n2026-10-19T01:36:16.836711Z 01O INNER_FAILURE_EXIT=7\n2026-10-19T01:36:17.092144Z 01O OWNED_CONTAINERS_ABSENT=PASS\n2026-10-19T01:36:17.092163Z 01O PODMAN_CONSUMER=PASS\n2026-10-19T01:36:17.250871Z 00O section_end:1792373777:step_script\n\n2026-10-19T01:36:17.261059Z 00O+section_start:1792373777:cleanup_file_variables\n\n2026-10-19T01:36:17.261091Z 00O+Cleaning up project directory and file based variables\n2026-10-19T01:36:17.539507Z 00O section_end:1792373777:cleanup_file_variables\n\n2026-10-19T01:36:17.539767Z 00O Job succeeded"
+    }
+  ],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
+    "file_count": 227,
+    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "revision": {
+      "source": "installer_record",
+      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": "https://gitlab.dcloud.run",
+  "target_source": "project;argv:--job-url",
+  "tested_revision": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3"
+}

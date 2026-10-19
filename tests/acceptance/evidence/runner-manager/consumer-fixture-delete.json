@@ -1,0 +1,8 @@
+{
+  "branch": "pr97-manager-d2a16be-20261019-v2",
+  "delete_http_status": 204,
+  "operation": "fixture_delete",
+  "project_id": 123,
+  "read_back_http_status": 404,
+  "status": "PASS"
+}

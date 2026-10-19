@@ -1,0 +1,10 @@
+{
+  "base_ref": "neroshige/ci-skills-job-list-smoke-20261007",
+  "branch": "pr97-manager-d2a16be-20261019-v2",
+  "commit_id": "e34a95dccadd57288bd7c75db029855ae27b7cc0",
+  "operation": "fixture_create",
+  "project_id": 123,
+  "short_id": "e34a95dc",
+  "status": "PASS",
+  "web_url": "https://gitlab.dcloud.run/hott/test/-/commit/e34a95dccadd57288bd7c75db029855ae27b7cc0"
+}

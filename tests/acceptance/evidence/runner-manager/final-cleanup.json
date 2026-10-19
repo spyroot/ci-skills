@@ -1,0 +1,32 @@
+{
+  "checks": {
+    "consumer_branch_absent": true,
+    "corrected_toolbox_buildconfig_retained": true,
+    "corrected_toolbox_image_tag_retained": true,
+    "corrected_toolbox_namespace_retained": true,
+    "corrected_toolbox_temporary_build_cleaned": true,
+    "manager_namespace_absent": true,
+    "old_toolbox_test_namespace_absent": true,
+    "private_token_sink_absent": "[REDACTED]",
+    "runner_99_absent": true
+  },
+  "contract": {
+    "successful_namespace": "preserved by toolbox lifecycle; superseded test-owned namespace removed separately after PVC/shared-data absence check",
+    "temporary_build": "deleted by HarborBuild.cleanup after durable registry and BuildConfig read-back"
+  },
+  "errors": [],
+  "observed": {
+    "consumer_branch_http_status": 404,
+    "corrected_toolbox_buildconfig": "ci13-runner-toolbox",
+    "corrected_toolbox_digest": "sha256:beeaf60ce4194020a00960a0af97fce7e88b433eeab7a388f9d8796797e6493b",
+    "corrected_toolbox_image": "harbor.dcloud.run/hott/ci13-runner-toolbox:ci-skills-build-c34ef433d9033f5da0ca8379",
+    "corrected_toolbox_namespace": "ci-skills-pr97-d2a16be-toolbox-v2",
+    "corrected_toolbox_temporary_build": "ci13-runner-toolbox-1",
+    "manager_namespace": "ci-skills-run-da8d8ca32dc049e69cab",
+    "old_toolbox_namespace": "ci-skills-pr97-d2a16be-toolbox",
+    "runner_http_status": 404,
+    "runner_id": 99,
+    "token_sink_present": "[REDACTED]"
+  },
+  "status": "PASS"
+}
