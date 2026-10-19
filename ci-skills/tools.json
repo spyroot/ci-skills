@@ -1096,11 +1096,9 @@
         "--cpu-request",
         "--describe",
         "--dry-run",
-        "--expected-sha",
         "--group",
         "--human",
         "--inner-image",
-        "--job",
         "--json",
         "--live-plan",
         "--log-file",
@@ -1111,12 +1109,9 @@
         "--namespace",
         "--node",
         "--output-dir",
-        "--pipeline-project",
-        "--pipeline-variable",
         "--probe-image",
         "--project",
         "--receipt-out",
-        "--ref",
         "--revision",
         "--run-id",
         "--runner-description",
@@ -1124,11 +1119,9 @@
         "--storage-size",
         "--timeout",
         "--toolbox-spec",
-        "--watch-interval",
-        "--watch-timeout",
         "--yaml"
       ],
-      "purpose": "Probe nested Podman or verify a toolbox-backed runner consumer chain.",
+      "purpose": "Probe nested Podman or build and publish a toolbox for a running GitLab runner.",
       "read_only": false,
       "report_kind": "image_build_readiness",
       "required_options": [],
@@ -1139,17 +1132,15 @@
       "requires_authorities": [
         "kubernetes"
       ],
-      "returns": "A plan or operation evidence: probe marker rows, or toolbox publication and linked runner/job observations, plus temporary-resource cleanup.",
-      "side_effects": "Probe creates and removes temporary cluster resources. Chain also publishes the toolbox and runs a GitLab job; the toolbox remains, while its temporary runner and owned helpers are removed.",
+      "returns": "A plan or operation evidence: probe marker rows and cleanup, or the published toolbox digest and retained runner manager workload.",
+      "side_effects": "Probe creates and removes temporary cluster resources. Chain publishes the toolbox and leaves its configured runner and manager available.",
       "subcommands": {
         "chain": {
           "mutates": true,
-          "purpose": "Probe, publish the toolbox, create a runner and verify the selected consumer job.",
-          "read_back": "Probe and manager placement, toolbox publication, exact successful runner/job linkage and owned-resource absence.",
+          "purpose": "Build and publish the toolbox, then configure a runner using that image.",
+          "read_back": "Published toolbox digest and the configured runner deployment using that image.",
           "required_options": [
             "--toolbox-spec",
-            "--ref",
-            "--job",
             "--runner-description",
             "--runner-label"
           ],
@@ -1159,7 +1150,7 @@
             "harbor"
           ],
           "result_schema": "schemas/results/image-build-readiness.schema.json",
-          "side_effects": "Publishes the toolbox image; creates a temporary runner record, manager, token and run-owned cluster resources; removes temporary resources on exit."
+          "side_effects": "Publishes the toolbox image and retains the runner record, manager and required cluster resources for caller use."
         },
         "probe": {
           "mutates": true,
@@ -1172,7 +1163,7 @@
           "side_effects": "Creates and removes a temporary namespace, conditional run-owned SCC RoleBinding, script ConfigMap and privileged Job."
         }
       },
-      "use_when": "Prove nested execution alone, or run one caller-selected GitLab consumer job on the temporary runner."
+      "use_when": "Prove nested execution alone, or configure a GitLab runner with a published toolbox."
     },
     "k8s_verify_mtu_consistency.py": {
       "capabilities": [
@@ -1534,6 +1525,7 @@
     "a named CI job failed": "gitlab_job.py",
     "a volume or claim is stuck": "storage_report.py",
     "browse tools and references": "reference.py",
+    "build and publish a toolbox for a running GitLab runner": "image_build_readiness.py",
     "build or delete a toolbox": "toolbox.py",
     "build or inspect a cluster-held OpenShift node ISO": "ocp_node_onboard.py",
     "check GitLab pipeline progress": "gitlab_pipeline.py",
@@ -1553,7 +1545,6 @@
     "read a caller-selected Git API resource": "bin/ci-api",
     "read or manage a GitLab runner": "gitlab_runner.py",
     "verify a Harbor toolbox pull": "harbor_pull.py",
-    "verify a toolbox-backed runner consumer job": "image_build_readiness.py",
     "what the cluster said during an interval": "event_trace.py"
   },
   "schema_version": "1.0",

@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import tempfile
 from collections.abc import Callable, Mapping
-from dataclasses import replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Optional
@@ -18,17 +17,16 @@ from typing import Optional
 from lib.python.core.abstract.callback import AbstractCallback, LocalCallback
 from lib.python.core.abstract.skill_result import require_result
 from lib.python.core.gitlab.gitlab_action import GitLabAuth, GitLabAuthAction
-from lib.python.core.gitlab.gitlab_actions import ActionError, ActionPlan, make_plan
-from lib.python.core.gitlab.gitlab_pipeline_start import StartPipeline
-from lib.python.core.gitlab.gitlab_pipeline_watch import WatchPipeline
-from lib.python.core.gitlab.gitlab_pipeline_watch_types import PipelineWatchAction
+from lib.python.core.gitlab.gitlab_actions import ActionPlan, make_plan
 from lib.python.core.gitlab.gitlab_runners import CreateRunner
 from lib.python.core.gitlab.runner_manager import (
+    DeployManagerRunner,
     GitLabRunnerManagerAction,
+    retain_manager_resources,
 )
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json
 from lib.python.core.kubernetes.kubernetes import DEFAULT_COMMAND_TIMEOUT
-from lib.python.core.kubernetes.podman_probe import ProbeMode
+from lib.python.core.kubernetes.podman_probe import ProbeMode, select_ready_worker
 from lib.python.core.report import plan_digest
 
 from .model import RUNNER_TOKEN_NAME, ImageBuildChainAction, ImageBuildChainState
@@ -49,25 +47,15 @@ class ProviderTransition(StrEnum):
 
         Retain the authenticated runner-scope GitLab service.
 
-    .. attribute :: RETAIN_PIPELINE_GITLAB
-
-        Retain the authenticated pipeline-project GitLab service.
-
     .. attribute :: USE_RUNNER_GITLAB
 
         Restore the retained runner-scope GitLab service.
-
-    .. attribute :: USE_PIPELINE_GITLAB
-
-        Restore the retained pipeline-project GitLab service.
     """
 
     RETAIN_TOOLBOX_HARBOR = "retain_toolbox_harbor"
     USE_TOOLBOX_HARBOR = "use_toolbox_harbor"
     RETAIN_RUNNER_GITLAB = "retain_runner_gitlab"
-    RETAIN_PIPELINE_GITLAB = "retain_pipeline_gitlab"
     USE_RUNNER_GITLAB = "use_runner_gitlab"
-    USE_PIPELINE_GITLAB = "use_pipeline_gitlab"
 
 
 class DeferredComponent(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
@@ -123,6 +111,8 @@ class DeferredComponent(LocalCallback[ImageBuildChainState, ImageBuildChainActio
             raise ValueError("deferred_component_collection_required")
         result = require_result(self.child.update())
         self.state.results[self.child] = result
+        if isinstance(self.child, DeployManagerRunner):
+            retain_manager_resources(self.state, self.state.manager_action)
         return result
 
     def cleanup(self) -> Mapping[str, JSONValue]:
@@ -153,7 +143,7 @@ class ScopedGitLabAuth(DeferredComponent):
         """Retain the exact project or group plan until callback collection.
 
         :param action: Parent chain target and timeout.
-        :param plan: Runner or pipeline scope selected for access verification.
+        :param plan: Runner scope selected for access verification.
         """
         self.plan = plan
         super().__init__(action, self._factory)
@@ -203,16 +193,9 @@ class RetainProvider(LocalCallback[ImageBuildChainState, ImageBuildChainAction])
         elif self.role == ProviderTransition.RETAIN_RUNNER_GITLAB:
             state.runner_gitlab = state.gitlab
             state.access_evidence["gitlab_runner"] = copy_json(state.access)
-        elif self.role == ProviderTransition.RETAIN_PIPELINE_GITLAB:
-            state.pipeline_gitlab = state.gitlab
-            state.pipeline_plan = state.plan
-            state.access_evidence["gitlab_pipeline"] = copy_json(state.access)
         elif self.role == ProviderTransition.USE_RUNNER_GITLAB:
             state.gitlab = state.runner_gitlab
             state.configured_session = state.runner_gitlab.session
-        elif self.role == ProviderTransition.USE_PIPELINE_GITLAB:
-            state.gitlab = state.pipeline_gitlab
-            state.configured_session = state.pipeline_gitlab.session
         else:
             raise ValueError("chain_provider_role_invalid")
         return {"verified": True, "role": self.role.value}
@@ -228,15 +211,22 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
         :raises ValueError: Live producers are missing or confirmation differs.
         """
         state, action = self.state, self.action
-        if not hasattr(state, "selected_node") or not hasattr(state, "pipeline_plan"):
-            raise ValueError("chain_live_plan_inputs_missing")
-        document = action.plan(state.selected_node, state.pipeline_plan)
+        nodes = state.kubernetes.json("get", "nodes", "-o", "json")
+        selected = select_ready_worker(nodes, action.args.node)
+        state.selected_node = selected.name
+        document = action.plan(state.selected_node)
         digest = plan_digest(document)
         state.chain_plan = document
         state.chain_plan_digest = digest
         if action.mode == ProbeMode.APPLY and action.args.confirm_plan != digest:
             raise ValueError("confirm_plan_mismatch_rerun_live_plan")
-        return {"verified": True, "plan_digest": digest}
+        return {
+            "verified": True,
+            "plan_digest": digest,
+            "selected_node": selected.name,
+            "selection": "requested" if action.args.node is not None else "discovered",
+            "node": selected.evidence(),
+        }
 
 
 class CreateRunnerRecord(DeferredComponent):
@@ -291,14 +281,17 @@ class PrepareRunnerManager(LocalCallback[ImageBuildChainState, ImageBuildChainAc
     """Prepare the existing manager action from linked chain outputs."""
 
     def run(self) -> JSONObject:
-        """Construct manager inputs using the probe node and toolbox digest.
+        """Construct manager inputs using the selected node and toolbox digest.
 
-        :returns: Verified runner, node, image, and run-scope identity.
+        :returns: Verified runner, node, and image identity.
         :raises ValueError: A required upstream identity is missing.
         :raises TargetError: Existing manager preparation cannot bind its target.
         """  # noqa: DOC503 - manager preparation propagates existing errors.
         state = self.state
-        if not hasattr(state, "published_image") or not hasattr(state, "run_scope"):
+        if not all(
+            hasattr(state, name)
+            for name in ("created_runner_id", "published_image", "selected_node")
+        ):
             raise ValueError("manager_upstream_identity_missing")
         args = _manager_args(self.action, state)
         manager = GitLabRunnerManagerAction(args, context=state)
@@ -309,87 +302,7 @@ class PrepareRunnerManager(LocalCallback[ImageBuildChainState, ImageBuildChainAc
             "runner_id": state.created_runner_id,
             "node": state.selected_node,
             "image": state.published_image,
-            "run_id": state.run_scope.run_id,
         }
-
-
-class StartBuildPipeline(DeferredComponent):
-    """Start the live-resolved caller-selected build pipeline."""
-
-    def __init__(self, action: ImageBuildChainAction):
-        """Retain chain inputs until the manager is online.
-
-        :param action: Parent chain inputs.
-        """
-        super().__init__(action, self._factory)
-
-    @staticmethod
-    def _factory(state: ImageBuildChainState) -> StartPipeline:
-        """Bind the live pipeline plan to this run and reuse its callback.
-
-        :param state: Shared state containing the exact-ref plan and run scope.
-        :returns: Existing start callback bound to the current run identity.
-        """
-        state.plan = replace(
-            state.pipeline_plan,
-            body={**state.pipeline_plan.body, "run_id": state.run_scope.run_id},
-        )
-        return StartPipeline(state.plan)
-
-    def update(self) -> Mapping[str, JSONValue]:
-        """Retain the new pipeline ID after existing read-back succeeds.
-
-        :returns: Child update evidence.
-        :raises ValueError: Start result lacks verified pipeline identity.
-        """
-        evidence = super().update()
-        result = self.result
-        identifier = result.get("id")
-        if (
-            result.get("verified") is not True
-            or type(identifier) is not int
-            or identifier <= 0
-        ):
-            raise ValueError("pipeline_start_not_verified")
-        self.state.pipeline_id = identifier
-        return evidence
-
-
-class WatchBuildPipeline(DeferredComponent):
-    """Require the selected pipeline graph to settle successfully."""
-
-    def __init__(self, action: ImageBuildChainAction):
-        """Retain chain watch bounds until the pipeline exists.
-
-        :param action: Parent chain inputs.
-        """
-        super().__init__(action, self._factory)
-
-    def _factory(self, state: ImageBuildChainState) -> WatchPipeline:
-        """Construct the existing bounded watch for the created pipeline.
-
-        :param state: Shared state containing the created pipeline ID.
-        :returns: Existing pipeline watch callback.
-        """
-        watch = PipelineWatchAction(
-            pipeline_id=state.pipeline_id,
-            related_name=None,
-            interval=self.action.args.watch_interval,
-            timeout=self.action.args.watch_timeout,
-        )
-        return WatchPipeline(watch, settled=lambda _: None)
-
-    def run(self) -> Mapping[str, JSONValue]:
-        """Run the watch and reject complete-but-unsuccessful evidence.
-
-        :returns: Successful bounded watch evidence.
-        :raises ActionError: The graph is incomplete or any pipeline failed.
-        """
-        result = super().run()
-        if result.get("complete") is not True or result.get("success") is not True:
-            raise ActionError("pipeline_watch_not_successful")
-        self.state.pipeline_watch = dict(result)
-        return result
 
 
 def _runner_args(action: ImageBuildChainAction, token_path: Path) -> argparse.Namespace:
@@ -422,7 +335,7 @@ def _manager_args(
     """Build existing manager inputs from linked verified outputs.
 
     :param action: Parent chain inputs.
-    :param state: Shared state containing runner, scope, image, and node identity.
+    :param state: Shared state containing runner, image, and node identity.
     :returns: Namespace accepted by ``GitLabRunnerManagerAction``.
     """
     values = vars(action.args).copy()
@@ -437,8 +350,8 @@ def _manager_args(
         node=state.selected_node,
         image=state.published_image,
         token_file=str(state.token_path),
-        run_id=state.run_scope.run_id,
-        namespace=state.run_scope.namespace,
+        run_id=None,
+        namespace=action.args.namespace,
         apply=True,
         dry_run=False,
         live_plan=False,

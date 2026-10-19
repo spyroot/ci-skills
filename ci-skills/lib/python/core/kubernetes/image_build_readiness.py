@@ -20,10 +20,6 @@ from lib.python.core.catalog import describe
 from lib.python.core.cli import _failure, parser
 from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.executor import WorkflowExecutor
-from lib.python.core.gitlab.gitlab_pipeline_watch_types import (
-    DEFAULT_WATCH_INTERVAL,
-    DEFAULT_WATCH_TIMEOUT,
-)
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json, is_json_value
 from lib.python.core.kubernetes.kubernetes import (
     DEFAULT_COMMAND_TIMEOUT,
@@ -61,10 +57,10 @@ from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, PLANNED
 
 
 def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
-    """Add the CI13 chain inputs to the existing readiness command.
+    """Add toolbox and durable runner inputs to the readiness command.
 
     :param result: Shared readiness parser receiving chain-only options.
-    :returns: None after registering caller-selected runner and pipeline inputs.
+    :returns: None after registering caller-selected toolbox and runner inputs.
     """
     result.add_argument(
         "--toolbox-spec",
@@ -74,33 +70,12 @@ def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
     result.add_argument(
         "--project",
         metavar="PATH_OR_ID",
-        help="GitLab project for a project runner and consumer pipeline",
+        help="GitLab project that owns the durable project runner",
     )
     result.add_argument(
         "--group",
         metavar="PATH_OR_ID",
         help="GitLab group for a group runner record",
-    )
-    result.add_argument(
-        "--pipeline-project",
-        metavar="PATH_OR_ID",
-        help="GitLab consumer project when the runner record belongs to a group",
-    )
-    result.add_argument("--ref", metavar="REF", help="GitLab consumer pipeline ref")
-    result.add_argument(
-        "--expected-sha",
-        metavar="SHA",
-        help="optional exact commit expected at the selected pipeline ref",
-    )
-    result.add_argument(
-        "--pipeline-variable",
-        action="append",
-        default=[],
-        metavar="KEY=VALUE",
-        help="caller-selected pipeline variable; repeatable",
-    )
-    result.add_argument(
-        "--job", metavar="NAME", help="exact consumer job name to verify"
     )
     result.add_argument(
         "--runner-description",
@@ -112,21 +87,7 @@ def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="LABEL",
-        help="GitLab runner label required by the selected job; repeatable",
-    )
-    result.add_argument(
-        "--watch-interval",
-        type=float,
-        default=DEFAULT_WATCH_INTERVAL,
-        metavar="SECONDS",
-        help=f"positive pipeline polling interval (default: {DEFAULT_WATCH_INTERVAL:g})",
-    )
-    result.add_argument(
-        "--watch-timeout",
-        type=float,
-        default=DEFAULT_WATCH_TIMEOUT,
-        metavar="SECONDS",
-        help=f"positive pipeline watch timeout (default: {DEFAULT_WATCH_TIMEOUT:g})",
+        help="GitLab runner label applied to the durable runner; repeatable",
     )
 
 
@@ -136,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     :returns: Parser for offline plan, live plan, and confirmed apply.
     """
     result = parser(
-        "Prove nested Podman readiness or run its toolbox-backed consumer chain.",
+        "Prove nested Podman readiness or deliver a toolbox-backed GitLab runner.",
         kind=PROBE_KIND,
     )
     result.set_defaults(kind=PROBE_KIND)
@@ -186,7 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="read the concrete Ready worker and print an apply-ready digest",
     )
-    result.add_argument("--apply", action="store_true", help="run the confirmed probe")
+    result.add_argument("--apply", action="store_true", help="run the confirmed action")
     result.add_argument(
         "--confirm-plan", metavar="SHA256", help="exact digest from the live plan"
     )
@@ -197,8 +158,8 @@ def build_parser() -> argparse.ArgumentParser:
     result.epilog = (result.epilog or "") + (
         " Default mode is the live plan. --dry-run contacts no API and uses "
         "'auto' when --node is omitted. Only --apply creates resources. On "
-        "OpenShift, apply reuses existing SCC permission or creates and removes "
-        "one run-owned RoleBinding."
+        "OpenShift, probe apply removes its run-owned access; chain apply retains "
+        "the usable runner and its owned manager access until explicit deletion."
     )
     return result
 

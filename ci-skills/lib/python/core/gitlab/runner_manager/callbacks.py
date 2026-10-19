@@ -405,44 +405,46 @@ class GitLabRunnerRuntime(GitLabManagerComponent):
         return {}
 
 
+def retain_manager_resources(
+    state: GitLabRunnerManagerState, workflow: GitLabRunnerManagerAction
+) -> None:
+    """Retain resources needed by one successfully delivered manager.
+
+    :param state: Shared manager state containing the exact run scope.
+    :param workflow: Deploy action whose owned resources must remain available.
+    :returns: None after recording retained resource identities.
+    """
+    scope = state.run_scope
+    runner = workflow.workload().runner(scope)
+    retained = state.retained_resources
+    if scope.owns_namespace:
+        retained.add(resource_identity("Namespace", scope.namespace, ""))
+    retained.update(
+        {
+            resource_identity("Deployment", runner.name, scope.namespace),
+            resource_identity(
+                "Secret",
+                runner.name + REGISTRATION_SECRET_SUFFIX,
+                scope.namespace,
+            ),
+            resource_identity(
+                "Secret",
+                runner.name + REGISTRY_SECRET_SUFFIX,
+                scope.namespace,
+            ),
+        }
+    )
+    binding = role_binding_document(workflow.scc_access(), scope)
+    metadata = json_object(binding["metadata"])
+    name = metadata.get("name")
+    if isinstance(name, str):
+        observed = state.kubernetes.read("RoleBinding", name, scope.namespace)
+        if observed is not None and scope.resources(state.kubernetes).owns(observed):
+            retained.add(resource_identity("RoleBinding", name, scope.namespace))
+
+
 class VerifyGitLabRunnerOnline(GitLabManagerComponent):
     """Poll the exact runner until GitLab confirms online contact."""
-
-    def _retain_manager(self, workflow: GitLabRunnerManagerAction) -> None:
-        """Retain only resources needed by the verified long-lived manager.
-
-        :param workflow: Verified deploy whose exact scope is in shared state.
-        :returns: None after recording retained resource identities.
-        """
-        scope = self.manager_state.run_scope
-        runner = workflow.workload().runner(scope)
-        retained = self.manager_state.retained_resources
-        if scope.owns_namespace:
-            retained.add(resource_identity("Namespace", scope.namespace, ""))
-        retained.update(
-            {
-                resource_identity("Deployment", runner.name, scope.namespace),
-                resource_identity(
-                    "Secret",
-                    runner.name + REGISTRATION_SECRET_SUFFIX,
-                    scope.namespace,
-                ),
-                resource_identity(
-                    "Secret",
-                    runner.name + REGISTRY_SECRET_SUFFIX,
-                    scope.namespace,
-                ),
-            }
-        )
-        binding = role_binding_document(workflow.scc_access(), scope)
-        metadata = json_object(binding["metadata"])
-        name = metadata.get("name")
-        if isinstance(name, str):
-            observed = self.state.kubernetes.read("RoleBinding", name, scope.namespace)
-            if observed is not None and scope.resources(self.state.kubernetes).owns(
-                observed
-            ):
-                retained.add(resource_identity("RoleBinding", name, scope.namespace))
 
     def run(self) -> JSONObject:
         """Require online and contact evidence after owned workload rollout.
@@ -475,7 +477,7 @@ class VerifyGitLabRunnerOnline(GitLabManagerComponent):
                     "run_id": self.manager_state.run_scope.run_id,
                     **runner_evidence(record),
                 }
-                self._retain_manager(workflow)
+                retain_manager_resources(self.manager_state, workflow)
                 evidence["workload"] = copy_json(self.state.deployment_result)
                 return dict(evidence)
             if time.monotonic() >= deadline:

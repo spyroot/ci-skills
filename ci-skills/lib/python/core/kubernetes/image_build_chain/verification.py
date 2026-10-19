@@ -1,4 +1,4 @@
-"""Final read-back and cleanup for the CI13 image-build chain.
+"""Failure recovery and token cleanup for the CI13 image-build chain.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -11,70 +11,25 @@ from collections.abc import MutableSequence
 from dataclasses import replace
 
 from lib.python.core.abstract.callback import AbstractCallback, LocalCallback
-from lib.python.core.gitlab.gitlab_actions import ActionError
-from lib.python.core.gitlab.gitlab_jobs import JobQuery, JobSummary, list_jobs
 from lib.python.core.gitlab.gitlab_runners import DeleteRunner, delete_snapshot
-from lib.python.core.gitlab.runner_manager import DeleteManagerRunner, workload_action
+from lib.python.core.gitlab.runner_manager import (
+    DeleteManagerRunner,
+    workload_action,
+)
 from lib.python.core.json_types import JSONObject, is_json_value
 from lib.python.core.kubernetes.run_scope import RemoveScope, ResolveRunScopeAction
 from lib.python.core.kubernetes.scc_access import RemoveSCCAccess
 from lib.python.core.runtime import sanitize
 from lib.python.sys.status import BLOCKED, PASS
 
-from .model import DEFAULT_STUCK_AFTER, ImageBuildChainAction, ImageBuildChainState
-
-
-class VerifyConsumerJob(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
-    """Verify exact successful consumer-job linkage to the created runner."""
-
-    def run(self) -> JSONObject:
-        """Read the selected job and verify its pipeline and runner identities.
-
-        :returns: Exact successful job and runner evidence.
-        :raises ActionError: Job selection, status, pipeline, or runner differs.
-        """
-        state, args = self.state, self.action.args
-        query = JobQuery(
-            statuses=(),
-            pipeline_id=state.pipeline_id,
-            ref=None,
-            search=None,
-            name_glob=None,
-            limit=100,
-            start=None,
-            end=None,
-            stuck_after=DEFAULT_STUCK_AFTER,
-        )
-        result = list_jobs(
-            state.pipeline_gitlab.session,
-            state.pipeline_gitlab.target_id,
-            query,
-            state.pipeline_gitlab.api,
-        )
-        if result.first_page_failed or result.truncated or result.errors:
-            raise ActionError("consumer_job_readback_incomplete")
-        matches = [record for record in result.records if record["name"] == args.job]
-        if len(matches) != 1:
-            raise ActionError("consumer_job_not_unique")
-        job = matches[0]
-        _verify_job(job, state.pipeline_id, state.created_runner_id)
-        evidence: JSONObject = {
-            "verified": True,
-            "pipeline_id": state.pipeline_id,
-            "job_id": job["id"],
-            "job": job["name"],
-            "job_status": job["status"],
-            "runner_id": state.created_runner_id,
-        }
-        state.job_readback = evidence
-        return evidence
+from .model import ImageBuildChainAction, ImageBuildChainState
 
 
 class CleanupChain(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
-    """Own cleanup for every long-lived resource created by the chain."""
+    """Recover failed delivery resources and remove the ephemeral token sink."""
 
     def cleanup(self) -> JSONObject:
-        """Remove manager, SCC, scope, runner record, and token on every exit.
+        """Rollback live resources only after failure and always remove the token.
 
         :returns: Per-resource cleanup evidence after all attempts.
         :raises RuntimeError: One or more owned cleanup operations fail.
@@ -82,17 +37,20 @@ class CleanupChain(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
         state = self.state
         records: MutableSequence[JSONObject] = []
         failures: MutableSequence[JSONObject] = []
-        manager = getattr(state, "manager_action", None)
-        if manager is not None and hasattr(state, "run_scope"):
-            cleanup_callbacks: tuple[AbstractCallback, ...] = (
-                DeleteManagerRunner(workload_action(manager)),
-                RemoveSCCAccess(manager.scc_access()),
-                RemoveScope(ResolveRunScopeAction(state.run_scope.run_id)),
-            )
-            for callback in cleanup_callbacks:
-                _attempt_cleanup_component(state, callback, records, failures)
-        if hasattr(state, "created_runner_id") and hasattr(state, "runner_create_plan"):
-            _delete_runner_record(state, records, failures)
+        if state.failed:
+            manager = getattr(state, "manager_action", None)
+            if manager is not None and hasattr(state, "run_scope"):
+                cleanup_callbacks: tuple[AbstractCallback, ...] = (
+                    DeleteManagerRunner(workload_action(manager)),
+                    RemoveSCCAccess(manager.scc_access()),
+                    RemoveScope(ResolveRunScopeAction(state.run_scope.run_id)),
+                )
+                for callback in cleanup_callbacks:
+                    _attempt_cleanup_component(state, callback, records, failures)
+            if hasattr(state, "created_runner_id") and hasattr(
+                state, "runner_create_plan"
+            ):
+                _delete_runner_record(state, records, failures)
         _remove_token_sink(state, records, failures)
         result: JSONObject = {
             "status": PASS if not failures else BLOCKED,
@@ -104,24 +62,6 @@ class CleanupChain(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
             reasons = ",".join(str(item["reason"]) for item in failures)
             raise RuntimeError("chain_cleanup_failed:" + reasons)
         return result
-
-
-def _verify_job(job: JobSummary, pipeline_id: int, runner_id: int) -> None:
-    """Require one successful job on the exact chain-owned runner.
-
-    :param job: Validated public job summary from the shared reader.
-    :param pipeline_id: Exact pipeline created by this chain.
-    :param runner_id: Exact runner record created by this chain.
-    :returns: None after exact identity verification.
-    :raises ActionError: Status, pipeline, or runner identity differs.
-    """
-    runner = job["runner"]
-    if job["pipeline_id"] != pipeline_id:
-        raise ActionError("consumer_job_pipeline_mismatch")
-    if job["status"] != "success":
-        raise ActionError("consumer_job_not_successful")
-    if runner is None or runner["id"] != runner_id:
-        raise ActionError("consumer_job_runner_mismatch")
 
 
 def _attempt_cleanup_component(

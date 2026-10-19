@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import signal
 from copy import deepcopy
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
 import pytest
 import test_gitlab_runner_lifecycle as runner_lifecycle
+import test_gitlab_runner_manager as runner_manager
 from conftest import import_script_module
 
 ABSTRACT_CALLBACK = import_script_module("lib.python.core.abstract.callback")
@@ -26,7 +26,6 @@ CALLBACKS = import_script_module(
 CHAIN = import_script_module("lib.python.core.kubernetes.image_build_chain")
 EXECUTOR = import_script_module("lib.python.core.executor")
 GITLAB_ACTIONS = import_script_module("lib.python.core.gitlab.gitlab_actions")
-GITLAB_JOBS = import_script_module("lib.python.core.gitlab.gitlab_jobs")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 MANAGER_ACTION = import_script_module("lib.python.core.gitlab.runner_manager.action")
 PODMAN = import_script_module("lib.python.core.kubernetes.podman_probe")
@@ -46,7 +45,6 @@ if TYPE_CHECKING:
     from lib.python.core.abstract.skill_action import SkillAction
     from lib.python.core.executor import WorkflowExecutor
     from lib.python.core.gitlab.gitlab_actions import ActionPlan
-    from lib.python.core.gitlab.gitlab_jobs import JobListResult, JobQuery
     from lib.python.core.json_types import JSONObject
     from lib.python.core.kubernetes.image_build_chain import (
         ImageBuildChainAction,
@@ -58,7 +56,6 @@ RUN_ID = "ci13-unit-run"
 NODE = "worker-ci13"
 CALLER_NAMESPACE = "caller-builds"
 RUNNER_ID = 73
-PIPELINE_ID = 91
 TOOLBOX_IMAGE = "harbor.example.test/toolbox/ci@sha256:" + "a" * 64
 
 
@@ -108,19 +105,15 @@ def _args(
     confirmation: Optional[str] = None,
     timeout: Optional[int] = None,
 ) -> Namespace:
-    """Parse one complete project- or group-runner chain request.
+    """Parse a runner-delivery request without consumer job inputs.
 
-    :param group: Select a group runner and a separate pipeline project.
+    :param group: Select a group runner.
     :param apply: Select confirmed mutation mode.
     :param confirmation: Digest supplied to confirmed apply.
     :param timeout: Optional caller-selected operation bound in seconds.
     :returns: Public parser namespace with explicit chain inputs.
     """
-    scope = (
-        ["--group", "team", "--pipeline-project", "team/build"]
-        if group
-        else ["--project", "team/build"]
-    )
+    scope = ["--group", "team"] if group else ["--project", "team/build"]
     mode = (
         ["--apply", "--confirm-plan", confirmation or "sha256:unit"]
         if apply
@@ -134,12 +127,6 @@ def _args(
             "--toolbox-spec",
             "/unit/toolbox.toml",
             *scope,
-            "--ref",
-            "main",
-            "--expected-sha",
-            "c" * 40,
-            "--job",
-            "build-image",
             "--runner-description",
             "ci13-unit-runner",
             "--runner-label",
@@ -148,6 +135,8 @@ def _args(
             "podman",
             "--namespace",
             CALLER_NAMESPACE,
+            "--node",
+            NODE,
             "--cpu-request",
             "333m",
             "--cpu-limit",
@@ -201,21 +190,20 @@ def _target() -> TARGET.Target:
     )
 
 
-def _pipeline_plan(project: str = "team/build") -> ActionPlan:
-    """Build one exact-ref pipeline plan for chain planning.
+def _runner_plan() -> ActionPlan:
+    """Build the existing runner-scope plan without a consumer pipeline.
 
-    :param project: Project that owns the selected build pipeline.
-    :returns: Existing GitLab action plan with an exact commit.
+    :returns: Existing GitLab runner plan used by cleanup context coverage.
     """
     return GITLAB_ACTIONS.ActionPlan(
-        kind="gitlab_pipeline",
-        operation="start",
+        kind="gitlab_runner",
+        operation="create",
         origin="https://gitlab.example.test",
         target_kind="project",
-        target_reference=project,
+        target_reference="team/build",
         target_file="/unit/target.toml",
         target_source="fixture",
-        body={"ref": "main", "resolved_sha": "c" * 40, "variables": []},
+        body={"description": "ci13-unit-runner"},
         revision="c" * 40,
     )
 
@@ -241,23 +229,6 @@ def _prepared_action(
     action.gitlab_target = TARGET.GitLabOperationTarget(
         action.target.gitlab, action.target.source_file
     )
-    action.probe = SimpleNamespace(
-        plan=lambda node: {
-            "node": node,
-            "run_scope": {
-                "namespace": CALLER_NAMESPACE,
-                "service_account": "default",
-            },
-            "podman": {
-                "privileged": True,
-                "cpu_request": action.args.cpu_request,
-                "cpu_limit": action.args.cpu_limit,
-                "memory_request": action.args.memory_request,
-                "memory_limit": action.args.memory_limit,
-                "storage_size": action.args.storage_size,
-            },
-        }
-    )
     action.toolbox = SimpleNamespace(
         resolved_base=None,
         repository="toolbox/ci",
@@ -270,7 +241,6 @@ def _prepared_action(
             app="ci13-toolbox",
         ),
     )
-    action.pipeline = _pipeline_plan()
     action.mode = PODMAN.ProbeMode.APPLY if apply else PODMAN.ProbeMode.LIVE_PLAN
     action.state.args = action.args
     return action
@@ -287,21 +257,9 @@ def test_chain_toolbox_build_can_complete_after_command_default_timeout(
     action = _prepared_action()
     action.args = _args(timeout=300)
     action.state.args = action.args
-    action.state.runner_auth_plan = _pipeline_plan()
-    action.state.pipeline_plan = _pipeline_plan()
+    action.state.runner_auth_plan = action._runner_auth_plan()
     action.toolbox = TOOLBOX_ACTIONS.WorkflowAction(
         action.args, spec=action.toolbox.spec, context=action.state
-    )
-    action.probe = PODMAN.PodmanProbeAction(
-        target=action.target,
-        node=NODE,
-        probe_image=action.args.probe_image,
-        inner_image=action.args.inner_image,
-        timeout=action.args.timeout,
-        resources=PODMAN.probe_resources_from_args(action.args),
-        mode=action.mode,
-        confirm_plan=None,
-        namespace=CALLER_NAMESPACE,
     )
     monkeypatch.setattr(
         WORKFLOW, "WorkflowExecutor", lambda **kwargs: SimpleNamespace(**kwargs)
@@ -351,35 +309,35 @@ def test_chain_toolbox_build_can_complete_after_command_default_timeout(
 
 
 @pytest.mark.parametrize(
-    ("group", "runner_scope", "runner_reference", "pipeline_project"),
+    ("group", "runner_scope", "runner_reference"),
     (
-        (False, "project", "team/build", "team/build"),
-        (True, "group", "team", "team/build"),
+        (False, "project", "team/build"),
+        (True, "group", "team"),
     ),
-    ids=("project-runner", "group-runner-separate-project"),
+    ids=("project-runner", "group-runner"),
 )
-def test_chain_plan_separates_runner_scope_from_pipeline_project(
+def test_chain_plan_requires_only_runner_delivery_inputs(
     group: bool,
     runner_scope: str,
     runner_reference: str,
-    pipeline_project: str,
 ) -> None:
-    """Bind project and group runners without losing the job project identity.
+    """Plan project or group runner delivery without consumer job inputs.
 
     :param group: Whether the runner belongs to the group scope.
     :param runner_scope: Expected runner scope in the chain plan.
     :param runner_reference: Expected project or group reference.
-    :param pipeline_project: Expected project that executes the build job.
-    :returns: None; assertions validate distinct target roles.
+    :returns: None after checking runner scope and absence of test operations.
     """
     action = _prepared_action(group=group)
+    action._validate_chain_inputs()
 
-    plan = action.plan(NODE, _pipeline_plan(pipeline_project))
+    plan = action.plan(NODE)
 
     assert plan["runner"]["scope"] == runner_scope
     assert plan["runner"]["reference"] == runner_reference
-    assert plan["pipeline"]["project"] == pipeline_project
-    assert plan["pipeline"]["plan"]["target_reference"] == pipeline_project
+    assert "pipeline" not in plan
+    assert "job" not in plan
+    assert "probe" not in plan
 
 
 @pytest.mark.parametrize(
@@ -388,7 +346,7 @@ def test_chain_plan_separates_runner_scope_from_pipeline_project(
 def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
     confirmation: str,
 ) -> None:
-    """Stop the shared executor before probe, build, manager, or pipeline writes.
+    """Stop the shared executor before build, publication, or manager writes.
 
     :param confirmation: Missing or stale confirmation supplied by the caller.
     :returns: None; the mutation callback remains unentered after confirmation fails.
@@ -396,7 +354,6 @@ def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
     action = _prepared_action(apply=True)
     action.args.confirm_plan = confirmation
     action.state.selected_node = NODE
-    action.state.pipeline_plan = _pipeline_plan()
     mutations: list[str] = []
     callbacks = ABSTRACT_CALLBACKS.Callbacks(
         [
@@ -415,61 +372,37 @@ def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
 
 
 @pytest.mark.parametrize("outer_run_id", (None, "caller-chain-run"))
-def test_pipeline_start_uses_execution_scope_without_changing_confirmation(
+def test_delivery_scope_does_not_change_confirmed_plan(
     outer_run_id: Optional[str],
 ) -> None:
-    """Reuse a pipeline only within one concrete chain execution scope.
+    """Keep confirmation stable while delivery acquires its concrete run scope.
 
-    :param outer_run_id: Omitted or caller-supplied identity in the stable template.
-    :returns: None; child digests distinguish runs while confirmation stays stable.
+    :param outer_run_id: Omitted or caller-selected execution identity.
+    :returns: None after comparing the public plan before and after scope creation.
     """
     action = _prepared_action(apply=True)
     action.args.run_id = outer_run_id
-    template = _pipeline_plan()
-    template = replace(template, body={**template.body, "run_id": outer_run_id})
-    template_body = deepcopy(template.body)
-    state = action.state
-    state.pipeline_plan = template
-    state.chain_plan = action.plan(NODE, template)
-    state.chain_plan_digest = action.fingerprint(NODE, template)
-    action.args.confirm_plan = state.chain_plan_digest
-    confirmed_plan = deepcopy(state.chain_plan)
-    confirmed_digest = state.chain_plan_digest
-    state.gitlab = SimpleNamespace(session=object())
-    child_plans: list[ActionPlan] = []
+    confirmed_plan = deepcopy(action.plan(NODE))
+    confirmed_digest = action.fingerprint(NODE)
+    action.args.confirm_plan = confirmed_digest
 
     for run_id in (RUN_ID, RUN_ID, f"{RUN_ID}-next"):
-        state.run_scope = RUN_SCOPE.RunScope(run_id, CALLER_NAMESPACE, False)
-        callback = CALLBACKS.StartBuildPipeline(action)
-        callback.bind(state)
+        action.state.run_scope = RUN_SCOPE.RunScope(run_id, CALLER_NAMESPACE, False)
+        assert action.plan(NODE) == confirmed_plan
+        assert action.fingerprint(NODE) == confirmed_digest
 
-        assert callback.collect() == {}
-
-        assert callback.child is not None
-        assert callback.child.action is state.plan
-        assert state.plan.body == {**template_body, "run_id": run_id}
-        child_plans.append(state.plan)
-
-    first, retry, next_run = child_plans
-    assert first.digest == retry.digest
-    assert first.digest != next_run.digest
-    assert state.pipeline_plan is template
-    assert template.body == template_body
-    assert state.chain_plan == confirmed_plan
-    assert state.chain_plan_digest == confirmed_digest
     assert action.args.confirm_plan == confirmed_digest
-    assert action.fingerprint(NODE, template) == confirmed_digest
 
 
-def test_manager_reuses_probe_node_scope_account_and_resource_settings(
+def test_manager_reuses_selected_node_scope_account_and_resource_settings(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Carry the proven Podman placement unchanged into manager preparation.
+    """Carry selected placement and resource requests into manager preparation.
 
     :param tmp_path: Directory holding the ephemeral one-time runner token.
     :param monkeypatch: Fixture replacing only target and credential boundaries.
-    :returns: None; manager workload fields match the probe-side selections.
+    :returns: None; manager workload fields match the caller's selections.
     """
     action = _prepared_action(apply=True)
     state = action.state
@@ -517,240 +450,118 @@ def test_manager_reuses_probe_node_scope_account_and_resource_settings(
     }
 
 
-def _job(
-    runner_id: int = RUNNER_ID,
-    *,
-    pipeline_id: int = PIPELINE_ID,
-    status: str = "success",
-) -> JSONObject:
-    """Build one bounded job summary with explicit pipeline and runner identity.
-
-    :param runner_id: Runner identity reported by GitLab for the selected job.
-    :param pipeline_id: Pipeline identity reported by the selected job.
-    :param status: Observed job completion status.
-    :returns: Complete bounded job summary accepted by the shared job reader.
-    """
-    return {
-        "id": 501,
-        "name": "build-image",
-        "stage": "build",
-        "status": status,
-        "stuck": False,
-        "failure_reason": None,
-        "created_at": "2026-10-18T00:00:00Z",
-        "started_at": "2026-10-18T00:00:01Z",
-        "finished_at": "2026-10-18T00:00:03Z",
-        "duration": 2.0,
-        "runner": {"id": runner_id, "description": "ci13-unit-runner"},
-        "pipeline_id": pipeline_id,
-        "ref": "main",
-        "web_url": "https://gitlab.example.test/team/build/-/jobs/501",
-    }
-
-
-def _bind_verification_state(action: ImageBuildChainAction) -> None:
-    """Bind job identity while forbidding artifact and registry reads.
-
-    :param action: Prepared chain action receiving the selected pipeline and runner.
-    :returns: None; the existing provider seams fail if extra reads are attempted.
-    """
-    action.state.pipeline_id = PIPELINE_ID
-    action.state.created_runner_id = RUNNER_ID
-    action.state.pipeline_gitlab = SimpleNamespace(
-        session=object(),
-        target_id=42,
-        api=SimpleNamespace(
-            get_text=lambda *_a: pytest.fail("consumer fetched a job artifact")
-        ),
-    )
-    action.state.harbor = SimpleNamespace(
-        digest=lambda *_a: pytest.fail("consumer read another Harbor image")
-    )
-
-
-def test_consumer_job_succeeds_without_image_publication_or_artifacts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Accept one successful selected job on the exact chain-created runner.
-
-    :param monkeypatch: Fixture replacing only the bounded GitLab job reader.
-    :returns: None after checking exact job linkage without extra provider reads.
-    """
-    action = _prepared_action(apply=True)
-    _bind_verification_state(action)
-    reads: list[int] = []
-
-    def read_jobs(
-        session: object, target_id: int, query: JobQuery, api: object
-    ) -> JobListResult:
-        """Return selected and unrelated jobs for the exact pipeline lookup."""
-        assert session is action.state.pipeline_gitlab.session
-        assert target_id == action.state.pipeline_gitlab.target_id
-        assert api is action.state.pipeline_gitlab.api
-        reads.append(query.pipeline_id)
-        unrelated = {**_job(), "id": 502, "name": "unrelated-job"}
-        return GITLAB_JOBS.JobListResult(
-            records=[unrelated, _job()], errors=(), truncated=False
-        )
-
-    monkeypatch.setattr(VERIFICATION, "list_jobs", read_jobs)
-    callback = VERIFICATION.VerifyConsumerJob(action)
-    callback.bind(action.state)
-
-    result = callback.run()
-
-    assert reads == [PIPELINE_ID]
-    assert result == {
-        "verified": True,
-        "pipeline_id": PIPELINE_ID,
-        "job_id": 501,
-        "job": action.args.job,
-        "job_status": "success",
-        "runner_id": RUNNER_ID,
-    }
-    assert action.state.job_readback == result
-
-
-@pytest.mark.parametrize(
-    ("runner_id", "pipeline_id", "status", "expected"),
-    (
-        (99, PIPELINE_ID, "success", "consumer_job_runner_mismatch"),
-        (RUNNER_ID, 92, "success", "consumer_job_pipeline_mismatch"),
-        (RUNNER_ID, PIPELINE_ID, "failed", "consumer_job_not_successful"),
-    ),
-    ids=("wrong-runner", "wrong-pipeline", "failed-job"),
-)
-def test_consumer_job_readback_fail_closed(
-    monkeypatch: pytest.MonkeyPatch,
-    runner_id: int,
-    pipeline_id: int,
-    status: str,
-    expected: str,
-) -> None:
-    """Reject failed jobs and jobs outside the selected pipeline or runner.
-
-    :param monkeypatch: Fixture replacing the bounded GitLab job listing.
-    :param runner_id: Runner identity attached to the selected job.
-    :param pipeline_id: Pipeline identity attached to the selected job.
-    :param status: Observed selected job status.
-    :param expected: Failure classification expected from verification.
-    :returns: None; verification never retains a passing read-back.
-    """
-    action = _prepared_action(apply=True)
-    _bind_verification_state(action)
-    monkeypatch.setattr(
-        VERIFICATION,
-        "list_jobs",
-        lambda *_a, **_k: GITLAB_JOBS.JobListResult(
-            records=[_job(runner_id, pipeline_id=pipeline_id, status=status)],
-            errors=(),
-            truncated=False,
-        ),
-    )
-    callback = VERIFICATION.VerifyConsumerJob(action)
-    callback.bind(action.state)
-
-    with pytest.raises(GITLAB_ACTIONS.ActionError, match=expected):
-        callback.run()
-
-    assert not hasattr(action.state, "job_readback")
-
-
-class CallerScopeKubernetes:
-    """Allow the initial namespace lookup and reject later namespace access."""
-
-    def __init__(self, target: TARGET.KubernetesTarget) -> None:
-        """Retain target identity and initialize a mutation journal.
-
-        :param target: Bound Kubernetes identity required by shared callbacks.
-        """
-        self.target = target
-        self.calls: list[tuple[str, str, str]] = []
-
-    def read(self, kind: str, name: str, namespace: str) -> JSONObject:
-        """Read the caller namespace once when the real opening callback runs.
-
-        :param kind: Native Namespace resource kind.
-        :param name: Caller-selected namespace name.
-        :param namespace: Empty cluster-scope namespace argument.
-        :returns: Existing caller-owned namespace without ci-skills labels.
-        :raises AssertionError: A later operation touches the caller namespace.
-        """
-        self.calls.append((kind, name, namespace))
-        assert self.calls == [("Namespace", CALLER_NAMESPACE, "")]
-        return {"metadata": {"name": CALLER_NAMESPACE}}
-
-
 def _lifecycle_executor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    outcome: str = "failed-job",
+    outcome: str = "failed-manager",
     cleanup_failure: bool = False,
+    owns_namespace: bool = False,
 ) -> tuple[
-    ImageBuildChainAction, WorkflowExecutor, list[str], list[str], CallerScopeKubernetes
+    ImageBuildChainAction,
+    WorkflowExecutor,
+    list[str],
+    list[str],
+    runner_manager.ManagerCluster,
 ]:
-    """Compose real verification and cleanup around deterministic provider doubles.
+    """Use the real chain and manager deployment with existing memory transports.
 
     :param tmp_path: Directory receiving the ephemeral runner-token sink.
     :param monkeypatch: Fixture replacing provider mutations at existing boundaries.
-    :param outcome: Success, failed job, timeout, SIGINT, or SIGTERM outcome.
+    :param outcome: Success, manager failure, timeout, SIGINT, or SIGTERM outcome.
     :param cleanup_failure: Make manager removal fail while later cleanup continues.
+    :param owns_namespace: Reuse a namespace owned by this delivery scope.
     :returns: Action, real executor, stage journal, cleanup journal, and fake Kubernetes.
     """
     action = _prepared_action(apply=True)
-    action.probe = PODMAN.PodmanProbeAction(
-        target=action.target,
-        node=NODE,
-        probe_image=action.args.probe_image,
-        inner_image=action.args.inner_image,
-        timeout=action.args.timeout,
-        resources=PODMAN.probe_resources_from_args(action.args),
-        mode=PODMAN.ProbeMode.LIVE_PLAN,
-        confirm_plan=None,
-        namespace=CALLER_NAMESPACE,
-    )
     state = action.state
-    kubernetes = CallerScopeKubernetes(action.target.kubernetes)
+    kubernetes = runner_manager.ManagerCluster()
     state.kubernetes = kubernetes
     state.selected_node = NODE
-    state.pipeline_plan = _pipeline_plan()
-    action.args.confirm_plan = action.fingerprint(NODE, state.pipeline_plan)
+    state.run_scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, owns_namespace)
+    if owns_namespace:
+        state.found_scopes = (state.run_scope,)
+        state.resolved_run_id = RUN_ID
+    kubernetes.objects[("namespace", "", CALLER_NAMESPACE)] = {
+        "kind": "Namespace",
+        "metadata": {
+            "name": CALLER_NAMESPACE,
+            "labels": dict(state.run_scope.labels) if owns_namespace else {},
+        },
+    }
+    state.gitlab = SimpleNamespace(
+        session=SimpleNamespace(target_kind="project"), api=object(), target_id=42
+    )
+    state.harbor = SimpleNamespace(dockerconfig=b'{"auths":{}}')
+    state.runner_runtime = runner_manager.CALLBACKS.RunnerRuntime(
+        init_command=("/bin/true",),
+        command=("gitlab-runner",),
+        environment=(),
+        readiness_command=(),
+        credential={"token": "private-unit-value"},
+    )
+    state.runner_auth_plan = action._runner_auth_plan()
+    action.args.confirm_plan = action.fingerprint(NODE)
     stages: list[str] = []
     cleanup: list[str] = []
 
-    def probe(current: ImageBuildChainState) -> None:
-        """Retain probe evidence after the real callback opens the caller scope."""
-        assert current.run_scope.namespace == CALLER_NAMESPACE
-        assert current.run_scope.owns_namespace is False
-        current.selected_node = NODE
-        current.probe_record = {"verified": True, "node": NODE}
-
     def toolbox(current: ImageBuildChainState) -> None:
-        """Retain the digest-pinned toolbox image published for the manager."""
+        """Check selected inputs at the toolbox provider boundary.
+
+        :param current: Shared state retaining selected placement and scope.
+        """
         assert current.selected_node == NODE
         assert current.run_scope.namespace == CALLER_NAMESPACE
+
+    def publish(current: ImageBuildChainState) -> None:
+        """Retain the immutable image from the Harbor provider boundary.
+
+        :param current: Shared state receiving the publication output.
+        """
         current.published_image = TOOLBOX_IMAGE
 
     def manager(current: ImageBuildChainState) -> None:
-        """Retain chain-owned manager, runner, and private token identities."""
+        """Retain manager inputs and the provider-created runner identity.
+
+        :param current: Shared state receiving runner and manager inputs.
+        """
         assert current.published_image == TOOLBOX_IMAGE
-        current.manager_action = SimpleNamespace(scc_access=lambda: action)
         current.created_runner_id = RUNNER_ID
-        current.runner_create_plan = _pipeline_plan()
+        current.runner_create_plan = _runner_plan()
         current.token_directory = tmp_path / "runner-token"
         current.token_directory.mkdir()
         current.token_path = current.token_directory / "token"
         current.token_path.write_text("private-unit-value\n", encoding="utf-8")
+        selected = runner_manager._action(apply=True)
+        selected.context = current
+        selected.candidate_scope = current.run_scope
+        selected.args.description = action.args.runner_description
+        selected.args.label = list(action.args.runner_label)
+        selected.args.image = TOOLBOX_IMAGE
+        current.manager_action = selected
+        binding = runner_manager.SCC_ACCESS.role_binding_document(
+            selected.scc_access(), current.run_scope
+        )
+        kubernetes.objects[
+            ("rolebinding", CALLER_NAMESPACE, str(binding["metadata"]["name"]))
+        ] = binding
 
-    def pipeline(current: ImageBuildChainState) -> None:
-        """Retain the exact pipeline services for the consumer job read-back."""
-        assert current.created_runner_id == RUNNER_ID
-        _bind_verification_state(action)
-        assert current is action.state
+    rollout = kubernetes.wait_rollout
+
+    def deploy(kind: str, name: str, namespace: str) -> None:
+        """Return actual memory rollout or a bounded injected provider failure.
+
+        :param kind: Deployment selected by shared runner code.
+        :param name: Exact run-owned manager name.
+        :param namespace: Selected delivery namespace.
+        """
+        stages.append("manager-deploy")
+        if outcome == "failed-manager":
+            raise GITLAB_ACTIONS.ActionError("manager_rollout_failed")
         if outcome == "timeout":
-            raise TimeoutError("pipeline_watch_timeout token=private-unit-value")
+            raise TimeoutError("manager_rollout_timeout token=private-unit-value")
         if outcome in ("SIGINT", "SIGTERM"):
             signal.raise_signal(getattr(signal, outcome))
+        rollout(kind, name, namespace)
 
     def cleanup_callback(_selection: object, resource: str) -> JournalCallback:
         """Build one mocked existing cleanup operation.
@@ -773,7 +584,12 @@ def _lifecycle_executor(
         records: MutableSequence[JSONObject],
         _failures: MutableSequence[JSONObject],
     ) -> None:
-        """Record verified deletion through the existing runner-cleanup seam."""
+        """Record deletion through the existing runner-cleanup boundary.
+
+        :param _state: Shared state retained by cleanup.
+        :param records: Destination for successful cleanup evidence.
+        :param _failures: Destination for cleanup failures, unused in this double.
+        """
         cleanup.append("runner")
         records.append(
             {"callback": "DeleteRunner", "resource": "runner", "verified": True}
@@ -791,80 +607,131 @@ def _lifecycle_executor(
     )
     monkeypatch.setattr(VERIFICATION, "workload_action", lambda _manager: action)
     monkeypatch.setattr(VERIFICATION, "_delete_runner_record", delete_runner)
-    monkeypatch.setattr(
-        VERIFICATION,
-        "list_jobs",
-        lambda *_a, **_k: GITLAB_JOBS.JobListResult(
-            records=[_job(status="failed" if outcome == "failed-job" else "success")],
-            errors=(),
-            truncated=False,
-        ),
-    )
-    callbacks = ABSTRACT_CALLBACKS.Callbacks(
-        [
-            VERIFICATION.CleanupChain(action),
-            CALLBACKS.ResolveChainPlan(action),
-            WORKFLOW.OpenProbeNamespace(action.probe),
-            JournalCallback(action, stages, "probe", probe),
-            JournalCallback(action, stages, "toolbox", toolbox),
-            JournalCallback(action, stages, "manager", manager),
-            JournalCallback(action, stages, "pipeline", pipeline),
-            VERIFICATION.VerifyConsumerJob(action),
-        ]
-    )
-    executor = EXECUTOR.WorkflowExecutor(state, callbacks)
+    monkeypatch.setattr(kubernetes, "wait_rollout", deploy)
+    for name in (
+        "K8SAuth",
+        "HarborAuth",
+        "ConfirmWorkflow",
+        "EnsureNamespace",
+        "ObserveGitLabRunner",
+        "EnsureSCCAccess",
+        "GitLabRunnerRuntime",
+    ):
+        monkeypatch.setattr(
+            WORKFLOW,
+            name,
+            lambda *_a, name=name, **_k: JournalCallback(action, stages, name),
+        )
+    transitions = {
+        "ScopedGitLabAuth": ("runner-auth", None),
+        "HarborBuild": ("toolbox", toolbox),
+        "HarborPush": ("harbor-push", publish),
+        "CreateRunnerRecord": ("manager", manager),
+        "PrepareRunnerManager": ("manager-prepare", None),
+    }
+    for name, (stage, transition) in transitions.items():
+        monkeypatch.setattr(
+            WORKFLOW,
+            name,
+            lambda *_a, stage=stage, transition=transition, **_k: JournalCallback(
+                action, stages, stage, transition
+            ),
+        )
+    for name in (
+        "StartBuildPipeline",
+        "WatchBuildPipeline",
+        "ResolvePipelineStart",
+        "RunPodmanProbe",
+        "PullManagerImage",
+        "VerifyGitLabRunnerOnline",
+    ):
+        monkeypatch.setattr(
+            WORKFLOW,
+            name,
+            lambda *_a, **_k: pytest.fail("delivery entered a test job or pipeline"),
+            raising=False,
+        )
+    executor = WORKFLOW.workflow(action)
     assert all(callback.state is state for callback in executor.callbacks)
 
     return action, executor, stages, cleanup, kubernetes
 
 
 @pytest.mark.parametrize(
-    "outcome", ("success", "failed-job", "timeout", "SIGINT", "SIGTERM")
+    ("outcome", "owns_namespace"),
+    (
+        ("success", False),
+        ("success", True),
+        ("failed-manager", False),
+        ("timeout", False),
+        ("SIGINT", False),
+        ("SIGTERM", False),
+    ),
 )
-def test_chain_cleanup_runs_on_success_failure_timeout_and_signals(
+def test_chain_retains_delivery_and_cleans_failures_timeouts_and_signals(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     outcome: str,
+    owns_namespace: bool,
 ) -> None:
-    """Remove owned resources and preserve caller scope on every execution exit.
+    """Keep the deployed runner on success and clean failed delivery attempts.
 
     :param tmp_path: Directory receiving the private runner-token sink.
     :param monkeypatch: Fixture replacing external provider operations.
-    :param outcome: Final verification success, provider failure, timeout, or signal.
+    :param outcome: Deployment success, provider failure, timeout, or signal.
+    :param owns_namespace: Whether successful delivery owns its retained namespace.
     :returns: None after checking cleanup side effects and restored signal handlers.
     """
     action, executor, stages, cleanup, kubernetes = _lifecycle_executor(
-        tmp_path, monkeypatch, outcome
+        tmp_path, monkeypatch, outcome, owns_namespace=owns_namespace
     )
     previous = {
         number: signal.getsignal(number) for number in (signal.SIGINT, signal.SIGTERM)
     }
     if outcome == "success":
         executor.run()
-        assert action.state.job_readback["verified"] is True
     elif outcome in ("SIGINT", "SIGTERM"):
         with pytest.raises(SystemExit) as interrupted:
             executor.run()
         assert interrupted.value.code == 128 + getattr(signal, outcome)
     else:
         expected = (
-            "consumer_job_not_successful"
-            if outcome == "failed-job"
-            else "pipeline_watch_timeout"
+            "manager_rollout_failed"
+            if outcome == "failed-manager"
+            else "manager_rollout_timeout"
         )
         with pytest.raises((GITLAB_ACTIONS.ActionError, TimeoutError), match=expected):
             executor.run()
     state = action.state
-    assert stages == ["probe", "toolbox", "manager", "pipeline"]
-    assert cleanup == ["manager", "scc", "runner"]
+    assert stages.count("runner-auth") == 1
+    assert stages.index("toolbox") < stages.index("harbor-push")
+    assert stages.index("harbor-push") < stages.index("manager")
+    assert stages.index("manager") < stages.index("manager-deploy")
+    assert cleanup == ([] if outcome == "success" else ["manager", "scc", "runner"])
     assert state.chain_cleanup["status"] == "PASS"
-    scope_cleanup = next(
-        item
-        for item in state.chain_cleanup["resources"]
-        if item.get("callback") == "RemoveScope"
-    )
-    assert scope_cleanup["preserved_scopes"] == [state.run_scope.as_dict()]
-    assert kubernetes.calls == [("Namespace", CALLER_NAMESPACE, "")]
+    if outcome == "success":
+        assert state.created_runner_id == RUNNER_ID
+        assert state.deployment_result["verified"] is True
+        assert state.deployment_result["image"] == TOOLBOX_IMAGE
+        assert state.deployment_result["pods"]
+        assert state.published_image == TOOLBOX_IMAGE
+        assert {kind for kind, _namespace, _name in kubernetes.objects} >= {
+            "deployment",
+            "secret",
+            "rolebinding",
+            "namespace",
+        }
+        assert kubernetes.deleted == []
+        assert state.runner_gitlab is state.gitlab
+        assert state.toolbox_harbor is state.harbor
+    else:
+        scope_cleanup = next(
+            item
+            for item in state.chain_cleanup["resources"]
+            if item.get("callback") == "RemoveScope"
+        )
+        assert scope_cleanup["preserved_scopes"] == [state.run_scope.as_dict()]
+    assert kubernetes.read("Namespace", CALLER_NAMESPACE, "") is not None
     assert not state.token_path.exists()
     assert not state.token_directory.exists()
     assert {number: signal.getsignal(number) for number in previous} == previous
@@ -890,7 +757,7 @@ def test_chain_runner_cleanup_uses_delete_plan_and_restores_execution_context(
         "create", {"description": "owned-runner"}
     )
     state.created_runner_id = RUNNER_ID
-    original_plan = _pipeline_plan()
+    original_plan = _runner_plan()
     original_provider = SimpleNamespace(session=object())
     state.plan = original_plan
     state.gitlab = original_provider

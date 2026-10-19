@@ -24,14 +24,12 @@ from test_image_build_chain import (
     CHAIN,
     EXECUTOR,
     NODE,
-    PIPELINE_ID,
     PODMAN,
     READINESS,
-    RUNNER_ID,
+    TOOLBOX_IMAGE,
     JournalCallback,
     _args,
     _lifecycle_executor,
-    _pipeline_plan,
     _prepared_action,
     _target,
 )
@@ -84,8 +82,8 @@ def _apply_report(
     monkeypatch.setattr(COMMAND, "workflow", lambda selected: executor)
     status = command.execute()
     output = json.loads(capsys.readouterr().out)
-    assert cleanup == ["manager", "scc", "runner"]
-    assert kubernetes.calls == [("Namespace", CALLER_NAMESPACE, "")]
+    assert cleanup == ([] if outcome == "success" else ["manager", "scc", "runner"])
+    assert kubernetes.read("Namespace", CALLER_NAMESPACE, "") is not None
     assert not action.state.token_path.exists()
     assert not action.state.token_directory.exists()
     _validator().validate(output)
@@ -93,15 +91,15 @@ def _apply_report(
 
 
 @pytest.mark.parametrize(
-    "outcome", ("success", "failed-job", "timeout", "cleanup-failure")
+    "outcome", ("success", "failed-manager", "timeout", "cleanup-failure")
 )
-def test_chain_emits_schema_valid_success_or_blocked_after_verified_cleanup(
+def test_chain_emits_schema_valid_runner_delivery_or_classified_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     outcome: str,
 ) -> None:
-    """Require linked evidence for success and expose failure without losing cleanup.
+    """Report durable runner delivery or a classified failed attempt.
 
     :param tmp_path: Isolated token directory.
     :param monkeypatch: Fixture replacing external provider operations.
@@ -113,7 +111,7 @@ def test_chain_emits_schema_valid_success_or_blocked_after_verified_cleanup(
         tmp_path,
         monkeypatch,
         capsys,
-        outcome="success" if outcome == "cleanup-failure" else outcome,
+        outcome="failed-manager" if outcome == "cleanup-failure" else outcome,
         cleanup_failure=outcome == "cleanup-failure",
     )
     assert status == (0 if outcome == "success" else 2)
@@ -121,21 +119,22 @@ def test_chain_emits_schema_valid_success_or_blocked_after_verified_cleanup(
     assert output["cleanup"]["status"] == (
         "BLOCKED" if outcome == "cleanup-failure" else "PASS"
     )
-    if outcome in ("success", "cleanup-failure"):
+    if outcome == "success":
         proof = next(
             record
             for record in output["records"]
-            if record["callback"] == "VerifyConsumerJob"
+            if record["callback"] == "DeployManagerRunner"
         )
         assert proof["verified"] is True
-        assert proof["pipeline_id"] == PIPELINE_ID
-        assert proof["runner_id"] == RUNNER_ID
-        assert proof["job_id"] == 501
-        assert "job_digest_artifact" not in proof
-        assert "job_digest" not in proof
-        assert "image" not in proof
-        assert "digest" not in proof
-        assert proof["job_status"] == "success"
+        assert proof["namespace"] == CALLER_NAMESPACE
+        assert proof["image"] == TOOLBOX_IMAGE
+        assert proof["pods"]
+        assert proof["resources"]
+        assert "pipeline_id" not in proof
+        assert "job_id" not in proof
+        without_cleanup = deepcopy(output)
+        without_cleanup.pop("cleanup", None)
+        _validator().validate(without_cleanup)
     if outcome != "success":
         assert output["errors"]
     if outcome in ("timeout", "cleanup-failure"):
@@ -150,12 +149,12 @@ def test_chain_emits_schema_valid_success_or_blocked_after_verified_cleanup(
         "missing-proof",
         "missing-plan",
         "missing-digest",
-        "unverified-job",
-        "cleanup-blocked",
-        "cleanup-failures",
+        "unverified-deployment",
+        "missing-image",
+        "missing-namespace",
     ),
 )
-def test_chain_schema_rejects_pass_without_complete_proof_and_cleanup(
+def test_chain_schema_rejects_pass_without_complete_runner_delivery(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -166,7 +165,7 @@ def test_chain_schema_rejects_pass_without_complete_proof_and_cleanup(
     :param tmp_path: Isolated token directory.
     :param monkeypatch: Fixture replacing external provider operations.
     :param capsys: Captured command JSON.
-    :param defect: Required identity, read-back or cleanup evidence removed/corrupted.
+    :param defect: Required identity or runner delivery evidence removed/corrupted.
     :returns: None; every incomplete PASS report fails the shipped schema.
     """
     _status, complete = _apply_report(tmp_path, monkeypatch, capsys)
@@ -190,16 +189,17 @@ def test_chain_schema_rejects_pass_without_complete_proof_and_cleanup(
         del broken["plan"]
     elif defect == "missing-digest":
         del broken["plan_digest"]
-    elif defect == "unverified-job":
+    elif defect == "unverified-deployment":
         for record in broken["records"]:
-            if record["callback"] == "VerifyConsumerJob":
+            if record["callback"] == "DeployManagerRunner":
                 record["verified"] = False
-    elif defect == "cleanup-blocked":
-        broken["cleanup"]["status"] = "BLOCKED"
     else:
-        broken["cleanup"]["failures"] = [
-            {"callback": "DeleteRunner", "reason": "delete_failed"}
-        ]
+        for record in broken["records"]:
+            if record["callback"] == "DeployManagerRunner":
+                if defect == "missing-image":
+                    del record["image"]
+                else:
+                    del record["namespace"]
     assert list(_validator().iter_errors(broken))
 
 
@@ -246,7 +246,12 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
             spec=template.toolbox.spec, resolved_base=None, prepare=lambda: None
         ),
     )
-    monkeypatch.setattr(MODEL, "prepare_start_plan", lambda *_a, **_k: _pipeline_plan())
+    monkeypatch.setattr(
+        MODEL,
+        "prepare_start_plan",
+        lambda *_a, **_k: pytest.fail("runner delivery prepared a consumer pipeline"),
+        raising=False,
+    )
 
     def preflight(state: ImageBuildChainState) -> None:
         """Return the worker selected at the mocked provider-read boundary.

@@ -108,7 +108,7 @@ Routing, in short:
 | Deploy or remove a toolbox-backed GitLab runner | `bin/gitlab_runner_manager.py` |
 | Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
 | Build a schema-declared toolbox | `bin/toolbox.py` |
-| Probe Podman or verify a runner build and push | `bin/image_build_readiness.py probe\|chain` |
+| Probe Podman, or build/publish a toolbox and configure its runner | `bin/image_build_readiness.py probe\|chain` |
 | Build an OpenShift ISO or join its node | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
 | access to configured GitHub, GitLab and Kubernetes providers | `access_check.py` |
@@ -299,7 +299,7 @@ affected node. `tools.json` describes every command and its filters.
 
 ## Nested Podman readiness
 
-`bin/image_build_readiness.py probe` checks nested runtime behavior; `chain` links a runner job to its Harbor digest.
+`bin/image_build_readiness.py`: `probe` checks Podman; `chain` builds/publishes the toolbox and configures its runner.
 See [Podman inputs](references/podman-readiness.md), [chain inputs and evidence](references/image-build-chain.md),
 and [OpenShift SCC discovery and access](references/openshift-scc.md).
 

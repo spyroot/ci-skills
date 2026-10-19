@@ -17,6 +17,7 @@ from .callbacks import (
     ObserveGitLabRunner,
     VerifyGitLabRunnerOnline,
     VerifyGitLabRunnerPreserved,
+    retain_manager_resources,
 )
 from .token import (
     BoundRunnerToken,
@@ -56,5 +57,6 @@ __all__ = (
     "VerifyGitLabRunnerOnline",
     "VerifyGitLabRunnerPreserved",
     "read_runner_token",
+    "retain_manager_resources",
     "workload_action",
 )

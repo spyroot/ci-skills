@@ -10,24 +10,22 @@ from __future__ import annotations
 from lib.python.core.abstract.callbacks import AbstractCallbacks, Callbacks
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.executor import WorkflowExecutor
-from lib.python.core.gitlab.gitlab_pipeline_start import ResolvePipelineStart
 from lib.python.core.gitlab.runner_manager import (
     DeployManagerRunner,
     GitLabRunnerRuntime,
+    GuardGitLabRunnerManager,
     ObserveGitLabRunner,
-    PullManagerImage,
-    VerifyGitLabRunnerOnline,
+    OpenManagerRunScope,
+    SelectManagerPlanScope,
     workload_action,
 )
 from lib.python.core.harbor.registry_mirror import HarborAuth, HarborPush, PushAction
 from lib.python.core.kubernetes.kubernetes import K8SAuth
-from lib.python.core.kubernetes.podman_callbacks import (
-    ConfirmPodmanProbe,
-    OpenProbeNamespace,
-    RunPodmanProbe,
-    SelectReadyWorker,
-)
 from lib.python.core.kubernetes.podman_probe import ProbeMode
+from lib.python.core.kubernetes.run_scope import (
+    ResolveRunScopeAction,
+    ResolveRunScopes,
+)
 from lib.python.core.kubernetes.scc_access import EnsureSCCAccess
 from lib.python.core.toolbox_actions import (
     ConfirmWorkflow,
@@ -43,11 +41,9 @@ from .callbacks import (
     ResolveChainPlan,
     RetainProvider,
     ScopedGitLabAuth,
-    StartBuildPipeline,
-    WatchBuildPipeline,
 )
 from .model import ImageBuildChainAction, ImageBuildChainState
-from .verification import CleanupChain, VerifyConsumerJob
+from .verification import CleanupChain
 
 
 def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainState]:
@@ -71,23 +67,13 @@ def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainS
         RetainProvider(action, ProviderTransition.USE_TOOLBOX_HARBOR),
         ScopedGitLabAuth(action, state.runner_auth_plan),
         RetainProvider(action, ProviderTransition.RETAIN_RUNNER_GITLAB),
-        ScopedGitLabAuth(action, state.pipeline_plan),
-        DeferredComponent(
-            action, lambda state: ResolvePipelineStart(state.pipeline_plan)
-        ),
-        RetainProvider(action, ProviderTransition.RETAIN_PIPELINE_GITLAB),
         RetainProvider(action, ProviderTransition.USE_RUNNER_GITLAB),
-        SelectReadyWorker(action.probe),
-        ConfirmPodmanProbe(action.probe),
         ResolveChainPlan(action),
     ]
     if action.mode == ProbeMode.APPLY:
         callbacks.extend(
             (
                 CleanupChain(action),
-                OpenProbeNamespace(action.probe),
-                EnsureSCCAccess(action.probe.scc_access()),
-                RunPodmanProbe(action.probe),
                 EnsureNamespace(action.toolbox),
                 HarborBuild(action.toolbox),
                 HarborPush(
@@ -99,13 +85,33 @@ def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainS
                 CreateRunnerRecord(action),
                 PrepareRunnerManager(action),
                 DeferredComponent(
+                    action,
+                    lambda state: GuardGitLabRunnerManager(state.manager_action),
+                ),
+                DeferredComponent(
+                    action,
+                    lambda state: ResolveRunScopes(
+                        ResolveRunScopeAction(state.manager_action.scope_id)
+                    ),
+                ),
+                DeferredComponent(
+                    action,
+                    lambda state: SelectManagerPlanScope(
+                        workload_action(state.manager_action)
+                    ),
+                ),
+                DeferredComponent(
                     action, lambda state: ObserveGitLabRunner(state.manager_action)
                 ),
                 DeferredComponent(
                     action,
-                    lambda state: PullManagerImage(
+                    lambda state: OpenManagerRunScope(
                         workload_action(state.manager_action)
                     ),
+                ),
+                DeferredComponent(
+                    action,
+                    lambda state: EnsureSCCAccess(state.manager_action.scc_access()),
                 ),
                 DeferredComponent(
                     action, lambda state: GitLabRunnerRuntime(state.manager_action)
@@ -116,14 +122,6 @@ def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainS
                         workload_action(state.manager_action)
                     ),
                 ),
-                DeferredComponent(
-                    action,
-                    lambda state: VerifyGitLabRunnerOnline(state.manager_action),
-                ),
-                RetainProvider(action, ProviderTransition.USE_PIPELINE_GITLAB),
-                StartBuildPipeline(action),
-                WatchBuildPipeline(action),
-                VerifyConsumerJob(action),
             )
         )
     return WorkflowExecutor(context=state, callbacks=Callbacks(callbacks))

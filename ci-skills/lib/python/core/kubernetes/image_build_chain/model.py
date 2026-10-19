@@ -16,7 +16,6 @@ from typing import Final, Optional
 from lib.python.access.credentials import bind_sources
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.gitlab.gitlab_actions import ActionPlan
-from lib.python.core.gitlab.gitlab_pipeline_start import prepare_start_plan
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession, GitLabService
 from lib.python.core.gitlab.runner_manager import (
     GitLabRunnerManagerAction,
@@ -24,13 +23,7 @@ from lib.python.core.gitlab.runner_manager import (
 )
 from lib.python.core.harbor.registry_mirror import HarborService
 from lib.python.core.json_types import JSONObject, copy_json
-from lib.python.core.kubernetes.podman_callbacks import PodmanProbeState
-from lib.python.core.kubernetes.podman_probe import (
-    PROBE_KIND,
-    PodmanProbeAction,
-    ProbeMode,
-    probe_resources_from_args,
-)
+from lib.python.core.kubernetes.podman_probe import PROBE_KIND, ProbeMode
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import plan_digest
 from lib.python.core.target import GitLabOperationTarget, Target, TargetError
@@ -38,16 +31,14 @@ from lib.python.core.toolbox_actions import WorkflowAction
 
 CHAIN_OPERATION: Final = "chain"
 RUNNER_TOKEN_NAME: Final = "runner-token"
-DEFAULT_STUCK_AFTER: Final = 900
 
 
 @dataclass
-class ImageBuildChainState(PodmanProbeState, GitLabRunnerManagerState):
+class ImageBuildChainState(GitLabRunnerManagerState):
     """Retain every linked CI13 result in one executor-owned state.
 
-    The state deliberately satisfies the existing probe and runner-manager state
-    contracts. Pipeline callbacks use the same object and replace ``plan`` only
-    after probe planning is complete.
+    The state satisfies the existing toolbox and runner-manager contracts while
+    retaining the immutable publication and durable runner delivery read-backs.
 
     :param session: Active GitLab session for the currently selected scope.
     :param access: Safe GitLab access evidence retained by shared authentication.
@@ -108,11 +99,6 @@ class ImageBuildChainState(PodmanProbeState, GitLabRunnerManagerState):
 
         SHA-256 fingerprint of ``chain_plan``.
 
-    .. attribute :: pipeline_plan
-        :type: ActionPlan
-
-        Live-resolved pipeline-start plan.
-
     .. attribute :: runner_auth_plan
         :type: ActionPlan
 
@@ -133,11 +119,6 @@ class ImageBuildChainState(PodmanProbeState, GitLabRunnerManagerState):
 
         Authenticated runner-scope GitLab service.
 
-    .. attribute :: pipeline_gitlab
-        :type: GitLabService
-
-        Authenticated pipeline-project GitLab service.
-
     .. attribute :: toolbox_harbor
         :type: HarborService
 
@@ -147,21 +128,6 @@ class ImageBuildChainState(PodmanProbeState, GitLabRunnerManagerState):
         :type: int
 
         Exact runner ID returned by the create operation.
-
-    .. attribute :: pipeline_id
-        :type: int
-
-        Exact pipeline ID returned by the start operation.
-
-    .. attribute :: pipeline_watch
-        :type: JSONObject
-
-        Terminal pipeline-graph watch evidence.
-
-    .. attribute :: job_readback
-        :type: JSONObject
-
-        Linked consumer job and runner evidence.
 
     .. attribute :: token_directory
         :type: Path
@@ -189,17 +155,13 @@ class ImageBuildChainState(PodmanProbeState, GitLabRunnerManagerState):
     operation_completed: bool = False
     chain_plan: JSONObject = field(init=False)
     chain_plan_digest: str = field(init=False)
-    pipeline_plan: ActionPlan = field(init=False, repr=False)
     runner_auth_plan: ActionPlan = field(init=False, repr=False)
     runner_create_plan: ActionPlan = field(init=False, repr=False)
     manager_action: GitLabRunnerManagerAction = field(init=False, repr=False)
     runner_gitlab: GitLabService = field(init=False, repr=False)
-    pipeline_gitlab: GitLabService = field(init=False, repr=False)
     toolbox_harbor: HarborService = field(init=False, repr=False)
+    selected_node: str = field(init=False)
     created_runner_id: int = field(init=False)
-    pipeline_id: int = field(init=False)
-    pipeline_watch: JSONObject = field(init=False)
-    job_readback: JSONObject = field(init=False)
     token_directory: Path = field(init=False, repr=False)
     token_path: Path = field(init=False, repr=False)
     chain_cleanup: JSONObject = field(default_factory=dict)
@@ -227,20 +189,10 @@ class ImageBuildChainAction(SkillAction):
 
         Resolved GitLab, Kubernetes, and Harbor target.
 
-    .. attribute :: probe
-        :type: PodmanProbeAction
-
-        Existing Podman readiness action bound to the selected node.
-
     .. attribute :: toolbox
         :type: WorkflowAction
 
         Existing toolbox build-and-push action.
-
-    .. attribute :: pipeline
-        :type: ActionPlan
-
-        Prepared pipeline-start plan.
 
     .. attribute :: gitlab_target
         :type: GitLabOperationTarget
@@ -261,9 +213,7 @@ class ImageBuildChainAction(SkillAction):
     args: argparse.Namespace
     state: ImageBuildChainState = field(default_factory=ImageBuildChainState)
     target: Target = field(init=False)
-    probe: PodmanProbeAction = field(init=False)
     toolbox: WorkflowAction = field(init=False)
-    pipeline: ActionPlan = field(init=False, repr=False)
     gitlab_target: GitLabOperationTarget = field(init=False, repr=False)
     target_source: str = field(init=False)
     mode: ProbeMode = field(init=False)
@@ -279,24 +229,6 @@ class ImageBuildChainAction(SkillAction):
             raise ValueError("chain_requires_exactly_one_project_or_group")
         return "group" if self.args.group else "project"
 
-    @property
-    def pipeline_project(self) -> str:
-        """Select the project that owns the actual build pipeline.
-
-        :returns: Explicit pipeline project for group runners, otherwise project.
-        :raises ValueError: Group mode omitted the pipeline project or project mode
-            supplied a different second project.
-        """
-        selected = self.args.pipeline_project or self.args.project
-        if not selected:
-            raise ValueError("pipeline_project_required_for_group_runner")
-        if self.args.project and self.args.pipeline_project not in (
-            None,
-            self.args.project,
-        ):
-            raise ValueError("pipeline_project_conflicts_with_project_runner")
-        return selected
-
     def _validate_chain_inputs(self) -> None:
         """Reject missing or ambiguous chain selections before provider access.
 
@@ -305,8 +237,6 @@ class ImageBuildChainAction(SkillAction):
         """
         required = {
             "toolbox_spec": self.args.toolbox_spec,
-            "ref": self.args.ref,
-            "job": self.args.job,
             "runner_description": self.args.runner_description,
         }
         missing = sorted(name for name, value in required.items() if not value)
@@ -316,9 +246,7 @@ class ImageBuildChainAction(SkillAction):
             raise ValueError("chain_runner_label_required")
         if len(set(self.args.runner_label)) != len(self.args.runner_label):
             raise ValueError("chain_runner_labels_must_be_unique")
-        if self.args.watch_interval <= 0 or self.args.watch_timeout <= 0:
-            raise ValueError("chain_watch_bounds_must_be_positive")
-        if not (self.runner_kind and self.pipeline_project):
+        if not self.runner_kind:
             raise ValueError("chain_scope_required")
 
     def _toolbox_args(self) -> argparse.Namespace:
@@ -338,25 +266,12 @@ class ImageBuildChainAction(SkillAction):
         )
         return argparse.Namespace(**values)
 
-    def _pipeline_args(self) -> argparse.Namespace:
-        """Build the existing pipeline-start plan inputs.
-
-        :returns: Namespace consumed by ``prepare_start_plan``.
-        """
-        values = vars(self.args).copy()
-        values.update(
-            project=self.pipeline_project,
-            variable=list(self.args.pipeline_variable),
-            require_protected_ref=False,
-        )
-        return argparse.Namespace(**values)
-
     def prepare(self, mode: ProbeMode) -> None:
         """Resolve targets and construct mutation-free component actions.
 
         :param mode: Validated offline, live-plan, or confirmed-apply mode.
         :returns: None after retaining component actions and one shared state.
-        :raises ValueError: Chain, probe, toolbox, or pipeline inputs are invalid.
+        :raises ValueError: Chain or toolbox inputs are invalid.
         :raises TargetError: Required target surfaces cannot be resolved.
         :raises OSError: A selected target, credential, or toolbox file cannot be read.
         """  # noqa: DOC503 - existing component preparation propagates errors.
@@ -375,27 +290,9 @@ class ImageBuildChainAction(SkillAction):
         self.target = target
         self.target_source = target.source_kind or "target"
         self.gitlab_target = GitLabOperationTarget(target.gitlab, target.source_file)
-        probe_mode = (
-            ProbeMode.DRY_RUN if mode == ProbeMode.DRY_RUN else ProbeMode.LIVE_PLAN
-        )
-        self.probe = PodmanProbeAction(
-            target=target,
-            node=self.args.node,
-            probe_image=self.args.probe_image,
-            inner_image=self.args.inner_image,
-            timeout=self.args.timeout,
-            resources=probe_resources_from_args(self.args),
-            mode=probe_mode,
-            confirm_plan=None,
-            namespace=self.args.namespace,
-        )
         self.toolbox = WorkflowAction(self._toolbox_args(), context=self.state)
         self.toolbox.prepare()
-        self.pipeline = prepare_start_plan(
-            self._pipeline_args(), self.gitlab_target, self.target_source
-        )
         self.state.args = self.args
-        self.state.pipeline_plan = self.pipeline
         self.state.runner_auth_plan = self._runner_auth_plan()
 
     def _runner_auth_plan(self) -> ActionPlan:
@@ -422,12 +319,11 @@ class ImageBuildChainAction(SkillAction):
             revision=self.args.revision,
         )
 
-    def plan(self, selected_node: str, pipeline: ActionPlan) -> JSONObject:
-        """Render one stable chain plan without volatile provider observations.
+    def plan(self, selected_node: str) -> JSONObject:
+        """Render one stable three-step delivery plan.
 
-        :param selected_node: Caller-selected or live-resolved worker name.
-        :param pipeline: Unresolved offline or exact-ref live pipeline plan.
-        :returns: Stable component inputs and linked proof expectations.
+        :param selected_node: Exact worker selected for the runner workload.
+        :returns: Stable toolbox build, Harbor publication, and runner inputs.
         :raises ValueError: The prepared toolbox specification is absent.
         """
         toolbox = self.toolbox.spec
@@ -440,7 +336,6 @@ class ImageBuildChainAction(SkillAction):
             "target_source": self.target.source_kind or "",
             "tested_revision": self.target.tested_revision,
             "skill": copy_json(self.target.skill),
-            "probe": self.probe.plan(selected_node),
             "toolbox": {
                 "specification": toolbox.fingerprint,
                 "base_image": self.toolbox.resolved_base or toolbox.base_image,
@@ -465,24 +360,12 @@ class ImageBuildChainAction(SkillAction):
                 "run_scope": "generated_after_confirmation",
                 "token_sink": "ephemeral",
             },
-            "pipeline": {
-                "project": self.pipeline_project,
-                "plan": pipeline.public(),
-                "job": self.args.job,
-            },
-            "cleanup": {
-                "manager_workload": "required",
-                "runner_record": "required",
-                "runner_token": "required",
-                "run_scope": "required_when_owned",
-            },
         }
 
-    def fingerprint(self, selected_node: str, pipeline: ActionPlan) -> str:
-        """Hash the stable chain plan used by live plan and apply.
+    def fingerprint(self, selected_node: str) -> str:
+        """Hash the stable delivery plan used by live plan and apply.
 
-        :param selected_node: Live-resolved worker name.
-        :param pipeline: Live-resolved pipeline plan with exact commit SHA.
+        :param selected_node: Exact worker selected for the runner workload.
         :returns: SHA-256 plan fingerprint.
         """
-        return plan_digest(self.plan(selected_node, pipeline))
+        return plan_digest(self.plan(selected_node))

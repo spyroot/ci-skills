@@ -31,6 +31,7 @@ from lib.python.core.target import TargetError
 from lib.python.core.toolbox import ToolboxError
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, PLANNED
 
+from .callbacks import DeferredComponent
 from .model import CHAIN_OPERATION, ImageBuildChainAction
 from .workflow import workflow
 
@@ -78,7 +79,11 @@ class ImageBuildChain:
                 continue
             if not is_json_value(value):
                 raise TypeError("workflow_record_requires_json")
-            records.append({"callback": type(callback).__name__, **dict(value)})
+            child = callback.child if isinstance(callback, DeferredComponent) else None
+            name = (
+                type(child).__name__ if child is not None else type(callback).__name__
+            )
+            records.append({"callback": name, **dict(value)})
         return records
 
     def execute(self) -> int:
@@ -94,7 +99,7 @@ class ImageBuildChain:
             self.action.prepare(mode)
             output = self._output()
             if mode == ProbeMode.DRY_RUN:
-                plan = self.action.plan(self.args.node or "auto", self.action.pipeline)
+                plan = self.action.plan(self.args.node or "auto")
                 output.update(
                     status=DRY_RUN,
                     plan=plan,
@@ -106,9 +111,8 @@ class ImageBuildChain:
                 workflow(self.action).run()
                 state = self.action.state
                 successful = mode == ProbeMode.LIVE_PLAN or (
-                    hasattr(state, "job_readback")
-                    and state.job_readback.get("verified") is True
-                    and state.chain_cleanup.get("status") == PASS
+                    hasattr(state, "deployment_result")
+                    and state.deployment_result.get("verified") is True
                 )
                 output.update(
                     status=(PLANNED if mode == ProbeMode.LIVE_PLAN else PASS)
@@ -122,6 +126,9 @@ class ImageBuildChain:
                 )
                 if mode == ProbeMode.APPLY and state.chain_cleanup:
                     output["cleanup"] = copy_json(state.chain_cleanup)
+                if mode == ProbeMode.APPLY and hasattr(state, "run_scope"):
+                    output["run_id"] = state.run_scope.run_id
+                    output["namespace"] = state.run_scope.namespace
                 if mode == ProbeMode.APPLY and not successful:
                     errors.append(
                         {

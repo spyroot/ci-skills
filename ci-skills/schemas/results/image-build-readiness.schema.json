@@ -194,42 +194,28 @@
       },
       "additionalProperties": false
     },
-    "chain_job_readback": {
+    "chain_deployment_result": {
       "type": "object",
       "required": [
         "callback",
         "verified",
-        "pipeline_id",
-        "job_id",
-        "job",
-        "job_status",
-        "runner_id"
+        "namespace",
+        "image"
       ],
       "properties": {
         "callback": {
-          "const": "VerifyConsumerJob"
+          "const": "DeployManagerRunner"
         },
         "verified": {
           "const": true
         },
-        "pipeline_id": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "job_id": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "runner_id": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "job": {
+        "namespace": {
           "type": "string",
           "minLength": 1
         },
-        "job_status": {
-          "const": "success"
+        "image": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }
@@ -341,11 +327,8 @@
                   "required": [
                     "kind",
                     "operation",
-                    "probe",
                     "toolbox",
-                    "runner",
-                    "pipeline",
-                    "cleanup"
+                    "runner"
                   ],
                   "properties": {
                     "kind": {
@@ -354,19 +337,10 @@
                     "operation": {
                       "const": "chain"
                     },
-                    "probe": {
-                      "type": "object"
-                    },
                     "toolbox": {
                       "type": "object"
                     },
                     "runner": {
-                      "type": "object"
-                    },
-                    "pipeline": {
-                      "type": "object"
-                    },
-                    "cleanup": {
                       "type": "object"
                     }
                   }
@@ -448,26 +422,10 @@
               }
             },
             "then": {
-              "required": [
-                "cleanup"
-              ],
               "properties": {
                 "records": {
                   "contains": {
-                    "$ref": "#/$defs/chain_job_readback"
-                  }
-                },
-                "cleanup": {
-                  "properties": {
-                    "status": {
-                      "const": "PASS"
-                    },
-                    "resources": {
-                      "minItems": 1
-                    },
-                    "failures": {
-                      "maxItems": 0
-                    }
+                    "$ref": "#/$defs/chain_deployment_result"
                   }
                 },
                 "summary": {
