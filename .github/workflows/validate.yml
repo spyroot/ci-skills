@@ -136,6 +136,7 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_actions.py \
             ci-skills/lib/python/core/gitlab/gitlab_milestones.py \
             ci-skills/lib/python/core/gitlab/gitlab_api.py \
+            ci-skills/lib/python/core/gitlab/runner_manager \
             ci-skills/lib/python/core/gitlab/gitlab_pipelines.py \
             ci-skills/lib/python/core/gitlab/gitlab_pipeline_graph.py \
             ci-skills/lib/python/core/gitlab/gitlab_pipeline_start.py \
@@ -143,7 +144,6 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch_runtime.py \
             ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch_types.py \
             ci-skills/bin/gitlab_pipeline.py \
-            ci-skills/lib/python/core/gitlab/runner_manager \
             ci-skills/lib/python/core/catalog.py \
             ci-skills/lib/python/core/kubernetes/run_scope.py \
             ci-skills/lib/python/core/kubernetes/scc_access.py \

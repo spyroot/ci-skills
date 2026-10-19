@@ -1,5 +1,38 @@
 # Installed pipeline execution proof
 
+## Latest v3 integration candidate
+
+Installed source `d1b2c6fb4e47836a68140873c220935463ebff81` uses the shared v3 discovery
+schema and renderer. Its package checksum is
+`a034ab750654ed12a5eaffad51e5f48ef4aac8e99984aa7f601b69c9c8337631`; its functional checksum is
+`9e28e57e6fbf4ea4e3de0ad155fd2d95bf2353bd7eb1503814ea9e81f301c07e`.
+
+The confirmed [start](final-d1b2c6f/start-applied.json) created pipeline 3927 on the
+existing protected test ref at commit `a9cd22f5a66395f9514102356ba8dd3e3573af5e`.
+The identical [retry](final-d1b2c6f/start-no_op.json) returned NO_OP for that same pipeline.
+[Watch](final-d1b2c6f/watch.json) and [final get](final-d1b2c6f/get-final.json) observed success;
+all five jobs, 60337–60341, succeeded. Watch also produced a persisted JSON/text report pair.
+
+The installed [command node](final-d1b2c6f/command.json) offered the task reference.
+Following that emitted pointer returned [sections](final-d1b2c6f/pipeline-sections.json),
+then the [selected section](final-d1b2c6f/pipeline-section.json). These outputs validate against
+the existing v3 schemas, and the [human renderer](final-d1b2c6f/command-human.txt) exited successfully.
+
+All 24 ordinary acceptance receipts carry this functional checksum; disposable resources were
+removed and [absence verified](final-d1b2c6f/acceptance-cleanup.json). The matching
+[Podman receipt](../../podman-readiness/image-build-readiness.json) passed all eight runtime checks and Pod exit 0.
+[Independent cleanup](final-d1b2c6f/podman-cleanup.json) verified all five owned resources absent;
+the existing SCC and ClusterRole remained present. GitHub checks the complete receipt set before merge.
+[Checksums](final-d1b2c6f/sha256.txt) bind the published documents. CLI portable receipts are
+unchanged; final get uses the existing portable transform for local credential paths.
+
+## Earlier pipeline candidate
+
+The `final-30ccd8e` directory preserves the earlier pipeline 3922 capture and checksums.
+It is historical evidence, not proof of the current functional checksum.
+
+## Historical pipeline captures
+
 Captured on 2026-10-18 after merging current main into the candidate, from a fresh installation of
 source `d8ab14b2d4d408975bc378ce871737bd014bbe44`.
 

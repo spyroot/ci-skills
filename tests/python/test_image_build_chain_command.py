@@ -18,9 +18,14 @@ from conftest import SKILL_ROOT, import_script_module
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
 from test_image_build_chain import (
+    ABSTRACT_CALLBACKS,
+    CALLBACKS,
     CHAIN,
+    EXECUTOR,
+    NODE,
     PODMAN,
     READINESS,
+    JournalCallback,
     _args,
     _lifecycle_executor,
     _pipeline_plan,
@@ -33,6 +38,7 @@ MODEL = import_script_module("lib.python.core.kubernetes.image_build_chain.model
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
+    from lib.python.core.kubernetes.image_build_chain import ImageBuildChainState
 
 
 def _validator() -> Draft202012Validator:
@@ -188,24 +194,28 @@ def test_chain_schema_rejects_pass_without_complete_proof_and_cleanup(
     assert list(_validator().iter_errors(broken))
 
 
-@pytest.mark.parametrize("explicit", (False, True), ids=("default", "explicit"))
-def test_chain_dry_run_reads_inputs_without_binding_credentials_or_mutating(
+@pytest.mark.parametrize(
+    "explicit", (False, True), ids=("default-live-plan", "explicit-dry-run")
+)
+def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     explicit: bool,
 ) -> None:
-    """Keep both default and explicit dry-run outside live credential/workflow setup.
+    """Plan live by default and keep explicit dry-run outside provider setup.
 
     :param monkeypatch: Fixture replacing configuration and forbidden live boundaries.
     :param capsys: Actual JSON emitter capture.
     :param explicit: Whether the caller supplies the explicit dry-run flag.
-    :returns: None after validating the offline report and absence of provider work.
+    :returns: None after checking mode-specific planning and absence of mutation.
     """
     args = _args()
     args.live_plan = False
     args.dry_run = explicit
     template = _prepared_action()
     resolutions = []
+    bindings = []
+    reads = []
 
     def resolve(_target, _binding, *, dry_run, required_surfaces):
         resolutions.append((dry_run, required_surfaces))
@@ -213,11 +223,13 @@ def test_chain_dry_run_reads_inputs_without_binding_credentials_or_mutating(
 
     _target_fixture = _target()
     monkeypatch.setattr(MODEL, "resolve_target", resolve)
-    monkeypatch.setattr(
-        MODEL,
-        "bind_sources",
-        lambda *_a, **_k: pytest.fail("dry-run bound credentials"),
-    )
+
+    def bind(target, **_kwargs):
+        assert not explicit, "dry-run bound credentials"
+        bindings.append(target)
+        return target
+
+    monkeypatch.setattr(MODEL, "bind_sources", bind)
     monkeypatch.setattr(
         MODEL,
         "WorkflowAction",
@@ -226,19 +238,52 @@ def test_chain_dry_run_reads_inputs_without_binding_credentials_or_mutating(
         ),
     )
     monkeypatch.setattr(MODEL, "prepare_start_plan", lambda *_a, **_k: _pipeline_plan())
-    monkeypatch.setattr(
-        COMMAND,
-        "workflow",
-        lambda *_a: pytest.fail("dry-run entered provider callbacks"),
-    )
-    assert COMMAND.ImageBuildChain(args).execute() == 0
+
+    def preflight(state: ImageBuildChainState) -> None:
+        """Return the worker selected at the mocked provider-read boundary.
+
+        :param state: Shared chain state receiving the observed worker identity.
+        """
+        state.selected_node = NODE
+
+    def workflow(action):
+        assert not explicit, "dry-run entered provider callbacks"
+        assert action.mode == PODMAN.ProbeMode.LIVE_PLAN
+        return EXECUTOR.WorkflowExecutor(
+            context=action.state,
+            callbacks=ABSTRACT_CALLBACKS.Callbacks(
+                [
+                    JournalCallback(action, reads, "live-preflight", preflight),
+                    CALLBACKS.ResolveChainPlan(action),
+                ]
+            ),
+        )
+
+    monkeypatch.setattr(COMMAND, "workflow", workflow)
+    command = COMMAND.ImageBuildChain(args)
+    assert command.execute() == 0
     output = json.loads(capsys.readouterr().out)
     _validator().validate(output)
-    assert output["status"] == "DRY_RUN"
-    assert output["confirmable"] is False
-    assert output["records"] == []
+    assert output["status"] == ("DRY_RUN" if explicit else "PLANNED")
+    assert output["confirmable"] is not explicit
+    assert output["errors"] == []
     assert "cleanup" not in output
-    assert resolutions == [(True, ("gitlab", "kubernetes", "harbor"))]
+    assert resolutions == [(explicit, ("gitlab", "kubernetes", "harbor"))]
+    assert bindings == ([] if explicit else [_target_fixture])
+    assert reads == ([] if explicit else ["live-preflight"])
+    if explicit:
+        assert output["records"] == []
+    else:
+        assert output["selected_node"] == NODE
+        assert [record["callback"] for record in output["records"]] == [
+            "JournalCallback",
+            "ResolveChainPlan",
+        ]
+        assert output["plan_digest"] == output["records"][1]["plan_digest"]
+    assert "run_id" not in output
+    assert not hasattr(command.action.state, "run_scope")
+    assert not hasattr(command.action.state, "created_runner_id")
+    assert command.action.state.chain_cleanup == {}
 
 
 def test_chain_describe_never_constructs_execution_or_reads_target(
@@ -267,7 +312,7 @@ def test_chain_describe_never_constructs_execution_or_reads_target(
 @pytest.mark.parametrize(
     ("apply", "dry_run", "live_plan", "confirm", "expected"),
     (
-        (False, False, False, False, "DRY_RUN"),
+        (False, False, False, False, "LIVE_PLAN"),
         (False, True, False, False, "DRY_RUN"),
         (False, False, True, False, "LIVE_PLAN"),
         (True, False, False, True, "APPLY"),

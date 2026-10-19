@@ -1,10 +1,13 @@
-# NOT_IMPLEMENTED: CI13 — Prove a cluster can build images from a GitLab job, starting with a podman probe on one node
+# PARTIALLY_IMPLEMENTED: CI13 — Prove a cluster can build images from a GitLab job, with a podman probe on one node
 
 - grounding: GROUNDED
-- verification: UNVERIFIED
-- planningStage: PROPOSED
+- verification: PARTIALLY_VERIFIED
+- planningStage: PLANNED
 
 ## Authority
+
+The installed `probe` and reusable SCC preparation merged in [PR81](https://github.com/spyroot/ci-skills/pull/81)
+at main `788b9e9`. The `chain` delivery remains unmerged; live interruption proof is not established.
 
 CI13 is the approved Podman/readiness delivery, separate from the native OCP delivery in
 [CI12](CI12-NODE-ONBOARDING.md). CI12.0 owns the reusable tool preparation and run scope; this phase consumes
@@ -36,7 +39,7 @@ This document plans from:
 - the live-acceptance gate as it exists: the policy
   [`inventory/ci/live-acceptance.json`](../../inventory/ci/live-acceptance.json) and the checker
   [`tools/check_live_acceptance.py`](../../tools/check_live_acceptance.py); how this command's evidence enters that
-  gate is an open question for the owner, recorded below, not a decision of this document;
+  gate was resolved by PR81's approved registration, recorded below;
 - the shared standards pinned by `standards-binding.yaml` at revision `56a579c`. The architecture and plan formats
   this document follows are taken from standards revision `cae52b2`, the `main` the owner named on 2026-10-15; the
   selected format does not add a validation gate absent from the pinned binding.
@@ -48,79 +51,79 @@ This document plans from:
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: The node is the agent's argument or, without one, a Ready worker the combo picks and names in the result; the plan lists the Job the apply would create (node, images by digest, limits, the name pattern) and its digest binds the caller's inputs and the resolved target.
         owner: ci-skills/lib/python/core/kubernetes/image_build_probe.py
         preserve: [The target and credential resolver, the result envelope, the exit-code contract]
         prIds: [PR-CI13-1]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-002
         authority: [docs/combos.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: One-shot privileged Job pinned to the selected node runs podman from an image pinned by digest with overlay storage on a size-limited emptyDir and the cgroupfs manager, no service-account token mounted, bounded requests, limits, deadline and TTL; inside it one inner container pinned by digest runs, writes a file read back through a bind mount, and a second inner container exits 7 so the exit code is seen to propagate; the probe removes both and lists what remains.
         owner: ci-skills/lib/python/core/kubernetes/image_build_probe.py
         preserve: [The temporary Job pattern of PullImage; a tag without a digest is refused]
         prIds: [PR-CI13-1]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-003
         authority: [docs/combos.md, docs/exec-plans/active/ci13-image-build-readiness.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: Every marker line of the Job log becomes an evidence row (host kernel, podman version, storage driver and cgroup version, backing filesystem, inner run, bind-mount read-back, exit propagation, remaining containers); a missing marker is a row of its own, never a silent gap; the probe's own result is the Pod's terminated exit code read from the API, not a line it printed.
         owner: ci-skills/lib/python/core/kubernetes/image_build_probe.py
         preserve: [Rows are read from the log and the Pod status through the bound Kubernetes service, never from a shell the agent runs]
         prIds: [PR-CI13-1]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-004
         authority: [docs/combos.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: VERIFIED
         deliverable: On OpenShift, the installed command reads whether the run namespace's service account can use the privileged constraint before creating the Job; existing permission is a verified no-op, otherwise the command creates one run-owned namespaced RoleBinding to the exact OpenShift SCC ClusterRole, reads permission back, and removes only that binding during cleanup. A missing selected SCC or generated ClusterRole, or a denied create, delete or bind preflight, blocks before Job creation. Only absence of the OpenShift SCC API is not applicable.
         owner: ci-skills/lib/python/core/kubernetes/scc_access.py
         preserve: [Never alter or remove preexisting authorization; create no ServiceAccount; grant no cluster-wide or alternate runtime permission]
         prIds: [PR-CI13-1]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-005
         authority: [docs/exec-plans/active/ci13-image-build-readiness.md, docs/phases/CI12-NODE-ONBOARDING.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: IMPLEMENTED
+          verification: PARTIALLY_VERIFIED
         deliverable: Every temporary name (namespace, ConfigMap, Job, labels) derives from one random run identifier generated after confirmation; the namespace, script ConfigMap and Job are removed on every exit, success, failure and interrupt, with absence read-back; when the agent names an evidence directory the Job log and the parsed rows persist there, otherwise nothing persists beyond the result.
         owner: ci-skills/lib/python/core/kubernetes/run_scope.py
         preserve: [ResourceSet ownership semantics and its operation label; the executor's reverse cleanup and recoverable signals; the shared --run-id option's existing meaning]
         prIds: [PR-CI13-1]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-006
         authority: [docs/combos.md, README.md, docs/contribution_guide.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
-          implementation: NOT_IMPLEMENTED
-          verification: UNVERIFIED
+          implementation: PARTIALLY_IMPLEMENTED
+          verification: PARTIALLY_VERIFIED
         deliverable: One thin main composes the callbacks through a Kubernetes action adapter over WorkflowExecutor, declares the command in the catalogue source with a paired result schema and regenerates tools.json, routes in SKILL.md, and renders the shared report, so the agent invokes it like every other installed command and reads the same envelope.
         owner: ci-skills/bin/image_build_readiness.py
         preserve: [The shared options, status values and exit codes; --describe and --help work without credentials; the existing gate's required operations and freshness policy]
         prIds: [PR-CI13-1, PR-CI13-2]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE, G-CI13-GATE]
-        evidence: []
+        evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-007
         authority: [docs/combos.md, docs/gitlab-toolbelt-plan.md]
         phaseId: CI13
@@ -165,14 +168,14 @@ This document plans from:
         requirementIds: [R-CI13-001, R-CI13-002, R-CI13-003, R-CI13-004, R-CI13-005, R-CI13-006, R-CI13-007]
         command: The invocations under "Invocation and the result the agent reads", run from the installed candidate against the live cluster, each with --receipt-out
         environment: The user's live smoke setup against the live cluster; the installed command must reuse or prepare its own run-scoped privileged permission
-        enforcement: Proposed; the live run precedes the merge and its receipts are attached to the pull request; whether and how those receipts are committed into the gate is open question 2, because the checker today accepts only its declared GitLab kinds and rejects any other receipt in a declared directory
+        enforcement: Existing for probe through PR81; the live run precedes the merge and its receipt is committed under tests/acceptance/podman-readiness/; chain proof remains pending
         evidence: [One receipt per verb and result action, the permission source and optional RoleBinding UID, the marker rows with the Pod's terminated exit code, the chosen node, the run identifier, absence read-back of every run-owned resource, the functional checksum of the installed candidate]
       - id: G-CI13-GATE
         requirementIds: [R-CI13-006]
         command: python tools/check_live_acceptance.py --root . --json
         environment: The live_acceptance step of the validate job, on the committed receipts
-        enforcement: Existing for the current operation set and unchanged by this phase until the owner answers open question 2; until then no receipt of this command is committed under a declared receipt directory
-        evidence: [Checker PASS on the pull request head with the existing receipt set unchanged, or, after the owner's answer, with the new receipts accepted]
+        enforcement: Existing; PR81 registers the Podman probe receipt, matching functional checksum, runtime checks and owned-resource cleanup alongside the existing required operations
+        evidence: [https://github.com/spyroot/ci-skills/actions/runs/39156922605, tests/acceptance/podman-readiness/image-build-readiness.json]
 <!-- /architecture-map:v1 -->
 
 ## Consumer
@@ -231,8 +234,8 @@ an evidence directory, the log and the rows.
 
 ### Current State and Intended Outcome
 
-NOT_IMPLEMENTED: the probe and the chain. Inspected at main `352128d` (documentation only for this phase). The
-relevant tree, with the files this phase adds marked NEW:
+PARTIALLY_IMPLEMENTED: the probe is merged in PR81 at main `788b9e9`; the chain remains unmerged.
+The following tree, CI topology and baseline observations retain the original planning snapshot at `352128d`:
 
     ci-skills/
       bin/
@@ -510,8 +513,8 @@ The phase identity and shared-foundation delivery order are settled by the opera
 specifications. Missing optional roadmap files do not create another approval requirement. The architecture
 format is documented above; the existing pinned checks remain authoritative.
 
-Open questions for the owner. Each is a requirement, a user-facing contract or a gate behaviour that only the
-owner decides; the document records the options and the finding that raised each, and decides none of them:
+Questions 1–3 were resolved by merged PR81; question 6 remains open. The original choices and approved
+boundaries are retained below:
 
 1. The command surface: the command name `image_build_readiness.py`, the verb `probe` (and `chain` later), and
    the options `--node`, `--probe-image`, `--inner-image`, `--timeout`, `--evidence-dir` and the resource bounds,
@@ -571,8 +574,8 @@ proof needs the test project and Harbor. Per the owner's rule, each pull request
 from the
 installed candidate before it merges. Live proof is bound to the functional checksum; wording-only docs or
 test changes do not invalidate unchanged executable behavior. What each pull request commits
-into the gate follows the owner's answer to open question 2; until then the evidence is attached to the pull
-request. Each pull request leaves the installed command coherent under the existing gates, with the
+into the gate follows the existing registration contract; PR81 registered the probe receipt. Each pull request
+leaves the installed command coherent under the existing gates, with the
 unimplemented verb absent from the catalogue rather than stubbed.
 
 ## Gates
@@ -581,12 +584,11 @@ The traceability map in `Authority` is the canonical map. `G-CI13-STATIC` is the
 the local pre-commit gate; its enforcement is the main ruleset's required `ci-skills/required` status with the
 strict up-to-date policy, read back from the repository's branch rules on 2026-10-15. `G-CI13-LIVE` is the live
 run of each slice from the installed candidate on the user's live smoke setup, with one receipt per verb and
-result action; it is proposed, its evidence is attached to the pull request, and whether its receipts enter the
-committed gate is open question 2. `G-CI13-GATE` is the existing live-acceptance step, unchanged by this phase
-until that question is answered.
+result action. PR81 registered the captured probe receipt in `G-CI13-GATE`, the existing live-acceptance step,
+which now checks its functional checksum, runtime result and owned-resource cleanup. Chain proof remains pending.
 
-Per-requirement gaps today, all of the same kind: no module, no unit test and no live run exists for any of
-`R-CI13-001` to `R-CI13-007`, so every row records `UNVERIFIED`. The specific evidence each needs: `R-CI13-001`
+PR81 verifies `R-CI13-001`–`004`; `005` remains partial without interruption proof, `006` is delivered for
+`probe` only, and `007` remains unmerged and unverified. The required evidence remains: `R-CI13-001`
 a node selection test (named node, chosen worker, no Ready worker) and a digest test (same inputs and target
 reproduce it, another target does not); `R-CI13-002` a Job document test (privileged, pinned node, no token,
 emptyDir limits, bounds, deadline, TTL, digests only, tag refused) and the live Job's read-back; `R-CI13-003` a
@@ -600,12 +602,20 @@ credentials; `R-CI13-007` nothing until chain 1 and block 7 exist.
 
 ## Live Smoke Evidence
 
-Planned, not observed. `probe`: the command run from the installed candidate against the live cluster on one node
+The [installed receipt](../../tests/acceptance/podman-readiness/image-build-readiness.json) records all eight
+runtime checks passing and Pod exit 0.
+[Independent cleanup](../../tests/acceptance/evidence/podman-readiness-final/success/supplemental-cleanup.json)
+confirms owned-resource absence. [GitHub validation](https://github.com/spyroot/ci-skills/actions/runs/39156922605)
+passed after merge.
+The [mistimed attempt](../../tests/acceptance/evidence/podman-readiness-final/mistimed-term/observer.json)
+sent no signal and proves no interruption handling. `chain` remains unverified.
+
+Required evidence for `probe`: the command run from the installed candidate against the live cluster on one node
 the agent names; evidence is the result's rows with the Pod's terminated exit code, the chosen node, the run
 identifier, the permission source, and the namespace, run-owned RoleBinding and Job absent afterwards. External
 authorization setup is not capability proof. A second run interrupted during the Job proves cleanup on interrupt
 by the same absence read-back. Each receipt is sanitized with the portable writer and carries the functional
-checksum of the installed candidate; where it is committed is open question 2. The chain's evidence
+checksum of the installed candidate; PR81 registered its captured receipt in the existing gate. The chain's evidence
 (runner, job, digest) waits for PR-CI13-2.
 
 ## End-to-End Test
@@ -614,4 +624,4 @@ The consumer journey: the agent names a node (or not), runs `probe`, and reads b
 Pod exited 0 and nothing left in the cluster carrying the run identifier; later, `chain` carries the same node
 through a runner, a build-and-push job and a pushed digest. The proposed test is the probe's live receipt bound to
 the functional checksum, then, after PR-CI13-2, the chain's receipts linked by the same run identifier; its
-acceptance gate is `G-CI13-LIVE`. No execution is recorded yet.
+acceptance gate is `G-CI13-LIVE`. Probe execution is recorded above; chain execution remains pending.

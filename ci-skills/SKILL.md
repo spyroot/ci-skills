@@ -21,7 +21,7 @@ installation using the prepared `ci-skills` conda environment:
 
 ```bash
 CI_SKILLS_ROOT="${CODEX_HOME:-$HOME/.codex}/skills/ci-skills"
-conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/reference.py" next --json
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/reference.py" --json
 ```
 
 This also applies to the extensionless `bin/ci-api` and `bin/ci-binary-build`.
@@ -43,10 +43,10 @@ and returns a plan.
 
 ## 1. Choose the command for the symptom
 
-Start at `bin/reference.py next` and expand only the selected capability or reference.
-Known commands remain directly callable; `reference.py [node]` keeps the compact
-proposition interface. Use `next PATH run ID options` for optional inputs and
-`get REF ANCHOR` for one reference section. Target-backed commands
+Start at `bin/reference.py` and expand only the node you need: `reference.py [node]` answers with what
+you can run, the installed commands, and what you can read, the references, each a pointer to the next
+call; `get REF` lists one reference's sections and `get REF ANCHOR` reads one section. Known commands
+remain directly callable with `--help`. Target-backed commands
 resolve only their declared authority: GitLab for a job, or Kubernetes for
 storage, events, Cilium, and Ceph. Diagnostic reports use `access` to report the
 effective source and identity. A Kubernetes-only target needs only `[kubernetes]`; a GitLab-only
