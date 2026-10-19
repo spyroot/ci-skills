@@ -134,28 +134,28 @@ through the owner's selector and non-TTY exec from the Cilium checks, Pod record
 events from `event_trace.py`. Evidence rows: node inventory read, load read per node, operator state read,
 findings listed, all bound to one digest.
 
-## 11. Can this cluster build images from a GitLab job? (proposed)
+## 11. Can a GitLab job use Podman on this cluster? (proposed)
 
-`probe podman on a node → runner with the same setup → job builds with podman → push to Harbor → read back digest`
+`probe podman → build/publish toolbox → create runner → run consumer job → verify runner/job → cleanup`
 
 Goal: a user who installed ci-skills asks their agent to prepare CI so the project's container tests, docker
-builds included, run in GitLab jobs on their cluster. The agent proves in one go that podman can run containers on
-a node there, then that a real job can build and push an image, instead of discovering each failure inside a
-pipeline.
+builds included, run in GitLab jobs on their cluster. The agent proves in one go that Podman can run containers on
+a node there, then that a real consumer job succeeds on the new runner, instead of discovering each failure inside
+a pipeline.
 
 [CI13](phases/CI13-IMAGE-BUILD-READINESS.md) owns the probe, its evidence rows and the later runner/job chain.
 Follow its [PR order](phases/CI13-IMAGE-BUILD-READINESS.md#pr-order) and
 [live smoke evidence](phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence).
 
 [`image_build_readiness.py`](../ci-skills/bin/image_build_readiness.py) provides `probe` and `chain`; the
-[chain reference](../ci-skills/references/image-build-chain.md) describes its runner, native job and digest evidence.
+[chain reference](../ci-skills/references/image-build-chain.md) describes its toolbox, runner and native job evidence.
 The probe uses the shared Kubernetes callbacks,
 `RunScope`, and `ResourceSet` for run ownership and cleanup. Its
 [installed example](../ci-skills/SKILL.md#nested-podman-readiness) shows live planning and confirmed apply.
 On OpenShift, the installed command reuses existing `privileged` SCC permission or creates, verifies and removes
 one run-owned namespaced RoleBinding before the probe. A denied authorization preflight blocks before Job creation;
 external setup does not count as capability proof. Probe evidence covers nested runtime behavior only; accepting
-the chain requires its own installed live results for the runner, job, digest comparison and cleanup.
+the chain requires its own installed results for toolbox publication, runner/job linkage and cleanup.
 
 ## How to add one
 

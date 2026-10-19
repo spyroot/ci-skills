@@ -1091,8 +1091,6 @@
       "options": [
         "--apply",
         "--binding",
-        "--build-repository",
-        "--build-tag",
         "--confirm-plan",
         "--cpu-limit",
         "--cpu-request",
@@ -1103,7 +1101,6 @@
         "--human",
         "--inner-image",
         "--job",
-        "--job-digest-artifact",
         "--json",
         "--live-plan",
         "--log-file",
@@ -1131,7 +1128,7 @@
         "--watch-timeout",
         "--yaml"
       ],
-      "purpose": "Probe nested Podman or verify a runner build-and-push chain.",
+      "purpose": "Probe nested Podman or verify a toolbox-backed runner consumer chain.",
       "read_only": false,
       "report_kind": "image_build_readiness",
       "required_options": [],
@@ -1142,22 +1139,19 @@
       "requires_authorities": [
         "kubernetes"
       ],
-      "returns": "A plan or operation evidence: probe marker rows, or linked runner, job and Harbor digest observations, plus temporary-resource cleanup.",
-      "side_effects": "Probe creates and removes temporary cluster resources. Chain also builds and publishes images and runs a GitLab job; published images remain, while its temporary runner and owned helpers are removed.",
+      "returns": "A plan or operation evidence: probe marker rows, or toolbox publication and linked runner/job observations, plus temporary-resource cleanup.",
+      "side_effects": "Probe creates and removes temporary cluster resources. Chain also publishes the toolbox and runs a GitLab job; the toolbox remains, while its temporary runner and owned helpers are removed.",
       "subcommands": {
         "chain": {
           "mutates": true,
-          "purpose": "Probe, publish the toolbox, create a runner, execute the selected job and verify its digest.",
-          "read_back": "Probe and manager placement, exact runner and job IDs, job digest artifact, independent Harbor digest and owned-resource absence.",
+          "purpose": "Probe, publish the toolbox, create a runner and verify the selected consumer job.",
+          "read_back": "Probe and manager placement, toolbox publication, exact successful runner/job linkage and owned-resource absence.",
           "required_options": [
             "--toolbox-spec",
             "--ref",
             "--job",
-            "--job-digest-artifact",
             "--runner-description",
-            "--runner-label",
-            "--build-repository",
-            "--build-tag"
+            "--runner-label"
           ],
           "requires_authorities": [
             "kubernetes",
@@ -1165,7 +1159,7 @@
             "harbor"
           ],
           "result_schema": "schemas/results/image-build-readiness.schema.json",
-          "side_effects": "Publishes toolbox and job images; creates a temporary runner record, manager, token and run-owned cluster resources; removes temporary resources on exit."
+          "side_effects": "Publishes the toolbox image; creates a temporary runner record, manager, token and run-owned cluster resources; removes temporary resources on exit."
         },
         "probe": {
           "mutates": true,
@@ -1178,7 +1172,7 @@
           "side_effects": "Creates and removes a temporary namespace, conditional run-owned SCC RoleBinding, script ConfigMap and privileged Job."
         }
       },
-      "use_when": "Prove nested execution alone, or link a real GitLab job on the same worker to its image digest in Harbor."
+      "use_when": "Prove nested execution alone, or run one caller-selected GitLab consumer job on the temporary runner."
     },
     "k8s_verify_mtu_consistency.py": {
       "capabilities": [
@@ -1559,7 +1553,7 @@
     "read a caller-selected Git API resource": "bin/ci-api",
     "read or manage a GitLab runner": "gitlab_runner.py",
     "verify a Harbor toolbox pull": "harbor_pull.py",
-    "verify a runner build and Harbor publication": "image_build_readiness.py",
+    "verify a toolbox-backed runner consumer job": "image_build_readiness.py",
     "what the cluster said during an interval": "event_trace.py"
   },
   "schema_version": "1.0",

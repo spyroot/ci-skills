@@ -24,8 +24,10 @@ from test_image_build_chain import (
     CHAIN,
     EXECUTOR,
     NODE,
+    PIPELINE_ID,
     PODMAN,
     READINESS,
+    RUNNER_ID,
     JournalCallback,
     _args,
     _lifecycle_executor,
@@ -91,7 +93,7 @@ def _apply_report(
 
 
 @pytest.mark.parametrize(
-    "outcome", ("success", "digest-mismatch", "timeout", "cleanup-failure")
+    "outcome", ("success", "failed-job", "timeout", "cleanup-failure")
 )
 def test_chain_emits_schema_valid_success_or_blocked_after_verified_cleanup(
     tmp_path: Path,
@@ -123,10 +125,16 @@ def test_chain_emits_schema_valid_success_or_blocked_after_verified_cleanup(
         proof = next(
             record
             for record in output["records"]
-            if record["callback"] == "VerifyBuildJob"
+            if record["callback"] == "VerifyConsumerJob"
         )
         assert proof["verified"] is True
-        assert proof["job_digest"] == proof["digest"]
+        assert proof["pipeline_id"] == PIPELINE_ID
+        assert proof["runner_id"] == RUNNER_ID
+        assert proof["job_id"] == 501
+        assert "job_digest_artifact" not in proof
+        assert "job_digest" not in proof
+        assert "image" not in proof
+        assert "digest" not in proof
         assert proof["job_status"] == "success"
     if outcome != "success":
         assert output["errors"]
@@ -184,7 +192,7 @@ def test_chain_schema_rejects_pass_without_complete_proof_and_cleanup(
         del broken["plan_digest"]
     elif defect == "unverified-job":
         for record in broken["records"]:
-            if record["callback"] == "VerifyBuildJob":
+            if record["callback"] == "VerifyConsumerJob":
                 record["verified"] = False
     elif defect == "cleanup-blocked":
         broken["cleanup"]["status"] = "BLOCKED"

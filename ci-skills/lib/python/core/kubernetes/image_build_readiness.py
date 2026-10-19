@@ -64,7 +64,7 @@ def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
     """Add the CI13 chain inputs to the existing readiness command.
 
     :param result: Shared readiness parser receiving chain-only options.
-    :returns: None after registering caller-selected runner, pipeline, and image inputs.
+    :returns: None after registering caller-selected runner and pipeline inputs.
     """
     result.add_argument(
         "--toolbox-spec",
@@ -74,7 +74,7 @@ def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
     result.add_argument(
         "--project",
         metavar="PATH_OR_ID",
-        help="GitLab project for a project runner and the build pipeline",
+        help="GitLab project for a project runner and consumer pipeline",
     )
     result.add_argument(
         "--group",
@@ -84,9 +84,9 @@ def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
     result.add_argument(
         "--pipeline-project",
         metavar="PATH_OR_ID",
-        help="GitLab build project when the runner record belongs to a group",
+        help="GitLab consumer project when the runner record belongs to a group",
     )
-    result.add_argument("--ref", metavar="REF", help="GitLab build pipeline ref")
+    result.add_argument("--ref", metavar="REF", help="GitLab consumer pipeline ref")
     result.add_argument(
         "--expected-sha",
         metavar="SHA",
@@ -97,17 +97,10 @@ def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="KEY=VALUE",
-        help="caller-selected build pipeline variable; repeatable",
+        help="caller-selected pipeline variable; repeatable",
     )
     result.add_argument(
-        "--job", metavar="NAME", help="exact build-and-push job name to verify"
-    )
-    result.add_argument(
-        "--job-digest-artifact",
-        metavar="PATH",
-        help=(
-            "artifact path written by the selected job with podman push --digestfile"
-        ),
+        "--job", metavar="NAME", help="exact consumer job name to verify"
     )
     result.add_argument(
         "--runner-description",
@@ -120,16 +113,6 @@ def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
         default=[],
         metavar="LABEL",
         help="GitLab runner label required by the selected job; repeatable",
-    )
-    result.add_argument(
-        "--build-repository",
-        metavar="REPOSITORY",
-        help="Harbor project-relative repository pushed by the selected job",
-    )
-    result.add_argument(
-        "--build-tag",
-        metavar="TAG",
-        help="Harbor tag pushed by the selected job",
     )
     result.add_argument(
         "--watch-interval",
@@ -153,7 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     :returns: Parser for offline plan, live plan, and confirmed apply.
     """
     result = parser(
-        "Prove nested Podman readiness or run its linked image-build chain.",
+        "Prove nested Podman readiness or run its toolbox-backed consumer chain.",
         kind=PROBE_KIND,
     )
     result.set_defaults(kind=PROBE_KIND)

@@ -7,10 +7,8 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-import re
 from collections.abc import MutableSequence
 from dataclasses import replace
-from urllib.parse import quote
 
 from lib.python.core.abstract.callback import AbstractCallback, LocalCallback
 from lib.python.core.gitlab.gitlab_actions import ActionError
@@ -26,15 +24,14 @@ from lib.python.sys.status import BLOCKED, PASS
 from .model import DEFAULT_STUCK_AFTER, ImageBuildChainAction, ImageBuildChainState
 
 
-class VerifyBuildJob(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
-    """Verify exact job-to-runner linkage and Harbor publication digest."""
+class VerifyConsumerJob(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
+    """Verify exact successful consumer-job linkage to the created runner."""
 
     def run(self) -> JSONObject:
-        """Read the selected job and independently resolve its pushed digest.
+        """Read the selected job and verify its pipeline and runner identities.
 
-        :returns: Exact job, runner, image, and digest evidence.
+        :returns: Exact successful job and runner evidence.
         :raises ActionError: Job selection, status, pipeline, or runner differs.
-        :raises ValueError: Harbor did not return the selected tag's digest.
         """
         state, args = self.state, self.action.args
         query = JobQuery(
@@ -55,24 +52,12 @@ class VerifyBuildJob(LocalCallback[ImageBuildChainState, ImageBuildChainAction])
             state.pipeline_gitlab.api,
         )
         if result.first_page_failed or result.truncated or result.errors:
-            raise ActionError("build_job_readback_incomplete")
+            raise ActionError("consumer_job_readback_incomplete")
         matches = [record for record in result.records if record["name"] == args.job]
         if len(matches) != 1:
-            raise ActionError("build_job_not_unique")
+            raise ActionError("consumer_job_not_unique")
         job = matches[0]
         _verify_job(job, state.pipeline_id, state.created_runner_id)
-        job_digest = _job_digest_artifact(
-            state,
-            job["id"],
-            args.job_digest_artifact,
-        )
-        digest = state.build_harbor.digest(args.build_repository, args.build_tag)
-        if digest is None:
-            raise ValueError("pushed_harbor_digest_missing")
-        _canonical_digest(digest, "pushed_harbor_digest_invalid")
-        if digest != job_digest:
-            raise ActionError("build_job_digest_mismatch")
-        image = state.build_harbor.image(args.build_repository, digest)
         evidence: JSONObject = {
             "verified": True,
             "pipeline_id": state.pipeline_id,
@@ -80,10 +65,6 @@ class VerifyBuildJob(LocalCallback[ImageBuildChainState, ImageBuildChainAction])
             "job": job["name"],
             "job_status": job["status"],
             "runner_id": state.created_runner_id,
-            "job_digest_artifact": args.job_digest_artifact,
-            "job_digest": job_digest,
-            "image": image,
-            "digest": digest,
         }
         state.job_readback = evidence
         return evidence
@@ -125,46 +106,6 @@ class CleanupChain(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
         return result
 
 
-def _job_digest_artifact(
-    state: ImageBuildChainState,
-    job_id: int,
-    artifact_path: str,
-) -> str:
-    """Read the digest file artifact emitted by the exact selected job.
-
-    :param state: Shared state with the build-project GitLab service.
-    :param job_id: Exact successful job ID selected from the started pipeline.
-    :param artifact_path: Caller-selected path uploaded by that job.
-    :returns: Canonical digest emitted by ``podman push --digestfile``.
-    :raises ValueError: The artifact does not contain exactly one canonical digest.
-    :raises OSError: The bounded native GitLab reader cannot start or read output.
-    """  # noqa: DOC502 - provider transport errors propagate to the chain boundary.
-    encoded_path = quote(artifact_path, safe="/")
-    endpoint = (
-        f"projects/{state.pipeline_gitlab.target_id}/jobs/{job_id}/"
-        f"artifacts/{encoded_path}"
-    )
-    value = state.pipeline_gitlab.api.get_text(
-        state.pipeline_gitlab.session,
-        endpoint,
-    )
-    value = value.removesuffix("\n")
-    return _canonical_digest(value, "build_job_digest_artifact_invalid")
-
-
-def _canonical_digest(value: str, reason: str) -> str:
-    """Require the immutable digest syntax used by Harbor and Podman.
-
-    :param value: Provider or artifact digest value.
-    :param reason: Stable failure classification for the selected source.
-    :returns: Unchanged canonical SHA-256 digest.
-    :raises ValueError: The value is not ``sha256:`` plus 64 lowercase hex digits.
-    """
-    if re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None:
-        raise ValueError(reason)
-    return value
-
-
 def _verify_job(job: JobSummary, pipeline_id: int, runner_id: int) -> None:
     """Require one successful job on the exact chain-owned runner.
 
@@ -176,11 +117,11 @@ def _verify_job(job: JobSummary, pipeline_id: int, runner_id: int) -> None:
     """
     runner = job["runner"]
     if job["pipeline_id"] != pipeline_id:
-        raise ActionError("build_job_pipeline_mismatch")
+        raise ActionError("consumer_job_pipeline_mismatch")
     if job["status"] != "success":
-        raise ActionError("build_job_not_successful")
+        raise ActionError("consumer_job_not_successful")
     if runner is None or runner["id"] != runner_id:
-        raise ActionError("build_job_runner_mismatch")
+        raise ActionError("consumer_job_runner_mismatch")
 
 
 def _attempt_cleanup_component(

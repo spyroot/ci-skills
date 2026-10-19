@@ -41,17 +41,9 @@ class ProviderTransition(StrEnum):
 
         Retain the authenticated toolbox Harbor service.
 
-    .. attribute :: RETAIN_BUILD_HARBOR
-
-        Retain the authenticated build-image Harbor service.
-
     .. attribute :: USE_TOOLBOX_HARBOR
 
         Restore the retained toolbox Harbor service.
-
-    .. attribute :: USE_BUILD_HARBOR
-
-        Restore the retained build-image Harbor service.
 
     .. attribute :: RETAIN_RUNNER_GITLAB
 
@@ -71,9 +63,7 @@ class ProviderTransition(StrEnum):
     """
 
     RETAIN_TOOLBOX_HARBOR = "retain_toolbox_harbor"
-    RETAIN_BUILD_HARBOR = "retain_build_harbor"
     USE_TOOLBOX_HARBOR = "use_toolbox_harbor"
-    USE_BUILD_HARBOR = "use_build_harbor"
     RETAIN_RUNNER_GITLAB = "retain_runner_gitlab"
     RETAIN_PIPELINE_GITLAB = "retain_pipeline_gitlab"
     USE_RUNNER_GITLAB = "use_runner_gitlab"
@@ -208,12 +198,8 @@ class RetainProvider(LocalCallback[ImageBuildChainState, ImageBuildChainAction])
         state = self.state
         if self.role == ProviderTransition.RETAIN_TOOLBOX_HARBOR:
             state.toolbox_harbor = state.harbor
-        elif self.role == ProviderTransition.RETAIN_BUILD_HARBOR:
-            state.build_harbor = state.harbor
         elif self.role == ProviderTransition.USE_TOOLBOX_HARBOR:
             state.harbor = state.toolbox_harbor
-        elif self.role == ProviderTransition.USE_BUILD_HARBOR:
-            state.harbor = state.build_harbor
         elif self.role == ProviderTransition.RETAIN_RUNNER_GITLAB:
             state.runner_gitlab = state.gitlab
             state.access_evidence["gitlab_runner"] = copy_json(state.access)

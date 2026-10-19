@@ -143,11 +143,6 @@ class ImageBuildChainState(PodmanProbeState, GitLabRunnerManagerState):
 
         Authenticated Harbor service for the toolbox image.
 
-    .. attribute :: build_harbor
-        :type: HarborService
-
-        Authenticated Harbor service for build-image readback.
-
     .. attribute :: created_runner_id
         :type: int
 
@@ -166,7 +161,7 @@ class ImageBuildChainState(PodmanProbeState, GitLabRunnerManagerState):
     .. attribute :: job_readback
         :type: JSONObject
 
-        Linked job, runner, artifact, and Harbor evidence.
+        Linked consumer job and runner evidence.
 
     .. attribute :: token_directory
         :type: Path
@@ -201,7 +196,6 @@ class ImageBuildChainState(PodmanProbeState, GitLabRunnerManagerState):
     runner_gitlab: GitLabService = field(init=False, repr=False)
     pipeline_gitlab: GitLabService = field(init=False, repr=False)
     toolbox_harbor: HarborService = field(init=False, repr=False)
-    build_harbor: HarborService = field(init=False, repr=False)
     created_runner_id: int = field(init=False)
     pipeline_id: int = field(init=False)
     pipeline_watch: JSONObject = field(init=False)
@@ -313,10 +307,7 @@ class ImageBuildChainAction(SkillAction):
             "toolbox_spec": self.args.toolbox_spec,
             "ref": self.args.ref,
             "job": self.args.job,
-            "job_digest_artifact": self.args.job_digest_artifact,
             "runner_description": self.args.runner_description,
-            "build_repository": self.args.build_repository,
-            "build_tag": self.args.build_tag,
         }
         missing = sorted(name for name, value in required.items() if not value)
         if missing:
@@ -478,11 +469,6 @@ class ImageBuildChainAction(SkillAction):
                 "project": self.pipeline_project,
                 "plan": pipeline.public(),
                 "job": self.args.job,
-                "digest_artifact": self.args.job_digest_artifact,
-            },
-            "publication_readback": {
-                "repository": self.args.build_repository,
-                "tag": self.args.build_tag,
             },
             "cleanup": {
                 "manager_workload": "required",

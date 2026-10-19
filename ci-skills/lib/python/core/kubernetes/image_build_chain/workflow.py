@@ -47,7 +47,7 @@ from .callbacks import (
     WatchBuildPipeline,
 )
 from .model import ImageBuildChainAction, ImageBuildChainState
-from .verification import CleanupChain, VerifyBuildJob
+from .verification import CleanupChain, VerifyConsumerJob
 
 
 def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainState]:
@@ -68,13 +68,6 @@ def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainS
         ),
         RetainProvider(action, ProviderTransition.RETAIN_TOOLBOX_HARBOR),
         ConfirmWorkflow(action.toolbox),
-        HarborAuth(
-            action.target,
-            action.args.build_repository,
-            ("pull",),
-            action.args.timeout,
-        ),
-        RetainProvider(action, ProviderTransition.RETAIN_BUILD_HARBOR),
         RetainProvider(action, ProviderTransition.USE_TOOLBOX_HARBOR),
         ScopedGitLabAuth(action, state.runner_auth_plan),
         RetainProvider(action, ProviderTransition.RETAIN_RUNNER_GITLAB),
@@ -130,8 +123,7 @@ def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainS
                 RetainProvider(action, ProviderTransition.USE_PIPELINE_GITLAB),
                 StartBuildPipeline(action),
                 WatchBuildPipeline(action),
-                RetainProvider(action, ProviderTransition.USE_BUILD_HARBOR),
-                VerifyBuildJob(action),
+                VerifyConsumerJob(action),
             )
         )
     return WorkflowExecutor(context=state, callbacks=Callbacks(callbacks))

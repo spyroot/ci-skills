@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan or run nested Podman readiness and its image-build chain.
+"""Plan or run nested Podman readiness and its runner consumer chain.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com

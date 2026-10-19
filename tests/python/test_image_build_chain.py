@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from lib.python.core.abstract.skill_action import SkillAction
     from lib.python.core.executor import WorkflowExecutor
     from lib.python.core.gitlab.gitlab_actions import ActionPlan
+    from lib.python.core.gitlab.gitlab_jobs import JobListResult, JobQuery
     from lib.python.core.json_types import JSONObject
     from lib.python.core.kubernetes.image_build_chain import (
         ImageBuildChainAction,
@@ -58,7 +59,6 @@ CALLER_NAMESPACE = "caller-builds"
 RUNNER_ID = 73
 PIPELINE_ID = 91
 TOOLBOX_IMAGE = "harbor.example.test/toolbox/ci@sha256:" + "a" * 64
-BUILD_DIGEST = "sha256:" + "b" * 64
 
 
 class JournalCallback(ABSTRACT_CALLBACK.LocalCallback):
@@ -139,18 +139,12 @@ def _args(
             "c" * 40,
             "--job",
             "build-image",
-            "--job-digest-artifact",
-            "reports/image-digest.txt",
             "--runner-description",
             "ci13-unit-runner",
             "--runner-label",
             "ci13",
             "--runner-label",
             "podman",
-            "--build-repository",
-            "team/application",
-            "--build-tag",
-            "unit",
             "--namespace",
             CALLER_NAMESPACE,
             "--cpu-request",
@@ -522,17 +516,24 @@ def test_manager_reuses_probe_node_scope_account_and_resource_settings(
     }
 
 
-def _job(runner_id: int = RUNNER_ID) -> JSONObject:
-    """Build one successful job bound to the chain pipeline and runner.
+def _job(
+    runner_id: int = RUNNER_ID,
+    *,
+    pipeline_id: int = PIPELINE_ID,
+    status: str = "success",
+) -> JSONObject:
+    """Build one bounded job summary with explicit pipeline and runner identity.
 
     :param runner_id: Runner identity reported by GitLab for the selected job.
+    :param pipeline_id: Pipeline identity reported by the selected job.
+    :param status: Observed job completion status.
     :returns: Complete bounded job summary accepted by the shared job reader.
     """
     return {
         "id": 501,
         "name": "build-image",
         "stage": "build",
-        "status": "success",
+        "status": status,
         "stuck": False,
         "failure_reason": None,
         "created_at": "2026-10-18T00:00:00Z",
@@ -540,148 +541,117 @@ def _job(runner_id: int = RUNNER_ID) -> JSONObject:
         "finished_at": "2026-10-18T00:00:03Z",
         "duration": 2.0,
         "runner": {"id": runner_id, "description": "ci13-unit-runner"},
-        "pipeline_id": PIPELINE_ID,
+        "pipeline_id": pipeline_id,
         "ref": "main",
         "web_url": "https://gitlab.example.test/team/build/-/jobs/501",
     }
 
 
-class ArtifactAPI:
-    """Return one exact digest artifact emitted by the selected build job."""
+def _bind_verification_state(action: ImageBuildChainAction) -> None:
+    """Bind job identity while forbidding artifact and registry reads.
 
-    def __init__(self, digest: str) -> None:
-        """Retain the artifact value and initialize an endpoint journal.
-
-        :param digest: Digest text returned from the bounded artifact endpoint.
-        """
-        self.digest = digest
-        self.calls: list[str] = []
-
-    def get_text(self, _session: object, endpoint: str) -> str:
-        """Read the single job artifact and record its exact endpoint.
-
-        :param _session: Bound GitLab session retained only for interface parity.
-        :param endpoint: Job artifact endpoint selected by production code.
-        :returns: Configured artifact digest with its normal terminal newline.
-        """
-        self.calls.append(endpoint)
-        return self.digest + "\n"
-
-
-class HarborReadback:
-    """Return one independently observed Harbor tag digest."""
-
-    def __init__(self, digest: Optional[str]) -> None:
-        """Retain the tag read-back selected for this test.
-
-        :param digest: Harbor digest or missing observation.
-        """
-        self.observed_digest = digest
-
-    def digest(self, repository: str, tag: str) -> Optional[str]:
-        """Return the configured digest for the exact repository and tag.
-
-        :param repository: Expected job publication repository.
-        :param tag: Expected caller-selected publication tag.
-        :returns: Configured immutable digest or ``None``.
-        """
-        assert (repository, tag) == ("team/application", "unit")
-        return self.observed_digest
-
-    def image(self, repository: str, digest: str) -> str:
-        """Render the digest-pinned image from verified Harbor identity.
-
-        :param repository: Verified repository name.
-        :param digest: Verified canonical digest.
-        :returns: Deterministic fixture image reference.
-        """
-        return f"harbor.example.test/{repository}@{digest}"
-
-
-def _bind_verification_state(
-    action: ImageBuildChainAction,
-    *,
-    artifact_digest: str = BUILD_DIGEST,
-    harbor_digest: Optional[str] = BUILD_DIGEST,
-) -> ArtifactAPI:
-    """Bind finite job-artifact and Harbor read-back services to chain state.
-
-    :param action: Prepared chain action whose one state receives the services.
-    :param artifact_digest: Digest emitted by the exact selected job.
-    :param harbor_digest: Digest independently read from the selected Harbor tag.
-    :returns: Artifact API double for endpoint assertions.
+    :param action: Prepared chain action receiving the selected pipeline and runner.
+    :returns: None; the existing provider seams fail if extra reads are attempted.
     """
-    api = ArtifactAPI(artifact_digest)
     action.state.pipeline_id = PIPELINE_ID
     action.state.created_runner_id = RUNNER_ID
     action.state.pipeline_gitlab = SimpleNamespace(
-        session=object(), target_id=42, api=api
+        session=object(),
+        target_id=42,
+        api=SimpleNamespace(
+            get_text=lambda *_a: pytest.fail("consumer fetched a job artifact")
+        ),
     )
-    action.state.build_harbor = HarborReadback(harbor_digest)
-    return api
+    action.state.harbor = SimpleNamespace(
+        digest=lambda *_a: pytest.fail("consumer read another Harbor image")
+    )
+
+
+def test_consumer_job_succeeds_without_image_publication_or_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accept one successful selected job on the exact chain-created runner.
+
+    :param monkeypatch: Fixture replacing only the bounded GitLab job reader.
+    :returns: None after checking exact job linkage without extra provider reads.
+    """
+    action = _prepared_action(apply=True)
+    _bind_verification_state(action)
+    reads: list[int] = []
+
+    def read_jobs(
+        session: object, target_id: int, query: JobQuery, api: object
+    ) -> JobListResult:
+        """Return selected and unrelated jobs for the exact pipeline lookup."""
+        assert session is action.state.pipeline_gitlab.session
+        assert target_id == action.state.pipeline_gitlab.target_id
+        assert api is action.state.pipeline_gitlab.api
+        reads.append(query.pipeline_id)
+        unrelated = {**_job(), "id": 502, "name": "unrelated-job"}
+        return GITLAB_JOBS.JobListResult(
+            records=[unrelated, _job()], errors=(), truncated=False
+        )
+
+    monkeypatch.setattr(VERIFICATION, "list_jobs", read_jobs)
+    callback = VERIFICATION.VerifyConsumerJob(action)
+    callback.bind(action.state)
+
+    result = callback.run()
+
+    assert reads == [PIPELINE_ID]
+    assert result == {
+        "verified": True,
+        "pipeline_id": PIPELINE_ID,
+        "job_id": 501,
+        "job": action.args.job,
+        "job_status": "success",
+        "runner_id": RUNNER_ID,
+    }
+    assert action.state.job_readback == result
 
 
 @pytest.mark.parametrize(
-    ("runner_id", "artifact_digest", "harbor_digest", "expected"),
+    ("runner_id", "pipeline_id", "status", "expected"),
     (
-        (99, BUILD_DIGEST, BUILD_DIGEST, "build_job_runner_mismatch"),
-        (RUNNER_ID, "", BUILD_DIGEST, "build_job_digest_artifact_invalid"),
-        (
-            RUNNER_ID,
-            BUILD_DIGEST,
-            "sha256:" + "f" * 64,
-            "build_job_digest_mismatch",
-        ),
-        (RUNNER_ID, BUILD_DIGEST, "latest", "pushed_harbor_digest_invalid"),
+        (99, PIPELINE_ID, "success", "consumer_job_runner_mismatch"),
+        (RUNNER_ID, 92, "success", "consumer_job_pipeline_mismatch"),
+        (RUNNER_ID, PIPELINE_ID, "failed", "consumer_job_not_successful"),
     ),
-    ids=(
-        "wrong-runner",
-        "missing-job-digest",
-        "digest-mismatch",
-        "malformed-harbor-digest",
-    ),
+    ids=("wrong-runner", "wrong-pipeline", "failed-job"),
 )
-def test_job_and_digest_readback_fail_closed(
+def test_consumer_job_readback_fail_closed(
     monkeypatch: pytest.MonkeyPatch,
     runner_id: int,
-    artifact_digest: str,
-    harbor_digest: Optional[str],
+    pipeline_id: int,
+    status: str,
     expected: str,
 ) -> None:
-    """Reject any break in the job-runner-artifact-Harbor identity chain.
+    """Reject failed jobs and jobs outside the selected pipeline or runner.
 
     :param monkeypatch: Fixture replacing the bounded GitLab job listing.
     :param runner_id: Runner identity attached to the selected job.
-    :param artifact_digest: Digest emitted by the selected job artifact.
-    :param harbor_digest: Digest independently read from Harbor.
-    :param expected: Stable failure classification expected from verification.
+    :param pipeline_id: Pipeline identity attached to the selected job.
+    :param status: Observed selected job status.
+    :param expected: Failure classification expected from verification.
     :returns: None; verification never retains a passing read-back.
     """
     action = _prepared_action(apply=True)
-    api = _bind_verification_state(
-        action,
-        artifact_digest=artifact_digest,
-        harbor_digest=harbor_digest,
-    )
+    _bind_verification_state(action)
     monkeypatch.setattr(
         VERIFICATION,
         "list_jobs",
         lambda *_a, **_k: GITLAB_JOBS.JobListResult(
-            records=[_job(runner_id)], errors=(), truncated=False
+            records=[_job(runner_id, pipeline_id=pipeline_id, status=status)],
+            errors=(),
+            truncated=False,
         ),
     )
-    callback = VERIFICATION.VerifyBuildJob(action)
+    callback = VERIFICATION.VerifyConsumerJob(action)
     callback.bind(action.state)
 
-    with pytest.raises((GITLAB_ACTIONS.ActionError, ValueError), match=expected):
+    with pytest.raises(GITLAB_ACTIONS.ActionError, match=expected):
         callback.run()
 
-    expected_artifact_calls = (
-        []
-        if runner_id != RUNNER_ID
-        else ["projects/42/jobs/501/artifacts/reports/image-digest.txt"]
-    )
-    assert api.calls == expected_artifact_calls
     assert not hasattr(action.state, "job_readback")
 
 
@@ -713,7 +683,7 @@ class CallerScopeKubernetes:
 def _lifecycle_executor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    outcome: str = "digest-mismatch",
+    outcome: str = "failed-job",
     cleanup_failure: bool = False,
 ) -> tuple[
     ImageBuildChainAction, WorkflowExecutor, list[str], list[str], CallerScopeKubernetes
@@ -722,7 +692,7 @@ def _lifecycle_executor(
 
     :param tmp_path: Directory receiving the ephemeral runner-token sink.
     :param monkeypatch: Fixture replacing provider mutations at existing boundaries.
-    :param outcome: Success, digest mismatch, timeout, SIGINT, or SIGTERM outcome.
+    :param outcome: Success, failed job, timeout, SIGINT, or SIGTERM outcome.
     :param cleanup_failure: Make manager removal fail while later cleanup continues.
     :returns: Action, real executor, stage journal, cleanup journal, and fake Kubernetes.
     """
@@ -772,15 +742,9 @@ def _lifecycle_executor(
         current.token_path.write_text("private-unit-value\n", encoding="utf-8")
 
     def pipeline(current: ImageBuildChainState) -> None:
-        """Retain exact pipeline services with a mismatching Harbor digest."""
+        """Retain the exact pipeline services for the consumer job read-back."""
         assert current.created_runner_id == RUNNER_ID
-        _bind_verification_state(
-            action,
-            artifact_digest=BUILD_DIGEST,
-            harbor_digest=("sha256:" + "f" * 64)
-            if outcome == "digest-mismatch"
-            else BUILD_DIGEST,
-        )
+        _bind_verification_state(action)
         assert current is action.state
         if outcome == "timeout":
             raise TimeoutError("pipeline_watch_timeout token=private-unit-value")
@@ -830,7 +794,9 @@ def _lifecycle_executor(
         VERIFICATION,
         "list_jobs",
         lambda *_a, **_k: GITLAB_JOBS.JobListResult(
-            records=[_job()], errors=(), truncated=False
+            records=[_job(status="failed" if outcome == "failed-job" else "success")],
+            errors=(),
+            truncated=False,
         ),
     )
     callbacks = ABSTRACT_CALLBACKS.Callbacks(
@@ -842,7 +808,7 @@ def _lifecycle_executor(
             JournalCallback(action, stages, "toolbox", toolbox),
             JournalCallback(action, stages, "manager", manager),
             JournalCallback(action, stages, "pipeline", pipeline),
-            VERIFICATION.VerifyBuildJob(action),
+            VERIFICATION.VerifyConsumerJob(action),
         ]
     )
     executor = EXECUTOR.WorkflowExecutor(state, callbacks)
@@ -852,7 +818,7 @@ def _lifecycle_executor(
 
 
 @pytest.mark.parametrize(
-    "outcome", ("success", "digest-mismatch", "timeout", "SIGINT", "SIGTERM")
+    "outcome", ("success", "failed-job", "timeout", "SIGINT", "SIGTERM")
 )
 def test_chain_cleanup_runs_on_success_failure_timeout_and_signals(
     tmp_path: Path,
@@ -881,8 +847,8 @@ def test_chain_cleanup_runs_on_success_failure_timeout_and_signals(
         assert interrupted.value.code == 128 + getattr(signal, outcome)
     else:
         expected = (
-            "build_job_digest_mismatch"
-            if outcome == "digest-mismatch"
+            "consumer_job_not_successful"
+            if outcome == "failed-job"
             else "pipeline_watch_timeout"
         )
         with pytest.raises((GITLAB_ACTIONS.ActionError, TimeoutError), match=expected):

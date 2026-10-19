@@ -203,15 +203,11 @@
         "job_id",
         "job",
         "job_status",
-        "runner_id",
-        "job_digest_artifact",
-        "job_digest",
-        "image",
-        "digest"
+        "runner_id"
       ],
       "properties": {
         "callback": {
-          "const": "VerifyBuildJob"
+          "const": "VerifyConsumerJob"
         },
         "verified": {
           "const": true
@@ -232,24 +228,8 @@
           "type": "string",
           "minLength": 1
         },
-        "job_digest_artifact": {
-          "type": "string",
-          "minLength": 1
-        },
-        "image": {
-          "type": "string",
-          "minLength": 1
-        },
         "job_status": {
           "const": "success"
-        },
-        "job_digest": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
-        },
-        "digest": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
         }
       }
     }
@@ -365,7 +345,6 @@
                     "toolbox",
                     "runner",
                     "pipeline",
-                    "publication_readback",
                     "cleanup"
                   ],
                   "properties": {
@@ -385,9 +364,6 @@
                       "type": "object"
                     },
                     "pipeline": {
-                      "type": "object"
-                    },
-                    "publication_readback": {
                       "type": "object"
                     },
                     "cleanup": {

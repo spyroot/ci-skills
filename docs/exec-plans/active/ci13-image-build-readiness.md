@@ -1,4 +1,4 @@
-# Prove a node can build images with podman, then carry it through a GitLab job
+# Prove Podman readiness, then carry it through a GitLab consumer job
 
 This ExecPlan is maintained in accordance with the shared standards' execution plan format (`docs/PLANS.md` at
 standards revision `cae52b2`). Its Progress, Surprises & Discoveries, Decision Log and Outcomes & Retrospective
@@ -16,8 +16,8 @@ images from a GitLab job. The agent runs one probe on a node, and the person obs
 proved there (kernel, podman version, storage driver and cgroup version, backing filesystem, an inner container
 that ran, a bind mount read back, a failing exit code that propagated, nothing left behind), the Pod's exit code as
 the verdict, and nothing left in the cluster afterwards; when the cluster refuses privileged Pods, the person reads
-the exact missing authorization instead of a failed pipeline. Later, the same chain carries the
-node through a runner, a build-and-push job and a pushed digest.
+the exact missing authorization instead of a failed pipeline. Later, the same chain publishes its runner toolbox,
+creates a runner on that node, and verifies one representative consumer job on that exact runner.
 
 ## Progress
 
@@ -30,9 +30,9 @@ node through a runner, a build-and-push job and a pushed digest.
 - [ ] Milestone 1, proof: live `probe` from the installed candidate on one node with every row present and the
       Pod exited 0, plus an interrupted run with the same absence read-back, attached to the pull request. The
       command must reuse or prepare and clean its own SCC permission; an external grant is not accepted as proof.
-- [ ] Milestone 2, code: the `chain` verb composing the probe with chain 1's runner, the build-and-push job and
-      the digest read-back; waits for chain 1 and block 7 (open question 6).
-- [ ] Milestone 2, proof: live chain on the test project with the pushed digest read back.
+- [ ] Milestone 2, code: the `chain` verb composing the probe, toolbox publication, chain 1's runner and the
+      selected consumer job; waits for chain 1 and block 7 (open question 6).
+- [ ] Milestone 2, proof: installed chain evidence for toolbox publication, runner/job linkage and cleanup.
 - [x] Open question 1 (command surface and default digests) answered by the owner.
 - [x] Open question 2 (gate wiring for this command's receipts) answered by the owner.
 - [x] Open question 4 answered: reuse existing permission or create, verify and clean one run-owned RoleBinding.
@@ -73,7 +73,7 @@ admission message for a refused privileged Pod and the backing filesystem the em
 ## Outcomes & Retrospective
 
 PR81 merged the standalone probe with [live proof](../../phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence).
-Interruption proof remains unestablished. Milestone 2's runner/job/push chain remains unmerged and unverified.
+Interruption proof remains unestablished. Milestone 2's runner/consumer-job chain remains unmerged and unverified.
 
 ## Context and Orientation
 
@@ -142,15 +142,16 @@ row present and the Pod exited 0, plus a second run interrupted during the Job w
 both attached to the pull request as receipts. A blocked authorization result does not stand in for execution.
 Reuse proof when the functional checksum is unchanged.
 
-### Milestone 2: `chain`, from the proven node to a pushed digest
+### Milestone 2: `chain`, from the proven node to a successful consumer job
 
 Goal: after a passing probe, the agent runs the chain on the same node and reads back a runner online with the
-same privileged podman setup, a job on the test project that built and pushed an image, and the pushed digest.
-Work: the composition over chain 1's runner manager and block 7's registration and test job, the verb, the
-result-schema rows and tests, then the live run. Result: `image_build_readiness.py chain --node <NODE>` composes
-the probe rows with chain 1's rows and ends on the digest read-back. Proof: the composition tests, the validate
-workflow green on the exact head, and the live chain result on the test project attached to the pull request.
-This milestone waits for chain 1 and block 7, open question 6.
+same privileged Podman setup, its published toolbox digest, and one selected consumer job that succeeded on that
+exact runner. Work: the composition over chain 1's runner manager and block 7's registration and test job, the
+verb, the result-schema rows and tests, then installed evidence. Result: `image_build_readiness.py chain --node
+<NODE>` composes the probe rows with toolbox publication and chain 1's rows and ends on exact runner/job read-back.
+Proof: the composition tests, the validate workflow green on the exact head, and the existing installed chain
+results that show the runner and Podman consumer job working with owned cleanup. This milestone waits for chain 1
+and block 7, open question 6.
 
 ## Concrete Steps
 
@@ -197,9 +198,9 @@ propagation 7 and not 7, remaining containers non-empty), the verdict (`PASS` on
 cleanup, and authorization denial before Job creation; when the catalogue consistency test and the render check
 pass; when the validate workflow is green on the exact head; and when the live results attached to the pull
 request show the rows with the Pod's exit code and nothing left carrying the identifier, including after the
-interrupted run. Milestone 2 is accepted when the composition tests pass and the live chain result shows the
-runner online, the job succeeded on that runner, and
-the pushed digest read back. A green build alone demonstrates nothing; the live results do.
+interrupted run. Milestone 2 is accepted when the composition tests pass and the installed chain result shows
+the toolbox digest, the runner online, the selected job successful on that runner, and owned-resource cleanup.
+Pipeline success alone does not establish the exact runner/job linkage; the linked read-back does.
 
 ## Idempotence and Recovery
 
