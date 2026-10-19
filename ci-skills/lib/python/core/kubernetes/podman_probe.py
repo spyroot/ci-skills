@@ -10,19 +10,25 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Final, Optional
 
-from kubernetes.utils.quantity import parse_quantity
-
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import JSONObject, JSONValue
+from lib.python.core.kubernetes import podman_runtime
 from lib.python.core.kubernetes.kubernetes import KubernetesError
 from lib.python.core.kubernetes.podman_evidence import (
     EXPECTED_INNER_EXIT,
     MARKER_PREFIX,
     PROBE_CONTAINER,
+)
+from lib.python.core.kubernetes.podman_runtime import (
+    DEFAULT_SERVICE_ACCOUNT,
+    PRIVILEGED_CONSTRAINT,
+    PodmanRuntimeSettings,
+)
+from lib.python.core.kubernetes.podman_runtime import (
+    PodmanResources as ProbeResources,
 )
 from lib.python.core.kubernetes.run_scope import (
     RUN_ID_LABEL,
@@ -34,9 +40,13 @@ from lib.python.core.paths import SKILL_ROOT
 from lib.python.core.report import plan_digest
 from lib.python.core.target import Target
 
+DEFAULT_CPU_REQUEST: Final = podman_runtime.DEFAULT_CPU_REQUEST
+DEFAULT_CPU_LIMIT: Final = podman_runtime.DEFAULT_CPU_LIMIT
+DEFAULT_MEMORY_REQUEST: Final = podman_runtime.DEFAULT_MEMORY_REQUEST
+DEFAULT_MEMORY_LIMIT: Final = podman_runtime.DEFAULT_MEMORY_LIMIT
+DEFAULT_STORAGE_SIZE: Final = podman_runtime.DEFAULT_STORAGE_SIZE
 PROBE_KIND: Final = "image_build_readiness"
 NESTED_RUNTIME_CLAIM: Final = "nested_podman_runtime_readiness"
-PRIVILEGED_CONSTRAINT: Final = "privileged"
 DEFAULT_PROBE_IMAGE: Final = (
     "quay.io/podman/stable@sha256:"
     "5118bdbb154b115d77f58107a2e69d65df4375bcb0d89a8da10b055754e8b9f3"
@@ -46,12 +56,6 @@ DEFAULT_INNER_IMAGE: Final = (
     "bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
 )
 DEFAULT_PROBE_TIMEOUT: Final = 300
-DEFAULT_CPU_REQUEST: Final = "250m"
-DEFAULT_CPU_LIMIT: Final = "1"
-DEFAULT_MEMORY_REQUEST: Final = "256Mi"
-DEFAULT_MEMORY_LIMIT: Final = "1Gi"
-DEFAULT_STORAGE_SIZE: Final = "8Gi"
-DEFAULT_SERVICE_ACCOUNT: Final = "default"
 PROBE_TTL_SECONDS: Final = 600
 PROBE_POLL_SECONDS: Final = 2
 PROBE_SCRIPT_ROOT: Final = SKILL_ROOT / "lib/bash/kubernetes"
@@ -75,82 +79,12 @@ def immutable_image(value: str) -> str:
 
     :param value: OCI image name supplied by the default or caller.
     :returns: The unchanged immutable reference.
-    :raises ValueError: If the reference is empty, contains whitespace, or lacks a digest.
+    :raises ValueError: If the reference is empty, contains whitespace, or lacks
+        a digest.
     """
     if _IMAGE_DIGEST.fullmatch(value) is None:
         raise ValueError("immutable_image_required")
     return value
-
-
-def _quantity(value: str, field_name: str) -> Decimal:
-    """Parse a nonnegative resource amount using the Kubernetes client.
-
-    :param value: Caller-selected Kubernetes quantity, including its unit suffix.
-    :param field_name: Input field used to identify malformed resource settings.
-    :returns: Finite nonnegative amount in the provider's base unit.
-    :raises ValueError: If the quantity has invalid syntax or is negative.
-    """
-    try:
-        amount = parse_quantity(value.strip())
-    except (ValueError, InvalidOperation) as exc:
-        raise ValueError(f"{field_name}_invalid") from exc
-    if not amount.is_finite() or amount < 0:
-        raise ValueError(f"{field_name}_invalid")
-    return amount
-
-
-@dataclass(frozen=True)
-class ProbeResources:
-    """Bound resource requests and limits for the temporary probe Pod.
-
-    .. attribute :: cpu_request
-        :type: str
-
-        Pod CPU request.
-
-    .. attribute :: cpu_limit
-        :type: str
-
-        Pod CPU limit.
-
-    .. attribute :: memory_request
-        :type: str
-
-        Pod memory request.
-
-    .. attribute :: memory_limit
-        :type: str
-
-        Pod memory limit.
-
-    .. attribute :: storage_size
-        :type: str
-
-        Size limit for the Podman storage ``emptyDir``.
-    """
-
-    cpu_request: str = DEFAULT_CPU_REQUEST
-    cpu_limit: str = DEFAULT_CPU_LIMIT
-    memory_request: str = DEFAULT_MEMORY_REQUEST
-    memory_limit: str = DEFAULT_MEMORY_LIMIT
-    storage_size: str = DEFAULT_STORAGE_SIZE
-
-    def __post_init__(self) -> None:
-        """Validate quantities and request/limit ordering before planning.
-
-        :raises ValueError: If a quantity is malformed, negative, or a request
-            exceeds its corresponding limit.
-        """
-        for resource in ("cpu", "memory"):
-            request_name, limit_name = f"{resource}_request", f"{resource}_limit"
-            for name in (request_name, limit_name):
-                object.__setattr__(self, name, getattr(self, name).strip())
-            request = _quantity(getattr(self, request_name), request_name)
-            limit = _quantity(getattr(self, limit_name), limit_name)
-            if request > limit:
-                raise ValueError(f"{resource}_request_exceeds_limit")
-        object.__setattr__(self, "storage_size", self.storage_size.strip())
-        _quantity(self.storage_size, "storage_size")
 
 
 class ProbeMode(StrEnum):
@@ -511,6 +445,13 @@ def probe_job(
     name = scope.name("podman-probe")
     labels = dict(scope.labels)
     labels["app.kubernetes.io/name"] = PROBE_KIND
+    runtime = PodmanRuntimeSettings(
+        selected_node,
+        action.service_account,
+        action.resources,
+    )
+    pod_fields = runtime.pod_fields()
+    container_fields = runtime.container_fields()
     return {
         "apiVersion": "batch/v1",
         "kind": "Job",
@@ -522,20 +463,14 @@ def probe_job(
             "template": {
                 "metadata": {"labels": labels},
                 "spec": {
-                    "nodeName": selected_node,
+                    **pod_fields,
                     "restartPolicy": "Never",
-                    "serviceAccountName": action.service_account,
-                    "automountServiceAccountToken": False,
                     "containers": [
                         {
                             "name": PROBE_CONTAINER,
                             "image": action.probe_image,
                             "imagePullPolicy": "IfNotPresent",
-                            "securityContext": {
-                                "privileged": True,
-                                "runAsUser": 0,
-                                "runAsNonRoot": False,
-                            },
+                            **container_fields,
                             "command": [
                                 "/bin/bash",
                                 f"{PROBE_MOUNT}/{PROBE_SCRIPT_NAME}",
@@ -559,30 +494,13 @@ def probe_job(
                                 },
                                 {"name": "MARKER_PREFIX", "value": MARKER_PREFIX},
                             ],
-                            "resources": {
-                                "requests": {
-                                    "cpu": action.resources.cpu_request,
-                                    "memory": action.resources.memory_request,
-                                },
-                                "limits": {
-                                    "cpu": action.resources.cpu_limit,
-                                    "memory": action.resources.memory_limit,
-                                },
-                            },
                             "volumeMounts": [
                                 {
                                     "name": PROBE_VOLUME,
                                     "mountPath": PROBE_MOUNT,
                                     "readOnly": True,
                                 },
-                                {
-                                    "name": "containers-storage",
-                                    "mountPath": "/var/lib/containers",
-                                },
-                                {
-                                    "name": "containers-runroot",
-                                    "mountPath": "/run/containers",
-                                },
+                                *runtime.volume_mounts(),
                                 {
                                     "name": "evidence",
                                     "mountPath": PROBE_EVIDENCE_MOUNT,
@@ -598,11 +516,7 @@ def probe_job(
                                 "defaultMode": 0o444,
                             },
                         },
-                        {
-                            "name": "containers-storage",
-                            "emptyDir": {"sizeLimit": action.resources.storage_size},
-                        },
-                        {"name": "containers-runroot", "emptyDir": {}},
+                        *runtime.volumes(),
                         {"name": "evidence", "emptyDir": {"sizeLimit": "16Mi"}},
                     ],
                 },

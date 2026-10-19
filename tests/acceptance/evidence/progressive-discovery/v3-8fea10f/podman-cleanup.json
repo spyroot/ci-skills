@@ -1,0 +1,36 @@
+{
+  "status": "PASS",
+  "observed_at": "2026-10-18T23:01:12Z",
+  "absent": {
+    "namespace": {
+      "name": "ci-skills-run-10188b1d76894d308092",
+      "count": 0
+    },
+    "job": {
+      "name": "ci-skills-run-podman-probe-63e737300993a15e",
+      "count": 0
+    },
+    "configmap": {
+      "name": "ci-skills-run-podman-scripts-63e737300993a15e",
+      "count": 0
+    },
+    "rolebinding": {
+      "name": "ci-skills-run-scc-permission-5f4add9322d9458c-63e737300993a15e",
+      "count": 0
+    },
+    "pod": {
+      "name": "ci-skills-run-podman-probe-63e737300993a15e-kj2pl",
+      "count": 0
+    }
+  },
+  "preserved": {
+    "scc": {
+      "name": "privileged",
+      "uid": "3bd4207d-29ca-4278-8cb2-8454c239f493"
+    },
+    "clusterrole": {
+      "name": "system:openshift:scc:privileged",
+      "uid": "8f4125b7-d09a-4d59-aab2-5ecce566d0c6"
+    }
+  }
+}

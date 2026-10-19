@@ -117,6 +117,7 @@ jobs:
             ci-skills/lib/python/core/executor.py \
             ci-skills/lib/python/core/tooling \
             ci-skills/lib/python/core/action_modes.py \
+            ci-skills/lib/python/core/runner.py \
             ci-skills/lib/python/core/kubernetes/tool_pod*.py \
             ci-skills/lib/python/core/kubernetes/artifact_storage*.py \
             ci-skills/lib/python/core/kubernetes/pod_credential*.py \
@@ -126,6 +127,7 @@ jobs:
             ci-skills/lib/python/core/runtime_streams.py \
             ci-skills/bin/ocp_node_onboard.py \
             ci-skills/lib/python/core/kubernetes/run_scope.py \
+            ci-skills/lib/python/core/kubernetes/runner.py \
             ci-skills/lib/python/core/kubernetes/script_resources.py \
             ci-skills/bin/prepare_tool_pod.py \
             ci-skills/lib/python/core/gitlab/callback.py \
@@ -134,9 +136,18 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_actions.py \
             ci-skills/lib/python/core/gitlab/gitlab_milestones.py \
             ci-skills/lib/python/core/gitlab/gitlab_api.py \
+            ci-skills/lib/python/core/gitlab/runner_manager \
+            ci-skills/lib/python/core/gitlab/gitlab_pipelines.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_graph.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_start.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch_runtime.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch_types.py \
+            ci-skills/bin/gitlab_pipeline.py \
             ci-skills/lib/python/core/catalog.py \
             ci-skills/lib/python/core/kubernetes/run_scope.py \
             ci-skills/lib/python/core/kubernetes/scc_access.py \
+            ci-skills/lib/python/core/kubernetes/podman_runtime.py \
             ci-skills/lib/python/core/kubernetes/podman_probe.py \
             ci-skills/lib/python/core/kubernetes/podman_evidence.py \
             ci-skills/lib/python/core/kubernetes/podman_callbacks.py \
@@ -145,6 +156,7 @@ jobs:
             ci-skills/bin/reference.py \
             ci-skills/lib/python/core/report.py \
             ci-skills/bin/gitlab_runner.py \
+            ci-skills/bin/gitlab_runner_manager.py \
             tools/check_live_acceptance.py
           pydoclint --style=sphinx --skip-checking-short-docstrings=False \
             --arg-type-hints-in-docstring=False --check-return-types=False \
@@ -169,6 +181,7 @@ jobs:
             schemas/live-acceptance-policy.schema.json \
             ci-skills/schemas/results/gitlab-action.schema.json \
             ci-skills/schemas/results/gitlab-job-list.schema.json \
+            ci-skills/schemas/results/gitlab-pipeline-watch.schema.json \
             ci-skills/schemas/results/toolbox-workflow.schema.json \
             ci-skills/schemas/results/image-build-readiness.schema.json \
             ci-skills/schemas/results/gitlab-runner-tag.schema.json \

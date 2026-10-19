@@ -103,6 +103,8 @@ class MemoryCluster:
             "pods": "pod",
             "namespaces": "namespace",
             "configmaps": "configmap",
+            "deployments": "deployment",
+            "rolebindings": "rolebinding",
         }[args[1]]
         selector = args[args.index("-l") + 1]
         selected = dict(item.split("=", 1) for item in selector.split(","))
@@ -422,13 +424,14 @@ def test_remove_finds_observed_namespace_and_repeat_is_no_op(
     assert len(cluster.deleted) == writes
 
 
-def test_run_lookup_rejects_two_live_namespaces_without_mutation() -> None:
+@pytest.mark.parametrize("kind", ("Pod", "Deployment", "RoleBinding"))
+def test_run_lookup_rejects_two_live_namespaces_without_mutation(kind: str) -> None:
     """Duplicate ownership labels must not select an arbitrary namespace to delete."""
     cluster = MemoryCluster()
     for namespace in ("first-space", "second-space"):
         scope = SCOPES.RunScope("unit-run", namespace, False)
         document = {
-            "kind": "Pod",
+            "kind": kind,
             "metadata": {
                 "name": f"pod-{namespace}",
                 "namespace": namespace,

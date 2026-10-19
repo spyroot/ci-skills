@@ -3,8 +3,9 @@
 The installed skill contains instructions and code. Each execution host
 supplies a nonsecret target file and its own credentials. The target file
 identifies the authorities its commands use. A Kubernetes collector needs its
-exact context and API server; a GitLab job needs its exact origin. The full
-access receipt also needs the GitHub repository. A project can select a target
+exact context and API server; a GitLab job needs its exact origin. The access
+receipt checks only configured GitHub, GitLab and Kubernetes providers; a
+configured GitHub check needs its repository. A project can select a target
 and its kubeconfig through the [project binding](project-binding.md).
 `gitlab_job.py` can use a GitLab-only target; its job URL selects the exact
 project for identity and project access read-back before job, pipeline, runner,
@@ -127,11 +128,14 @@ its own calculation for the candidate. The original commit need not remain in
 the candidate's Git history. A documentation or test edit can change
 the package checksum without invalidating live proof of unchanged runtime files.
 
-## Full three-authority live receipt
+## Configured-provider live receipt
 
-When accepting the full access capability, run
-`access_check.py --json --publication` with the selected target on each intended
-execution host. Supply `--revision SHA` for an installed copy without Git
+Run `access_check.py --json` to check the configured GitHub, GitLab and Kubernetes
+providers in the selected target. At least one supported provider is needed.
+Absent providers require no credentials or tools; malformed selected tables still fail.
+Harbor access remains part of the selected Harbor operation.
+`--publication`, `--job-url` and `--ceph-namespace` additionally require GitHub, GitLab
+and Kubernetes respectively, before any API calls. Supply `--revision SHA` for an installed copy without Git
 metadata, and `--job-url URL` when verifying a requested job. The receipt
 identifies the execution host, time, revision, sources, targets, identities,
 and individual results.
@@ -175,7 +179,7 @@ the case that actually happens, a login rewriting the kubeconfig mid-run.
 
 The command-specific base gate runs before every collector. Cilium discovery
 and non-TTY health exec extend that gate only for Cilium commands and the full
-`access_check.py` receipt. The expanded three-authority bundle runs in
+`access_check.py` receipt. The configured-provider bundle runs in
 `access_check.py`, and every report names which gate it passed in
 `access.profile`. A
 collector report also carries `access`: the identities, credential sources,

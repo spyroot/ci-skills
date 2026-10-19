@@ -1,0 +1,62 @@
+{
+  "access": {
+    "harbor": {
+      "credential_source": "file:path:1f8b6bf528f9",
+      "granted_actions": [
+        "delete",
+        "pull",
+        "push"
+      ],
+      "identity": "spyroot",
+      "origin": "https://harbor.dcloud.run",
+      "repository": "hott/ci13-runner-toolbox"
+    },
+    "kubernetes": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "captured_at": "2026-10-19T01:42:35.936012+00:00",
+  "cleanup": {
+    "failures": [],
+    "status": "PASS"
+  },
+  "errors": [],
+  "filters": {},
+  "kind": "toolbox",
+  "operation": "delete",
+  "plan_digest": "e8241eb7c855974d9fa0292d387a8184ce0e08830732e9777f59355bf1a3f923",
+  "records": [
+    {
+      "action": "APPLIED",
+      "callback": "DeleteToolbox",
+      "name": "ci13-runner-toolbox",
+      "namespace": "ci-skills-pr97-d2a16be-toolbox",
+      "verified": true
+    }
+  ],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
+    "file_count": 227,
+    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "revision": {
+      "source": "installer_record",
+      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": "path:5e5380df1eda",
+  "tested_revision": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3"
+}
