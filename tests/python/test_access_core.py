@@ -96,18 +96,26 @@ class _TokenPath(PathLike[str]):
 
 
 def _load_target(
-    path: Path, *, required_surfaces: Optional[tuple[str, ...]] = None
+    path: Path,
+    *,
+    required_surfaces: Optional[tuple[str, ...]] = None,
+    optional_surfaces: tuple[str, ...] = (),
 ) -> Target:
     """Load the nonsecret target with optional surface filtering.
 
     :param path: Fixture target TOML path.
     :param required_surfaces: Provider surfaces to retain during loading.
+    :param optional_surfaces: Configured provider surfaces selected when present.
     :returns: Parsed target used by access checks.
     """
     if required_surfaces is None:
-        return import_script_module("lib.python.core.target").load_target(path)
+        return import_script_module("lib.python.core.target").load_target(
+            path, optional_surfaces=optional_surfaces
+        )
     return import_script_module("lib.python.core.target").load_target(
-        path, required_surfaces=required_surfaces
+        path,
+        required_surfaces=required_surfaces,
+        optional_surfaces=optional_surfaces,
     )
 
 
@@ -591,8 +599,12 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
     monkeypatch.setattr(
         cli,
         "resolve_project_target",
-        lambda _target, _binding, *, dry_run, required_surfaces: _load_target(
-            target_file, required_surfaces=required_surfaces
+        lambda _target, _binding, *, dry_run, required_surfaces, optional_surfaces: (
+            _load_target(
+                target_file,
+                required_surfaces=required_surfaces,
+                optional_surfaces=optional_surfaces,
+            )
         ),
     )
     monkeypatch.setattr(cli, "bind_sources", lambda target, *, revision: target)
