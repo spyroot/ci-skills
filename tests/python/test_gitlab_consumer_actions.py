@@ -10,17 +10,19 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlencode
 
 import pytest
 from conftest import import_script_module
-from test_gitlab_actions import FakeAPI, _list, _plan
+from test_gitlab_actions import FakeAPI, _list, _plan, _tag_output
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
 
+SCHEMA = import_script_module("lib.python.core.schema")
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
 REPOSITORY = import_script_module("lib.python.core.gitlab.gitlab_repository")
 MERGE_REQUESTS = import_script_module("lib.python.core.gitlab.gitlab_merge_requests")
@@ -244,3 +246,56 @@ def test_mr_milestone_assignment_reads_back_before_success(matches: bool) -> Non
     else:
         assert result["mutated"] is True
         assert result["errors"][0]["reason"] == "mr_readback_mismatch"
+
+
+@pytest.mark.parametrize("kind", ("gitlab_repository", "gitlab_merge_request"))
+def test_action_schema_requires_each_delivered_evidence_field(kind: str) -> None:
+    """Reject PASS records and read-back that omit the new operation's evidence.
+
+    :param kind: Repository commit or MR operation whose successful output is checked.
+    """
+    if kind == "gitlab_repository":
+        operation = "commit"
+        record = {
+            "action": "APPLIED",
+            "verified": True,
+            "mutated": True,
+            "branch": "consumer",
+            "commit_sha": "b" * 40,
+            "files": [{"file_path": "main.go", "content_sha256": "c" * 64}],
+        }
+        fields = ("files", "file_path", "content_sha256")
+    else:
+        operation = "create"
+        record = {
+            "action": "APPLIED",
+            "verified": True,
+            "mutated": True,
+            "id": 81,
+            "iid": 7,
+            "title": "Consumer files",
+            "milestone_id": 113,
+        }
+        fields = ("id", "iid", "title", "milestone_id")
+    result = _tag_output(_plan(kind, operation, {}), record)
+    SCHEMA.validate_specification(result, "results/gitlab-action.schema.json")
+    if kind == "gitlab_merge_request":
+        unassigned = deepcopy(result)
+        unassigned["records"][0]["milestone_id"] = None
+        unassigned["readback"]["milestone_id"] = None
+        SCHEMA.validate_specification(unassigned, "results/gitlab-action.schema.json")
+
+    for section in ("records", "readback"):
+        for field in fields:
+            invalid = deepcopy(result)
+            evidence = (
+                invalid["records"][0] if section == "records" else invalid["readback"]
+            )
+            if kind == "gitlab_repository" and field != "files":
+                del evidence["files"][0][field]
+            else:
+                del evidence[field]
+            with pytest.raises(SCHEMA.SpecificationError):
+                SCHEMA.validate_specification(
+                    invalid, "results/gitlab-action.schema.json"
+                )

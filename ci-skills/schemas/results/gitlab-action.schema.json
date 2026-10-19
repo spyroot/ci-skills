@@ -70,10 +70,17 @@
             "records": {"items": {"$ref": "#/$defs/verified_repository_record"}},
             "readback": {"$ref": "#/$defs/verified_repository_record"}
           }},
-          "else": {"properties": {
-            "records": {"items": {"$ref": "#/$defs/verified_record"}},
-            "readback": {"$ref": "#/$defs/verified_record"}
-          }}
+          "else": {
+            "if": {"properties": {"kind": {"const": "gitlab_merge_request"}}},
+            "then": {"properties": {
+              "records": {"items": {"$ref": "#/$defs/verified_merge_request_record"}},
+              "readback": {"$ref": "#/$defs/verified_merge_request_record"}
+            }},
+            "else": {"properties": {
+              "records": {"items": {"$ref": "#/$defs/verified_record"}},
+              "readback": {"$ref": "#/$defs/verified_record"}
+            }}
+          }
         }]
       }
     },
@@ -129,8 +136,28 @@
     "verified_repository_record": {
       "allOf": [
         {"$ref": "#/$defs/record"},
-        {"required": ["branch", "commit_sha"], "properties": {"commit_sha": {"type": "string"}}},
+        {"required": ["branch", "commit_sha", "files"], "properties": {
+          "commit_sha": {"type": "string"},
+          "files": {
+            "type": "array", "minItems": 1,
+            "items": {
+              "type": "object", "required": ["file_path", "content_sha256"],
+              "properties": {
+                "file_path": {"type": "string", "minLength": 1},
+                "content_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+              }
+            }
+          }
+        }},
         {"properties": {"verified": {"const": true}, "action": {"enum": ["APPLIED", "NO_OP"]}, "errors": {"maxItems": 0}, "cleanup": {"properties": {"status": {"not": {"enum": ["BLOCKED", "PARTIAL"]}}}}}}
+      ]
+    },
+    "verified_merge_request_record": {
+      "allOf": [
+        {"$ref": "#/$defs/verified_record"},
+        {"required": ["id", "iid", "title", "milestone_id"], "properties": {
+          "id": {"type": "integer"}, "title": {"type": "string", "minLength": 1}
+        }}
       ]
     },
     "verified_record": {
