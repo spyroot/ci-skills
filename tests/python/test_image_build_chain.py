@@ -505,13 +505,15 @@ def _lifecycle_executor(
     if owns_namespace:
         state.found_scopes = (state.run_scope,)
         state.resolved_run_id = RUN_ID
-    kubernetes.objects[("namespace", "", CALLER_NAMESPACE)] = {
+    namespace: JSONObject = {
         "kind": "Namespace",
-        "metadata": {
-            "name": CALLER_NAMESPACE,
-            "labels": dict(state.run_scope.labels) if owns_namespace else {},
-        },
+        "metadata": {"name": CALLER_NAMESPACE, "labels": {}},
     }
+    if owns_namespace:
+        namespace = state.run_scope.cluster_resources(kubernetes).managed(
+            RUN_SCOPE.namespace_document(state.run_scope)
+        )
+    kubernetes.objects[("namespace", "", CALLER_NAMESPACE)] = namespace
     state.gitlab = SimpleNamespace(
         session=SimpleNamespace(
             origin="https://gitlab.example.test", target_kind="project"
