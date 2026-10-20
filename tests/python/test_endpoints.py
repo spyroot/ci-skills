@@ -14,9 +14,11 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import MutableSequence, MutableSet, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -363,6 +365,14 @@ def test_a_binding_block_is_another_format_and_a_target_block_is_read() -> None:
             False,
             id="repeated-attribute",
         ),
+        pytest.param(
+            "native-config=.ci-skills/ci-skills-smoke.toml", False, id="smoke-target"
+        ),
+        pytest.param("native-config=~/.ci-skills/TARGET.toml", False, id="target-case"),
+        pytest.param("native-config=.toml", False, id="suffix-only"),
+        pytest.param("native-config=runner/.toml", False, id="nameless"),
+        pytest.param(r"native-config=C:\runner\config.toml", True, id="windows-path"),
+        pytest.param(r"native-config=C:\ci\target.toml", False, id="windows-target"),
     ],
 )
 def test_native_toml_requires_an_explicit_non_target_filename(
@@ -389,6 +399,94 @@ def test_native_toml_requires_an_explicit_non_target_filename(
         assert documents[0].source == "doc.md"
         assert documents[0].first_line == 2
         assert "environment" in {use.path for use in documents[0].uses()}
+
+
+@pytest.mark.parametrize(
+    ("markdown", "native"),
+    [
+        pytest.param(
+            "```TOML native-config=gitlab-runner/config.toml\n[runners]\n```\n",
+            True,
+            id="uppercase-fence",
+        ),
+        pytest.param(
+            "~~~toml native-config=gitlab-runner/config.toml\n[runners]\n~~~\n",
+            True,
+            id="tilde-fence",
+        ),
+        pytest.param(
+            "  ```toml native-config=gitlab-runner/config.toml\n  [runners]\n  ```\n",
+            True,
+            id="indented-fence",
+        ),
+        pytest.param(
+            "```toml\tnative-config=gitlab-runner/config.toml\n[runners]\n```\n",
+            True,
+            id="tab-separator",
+        ),
+        pytest.param(
+            "```toml\n# native-config=gitlab-runner/config.toml\n[runners]\n```\n",
+            False,
+            id="body-only",
+        ),
+    ],
+)
+def test_native_config_is_read_from_the_fence_info_string_only(
+    markdown: str, native: bool
+) -> None:
+    """Honor the annotation on every fence shape and only on the opening line.
+
+    :param markdown: One fenced TOML block in a selected fence shape.
+    :param native: Whether the block is excluded from target validation.
+    :returns: None; assertions verify exclusion or retention per fence shape.
+    """
+    documents = GATE_LIB.MarkdownExamples("doc.md", markdown).documents()
+    assert (documents == ()) is native
+    if not native:
+        assert "runners" in {use.path for use in documents[0].uses()}
+
+
+def test_native_config_fences_parse_and_keep_keys_under_their_own_table() -> None:
+    """Parse every excluded Runner fence, since the gate no longer reads it.
+
+    A TOML table header owns every key below it until the next header; indentation
+    does not close it. Each fence must parse, and no key may sit less indented than
+    the first key of the table header above it, which is how a key meant for the
+    parent table ends up in a sub-table.
+
+    :returns: None; assertions check parsing and key placement in each fence.
+    """
+    source = REPO_ROOT / "ci-skills/references/gitlab-runner.md"
+    fences = re.findall(
+        r"^```toml native-config=gitlab-runner/config\.toml\n(.*?)^```$",
+        source.read_text(encoding="utf-8"),
+        re.DOTALL | re.MULTILINE,
+    )
+    assert len(fences) >= 25
+    runner_entries = []
+    for body in fences:
+        document = tomllib.loads(body)
+        runner_entries.extend(
+            entry for entry in document.get("runners", []) if isinstance(entry, dict)
+        )
+        first_key_indent = None
+        for line in body.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            indent = len(line) - len(line.lstrip())
+            if stripped.startswith("["):
+                first_key_indent = -1
+            elif first_key_indent == -1:
+                first_key_indent = indent
+            elif first_key_indent is not None:
+                assert indent >= first_key_indent, stripped
+    runner = next(entry for entry in runner_entries if "request_concurrency" in entry)
+    assert runner["allowed_docker_credential_helpers"] == {
+        "ecr-login": ["*.dkr.ecr.*.amazonaws.com"]
+    }
+    assert runner["monitoring"] == {}
+    assert "use_slot_cgroups" in runner
 
 
 # --- the gate, run as a command ------------------------------------------------------

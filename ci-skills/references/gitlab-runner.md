@@ -13,9 +13,9 @@ Top of `config.toml`, outside every `[[runners]]` entry. These apply to the whol
 
 ```toml native-config=gitlab-runner/config.toml
 # Comment: type | default | effect
-concurrent = 10                  # int | 1 | jobs running at once across every [[runners]] entry; caps the sum of their limits; 0 exits with a critical error
+concurrent = 10                  # int | 1 | jobs running at once across every [[runners]] entry; caps their total even when the limits add up to more; 0 exits with a critical error
 check_interval = 3               # int seconds | 3 | job request loop period, divided across the [[runners]] entries; 0 or lower restores 3
-log_level = "info"               # string | info | panic, fatal, error, warning, info or debug; a --log-level command flag wins
+log_level = "info"               # string | info | panic, fatal, error, warn, info or debug; a --log-level command flag wins
 log_format = "runner"            # string | runner | runner (ANSI color), text or json; a --log-format command flag wins
 log_field_schema_version = 0     # int | 0 | log fields standardized at or before this version use their standardized names; 0 keeps legacy names
 log_field_dual_emit_target = 0   # int | 0 | also emit standardized names for fields standardized up to this version; 0 off; must exceed the schema version
@@ -53,7 +53,7 @@ process stops, which otherwise is left to an external hook; the buckets shape th
   creation_phase_duration_seconds_buckets = [1, 2, 5, 10]   # array of floats | 1, 2, 5, 10, 20, 40, 80, 160, 320, 640 | per-phase buckets; need FF_DOCKER_MACHINE_JSON_OUTPUT and Docker Machine 0.16.2-gitlab.55+
   disable_creation_phase_metrics = false                    # bool | false | stop recording the phase histogram; phase durations are still logged
   [machine.shutdown_drain]
-    enabled = true          # bool | false | remove idle machines during shutdown; uses the global shutdown_timeout, so give it 300 seconds or more
+    enabled = true          # bool | false | remove idle machines during shutdown; uses the global shutdown_timeout, which the page's example raises to 600
     early = false           # bool | false | start removing idle machines when job requests stop instead of after the last job finishes
     concurrency = 3         # int | 3 | machines removed at once
     max_retries = 3         # int | 3 | removal attempts per machine
@@ -83,12 +83,10 @@ the environment. Multi-line scripts use a triple-quoted string.
   tls-key-file = ""                        # string | unset | private key of that client certificate
   limit = 0                                # int | 0 | jobs this entry handles at once; 0 is unlimited; the global concurrent still caps the total
   executor = "kubernetes"                  # string | unset | shell, docker, docker-windows, docker+machine, docker-autoscaler, instance, kubernetes, ssh, custom, parallels, virtualbox
-  shell = "bash"                           # string | platform default | bash, sh, powershell or pwsh for the generated job script
+  shell = "bash"                           # string | bash on Unix with sh as fallback; pwsh on Windows for the shell executor and new registrations; powershell on Windows for kubernetes and docker-windows | bash, sh, pwsh, powershell or legacy cmd for the generated job script
   builds_dir = ""                          # string | executor default | absolute directory for builds in the executor's context; $CI_BUILDS_DIR for jobs
   cache_dir = ""                           # string | executor default | absolute directory for local caches; docker needs it in volumes
   environment = ["ENV=value"]              # array of strings | unset | KEY=value pairs appended to or overwriting the job environment; FF_NAME=1 sets a feature flag
-  [runners.allowed_docker_credential_helpers]   # table of string = array | unset (no helper runs) | helper name or path to the registry globs it may serve for a job's DOCKER_AUTH_CONFIG; docker and kubernetes
-    ecr-login = ["*.dkr.ecr.*.amazonaws.com"]
   request_concurrency = 1                  # int | 1 | parallel job requests from this entry; a maximum under FF_USE_ADAPTIVE_REQUEST_CONCURRENCY
   strict_check_interval = false            # bool | false | true polls once per check_interval even after receiving a job; evens distribution, longer queue wait
   output_limit = 4096                      # int kilobytes | 4096 | maximum job log size
@@ -108,9 +106,11 @@ the environment. Multi-line scripts use a triple-quoted string.
   get_sources_timeout = "15m"              # duration | job timeout | deadline for clone or fetch including submodules; same fallback
   step_runner_image = ""                   # string | bundled | override the step-runner image injected for FF_SCRIPT_TO_STEP_MIGRATION and FF_CONCRETE
   proxy_exec = false                       # bool | unset | experiment; proxy command execution through the helper binary
-  [runners.monitoring]                     # table | unset | experiment; monitoring settings of this runner, from the configuration types
   use_slot_cgroups = false                 # bool | false | slot-derived cgroup names per concurrent job for resource isolation (docker-autoscaler)
   slot_cgroup_template = ""                # string | unset | template for those names with a ${slot} placeholder
+  [runners.allowed_docker_credential_helpers]   # table of string = array | unset (no helper runs) | helper name or path to the registry globs it may serve for a job's DOCKER_AUTH_CONFIG; docker and kubernetes
+    ecr-login = ["*.dkr.ecr.*.amazonaws.com"]
+  [runners.monitoring]                     # table | unset | experiment; monitoring settings of this runner, from the configuration types
   [runners.feature_flags]                  # table of FF_NAME = bool | page defaults | pinned flags that jobs cannot override; see Feature flags
     FF_SCRIPT_SECTIONS = true
 ```
@@ -132,7 +132,7 @@ Four small tables nested under one `[[runners]]` entry.
     [runners.referees.metrics]
       prometheus_address = "http://prometheus.example.internal:9090"   # string | unset | Prometheus server reachable from the runner manager when the job ends
       query_interval = 10                 # int seconds | unset | sampling interval of the time series
-      metric_queries = [                  # array of strings | unset | canonical_name:PromQL; {selector} is the runner instance label pair, {interval} the query_interval
+      queries = [                         # array of strings | unset | canonical_name:PromQL; {selector} is the runner instance label pair, {interval} the query_interval; the page example's metric_queries is not the key the referees type reads
         "cpu_seconds:rate(node_cpu_seconds_total{{selector}}[{interval}])",
       ]
   [runners.experimental.boot_verify]      # runs a synthetic job at process start; /health/ready waits for it and a failure exits non-zero
@@ -273,7 +273,7 @@ section below.
   bearer_token = ""                              # string | service account token | token used to create job Pods
   bearer_token_overwrite_allowed = false         # bool | false | let a job pass its own token in KUBERNETES_BEARER_TOKEN
   namespace = "gitlab-runner"                    # string | unset | namespace of job Pods; the Operator uses the Runner resource's namespace
-  namespace_overwrite_allowed = "ci-.*"          # regex string | unset (off) | pattern a job's KUBERNETES_NAMESPACE_OVERWRITE must match; the namespace must exist
+  namespace_overwrite_allowed = "ci-.*"          # regex string | unset (off) | pattern a job's KUBERNETES_NAMESPACE_OVERWRITE must match; the namespace must exist and the runner needs core API permissions there (Helm rbac.clusterWideAccess true)
   namespace_per_job = false                      # bool | false | one namespace per job; ignores namespace and namespace_overwrite_allowed
   service_account = "gitlab-runner-jobs"         # string | namespace default | service account of job Pods
   service_account_overwrite_allowed = "ci-.*"    # regex string | unset (off) | pattern a job's KUBERNETES_SERVICE_ACCOUNT_OVERWRITE must match
@@ -290,8 +290,8 @@ section below.
   helper_image_autoset_arch_and_os = false       # bool | false | pick the helper architecture and OS from the node
   privileged = false                             # bool | false | privileged flag on every container
   allow_privilege_escalation = false             # bool | unset (cluster default) | allowPrivilegeEscalation on every container
-  host_users = false                             # bool | unset (cluster default) | hostUsers on the Pod; false runs in its own user namespace; forced false with proc_mount unmasked or suspend
-  host_users_overwrite_allowed = false           # bool | false | let a job set KUBERNETES_HOST_USERS
+  host_users = false                             # bool | unset (cluster default) | hostUsers on the Pod; false runs in its own user namespace; forced false with proc_mount unmasked or suspend; 19.6+
+  host_users_overwrite_allowed = false           # bool | false | let a job set KUBERNETES_HOST_USERS; 19.6+
   runtime_class_name = "kata"                    # string | unset | RuntimeClass of every Pod; jobs fail when the cluster lacks it
   priority_class_name = "ci-jobs"                # string | cluster default | PriorityClass of job Pods
   scheduler_name = ""                            # string | default scheduler | scheduler that places job Pods
@@ -317,21 +317,21 @@ section below.
   cleanup_resources_timeout = "5m"               # duration | 5m | total time allowed for resource cleanup after the job
   retry_limit = 5                                # int | 5 | attempts for retryable API errors; backoff starts at 500 ms
   retry_backoff_max = 2000                       # int milliseconds | 2000 | backoff ceiling; not below 500
-  [runners.kubernetes.retry_limits]              # table of error substring = int | unset | per-error attempts; wins over retry_limit
-    "TLS handshake timeout" = 10
-    "exceeded quota" = 20
   print_pod_warning_events = true                # bool | true | print warning events while the Pod starts and after a failure; needs events list
   pod_disruption_budget = false                  # bool | false | one PodDisruptionBudget per job Pod against drains; needs poddisruptionbudgets permissions
   enable_service_links = false                   # bool | true (cluster default) | inject service environment variables in Docker links syntax
   dns_policy = "cluster-first"                   # string | cluster-first | none, default, cluster-first or cluster-first-with-host-net
   suspend_pvc_size = "20Gi"                      # string | 20Gi | PVC size for suspendable job environments (FF_SUSPENDABLE_ENVIRONMENTS)
   suspend_pvc_storage_class = ""                 # string | cluster default | StorageClass of that PVC
+  pod_labels_overwrite_allowed = ".*"            # regex string | unset (off) | pattern a job's KUBERNETES_POD_LABELS_* values must match
+  pod_annotations_overwrite_allowed = ".*"       # regex string | unset (off) | pattern a job's KUBERNETES_POD_ANNOTATIONS_* values must match
+  [runners.kubernetes.retry_limits]              # table of error substring = int | unset | per-error attempts; wins over retry_limit
+    "TLS handshake timeout" = 10
+    "exceeded quota" = 20
   [runners.kubernetes.pod_labels]                # table of string = string | unset | labels on every job Pod; values expand environment variables; runner.gitlab.com/* is read-only
     team = "platform"
-  pod_labels_overwrite_allowed = ".*"            # regex string | unset (off) | pattern a job's KUBERNETES_POD_LABELS_* values must match
   [runners.kubernetes.pod_annotations]           # table of string = string | unset | annotations on every job Pod; values expand environment variables
     "cluster-autoscaler.kubernetes.io/safe-to-evict" = "false"
-  pod_annotations_overwrite_allowed = ".*"       # regex string | unset (off) | pattern a job's KUBERNETES_POD_ANNOTATIONS_* values must match
 ```
 
 ### Kubernetes resource requests and limits
@@ -407,10 +407,10 @@ variables:
   KUBERNETES_HELPER_MEMORY_LIMIT: "512Mi"          # quantity | helper_memory_limit_overwrite_max_allowed | helper memory for cache or artifact heavy jobs
   KUBERNETES_SERVICE_CPU_REQUEST: "1"              # quantity | service_cpu_request_overwrite_max_allowed | every service; the same pattern for SERVICE_CPU_LIMIT, SERVICE_MEMORY_*, SERVICE_EPHEMERAL_STORAGE_*; a service's own variables: block overrides per service
   KUBERNETES_POD_CPU_REQUEST: "2"                  # quantity | pod_cpu_request_overwrite_max_allowed | Pod level; the same pattern for POD_CPU_LIMIT and POD_MEMORY_*
-  KUBERNETES_NAMESPACE_OVERWRITE: ci-$CI_COMMIT_REF_SLUG   # string | namespace_overwrite_allowed | existing namespace for this job's Pod
+  KUBERNETES_NAMESPACE_OVERWRITE: ci-$CI_COMMIT_REF_SLUG   # string | namespace_overwrite_allowed | existing namespace for this job's Pod; the runner needs cluster-wide RBAC to create Pods there
   KUBERNETES_SERVICE_ACCOUNT_OVERWRITE: ci-deployer        # string | service_account_overwrite_allowed | service account of this job's Pod
   KUBERNETES_BEARER_TOKEN: $DEPLOY_TOKEN           # string | bearer_token_overwrite_allowed | token used to create this job's Pod
-  KUBERNETES_HOST_USERS: "true"                    # bool | host_users_overwrite_allowed | Pod hostUsers for this job
+  KUBERNETES_HOST_USERS: "true"                    # bool | host_users_overwrite_allowed | Pod hostUsers for this job; 19.6+
   KUBERNETES_NODE_SELECTOR_1: "kubernetes.io/arch=arm64"   # key=value | node_selector_overwrite_allowed | adds to or replaces the runner node_selector; any suffix
   KUBERNETES_NODE_TOLERATIONS_1: "node-role.kubernetes.io/master:NoSchedule"   # key=value:Effect | node_tolerations_overwrite_allowed | extra toleration; empty value tolerates all
   KUBERNETES_POD_LABELS_1: "team=platform"         # key=value | pod_labels_overwrite_allowed | label on this job's Pod; runner.gitlab.com/* is read-only
@@ -644,14 +644,14 @@ without waiting for the cluster autoscaler. Pause Pods do not inherit `pod_label
 ```toml native-config=gitlab-runner/config.toml
 # Comment: type | default | effect
 [runners.kubernetes]
-  [runners.kubernetes.autoscaler]
+  [runners.kubernetes.autoscaler]                        # needs a ClusterRole: apps/deployments get, list, create, update, delete; scheduling.k8s.io/priorityclasses get, create
     max_pause_pods = 10                                  # int | 0 (unlimited) | ceiling on pause Pods
     pause_pod_image = "registry.k8s.io/pause:3.10"       # string | registry.k8s.io/pause:3.10 | pause Pod image; mirror it for offline clusters
     pause_pod_priority_class_name = "gitlab-runner-idle-capacity"   # string | gitlab-runner-idle-capacity, auto-created with priority -1 | lower than job Pods so they are preempted; a set value skips auto-creation
     pause_pod_image_pull_secrets = ["registry-credentials"]   # array of strings | unset | pull secrets for the pause image
-    [runners.kubernetes.autoscaler.pause_pod_labels]     # table of string = string | unset | labels on pause Pods; runner.gitlab.com/* ignored
+    [runners.kubernetes.autoscaler.pause_pod_labels]     # table of string = string | unset | labels on pause Pods; runner.gitlab.com/* ignored; 19.6+
       team = "platform"
-    [runners.kubernetes.autoscaler.pause_pod_annotations]   # table of string = string | unset | annotations on pause Pods
+    [runners.kubernetes.autoscaler.pause_pod_annotations]   # table of string = string | unset | annotations on pause Pods; 19.6+
       "cluster-autoscaler.kubernetes.io/safe-to-evict" = "true"
     [[runners.kubernetes.autoscaler.policy]]             # the last policy whose periods match now wins
       periods = ["* 8-17 * * mon-fri"]                   # array of cron strings | "* * * * *" | when this policy applies
@@ -665,7 +665,7 @@ without waiting for the cluster autoscaler. Pause Pods do not inherit `pod_label
       idle_count = 0
 ```
 
-## Cache
+## Caching
 
 `[runners.cache]` sends job caches to object storage so every runner and executor instance shares them. One
 backend table matches `Type`. Compression and transfer tuning are job variables; see Speed up and optimization.
@@ -985,7 +985,7 @@ stage that is full.
 
 ```toml native-config=gitlab-runner/config.toml
 # Comment: type | default | effect on throughput
-concurrent = 20                      # int | 1 | process cap on running jobs across every entry; the sum of limits cannot exceed it; 0 exits
+concurrent = 20                      # int | 1 | process cap on running jobs across every entry; it holds even when the limits add up to more; 0 exits
 check_interval = 3                   # int seconds | 3 | request period shared by the entries: each worker sleeps check_interval / number of entries between requests
 [[runners]]
   limit = 10                         # int | 0 (unlimited) | cap for this entry; effective cap = min(limit, concurrent minus jobs on other entries)
@@ -995,7 +995,7 @@ check_interval = 3                   # int seconds | 3 | request period shared b
     FF_USE_ADAPTIVE_REQUEST_CONCURRENCY = true   # bool | true | request_concurrency becomes a ceiling; the live count follows the successful request rate
   [runners.autoscaler]
     capacity_per_instance = 1        # int | unset | jobs per instance; concurrent = max_instances x capacity_per_instance (10 x 1 = 10, 10 x 5 = 50, 4 x 2 = 8)
-    max_instances = 10               # int | 0 (unlimited) | instance ceiling counting pending and deleting instances
+    max_instances = 20               # int | 0 (unlimited) | instance ceiling counting pending and deleting instances; 20 x 1 matches concurrent above
     max_use_count = 1                # int | 0 (unlimited) | retire an instance after this many jobs
     [[runners.autoscaler.policy]]
       idle_count = 2                 # int | unset | idle job slots kept warm; counts jobs, not machines
@@ -1082,7 +1082,7 @@ variables:
     enabled = true                         # bool | executor default | allows GIT_CLONE_PATH
   [runners.docker]
     pull_policy = ["if-not-present", "always"]   # string or array | always | reuse local images first; a registry mirror or the Dependency Proxy cuts pulls further
-    helper_image = "registry.example.internal/gitlab-runner-helper:x86_64-v${CI_RUNNER_VERSION}"   # string | registry.gitlab.com | local mirror
+    helper_image = "registry.example.internal/gitlab-runner-helper:x86_64-v${CI_RUNNER_VERSION}"   # string | registry.gitlab.com/gitlab-org/gitlab-runner/gitlab-runner-helper:<arch>-<revision> | local mirror
     volumes = ["/cache"]                   # array of strings | unset | local cache volume between jobs on one host
   [runners.kubernetes]
     helper_memory_limit = "512Mi"          # quantity | unset | more helper memory for cache and artifact archiving
@@ -1188,8 +1188,10 @@ template into the generated file.
 ```
 
 ```bash
-oc create configmap custom-config-toml --from-file config.toml=custom-config.toml
+oc -n gitlab-runner create configmap custom-config-toml --from-file config.toml=custom-config.toml
 ```
+
+The ConfigMap lives in the Runner resource's namespace, `gitlab-runner` in this example.
 
 Four settings are not read from the template because of a known Operator issue; set them as environment
 variables in the ConfigMap named by `spec.env`.
@@ -1211,9 +1213,10 @@ lets the Kubernetes scheduler decide when each job Pod runs.
 
 ## Sources
 
-GitLab Runner documentation and source at release 19.6: `docs/configuration/advanced-configuration.md`,
+GitLab Runner documentation and source at tag v19.5.0, with keys marked 19.6+ taken from the development documentation
+after that tag: `docs/configuration/advanced-configuration.md`,
 `docs/configuration/feature-flags.md`, `docs/configuration/speed_up_job_execution.md`,
 `docs/configuration/configuring_runner_operator.md`, `docs/executors/kubernetes/_index.md`,
-`docs/executors/docker_autoscaler.md`, `docs/executors/instance.md`, `common/config.go` and
-`cache/cacheconfig/cacheconfig.go` in `gitlab-org/gitlab-runner`. GitLab documentation at the newest release:
-`doc/ci/runners/configure_runners.md` in `gitlab-org/gitlab` for the job variables.
+`docs/executors/docker_autoscaler.md`, `docs/executors/instance.md`, `docs/install/operator.md`, `common/config.go`,
+`cache/cacheconfig/cacheconfig.go` and `referees/metrics.go` in `gitlab-org/gitlab-runner`. GitLab documentation at
+tag v19.5.0-ee: `doc/ci/runners/configure_runners.md` in `gitlab-org/gitlab` for the job variables.

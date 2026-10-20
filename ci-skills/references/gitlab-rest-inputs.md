@@ -10,8 +10,10 @@ itself. Each block is one request body with every accepted attribute as a traili
 ## Runner
 
 `gitlab_runner.py create` calls the first endpoint and saves the returned token; `tag` and the record fields go
-through the second; `assign` through the third. Creation needs a token with the `create_runner` scope, the rest
-the `api` scope; the caller is an Owner of the target or an administrator.
+through the second; `assign` through the third. Creation needs the `create_runner` scope and an Owner or administrator
+whose group or project allows runner registration. Update, assign and unassign need the `manage_runner` scope with
+the Maintainer or Owner role for a project runner, Owner for a group runner, administrator for an instance runner;
+only an administrator unassigns a locked runner.
 
 ```yaml
 # POST /user/runners
@@ -76,8 +78,9 @@ state_event: close               # close, activate | unchanged | state transitio
 
 ## Pipeline
 
-`gitlab_pipeline.py` reads a pipeline; starting one is the endpoint below. Merge request pipelines use the merge
-requests endpoint instead.
+`gitlab_pipeline.py start --ref REF --variable KEY=VALUE` wraps this endpoint with a plan, a confirmed apply and a
+read-back; the raw body is for `inputs` or `variable_type: file`, which the command does not expose. Merge request
+pipelines use the merge requests endpoint instead.
 
 ```yaml
 # POST /projects/:id/pipeline
@@ -186,30 +189,30 @@ ci_access:
   instance: {}                               # object | unset | every project of the instance; Self-Managed with organization_cluster_agent_authorization_enabled on
   access_as:                                 # object | agent: {} | identity the agent presents to the Kubernetes API; one key; also accepted inside one projects or groups entry
     agent: {}                                # default; the agent's service account
-    ci_job: {}                               # Premium; impersonate gitlab:ci_job:<job id> with groups gitlab:ci_job, gitlab:group:<id>, gitlab:group_env_tier:<id>:<tier>, gitlab:project:<id>, gitlab:project_env:<id>:<slug>, gitlab:project_env_tier:<id>:<tier>
-    impersonate:                             # Premium; a static identity
-      username: ci-deployer                  # string | required | impersonated user
-      uid: ""                                # string | unset | impersonated UID
-      groups: [deployers]                    # list of strings | unset | impersonated groups
-      extra:                                 # object of string lists | unset | extra impersonation fields
-        team: [platform]
+    # ci_job: {}                             # Premium; impersonate gitlab:ci_job:<job id> with groups gitlab:ci_job, gitlab:group:<id>, gitlab:group_env_tier:<id>:<tier>, gitlab:project:<id>, gitlab:project_env:<id>:<slug>, gitlab:project_env_tier:<id>:<tier>
+    # impersonate:                           # Premium; a static identity
+    #   username: ci-deployer                # string | required | impersonated user
+    #   uid: ""                              # string | unset | impersonated UID
+    #   groups: [deployers]                  # list of strings | unset | impersonated groups
+    #   extra:                               # object of string lists | unset | extra impersonation fields
+    #     team: [platform]
 user_access:
   projects:                                  # list, up to 500 | unset | projects whose members get access
     - id: group/project-1
   groups:                                    # list, up to 500 | unset | groups whose members get access, descendants included
     - id: group/subgroup
-  access_as:                                 # object | required | one key
+  access_as:                                 # object | agent: {} | one key
     agent: {}                                # requests use the agent service account
-    user: {}                                 # Premium; impersonate gitlab:user:<username> with groups gitlab:user, gitlab:project_role:<project id>:<role> and gitlab:group_role:<group id>:<role>
+    # user: {}                               # Premium; impersonate gitlab:user:<username> with groups gitlab:user, gitlab:project_role:<project id>:<role> and gitlab:group_role:<group id>:<role>
 ```
 
-With `user: {}`, bind Kubernetes roles to those group names, for example a `ClusterRoleBinding` whose subject is
-the group `gitlab:project_role:123:maintainer`. Only projects and groups listed directly under `user_access`
-produce role groups.
+With `user: {}` instead of `agent: {}`, bind Kubernetes roles to those group names, for example a
+`ClusterRoleBinding` whose subject is the group `gitlab:project_role:123:maintainer`. Only projects and groups
+listed directly under `user_access` produce role groups.
 
 ## Sources
 
-GitLab documentation at the newest release in `gitlab-org/gitlab`: `doc/api/users.md`, `doc/api/runners.md`,
+GitLab documentation at tag v19.5.0-ee in `gitlab-org/gitlab`: `doc/api/users.md`, `doc/api/runners.md`,
 `doc/api/milestones.md`, `doc/api/group_milestones.md`, `doc/api/pipelines.md`, `doc/api/pipeline_schedules.md`,
 `doc/api/wikis.md`, `doc/api/project_integrations.md`, `doc/user/clusters/agent/ci_cd_workflow.md`,
 `doc/user/clusters/agent/user_access.md`. The generated OpenAPI document `doc/api/openapi/openapi_v2.yaml`

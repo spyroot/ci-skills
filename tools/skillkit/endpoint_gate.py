@@ -19,10 +19,12 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from enum import IntEnum, StrEnum
 from pathlib import Path
-from typing import Optional, TypeAlias, Union
+from typing import Final, Optional, TypeAlias, Union
 
+from lib.python.core.catalog import TARGET_FILENAME
 from lib.python.core.endpoints import TARGET_CONTRACT, Role, TargetContract
 from lib.python.core.json_types import JSONObject
+from lib.python.core.project_binding import SMOKE_TARGET_FILENAME
 from lib.python.core.runtime import run_command
 from lib.python.sys import status
 
@@ -65,7 +67,11 @@ class ParsedTarget:
 SCHEMA_VERSION = "1.0"
 REPORT_KIND = "ci_skills_endpoints"
 CONTRACT_SOURCE = "ci-skills/lib/python/core/endpoints.py"
-TARGET_TEMPLATE = "target.toml.template"
+# Basenames of the target format, compared without case; a fence that names one of
+# them is a target example even when it carries native-config.
+TARGET_FILENAMES: Final = frozenset(
+    name.casefold() for name in (TARGET_FILENAME, SMOKE_TARGET_FILENAME)
+)
 
 
 class Rule(StrEnum):
@@ -398,14 +404,20 @@ class MarkdownExamples:
         """Recognize one explicit native TOML filename while retaining target checks.
 
         :param info: Fence attributes after the TOML language name.
-        :returns: True for one native-config path ending in .toml whose basename
-            is not target.toml; missing, repeated or malformed attributes stay checked.
+        :returns: True for exactly one native-config path whose basename has a name
+            before .toml and is not a target filename, compared without case; a
+            missing, repeated, nameless or non-TOML value stays checked.
         """
         paths = cls._NATIVE_CONFIG.findall(info)
         if len(paths) != 1:
             return False
-        filename = Path(paths[0].replace("\\", "/")).name
-        return filename.endswith(".toml") and filename != Path(TARGET_TEMPLATE).stem
+        filename = Path(paths[0].replace("\\", "/")).name.casefold()
+        suffix = ".toml"
+        return (
+            filename.endswith(suffix)
+            and len(filename) > len(suffix)
+            and filename not in TARGET_FILENAMES
+        )
 
     @staticmethod
     def _closes(line: str, fence: str) -> bool:
@@ -649,7 +661,7 @@ class EndpointGate:
         Repository document globs whose fenced TOML examples are checked.
     """
 
-    TEMPLATE = TARGET_TEMPLATE
+    TEMPLATE = "target.toml.template"
     # Shipped documents whose fenced TOML examples show a target file. Phase
     # plans under docs/ propose future keys and are not examples of this format.
     EXAMPLE_PATTERNS = ("README.md", "ci-skills/**/*.md")
