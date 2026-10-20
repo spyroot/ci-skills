@@ -21,6 +21,7 @@ the real one is a test failure rather than a surprise at runtime.
 
 from __future__ import annotations
 
+import re
 from argparse import Namespace
 from collections.abc import Mapping, MutableMapping, Sequence
 from types import MappingProxyType
@@ -118,7 +119,7 @@ ACCESS_PROTOCOL: Mapping[str, Union[str, Sequence[Mapping[str, str]]]] = {
     "no_search": (
         "Do not hunt for credentials. Run the diagnostic you need: its access "
         "receipt names the effective source for each required authority. "
-        "Use access_check.py when you need the full three-authority receipt."
+        "Use access_check.py to check the configured GitHub, GitLab and Kubernetes authorities."
     ),
     "github": [
         {
@@ -266,9 +267,10 @@ COMMANDS: Mapping[str, CommandDefinition] = {
     },
     "ocp_node_onboard.py": {
         "kind": "ocp_node_onboard",
-        "purpose": "Build an OpenShift node ISO in-cluster and verify its delivery to selected storage.",
+        "purpose": "Build an OpenShift node ISO in-cluster, join its node, and verify selected storage.",
         "use_when": "Prepare a node boot image from the caller's native MAC or YAML input; "
-        "inspect or release a previous run. See references/ocp-node-image.md.",
+        "join its booted node, inspect it or release a previous run. "
+        "See references/ocp-node-image.md.",
         "requires": ("kubernetes",),
         "capabilities": (),
         "mutates": True,
@@ -278,14 +280,16 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--network-config-path": "native network YAML used with the MAC route, passed unchanged",
             "--destination": "five-field cluster storage JSON; schemas/artifact-destination.schema.json",
             "--tool-pod-spec": "optional CI12.0 tool override; schemas/tool-pod.schema.json",
+            "--node-name": "exact Kubernetes Node name selected for join",
+            "--ip-address": "joining node address for native monitor; repeatable",
             "--pull-secret-namespace": "existing registry Secret namespace; default openshift-config",
             "--pull-secret-name": "existing registry Secret name; default pull-secret",
             "--pull-secret-key": "existing registry Secret data key; default .dockerconfigjson",
-            "--run-id": "returned run identifier for verification/removal, also used in logs",
+            "--run-id": "returned build run identifier for join, verification or removal",
             "--timeout": "positive operation timeout in seconds (default: 1800)",
             "--live-plan": "resolve live prerequisites and produce the confirmation digest",
-            "--apply": "perform the exact confirmed build or removal",
-            "--confirm-plan": "plan digest binding target, native inputs, storage, tools and functional code",
+            "--apply": "perform the exact confirmed build, join or removal",
+            "--confirm-plan": "plan digest binding target, operation inputs and functional code",
             "--receipt-out": "write the sanitized result to this exact path",
         },
         "subcommands": {
@@ -306,6 +310,16 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "read_back": "Exact stored artifact identity, size/SHA-256 and embedded Ignition.",
                 "result_schema": "schemas/results/ocp-node-onboard.schema.json",
             },
+            "join": {
+                "purpose": "Approve the booted node's selected CSRs and verify its Ready identity.",
+                "required_options": ["--run-id", "--node-name", "--ip-address"],
+                "mutates": True,
+                "side_effects": "Confirmed join approves only the exact hostname's client and serving "
+                "signers, then removes the owned build scope; it never boots or deletes a node.",
+                "read_back": "Client bootstrap-completion evidence, issued serving request state and exact Ready "
+                "Node hostname, roles and observed IPs.",
+                "result_schema": "schemas/results/ocp-node-onboard.schema.json",
+            },
             "remove": {
                 "purpose": "Remove owned run resources while preserving persistent destination storage and ISO.",
                 "required_options": ["--run-id"],
@@ -317,13 +331,13 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "related": ("prepare_tool_pod.py", "storage_report.py"),
-        "references": ("OpenShift node image",),
+        "references": ("Native OCP YAML example", "Native OCP command flags"),
         "required_tools": ("kubectl", "oc", "curl (default tool discovery)"),
-        "returns": "Shared workflow report with native completion, callback observations, final cluster artifact "
+        "returns": "Shared workflow report with native completion, join read-back, final cluster artifact "
         "identity/lifetime, plan, provenance and cleanup evidence.",
-        "execution_surface": "installed skill controls tools and ISO generation inside the selected Kubernetes cluster",
-        "side_effects": "Build/remove use plan confirmation. Native oc creates its temporary workload and RBAC; "
-        "the wrapper grants no additional cluster rights. ISO bytes stay in the cluster.",
+        "execution_surface": "installed skill controls tools, ISO generation and node join in the selected cluster",
+        "side_effects": "Build/join/remove use plan confirmation. Native oc creates temporary build resources; "
+        "join approves only the selected node's two signers. ISO bytes stay in the cluster.",
         "description": "Build requires --destination and exactly one of --mac-address or --spec. "
         "The caller selects real NIC/network/disk values; ci-skills passes native YAML unchanged to OpenShift "
         "and returns native errors. Tools are prepared inside the Pod through CI12.0. "
@@ -348,6 +362,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             {
                 "description": "Inspect a previous run's cluster-held artifact",
                 "command": "ocp_node_onboard.py verify --run-id RUN_ID --json",
+            },
+            {
+                "description": "Plan the selected booted node's exact join sequence",
+                "command": "ocp_node_onboard.py join --run-id RUN_ID --node-name worker-01 "
+                "--ip-address 192.0.2.10 --live-plan --json",
             },
             {
                 "description": "Plan removal while preserving persistent output",
@@ -510,19 +529,93 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "side_effects": "Only confirmed operations mutate selected resources; temporary helpers "
         "are cleaned on exit.",
     },
+    "image_build_readiness.py": {
+        "kind": "image_build_readiness",
+        "purpose": "Probe nested Podman or build and publish a toolbox for a running GitLab runner.",
+        "use_when": "Prove nested execution alone, or configure a GitLab runner with a published toolbox.",
+        "requires": ("kubernetes",),
+        "capabilities": ("node_scoped", "namespaced"),
+        "mutates": True,
+        "options": {
+            "--namespace": "existing namespace; default creates a run namespace retained by a successful chain",
+            "--probe-image": "digest-pinned image providing Podman; default is Linux amd64",
+            "--inner-image": "digest-pinned inner test image; default is Linux amd64",
+            "--timeout": "maximum probe duration in seconds",
+            "--cpu-request": "probe container CPU request",
+            "--cpu-limit": "probe container CPU limit",
+            "--memory-request": "probe container memory request",
+            "--memory-limit": "probe container memory limit",
+            "--storage-size": "maximum temporary container-storage volume size",
+            "--live-plan": "read target identity and select a Ready worker without mutation",
+            "--apply": "run the confirmed operation and read back its result",
+            "--confirm-plan": "exact fingerprint returned by the live plan",
+            "--receipt-out": "write a sanitized operation receipt to this exact path",
+            "--toolbox-spec": "chain: existing toolbox specification with gitlab-runner, git and podman",
+            "--project": "chain: GitLab project for a project runner",
+            "--group": "chain: GitLab group for a group runner",
+            "--runner-description": "chain: unique description for the runner record",
+            "--runner-label": "chain: runner tag; repeatable",
+        },
+        "subcommands": {
+            "probe": {
+                "purpose": "Run a temporary Podman Job on one selected worker.",
+                "requires_authorities": ("kubernetes",),
+                "result_schema": "schemas/results/image-build-readiness.schema.json",
+                "mutates": True,
+                "side_effects": "Creates and removes a temporary namespace, conditional "
+                "run-owned SCC RoleBinding, script ConfigMap and privileged Job.",
+                "read_back": "Exact permission source, optional RoleBinding UID, "
+                "Job-owned Pod exit, probe rows and resource absence.",
+            },
+            "chain": {
+                "purpose": "Build and publish the toolbox, then configure a runner using that image.",
+                "requires_authorities": ("kubernetes", "gitlab", "harbor"),
+                "required_options": (
+                    "--toolbox-spec",
+                    "--runner-description",
+                    "--runner-label",
+                ),
+                "result_schema": "schemas/results/image-build-readiness.schema.json",
+                "mutates": True,
+                "side_effects": "Publishes the toolbox image and retains the runner record, manager and "
+                "required cluster resources for caller use.",
+                "read_back": "Published toolbox digest and the configured runner deployment using that image.",
+            },
+        },
+        "related": (
+            "toolbox.py",
+            "harbor_pull.py",
+            "gitlab_runner_manager.py",
+        ),
+        "references": (
+            "Nested Podman readiness",
+            "Image build chain",
+            "OpenShift SCC access",
+        ),
+        "required_tools": (
+            "kubectl",
+            "oc on OpenShift; chain requires oc, glab and skopeo",
+        ),
+        "returns": "A plan or operation evidence: probe marker rows and cleanup, or the published toolbox "
+        "digest and retained runner manager workload.",
+        "execution_surface": "configured Kubernetes API; chain also uses the selected GitLab project and Harbor registry",
+        "side_effects": "Probe creates and removes temporary cluster resources. Chain publishes the toolbox "
+        "and leaves its configured runner and manager available.",
+    },
     "access_check.py": {
         "kind": "access_check",
         "purpose": "Prove access to every selected authority and emit one receipt.",
         "use_when": (
-            "When you need one live receipt proving GitHub, GitLab, and "
-            "Kubernetes access on the execution host."
+            "When you need one live receipt for the configured GitHub, GitLab "
+            "or Kubernetes authorities on the execution host."
         ),
-        "requires": DEFAULT_AUTHORITIES,
+        "requires": (),
+        "optional_requires": DEFAULT_AUTHORITIES,
         "capabilities": (),
         "options": {
-            "--publication": "also require repository administration and the declared required checks",
-            "--job-url": "also prove access to one job, its pipeline, runner and trace",
-            "--ceph-namespace": "also prove Ceph health, OSD, PG and Pod reads in the selected namespace",
+            "--publication": "require GitHub, repository administration and the declared required checks",
+            "--job-url": "require GitLab and prove access to one job, its pipeline, runner and trace",
+            "--ceph-namespace": "require Kubernetes and prove Ceph health, OSD, PG and Pod reads",
             "--receipt-out": "write the committable receipt, with host paths digested",
         },
         "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
@@ -565,20 +658,88 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         ),
     },
     "gitlab_pipeline.py": {
-        "related": ("gitlab_job.py", "gitlab_milestone.py"),
+        "related": (
+            "gitlab_job.py",
+            "gitlab_milestone.py",
+            "gitlab_runner.py",
+        ),
         "kind": "gitlab_pipeline",
-        "purpose": "Read one CI pipeline and bounded job progress by stage.",
-        "use_when": "You need the status and progress of an exact GitLab pipeline.",
+        "purpose": "Read, start, or watch an exact GitLab CI pipeline.",
+        "use_when": (
+            "You need exact pipeline state, a confirmed start, or bounded "
+            "completion evidence."
+        ),
         "requires": ("gitlab",),
         "capabilities": (),
+        "required_tools": ("glab",),
+        "mutates": True,
+        "side_effects": "Confirmed start may create one pipeline on the selected ref.",
+        "references": ("GitLab pipeline execution",),
         "options": {
-            "--project": "exact project path or numeric ID; otherwise use gitlab.project",
-            "--pipeline-id": "numeric ID of the pipeline to read",
+            "--project": (
+                "exact project path or numeric ID; otherwise use gitlab.project"
+            ),
+            "--run-id": (
+                "diagnostic identifier; start reuses it for a retry and changes it for a new identical build"
+            ),
+            "--pipeline-id": "numeric pipeline ID for get or watch",
+            "--ref": "start ref; otherwise the live project default branch",
+            "--variable": (
+                "pipeline variable as KEY=VALUE; CI_SKILLS_PIPELINE_PLAN_DIGEST is managed by start"
+            ),
+            "--require-protected-ref": (
+                "require the resolved start branch to be protected"
+            ),
+            "--expected-sha": (
+                "require the ref to resolve to this full lowercase commit SHA"
+            ),
+            "--related-name": (
+                "watch newer same-ref pipelines whose names match this regex"
+            ),
+            "--interval": "positive watch polling interval in seconds (default 10)",
+            "--timeout": "positive watch deadline or start request timeout in seconds",
+            "--live-plan": (
+                "resolve the exact start ref and SHA without creating a pipeline"
+            ),
+            "--apply": "create the pipeline selected by the confirmed live plan",
+            "--confirm-plan": "exact SHA-256 digest printed by --live-plan",
+            "--receipt-out": "write one portable start or watch result",
         },
-        "required_options": ("--pipeline-id",),
+        "subcommands": {
+            "get": {
+                "purpose": "Read one exact pipeline and its bounded jobs.",
+                "required_options": ["--pipeline-id"],
+                "mutates": False,
+                "read_back": "GitLab pipeline and job APIs for the selected numeric ID.",
+            },
+            "start": {
+                "purpose": (
+                    "Resolve an exact ref and commit, then start one confirmed pipeline."
+                ),
+                "required_options": [],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "mutates": True,
+                "side_effects": (
+                    "Confirmed apply creates one pipeline or returns NO_OP for its verified plan marker."
+                ),
+                "read_back": (
+                    "GET the exact pipeline and variables; require project, ref, SHA and plan marker."
+                ),
+            },
+            "watch": {
+                "purpose": "Watch one bounded pipeline graph to settlement or timeout.",
+                "required_options": ["--pipeline-id"],
+                "result_schema": "schemas/results/gitlab-pipeline-watch.schema.json",
+                "mutates": False,
+                "read_back": (
+                    "Poll root, child, related and job state through bounded GitLab reads."
+                ),
+            },
+        },
         "returns": (
-            "One validated pipeline with stage and job status counts, up to 500 "
-            "job records, and a PARTIAL result when the job cap is exceeded."
+            "Get returns one validated pipeline and bounded jobs. Start returns an "
+            "offline or live plan, or a verified new or existing plan identity. Watch returns "
+            "bounded graph completion, success, changes and retrieve choices."
         ),
     },
     "gitlab_access.py": {
@@ -665,6 +826,97 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "returns": "A sanitized plan or verified issue IID and independent GET evidence.",
+    },
+    "gitlab_repository.py": {
+        "kind": "gitlab_repository",
+        "purpose": "Commit caller-supplied files to a GitLab branch and verify their bytes.",
+        "use_when": "Create or update project source, a Dockerfile or pipeline configuration.",
+        "requires": ("gitlab",),
+        "capabilities": (),
+        "mutates": True,
+        "related": ("gitlab_pipeline.py", "gitlab_mr.py"),
+        "references": ("GitLab repository commits",),
+        "required_tools": ("glab",),
+        "side_effects": "Confirmed apply creates one commit and optionally its requested branch; GitLab may trigger the project's configured pipeline.",
+        "options": {
+            "--project": "exact project path or numeric ID",
+            "--branch": "destination branch",
+            "--start-branch": "existing branch or commit to start a new branch from",
+            "--commit-message": "message for this commit",
+            "--actions-file": "JSON array of native GitLab create/update file actions",
+            "--apply": "perform the confirmed commit",
+            "--confirm-plan": "SHA-256 fingerprint printed by the dry-run plan",
+            "--timeout": "maximum seconds for each external request",
+            "--receipt-out": "write the verified branch, commit and file digests",
+        },
+        "subcommands": {
+            "commit": {
+                "required_options": ["--branch", "--commit-message", "--actions-file"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "mutates": True,
+                "read_back": "Read the commit, exact file bytes and final branch head.",
+            },
+        },
+        "examples": [
+            {
+                "description": "Plan files on a new branch",
+                "command": 'gitlab_repository.py commit --project "$PROJECT" --branch "$BRANCH" --start-branch "$BASE" --commit-message "Add consumer example" --actions-file actions.json',
+            },
+        ],
+        "returns": "A plan or verified branch, commit SHA and per-file content digests.",
+    },
+    "gitlab_mr.py": {
+        "kind": "gitlab_merge_request",
+        "purpose": "Create a GitLab merge request or attach it to a milestone.",
+        "use_when": "Open an MR for selected branches or assign an existing MR's milestone.",
+        "requires": ("gitlab",),
+        "capabilities": (),
+        "mutates": True,
+        "related": (
+            "gitlab_repository.py",
+            "gitlab_milestone.py",
+            "gitlab_pipeline.py",
+        ),
+        "references": ("GitLab merge requests",),
+        "required_tools": ("glab",),
+        "side_effects": "Confirmed apply creates one MR or changes only the selected MR's milestone.",
+        "options": {
+            "--project": "exact project path or numeric ID",
+            "--source-branch": "existing source branch for create",
+            "--target-branch": "existing target branch for create",
+            "--title": "MR title for create",
+            "--mr-iid": "project-local MR number for update, not its global ID",
+            "--milestone-id": "global milestone ID, not its project-local IID",
+            "--apply": "perform the confirmed MR change",
+            "--confirm-plan": "SHA-256 fingerprint printed by the dry-run plan",
+            "--timeout": "maximum seconds for each external request",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "create": {
+                "required_options": ["--source-branch", "--target-branch", "--title"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "mutates": True,
+                "read_back": "Read the exact MR IID, branches, title and requested milestone.",
+            },
+            "update": {
+                "required_options": ["--mr-iid", "--milestone-id"],
+                "result_schema": GITLAB_ACTION_SCHEMA,
+                "mutates": True,
+                "read_back": "Read the selected MR and its assigned milestone ID.",
+            },
+        },
+        "examples": [
+            {
+                "description": "Plan an MR",
+                "command": 'gitlab_mr.py create --project "$PROJECT" --source-branch "$BRANCH" --target-branch "$BASE" --title "Consumer example"',
+            },
+            {
+                "description": "Plan its milestone assignment",
+                "command": 'gitlab_mr.py update --project "$PROJECT" --mr-iid "$MR_IID" --milestone-id "$MILESTONE_ID"',
+            },
+        ],
+        "returns": "A plan or verified MR ID, project-local IID and milestone ID.",
     },
     "gitlab_wiki.py": {
         "kind": "gitlab_wiki",
@@ -771,6 +1023,83 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "returns": "Public runner fields, a sanitized plan, or verified before/after action evidence.",
+    },
+    "gitlab_runner_manager.py": {
+        "kind": "gitlab_runner_manager",
+        "purpose": "Deploy or remove one toolbox-backed GitLab shell runner.",
+        "use_when": "A pre-created project or group runner must execute on the "
+        "exact worker proven ready for Podman.",
+        "requires": ("gitlab", "kubernetes", "harbor"),
+        "capabilities": ("namespaced", "node_scoped"),
+        "mutates": True,
+        "options": {
+            "--project": "exact project path or numeric ID; otherwise use "
+            "gitlab.project",
+            "--group": "exact group path or numeric ID; otherwise use gitlab.group",
+            "--runner-id": "positive ID returned by gitlab_runner.py create",
+            "--description": "exact description used to create the runner record",
+            "--label": "expected GitLab runner tag; repeat for multiple tags",
+            "--image": "digest-pinned toolbox image containing gitlab-runner and "
+            "podman",
+            "--token-file": "one-time token file written by gitlab_runner.py create",
+            "--namespace": "existing namespace to retain; omit for one run-owned "
+            "namespace",
+            "--node": "exact worker already verified by image_build_readiness.py",
+            "--cpu-request": "runner CPU request; repeat the proven probe value",
+            "--cpu-limit": "runner CPU limit; repeat the proven probe value",
+            "--memory-request": "runner memory request; repeat the proven probe value",
+            "--memory-limit": "runner memory limit; repeat the proven probe value",
+            "--storage-size": "runner Podman storage limit; repeat the proven probe value",
+            "--apply": "perform the confirmed operation",
+            "--confirm-plan": "exact fingerprint from the preceding plan",
+            "--timeout": "operation timeout in seconds",
+            "--receipt-out": "write a sanitized operation receipt",
+        },
+        "subcommands": {
+            "deploy": {
+                "required_options": [
+                    "--runner-id",
+                    "--description",
+                    "--label",
+                    "--image",
+                    "--token-file",
+                    "--node",
+                ],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+                "requires_authorities": ["gitlab", "kubernetes", "harbor"],
+                "side_effects": "Confirmed apply opens or reuses one run scope, "
+                "creates a run-owned SCC RoleBinding only when required, and "
+                "retains the verified manager workload.",
+                "read_back": "Exact-node privileged Deployment and immutable Pod "
+                "image, then the exact scoped GitLab runner online with contact "
+                "evidence.",
+            },
+            "delete": {
+                "required_options": ["--runner-id", "--description", "--run-id"],
+                "result_schema": "schemas/results/toolbox-workflow.schema.json",
+                "requires_authorities": ["gitlab", "kubernetes"],
+                "side_effects": "Confirmed apply removes only run-owned manager "
+                "resources and preserves the GitLab runner record.",
+                "read_back": "Owned Deployment and Secrets absent, exact runner "
+                "record preserved with its current cached status, run-owned SCC "
+                "RoleBinding absent, and owned generated namespace absent.",
+            },
+        },
+        "related": (
+            "gitlab_runner.py",
+            "gitlab_pipeline.py",
+            "gitlab_job.py",
+            "image_build_readiness.py",
+        ),
+        "references": ("GitLab runner manager", "OpenShift SCC access"),
+        "required_tools": ("glab", "kubectl", "oc on OpenShift"),
+        "returns": "A run ID and confirmed plan, or verified workload and exact "
+        "GitLab runner read-back with cleanup evidence.",
+        "execution_surface": "installed skill, configured provider APIs, and the "
+        "caller-selected digest-pinned toolbox image",
+        "side_effects": "Deploy uses GitLab, Kubernetes and Harbor; delete uses "
+        "GitLab and Kubernetes only. Provider runner deletion remains "
+        "gitlab_runner.py delete.",
     },
     "storage_report.py": {
         "kind": "storage_report",
@@ -998,7 +1327,7 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
     },
 }
 
-PROPOSITION_VERSION: Final = "2.0"
+PROPOSITION_VERSION: Final = "3.0"
 PROPOSITION_CLUSTERS: Final = MappingProxyType(
     {
         "glab": "gitlab",
@@ -1025,72 +1354,46 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Tool input, preparation, reuse and removal examples.",
             "pointer": "references/tool-pod.md",
         },
-        "OpenShift node image": {
-            "summary": "Native OCP YAML, cluster destination and ISO lifecycle examples.",
-            "pointer": "references/ocp-node-image.md",
+        "GitLab pipeline execution": {
+            "summary": "Exact pipeline read, confirmed start and bounded watch flow.",
+            "pointer": "references/gitlab-pipeline.md",
+        },
+        "Nested Podman readiness": {
+            "summary": "Podman probe inputs, planning, execution and evidence.",
+            "pointer": "references/podman-readiness.md",
+        },
+        "Image build chain": {
+            "summary": "Build and publish a toolbox, then start a runner using its immutable image.",
+            "pointer": "references/image-build-chain.md",
+        },
+        "OpenShift SCC access": {
+            "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
+            "pointer": "references/openshift-scc.md",
+        },
+        "GitLab runner manager": {
+            "summary": "Runner token, exact-node deployment, verification and cleanup.",
+            "pointer": "references/gitlab-runner-manager.md",
+        },
+        "Native OCP YAML example": {
+            "summary": "Node MAC/NIC, disk and network inputs passed unchanged to OpenShift.",
+            "pointer": "references/ocp-node-input.md",
+        },
+        "Native OCP command flags": {
+            "summary": "OpenShift flags, ci-skills input mapping and upstream procedure.",
+            "pointer": "references/ocp-node-image-flags.md",
+        },
+        "GitLab repository commits": {
+            "summary": "Native file-action keys, text/base64 content and branch examples.",
+            "pointer": "references/gitlab-repository.md",
+        },
+        "GitLab merge requests": {
+            "summary": "Source/target branches, MR IID and milestone ID examples.",
+            "pointer": "references/gitlab-merge-requests.md",
         },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",
             "pointer": "references/mcp.md",
         },
-    }
-)
-# Progressive navigation contains placements only; executable facts stay above.
-NAV_NODES: Final = MappingProxyType(
-    {
-        (): "Discover what ci-skills can inspect, run or read.",
-        ("gitlab",): "GitLab pipelines, jobs, runners, issues, milestones and wikis.",
-        ("gitlab", "access"): "Prove GitLab access and read back the selected target.",
-        ("gitlab", "api"): "Read one caller-selected GitLab or GitHub API resource.",
-        ("gitlab", "issue"): "Create or reuse exact bug issues.",
-        ("gitlab", "job"): "Inspect job state, output and failure evidence.",
-        ("gitlab", "milestone"): "Create or update milestones.",
-        ("gitlab", "pipeline"): "Inspect, watch and diagnose pipelines.",
-        ("gitlab", "runner"): "Inspect or manage runners.",
-        ("gitlab", "wiki"): "Create or update wiki pages.",
-        ("k8s",): "Cluster, workload, storage and network operations.",
-        ("k8s", "build"): "Plan exact-commit OpenShift binary builds.",
-        (
-            "k8s",
-            "ceph",
-        ): "Ceph health, OSDs, placement groups and host kernel messages.",
-        ("k8s", "cilium"): "Cilium agents, operator and per-node health.",
-        ("k8s", "events"): "What the cluster reported during an interval.",
-        ("k8s", "network"): "Physical uplink MTU consistency across nodes.",
-        ("k8s", "storage"): "Claims, volumes, attachments and the pods using them.",
-        ("github",): "GitHub operations and related combinations.",
-        ("harbor",): "Registry, images, charts and related operations.",
-    }
-)
-NAV_PLACEMENT: Final = MappingProxyType(
-    {
-        "access_check.py": (),
-        "gitlab_access.py": ("gitlab", "access"),
-        "bin/ci-api": ("gitlab", "api"),
-        "gitlab_issue.py": ("gitlab", "issue"),
-        "gitlab_job.py": ("gitlab", "job"),
-        "gitlab_milestone.py": ("gitlab", "milestone"),
-        "gitlab_pipeline.py": ("gitlab", "pipeline"),
-        "gitlab_runner.py": ("gitlab", "runner"),
-        "gitlab_wiki.py": ("gitlab", "wiki"),
-        "bin/ci-binary-build": ("k8s", "build"),
-        "ceph_cluster.py": ("k8s", "ceph"),
-        "ceph_kernel.py": ("k8s", "ceph"),
-        "cilium_status.py": ("k8s", "cilium"),
-        "cilium_node.py": ("k8s", "cilium"),
-        "event_trace.py": ("k8s", "events"),
-        "k8s_verify_mtu_consistency.py": ("k8s", "network"),
-        "storage_report.py": ("k8s", "storage"),
-    }
-)
-PLANNED_VERBS: Final = MappingProxyType(
-    {
-        "gitlab_job.py": dict.fromkeys(("get", "list", "watch", "logs"), "CI11-TOOLS"),
-        "gitlab_pipeline.py": dict.fromkeys(
-            ("list", "logs", "children", "start", "retry", "cancel"), "CI11-TOOLS"
-        ),
-        "gitlab_runner.py": {"reset-token": "CI11-TOOLS"},
-        "gitlab_milestone.py": {"list": "CI11-TOOLS"},
     }
 )
 NAV_OPTIONS: Final = {
@@ -1103,8 +1406,8 @@ NAV_OPTIONS: Final = {
 DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
     "reference.py": {
         "report_kind": "reference_next",
-        "purpose": "Expand installed tools, required inputs and selected reference sections.",
-        "use_when": "Choose a capability, expand its optional inputs or read one reference section.",
+        "purpose": "Show what the agent can run and read at one node, or read one reference.",
+        "use_when": "Choose a cluster or command, list a reference's sections or read one section.",
         "requires_authorities": [],
         "required_tools": ["python3"],
         "required_options": [],
@@ -1123,7 +1426,7 @@ DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
             "--log-file",
             "--run-id",
         ],
-        "description": "Expand one node; optional references remain pointers until requested.",
+        "description": "One answer per node: installed tools to run and references to read, each a pointer to the next call.",
         "examples": [
             {"description": "Show available clusters", "command": "reference.py"},
             {"description": "Expand GitLab tools", "command": "reference.py glab"},
@@ -1131,14 +1434,18 @@ DISCOVERY_COMMANDS: Final[Mapping[str, DiscoveryDefinition]] = {
                 "description": "Expand a command node",
                 "command": "reference.py gitlab_runner.py",
             },
+            {
+                "description": "List one reference's sections",
+                "command": "reference.py get mcp",
+            },
         ],
         "output_modes": {
-            "json": "Compact JSON with --json; default for legacy node propositions",
+            "json": "Compact JSON; default when stdout is not a terminal",
             "yaml": "Versioned YAML with --yaml",
-            "human": "Readable selected level; default for next/get",
+            "human": "Run and read lists; default on a terminal",
         },
-        "usage": "reference.py [node] | next [path ...] | get reference anchor [options]",
-        "returns": "A compact proposition, bounded discovery page or selected own-text reference section.",
+        "usage": "reference.py [node] | get reference [anchor] [options]",
+        "returns": "A node of tools and references, one reference's sections, or one section's own text.",
         "read_only": True,
         "side_effects": "Only an explicit log file is written; dry-run and describe do not write.",
         "execution_surface": "installed catalogue; no provider or credential access",
@@ -1155,7 +1462,10 @@ def command_authorities(script: str) -> Sequence[str]:
     :raises KeyError: If the command is not registered.
     """  # noqa: DOC502 - Dictionary lookup rejects unknown command keys.
     if script in COMMANDS:
-        return COMMANDS[script]["requires"]
+        entry = COMMANDS[script]
+        return tuple(
+            dict.fromkeys((*entry["requires"], *entry.get("optional_requires", ())))
+        )
     if script in NODE_LOCAL_COMMANDS:
         return NODE_LOCAL_COMMANDS[script]["requires"]
     if script == "bin/ci-api":
@@ -1165,26 +1475,60 @@ def command_authorities(script: str) -> Sequence[str]:
     return DISCOVERY_COMMANDS[script]["requires_authorities"]
 
 
+def reference_slug(name: str) -> str:
+    """Derive the stable identifier a pointer uses for one registered reference.
+
+    :param name: Registry key, the reference's display name.
+    :returns: Lowercase identifier made of letters, digits, hyphens and underscores.
+    """
+    return re.sub(r"[^a-z0-9_-]", "", name.casefold().replace(" ", "-")) or "reference"
+
+
+def reference_entry(name: str) -> MutableMapping[str, JSONValue]:
+    """Render one registered reference as a read entry of a proposition node.
+
+    :param name: Registry key in ``PROPOSITION_REFERENCES``.
+    :returns: Name, summary and the next ``reference.py`` call as a string.
+    """
+    record = PROPOSITION_REFERENCES[name]
+    return {
+        "name": name,
+        "summary": record["summary"],
+        "pointer": f"get {reference_slug(name)}",
+    }
+
+
 def _proposition_offering(
-    scripts: Sequence[str], commands: Mapping[str, Mapping[str, object]]
+    scripts: Sequence[str],
+    commands: Mapping[str, Mapping[str, object]],
+    *,
+    provider: Optional[str] = None,
+    include_command_references: bool = True,
 ) -> MutableMapping[str, JSONValue]:
-    """Offer immediate commands with their provider and task references.
+    """Offer what the agent can run and what it can read at one node.
 
     :param scripts: Command keys selected for a cluster or related-command node.
     :param commands: Existing catalogue definitions for the offered commands.
-    :returns: Compact tools and optional reference mappings.
+    :param provider: Selected provider; command nodes derive their own dependencies.
+    :param include_command_references: Expand task references after a node is selected.
+    :returns: Installed filenames under ``tools`` and an ordered array of read entries.
     """
-    authorities = {name for script in scripts for name in command_authorities(script)}
+    authorities = (
+        {provider}
+        if provider is not None
+        else {name for script in scripts for name in command_authorities(script)}
+    )
     names = ["access", "project binding"] if authorities else []
     if "gitlab" in authorities:
         names.append("mcp")
     if "harbor" in authorities:
         names.append("toolbox specification")
-    for script in scripts:
-        names.extend(json_strings(commands[script].get("references", ())))
+    if include_command_references:
+        for script in scripts:
+            names.extend(json_strings(commands[script].get("references", ())))
     return {
         "tools": {script: {} for script in sorted(scripts)},
-        "reference": {name: dict(PROPOSITION_REFERENCES[name]) for name in names},
+        "reference": [reference_entry(name) for name in dict.fromkeys(names)],
     }
 
 
@@ -1207,11 +1551,15 @@ def proposition(node: Optional[str] = None) -> MutableMapping[str, JSONValue]:
         cluster: _proposition_offering(
             [script for script, names in authorities.items() if authority in names],
             commands,
+            provider=authority,
+            include_command_references=node is not None,
         )
         for cluster, authority in PROPOSITION_CLUSTERS.items()
     }
     clusters["offline"] = _proposition_offering(
-        [script for script, names in authorities.items() if not names], commands
+        [script for script, names in authorities.items() if not names],
+        commands,
+        include_command_references=node is not None,
     )
     if node is None:
         return {"schema_version": PROPOSITION_VERSION, **clusters}
@@ -1473,6 +1821,8 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 **DISCOVERY_COMMANDS,
             },
             "routing": {
+                "prove nested Podman runtime readiness": "image_build_readiness.py",
+                "build and publish a toolbox for a running GitLab runner": "image_build_readiness.py",
                 "build or inspect a cluster-held OpenShift node ISO": "ocp_node_onboard.py",
                 "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
                 "build or delete a toolbox": "toolbox.py",
@@ -1480,14 +1830,17 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 "verify a Harbor toolbox pull": "harbor_pull.py",
                 "create or delete a GitHub runner": "create_selfhosted_runner.py",
                 "browse tools and references": "reference.py",
-                "prove all three authorities": "access_check.py",
+                "prove configured access authorities": "access_check.py",
                 "a named CI job failed": "gitlab_job.py",
                 "check GitLab pipeline progress": "gitlab_pipeline.py",
                 "GitLab operation access": "gitlab_access.py",
                 "create or change a GitLab milestone": "gitlab_milestone.py",
                 "open a GitLab bug": "gitlab_issue.py",
+                "commit files to a GitLab branch": "gitlab_repository.py",
+                "create a GitLab MR or assign its milestone": "gitlab_mr.py",
                 "create or change a GitLab wiki page": "gitlab_wiki.py",
                 "read or manage a GitLab runner": "gitlab_runner.py",
+                "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
                 "a volume or claim is stuck": "storage_report.py",
                 "what the cluster said during an interval": "event_trace.py",
                 "connectivity or CNI health": "cilium_status.py",

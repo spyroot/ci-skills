@@ -1,0 +1,668 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/image-build-readiness.schema.json",
+  "title": "Nested Podman probe and image-build chain result",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "captured_at",
+    "errors",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "image_build_readiness"
+    },
+    "status": {
+      "enum": [
+        "DRY_RUN",
+        "PLANNED",
+        "PASS",
+        "PARTIAL",
+        "BLOCKED"
+      ]
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "operation": {
+      "enum": [
+        "probe",
+        "chain"
+      ]
+    },
+    "target": {
+      "type": "string"
+    },
+    "target_file": {
+      "type": "string"
+    },
+    "target_source": {
+      "type": "string"
+    },
+    "filters": {
+      "type": "object"
+    },
+    "records": {
+      "type": "array"
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "reason"
+        ],
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "record_count",
+        "error_count"
+      ],
+      "properties": {
+        "record_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "plan": {
+      "type": "object"
+    },
+    "plan_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "confirmable": {
+      "type": "boolean"
+    },
+    "selected_node": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "namespace": {
+      "type": "string"
+    },
+    "access": {
+      "type": "object"
+    },
+    "cleanup": {
+      "type": "object"
+    },
+    "skill": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/skill"
+    },
+    "tested_revision": {
+      "$ref": "gitlab-runner-tag.schema.json#/properties/tested_revision"
+    },
+    "execution_host": {
+      "type": "string"
+    },
+    "trace_artifact": {
+      "type": "string"
+    },
+    "report_files": {
+      "type": "object"
+    },
+    "probe_artifacts": {
+      "type": "object",
+      "required": [
+        "log"
+      ],
+      "properties": {
+        "log": {
+          "type": "string"
+        },
+        "markers": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "markers": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "kind",
+        "run_id",
+        "rows"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0"
+        },
+        "kind": {
+          "const": "image_build_readiness_markers"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "check",
+              "status",
+              "observed"
+            ],
+            "properties": {
+              "check": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "PASS",
+                  "BLOCKED"
+                ]
+              },
+              "observed": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "chain_deployment_result": {
+      "type": "object",
+      "required": [
+        "callback",
+        "verified",
+        "namespace",
+        "image"
+      ],
+      "properties": {
+        "callback": {
+          "const": "DeployManagerRunner"
+        },
+        "verified": {
+          "const": true
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "operation"
+        ],
+        "properties": {
+          "operation": {
+            "const": "chain"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "callback"
+              ],
+              "properties": {
+                "callback": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "cleanup": {
+            "type": "object",
+            "required": [
+              "status",
+              "resources",
+              "failures"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "PASS",
+                  "BLOCKED"
+                ]
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "callback"
+                  ],
+                  "properties": {
+                    "callback": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "failures": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "callback",
+                    "reason"
+                  ],
+                  "properties": {
+                    "callback": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "status": {
+                  "enum": [
+                    "DRY_RUN",
+                    "PLANNED",
+                    "PASS"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "plan",
+                "plan_digest",
+                "confirmable",
+                "records"
+              ],
+              "properties": {
+                "plan": {
+                  "required": [
+                    "kind",
+                    "operation",
+                    "toolbox",
+                    "runner"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "image_build_readiness"
+                    },
+                    "operation": {
+                      "const": "chain"
+                    },
+                    "toolbox": {
+                      "type": "object"
+                    },
+                    "runner": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "errors": {
+                  "maxItems": 0
+                },
+                "summary": {
+                  "properties": {
+                    "error_count": {
+                      "const": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "status": {
+                  "const": "DRY_RUN"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "confirmable": {
+                  "const": false
+                },
+                "records": {
+                  "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "status": {
+                  "enum": [
+                    "PLANNED",
+                    "PASS"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "selected_node",
+                "access"
+              ],
+              "properties": {
+                "confirmable": {
+                  "const": true
+                },
+                "selected_node": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "status": {
+                  "const": "PASS"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "records": {
+                  "contains": {
+                    "$ref": "#/$defs/chain_deployment_result"
+                  }
+                },
+                "summary": {
+                  "properties": {
+                    "record_count": {
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "else": {
+        "properties": {
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "callback",
+                "verified"
+              ],
+              "properties": {
+                "callback": {
+                  "type": "string"
+                },
+                "verified": {
+                  "type": "boolean"
+                },
+                "action": {
+                  "enum": [
+                    "APPLIED",
+                    "NO_OP",
+                    "VERIFIED"
+                  ]
+                },
+                "outcome": {
+                  "type": "string"
+                },
+                "claim": {
+                  "type": "string"
+                },
+                "nested_runtime_ready": {
+                  "type": "boolean"
+                },
+                "selected_node": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "service_account": {
+                  "type": "string"
+                },
+                "constraint": {
+                  "type": "string"
+                },
+                "cluster_role": {
+                  "type": "string"
+                },
+                "permission_source": {
+                  "enum": [
+                    "not_applicable",
+                    "existing",
+                    "temporary_role_binding"
+                  ]
+                },
+                "role_binding": {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "name",
+                    "namespace",
+                    "uid",
+                    "action"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "RoleBinding"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    },
+                    "uid": {
+                      "type": "string"
+                    },
+                    "action": {
+                      "const": "APPLIED"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "job": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "uid"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "uid": {
+                      "type": "string"
+                    },
+                    "exit_code": {
+                      "type": "integer"
+                    },
+                    "image_id": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "pod": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "uid"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "uid": {
+                      "type": "string"
+                    },
+                    "exit_code": {
+                      "type": "integer"
+                    },
+                    "image_id": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "check",
+                      "status",
+                      "observed"
+                    ],
+                    "properties": {
+                      "check": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "PASS",
+                          "BLOCKED"
+                        ]
+                      },
+                      "observed": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          },
+          "cleanup": {
+            "type": "object",
+            "required": [
+              "status",
+              "resources",
+              "failures"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "PASS",
+                  "BLOCKED"
+                ]
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "kind",
+                    "name",
+                    "namespace",
+                    "status",
+                    "absent"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "const": "PASS"
+                    },
+                    "absent": {
+                      "const": true
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "failures": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "callback",
+                    "reason"
+                  ],
+                  "properties": {
+                    "callback": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  ]
+}

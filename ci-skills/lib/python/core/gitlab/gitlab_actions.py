@@ -349,7 +349,12 @@ def _select_target(
     if project and group:
         raise ActionError("project_and_group_are_mutually_exclusive")
     operation = args.action
-    if kind in {"gitlab_issue", "gitlab_wiki"}:
+    if kind in {
+        "gitlab_issue",
+        "gitlab_wiki",
+        "gitlab_repository",
+        "gitlab_merge_request",
+    }:
         if group:
             raise ActionError("operation_requires_project")
         selected = project or target.gitlab.project
@@ -421,6 +426,14 @@ def make_plan(
         prepared = prepare(args)
     elif kind == "gitlab_wiki":
         from lib.python.core.gitlab.gitlab_wikis import prepare
+
+        prepared = prepare(args)
+    elif kind == "gitlab_repository":
+        from lib.python.core.gitlab.gitlab_repository import prepare
+
+        prepared = prepare(args)
+    elif kind == "gitlab_merge_request":
+        from lib.python.core.gitlab.gitlab_merge_requests import prepare
 
         prepared = prepare(args)
     elif kind == "gitlab_runner":
@@ -613,6 +626,14 @@ def apply_plan(
         from lib.python.core.gitlab.gitlab_wikis import apply
 
         return apply(api, session, plan, target_id)
+    if plan.kind == "gitlab_repository":
+        from lib.python.core.gitlab.gitlab_repository import apply
+
+        return apply(api, session, plan, target_id)
+    if plan.kind == "gitlab_merge_request":
+        from lib.python.core.gitlab.gitlab_merge_requests import apply
+
+        return apply(api, session, plan, target_id)
     if plan.kind == "gitlab_runner":
         from lib.python.core.gitlab.gitlab_runners import apply
 
@@ -634,6 +655,8 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
         "gitlab_milestone": ("create", "update", "adjust-time"),
         "gitlab_issue": ("open-bug", "create-bug"),
         "gitlab_wiki": ("create", "update"),
+        "gitlab_repository": ("commit",),
+        "gitlab_merge_request": ("create", "update"),
         "gitlab_runner": ("assign", "create", "delete", "get", "list", "tag"),
     }
     result.set_defaults(kind=kind)
@@ -655,18 +678,23 @@ def action_parser(kind: str) -> argparse.ArgumentParser:
 
 
 def _resource_arguments(result: argparse.ArgumentParser, kind: str) -> None:
-    """Declare the fields accepted by issue, milestone, and wiki plans.
+    """Declare native resource inputs for the selected GitLab operation.
 
     :param result: Caller-owned parser to extend with resource input options.
     :param kind: Registered operation kind selecting the applicable input fields.
     """
-    if kind in {"gitlab_milestone", "gitlab_issue", "gitlab_wiki"}:
+    if kind in {
+        "gitlab_milestone",
+        "gitlab_issue",
+        "gitlab_wiki",
+        "gitlab_merge_request",
+    }:
         result.add_argument("--title", help="requested title")
     if kind in {"gitlab_milestone", "gitlab_issue"}:
         result.add_argument(
             "--description-file", metavar="PATH", help="UTF-8 description body"
         )
-    if kind in {"gitlab_milestone", "gitlab_issue"}:
+    if kind in {"gitlab_milestone", "gitlab_issue", "gitlab_merge_request"}:
         result.add_argument("--milestone-id", type=int, help="numeric milestone ID")
     if kind == "gitlab_milestone":
         result.add_argument("--start-date", help="start date YYYY-MM-DD")
@@ -681,6 +709,23 @@ def _resource_arguments(result: argparse.ArgumentParser, kind: str) -> None:
     if kind == "gitlab_wiki":
         result.add_argument("--slug", help="exact wiki slug for update")
         result.add_argument("--content-file", metavar="PATH", help="UTF-8 wiki content")
+    if kind == "gitlab_repository":
+        result.add_argument("--branch", help="destination branch for the commit")
+        result.add_argument(
+            "--start-branch", help="source branch when creating a branch"
+        )
+        result.add_argument("--commit-message", help="commit message")
+        result.add_argument(
+            "--actions-file",
+            metavar="PATH",
+            help="JSON array of native GitLab create or update file actions",
+        )
+    if kind == "gitlab_merge_request":
+        result.add_argument("--source-branch", help="source branch for MR creation")
+        result.add_argument("--target-branch", help="target branch for MR creation")
+        result.add_argument(
+            "--mr-iid", type=int, help="project-local MR IID for update"
+        )
 
 
 def _runner_arguments(result: argparse.ArgumentParser) -> None:

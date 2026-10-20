@@ -1,0 +1,44 @@
+{
+  "choices": [
+    {
+      "id": "run",
+      "kind": "expand",
+      "next": {
+        "action": "expand",
+        "args": [
+          "next",
+          "k8s",
+          "image_build_readiness",
+          "run",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "1 capability to run."
+    },
+    {
+      "id": "read",
+      "kind": "expand",
+      "next": {
+        "action": "expand",
+        "args": [
+          "next",
+          "k8s",
+          "image_build_readiness",
+          "read",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "4 references with sections here."
+    }
+  ],
+  "continuation": null,
+  "kind": "reference_next",
+  "path": [
+    "k8s",
+    "image_build_readiness"
+  ],
+  "schema_version": "1.0",
+  "summary": "Probe nested Podman execution on one Kubernetes worker and clean up."
+}

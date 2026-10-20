@@ -21,7 +21,7 @@ installation using the prepared `ci-skills` conda environment:
 
 ```bash
 CI_SKILLS_ROOT="${CODEX_HOME:-$HOME/.codex}/skills/ci-skills"
-conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/reference.py" next --json
+conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/reference.py" --json
 ```
 
 This also applies to the extensionless `bin/ci-api` and `bin/ci-binary-build`.
@@ -35,16 +35,18 @@ Installing the skill does not install all of those native clients.
 Diagnose a Kubernetes-backed CI, storage, or network symptom, or act on an
 explicit GitLab request. GitLab operation commands default to an offline
 dry-run and write only with `--apply` and the printed plan fingerprint.
+`gitlab_runner_manager.py` instead defaults to a live read-only plan;
+`--dry-run` requests offline intent, and confirmed `--apply` performs changes.
 `k8s_verify_mtu_consistency.py --apply` creates temporary OpenShift debug Pods
 and verifies cleanup; its default invocation reads the selected node inventory
 and returns a plan.
 
 ## 1. Choose the command for the symptom
 
-Start at `bin/reference.py next` and expand only the selected capability or reference.
-Known commands remain directly callable; `reference.py [node]` keeps the compact
-proposition interface. Use `next PATH run ID options` for optional inputs and
-`get REF ANCHOR` for one reference section. Target-backed commands
+Start at `bin/reference.py` and expand only the node you need: `reference.py [node]` answers with what
+you can run, the installed commands, and what you can read, the references, each a pointer to the next
+call; `get REF` lists one reference's sections and `get REF ANCHOR` reads one section. Known commands
+remain directly callable with `--help`. Target-backed commands
 resolve only their declared authority: GitLab for a job, or Kubernetes for
 storage, events, Cilium, and Ceph. Diagnostic reports use `access` to report the
 effective source and identity. A Kubernetes-only target needs only `[kubernetes]`; a GitLab-only
@@ -52,11 +54,14 @@ target needs only `[gitlab]`. The selected target file never inherits missing
 tables from a lower tier. For a selected GitLab operation, its command also
 reads back GitLab identity and target before applying a change.
 
-For one receipt proving all three authorities, run:
+For one receipt covering configured GitHub, GitLab and Kubernetes providers, run:
 
 ```bash
 conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/access_check.py" --json
 ```
+
+Only configured providers are checked; unrelated provider tables and tools are not required.
+Harbor authorization is checked by the selected Harbor operation.
 
 Add `--publication` when repository administration and required-check read-back
 are part of the requested proof. Add `--ceph-namespace NAME` when the receipt
@@ -100,13 +105,15 @@ Routing, in short:
 
 | You need | Command |
 | --- | --- |
+| Deploy or remove a toolbox-backed GitLab runner | `bin/gitlab_runner_manager.py` |
 | Toolbox-backed GitHub runner lifecycle | `bin/create_selfhosted_runner.py` |
 | Build a schema-declared toolbox | `bin/toolbox.py` |
-| Build or inspect an OpenShift ISO | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
+| Probe Podman, or build/publish a toolbox and configure its runner | `bin/image_build_readiness.py probe\|chain` |
+| Build an OpenShift ISO or join its node | [bin/ocp_node_onboard.py](references/ocp-node-image.md) |
 | Publish or verify a Harbor toolbox | `bin/harbor_push.py`, `bin/harbor_pull.py` |
-| proof of access across all three authorities | `access_check.py` |
+| access to configured GitHub, GitLab and Kubernetes providers | `access_check.py` |
 | a named CI job's own facts | `gitlab_job.py --job-url URL` |
-| pipeline progress | `gitlab_pipeline.py --project PATH --pipeline-id ID` |
+| pipeline read, confirmed start, or bounded watch | `gitlab_pipeline.py get\|start\|watch` |
 | why a volume or claim is stuck | `storage_report.py` |
 | what the cluster said during an interval | `event_trace.py --last 15m` |
 | connectivity, or CNI health per node | `cilium_status.py` |
@@ -269,6 +276,10 @@ relative endpoint; host and token references resolve from the selected
 `--lines START:END` for a bounded text slice, and `--paginate` for array pages.
 Its output is the selected provider value, not an access-receipt envelope.
 
+`reference.py gitlab_runner_manager.py` offers the focused runner-manager and
+SCC references. Use `--help` for arguments; read the focused reference when the
+runner deployment or cleanup sequence is needed.
+
 `bin/ci-binary-build` uses Git and PyYAML to validate the caller's BuildConfig,
 source repository, full commit, and commit-label key. It checks the Dockerfile
 at that commit and returns a fingerprinted plan. It does not resolve a cluster
@@ -285,6 +296,12 @@ For a Ceph network or RBD timeout, start with `ceph_cluster.py` and
 `event_trace.py`, then run the MTU command when physical network consistency
 matters. For Cilium, run `cilium_status.py` first and `cilium_node.py` for an
 affected node. `tools.json` describes every command and its filters.
+
+## Nested Podman readiness
+
+`bin/image_build_readiness.py`: `probe` checks Podman; `chain` builds/publishes the toolbox and configures its runner.
+See [Podman inputs](references/podman-readiness.md), [chain inputs and evidence](references/image-build-chain.md),
+and [OpenShift SCC discovery and access](references/openshift-scc.md).
 
 ## Toolbox and runner workflows
 

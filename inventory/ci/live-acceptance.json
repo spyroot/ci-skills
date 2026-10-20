@@ -5,7 +5,9 @@
   "receiptDirectories": [
     "tests/acceptance/receipts",
     "tests/acceptance/runner-tag",
-    "tests/acceptance/runner-lifecycle"
+    "tests/acceptance/runner-lifecycle",
+    "tests/acceptance/podman-readiness",
+    "tests/acceptance/candidate"
   ],
   "historicalDirectory": "tests/acceptance/historical",
   "scheduledCheck": {

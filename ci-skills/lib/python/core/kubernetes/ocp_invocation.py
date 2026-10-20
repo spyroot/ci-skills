@@ -8,7 +8,7 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Final, Optional
@@ -21,6 +21,7 @@ from lib.python.core.action_modes import (
 from lib.python.core.cli import parser
 from lib.python.core.json_types import JSONObject
 from lib.python.core.kubernetes.artifact_storage_models import StorageDestination
+from lib.python.core.kubernetes.ocp_csr import JoinSelector
 from lib.python.core.kubernetes.ocp_native_input import NativeNodeInput
 from lib.python.core.kubernetes.pod_credential_models import PullSecretReference
 from lib.python.core.kubernetes.run_scope import validate_run_id
@@ -42,6 +43,11 @@ MODE_POLICY: Final = ActionModePolicy(
     allow_offline_output=True,
 )
 
+JOIN_MODE_POLICY: Final = replace(
+    MODE_POLICY,
+    receipt_modes=MODE_POLICY.receipt_modes | frozenset((ActionMode.LIVE_PLAN,)),
+)
+
 
 class NodeOperation(StrEnum):
     """Operations over a caller-selected in-cluster node ISO.
@@ -57,11 +63,16 @@ class NodeOperation(StrEnum):
     .. attribute :: REMOVE
 
         Release run-owned resources while preserving persistent output.
+
+    .. attribute :: JOIN
+
+        Approve the selected booted node and verify its Ready state.
     """
 
     BUILD = "build"
     VERIFY = "verify"
     REMOVE = "remove"
+    JOIN = "join"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     :returns: Installed-command parser with no invented host or storage values.
     """
     result = parser(
-        "Build an OpenShift node ISO inside your cluster and verify it at your chosen destination.",
+        "Build, verify, join or remove an OpenShift node-image run.",
         kind=NODE_IMAGE_KIND,
     )
     result.set_defaults(kind=NODE_IMAGE_KIND)
@@ -104,6 +115,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="optional CI12.0 image and dependency override",
     )
     result.add_argument(
+        "--node-name",
+        metavar="HOSTNAME",
+        help="exact Kubernetes Node name selected for join",
+    )
+    result.add_argument(
+        "--ip-address",
+        metavar="ADDRESS",
+        action="append",
+        default=[],
+        help="joining node address; repeat for every expected serving address",
+    )
+    result.add_argument(
         "--pull-secret-namespace",
         default=OCP_CONFIG_NAMESPACE,
         help="namespace of the existing registry Secret (default: OpenShift configuration namespace)",
@@ -130,7 +153,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="read prerequisites and produce the confirmation digest",
     )
     result.add_argument(
-        "--apply", action="store_true", help="perform the confirmed build or removal"
+        "--apply",
+        action="store_true",
+        help="perform the confirmed build, join or removal",
     )
     result.add_argument(
         "--confirm-plan", metavar="SHA256", help="exact digest returned by the plan"
@@ -160,7 +185,7 @@ def execution_mode(args: argparse.Namespace) -> ActionMode:
         receipt_requested=bool(args.receipt_out),
         output_requested=bool(args.output_dir or args.log_file),
         timeout=args.timeout,
-        policy=MODE_POLICY,
+        policy=JOIN_MODE_POLICY if operation == NodeOperation.JOIN else MODE_POLICY,
         read_only=operation == NodeOperation.VERIFY,
     )
 
@@ -244,6 +269,42 @@ class NodeBuildInputs:
         }
 
 
+@dataclass(frozen=True)
+class NodeJoinInputs:
+    """Capture the stable caller selector for one existing ISO run.
+
+    :param selector: Exact Node name, IP addresses and fixed signer sequence.
+
+    .. attribute :: selector
+        :type: JoinSelector
+
+        Caller-selected identity used for every CSR and Node read-back.
+    """
+
+    selector: JoinSelector
+
+    @classmethod
+    def read(cls, args: argparse.Namespace) -> NodeJoinInputs:
+        """Read join inputs without querying the provider.
+
+        :param args: Join invocation containing node name and repeated addresses.
+        :returns: Immutable digest-stable selector.
+        :raises ValueError: Node identity or address input is absent or invalid.
+        """
+        if not args.node_name:
+            raise ValueError("join_requires_node_name")
+        if not args.ip_address:
+            raise ValueError("join_requires_ip_address")
+        return cls(JoinSelector(args.node_name, tuple(args.ip_address)))
+
+    def evidence(self) -> JSONObject:
+        """Render stable join inputs without provider-generated CSR names.
+
+        :returns: Exact caller selector and fixed signer sequence.
+        """
+        return {"node_selector": self.selector.as_dict()}
+
+
 def operation_plan(
     args: argparse.Namespace, target: Target, inputs: JSONObject
 ) -> JSONObject:
@@ -261,19 +322,26 @@ def operation_plan(
     selected = target.kubernetes
     if selected is None:
         raise TargetError("kubernetes_target_missing")
-    if operation != NodeOperation.BUILD:
+    build_inputs = (
+        args.spec,
+        args.mac_address,
+        args.network_config_path,
+        args.destination,
+        args.tool_pod_spec,
+    )
+    join_inputs = (args.node_name, *args.ip_address)
+    if operation == NodeOperation.BUILD:
+        if any(join_inputs):
+            raise ValueError("build_does_not_accept_join_inputs")
+    else:
         if not args.run_id:
             raise ValueError("operation_requires_run_id")
-        if any(
-            (
-                args.spec,
-                args.mac_address,
-                args.network_config_path,
-                args.destination,
-                args.tool_pod_spec,
-            )
-        ):
+        if any(build_inputs):
             raise ValueError("existing_run_does_not_accept_build_inputs")
+        if operation == NodeOperation.JOIN:
+            NodeJoinInputs.read(args)
+        elif any(join_inputs):
+            raise ValueError("artifact_operation_does_not_accept_join_inputs")
     if args.run_id:
         validate_run_id(args.run_id)
     return {

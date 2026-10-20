@@ -295,14 +295,19 @@ def test_each_command_declares_the_authorities_it_needs_and_their_protocol() -> 
     :returns: None; assertions in the body validate the regression.
     """
     for script, entry in CATALOG.COMMANDS.items():
-        assert entry["requires"], f"{script} declares no authority"
-        for authority in entry["requires"]:
+        authorities = CATALOG.command_authorities(script)
+        assert authorities, f"{script} declares no authority"
+        assert set(authorities) == set(entry["requires"]) | set(
+            entry.get("optional_requires", ())
+        )
+        for authority in authorities:
             assert authority in CATALOG.AUTHORITIES
             assert authority in CATALOG.ACCESS_PROTOCOL, (
                 f"{authority} has no declared resolution chain"
             )
         contract = CATALOG.describe(script)
-        assert set(contract["access_protocol"]) == set(entry["requires"])
+        assert contract["requires_authorities"] == list(entry["requires"])
+        assert set(contract["access_protocol"]) == set(authorities)
 
 
 def test_the_kubernetes_chain_declares_ambient_fallback_after_selected_sources() -> (

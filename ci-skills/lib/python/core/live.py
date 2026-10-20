@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from argparse import Namespace
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, Mapping, MutableMapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from lib.python.core.gitlab.job_read import collect_gitlab_job
@@ -157,7 +157,76 @@ def collect_live_checks(
     """  # noqa: DOC502 - Executor setup and task submission may fail.
     tasks: MutableMapping[
         str, tuple[Callable[[Target, Namespace], JSONObject], Namespace]
-    ] = {
+    ] = {}
+    if "kubernetes" in target.active_surfaces:
+        tasks.update(_kubernetes_checks())
+    if "gitlab" in target.active_surfaces and getattr(args, "job_url", None):
+        tasks["gitlab_job"] = (
+            collect_gitlab_job,
+            Namespace(job_url=args.job_url, search=None),
+        )
+
+    if "kubernetes" in target.active_surfaces and getattr(args, "ceph_namespace", None):
+        tasks["ceph_cluster"] = (
+            collect_ceph_cluster,
+            Namespace(
+                namespace=args.ceph_namespace,
+                operator=None,
+                conf=None,
+                node=None,
+                ready="all",
+                condition=None,
+            ),
+        )
+
+    checks: MutableMapping[str, MutableMapping[str, JSONValue]] = {}
+    if tasks:
+        with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+            futures = {
+                pool.submit(function, target, options): name
+                for name, (function, options) in tasks.items()
+            }
+
+            for future in as_completed(futures):
+                name = futures[future]
+                try:
+                    checks[name] = _evidence(future.result())
+
+                except Exception:  # noqa: BLE001 - isolate one failed live collector in the receipt
+                    checks[name] = {
+                        "status": BLOCKED,
+                        "record_count": 0,
+                        "error_count": 1,
+                        "errors": [
+                            {"source": name, "reason": "collector_runtime_failure"}
+                        ],
+                        "readback_sha256": None,
+                    }
+
+    for name, evidence in checks.items():
+        evidence["access_proven"] = _access_proven(name, evidence)
+
+    receipt["live_checks"] = checks
+    if checks:
+        receipt["status"] = (
+            PASS
+            if all(check["access_proven"] for check in checks.values())
+            else BLOCKED
+        )
+    receipt["blocking_live_checks"] = sorted(
+        name for name, check in checks.items() if not check["access_proven"]
+    )
+    return receipt
+
+
+def _kubernetes_checks() -> Mapping[
+    str, tuple[Callable[[Target, Namespace], JSONObject], Namespace]
+]:
+    """Select the standard Kubernetes collectors and their default read options.
+
+    :returns: Storage, event, and Cilium collectors for a configured Kubernetes target.
+    """
+    return {
         "storage_report": (
             collect_storage,
             Namespace(
@@ -181,55 +250,3 @@ def collect_live_checks(
             Namespace(namespace="auto", node=None, search=None),
         ),
     }
-    if getattr(args, "job_url", None):
-        tasks["gitlab_job"] = (
-            collect_gitlab_job,
-            Namespace(job_url=args.job_url, search=None),
-        )
-
-    if getattr(args, "ceph_namespace", None):
-        tasks["ceph_cluster"] = (
-            collect_ceph_cluster,
-            Namespace(
-                namespace=args.ceph_namespace,
-                operator=None,
-                conf=None,
-                node=None,
-                ready="all",
-                condition=None,
-            ),
-        )
-
-    checks: MutableMapping[str, MutableMapping[str, JSONValue]] = {}
-
-    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-        futures = {
-            pool.submit(function, target, options): name
-            for name, (function, options) in tasks.items()
-        }
-
-        for future in as_completed(futures):
-            name = futures[future]
-            try:
-                checks[name] = _evidence(future.result())
-
-            except Exception:  # noqa: BLE001 - isolate one failed live collector in the receipt
-                checks[name] = {
-                    "status": BLOCKED,
-                    "record_count": 0,
-                    "error_count": 1,
-                    "errors": [{"source": name, "reason": "collector_runtime_failure"}],
-                    "readback_sha256": None,
-                }
-
-    for name, evidence in checks.items():
-        evidence["access_proven"] = _access_proven(name, evidence)
-
-    receipt["live_checks"] = checks
-    receipt["status"] = (
-        PASS if all(check["access_proven"] for check in checks.values()) else BLOCKED
-    )
-    receipt["blocking_live_checks"] = sorted(
-        name for name, check in checks.items() if not check["access_proven"]
-    )
-    return receipt

@@ -1,0 +1,62 @@
+{
+  "capability": {
+    "command": "bin/image_build_readiness.py",
+    "kind": "image_build_readiness",
+    "mutates": true,
+    "read_back": "Exact permission source, optional RoleBinding UID, Job-owned Pod exit, probe rows and resource absence.",
+    "requires": [
+      "kubernetes"
+    ],
+    "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows and cleanup read-back; does not prove runner or image-publication behavior.",
+    "side_effects": "Creates and removes a temporary namespace, conditional run-owned SCC RoleBinding, script ConfigMap and privileged Job.",
+    "tools": [
+      "kubectl",
+      "oc on OpenShift"
+    ],
+    "verb": "probe"
+  },
+  "choices": [
+    {
+      "id": "probe",
+      "kind": "execute",
+      "next": {
+        "action": "execute",
+        "args": [
+          "probe",
+          "--json"
+        ],
+        "entrypoint": "bin/image_build_readiness.py",
+        "inputs": []
+      },
+      "summary": "Run a temporary Podman Job on one selected worker."
+    },
+    {
+      "id": "options",
+      "kind": "expand",
+      "next": {
+        "action": "expand",
+        "args": [
+          "next",
+          "k8s",
+          "image_build_readiness",
+          "run",
+          "probe",
+          "options",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "12 optional inputs; append each as --name value."
+    }
+  ],
+  "continuation": null,
+  "kind": "reference_next",
+  "path": [
+    "k8s",
+    "image_build_readiness",
+    "run",
+    "probe"
+  ],
+  "schema_version": "1.0",
+  "summary": "Run a temporary Podman Job on one selected worker."
+}

@@ -1,8 +1,9 @@
-# Build an OpenShift node ISO
+# Build and join an OpenShift node
 
 `bin/ocp_node_onboard.py` builds a node ISO inside your OpenShift cluster and verifies it at the cluster
 storage path you choose. The ISO stays there; the command returns its location, size, checksum and run ID.
-You decide how to boot the intended node. This command does not boot a machine or approve its certificates.
+You decide how to boot the intended node. After boot, the join action can approve that exact node's client and
+serving certificate requests and verify its Ready state. The command never boots or deletes a machine.
 
 ## Prepare access and choose inputs
 
@@ -39,40 +40,8 @@ the user. Example hostnames, devices and addresses below are not defaults.
 
 ## Native node input
 
-The [OpenShift 4.19 node-image procedure][native] owns the native format and command behavior. For a simple
-single-node configuration, supply `--mac-address` with that node's actual NIC address. For additional settings
-or multiple nodes, save native YAML as `nodes-config.yaml`. This single-node example uses DHCP:
-
-```yaml
-hosts:
-  - hostname: worker-01
-    rootDeviceHints:
-      deviceName: /dev/sda
-    interfaces:
-      - name: ens3
-        macAddress: 02:00:00:10:00:01
-    networkConfig:
-      interfaces:
-        - name: ens3
-          type: ethernet
-          state: up
-          mac-address: 02:00:00:10:00:01
-          mtu: 9000
-          ipv4:
-            enabled: true
-            dhcp: true
-          ipv6:
-            enabled: false
-```
-
-Replace the disk, NIC, MAC, hostname and MTU with values for the machine being added. Native network settings
-follow [NMState](https://nmstate.io/). ci-skills stages this file byte-for-byte as `nodes-config.yaml`; it does
-not validate, rewrite or duplicate the OCP/NMState format. A native failure returns the provider's sanitized
-error and exit status so the caller can correct its input.
-
-Use either `--spec nodes-config.yaml` or `--mac-address MAC`. The MAC route optionally accepts
-`--network-config-path network.yaml`, which is also staged unchanged. These inputs are distinct from the
-ci-skills storage wrapper below.
+Use the [native OCP YAML example](ocp-node-input.md) for the caller-supplied MAC/NIC and network settings.
+The [native flag reference](ocp-node-image-flags.md) separates OpenShift flags from ci-skills inputs.
 
 ## Choose where the ISO stays
 
@@ -143,11 +112,49 @@ and retained resources. Add `--receipt-out result.json` for a saved report, or
 If transport ends without confirmed native completion, the report says so and retains the exact Pod/resources;
 it does not claim cleanup or a successful build.
 
+## Join a booted node
+
+Boot the intended machine from the generated ISO and read its build result's `run_id` into `RUN_ID`. Select the
+exact Kubernetes Node hostname and every IP address passed to OpenShift's native monitor. These are caller
+choices; ci-skills does not discover or replace them. Repeat `--ip-address` for a multi-address node.
+
+```bash
+python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" join --run-id "$RUN_ID" \
+  --node-name worker-01 --ip-address 192.0.2.10 --live-plan --json
+```
+
+Set `JOIN_DIGEST` to the `plan_digest` returned by that live plan, then apply it unchanged:
+
+```bash
+python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" join --run-id "$RUN_ID" \
+  --node-name worker-01 --ip-address 192.0.2.10 \
+  --apply --confirm-plan "$JOIN_DIGEST" --json
+```
+
+Replace the example hostname and address with the booted node's values. The plan binds the run ID, hostname,
+addresses, two fixed Kubernetes signers, target and installed functional code. It never binds provider-generated
+CSR names.
+
+The selected credentials need permission to list and read certificate signing requests, update the CSR approval
+subresource, read the selected Node, and remove the run-owned build resources after successful join. The command
+does not grant those permissions.
+
+Apply reads CSRs explicitly even without reverse DNS. It approves only the supplied hostname's client-kubelet
+and kubelet-serving requests, in that order, and reads each approval back by UID. Other signers remain untouched.
+The report distinguishes observed client issuance from bootstrap completion inferred from a serving request.
+
+After approval, native `oc adm node-image monitor` runs and the exact Node is independently checked for Ready.
+Roles and addresses are reported; monitor and Node addresses may differ across NAT or multiple networks.
+An already Ready Node returns `NO_OP` without claiming unobserved certificate issuance.
+
+Successful join cleans run-owned build resources last. Persistent storage and its ISO remain; temporary output
+is removed with its backing resources. Cleanup never deletes joined Nodes or issued certificates.
+
 ## Verify or remove a run
 
-Read the build result's `run_id` into `RUN_ID`. Verification resolves its live artifact record, reads the ISO
-in-cluster and compares its checksum and size before inspecting the embedded configuration. For persistent
-storage, it creates and cleans a temporary reader Pod; the selected credentials need those Pod permissions.
+Verification resolves the selected run's live artifact record, reads the ISO in-cluster and compares its checksum
+and size before inspecting the embedded configuration. For persistent storage, it creates and cleans a temporary
+reader Pod; the selected credentials need those Pod permissions.
 
 ```bash
 python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" verify --run-id "$RUN_ID" --json
@@ -160,5 +167,3 @@ Set `REMOVE_DIGEST` from the removal plan. Persistent output is read back before
 original build resources; its storage and final ISO are preserved. Removal of temporary output deletes its
 backing Pod and verifies absence. Once the run record is removed, repeating removal is `NO_OP`; the preserved
 persistent ISO can still be consumed directly from its selected storage path.
-
-[native]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.19/html/nodes/working-with-nodes

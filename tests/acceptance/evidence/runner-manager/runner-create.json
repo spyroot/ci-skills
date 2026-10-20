@@ -1,0 +1,106 @@
+{
+  "captured_at": "2026-10-19T01:28:54.816082+00:00",
+  "cleanup": {
+    "reason": "persistent_runner_requested",
+    "status": "NOT_APPLICABLE"
+  },
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:29f247d18d3c",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_runner",
+  "mutated": true,
+  "operation": "create",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "APPLY",
+  "plan": {
+    "body_sha256": "eb0ceade2d5152a0fcb19c18fec937ac0e14ecc1e1763c771cbccbea0069a39a",
+    "confirmation_ready": true,
+    "fields": [
+      "description",
+      "runner_type",
+      "tag_list"
+    ],
+    "one_time_sink_required": true,
+    "operation": "create",
+    "plan_digest": "51f53ce24996a73a2a6402b759792c04fa477308b84a5c24ac06c1de6048307d",
+    "project_ids": null,
+    "requested_tags": [
+      "pr97-manager-d2a16be-20261019-v2"
+    ],
+    "resource_id": null,
+    "target_kind": "group",
+    "target_reference": "38"
+  },
+  "plan_digest": "51f53ce24996a73a2a6402b759792c04fa477308b84a5c24ac06c1de6048307d",
+  "readback": {
+    "action": "APPLIED",
+    "after_tags": [
+      "pr97-manager-d2a16be-20261019-v2"
+    ],
+    "cleanup": {
+      "reason": "persistent_runner_requested",
+      "status": "NOT_APPLICABLE"
+    },
+    "id": 99,
+    "mutated": true,
+    "sink_persisted": true,
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "APPLIED",
+      "after_tags": [
+        "pr97-manager-d2a16be-20261019-v2"
+      ],
+      "cleanup": {
+        "reason": "persistent_runner_requested",
+        "status": "NOT_APPLICABLE"
+      },
+      "id": 99,
+      "mutated": true,
+      "sink_persisted": true,
+      "verified": true
+    }
+  ],
+  "result_action": "APPLIED",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
+    "file_count": 227,
+    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "revision": {
+      "source": "installer_record",
+      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": {
+    "kind": "group",
+    "reference": "38"
+  },
+  "target_file": "path:5e5380df1eda",
+  "target_source": "user;argv:--group",
+  "tested_revision": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+  "verified_target": {
+    "full_path": "hott",
+    "id": 38,
+    "kind": "group",
+    "web_url": "https://gitlab.dcloud.run/groups/hott"
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "access": {
+    "harbor": {
+      "credential_source": "file:path:1f8b6bf528f9",
+      "granted_actions": [
+        "delete",
+        "pull",
+        "push"
+      ],
+      "identity": "spyroot",
+      "origin": "https://harbor.dcloud.run",
+      "repository": "hott/ci13-runner-toolbox"
+    },
+    "kubernetes": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "captured_at": "2026-10-19T01:25:37.098429+00:00",
+  "cleanup": {
+    "failures": [],
+    "status": "PASS"
+  },
+  "errors": [],
+  "filters": {},
+  "kind": "toolbox",
+  "operation": "create",
+  "plan_digest": "9eabe8506512c110a08e4267c459849c42d90669a268e534ab2bb6f3768ad087",
+  "records": [
+    {
+      "callback": "EnsureNamespace",
+      "namespaces": [
+        {
+          "action": "APPLIED",
+          "kind": "Namespace",
+          "name": "ci-skills-pr97-d2a16be-toolbox-v2",
+          "namespace": "",
+          "uid": "27c257b6-daa3-4c01-83fb-4c056776009d"
+        }
+      ],
+      "verified": true
+    },
+    {
+      "app": "ci13-runner-toolbox",
+      "build_fingerprint": "e5da7d4f385ec6f56250a248d39c133750cfbffd009e3cc6a5781db5424000d8",
+      "build_name": "ci13-runner-toolbox-1",
+      "callback": "HarborBuild",
+      "digest": "sha256:beeaf60ce4194020a00960a0af97fce7e88b433eeab7a388f9d8796797e6493b",
+      "image": "harbor.dcloud.run/hott/ci13-runner-toolbox:ci-skills-build-c34ef433d9033f5da0ca8379",
+      "namespace": "ci-skills-pr97-d2a16be-toolbox-v2",
+      "reused": false,
+      "specification_fingerprint": "c34ef433d9033f5da0ca8379e8060799d11b565774f98d712dd82943aa6e8a23",
+      "verified": true
+    }
+  ],
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
+    "file_count": 227,
+    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "revision": {
+      "source": "installer_record",
+      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 2
+  },
+  "target": "path:5e5380df1eda",
+  "tested_revision": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3"
+}

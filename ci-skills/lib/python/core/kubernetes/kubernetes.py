@@ -110,25 +110,38 @@ class KubernetesService:
         *args: str,
         openshift: bool = False,
         input_data: Optional[bytes] = None,
+        timeout: Optional[float] = None,
     ) -> CommandResult:
         """Run one bounded ``kubectl`` or ``oc`` command without a shell.
 
         :param *args: Native client arguments after the selected context flags.
         :param openshift: Select ``oc`` instead of ``kubectl``.
         :param input_data: Optional exact stdin bytes, excluded from command metadata.
+        :param timeout: Optional remaining operation seconds; capped by the service bound.
         :returns: Bounded stdout, stderr, exit status, and exact argument vector.
+        :raises ValueError: An explicitly supplied timeout is not positive.
         :raises TargetError: If the bound kubeconfig changed before execution.
         :raises OSError: If the native process cannot start or its output cannot be read.
         """  # noqa: DOC502,DOC503 - Binding and native process failures propagate.
+        command_timeout = (
+            self.timeout if timeout is None else min(self.timeout, timeout)
+        )
+        if command_timeout <= 0:
+            raise ValueError("kubernetes_timeout_invalid")
         builder = oc_argv if openshift else kubectl_argv
         return run_command_bounded(
             builder(self.target, *args),
-            timeout=self.timeout,
+            timeout=command_timeout,
             env=kubernetes_env(self.target),
             **({"input_data": input_data} if input_data is not None else {}),
         )
 
-    def json(self, *args: str, openshift: bool = False) -> JSONDocument:
+    def json(
+        self,
+        *args: str,
+        openshift: bool = False,
+        timeout: Optional[float] = None,
+    ) -> JSONDocument:
         """Run one command and parse its bounded JSON response.
 
         The returned value is internal provider data. Callers must select safe
@@ -136,12 +149,18 @@ class KubernetesService:
 
         :param *args: Native client arguments that request a JSON response.
         :param openshift: Select ``oc`` instead of ``kubectl``.
+        :param timeout: Optional remaining operation seconds; capped by the service bound.
         :returns: Parsed provider object or list.
+        :raises ValueError: An explicitly supplied timeout is not positive.
         :raises KubernetesError: If the command fails or returns invalid JSON.
         :raises TargetError: If the bound kubeconfig changed before execution.
         :raises OSError: If the native process cannot start or its output cannot be read.
         """  # noqa: DOC502,DOC503 - command propagates target binding errors
-        result = self.command(*args, openshift=openshift)
+        result = self.command(
+            *args,
+            openshift=openshift,
+            **({"timeout": timeout} if timeout is not None else {}),
+        )
         if result.returncode:
             raise KubernetesError(error_class(result))
         try:
@@ -152,7 +171,14 @@ class KubernetesService:
             raise KubernetesError("invalid_json_shape")
         return value
 
-    def read(self, kind: str, name: str, namespace: str) -> Optional[JSONObject]:
+    def read(
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        *,
+        timeout: Optional[float] = None,
+    ) -> Optional[JSONObject]:
         """Read one exact object, returning ``None`` when it is absent.
 
         The raw object remains internal so its atomic owner can compare exact
@@ -161,14 +187,18 @@ class KubernetesService:
         :param kind: Kubernetes resource kind accepted by the native client.
         :param name: Exact resource name.
         :param namespace: Resource namespace, or an empty string for cluster scope.
+        :param timeout: Optional remaining operation seconds; capped by the service bound.
         :returns: The provider object or ``None`` after an ignored 404.
+        :raises ValueError: An explicitly supplied timeout is not positive.
         :raises KubernetesError: If the read fails or returns a non-object response.
         :raises TargetError: If the bound kubeconfig changed before execution.
         :raises OSError: If the native process cannot start or its output cannot be read.
         """  # noqa: DOC502,DOC503 - Command and decoding helpers propagate failures.
         args = [*self._namespace_args(namespace), "get", f"{kind}/{name}"]
         args.extend(("--ignore-not-found", "-o", "json"))
-        result = self.command(*args)
+        result = self.command(
+            *args, **({"timeout": timeout} if timeout is not None else {})
+        )
         if result.returncode == 0 and not result.stdout.strip():
             return None
         return self._object_response(result)

@@ -1,0 +1,15 @@
+{
+  "clusterrole": "system:openshift:scc:privileged",
+  "clusterrole_get_exit_code": 0,
+  "clusterrole_preserved": true,
+  "namespace": "ci-skills-run-62c2d59bc1e2463f81fe",
+  "namespace_absent": true,
+  "namespace_get_exit_code": 1,
+  "rolebinding": "ci-skills-run-scc-permission-5f4add9322d9458c-6157eda1920e1686",
+  "rolebinding_absent": true,
+  "rolebinding_get_exit_code": 1,
+  "scc": "privileged",
+  "scc_get_exit_code": 0,
+  "scc_preserved": true,
+  "schema_version": "1.0"
+}
