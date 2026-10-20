@@ -175,7 +175,10 @@ This document plans from:
         requirementIds: [R-CI13-006]
         command: python tools/check_live_acceptance.py --root . --json
         environment: The live_acceptance step of the validate job, on the committed receipts
-        enforcement: Existing; PR81 registers the Podman probe receipt, matching functional checksum, runtime checks and owned-resource cleanup alongside the existing required operations
+        enforcement: >-
+          Aggregate mode retains the full required operation set; --no-aggregate with an explicit --receipts
+          directory checks only selected candidate capability receipts with their provenance, functional checksum,
+          freshness, result, read-back and applicable cleanup requirements. Targeted PASS is not full-skill acceptance.
         evidence: [https://github.com/spyroot/ci-skills/actions/runs/39156922605, tests/acceptance/podman-readiness/image-build-readiness.json]
 <!-- /architecture-map:v1 -->
 

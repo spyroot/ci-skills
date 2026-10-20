@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Final, Optional, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import import_script_module, load_module
 from jsonschema import Draft202012Validator
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
@@ -32,7 +32,10 @@ ISSUES = import_script_module("lib.python.core.gitlab.gitlab_issues")
 WIKIS = import_script_module("lib.python.core.gitlab.gitlab_wikis")
 RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
 REPORT = import_script_module("lib.python.core.report")
-PROVENANCE = import_script_module("lib.python.core.provenance")
+ACCEPTANCE = load_module(
+    "runner_tag_receipt_acceptance",
+    Path(__file__).parents[2] / "tools/check_live_acceptance.py",
+)
 ISSUE = import_script_module("gitlab_issue")
 MILESTONE = import_script_module("gitlab_milestone")
 RUNNER = import_script_module("gitlab_runner")
@@ -61,7 +64,7 @@ if TYPE_CHECKING:
 
 
 def test_committed_runner_tag_receipts_match_live_contract() -> None:
-    """Match runner-tag receipts to current functional inputs and schema.
+    """Validate retained runner-tag receipts against their recorded source and schema.
     :returns: None; assertions in the body validate the regression.
     """
     root = Path(__file__).parents[2]
@@ -72,11 +75,10 @@ def test_committed_runner_tag_receipts_match_live_contract() -> None:
         (root / "tests/acceptance/receipts/gitlab-access.json").read_text()
     )
     target = setup["target"]
-    functional_digest = PROVENANCE.functional_digest(root / "ci-skills")
 
     for result in (applied, repeated):
         TAG_VALIDATOR.validate(result)
-        assert result["skill"]["functional_digest"] == functional_digest
+        assert ACCEPTANCE.check_recorded_identity(result, root / "ci-skills") == []
         assert result["skill"]["revision"]["verified"] is True
         assert result["tested_revision"] == result["skill"]["revision"]["value"]
         assert {
