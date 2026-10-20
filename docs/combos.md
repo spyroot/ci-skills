@@ -15,23 +15,22 @@ A chain is proven only by one live run whose rows link,
 each consuming the previous row's output, bound to one functional checksum; see block 7 of the tool belt plan for
 the six-row model.
 
-## 1. Runner proven by a test job
+## 1. Toolbox-backed runner
 
-`build toolbox → push to Harbor → create/configure runner → execute test job → verify results → cleanup`
+`build toolbox → push to Harbor → create/configure runner`
 
-Goal: a runner the agent created runs a real job, and the job read-back names that runner.
+Goal: configure/start the runner using the published toolbox and leave it available to the caller.
 
 GitHub today: the first three steps are already one installed combo, `create_selfhosted_runner.py create` (build
 the toolbox, push it, deploy the runner, register it), exists and the runner comes online [9]; the standalone
-`toolbox.py` [35, 37] and `harbor_push.py` [31] exist for the parts. Execute test job, missing (the skill has no
-workflow dispatch) → verify results, missing → `create_selfhosted_runner.py delete`, exists [10].
+`toolbox.py` [35, 37] and `harbor_push.py` [31] exist for the parts.
+`create_selfhosted_runner.py delete` is the separate explicit removal operation [10].
 
 GitLab today: `toolbox.py` and `harbor_push.py` as above → `gitlab_runner.py create`, exists, record only [23],
-with the runner manager deployment planned (block 7; CI11 "Toolbox build, publish and configure a runner") →
-`gitlab_pipeline.py start` and `watch`, planned (CI11) →
-`gitlab_job.py get`, exists [16], but naming the created runner is unproven: case 16 is PARTIAL because that job
-never reached a runner, and that read-back is block 7's proof → `gitlab_runner.py delete`, exists [24], with
-deployment removal planned.
+with runner manager deployment composed by CI13's `chain` (CI11 "Toolbox build, publish and configure a runner").
+`gitlab_runner.py delete` is the separate runner-record removal operation [24]. A consumer job and its runner
+read-back provide external live acceptance; job execution, separate verification and successful runner teardown
+are not combo steps.
 
 ## 2. OpenShift node onboarding (planned)
 
@@ -99,7 +98,7 @@ Goal: promote one image by digest between Harbor projects or tags with both read
 
 `create → assign → tag → get → delete`
 
-All steps exist [23, 22, 27, 25, 24]. The gap is the runner going online, which is chain 1.
+All steps exist [23, 22, 27, 25, 24]. Chain 1 composes runner-manager deployment; runtime proof is external acceptance.
 
 ## 9. Toolbox refresh
 
@@ -134,27 +133,28 @@ through the owner's selector and non-TTY exec from the Cilium checks, Pod record
 events from `event_trace.py`. Evidence rows: node inventory read, load read per node, operator state read,
 findings listed, all bound to one digest.
 
-## 11. Can this cluster build images from a GitLab job? (proposed)
+## 11. Can a GitLab job use Podman on this cluster? (proposed)
 
-`probe podman on a node → runner with the same setup → job builds with podman → push to Harbor → read back digest`
+`build toolbox → push to Harbor → create/configure runner`
 
 Goal: a user who installed ci-skills asks their agent to prepare CI so the project's container tests, docker
-builds included, run in GitLab jobs on their cluster. The agent proves in one go that podman can run containers on
-a node there, then that a real job can build and push an image, instead of discovering each failure inside a
-pipeline.
+builds included, run in GitLab jobs on their cluster. The chain leaves a runner using the published toolbox;
+the separate probe checks Podman on a selected node. A real consumer job is external acceptance evidence.
 
-[CI13](phases/CI13-IMAGE-BUILD-READINESS.md) owns the probe, its evidence rows and the later runner/job chain.
+[CI13](phases/CI13-IMAGE-BUILD-READINESS.md) owns the probe, its evidence rows and the toolbox-backed runner chain.
 Follow its [PR order](phases/CI13-IMAGE-BUILD-READINESS.md#pr-order) and
 [live smoke evidence](phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence).
 
-Status: probe implemented by [`image_build_readiness.py`](../ci-skills/bin/image_build_readiness.py); the runner,
-image-build job, and publication chain remain proposed. The probe uses the shared Kubernetes callbacks,
+[`image_build_readiness.py`](../ci-skills/bin/image_build_readiness.py) provides `probe` and `chain`; the
+[chain reference](../ci-skills/references/image-build-chain.md) describes its build, publication and deployment results.
+The probe uses the shared Kubernetes callbacks,
 `RunScope`, and `ResourceSet` for run ownership and cleanup. Its
 [installed example](../ci-skills/SKILL.md#nested-podman-readiness) shows live planning and confirmed apply.
 On OpenShift, the installed command reuses existing `privileged` SCC permission or creates, verifies and removes
 one run-owned namespaced RoleBinding before the probe. A denied authorization preflight blocks before Job creation;
-external setup does not count as capability proof. Probe evidence covers nested runtime behavior only; the later
-runner, build, and publication steps need their own live results.
+external setup does not count as capability proof. Probe evidence covers nested runtime behavior only; accepting
+the chain requires its existing build/publication/deployment results and external consumer proof that the runner
+uses the published toolbox.
 
 ## How to add one
 

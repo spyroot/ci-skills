@@ -82,9 +82,9 @@ If `glab` was missing, the first apply installs it and requests a new dry-run fi
 
 **3. Authenticate, as yourself.** The skill ships no credentials and grants no access. Provide the identity needed by
 the commands you run: a Kubernetes administrator for cluster diagnostics, a GitLab instance administrator for GitLab
-diagnostics, and a GitHub identity for the full access receipt. `gh auth login`, `glab auth login`, and your cluster's
-existing login mechanism are supported. A declared token file takes precedence over ambient token variables; the report
-names the effective source.
+diagnostics, and a GitHub identity for GitHub reads or publication checks. `gh auth login`, `glab auth login`, and your
+cluster's existing login mechanism are supported. A declared token file takes precedence over ambient token variables;
+the report names the effective source.
 
 **4. Create your target file.** This is the step that makes everything else argument-free:
 
@@ -94,8 +94,10 @@ cp "$CI_SKILLS_CHECKOUT/target.toml.template" ~/.ci-skills/target.toml
 $EDITOR ~/.ci-skills/target.toml
 ```
 
-Fill in the sections needed by your commands. GitLab-only commands can use `[gitlab]` alone, while the full
-`access_check.py` receipt needs all three sections. Kubernetes commands need the selected context and exact API server.
+Fill in the sections needed by the selected operation. GitLab-only commands can use `[gitlab]` alone.
+`access_check.py` checks configured providers; unrelated provider tables and tools are not required.
+`--publication` additionally requires GitHub configuration. Kubernetes commands need the selected context and exact
+API server.
 Declare `kubernetes.kubeconfigs` when context and credential span files; otherwise the resolver uses a declared
 `kubeconfig`, `KUBECONFIG`, or `~/.kube/config` in that order, then verifies the context and server. For the
 `--publication` check in step 5, declare the repository's actual `github.required_checks` from branch protection.
@@ -141,9 +143,11 @@ host.
 
 ### Installer reference
 
-`install.sh` forwards to [the copy installer](tools/install_ci_skills.py). It installs at
+`install.sh` forwards to [the copy installer](tools/install_ci_skills.py), which copies the nested `ci-skills/`
+package, not the repository root. It installs at
 `$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills` when `CODEX_HOME` is unset. The installed copy is
-independent of the checkout. The staged copy includes `INSTALLATION.json`, an installer-owned record of the clean
+independent of the checkout: later checkout changes take effect only after an explicit upgrade. The staged copy
+includes `INSTALLATION.json`, an installer-owned record of the clean
 source revision and measured skill digest; installed commands accept it only while the current bytes still match.
 It also installs the bundled `glab-stack` skill under `$REPO_ROOT/.agents/skills` in the
 repository where you run the installer.
@@ -602,22 +606,58 @@ local agent and handoff files are ignored.
 
 ### Live acceptance receipts and freshness
 
-`tools/check_live_acceptance.py --root . --json` evaluates the committed receipts in the directories declared by
-[inventory/ci/live-acceptance.json](inventory/ci/live-acceptance.json) against the candidate's functional checksum,
-the required operation set, and the declared freshness window (`maxReceiptAgeDays`). The `validate` workflow runs
-it as the last required step on every pull request and push, and again on the schedule the policy declares, so a
-receipt that goes stale between pull requests is reported on `main` by the next scheduled run. The setup receipt is the
-full live access check of the installed candidate, `access_check.py --json`, whose GitLab and Kubernetes identities,
-targets, and declared live reads are bound to the functional checksum. The checker ignores the receipt's GitHub
-surface and never reads this repository's branch protection, so the execution host's target file needs no
-`required_checks` declaration and no entry for this repository; `access_check.py` itself still needs a `[github]`
-table naming some readable repository, as its own contract requires all three authorities. Superseded receipts live
-under `tests/acceptance/historical/`, which the checker never evaluates.
+`tools/check_live_acceptance.py` checks captured installed-skill results against the candidate functional checksum,
+result contract, read-back, cleanup and freshness window in
+[inventory/ci/live-acceptance.json](inventory/ci/live-acceptance.json). Its report names the selected `mode` and
+`tested_revision`. All selected receipts must come from the same installed revision; a mixed set fails.
+
+Pull requests, pushes and scheduled checks use targeted mode with `tests/acceptance/candidate`. This checks the
+committed proof for the affected capability. It does not run live actions or require another Podman probe.
+The scheduled check re-evaluates that evidence's identity and freshness; it does not trigger new live work.
+A targeted PASS certifies only the listed receipts.
+
+The complete operation set remains available explicitly:
+
+```bash
+python tools/check_live_acceptance.py --root . --aggregate --json
+```
+
+CLI aggregate mode is the default for compatibility. In GitHub's **Run workflow** form, set `aggregate` to `true`
+to select it; the form defaults to targeted mode. Aggregate checks the policy's receipt directories, including
+`tests/acceptance/candidate`. It requires every declared operation, its required APPLIED/NO_OP pairs, matching setup
+context, one tested revision and the candidate functional checksum. Toolbox/runner proof includes an independent
+read of the exact runner created by the chain.
+Historical receipt tests verify their original source checksum without claiming execution on a changed candidate.
+Neither mode changes a receipt's captured revision or checksum. Superseded receipts remain under
+`tests/acceptance/historical/`.
+
+#### Live test through an agent
+
+1. Use the installer above to install or upgrade the independent `ci-skills` copy in Codex or Claude.
+2. Start a fresh agent without the development conversation or repository source instructions.
+3. Ask that agent to **use ci-skills** for the actual task, naming the target and requested result. For example:
+   “Use ci-skills to build a toolbox with Go and golangci-lint, publish it, and add its runner to my GitLab project.”
+4. Confirm that the agent discovers the installed commands, reads their help and relevant reference pointers,
+   and executes those commands. Developer worktree inspection, parent-provided command recipes or replacement
+   ad hoc code do not prove the installed skill works.
+5. Capture the actual installed revision, command results and independent read-back. Put the sanitized result
+   receipts for that capability in `tests/acceptance/candidate`, retaining their original identities.
+6. Check the selected proof:
+
+```bash
+python tools/check_live_acceptance.py --root . --no-aggregate \
+  --receipts tests/acceptance/candidate --json
+```
+
+The toolbox/runner combo builds the toolbox, publishes it and configures the durable runner. Consumer verification
+is separate from that combo; it does not add a pipeline or test job to the delivered command.
 
 #### Live acceptance reruns
 
-When the scheduled run reports `receipt_stale`, or a runtime change invalidates the recorded functional checksum,
-refresh the receipts from the installed candidate on the execution host and commit them through a pull request:
+For a targeted failure or stale receipt, repeat only the selected task through the agent procedure above.
+When a full aggregate run is explicitly requested, keep the installed revision fixed, ask the same agent to execute
+the complete declared operation set, and capture these receipts. This aggregate scenario needs GitLab and
+Kubernetes; GitHub is additionally required only when publication checking is selected:
 
 1. `access_check.py --json --job-url <declared job> --ceph-namespace <declared namespace>
    --receipt-out tests/acceptance/receipts/access-check.json`.

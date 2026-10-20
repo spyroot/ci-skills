@@ -16,8 +16,9 @@ This document plans from:
 
 - the owner's direction of 2026-10-15, recorded in [`docs/combos.md`](../combos.md) chain 11 ("Can this cluster
   build images from a GitLab job?"): a user who installed ci-skills asks their agent to prepare CI so the project's
-  container tests, docker builds included, run in GitLab jobs on their cluster; the agent proves in one go that
-  podman can run containers on a node there, then that a real job can build and push an image;
+  container tests, docker builds included, run in GitLab jobs on their cluster; the probe checks Podman on a node,
+  and the chain builds and publishes the toolbox and configures a runner using it. A consumer job is external
+  live acceptance, not part of the chain;
 - the owner's directions of 2026-10-15 on run-scoped names and agent-chosen locations, and on the probe's result
   being the Pod's terminated exit code with every marker line a row, recorded with their dates in the
   [ExecPlan's Decision Log](../exec-plans/active/ci13-image-build-readiness.md#decision-log); the catalogue does
@@ -25,8 +26,8 @@ This document plans from:
 - the project motivation in [`README.md`](../../README.md#motivation): one combo instead of many hand-rolled
   calls, less context, the same result in one go;
 - the six-row evidence model in [`docs/gitlab-toolbelt-plan.md`](../gitlab-toolbelt-plan.md) block 7, which
-  defines how a chain is proven and names the runner registration and test job that chain 11's later steps build
-  on, and the owner's rule that only a live-tested head merges;
+  defines how a chain is proven through runner registration and an external test job, and the owner's rule that
+  only a live-tested head merges;
 - the [contribution guide](../contribution_guide.md), sections 2 (one atomic callback), 3 (compose a thin
   workflow; for a domain other than the toolbox, reuse that domain's action adapter) and 4 (declare the command in
   `core/catalog.py`, pair a result schema, regenerate `tools.json`), which every step below is written against;
@@ -125,14 +126,14 @@ This document plans from:
         gateIds: [G-CI13-STATIC, G-CI13-LIVE, G-CI13-GATE]
         evidence: [tests/acceptance/podman-readiness/image-build-readiness.json, tests/acceptance/evidence/podman-readiness-final/README.md]
       - id: R-CI13-007
-        authority: [docs/combos.md, docs/gitlab-toolbelt-plan.md]
+        authority: [docs/combos.md, docs/phases/CI11-TOOLS.md]
         phaseId: CI13
         classification:
           grounding: GROUNDED
           implementation: NOT_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: After a passing probe, the chain continues on the same node with a toolbox-backed runner carrying the same privileged podman setup, a job on the test project that builds an image with podman and pushes it to Harbor, and the read-back of the pushed digest and of the job naming the runner, composed from chain 1 and block 7 once they exist.
-        owner: ci-skills/lib/python/core/kubernetes/image_build_chain.py
+        deliverable: The chain builds the toolbox, publishes it to Harbor, and creates/configures a GitLab runner using that image on the selected worker. It ends at the existing DeployManagerRunner and returns existing build, publication and deployment results. The runner, manager and required runtime resources remain available to the caller; online/runtime proof, probe and consumer-job execution are external to the chain.
+        owner: ci-skills/lib/python/core/kubernetes/image_build_chain/
         preserve: [Chain 1's runner manager and harbor_push read-back are composed, not reimplemented]
         prIds: [PR-CI13-2]
         gateIds: [G-CI13-STATIC, G-CI13-LIVE]
@@ -147,7 +148,7 @@ This document plans from:
         requirementIds: [R-CI13-006, R-CI13-007]
         dependsOn: [PR-CI13-1]
         waveId: W-CI13-2
-        owns: [ci-skills/lib/python/core/kubernetes/image_build_chain.py, ci-skills/lib/python/core/image_build_action.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/image_build_readiness.py, ci-skills/schemas/results/image-build-readiness.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_image_build_chain.py]
+        owns: [ci-skills/lib/python/core/kubernetes/image_build_chain/, ci-skills/lib/python/core/kubernetes/image_build_readiness.py, ci-skills/lib/python/core/catalog.py, ci-skills/bin/image_build_readiness.py, ci-skills/schemas/results/image-build-readiness.schema.json, ci-skills/tools.json, ci-skills/SKILL.md, tests/python/test_image_build_chain.py]
     waves:
       - id: W-CI13-1
         prIds: [PR-CI13-1]
@@ -169,12 +170,15 @@ This document plans from:
         command: The invocations under "Invocation and the result the agent reads", run from the installed candidate against the live cluster, each with --receipt-out
         environment: The user's live smoke setup against the live cluster; the installed command must reuse or prepare its own run-scoped privileged permission
         enforcement: Existing for probe through PR81; the live run precedes the merge and its receipt is committed under tests/acceptance/podman-readiness/; chain proof remains pending
-        evidence: [One receipt per verb and result action, the permission source and optional RoleBinding UID, the marker rows with the Pod's terminated exit code, the chosen node, the run identifier, absence read-back of every run-owned resource, the functional checksum of the installed candidate]
+        evidence: [One receipt per verb and result action, the permission source and optional RoleBinding UID, probe marker rows with the Pod's terminated exit code and owned-resource absence, chain build/publication/deployment results and external consumer proof, the chosen node, the run identifier, the functional checksum of the installed candidate]
       - id: G-CI13-GATE
         requirementIds: [R-CI13-006]
         command: python tools/check_live_acceptance.py --root . --json
         environment: The live_acceptance step of the validate job, on the committed receipts
-        enforcement: Existing; PR81 registers the Podman probe receipt, matching functional checksum, runtime checks and owned-resource cleanup alongside the existing required operations
+        enforcement: >-
+          Aggregate mode retains the full required operation set; --no-aggregate with an explicit --receipts
+          directory checks only selected candidate capability receipts with their provenance, functional checksum,
+          freshness, result, read-back and applicable cleanup requirements. Targeted PASS is not full-skill acceptance.
         evidence: [https://github.com/spyroot/ci-skills/actions/runs/39156922605, tests/acceptance/podman-readiness/image-build-readiness.json]
 <!-- /architecture-map:v1 -->
 
@@ -185,8 +189,8 @@ preparing CI so their project's container tests and image builds run in GitLab j
 calls the installed command with a node, or lets the combo pick one, and reads the shared result envelope: one
 row per thing the probe proved on that node, the probe's exit code from the Pod, and either `PASS` or a named
 authorization or runtime failure. The exact invocations and the JSON the agent reads are under "Invocation and the
-result the agent reads". The downstream consumer is chain 11's later steps: a runner with the same setup on that
-node, a job that builds and pushes, and the digest read-back.
+result the agent reads". The separate chain builds and publishes the toolbox and leaves a runner using that image
+on the selected node. A consumer job with exact runner/job read-back is external acceptance.
 
 The motivations, in the contract's categories: the capability it adds (an answer to "can this cluster build
 images from a job?" in one command, where today the agent would discover each failure inside a pipeline, one
@@ -204,8 +208,8 @@ watch a bind mount read back empty, and only then learn that the exit code of a 
 the job. Each round trip costs a pipeline and the agent's context. After this phase the agent runs one probe on
 the chosen node and gets every one of those answers as a row, with the Pod's exit code as the verdict, and a
 named reason when the cluster refuses privileged Pods. The observable outcome for the user: a node proven able to
-run podman builds before any runner or pipeline is touched, and later, the same chain carried through a real job
-and a pushed digest.
+run Podman before any runner or pipeline is touched, and a separate chain that leaves a toolbox-backed runner
+available for the user's own jobs.
 
 ## Diagram
 
@@ -221,8 +225,8 @@ and a pushed digest.
                                                               │
                                       shared report ─► JSON result, sanitized receipt (schema image-build-readiness)
 
-    (PR-CI13-2) agent ─ image_build_readiness.py chain --node N ──► probe rows ─► chain 1 runner with the same setup
-                                                                   ─► job on the test project builds and pushes ─► digest read-back
+    (PR-CI13-2) agent ─ image_build_readiness.py chain --node N ──► build toolbox ─► push to Harbor
+                                                                   ─► configure/start runner using toolbox
 
 Data flow runs left to right through named state fields; control flow is the executor's `collect → run → update`
 per callback and reverse `cleanup` for every entered callback on success and on failure, inside the executor's
@@ -255,7 +259,7 @@ The following tree, CI topology and baseline observations retain the original pl
         kubernetes/mtu_consistency.py                 privileged debug Pods, marker-based cleanup, interrupt handling
         kubernetes/run_scope.py                       RunScope over ResourceSet; OpenRunScope (delivered by CI12.0)
         kubernetes/image_build_probe.py          NEW  SelectNode, RunProbeJob, ReadProbeResult, ParseMarkers
-        kubernetes/image_build_chain.py          NEW  PR-CI13-2: composition over chain 1 and block 7
+        kubernetes/image_build_chain/            NEW  PR-CI13-2: typed model, callbacks, verification, workflow and command
         image_build_action.py                    NEW  ReadinessState, ReadinessAction, ConfirmReadinessOperation, ReadinessWorkflow
       schemas/
         results/image-build-readiness.schema.json NEW
@@ -305,7 +309,7 @@ in the toolbox actions, the GitLab adapter and the MTU check.
 
 Intended outcome: seven requirements, two pull requests, two waves, one command with the proposed verbs `probe`
 and, later, `chain`, sharing the mode flags of the GitLab actions (`--dry-run`, `--live-plan`, `--apply
---confirm-plan`); the probe's callbacks reusable by the chain and the run scope shared with CI12. The command
+--confirm-plan`); shared worker/runtime callbacks are reusable and the run scope is shared with CI12. The command
 surface is open question 1 until the owner approves it; the invocations below show the proposal exactly.
 
 ### Design and Decomposition
@@ -469,12 +473,29 @@ Every verb also accepts `--live-plan` (`status: PLANNED`, identity and node read
 `--yaml`, `--human`, `--output-dir` for paired reports, `--evidence-dir` for the persisted log and rows, and the
 shared diagnostic options.
 
+#### Chain inputs and evidence
+
+The `chain` verb consumes the existing toolbox specification, `--runner-description`, `--runner-label` and the
+caller-selected GitLab scope: `--project` for a project runner or `--group` for a group runner. `--node` selects
+the worker and `--namespace` selects an existing runtime namespace. There are no pipeline or job inputs.
+
+The confirmed plan includes runner scope, toolbox image selection and worker/runtime inputs. One executor
+composes the existing provider, toolbox and runner callbacks. The chain ends at the existing
+`DeployManagerRunner`, using the published toolbox, and returns existing build, publication and deployment
+results. It adds no separate verification stage; online/runtime proof is an external installed-skill invocation
+by the consumer agent.
+
+The runner, manager, required SCC binding and runtime namespace remain available after success. The reusable
+toolbox BuildConfig, build namespace and published image also persist. Removal is an explicit lifecycle action;
+successful delivery does not tear down the runner. Consumer-job execution and disposal of live-test resources
+belong to external acceptance. The installed [chain reference](../../ci-skills/references/image-build-chain.md)
+supplies arguments and the plan/apply example; command discovery must return that reference.
+
 #### When to Decompose
 
 Two slices, because they have independent reasons to change and independent proofs: the probe (PR-CI13-1) is
-provable with nothing but the cluster, one node and the constraint; the chain (PR-CI13-2) depends on chain 1's
-runner manager and block 7's registration and test job, which are their own deliveries, and on the test project
-and Harbor. Each is one pull request with its own live proof.
+provable with nothing but the cluster, one node and the constraint; the chain (PR-CI13-2) depends on the existing
+toolbox build, Harbor publication and runner manager callbacks. Each is one pull request with its own live proof.
 
 #### When to Introduce Abstraction
 
@@ -492,8 +513,8 @@ The phase identity and shared-foundation delivery order are settled by the opera
 specifications. Missing optional roadmap files do not create another approval requirement. The architecture
 format is documented above; the existing pinned checks remain authoritative.
 
-Questions 1–3 were resolved by merged PR81; question 6 remains open. The original choices and approved
-boundaries are retained below:
+Questions 1–3 were resolved by merged PR81; question 6 is resolved by the operator's delivery boundary below.
+The original choices and approved boundaries are retained below:
 
 1. The command surface: the command name `image_build_readiness.py`, the verb `probe` (and `chain` later), and
    the options `--node`, `--probe-image`, `--inner-image`, `--timeout`, `--evidence-dir` and the resource bounds,
@@ -518,9 +539,9 @@ boundaries are retained below:
 5. Resolved delivery order: CI12.0 delivers `core/kubernetes/run_scope.py` and reusable tool preparation.
    CI13 consumes them. The shared mode validator `core/action_modes.py` serves both adapters; reuse the existing
    implementation if already delivered rather than introduce a duplicate.
-6. Chain 11's later steps (runner with the same setup, build-and-push job, digest read-back) depend on chain 1's
-   runner manager and block 7's registration and test job, which are not delivered; PR-CI13-2 waits for them and
-   its verb, `chain`, is a proposal.
+6. The chain delivers toolbox build, Harbor publication and runner configuration using that toolbox.
+   It ends at the existing runner deployment; online/runtime proof, probe and consumer-job execution are external
+   acceptance only.
 
 Decided as mechanism inside the library, recorded so no step hides a choice:
 
@@ -534,10 +555,10 @@ Decided as mechanism inside the library, recorded so no step hides a choice:
 - The Job log is read through the service's `command` call and the Pod status through `json`, because the service
   has no dedicated log call; adding one is not needed for one consumer.
 - Image references are digests; a tag without a digest is refused before any plan is produced.
-- Nothing persists beyond the result unless the agent names an evidence directory; the namespace and the Job are
-  removed on every exit.
+- For the probe, nothing persists beyond the result unless the agent names an evidence directory; the namespace
+  and the Job are removed on every exit.
 
-The boundary is the two slices above. The runner manager and block 7 stay their own deliveries.
+The boundary is the two slices above. The runner manager remains its own reusable delivery.
 
 ## PR Order
 
@@ -547,9 +568,10 @@ the `probe` verb, the catalogue declaration with its regenerated `tools.json` an
 in the validate workflow per the existing pairing rule, and the routing; its live proof is the probe run from
 the installed candidate on one node of the live cluster with every row present and the Pod exited 0, and the
 namespace, RoleBinding and Job absent afterwards. A permission preflight failure is a blocked capability and is
-not accepted as live proof. PR-CI13-2 (wave W-CI13-2) depends on it and on chain 1 and block 7, and delivers the
-`chain` verb that composes the probe with the runner, the build-and-push job and the digest read-back; its live
-proof needs the test project and Harbor. Per the owner's rule, each pull request is live-tested on its own head
+not accepted as live proof. PR-CI13-2 (wave W-CI13-2) reuses the toolbox, Harbor and runner manager callbacks and
+delivers the `chain` verb: build toolbox, publish it, configure/start a runner using it. Its result contains the
+existing build, publication and deployment records. Online/runtime proof and consumer-job verification are
+external acceptance, not chain callbacks. Per the owner's rule, each pull request is live-tested on its own head
 from the
 installed candidate before it merges. Live proof is bound to the functional checksum; wording-only docs or
 test changes do not invalidate unchanged executable behavior. What each pull request commits
@@ -577,7 +599,8 @@ rejection message, existing-permission no-op preservation, temporary RoleBinding
 before Job creation; `R-CI13-005` a scope test (names
 derive from the identifier, removal deletes exactly the owned set) and the live absence read-back, including an
 interrupted run; `R-CI13-006` the catalogue consistency test, the render check and `--describe` without
-credentials; `R-CI13-007` nothing until chain 1 and block 7 exist.
+credentials; `R-CI13-007` composition coverage, the existing build/publication/deployment results, and external
+consumer proof that the retained runner uses the published toolbox.
 
 ## Live Smoke Evidence
 
@@ -595,12 +618,14 @@ identifier, the permission source, and the namespace, run-owned RoleBinding and 
 authorization setup is not capability proof. A second run interrupted during the Job proves cleanup on interrupt
 by the same absence read-back. Each receipt is sanitized with the portable writer and carries the functional
 checksum of the installed candidate; PR81 registered its captured receipt in the existing gate. The chain's evidence
-(runner, job, digest) waits for PR-CI13-2.
+(existing build/publication/deployment results) waits for PR-CI13-2. Online/runtime proof, consumer-job execution
+and disposal of test resources are external acceptance steps.
 
 ## End-to-End Test
 
 The consumer journey: the agent names a node (or not), runs `probe`, and reads back every row passed with the
-Pod exited 0 and nothing left in the cluster carrying the run identifier; later, `chain` carries the same node
-through a runner, a build-and-push job and a pushed digest. The proposed test is the probe's live receipt bound to
-the functional checksum, then, after PR-CI13-2, the chain's receipts linked by the same run identifier; its
+Pod exited 0 and nothing left in the cluster carrying the run identifier. Separately, `chain` builds and publishes
+the toolbox and deploys a runner using it. The live acceptance test consumes that runner outside the combo.
+The proposed evidence is the probe's live receipt bound to the functional checksum, then, after PR-CI13-2, the
+chain's existing build/publication/deployment records and external consumer proof; its
 acceptance gate is `G-CI13-LIVE`. Probe execution is recorded above; chain execution remains pending.

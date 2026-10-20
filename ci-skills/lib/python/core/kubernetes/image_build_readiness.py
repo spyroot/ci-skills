@@ -9,18 +9,13 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from collections.abc import MutableMapping, MutableSequence, Sequence
 from pathlib import Path
-from typing import Final, Optional
+from typing import Optional
 
 from lib.python.access.credentials import bind_sources
 from lib.python.core.abstract.callbacks import AbstractCallbacks, Callbacks
 from lib.python.core.abstract.skill_action import SkillAction
-from lib.python.core.action_modes import (
-    ActionMode,
-    ActionModePolicy,
-    validate_action_mode,
-)
 from lib.python.core.catalog import describe
 from lib.python.core.cli import _failure, parser
 from lib.python.core.delivery_state import DeliveryState
@@ -50,7 +45,8 @@ from lib.python.core.kubernetes.podman_probe import (
     PROBE_KIND,
     PodmanProbeAction,
     ProbeMode,
-    ProbeResources,
+    probe_resources_from_args,
+    resolve_probe_mode,
 )
 from lib.python.core.kubernetes.scc_access import EnsureSCCAccess
 from lib.python.core.project_binding import resolve_target
@@ -59,16 +55,40 @@ from lib.python.core.runtime import TRACE_TEXT_LIMIT, redact_tree, sanitize
 from lib.python.core.target import Target, TargetError
 from lib.python.sys.status import BLOCKED, DRY_RUN, PARTIAL, PASS, PLANNED
 
-PROBE_MODE_POLICY: Final = ActionModePolicy(
-    default_mode=ActionMode.LIVE_PLAN,
-    receipt_modes=frozenset((ActionMode.APPLY,)),
-    allow_offline_output=True,
-)
-PROBE_EXECUTION_MODES: Final[Mapping[ActionMode, ProbeMode]] = {
-    ActionMode.OFFLINE: ProbeMode.DRY_RUN,
-    ActionMode.LIVE_PLAN: ProbeMode.LIVE_PLAN,
-    ActionMode.APPLY: ProbeMode.APPLY,
-}
+
+def _add_chain_arguments(result: argparse.ArgumentParser) -> None:
+    """Add toolbox and durable runner inputs to the readiness command.
+
+    :param result: Shared readiness parser receiving chain-only options.
+    :returns: None after registering caller-selected toolbox and runner inputs.
+    """
+    result.add_argument(
+        "--toolbox-spec",
+        metavar="PATH",
+        help="toolbox specification used by the chain runner manager",
+    )
+    result.add_argument(
+        "--project",
+        metavar="PATH_OR_ID",
+        help="GitLab project that owns the durable project runner",
+    )
+    result.add_argument(
+        "--group",
+        metavar="PATH_OR_ID",
+        help="GitLab group for a group runner record",
+    )
+    result.add_argument(
+        "--runner-description",
+        metavar="TEXT",
+        help="unique GitLab runner record description",
+    )
+    result.add_argument(
+        "--runner-label",
+        action="append",
+        default=[],
+        metavar="LABEL",
+        help="GitLab runner label applied to the durable runner; repeatable",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,11 +97,13 @@ def build_parser() -> argparse.ArgumentParser:
     :returns: Parser for offline plan, live plan, and confirmed apply.
     """
     result = parser(
-        "Prove nested Podman runtime readiness in one disposable Kubernetes Job.",
+        "Prove nested Podman readiness or deliver a toolbox-backed GitLab runner.",
         kind=PROBE_KIND,
     )
     result.set_defaults(kind=PROBE_KIND)
-    result.add_argument("action", nargs="?", choices=("probe",), default="probe")
+    result.add_argument(
+        "action", nargs="?", choices=("probe", "chain"), default="probe"
+    )
     result.add_argument("--node", metavar="NAME", help="Ready worker; default discover")
     result.add_argument(
         "--namespace",
@@ -125,56 +147,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="read the concrete Ready worker and print an apply-ready digest",
     )
-    result.add_argument("--apply", action="store_true", help="run the confirmed probe")
+    result.add_argument("--apply", action="store_true", help="run the confirmed action")
     result.add_argument(
         "--confirm-plan", metavar="SHA256", help="exact digest from the live plan"
     )
     result.add_argument(
         "--receipt-out", metavar="PATH", help="write one portable live receipt"
     )
+    _add_chain_arguments(result)
     result.epilog = (result.epilog or "") + (
         " Default mode is the live plan. --dry-run contacts no API and uses "
         "'auto' when --node is omitted. Only --apply creates resources. On "
-        "OpenShift, apply reuses existing SCC permission or creates and removes "
-        "one run-owned RoleBinding."
+        "OpenShift, probe apply removes its run-owned access; chain apply retains "
+        "the usable runner and its owned manager access until explicit deletion."
     )
     return result
-
-
-def _mode(args: argparse.Namespace) -> ProbeMode:
-    """Validate mutually exclusive execution flags and choose one mode.
-
-    :param args: Parsed shared and probe-specific command arguments.
-    :returns: Closed probe execution mode.
-    :raises ValueError: If modes or confirmation flags conflict, the timeout is
-        nonpositive, or a receipt is requested outside apply.
-    """
-    mode = validate_action_mode(
-        apply=bool(args.apply),
-        dry_run=bool(args.dry_run),
-        live_plan=bool(args.live_plan),
-        confirmed=bool(args.confirm_plan),
-        receipt_requested=bool(args.receipt_out),
-        output_requested=bool(args.output_dir or args.log_file),
-        timeout=args.timeout,
-        policy=PROBE_MODE_POLICY,
-    )
-    return PROBE_EXECUTION_MODES[mode]
-
-
-def _resources(args: argparse.Namespace) -> ProbeResources:
-    """Build validated resource settings from parsed command arguments.
-
-    :param args: Parser namespace containing the five quantity options.
-    :returns: Immutable bounded resource settings.
-    """
-    return ProbeResources(
-        cpu_request=args.cpu_request,
-        cpu_limit=args.cpu_limit,
-        memory_request=args.memory_request,
-        memory_limit=args.memory_limit,
-        storage_size=args.storage_size,
-    )
 
 
 def workflow(
@@ -243,7 +230,7 @@ class ImageBuildReadiness:
             probe_image=self.args.probe_image,
             inner_image=self.args.inner_image,
             timeout=self.args.timeout,
-            resources=_resources(self.args),
+            resources=probe_resources_from_args(self.args),
             mode=mode,
             confirm_plan=self.args.confirm_plan,
             namespace=self.args.namespace,
@@ -371,10 +358,8 @@ class ImageBuildReadiness:
         :returns: Canonical exit status from the final report status.
         :raises OSError: If final output or a requested report cannot be written.
         """  # noqa: DOC502 - Shared result emitters propagate requested I/O failures.
-        if self.args.describe:
-            return emit_result(describe("image_build_readiness.py"), self.args)
         try:
-            mode = _mode(self.args)
+            mode = resolve_probe_mode(self.args)
         except ValueError as exc:
             return _failure(self.args, PROBE_KIND, "arguments", str(exc))
         errors: MutableSequence[JSONObject] = []
@@ -451,4 +436,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     :returns: Canonical command exit status.
     """
     args = build_parser().parse_args(argv)
+    if args.describe:
+        return emit_result(describe("image_build_readiness.py"), args)
+    if args.action == "chain":
+        from lib.python.core.kubernetes.image_build_chain import ImageBuildChain
+
+        return ImageBuildChain(args).execute()
     return ImageBuildReadiness(args).execute()

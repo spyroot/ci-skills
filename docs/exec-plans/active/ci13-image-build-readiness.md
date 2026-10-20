@@ -1,4 +1,4 @@
-# Prove a node can build images with podman, then carry it through a GitLab job
+# Prove Podman readiness and deliver a toolbox-backed GitLab runner
 
 This ExecPlan is maintained in accordance with the shared standards' execution plan format (`docs/PLANS.md` at
 standards revision `cae52b2`). Its Progress, Surprises & Discoveries, Decision Log and Outcomes & Retrospective
@@ -16,8 +16,9 @@ images from a GitLab job. The agent runs one probe on a node, and the person obs
 proved there (kernel, podman version, storage driver and cgroup version, backing filesystem, an inner container
 that ran, a bind mount read back, a failing exit code that propagated, nothing left behind), the Pod's exit code as
 the verdict, and nothing left in the cluster afterwards; when the cluster refuses privileged Pods, the person reads
-the exact missing authorization instead of a failed pipeline. Later, the same chain carries the
-node through a runner, a build-and-push job and a pushed digest.
+the exact missing authorization instead of a failed pipeline. The separate chain builds and publishes its runner
+toolbox and configures/starts a runner using it. Online/runtime proof and a representative consumer job are
+external live acceptance.
 
 ## Progress
 
@@ -30,9 +31,8 @@ node through a runner, a build-and-push job and a pushed digest.
 - [ ] Milestone 1, proof: live `probe` from the installed candidate on one node with every row present and the
       Pod exited 0, plus an interrupted run with the same absence read-back, attached to the pull request. The
       command must reuse or prepare and clean its own SCC permission; an external grant is not accepted as proof.
-- [ ] Milestone 2, code: the `chain` verb composing the probe with chain 1's runner, the build-and-push job and
-      the digest read-back; waits for chain 1 and block 7 (open question 6).
-- [ ] Milestone 2, proof: live chain on the test project with the pushed digest read back.
+- [ ] Milestone 2, code: the `chain` verb composing toolbox build, Harbor publication and runner configuration.
+- [ ] Milestone 2, proof: existing chain build/publication/deployment results and external consumer proof.
 - [x] Open question 1 (command surface and default digests) answered by the owner.
 - [x] Open question 2 (gate wiring for this command's receipts) answered by the owner.
 - [x] Open question 4 answered: reuse existing permission or create, verify and clean one run-owned RoleBinding.
@@ -62,6 +62,10 @@ admission message for a refused privileged Pod and the backing filesystem the em
 - 2026-10-18, the owner's direction: live proof must use only the installed command; external OpenShift setup is
   diagnostic evidence and cannot make an incomplete capability pass. The command reuses existing SCC permission
   or creates, verifies and cleans one run-owned RoleBinding to the exact SCC ClusterRole.
+- 2026-10-19, the owner's correction: the production combo is build toolbox, push it to Harbor and configure a
+  runner using it. The runner remains available after success. Probe and consumer-job execution are external
+  acceptance; the combo ends at the existing runner deployment without a separate verification stage, pipeline
+  execution, required job results or automatic runner teardown.
 - 2026-10-15, mechanism: the Pod's terminated exit code read from the API is the probe's result; every marker line
   is a row and a missing marker is a row; a tag without a digest is refused; node selection without an argument
   is the first Ready worker by name order, named in the result.
@@ -73,7 +77,7 @@ admission message for a refused privileged Pod and the backing filesystem the em
 ## Outcomes & Retrospective
 
 PR81 merged the standalone probe with [live proof](../../phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence).
-Interruption proof remains unestablished. Milestone 2's runner/job/push chain remains unmerged and unverified.
+Interruption proof remains unestablished. Milestone 2's toolbox-backed runner chain remains unmerged and unverified.
 
 ## Context and Orientation
 
@@ -119,10 +123,10 @@ the probe script, `ReadProbeResult`, `ParseMarkers`), `ci-skills/lib/python/core
 `ci-skills/schemas/results/image-build-readiness.schema.json`, the routing in `ci-skills/SKILL.md`, the unit tests
 `tests/python/test_action_modes.py`, `tests/python/test_run_scope.py` and `tests/python/test_image_build_probe.py`,
 and the metaschema entry in `.github/workflows/validate.yml` paired in `lib/bash/automation/bless.bash` as open
-question 3 allows. Milestone 2 adds `ci-skills/lib/python/core/kubernetes/image_build_chain.py`, the `chain` verb
+question 3 allows. Milestone 2 adds `ci-skills/lib/python/core/kubernetes/image_build_chain/`, the `chain` verb
 in the adapter, the thin main and the catalogue declaration, the chain's rows in the result schema, and
-`tests/python/test_image_build_chain.py`, once chain 1's runner manager and block 7 exist. Each milestone edits only
-the files its pull request owns in the phase document's map; any receipt committed into the gate follows the
+`tests/python/test_image_build_chain.py`, reusing the toolbox, Harbor and runner manager callbacks. Each milestone
+edits only the files its pull request owns in the phase document's map; any receipt committed into the gate follows the
 owner's answer to open question 2 and is not part of either milestone until then. The two milestones, each with
 its goal, work, result and proof:
 
@@ -142,15 +146,18 @@ row present and the Pod exited 0, plus a second run interrupted during the Job w
 both attached to the pull request as receipts. A blocked authorization result does not stand in for execution.
 Reuse proof when the functional checksum is unchanged.
 
-### Milestone 2: `chain`, from the proven node to a pushed digest
+### Milestone 2: `chain`, build and publish a toolbox and configure its runner
 
-Goal: after a passing probe, the agent runs the chain on the same node and reads back a runner online with the
-same privileged podman setup, a job on the test project that built and pushed an image, and the pushed digest.
-Work: the composition over chain 1's runner manager and block 7's registration and test job, the verb, the
-result-schema rows and tests, then the live run. Result: `image_build_readiness.py chain --node <NODE>` composes
-the probe rows with chain 1's rows and ends on the digest read-back. Proof: the composition tests, the validate
-workflow green on the exact head, and the live chain result on the test project attached to the pull request.
-This milestone waits for chain 1 and block 7, open question 6.
+Goal: the agent supplies the toolbox specification and runner scope and deploys a runner using the
+published toolbox on the selected worker. Work: compose the existing toolbox, Harbor and runner manager
+callbacks, the verb, result-schema rows and tests, then installed evidence. Result:
+`image_build_readiness.py chain --node <NODE>` builds the toolbox, publishes it to Harbor and configures/starts
+the runner, ending at the existing `DeployManagerRunner` and returning the existing operation results.
+The runner, manager, required SCC binding and runtime namespace remain available after success; removal is an
+explicit lifecycle action.
+Proof: the composition tests, the validate workflow green on the exact head, and the installed chain result.
+Online/runtime proof, consumer-job execution and disposal of test resources belong to external acceptance through
+installed-skill invocations by the consumer agent, not the product combo.
 
 ## Concrete Steps
 
@@ -179,8 +186,9 @@ head is the one that merges. The report of every live step is its receipt, produ
 live run in this repository: `--receipt-out` on the installed command, sanitized by the portable writer, bound to
 the functional checksum, with the rows that prove the outcome quoted in the pull request body.
 
-Milestone 2 follows the same sequence with `chain --node <NODE>` on the test project once chain 1 and block 7
-exist.
+Milestone 2 uses the [chain reference](../../../ci-skills/references/image-build-chain.md) for its required
+toolbox and runner inputs, live plan and confirmed apply. It returns the existing build, publication and deployment
+results; no separate verification stage, pipeline or consumer job is executed by the combo.
 
 ## Validation and Acceptance
 
@@ -197,9 +205,9 @@ propagation 7 and not 7, remaining containers non-empty), the verdict (`PASS` on
 cleanup, and authorization denial before Job creation; when the catalogue consistency test and the render check
 pass; when the validate workflow is green on the exact head; and when the live results attached to the pull
 request show the rows with the Pod's exit code and nothing left carrying the identifier, including after the
-interrupted run. Milestone 2 is accepted when the composition tests pass and the live chain result shows the
-runner online, the job succeeded on that runner, and
-the pushed digest read back. A green build alone demonstrates nothing; the live results do.
+interrupted run. Milestone 2 is accepted when the composition tests pass, the existing build/publication/deployment
+results are captured, and external consumer proof shows that the retained runner uses the published toolbox.
+Online/runtime proof, consumer-job execution and test-resource disposal are external acceptance steps.
 
 ## Idempotence and Recovery
 

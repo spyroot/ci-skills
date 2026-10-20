@@ -474,12 +474,12 @@ class RunScopeState(DeliveryState):
     .. attribute :: found_scopes
         :type: Sequence[RunScope]
 
-        Exact live scopes returned by the latest labeled lookup.
+        Exact live scopes verified by the latest lookup or open operation.
 
     .. attribute :: resolved_run_id
         :type: Optional[str]
 
-        Run identifier that produced ``found_scopes``, or absent before lookup.
+        Run identifier that produced ``found_scopes``, or absent before verification.
 
     .. attribute :: scope_reused
         :type: bool
@@ -611,8 +611,8 @@ class OpenRunScope(K8SCallback[RunScopeAction]):
             if len(observed) != 1 or observed[0] != candidate:
                 raise KubernetesError("run_scope_post_create_not_unique")
             scope = candidate
-            state.resolved_run_id = candidate.run_id
-            state.found_scopes = observed
+        state.resolved_run_id = scope.run_id
+        state.found_scopes = (scope,)
         state.run_scope = scope
         state.scope_reused = reused
         return {
