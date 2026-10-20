@@ -22,6 +22,11 @@ class VerbDefinition(TypedDict):
 
         Option names required for this verb.
 
+    .. attribute :: requires_authorities
+        :type: NotRequired[Sequence[str]]
+
+        Provider configuration required by this specific operation.
+
     .. attribute :: side_effects
         :type: NotRequired[str]
 
@@ -45,6 +50,7 @@ class VerbDefinition(TypedDict):
 
     purpose: NotRequired[str]
     required_options: NotRequired[Sequence[str]]
+    requires_authorities: NotRequired[Sequence[str]]
     side_effects: NotRequired[str]
     result_schema: NotRequired[str]
     mutates: NotRequired[bool]

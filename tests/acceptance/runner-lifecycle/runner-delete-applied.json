@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-19T01:06:45.847863+00:00",
+  "captured_at": "2026-10-19T05:07:36.575689+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -25,12 +25,12 @@
     ],
     "one_time_sink_required": false,
     "operation": "delete",
-    "plan_digest": "bec4149599cb53136b657a34c53c1f68c1cede74ff33e7800c5f6ec6d126ff9d",
+    "plan_digest": "4e20c51b9f15a3c20aa97cfbcec10c0134d7991fe9ed4e7945cce3c36a832843",
     "project_ids": null,
-    "resource_id": 97,
+    "resource_id": 104,
     "runner_snapshot": {
-      "description": "ci-skills-d2a16bea-20261019T010231Z-runner",
-      "id": 97,
+      "description": "ci-skills-92871b23-20261019T050237Z-runner",
+      "id": 104,
       "present": true,
       "project_ids": [
         123,
@@ -41,7 +41,7 @@
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "bec4149599cb53136b657a34c53c1f68c1cede74ff33e7800c5f6ec6d126ff9d",
+  "plan_digest": "4e20c51b9f15a3c20aa97cfbcec10c0134d7991fe9ed4e7945cce3c36a832843",
   "readback": {
     "action": "APPLIED",
     "after": {
@@ -54,8 +54,8 @@
       "access_level": "not_protected",
       "architecture": null,
       "contacted_at": null,
-      "description": "ci-skills-d2a16bea-20261019T010231Z-runner",
-      "id": 97,
+      "description": "ci-skills-92871b23-20261019T050237Z-runner",
+      "id": 104,
       "is_shared": false,
       "job_execution_status": "idle",
       "online": null,
@@ -69,11 +69,11 @@
       "status": "never_contacted",
       "tag_list": [
         "ci-skills",
-        "d2a16bea"
+        "92871b23"
       ],
       "version": null
     },
-    "id": 97,
+    "id": 104,
     "mutated": true,
     "verified": true
   },
@@ -90,8 +90,8 @@
         "access_level": "not_protected",
         "architecture": null,
         "contacted_at": null,
-        "description": "ci-skills-d2a16bea-20261019T010231Z-runner",
-        "id": 97,
+        "description": "ci-skills-92871b23-20261019T050237Z-runner",
+        "id": 104,
         "is_shared": false,
         "job_execution_status": "idle",
         "online": null,
@@ -105,11 +105,11 @@
         "status": "never_contacted",
         "tag_list": [
           "ci-skills",
-          "d2a16bea"
+          "92871b23"
         ],
         "version": null
       },
-      "id": 97,
+      "id": 104,
       "mutated": true,
       "verified": true
     }
@@ -122,12 +122,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
-    "file_count": 227,
-    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "digest": "39de6f3b5f6a310222dba33ddb45ed894f8a8a1642c3f0574ecd0962881cf992",
+    "file_count": 234,
+    "functional_digest": "972b1e04f7c859dd97472031cb0d49c8e78228320a5488702e2c7309bc625959",
     "revision": {
       "source": "installer_record",
-      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "value": "92871b23992c391edbab940ae32893f754179f0b",
       "verified": true
     }
   },
@@ -140,9 +140,9 @@
     "kind": "project",
     "reference": "hott/test"
   },
-  "target_file": "path:9f3098ba4860",
+  "target_file": "path:c13b67713962",
   "target_source": "project;argv:--project",
-  "tested_revision": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+  "tested_revision": "92871b23992c391edbab940ae32893f754179f0b",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

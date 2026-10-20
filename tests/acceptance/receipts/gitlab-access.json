@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-19T01:03:56.550503+00:00",
+  "captured_at": "2026-10-19T05:04:06.305036+00:00",
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
@@ -22,12 +22,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
-    "file_count": 227,
-    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "digest": "39de6f3b5f6a310222dba33ddb45ed894f8a8a1642c3f0574ecd0962881cf992",
+    "file_count": 234,
+    "functional_digest": "972b1e04f7c859dd97472031cb0d49c8e78228320a5488702e2c7309bc625959",
     "revision": {
       "source": "installer_record",
-      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "value": "92871b23992c391edbab940ae32893f754179f0b",
       "verified": true
     }
   },
@@ -38,6 +38,6 @@
     "kind": "project",
     "web_url": "https://gitlab.dcloud.run/hott/test"
   },
-  "target_file": "path:9f3098ba4860",
+  "target_file": "path:c13b67713962",
   "target_source": "project"
 }

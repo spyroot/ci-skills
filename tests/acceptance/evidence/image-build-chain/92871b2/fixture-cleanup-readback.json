@@ -1,0 +1,11 @@
+{
+  "branch": "ci13-pr99-92871b2-20261019",
+  "delete_exit_code": 0,
+  "operation": "ci13_fixture_branch_cleanup",
+  "postdelete_absent": true,
+  "postdelete_read_exit_code": 69,
+  "predelete_commit": "9e76d27695d0b089568a63d601f1f58d9dd4dfdb",
+  "project_id": 123,
+  "schema_version": "1.0",
+  "temporary_auth_removed_after_command": true
+}

@@ -426,14 +426,17 @@ def test_remove_finds_observed_namespace_and_repeat_is_no_op(
 
 @pytest.mark.parametrize("kind", ("Pod", "Deployment", "RoleBinding"))
 def test_run_lookup_rejects_two_live_namespaces_without_mutation(kind: str) -> None:
-    """Duplicate ownership labels must not select an arbitrary namespace to delete."""
+    """Reject ambiguous run ownership without choosing a namespace to delete.
+
+    :param kind: Native resource kind carrying duplicate run ownership labels.
+    """
     cluster = MemoryCluster()
     for namespace in ("first-space", "second-space"):
         scope = SCOPES.RunScope("unit-run", namespace, False)
         document = {
             "kind": kind,
             "metadata": {
-                "name": f"pod-{namespace}",
+                "name": f"resource-{namespace}",
                 "namespace": namespace,
                 "labels": dict(scope.labels),
             },

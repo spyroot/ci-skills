@@ -234,7 +234,7 @@ def test_probe_defaults_to_live_plan_and_apply_requires_confirmation(
     """
     args = READINESS.build_parser().parse_args([])
 
-    assert READINESS._mode(args) == PODMAN.ProbeMode.LIVE_PLAN
+    assert PODMAN.resolve_probe_mode(args) == PODMAN.ProbeMode.LIVE_PLAN
     with pytest.raises(ValueError, match="confirm_plan_required"):
         replace(
             _action(tmp_path),

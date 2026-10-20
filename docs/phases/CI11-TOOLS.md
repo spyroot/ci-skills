@@ -95,6 +95,23 @@ reference's own sections as entries of the same kind, down to one section's text
 `references/` stays behind that node; the agent is handed the pointer, not the file, and follows it only when it
 decides it needs to. The graph therefore continues past the command node through its references.
 
+### Cross-integration combinations already fit the implementation
+
+**Locked reference example. Changes require explicit operator approval.**
+
+There is a concrete example on main: `gitlab_runner_manager.py` declares **GitLab, Kubernetes, and Harbor**.
+`proposition()` places commands into the clusters corresponding to their declared authorities. Consequently, this
+one command is reachable through all three relevant provider clusters. That is consistent with your composite
+workflow model. [Runner-manager declaration][runner-manager-declaration] · [Cluster construction][cluster-construction]
+
+Selecting a command also offers its immediate related tools and collects their declared references, removing
+duplicates. Shared references therefore already have a central definition and can appear at several relevant
+command nodes. [Offering construction][offering-construction]
+
+[runner-manager-declaration]: https://github.com/spyroot/ci-skills/blob/6c02a4f1ec8624901dc142e12aacd399152f5c8d/ci-skills/lib/python/core/catalog.py#L906-L913
+[cluster-construction]: https://github.com/spyroot/ci-skills/blob/6c02a4f1ec8624901dc142e12aacd399152f5c8d/ci-skills/lib/python/core/catalog.py#L1402-L1442
+[offering-construction]: https://github.com/spyroot/ci-skills/blob/6c02a4f1ec8624901dc142e12aacd399152f5c8d/ci-skills/lib/python/core/catalog.py#L1368-L1399
+
 ### Proposition schema
 
 The [reference-next schema](../../schemas/reference-next.schema.json) owns version `3.0` propositions; the `2.0`

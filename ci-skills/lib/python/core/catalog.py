@@ -531,14 +531,13 @@ COMMANDS: Mapping[str, CommandDefinition] = {
     },
     "image_build_readiness.py": {
         "kind": "image_build_readiness",
-        "purpose": "Probe nested Podman execution on one Kubernetes worker and clean up.",
-        "use_when": "Check container execution, bind mounts and exit propagation before "
-        "building a runner workflow.",
+        "purpose": "Probe nested Podman or build and publish a toolbox for a running GitLab runner.",
+        "use_when": "Prove nested execution alone, or configure a GitLab runner with a published toolbox.",
         "requires": ("kubernetes",),
         "capabilities": ("node_scoped", "namespaced"),
         "mutates": True,
         "options": {
-            "--namespace": "existing namespace; default creates a temporary namespace",
+            "--namespace": "existing namespace; default creates a run namespace retained by a successful chain",
             "--probe-image": "digest-pinned image providing Podman; default is Linux amd64",
             "--inner-image": "digest-pinned inner test image; default is Linux amd64",
             "--timeout": "maximum probe duration in seconds",
@@ -548,13 +547,19 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--memory-limit": "probe container memory limit",
             "--storage-size": "maximum temporary container-storage volume size",
             "--live-plan": "read target identity and select a Ready worker without mutation",
-            "--apply": "run the confirmed probe and verify cleanup",
+            "--apply": "run the confirmed operation and read back its result",
             "--confirm-plan": "exact fingerprint returned by the live plan",
             "--receipt-out": "write a sanitized operation receipt to this exact path",
+            "--toolbox-spec": "chain: existing toolbox specification with gitlab-runner, git and podman",
+            "--project": "chain: GitLab project for a project runner",
+            "--group": "chain: GitLab group for a group runner",
+            "--runner-description": "chain: unique description for the runner record",
+            "--runner-label": "chain: runner tag; repeatable",
         },
         "subcommands": {
             "probe": {
                 "purpose": "Run a temporary Podman Job on one selected worker.",
+                "requires_authorities": ("kubernetes",),
                 "result_schema": "schemas/results/image-build-readiness.schema.json",
                 "mutates": True,
                 "side_effects": "Creates and removes a temporary namespace, conditional "
@@ -562,15 +567,40 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "read_back": "Exact permission source, optional RoleBinding UID, "
                 "Job-owned Pod exit, probe rows and resource absence.",
             },
+            "chain": {
+                "purpose": "Build and publish the toolbox, then configure a runner using that image.",
+                "requires_authorities": ("kubernetes", "gitlab", "harbor"),
+                "required_options": (
+                    "--toolbox-spec",
+                    "--runner-description",
+                    "--runner-label",
+                ),
+                "result_schema": "schemas/results/image-build-readiness.schema.json",
+                "mutates": True,
+                "side_effects": "Publishes the toolbox image and retains the runner record, manager and "
+                "required cluster resources for caller use.",
+                "read_back": "Published toolbox digest and the configured runner deployment using that image.",
+            },
         },
-        "related": ("toolbox.py", "harbor_pull.py"),
-        "references": ("Nested Podman readiness", "OpenShift SCC access"),
-        "required_tools": ("kubectl", "oc on OpenShift"),
-        "returns": "A plan or nested-runtime evidence with the Pod exit code, marker rows "
-        "and cleanup read-back; does not prove runner or image-publication behavior.",
-        "execution_surface": "configured Kubernetes API and a temporary privileged Job",
-        "side_effects": "Apply creates a run-owned namespace, conditionally creates one namespaced SCC RoleBinding, "
-        "then creates a script ConfigMap and Job; it removes only resources owned by the run.",
+        "related": (
+            "toolbox.py",
+            "harbor_pull.py",
+            "gitlab_runner_manager.py",
+        ),
+        "references": (
+            "Nested Podman readiness",
+            "Image build chain",
+            "OpenShift SCC access",
+        ),
+        "required_tools": (
+            "kubectl",
+            "oc on OpenShift; chain requires oc, glab and skopeo",
+        ),
+        "returns": "A plan or operation evidence: probe marker rows and cleanup, or the published toolbox "
+        "digest and retained runner manager workload.",
+        "execution_surface": "configured Kubernetes API; chain also uses the selected GitLab project and Harbor registry",
+        "side_effects": "Probe creates and removes temporary cluster resources. Chain publishes the toolbox "
+        "and leaves its configured runner and manager available.",
     },
     "access_check.py": {
         "kind": "access_check",
@@ -1241,6 +1271,10 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
             "summary": "Podman probe inputs, planning, execution and evidence.",
             "pointer": "references/podman-readiness.md",
         },
+        "Image build chain": {
+            "summary": "Build and publish a toolbox, then start a runner using its immutable image.",
+            "pointer": "references/image-build-chain.md",
+        },
         "OpenShift SCC access": {
             "summary": "Discover SCCs, inspect permission and read the admitted constraint.",
             "pointer": "references/openshift-scc.md",
@@ -1689,6 +1723,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
             },
             "routing": {
                 "prove nested Podman runtime readiness": "image_build_readiness.py",
+                "build and publish a toolbox for a running GitLab runner": "image_build_readiness.py",
                 "build or inspect a cluster-held OpenShift node ISO": "ocp_node_onboard.py",
                 "prepare or remove reusable cluster tools": "prepare_tool_pod.py",
                 "build or delete a toolbox": "toolbox.py",
