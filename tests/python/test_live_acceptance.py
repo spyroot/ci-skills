@@ -542,7 +542,14 @@ def test_full_required_operation_set_is_bound_to_initial_runtime_setup() -> None
         (receipt.get("kind"), receipt.get("operation"), receipt.get("result_action"))
         for receipt in receipts.values()
         if receipt.get("kind") in ACCEPTANCE.GITLAB_RECEIPT_KINDS
-    } == ACCEPTANCE.REQUIRED_GITLAB_OPERATIONS
+    } == {
+        operation
+        for operation in (
+            ACCEPTANCE.REQUIRED_GITLAB_OPERATIONS
+            | ACCEPTANCE.REQUIRED_CAPABILITY_OPERATIONS
+        )
+        if operation[0] in ACCEPTANCE.GITLAB_RECEIPT_KINDS
+    }
 
 
 def test_required_podman_runtime_receipt_cannot_be_missing() -> None:
