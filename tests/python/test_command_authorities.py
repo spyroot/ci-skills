@@ -249,8 +249,8 @@ def test_selected_target_malformed_blocks_without_fallback(
     assert "kubernetes.server" in data["errors"][0]["reason"]
 
 
-def test_full_access_check_still_requires_all_three_targets(tmp_path: Path) -> None:
-    """Keep the full access receipt dependent on all declared authorities.
+def test_load_target_default_still_requires_all_three_targets(tmp_path: Path) -> None:
+    """Preserve the library default's explicit three-authority requirement.
 
     :param tmp_path: Directory for a Kubernetes-only target that must be rejected.
 
@@ -262,5 +262,8 @@ def test_full_access_check_still_requires_all_three_targets(tmp_path: Path) -> N
         '[kubernetes]\ncontext = "unit"\n'
         'server = "https://api.cluster.example.test:6443"\n',
     )
-    with pytest.raises(target.TargetError, match="target must contain"):
+    with pytest.raises(
+        target.TargetError,
+        match="target is missing required authority tables: github, gitlab",
+    ):
         target.load_target(path)

@@ -1,0 +1,142 @@
+{
+  "blocking_live_checks": [],
+  "captured_at": "2026-10-19T00:11:37.017254+00:00",
+  "consuming_project": {
+    "commit": null,
+    "source": null
+  },
+  "credential_sources": {
+    "gitlab": "file:path:29f247d18d3c",
+    "kubernetes": "target:kubernetes.kubeconfigs"
+  },
+  "execution_host": "mac.lan",
+  "kind": "access_check",
+  "live_checks": {
+    "cilium_status": {
+      "access_proven": true,
+      "agent_health": {
+        "passed": 9,
+        "total": 9
+      },
+      "ciliumnode_count": 9,
+      "error_count": 0,
+      "errors": [],
+      "readback_sha256": "a4300144ce18eaaad3395600335adce999305d1b3bd0b32d053a57258ef9ed02",
+      "record_count": 9,
+      "status": "PASS"
+    },
+    "event_trace": {
+      "access_proven": true,
+      "error_count": 0,
+      "errors": [],
+      "readback_sha256": "820d1a18f0a5790abb1b5e2f47ab46337ef32dcc4221f7eef236a3c84d6a91c5",
+      "record_count": 3567,
+      "status": "PASS"
+    },
+    "storage_report": {
+      "access_proven": true,
+      "error_count": 0,
+      "errors": [],
+      "readback_sha256": "698458798bcff9ac1bb2cec77b6bd2b274f78eeebcb335cecd172669363f9417",
+      "record_count": 65,
+      "resource_counts": {
+        "attachments": 34,
+        "csidrivers": 4,
+        "csinodes": 9,
+        "daemonsets": 41,
+        "deployments": 195,
+        "nodes": 9,
+        "pods": 704,
+        "pvcs": 60,
+        "pvs": 65,
+        "replicasets": 459,
+        "statefulsets": 15,
+        "storageclasses": 8
+      },
+      "status": "PASS"
+    }
+  },
+  "profile": "full_live_access_check",
+  "publication": false,
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "1a39d5517d2c641f13e6b481a29d08c43f29c915f5905d60d51d1228f67df300",
+    "file_count": 218,
+    "functional_digest": "20331446ec5208bf45d708e0d00c8c678c64d52efdc58009d7290e28adcd83b1",
+    "revision": {
+      "source": "installer_record",
+      "value": "4ab0236d10b7b87104b332915b1bb467bec23944",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "surfaces": {
+    "gitlab": {
+      "credential_source": "file:path:29f247d18d3c",
+      "details": null,
+      "identity": "spyroot",
+      "name": "gitlab",
+      "next_step": null,
+      "observed_capability": [
+        "token_file_read",
+        "authenticated_host",
+        "instance_admin_identity",
+        "instance_runner_api_read"
+      ],
+      "reason": null,
+      "status": "PASS",
+      "target": "https://gitlab.dcloud.run"
+    },
+    "kubernetes": {
+      "credential_source": "target:kubernetes.kubeconfigs",
+      "details": {
+        "api_server": "https://api.ww-cai-cisco-live.dcloud.local:6443",
+        "auth_mechanism": {
+          "source": "selected kubeconfig user entry",
+          "type": "embedded-token"
+        },
+        "cilium_health_pod": "cilium-8p7t4",
+        "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+        "kubeconfig_files": [
+          "path:f73adaea0685"
+        ],
+        "user_entry": "kube:admin/api-ww-cai-cisco-live-dcloud-local:6443"
+      },
+      "identity": "kube:admin",
+      "name": "kubernetes",
+      "next_step": null,
+      "observed_capability": [
+        "context_server_match",
+        "tls_api_reachable",
+        "effective_identity",
+        "cluster_wildcard",
+        "clusterrolebinding_create",
+        "clusterrolebinding_update",
+        "clusterrolebinding_delete",
+        "clusterrole_bind",
+        "cilium_namespace:cilium",
+        "cilium_pods_exec",
+        "cilium_health_exec"
+      ],
+      "reason": null,
+      "status": "PASS",
+      "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin -> https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "target_file": "path:b68b31f54f9a",
+  "target_selection": "project:path:b68b31f54f9a",
+  "target_source": "project",
+  "targets": {
+    "gitlab": "https://gitlab.dcloud.run",
+    "kubernetes": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "tested_revision": "4ab0236d10b7b87104b332915b1bb467bec23944"
+}

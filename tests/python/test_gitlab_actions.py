@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Final, Optional, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import import_script_module, load_module
 from jsonschema import Draft202012Validator
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
@@ -32,7 +32,10 @@ ISSUES = import_script_module("lib.python.core.gitlab.gitlab_issues")
 WIKIS = import_script_module("lib.python.core.gitlab.gitlab_wikis")
 RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
 REPORT = import_script_module("lib.python.core.report")
-PROVENANCE = import_script_module("lib.python.core.provenance")
+ACCEPTANCE = load_module(
+    "runner_tag_receipt_acceptance",
+    Path(__file__).parents[2] / "tools/check_live_acceptance.py",
+)
 ISSUE = import_script_module("gitlab_issue")
 MILESTONE = import_script_module("gitlab_milestone")
 RUNNER = import_script_module("gitlab_runner")
@@ -61,7 +64,7 @@ if TYPE_CHECKING:
 
 
 def test_committed_runner_tag_receipts_match_live_contract() -> None:
-    """Match runner-tag receipts to current functional inputs and schema.
+    """Validate retained runner-tag receipts against their recorded source and schema.
     :returns: None; assertions in the body validate the regression.
     """
     root = Path(__file__).parents[2]
@@ -72,11 +75,10 @@ def test_committed_runner_tag_receipts_match_live_contract() -> None:
         (root / "tests/acceptance/receipts/gitlab-access.json").read_text()
     )
     target = setup["target"]
-    functional_digest = PROVENANCE.functional_digest(root / "ci-skills")
 
     for result in (applied, repeated):
         TAG_VALIDATOR.validate(result)
-        assert result["skill"]["functional_digest"] == functional_digest
+        assert ACCEPTANCE.check_recorded_identity(result, root / "ci-skills") == []
         assert result["skill"]["revision"]["verified"] is True
         assert result["tested_revision"] == result["skill"]["revision"]["value"]
         assert {
@@ -1752,7 +1754,60 @@ def test_action_plan_rejects_log_file_without_creating_it(
     report = json.loads(capsys.readouterr().out)
     assert result == 2
     assert report["status"] == "BLOCKED"
+    assert report["errors"][0]["reason"] == "dry_run_cannot_write_output"
     assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "reason"),
+    (
+        ([], "action_required"),
+        (["open-bug", "--apply", "--dry-run"], "apply_and_dry_run_conflict"),
+        (["open-bug", "--confirm-plan", "unit"], "confirm_plan_requires_apply"),
+        (["open-bug", "--receipt-out", "unit.json"], "receipt_out_requires_live_run"),
+        (["open-bug", "--timeout", "301"], "timeout_out_of_range"),
+    ),
+)
+def test_issue_mode_errors_remain_stable_after_shared_validation(
+    arguments: Sequence[str], reason: str
+) -> None:
+    """Preserve existing GitLab failure reasons through the shared validator.
+
+    :param arguments: Issue arguments selecting one invalid mode combination.
+    :param reason: Stable classified error expected by existing consumers.
+    :returns: None; the exact error reason is asserted.
+    """
+    args = ISSUE.build_parser().parse_args(arguments)
+
+    with pytest.raises(ACTION.ActionError, match=f"^{reason}$"):
+        GITLAB_ACTION._workflow_mode(args)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "reason"),
+    (
+        (["get", "--runner-id", "1", "--apply"], "runner_read_rejects_apply_options"),
+        (["list", "--live-plan"], "runner_read_rejects_apply_options"),
+        (["tag", "--live-plan", "--dry-run"], "live_plan_mode_conflict"),
+    ),
+)
+def test_runner_mode_errors_remain_stable_after_shared_validation(
+    arguments: Sequence[str],
+    reason: str,
+) -> None:
+    """Keep runner-specific precedence and shared planning conflict behavior.
+
+    :param arguments: Runner arguments selecting one invalid mode combination.
+    :param reason: Stable classified error expected by existing consumers.
+    :returns: None; runner-specific precedence and shared errors are asserted.
+    """
+    args = RUNNER.build_parser().parse_args(arguments)
+
+    with pytest.raises(
+        ACTION.ActionError,
+        match=f"^{reason}$",
+    ):
+        GITLAB_ACTION._workflow_mode(args)
 
 
 def test_action_plan_json_diagnostic_is_separate_from_machine_result(

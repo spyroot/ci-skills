@@ -1,0 +1,430 @@
+{
+  "access": {
+    "gitlab_runner": {
+      "captured_at": "2026-10-20T01:21:50.408233+00:00",
+      "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+      "credential_source": "file:path:29f247d18d3c",
+      "errors": [],
+      "execution_host": "mac.lan",
+      "identity": {
+        "id": 6,
+        "username": "spyroot",
+        "web_url": "https://gitlab.dcloud.run/spyroot"
+      },
+      "kind": "gitlab_access",
+      "observed_capability": [
+        "identity_read",
+        "target_read"
+      ],
+      "origin": "https://gitlab.dcloud.run",
+      "schema_version": "1.0",
+      "skill": {
+        "algorithm": "sha256-tree-v1",
+        "consuming_project": {
+          "commit": null,
+          "source": null
+        },
+        "digest": "cabc9f9dc5878eabdc966e0e526246ca5f8935e14412ddfa2c11ef82a55ced4e",
+        "file_count": 235,
+        "functional_digest": "108bd1b30961c3e79762edd1ce686854ef25d16720f84b425fecc126c7dfa648",
+        "revision": {
+          "source": "git_head",
+          "value": "92713cc9610b64f8ec7ba5ee141a99a38e63c9e9",
+          "verified": true
+        }
+      },
+      "status": "PASS",
+      "target": {
+        "full_path": "hott/test",
+        "id": 123,
+        "kind": "project",
+        "web_url": "https://gitlab.dcloud.run/hott/test"
+      },
+      "target_file": "path:5e5380df1eda",
+      "target_source": "env:CI_SKILLS_TARGET;argv:--project"
+    },
+    "harbor": {
+      "credential_source": "file:path:1f8b6bf528f9",
+      "granted_actions": [
+        "delete",
+        "pull",
+        "push"
+      ],
+      "identity": "spyroot",
+      "origin": "https://harbor.dcloud.run",
+      "repository": "hott/go-golangci-toolbox"
+    },
+    "kubernetes": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "captured_at": "2026-10-20T01:21:46.502733+00:00",
+  "cleanup": {
+    "failures": [],
+    "resources": [
+      {
+        "callback": "RemoveRunnerToken",
+        "resource": "runner_token",
+        "verified": true
+      }
+    ],
+    "status": "PASS"
+  },
+  "confirmable": true,
+  "errors": [],
+  "filters": {},
+  "kind": "image_build_readiness",
+  "namespace": "ci-skills-run-458521ba945e4204ba13",
+  "operation": "chain",
+  "plan": {
+    "kind": "image_build_readiness",
+    "operation": "chain",
+    "runner": {
+      "description": "go-golangci-toolbox-20261020",
+      "labels": [
+        "go-golangci"
+      ],
+      "node": "node-1.ww-cai-cisco-live.dcloud.local",
+      "podman_resources": {
+        "cpu_limit": "1",
+        "cpu_request": "250m",
+        "memory_limit": "1Gi",
+        "memory_request": "256Mi",
+        "storage_size": "8Gi"
+      },
+      "reference": "hott/test",
+      "run_scope": "generated_after_confirmation",
+      "scope": "project",
+      "token_sink": "[REDACTED]"
+    },
+    "skill": {
+      "algorithm": "sha256-tree-v1",
+      "consuming_project": {
+        "commit": null,
+        "source": null
+      },
+      "digest": "cabc9f9dc5878eabdc966e0e526246ca5f8935e14412ddfa2c11ef82a55ced4e",
+      "file_count": 235,
+      "functional_digest": "108bd1b30961c3e79762edd1ce686854ef25d16720f84b425fecc126c7dfa648",
+      "revision": {
+        "source": "git_head",
+        "value": "92713cc9610b64f8ec7ba5ee141a99a38e63c9e9",
+        "verified": true
+      }
+    },
+    "target_file": "path:5e5380df1eda",
+    "target_source": "env:CI_SKILLS_TARGET",
+    "tested_revision": "92713cc9610b64f8ec7ba5ee141a99a38e63c9e9",
+    "toolbox": {
+      "app": "go-golangci-toolbox",
+      "base_image": "docker.io/gitlab/gitlab-runner@sha256:4411906ada6b40b2ca259a72549a0c83883649d7b1e4c634d4d0dadf41b00785",
+      "namespace": "ci-skills-build-go-20261020",
+      "repository": "go-golangci-toolbox",
+      "specification": "e491524613dc6ef471b5cd9e6ec56ab10260ca7eabb65fada23d09e7c20b1eb7",
+      "tag": "consumer-20261020"
+    }
+  },
+  "plan_digest": "a402c26d65f42875ae3f3a87f81e08f3cf3e28ff418e43827bdda247eb44368b",
+  "records": [
+    {
+      "callback": "K8SAuth",
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    },
+    {
+      "callback": "HarborAuth",
+      "credential_source": "file:path:1f8b6bf528f9",
+      "granted_actions": [
+        "delete",
+        "pull",
+        "push"
+      ],
+      "identity": "spyroot",
+      "origin": "https://harbor.dcloud.run",
+      "repository": "hott/go-golangci-toolbox"
+    },
+    {
+      "callback": "RetainProvider",
+      "role": "retain_toolbox_harbor",
+      "verified": true
+    },
+    {
+      "callback": "ConfirmWorkflow",
+      "plan_digest": "e2a4f5bbddd4b6c984d1791d59899d67653999b9c2a5ad6f23df77cde375b7a6"
+    },
+    {
+      "callback": "RetainProvider",
+      "role": "use_toolbox_harbor",
+      "verified": true
+    },
+    {
+      "callback": "GitLabAuth",
+      "captured_at": "2026-10-20T01:21:50.408233+00:00",
+      "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+      "credential_source": "file:path:29f247d18d3c",
+      "errors": [],
+      "execution_host": "mac.lan",
+      "identity": {
+        "id": 6,
+        "username": "spyroot",
+        "web_url": "https://gitlab.dcloud.run/spyroot"
+      },
+      "kind": "gitlab_access",
+      "observed_capability": [
+        "identity_read",
+        "target_read"
+      ],
+      "origin": "https://gitlab.dcloud.run",
+      "schema_version": "1.0",
+      "skill": {
+        "algorithm": "sha256-tree-v1",
+        "consuming_project": {
+          "commit": null,
+          "source": null
+        },
+        "digest": "cabc9f9dc5878eabdc966e0e526246ca5f8935e14412ddfa2c11ef82a55ced4e",
+        "file_count": 235,
+        "functional_digest": "108bd1b30961c3e79762edd1ce686854ef25d16720f84b425fecc126c7dfa648",
+        "revision": {
+          "source": "git_head",
+          "value": "92713cc9610b64f8ec7ba5ee141a99a38e63c9e9",
+          "verified": true
+        }
+      },
+      "status": "PASS",
+      "target": {
+        "full_path": "hott/test",
+        "id": 123,
+        "kind": "project",
+        "web_url": "https://gitlab.dcloud.run/hott/test"
+      },
+      "target_file": "path:5e5380df1eda",
+      "target_source": "env:CI_SKILLS_TARGET;argv:--project"
+    },
+    {
+      "callback": "RetainProvider",
+      "role": "retain_runner_gitlab",
+      "verified": true
+    },
+    {
+      "callback": "RetainProvider",
+      "role": "use_runner_gitlab",
+      "verified": true
+    },
+    {
+      "callback": "ResolveChainPlan",
+      "node": {
+        "kernelVersion": "5.14.0-570.98.1.el9_6.x86_64",
+        "name": "node-1.ww-cai-cisco-live.dcloud.local",
+        "osImage": "Red Hat Enterprise Linux CoreOS 9.6.20260309-0 (Plow)"
+      },
+      "plan_digest": "a402c26d65f42875ae3f3a87f81e08f3cf3e28ff418e43827bdda247eb44368b",
+      "selected_node": "node-1.ww-cai-cisco-live.dcloud.local",
+      "selection": "discovered",
+      "verified": true
+    },
+    {
+      "callback": "EnsureNamespace",
+      "namespaces": [
+        {
+          "action": "APPLIED",
+          "kind": "Namespace",
+          "name": "ci-skills-build-go-20261020",
+          "namespace": "",
+          "uid": "35f7343b-6917-4aa0-b282-4bdff9220bff"
+        }
+      ],
+      "verified": true
+    },
+    {
+      "app": "go-golangci-toolbox",
+      "build_fingerprint": "9c8b0b3832d9c0cc56f6466bdde78da9d6b27cd0df4a15e81f54c72c64287a01",
+      "build_name": "go-golangci-toolbox-1",
+      "callback": "HarborBuild",
+      "digest": "sha256:974533d118dfa1cb002be4a178b3684572acea328781e5647cf6671062342827",
+      "image": "harbor.dcloud.run/hott/go-golangci-toolbox:ci-skills-build-e491524613dc6ef471b5cd9e",
+      "namespace": "ci-skills-build-go-20261020",
+      "reused": false,
+      "specification_fingerprint": "e491524613dc6ef471b5cd9e6ec56ab10260ca7eabb65fada23d09e7c20b1eb7",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "HarborPush",
+      "digest": "sha256:974533d118dfa1cb002be4a178b3684572acea328781e5647cf6671062342827",
+      "image": "harbor.dcloud.run/hott/go-golangci-toolbox@sha256:974533d118dfa1cb002be4a178b3684572acea328781e5647cf6671062342827",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "after_tags": [
+        "go-golangci"
+      ],
+      "callback": "CreateRunner",
+      "cleanup": {
+        "reason": "persistent_runner_requested",
+        "status": "NOT_APPLICABLE"
+      },
+      "id": 107,
+      "mutated": true,
+      "sink_persisted": true,
+      "verified": true
+    },
+    {
+      "callback": "PrepareRunnerManager",
+      "image": "harbor.dcloud.run/hott/go-golangci-toolbox@sha256:974533d118dfa1cb002be4a178b3684572acea328781e5647cf6671062342827",
+      "node": "node-1.ww-cai-cisco-live.dcloud.local",
+      "runner_id": 107,
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveRunScopes",
+      "run_id": "aaa68b813533cd2e3d2e8adc8f11b68c",
+      "scopes": [],
+      "verified": true
+    },
+    {
+      "callback": "SelectManagerPlanScope",
+      "namespace": "ci-skills-run-458521ba945e4204ba13",
+      "owns_namespace": true,
+      "reused": false,
+      "run_id": "aaa68b813533cd2e3d2e8adc8f11b68c",
+      "verified": true
+    },
+    {
+      "architecture": null,
+      "callback": "ObserveGitLabRunner",
+      "contacted_at": null,
+      "description": "go-golangci-toolbox-20261020",
+      "id": 107,
+      "online": null,
+      "paused": false,
+      "platform": null,
+      "run_id": "aaa68b813533cd2e3d2e8adc8f11b68c",
+      "runner_type": "project_type",
+      "scope": {
+        "namespace": null,
+        "owns_namespace": true,
+        "run_id": "aaa68b813533cd2e3d2e8adc8f11b68c",
+        "state": "selected"
+      },
+      "status": "never_contacted",
+      "tag_list": [
+        "go-golangci"
+      ],
+      "verified": true,
+      "version": null
+    },
+    {
+      "action": "APPLIED",
+      "callback": "OpenManagerRunScope",
+      "namespace": "ci-skills-run-458521ba945e4204ba13",
+      "owns_namespace": true,
+      "reused": false,
+      "run_id": "aaa68b813533cd2e3d2e8adc8f11b68c",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "EnsureSCCAccess",
+      "cluster_role": "system:openshift:scc:privileged",
+      "constraint": "privileged",
+      "outcome": "scc_access_ready",
+      "permission_source": "temporary_role_binding",
+      "role_binding": {
+        "action": "APPLIED",
+        "kind": "RoleBinding",
+        "name": "ci-skills-run-scc-permission-5f4add9322d9458c-6bcef80fb59113ff",
+        "namespace": "ci-skills-run-458521ba945e4204ba13",
+        "uid": "52585586-c328-45f9-8984-789d4c9084cf"
+      },
+      "service_account": "system:serviceaccount:ci-skills-run-458521ba945e4204ba13:default",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "DeployManagerRunner",
+      "image": "harbor.dcloud.run/hott/go-golangci-toolbox@sha256:974533d118dfa1cb002be4a178b3684572acea328781e5647cf6671062342827",
+      "name": "ci-skills-run-gitlab-runner-manager-6bcef80fb59113ff",
+      "namespace": "ci-skills-run-458521ba945e4204ba13",
+      "pods": [
+        {
+          "image_id": "harbor.dcloud.run/hott/go-golangci-toolbox@sha256:974533d118dfa1cb002be4a178b3684572acea328781e5647cf6671062342827",
+          "name": "ci-skills-run-gitlab-runner-manager-6bcef80fb59113ff-d6d7c4xwwl",
+          "podman": {
+            "automount_service_account_token": "[REDACTED]",
+            "node": "node-1.ww-cai-cisco-live.dcloud.local",
+            "privileged": true,
+            "resources": {
+              "cpu_limit": "1",
+              "cpu_request": "250m",
+              "memory_limit": "1Gi",
+              "memory_request": "256Mi",
+              "storage_size": "8Gi"
+            },
+            "service_account": "default",
+            "storage": {
+              "graph_root": "/var/lib/containers",
+              "run_root": "/run/containers"
+            }
+          }
+        }
+      ],
+      "resources": [
+        {
+          "action": "APPLIED",
+          "kind": "Secret",
+          "name": "ci-skills-run-gitlab-runner-manager-6bcef80fb59113ff-registry",
+          "namespace": "ci-skills-run-458521ba945e4204ba13",
+          "uid": "e73e6ac0-3d56-4264-a6e2-b6a8b9afced7"
+        },
+        {
+          "action": "APPLIED",
+          "kind": "Secret",
+          "name": "ci-skills-run-gitlab-runner-manager-6bcef80fb59113ff-registration",
+          "namespace": "ci-skills-run-458521ba945e4204ba13",
+          "uid": "5a1af3d4-b4ac-4cfb-8fdd-8bbdbc8a8af0"
+        },
+        {
+          "action": "APPLIED",
+          "kind": "Deployment",
+          "name": "ci-skills-run-gitlab-runner-manager-6bcef80fb59113ff",
+          "namespace": "ci-skills-run-458521ba945e4204ba13",
+          "uid": "deb0e64f-d798-4fd3-b71e-4fec2609a2cd"
+        }
+      ],
+      "verified": true
+    }
+  ],
+  "run_id": "aaa68b813533cd2e3d2e8adc8f11b68c",
+  "schema_version": "1.0",
+  "selected_node": "node-1.ww-cai-cisco-live.dcloud.local",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "cabc9f9dc5878eabdc966e0e526246ca5f8935e14412ddfa2c11ef82a55ced4e",
+    "file_count": 235,
+    "functional_digest": "108bd1b30961c3e79762edd1ce686854ef25d16720f84b425fecc126c7dfa648",
+    "revision": {
+      "source": "git_head",
+      "value": "92713cc9610b64f8ec7ba5ee141a99a38e63c9e9",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 20
+  },
+  "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin@https://api.ww-cai-cisco-live.dcloud.local:6443",
+  "target_file": "path:5e5380df1eda",
+  "target_source": "env:CI_SKILLS_TARGET",
+  "tested_revision": "92713cc9610b64f8ec7ba5ee141a99a38e63c9e9"
+}

@@ -35,7 +35,7 @@ ACCEPTANCE: Final = load_module(
 POLICY: Final = ACCEPTANCE.load_policy(
     REPO_ROOT / ACCEPTANCE.POLICY_FILE, REPO_ROOT / ACCEPTANCE.POLICY_SCHEMA_FILE
 )
-CHECKER_COMMAND: Final = "python tools/check_live_acceptance.py --root . --json"
+CHECKER_COMMAND: Final = "python tools/check_live_acceptance.py"
 
 
 def _workflow_text() -> str:
@@ -108,7 +108,13 @@ def test_validate_workflow_schedules_the_declared_freshness_check() -> None:
     assert [entry["cron"] for entry in triggers["schedule"]] == [
         POLICY["scheduled_cron"]
     ]
-    assert "workflow_dispatch" in triggers
+    assert triggers["workflow_dispatch"]["inputs"]["aggregate"]["default"] is False
+    publication = next(
+        item
+        for item in workflow["jobs"]["validate"]["steps"]
+        if item.get("id") == "live_acceptance"
+    )
+    assert "inputs.aggregate" in publication["env"]["AGGREGATE_ACCEPTANCE"]
     concurrency = workflow["concurrency"]
     assert concurrency["cancel-in-progress"] is False
     assert "github.sha" in concurrency["group"]
@@ -116,6 +122,7 @@ def test_validate_workflow_schedules_the_declared_freshness_check() -> None:
 
 LIVE_SHA: Final = "a" * 40
 LIVE_DIGEST: Final = "b" * 64
+LIVE_TESTED_REVISION: Final = "c" * 40
 LIVE_REPORT_URL: Final = "https://github.example.test/unit/repo/actions/runs/19"
 FAKE_PUBLICATION_TOOLS: Final = r"""
 import json
@@ -124,10 +131,15 @@ import pathlib
 import sys
 
 if pathlib.Path(sys.argv[0]).name == "python":
-    assert sys.argv[1:] == ["tools/check_live_acceptance.py", "--root", ".", "--json"]
+    expected = ["tools/check_live_acceptance.py", "--root", ".", "--json"]
+    aggregate = os.environ["AGGREGATE_ACCEPTANCE"] == "true"
+    expected += ["--aggregate"] if aggregate else ["--no-aggregate", "--receipts", "tests/acceptance/candidate"]
+    assert sys.argv[1:] == expected
     print(json.dumps({
         "status": os.environ["FAKE_ACCEPTANCE_STATUS"],
         "functional_digest": os.environ["FAKE_DIGEST"],
+        "mode": "aggregate" if aggregate else "targeted",
+        "tested_revision": os.environ["FAKE_TESTED_REVISION"],
     }))
     raise SystemExit(0 if os.environ["FAKE_ACCEPTANCE_STATUS"] == "PASS" else 1)
 
@@ -149,14 +161,16 @@ elif route == "deployments/71" and method == "GET":
         "payload": {
             "report_url": os.environ["REPORT_URL"],
             "functional_digest": os.environ["FAKE_DIGEST"],
+            "mode": "aggregate" if os.environ["AGGREGATE_ACCEPTANCE"] == "true" else "targeted",
+            "tested_revision": os.environ["FAKE_TESTED_REVISION"],
         },
     }
     if mismatch in {"sha", "environment"}:
         response[mismatch] = "different"
     elif mismatch == "report_url":
         response["payload"]["report_url"] = "https://example.test/different"
-    elif mismatch == "functional_digest":
-        response["payload"]["functional_digest"] = "different"
+    elif mismatch in {"functional_digest", "mode", "tested_revision"}:
+        response["payload"][mismatch] = "different"
 elif route == "deployments/71/statuses":
     response = {
         "state": "success",
@@ -180,6 +194,7 @@ def _run_live_publication(
     *,
     checker_status: str = "PASS",
     mismatch: str = "",
+    aggregate: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Sequence[JSONObject]]:
     """Execute workflow Bash with only checker and HTTP transport replaced.
 
@@ -188,6 +203,7 @@ def _run_live_publication(
     :param tmp_path: Isolated workspace containing the generated report.
     :param checker_status: Receipt evaluator outcome and matching exit status.
     :param mismatch: Read-back field deliberately changed by the transport.
+    :param aggregate: Manual aggregate mode instead of automatic targeted evaluation.
     :returns: Shell result and the recorded HTTP requests in execution order.
     """
     workflow = yaml.safe_load(_workflow_text())
@@ -213,6 +229,8 @@ def _run_live_publication(
         "FAKE_JOURNAL": str(call_journal),
         "FAKE_ACCEPTANCE_STATUS": checker_status,
         "FAKE_DIGEST": LIVE_DIGEST,
+        "FAKE_TESTED_REVISION": LIVE_TESTED_REVISION,
+        "AGGREGATE_ACCEPTANCE": str(aggregate).lower(),
         "FAKE_READBACK_MISMATCH": mismatch,
     }
     result = subprocess.run(
@@ -227,11 +245,14 @@ def _run_live_publication(
     return result, read_journal(call_journal)
 
 
+@pytest.mark.parametrize("aggregate", (False, True))
 def test_live_acceptance_publishes_verified_candidate_and_report(
-    fake_bin: Path, call_journal: Path, tmp_path: Path
+    fake_bin: Path, call_journal: Path, tmp_path: Path, aggregate: bool
 ) -> None:
     """Publish success only after candidate and report read-back agree."""
-    result, calls = _run_live_publication(fake_bin, call_journal, tmp_path)
+    result, calls = _run_live_publication(
+        fake_bin, call_journal, tmp_path, aggregate=aggregate
+    )
 
     assert result.returncode == 0, result.stderr
     assert [(item["method"], item["route"]) for item in calls] == [
@@ -250,6 +271,8 @@ def test_live_acceptance_publishes_verified_candidate_and_report(
     assert deployment["payload"] == {
         "report_url": LIVE_REPORT_URL,
         "functional_digest": LIVE_DIGEST,
+        "mode": "aggregate" if aggregate else "targeted",
+        "tested_revision": LIVE_TESTED_REVISION,
     }
     status = calls[2]["body"]
     assert isinstance(status, dict)
@@ -277,6 +300,8 @@ def test_failed_live_acceptance_makes_no_deployment_requests(
         "environment",
         "report_url",
         "functional_digest",
+        "mode",
+        "tested_revision",
         "state",
         "log_url",
         "environment_url",
@@ -292,7 +317,14 @@ def test_live_acceptance_rejects_mismatched_deployment_readback(
 
     assert result.returncode != 0
     assert calls
-    if mismatch in {"sha", "environment", "report_url", "functional_digest"}:
+    if mismatch in {
+        "sha",
+        "environment",
+        "report_url",
+        "functional_digest",
+        "mode",
+        "tested_revision",
+    }:
         assert all(item["method"] != "POST" for item in calls[1:])
 
 

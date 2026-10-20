@@ -313,3 +313,43 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
         {"source": "storage_report", "reason": "malformed nested response"}
     ]
     assert "BLOCKED:" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "script_name", ("gitlab_runner.py", "gitlab_repository.py", "gitlab_mr.py")
+)
+def test_help_offers_same_reference_pointers_as_command_proposition(
+    monkeypatch: pytest.MonkeyPatch, script_name: str
+) -> None:
+    """Show task reference names, summaries, and expansion commands without loading documents.
+
+    :param monkeypatch: Fixture preventing hidden reference-document reads.
+    :param script_name: Installed command whose help and proposition must agree.
+    """
+    catalogue = import_script_module("lib.python.core.catalog")
+    command = import_script_module(script_name.removesuffix(".py"))
+    references = catalogue.proposition(script_name)["reference"]
+    assert references
+
+    def forbid_document_read(_path: Path, *args: str, **kwargs: str) -> str:
+        """Fail if rendering help attempts to fetch any reference document.
+
+        :param _path: Unexpected document path requested by help rendering.
+        :param args: Positional file-decoding arguments accepted by Path.read_text.
+        :param kwargs: Keyword file-decoding arguments accepted by Path.read_text.
+        :returns: No text; document fetching is forbidden in this test.
+        :raises AssertionError: Help attempts to expand document content.
+        """
+        raise AssertionError(
+            "command help must offer pointers without loading documents"
+        )
+
+    monkeypatch.setattr(Path, "read_text", forbid_document_read)
+    parser = command.build_parser()
+    parser.prog = script_name
+    help_text = " ".join(parser.format_help().split())
+
+    for reference in references:
+        assert " ".join(reference["name"].split()) in help_text
+        assert " ".join(reference["summary"].split()) in help_text
+        assert f"reference.py {reference['pointer']}" in help_text

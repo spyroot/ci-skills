@@ -4,12 +4,17 @@ name: validate
   pull_request:
   push:
     branches: [main]
-  # The cron below is declared in inventory/ci/live-acceptance.json; the policy
-  # test keeps the two in step. A scheduled run re-evaluates the committed
-  # live-acceptance receipts on main so stale receipts surface before a PR.
+  # The policy declares this cron. Scheduled runs re-evaluate the selected
+  # candidate evidence on main; they do not execute new live operations.
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
+    inputs:
+      aggregate:
+        description: Check the full operation set from one installed revision
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   actions: read
@@ -117,6 +122,7 @@ jobs:
             ci-skills/lib/python/core/executor.py \
             ci-skills/lib/python/core/tooling \
             ci-skills/lib/python/core/action_modes.py \
+            ci-skills/lib/python/core/runner.py \
             ci-skills/lib/python/core/kubernetes/tool_pod*.py \
             ci-skills/lib/python/core/kubernetes/artifact_storage*.py \
             ci-skills/lib/python/core/kubernetes/pod_credential*.py \
@@ -126,6 +132,7 @@ jobs:
             ci-skills/lib/python/core/runtime_streams.py \
             ci-skills/bin/ocp_node_onboard.py \
             ci-skills/lib/python/core/kubernetes/run_scope.py \
+            ci-skills/lib/python/core/kubernetes/runner.py \
             ci-skills/lib/python/core/kubernetes/script_resources.py \
             ci-skills/bin/prepare_tool_pod.py \
             ci-skills/lib/python/core/gitlab/callback.py \
@@ -133,12 +140,31 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_runners.py \
             ci-skills/lib/python/core/gitlab/gitlab_actions.py \
             ci-skills/lib/python/core/gitlab/gitlab_milestones.py \
+            ci-skills/lib/python/core/gitlab/gitlab_repository.py \
+            ci-skills/lib/python/core/gitlab/gitlab_merge_requests.py \
             ci-skills/lib/python/core/gitlab/gitlab_api.py \
+            ci-skills/lib/python/core/gitlab/runner_manager \
+            ci-skills/lib/python/core/gitlab/gitlab_pipelines.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_graph.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_start.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch_runtime.py \
+            ci-skills/lib/python/core/gitlab/gitlab_pipeline_watch_types.py \
+            ci-skills/bin/gitlab_pipeline.py \
             ci-skills/lib/python/core/catalog.py \
+            ci-skills/lib/python/core/kubernetes/run_scope.py \
+            ci-skills/lib/python/core/kubernetes/scc_access.py \
+            ci-skills/lib/python/core/kubernetes/podman_runtime.py \
+            ci-skills/lib/python/core/kubernetes/podman_probe.py \
+            ci-skills/lib/python/core/kubernetes/podman_evidence.py \
+            ci-skills/lib/python/core/kubernetes/podman_callbacks.py \
+            ci-skills/lib/python/core/kubernetes/image_build_readiness.py \
+            ci-skills/lib/python/core/kubernetes/image_build_chain \
             ci-skills/lib/python/core/navigate*.py \
             ci-skills/bin/reference.py \
             ci-skills/lib/python/core/report.py \
             ci-skills/bin/gitlab_runner.py \
+            ci-skills/bin/gitlab_runner_manager.py \
             tools/check_live_acceptance.py
           pydoclint --style=sphinx --skip-checking-short-docstrings=False \
             --arg-type-hints-in-docstring=False --check-return-types=False \
@@ -163,7 +189,9 @@ jobs:
             schemas/live-acceptance-policy.schema.json \
             ci-skills/schemas/results/gitlab-action.schema.json \
             ci-skills/schemas/results/gitlab-job-list.schema.json \
+            ci-skills/schemas/results/gitlab-pipeline-watch.schema.json \
             ci-skills/schemas/results/toolbox-workflow.schema.json \
+            ci-skills/schemas/results/image-build-readiness.schema.json \
             ci-skills/schemas/results/gitlab-runner-tag.schema.json \
             ci-skills/schemas/results/gitlab-runner-read.schema.json \
             ci-skills/schemas/results/gitlab-runner-delete.schema.json
@@ -215,15 +243,22 @@ jobs:
         env:
           BASE_SHA: ${{ steps.static.outputs.base }}
         run: git diff --check "$BASE_SHA" HEAD
-      - name: Evaluate and publish committed live-acceptance evidence
+      - name: Evaluate and publish selected live-acceptance evidence
         id: live_acceptance
         env:
           GH_TOKEN: ${{ github.token }}
+          AGGREGATE_ACCEPTANCE: ${{ inputs.aggregate || false }}
           LIVE_ENVIRONMENT: live-acceptance
           REPORT_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           mkdir -p reports/raw
-          python tools/check_live_acceptance.py --root . --json \
+          acceptance_args=(--root . --json)
+          if [[ "$AGGREGATE_ACCEPTANCE" == true ]]; then
+            acceptance_args+=(--aggregate)
+          else
+            acceptance_args+=(--no-aggregate --receipts tests/acceptance/candidate)
+          fi
+          python tools/check_live_acceptance.py "${acceptance_args[@]}" \
             | tee reports/raw/live-acceptance.json
 
           github_api() {
@@ -240,20 +275,23 @@ jobs:
             --arg report_url "$REPORT_URL" --slurpfile report reports/raw/live-acceptance.json \
             '{ref: $ref, environment: $environment, auto_merge: false,
               required_contexts: [], production_environment: false,
-              description: "Verified installed-skill live evidence",
-              payload: {report_url: $report_url, functional_digest: $report[0].functional_digest}}')
+              description: "Verified selected installed-skill evidence",
+              payload: {report_url: $report_url, functional_digest: $report[0].functional_digest,
+                mode: $report[0].mode, tested_revision: $report[0].tested_revision}}')
           deployment=$(github_api deployments --request POST --data "$body")
           deployment_id=$(jq -er '.id | select(type == "number")' <<<"$deployment")
           github_api "deployments/$deployment_id" \
             | jq -e --arg sha "$CI_SOURCE_SHA" --arg environment "$LIVE_ENVIRONMENT" \
               --arg report_url "$REPORT_URL" --slurpfile report reports/raw/live-acceptance.json \
               '.sha == $sha and .environment == $environment and .payload.report_url == $report_url
-                and .payload.functional_digest == $report[0].functional_digest' \
+                and .payload.functional_digest == $report[0].functional_digest
+                and .payload.mode == $report[0].mode
+                and .payload.tested_revision == $report[0].tested_revision' \
               >/dev/null
 
           body=$(jq -n --arg url "$REPORT_URL" \
             '{state: "success", log_url: $url, environment_url: $url, auto_inactive: false,
-              description: "Live evidence matches the candidate functional checksum"}')
+              description: "Selected live evidence matches the candidate functional checksum"}')
           github_api "deployments/$deployment_id/statuses" --request POST --data "$body" >/dev/null
           github_api "deployments/$deployment_id/statuses" \
             | jq -e --arg url "$REPORT_URL" \

@@ -1,0 +1,15 @@
+Run
+  gitlab_job.py  (gitlab_job.py --help)
+  gitlab_milestone.py  (gitlab_milestone.py --help)
+  gitlab_pipeline.py  (gitlab_pipeline.py --help)
+  gitlab_runner.py  (gitlab_runner.py --help)
+
+Read
+  access                     Selected authority and credential sources.
+                             reference.py get access
+  project binding            Project target and credential binding.
+                             reference.py get project-binding
+  mcp                        GitLab MCP configuration and toolsets.
+                             reference.py get mcp
+  GitLab pipeline execution  Exact pipeline read, confirmed start and bounded watch flow.
+                             reference.py get gitlab-pipeline-execution

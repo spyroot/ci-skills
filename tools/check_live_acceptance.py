@@ -29,9 +29,14 @@ import argparse
 import json
 import re
 import runpy
+import subprocess
+import tarfile
 from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from datetime import UTC, datetime
+from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Final, Optional, TypeAlias, TypedDict
 
 from jsonschema import Draft202012Validator
@@ -48,7 +53,12 @@ from lib.python.core.json_types import (
     json_string,
     json_strings,
 )
+from lib.python.core.kubernetes.podman_evidence import (
+    MARKER_PREFIX,
+    parse_probe_markers,
+)
 from lib.python.core.logging import add_log_arguments, log_event
+from lib.python.core.schema import SpecificationError, validate_specification
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
@@ -63,6 +73,8 @@ class AcceptanceResult(TypedDict, total=False):
     :param status: PASS when every required receipt passes, otherwise BLOCKED.
     :param skill_digest: Measured whole-package digest of the candidate.
     :param functional_digest: Candidate runtime and schema digest used for acceptance.
+    :param mode: Aggregate or targeted coverage selected for this result.
+    :param tested_revision: Single installed skill revision shared by the receipts.
     :param accepted: Sorted names of accepted setup and operation receipts.
     :param problems: Sorted classified acceptance failures, or a loading diagnostic.
     :param policy: Declared policy values, present only in a dry run.
@@ -93,6 +105,16 @@ class AcceptanceResult(TypedDict, total=False):
 
         Candidate runtime and schema digest used for acceptance.
 
+    .. attribute :: mode
+        :type: str
+
+        Aggregate or targeted coverage selected for this result.
+
+    .. attribute :: tested_revision
+        :type: Optional[str]
+
+        Single installed skill revision shared by the receipts, or None if unavailable.
+
     .. attribute :: accepted
         :type: Sequence[str]
 
@@ -119,6 +141,8 @@ class AcceptanceResult(TypedDict, total=False):
     status: str
     skill_digest: str
     functional_digest: str
+    mode: str
+    tested_revision: Optional[str]
     accepted: Sequence[str]
     problems: Sequence[str]
     policy: AcceptancePolicy
@@ -134,6 +158,8 @@ GITLAB_RECEIPT_KINDS: Final = frozenset(
         "gitlab_issue",
         "gitlab_wiki",
         "gitlab_runner",
+        "gitlab_repository",
+        "gitlab_merge_request",
     }
 )
 # The acceptance window and receipt locations come from the tracked policy file.
@@ -179,6 +205,21 @@ REQUIRED_GITLAB_OPERATIONS: Final = frozenset(
     }
     | {(kind, operation, None) for kind, operation in READ_ONLY_GITLAB_OPERATIONS}
 )
+IMAGE_BUILD_READINESS_KEY: Final[OperationKey] = (
+    "image_build_readiness",
+    "probe",
+    None,
+)
+REQUIRED_CAPABILITY_OPERATIONS: Final = frozenset(
+    {
+        IMAGE_BUILD_READINESS_KEY,
+        ("image_build_readiness", "chain", None),
+        ("gitlab_repository", "commit", "APPLIED"),
+        ("gitlab_merge_request", "create", "APPLIED"),
+        ("gitlab_merge_request", "update", "APPLIED"),
+    }
+)
+IMAGE_BUILD_READINESS_SCHEMA: Final = "results/image-build-readiness.schema.json"
 
 
 class AcceptanceError(RuntimeError):
@@ -379,6 +420,65 @@ def check_candidate_identity(receipt: JSONObject, skill_root: Path) -> Sequence[
     return []
 
 
+@lru_cache(maxsize=32)
+def _source_functional_digest(skill_root: Path, revision: str) -> Optional[str]:
+    """Measure a retained source snapshot without altering the checkout.
+
+    :param skill_root: Current repository's installable skill directory.
+    :param revision: Verified forty-character source commit from the receipt.
+    :returns: Original functional digest, or None when source is unavailable.
+    """
+    from lib.python.core.provenance import functional_digest
+
+    try:
+        archive = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(skill_root.parent),
+                "archive",
+                "--format=tar",
+                f"{revision}:{skill_root.name}",
+            ],
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        if archive.returncode:
+            return None
+        with TemporaryDirectory(prefix="ci-skills-receipt-source-") as directory:
+            with tarfile.open(fileobj=BytesIO(archive.stdout)) as source:
+                source.extractall(directory, filter="data")
+            return functional_digest(Path(directory))
+    except (OSError, ValueError, subprocess.SubprocessError, tarfile.TarError):
+        return None
+
+
+def check_recorded_identity(receipt: JSONObject, skill_root: Path) -> Sequence[str]:
+    """Verify historical receipt bytes against their captured source revision.
+
+    Equal candidate bytes remain sufficient when a squash source is unavailable.
+    This verifies historical identity, not execution on a changed candidate.
+
+    :param receipt: Captured receipt whose identity must remain unchanged.
+    :param skill_root: Candidate repository's skill directory.
+    :returns: Source-provenance or original functional-checksum failures.
+    """
+    problems = _check_source_revision(receipt)
+    if problems:
+        return problems
+    if not check_candidate_identity(receipt, skill_root):
+        return []
+    skill = _mapping(receipt.get("skill"))
+    revision = _mapping(skill.get("revision"))["value"]
+    original = _source_functional_digest(skill_root, json_string(revision))
+    if original is None:
+        return ["recorded_source_unavailable"]
+    if skill.get("functional_digest") != original:
+        return ["recorded_functional_digest_mismatch"]
+    return []
+
+
 def _parse_time(value: JSONValue) -> Optional[datetime]:
     """Parse a receipt timestamp, treating a naive value as UTC.
 
@@ -437,6 +537,229 @@ def _check_common(
         problems.append(f"{name}:sanitization_check_unavailable")
     elif redactor(receipt) != receipt:
         problems.append(f"{name}:receipt_not_sanitized")
+    return problems
+
+
+def _callback_record(
+    records: Sequence[JSONValue], callback: str
+) -> Optional[JSONObject]:
+    """Select one exact callback result from a workflow report.
+
+    :param records: Schema-validated callback result objects.
+    :param callback: Concrete callback class name to select.
+    :returns: The sole matching result, or None when absent or ambiguous.
+    """
+    matching = [
+        item
+        for item in records
+        if isinstance(item, dict) and item.get("callback") == callback
+    ]
+    return matching[0] if len(matching) == 1 else None
+
+
+def _probe_runtime_verified(probe: Optional[JSONObject]) -> bool:
+    """Check the authoritative Pod termination retained by the probe callback.
+
+    :param probe: Sole RunPodmanProbe result, or None when missing or ambiguous.
+    :returns: Whether the callback proves a successful nested Podman execution.
+    """
+    if probe is None:
+        return False
+    pod = _mapping(probe.get("pod"))
+    return (
+        probe.get("verified") is True
+        and probe.get("action") == "APPLIED"
+        and probe.get("claim") == "nested_podman_runtime_readiness"
+        and probe.get("outcome") == "ready"
+        and probe.get("nested_runtime_ready") is True
+        and pod.get("exit_code") == 0
+        and bool(pod.get("image_id"))
+    )
+
+
+def _probe_markers_verified(probe: Optional[JSONObject]) -> bool:
+    """Re-evaluate reported marker rows through the production marker parser.
+
+    :param probe: Sole RunPodmanProbe result, or None when missing or ambiguous.
+    :returns: Whether every row exactly matches the production PASS evidence.
+    """
+    rows = probe.get("rows") if probe is not None else None
+    row_list = rows if isinstance(rows, list) else []
+    try:
+        marker_log = "\n".join(
+            f"{MARKER_PREFIX}|{json_string(row['check'])}|"
+            f"{json_string(row['observed'])}"
+            for row in row_list
+            if isinstance(row, Mapping)
+        )
+        marker_evidence = parse_probe_markers(marker_log)
+    except (KeyError, TypeError, ValueError):
+        return False
+    return marker_evidence.verified is True and list(marker_evidence.rows) == row_list
+
+
+def _object_identity(value: JSONValue) -> Optional[tuple[str, str, str]]:
+    """Read one exact Kubernetes kind, name, and namespace.
+
+    :param value: Schema-validated Kubernetes resource evidence.
+    :returns: Exact resource identity, or None when incomplete.
+    """
+    if not isinstance(value, Mapping):
+        return None
+    kind, name, namespace = (
+        value.get("kind"),
+        value.get("name"),
+        value.get("namespace"),
+    )
+    if (
+        not isinstance(kind, str)
+        or not kind
+        or not isinstance(name, str)
+        or not name
+        or not isinstance(namespace, str)
+    ):
+        return None
+    return kind, name, namespace
+
+
+def _cleanup_identity(value: JSONValue) -> Optional[tuple[str, str, str]]:
+    """Require one absent PASS resource and return its exact identity.
+
+    :param value: Schema-validated cleanup resource object.
+    :returns: Exact resource identity, or None when not proven absent.
+    """
+    identity = _object_identity(value)
+    if (
+        not isinstance(value, Mapping)
+        or identity is None
+        or value.get("status") != PASS
+        or value.get("absent") is not True
+    ):
+        return None
+    return identity
+
+
+def _expected_probe_cleanup(
+    records: Sequence[JSONValue],
+) -> Optional[tuple[set[tuple[str, str, str]], str]]:
+    """Derive cleanup identities only from resources callbacks say they own.
+
+    :param records: Schema-validated callback results from the installed command.
+    :returns: Expected exact identities and run namespace, or None if ambiguous.
+    """
+    scope = _callback_record(records, "OpenProbeNamespace")
+    access = _callback_record(records, "EnsureSCCAccess")
+    probe = _callback_record(records, "RunPodmanProbe")
+    if scope is None or access is None or probe is None:
+        return None
+    namespace = scope.get("namespace")
+    job = _mapping(probe.get("job"))
+    if (
+        not isinstance(namespace, str)
+        or not namespace
+        or probe.get("namespace") != namespace
+        or not isinstance(job.get("name"), str)
+        or not job.get("name")
+    ):
+        return None
+    expected = {("Job", str(job["name"]), namespace)}
+    owns_namespace = scope.get("owns_namespace")
+    if owns_namespace is True:
+        expected.add(("Namespace", namespace, ""))
+    elif owns_namespace is not False:
+        return None
+    permission_source = access.get("permission_source")
+    if permission_source == "temporary_role_binding":
+        binding_record = _mapping(access.get("role_binding"))
+        binding = _object_identity(binding_record)
+        if (
+            binding is None
+            or binding[0] != "RoleBinding"
+            or binding[2] != namespace
+            or binding_record.get("action") != "APPLIED"
+        ):
+            return None
+        expected.add(binding)
+    elif permission_source not in {"existing", "not_applicable"}:
+        return None
+    return expected, namespace
+
+
+def _probe_cleanup_verified(records: Sequence[JSONValue], cleanup: JSONObject) -> bool:
+    """Match every owned probe resource to a successful absence read-back.
+
+    :param records: Schema-validated callback results declaring resource ownership.
+    :param cleanup: Final cleanup report emitted after reverse callback cleanup.
+    :returns: Whether cleanup proves exactly the resources owned by this run absent.
+    """
+    resources = cleanup.get("resources")
+    resource_list = resources if isinstance(resources, list) else []
+    expected = _expected_probe_cleanup(records)
+    identities = [_cleanup_identity(item) for item in resource_list]
+    if (
+        cleanup.get("status") != PASS
+        or cleanup.get("failures") != []
+        or expected is None
+        or not resource_list
+        or any(identity is None for identity in identities)
+    ):
+        return False
+    expected_identities, namespace = expected
+    observed = {identity for identity in identities if identity is not None}
+    configmaps = {
+        identity
+        for identity in observed
+        if identity[0] == "ConfigMap" and identity[2] == namespace
+    }
+    return (
+        len(observed) == len(resource_list)
+        and len(configmaps) == 1
+        and observed == expected_identities | configmaps
+    )
+
+
+def _check_image_build_readiness_receipt(
+    name: str,
+    receipt: JSONObject,
+    digest: str,
+    now: datetime,
+    max_age_days: int,
+) -> MutableSequence[str]:
+    """Validate one installed Podman readiness result and its API read-backs.
+
+    :param name: Receipt file name prefixed to each reported problem.
+    :param receipt: Parsed image-build readiness result from the installed command.
+    :param digest: Expected functional digest of the candidate runtime and schemas.
+    :param now: Reference time used for receipt freshness.
+    :param max_age_days: Maximum accepted receipt age in whole days.
+    :returns: Problems proving a schema, runtime, read-back, or cleanup failure.
+    :raises RecursionError: If receipt containers exceed recursive validation limits.
+    """  # noqa: DOC502 - Shared validators propagate recursion failures.
+    problems = _check_common(name, receipt, digest, now, max_age_days)
+    try:
+        validate_specification(receipt, IMAGE_BUILD_READINESS_SCHEMA)
+    except (KeyError, OSError, SchemaError, SpecificationError, TypeError, ValueError):
+        problems.append(f"{name}:result_schema_invalid")
+        return problems
+
+    problems.extend(f"{name}:{reason}" for reason in _check_source_revision(receipt))
+    records = receipt.get("records")
+    record_list = records if isinstance(records, list) else []
+    summary = _mapping(receipt.get("summary"))
+    if (
+        receipt.get("operation") != "probe"
+        or receipt.get("errors") != []
+        or summary.get("error_count") != 0
+        or summary.get("record_count") != len(record_list)
+    ):
+        problems.append(f"{name}:execution_readback_unproven")
+    probe = _callback_record(record_list, "RunPodmanProbe")
+    if not _probe_runtime_verified(probe):
+        problems.append(f"{name}:runtime_readback_unproven")
+    if not _probe_markers_verified(probe):
+        problems.append(f"{name}:runtime_checks_incomplete")
+    if not _probe_cleanup_verified(record_list, _mapping(receipt.get("cleanup"))):
+        problems.append(f"{name}:cleanup_unproven")
     return problems
 
 
@@ -956,7 +1279,7 @@ class AcceptanceReview:
             self.problems.append("access_check:setup_missing")
 
     def operation_receipts(self) -> None:
-        """Match each operation to one setup context and retain repeatable pairs.
+        """Validate capability proof or match an operation to one setup context.
 
         Malformed fields contribute classified problems; accepted receipts retain
         their original bytes and must still match the candidate identity.
@@ -977,7 +1300,26 @@ class AcceptanceReview:
                 self.problems.append(f"{name}:receipt_not_declared")
                 continue
             operation_key = (kind, operation, result_action)
-            if operation_key not in REQUIRED_GITLAB_OPERATIONS:
+            if (
+                kind == "image_build_readiness"
+                and operation_key in REQUIRED_CAPABILITY_OPERATIONS
+            ):
+                try:
+                    found = _check_targeted_receipt(name, receipt, self)
+                except (AttributeError, KeyError, TypeError, ValueError):
+                    found = [f"{name}:receipt_invalid_shape"]
+                self.problems.extend(found)
+                if not found:
+                    if operation_key in self.observed_operations:
+                        self.problems.append(f"{name}:receipt_ambiguous")
+                        continue
+                    self.accepted.append(name)
+                    self.observed_operations.add(operation_key)
+                continue
+            if operation_key not in REQUIRED_GITLAB_OPERATIONS and kind not in {
+                "gitlab_repository",
+                "gitlab_merge_request",
+            }:
                 self.problems.append(f"{name}:receipt_not_declared")
                 continue
             candidates = [
@@ -995,17 +1337,7 @@ class AcceptanceReview:
                 "result_action": result_action,
             }
             try:
-                found = _check_gitlab_receipt(
-                    name,
-                    receipt,
-                    required,
-                    self.functional_digest,
-                    self.now,
-                    self.max_age_days,
-                )
-                found.extend(
-                    f"{name}:{reason}" for reason in _check_source_revision(receipt)
-                )
+                found = _check_targeted_receipt(name, receipt, self, required=required)
             except (AttributeError, KeyError, TypeError, ValueError):
                 found = [f"{name}:receipt_invalid_shape"]
             self.problems.extend(found)
@@ -1034,7 +1366,8 @@ class AcceptanceReview:
     def repeated_receipts(self) -> None:
         """Require operation coverage and matching APPLIED/NO_OP resource evidence."""
         for kind, operation, action in sorted(
-            REQUIRED_GITLAB_OPERATIONS - self.observed_operations,
+            (REQUIRED_GITLAB_OPERATIONS | REQUIRED_CAPABILITY_OPERATIONS)
+            - self.observed_operations,
             key=lambda entry: tuple(str(value) for value in entry),
         ):
             self.problems.append(
@@ -1074,6 +1407,175 @@ class AcceptanceReview:
         }
 
 
+def _check_chain_runner_readback(
+    name: str, receipt: JSONObject, review: AcceptanceReview
+) -> Sequence[str]:
+    """Match delivered runner identity to an independent installed-command read.
+
+    :param name: Chain receipt filename used in diagnostics.
+    :param receipt: Delivered toolbox and runner chain result.
+    :param review: Selected receipts and candidate validation settings.
+    :returns: A missing or mismatched read-back diagnostic, or no problems.
+    """
+    reads = [
+        (read_name, item)
+        for read_name, item in review.receipts.items()
+        if item.get("kind") == "gitlab_runner" and item.get("operation") == "get"
+    ]
+    if not reads:
+        return [f"{name}:runner_get_receipt_missing"]
+    access = _mapping(_mapping(receipt.get("access")).get("gitlab_runner"))
+    context = _gitlab_context(access)
+    records = receipt.get("records")
+    created = _callback_record(
+        records if isinstance(records, list) else [], "CreateRunner"
+    )
+    runner_id = created.get("id") if created else None
+    if (
+        type(runner_id) is not int
+        or runner_id <= 0
+        or any(not value for value in context.values())
+        or _check_source_revision(access)
+        or _mapping(_mapping(access.get("skill")).get("revision")).get("value")
+        != receipt.get("tested_revision")
+    ):
+        return [f"{name}:runner_get_readback_mismatch"]
+    matching = 0
+    for read_name, item in reads:
+        found = _check_gitlab_receipt(
+            read_name,
+            item,
+            {**context, "kind": "gitlab_runner", "operation": "get"},
+            review.functional_digest,
+            review.now,
+            review.max_age_days,
+        )
+        found.extend(_check_source_revision(item))
+        read_records = item.get("records")
+        record = (
+            _mapping(read_records[0])
+            if isinstance(read_records, list) and len(read_records) == 1
+            else {}
+        )
+        if (
+            not found
+            and record.get("id") == runner_id
+            and _mapping(item.get("plan")).get("resource_id") == runner_id
+            and record.get("online") is True
+            and record.get("status") == "online"
+            and item.get("tested_revision") == receipt.get("tested_revision")
+        ):
+            matching += 1
+    return [] if matching == 1 else [f"{name}:runner_get_readback_mismatch"]
+
+
+def _check_targeted_receipt(
+    name: str,
+    receipt: JSONObject,
+    review: AcceptanceReview,
+    *,
+    required: Optional[JSONObject] = None,
+) -> Sequence[str]:
+    """Validate selected candidate proof without demanding unrelated operations.
+
+    :param name: Caller-selected receipt filename.
+    :param receipt: Existing installed-command result envelope.
+    :param review: Candidate identity and existing receipt freshness settings.
+    :param required: Aggregate setup context, or None for a selected receipt.
+    :returns: Provenance, schema, execution, read-back or cleanup failures.
+    """
+    kind = receipt.get("kind")
+    operation = receipt.get("operation")
+    arguments = (
+        name,
+        receipt,
+        review.functional_digest,
+        review.now,
+        review.max_age_days,
+    )
+    if kind == RECEIPT_KIND:
+        return [*_check_receipt(*arguments), *_check_source_revision(receipt)]
+    if kind == "image_build_readiness" and operation == "probe":
+        return _check_image_build_readiness_receipt(*arguments)
+    problems = _check_common(*arguments)
+    problems.extend(f"{name}:{item}" for item in _check_source_revision(receipt))
+    try:
+        if kind == "image_build_readiness" and operation == "chain":
+            validate_specification(receipt, IMAGE_BUILD_READINESS_SCHEMA)
+            records = receipt.get("records")
+            records = records if isinstance(records, list) else []
+            callbacks = [
+                _callback_record(records, callback)
+                for callback in (
+                    "HarborBuild",
+                    "HarborPush",
+                    "CreateRunner",
+                    "DeployManagerRunner",
+                )
+            ]
+            if any(
+                item is None or item.get("verified") is not True for item in callbacks
+            ):
+                problems.append(f"{name}:delivery_readback_missing")
+            build, publish, _, deployed = (item or {} for item in callbacks)
+            image = publish.get("image")
+            if (
+                not isinstance(image, str)
+                or build.get("digest") != publish.get("digest")
+                or deployed.get("image") != image
+            ):
+                problems.append(f"{name}:delivery_image_mismatch")
+            cleanup = _mapping(receipt.get("cleanup"))
+            if cleanup.get("status") != PASS or cleanup.get("failures") != []:
+                problems.append(f"{name}:cleanup_unproven")
+            problems.extend(_check_chain_runner_readback(name, receipt, review))
+        elif kind in GITLAB_RECEIPT_KINDS:
+            context = _gitlab_context(
+                receipt
+                if kind == "gitlab_access"
+                else {**receipt, "target": receipt.get("verified_target")}
+            )
+            problems = list(
+                _check_gitlab_receipt(
+                    name,
+                    receipt,
+                    required
+                    or {
+                        **context,
+                        "kind": kind,
+                        "operation": operation,
+                        "result_action": receipt.get("result_action"),
+                    },
+                    review.functional_digest,
+                    review.now,
+                    review.max_age_days,
+                )
+            )
+            problems.extend(
+                f"{name}:{item}" for item in _check_source_revision(receipt)
+            )
+            if kind in {"gitlab_repository", "gitlab_merge_request"}:
+                validate_specification(receipt, "results/gitlab-action.schema.json")
+                supported = (
+                    {"commit"} if kind == "gitlab_repository" else {"create", "update"}
+                )
+                if operation not in supported:
+                    problems.append(f"{name}:operation_unexpected")
+            elif (
+                kind,
+                operation,
+                receipt.get("result_action"),
+            ) not in REQUIRED_GITLAB_OPERATIONS:
+                problems.append(f"{name}:receipt_not_declared")
+            if any(not value for value in context.values()):
+                problems.append(f"{name}:setup_context_incomplete")
+        else:
+            problems.append(f"{name}:receipt_not_declared")
+    except (KeyError, OSError, SchemaError, SpecificationError, TypeError, ValueError):
+        problems.append(f"{name}:result_schema_invalid")
+    return problems
+
+
 def evaluate(
     setup: Mapping[str, JSONObject],
     receipts: Mapping[str, JSONObject],
@@ -1081,6 +1583,7 @@ def evaluate(
     now: Optional[datetime] = None,
     *,
     max_age_days: int,
+    aggregate: bool = True,
 ) -> AcceptanceResult:
     """Compare action receipts with the initial authenticated runtime setup.
 
@@ -1089,6 +1592,7 @@ def evaluate(
     :param skill_root: Candidate skill tree used for digest comparison.
     :param now: Reference time for freshness, or None to read the current UTC time.
     :param max_age_days: Declared maximum receipt age from the acceptance policy.
+    :param aggregate: Require the full operation set; False checks selected receipts only.
     :returns: Acceptance status, accepted receipts, and stable problem reasons.
     :raises ImportError: If the shared provenance module cannot be loaded.
     :raises OSError: If a candidate source file cannot be read for its digest.
@@ -1102,10 +1606,35 @@ def evaluate(
         now if now is not None else datetime.now(UTC),
         max_age_days,
     )
-    review.setup_receipts()
-    review.operation_receipts()
-    review.repeated_receipts()
-    return review.result()
+    if aggregate:
+        review.setup_receipts()
+        review.operation_receipts()
+        review.repeated_receipts()
+    else:
+        if not receipts:
+            review.problems.append("receipts_missing")
+        for name, receipt in receipts.items():
+            problems = _check_targeted_receipt(name, receipt, review)
+            review.problems.extend(problems)
+            if not problems:
+                review.accepted.append(name)
+    result = review.result()
+    result["mode"] = "aggregate" if aggregate else "targeted"
+    revisions = {
+        revision
+        for receipt in receipts.values()
+        if isinstance(
+            revision := _mapping(_mapping(receipt.get("skill")).get("revision")).get(
+                "value"
+            ),
+            str,
+        )
+    }
+    result["tested_revision"] = next(iter(revisions)) if len(revisions) == 1 else None
+    if len(revisions) > 1:
+        result["problems"] = sorted([*result["problems"], "mixed_tested_revisions"])
+        result["status"] = BLOCKED
+    return result
 
 
 def main() -> int:
@@ -1123,6 +1652,13 @@ def main() -> int:
         epilog="Example: check_live_acceptance.py --root . --json",
     )
     cli.add_argument("--root", required=True, metavar="PATH", help="repository root")
+    cli.add_argument(
+        "--aggregate",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="require all declared operation coverage (default); --no-aggregate "
+        "checks only the explicit --receipts directory",
+    )
     cli.add_argument(
         "--policy",
         metavar="PATH",
@@ -1148,6 +1684,8 @@ def main() -> int:
     modes.add_argument("--yaml", action="store_true", help="print YAML")
     add_log_arguments(cli)
     args = cli.parse_args()
+    if not args.aggregate and not args.receipts:
+        cli.error("--no-aggregate requires --receipts PATH")
 
     root = Path(args.root).resolve()
     skill_path = Path(args.skill) if args.skill else root / "ci-skills"
@@ -1174,6 +1712,8 @@ def main() -> int:
                 "kind": "live_acceptance",
                 "status": DRY_RUN,
                 "policy": dict(policy),
+                "mode": "aggregate" if args.aggregate else "targeted",
+                "tested_revision": None,
                 "receipts": sorted(receipts),
                 "accepted": [],
                 "problems": [],
@@ -1184,12 +1724,15 @@ def main() -> int:
                 receipts,
                 skill_path,
                 max_age_days=policy["max_receipt_age_days"],
+                aggregate=args.aggregate,
             )
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {
             "schema_version": SCHEMA_VERSION,
             "kind": "live_acceptance",
             "status": BLOCKED,
+            "mode": "aggregate" if args.aggregate else "targeted",
+            "tested_revision": None,
             "accepted": [],
             "problems": [str(exc)],
         }
@@ -1201,7 +1744,8 @@ def main() -> int:
 
         print(yaml.safe_dump(data, sort_keys=True), end="")
     else:
-        print(f"Live acceptance: {data['status']}")
+        print(f"Live acceptance: {data['status']} ({data['mode']})")
+        print(f"  tested revision {data['tested_revision'] or 'unavailable'}")
         if data["status"] == DRY_RUN:
             policy = data["policy"]
             print(f"  window    {policy['max_receipt_age_days']} days")

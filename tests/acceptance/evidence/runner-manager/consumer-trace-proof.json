@@ -1,0 +1,61 @@
+{
+  "checks": {
+    "all_executed_markers_present": true,
+    "command_not_found_absent": true,
+    "job_status_success": true,
+    "pipeline_id_matches": true,
+    "runner_id_matches": true,
+    "warning_absent": true
+  },
+  "errors": [],
+  "executed_output": [
+    {
+      "output": "HOSTNAME_TOOL=/usr/bin/hostname",
+      "timestamp": "2026-10-19T01:36:14.867594Z"
+    },
+    {
+      "output": "DRIVER=overlay",
+      "timestamp": "2026-10-19T01:36:15.286568Z"
+    },
+    {
+      "output": "PODMAN_CONSUMER_OK",
+      "timestamp": "2026-10-19T01:36:15.526641Z"
+    },
+    {
+      "output": "BIND_MOUNT_READBACK=PASS",
+      "timestamp": "2026-10-19T01:36:15.570061Z"
+    },
+    {
+      "output": "INNER_FAILURE_EXIT=7",
+      "timestamp": "2026-10-19T01:36:16.836711Z"
+    },
+    {
+      "output": "OWNED_CONTAINERS_ABSENT=PASS",
+      "timestamp": "2026-10-19T01:36:17.092144Z"
+    },
+    {
+      "output": "PODMAN_CONSUMER=PASS",
+      "timestamp": "2026-10-19T01:36:17.092163Z"
+    }
+  ],
+  "job_id": 60694,
+  "kind": "gitlab_runner_manager_consumer_trace",
+  "pipeline_id": 3956,
+  "runner_id": 99,
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "ac13183ffd71563eabf7676f6b2da8cb17042667ea951fa9adbab20b513b7e60",
+    "file_count": 227,
+    "functional_digest": "0336a2806847e9e9cb75e962c72ea568864e1df50e0039efaad4f84c33d4cced",
+    "revision": {
+      "source": "installer_record",
+      "value": "d2a16beab957f5b5ef34c2ae0e22b36f638e53e3",
+      "verified": true
+    }
+  },
+  "status": "PASS"
+}

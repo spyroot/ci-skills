@@ -17,10 +17,29 @@ from lib.python.core.gitlab.gitlab_job_fields import (
     GitLabJobFields,
 )
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
-from lib.python.core.json_types import JSONObject, JSONValue, json_object
+from lib.python.core.json_types import JSONObject, JSONValue, copy_json, json_object
 
 PAGE_SIZE = 100
 MAX_JOB_PAGES = 5
+
+
+def attach_pipeline_provenance(
+    data: MutableMapping[str, JSONValue],
+    session: BoundGitLabSession,
+    access: JSONObject,
+) -> None:
+    """Attach common GitLab access and installed-skill identity to a report.
+
+    :param data: Mutable pipeline report assembled by the selected operation.
+    :param session: Bound session exposing nonsecret provenance attributes.
+    :param access: Access evidence that authorized the operation.
+    :raises AttributeError: The supplied session lacks the bound-session contract.
+    """  # noqa: DOC502 - Bound-session attribute errors propagate unchanged.
+    data["access"] = access
+    data["execution_host"] = session.execution_host
+    data["tested_revision"] = session.skill["revision"]["value"]
+    data["skill"] = copy_json(session.skill)
+    data["target_source"] = session.target_source
 
 
 def _positive_id(value: JSONValue) -> TypeGuard[int]:
@@ -173,8 +192,10 @@ def read_pipeline(
     :param session: Exact-host GitLab session.
     :param project_id: Positive selected project ID.
     :param pipeline_id: Positive selected pipeline ID.
-    :param api_client: Optional caller-owned transport; otherwise construct the native client.
-    :returns: Pipeline summary and bounded collection errors, with unchanged public fields.
+    :param api_client: Optional caller-owned transport; otherwise construct the
+        native client.
+    :returns: Pipeline summary and bounded collection errors, with unchanged
+        public fields.
     :raises ValueError: Selected IDs or provider responses are invalid.
     :raises GitLabAPIError: A pipeline or job collection request fails.
     """  # noqa: DOC503 - pipeline and job collection reads propagate GitLabAPIError

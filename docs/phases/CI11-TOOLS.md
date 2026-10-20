@@ -52,12 +52,13 @@ The `glab` part of the root offers command families and one relevant reference:
       "milestone.py": {},
       "jobs.py": {}
     },
-    "reference": {
-      "mcp": {
+    "reference": [
+      {
+        "name": "mcp",
         "summary": "GitLab MCP configuration and toolsets.",
-        "pointer": "references/mcp.md"
+        "pointer": "get mcp"
       }
-    }
+    ]
   }
 }
 ```
@@ -72,12 +73,13 @@ Selecting `jobs.py` returns its own proposition directly, including a combinatio
     "watch.py": {},
     "create_tagged_protected_job.py": {}
   },
-  "reference": {
-    "pipeline variables": {
+  "reference": [
+    {
+      "name": "pipeline variables",
       "summary": "Predefined CI/CD variables reference",
-      "pointer": "references/predefine.md"
+      "pointer": "get predefine"
     }
-  }
+  ]
 }
 ```
 
@@ -85,14 +87,39 @@ An entrypoint's descriptive filename already tells the agent what it does. Its e
 repeated summary, entrypoint, or `args: ["--describe"]` wrapper. The agent can use `--help` for arguments. A node can
 include related tools from other command families when useful; narrowing the scope does not require removing them.
 
+A node shows two things and nothing else: what the agent can run, `tools`, the installed ci-skills commands, and
+what it can read, `reference`, the references ci-skills stores and serves. A command's filename is chosen to say
+what it actually does, because that name is all the node shows for it. `reference` is an ordered array; each
+entry names the reference, summarises it and points at the next node, the `reference.py` call that returns that
+reference's own sections as entries of the same kind, down to one section's text. The stored file under
+`references/` stays behind that node; the agent is handed the pointer, not the file, and follows it only when it
+decides it needs to. The graph therefore continues past the command node through its references.
+
+### Cross-integration combinations already fit the implementation
+
+**Locked reference example. Changes require explicit operator approval.**
+
+There is a concrete example on main: `gitlab_runner_manager.py` declares **GitLab, Kubernetes, and Harbor**.
+`proposition()` places commands into the clusters corresponding to their declared authorities. Consequently, this
+one command is reachable through all three relevant provider clusters. That is consistent with your composite
+workflow model. [Runner-manager declaration][runner-manager-declaration] · [Cluster construction][cluster-construction]
+
+Selecting a command also offers its immediate related tools and collects their declared references, removing
+duplicates. Shared references therefore already have a central definition and can appear at several relevant
+command nodes. [Offering construction][offering-construction]
+
+[runner-manager-declaration]: https://github.com/spyroot/ci-skills/blob/6c02a4f1ec8624901dc142e12aacd399152f5c8d/ci-skills/lib/python/core/catalog.py#L906-L913
+[cluster-construction]: https://github.com/spyroot/ci-skills/blob/6c02a4f1ec8624901dc142e12aacd399152f5c8d/ci-skills/lib/python/core/catalog.py#L1402-L1442
+[offering-construction]: https://github.com/spyroot/ci-skills/blob/6c02a4f1ec8624901dc142e12aacd399152f5c8d/ci-skills/lib/python/core/catalog.py#L1368-L1399
+
 ### Proposition schema
 
-The [reference-next schema](../../schemas/reference-next.schema.json) owns version `2.0` propositions and retains the
-legacy 1.x `choices` envelope. The proposition response revision is `2.0`;
-a proposition reference's `pointer` is a path string, as shown in the root/jobs examples. Preserve the separate 1.x
-command-pointer definitions (`action`, `entrypoint`, `args`) still used by the
-[reference-section schema](../../schemas/reference-section.schema.json) and existing result schemas. Proposition
-reference paths do not reuse that command-pointer object.
+The [reference-next schema](../../schemas/reference-next.schema.json) owns version `3.0` propositions; the `2.0`
+node with its `reference` mapping and the 1.x `choices` envelope are retired. The proposition response revision
+is `3.0`; a proposition reference's `pointer` is the next `reference.py` call as a string, as shown in the
+root/jobs examples. The separate command-pointer definitions (`action`, `entrypoint`, `args`) stay in that schema
+only for the [gitlab-pipeline-watch result schema](../../schemas/gitlab-pipeline-watch.schema.json), their
+remaining user. Proposition reference pointers do not reuse that command-pointer object.
 
 Every response carries `schema_version` alongside its payload members. The examples above omit only that response
 metadata to show the root and node shapes. The schema describes structure; it does not prescribe which reference an
@@ -101,10 +128,10 @@ agent must read or require traversal through `run`, `read`, or `describe` before
 | Element | Shape |
 | --- | --- |
 | Root payload | Mapping of cluster names to proposition nodes. |
-| Node payload | `tools` and `reference` mappings, returned directly when that node is selected. |
+| Node payload | `tools` and `reference` fields, returned directly when that node is selected. |
 | `tools` | Mapping of actual entrypoint filenames to `{}` in this proposition version. |
-| `reference` | Mapping of reference names to a short `summary` and concrete `pointer`. |
-| `schema_version` | Response version `2.0` for this shape. |
+| `reference` | Ordered array of entries, each a `name`, a short `summary` and a `pointer` to the next node. |
+| `schema_version` | Response version `3.0` for this shape. |
 
 This schema defines both complete response shapes without an extra payload wrapper. The root carries
 `schema_version` beside its named clusters; a selected node carries it beside `tools` and `reference`. Both reuse the
@@ -118,7 +145,7 @@ same node definition:
       "type": "object",
       "required": ["schema_version"],
       "properties": {
-        "schema_version": {"const": "2.0"}
+        "schema_version": {"const": "3.0"}
       },
       "additionalProperties": {"$ref": "#/$defs/node"}
     },
@@ -134,17 +161,18 @@ same node definition:
       "type": "object",
       "required": ["tools", "reference"],
       "properties": {
-        "schema_version": {"const": "2.0"},
+        "schema_version": {"const": "3.0"},
         "tools": {
           "type": "object",
           "additionalProperties": {"type": "object", "maxProperties": 0}
         },
         "reference": {
-          "type": "object",
-          "additionalProperties": {
+          "type": "array",
+          "items": {
             "type": "object",
-            "required": ["summary", "pointer"],
+            "required": ["name", "summary", "pointer"],
             "properties": {
+              "name": {"type": "string"},
               "summary": {"type": "string"},
               "pointer": {"type": "string"}
             },

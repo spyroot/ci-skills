@@ -1,0 +1,107 @@
+{
+  "captured_at": "2026-10-20T01:58:38.107276+00:00",
+  "cleanup": {
+    "status": "NOT_APPLICABLE"
+  },
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:29f247d18d3c",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_repository",
+  "mutated": true,
+  "operation": "commit",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "APPLY",
+  "plan": {
+    "body_sha256": "be47619922b7e07724291af53e7fd9fba6c23b70b69de3ad5f5012fa8957802f",
+    "confirmation_ready": true,
+    "fields": [
+      "actions",
+      "branch",
+      "commit_message",
+      "start_branch"
+    ],
+    "one_time_sink_required": false,
+    "operation": "commit",
+    "plan_digest": "d6e1e8bac3a96579c33dfd15ab8b86390857aa84941387c6fd1814bd27587848",
+    "project_ids": null,
+    "resource_id": null,
+    "target_kind": "project",
+    "target_reference": "123"
+  },
+  "plan_digest": "d6e1e8bac3a96579c33dfd15ab8b86390857aa84941387c6fd1814bd27587848",
+  "readback": {
+    "action": "APPLIED",
+    "branch": "ci-skills/hello-world-consumer-20261020-gzibur",
+    "commit_sha": "81bcd6a8aa9b07ade8707a9aec80dac4d24b1834",
+    "files": [
+      {
+        "content_sha256": "ec0eefc0a67c60dc61a585554d322754bbd74fe849b893aa84764ba984e9239f",
+        "file_path": "main.go"
+      },
+      {
+        "content_sha256": "e4932c9ea7d1ae2f1b2dc92d162edaa9454146334418d26e4b15099eefbe9ec9",
+        "file_path": "Dockerfile"
+      }
+    ],
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "APPLIED",
+      "branch": "ci-skills/hello-world-consumer-20261020-gzibur",
+      "commit_sha": "81bcd6a8aa9b07ade8707a9aec80dac4d24b1834",
+      "files": [
+        {
+          "content_sha256": "ec0eefc0a67c60dc61a585554d322754bbd74fe849b893aa84764ba984e9239f",
+          "file_path": "main.go"
+        },
+        {
+          "content_sha256": "e4932c9ea7d1ae2f1b2dc92d162edaa9454146334418d26e4b15099eefbe9ec9",
+          "file_path": "Dockerfile"
+        }
+      ],
+      "verified": true
+    }
+  ],
+  "result_action": "APPLIED",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "7194c1819ad07de0b5046e14614a32bd1e50cf71021a9cc05ecb43aeabbb1001",
+    "file_count": 241,
+    "functional_digest": "7a3f5b60d17c89c26f845009b7afa68ffa9e81ffb13dd8bc8a6fdb9b71d611e8",
+    "revision": {
+      "source": "installer_record",
+      "value": "39bbf4a10e16d0f51407b67d655dc3746219b087",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": {
+    "kind": "project",
+    "reference": "123"
+  },
+  "target_file": "path:5e5380df1eda",
+  "target_source": "user;argv:--project",
+  "tested_revision": "39bbf4a10e16d0f51407b67d655dc3746219b087",
+  "verified_target": {
+    "full_path": "hott/test",
+    "id": 123,
+    "kind": "project",
+    "web_url": "https://gitlab.dcloud.run/hott/test"
+  }
+}

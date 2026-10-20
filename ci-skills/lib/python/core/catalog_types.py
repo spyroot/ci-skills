@@ -22,6 +22,11 @@ class VerbDefinition(TypedDict):
 
         Option names required for this verb.
 
+    .. attribute :: requires_authorities
+        :type: NotRequired[Sequence[str]]
+
+        Provider configuration required by this specific operation.
+
     .. attribute :: side_effects
         :type: NotRequired[str]
 
@@ -45,6 +50,7 @@ class VerbDefinition(TypedDict):
 
     purpose: NotRequired[str]
     required_options: NotRequired[Sequence[str]]
+    requires_authorities: NotRequired[Sequence[str]]
     side_effects: NotRequired[str]
     result_schema: NotRequired[str]
     mutates: NotRequired[bool]
@@ -68,7 +74,11 @@ class CommandDefinition(TypedDict):
 
     .. attribute :: requires
 
-        Runtime authorities used by this command.
+        Runtime authorities required by this command.
+
+    .. attribute :: optional_requires
+
+        Supported authorities checked only when configured in the selected target.
 
     .. attribute :: capabilities
 
@@ -77,6 +87,10 @@ class CommandDefinition(TypedDict):
     .. attribute :: options
 
         Command-specific options and help text.
+
+    .. attribute :: examples
+
+        Short descriptions and runnable commands for the selected capability.
 
     .. attribute :: references
 
@@ -120,8 +134,10 @@ class CommandDefinition(TypedDict):
     purpose: str
     use_when: str
     requires: Sequence[str]
+    optional_requires: NotRequired[Sequence[str]]
     capabilities: Sequence[str]
     options: Mapping[str, str]
+    examples: NotRequired[Sequence[Mapping[str, str]]]
     references: NotRequired[Sequence[str]]
     returns: str
     mutates: NotRequired[bool]

@@ -1,8 +1,9 @@
-# Build an OpenShift node ISO
+# Build and join an OpenShift node
 
 `bin/ocp_node_onboard.py` builds a node ISO inside your OpenShift cluster and verifies it at the cluster
 storage path you choose. The ISO stays there; the command returns its location, size, checksum and run ID.
-You decide how to boot the intended node. This command does not boot a machine or approve its certificates.
+You decide how to boot the intended node. After boot, the join action can approve that exact node's client and
+serving certificate requests and verify its Ready state. The command never boots or deletes a machine.
 
 ## Prepare access and choose inputs
 
@@ -39,284 +40,8 @@ the user. Example hostnames, devices and addresses below are not defaults.
 
 ## Native node input
 
-The [OpenShift 4.22 node-image procedure][native] owns the native format and command behavior. For a simple
-single-node configuration, supply `--mac-address` with that node's actual NIC address. For additional settings
-or multiple nodes, save native YAML as `nodes-config.yaml`. This single-node example uses DHCP:
-
-```yaml
-hosts:
-  - hostname: worker-01
-    rootDeviceHints:
-      deviceName: /dev/sda
-    interfaces:
-      - name: ens3
-        macAddress: 02:00:00:10:00:01
-    networkConfig:
-      interfaces:
-        - name: ens3
-          type: ethernet
-          state: up
-          mac-address: 02:00:00:10:00:01
-          mtu: 9000
-          ipv4:
-            enabled: true
-            dhcp: true
-          ipv6:
-            enabled: false
-```
-
-Replace the disk, NIC, MAC, hostname and MTU with values for the machine being added. Native network settings
-follow [NMState](https://nmstate.io/). ci-skills stages this file byte-for-byte as `nodes-config.yaml`; it does
-not validate, rewrite or duplicate the OCP/NMState format. A native failure returns the provider's sanitized
-error and exit status so the caller can correct its input.
-
-Use either `--spec nodes-config.yaml` or `--mac-address MAC`. The MAC route optionally accepts
-`--network-config-path network.yaml`, which is also staged unchanged. These inputs are distinct from the
-ci-skills storage wrapper below.
-
-## Accepted node input shape
-
-Every key `oc adm node-image create` reads from `nodes-config.yaml`, from the installer's node-image types. The
-comment on each key is its rule. Values are examples; these are the keys documented for node-image.
-
-```yaml
-cpuArchitecture: x86_64              # optional; architecture of the nodes being added
-sshKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAwvoRVg9tj/8eE9Re9lY1R34rgiKjCQAXokfwY22gJJ example@bastion   # optional; the public key text itself, not a file path
-bootArtifactsBaseURL: https://pxe.example.internal/assets   # optional; only with --pxe
-hosts:                               # required; at least one host
-  - hostname: worker-01              # optional; overrides DHCP or reverse DNS
-    interfaces:                      # required; at least one; MAC unique across the whole file
-      - name: eno1                   # NIC name, one entry per MAC
-        macAddress: 02:00:00:10:00:01   # aa:bb:cc:dd:ee:ff
-    rootDeviceHints:                 # optional; any of these eight; every hint given must match
-      deviceName: /dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0   # exact; /dev/<name> or /dev/disk/by-path/<link>
-      hctl: "0:2:0:0"                # exact SCSI address; quote it
-      model: PERC H740P              # substring of the reported model
-      vendor: DELL                   # substring of the reported vendor
-      serialNumber: 00abc123         # exact
-      minSizeGigabytes: 480          # integer; the device is at least this size
-      wwn: "0x5000c500a1b2c3d4"      # exact; quote it
-      rotational: false              # true = spinning disk, false = SSD or NVMe, omitted = either
-    networkConfig:                   # optional; one NMState document; every interface in it is also listed above
-      interfaces: []
-```
-
-The installer rejects these inputs with the quoted text:
-
-- `rootDeviceHints.wwnWithExtension`: "WWN extensions are not supported in root device hints".
-- `rootDeviceHints.wwnVendorExtension`: "WWN vendor extensions are not supported in root device hints".
-- `deviceName` not under `/dev/`: "Device Name of root device hint must be a /dev/ path".
-- `deviceName` under another directory, such as `/dev/disk/by-id/` or `/dev/mapper/`: "Device Name of root device
-  hint must be path in /dev/ or /dev/disk/by-path/". Claim by WWN with the `wwn` hint, not with a `by-id` link.
-- a host without `interfaces`: "at least one interface must be defined for each node"; an interface without
-  `macAddress`: "each interface must have a MAC address defined"; a repeated MAC: "duplicate MAC address found".
-
-## Claim the install disk
-
-The node examines its disks in discovery order and installs to the first one matching every hint given. Read the
-real values on a booted host with `lsblk -o NAME,HCTL,MODEL,VENDOR,SERIAL,WWN,SIZE,ROTA` and
-`ls -l /dev/disk/by-path/`. Each block below is a complete `rootDeviceHints` value for one host.
-
-```yaml
-rootDeviceHints:                     # stable path; does not move when kernel names change
-  deviceName: /dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0
-```
-
-```yaml
-rootDeviceHints:                     # kernel name; may change between boots on multi-disk hosts
-  deviceName: /dev/sda
-```
-
-```yaml
-rootDeviceHints:                     # SCSI address host:channel:target:lun
-  hctl: "0:2:0:0"
-```
-
-```yaml
-rootDeviceHints:                     # world wide name
-  wwn: "0x5000c500a1b2c3d4"
-```
-
-```yaml
-rootDeviceHints:                     # serial number
-  serialNumber: S4EMNX0N123456
-```
-
-```yaml
-rootDeviceHints:                     # model substring and a size floor; both must match
-  model: MZ7LH960
-  minSizeGigabytes: 800
-```
-
-```yaml
-rootDeviceHints:                     # first non-rotating disk of that vendor
-  vendor: DELL
-  rotational: false
-```
-
-Through ci-skills the disk claim travels in `--spec nodes-config.yaml`; the `--mac-address` route of
-`ocp_node_onboard.py` carries no disk hint. Native `oc adm node-image create --mac-address MAC` accepts one hint as
-`--root-device-hint <hint name>:<value>` and stores the value as text, so use it for the text hints and the YAML
-route for `minSizeGigabytes` and `rotational`.
-
-### Where the claim lands in the ISO
-
-The ISO's embedded Ignition carries one directory per host under `/etc/assisted/hostconfig/`, named after
-`hostname` or `host-<index>` when no hostname is given. The hints are written with the same keys as the input.
-This input:
-
-```yaml
-hosts:
-  - hostname: worker-01
-    interfaces:
-      - name: eno1
-        macAddress: 02:00:00:10:00:01
-    rootDeviceHints:
-      wwn: "0x5000c500a1b2c3d4"
-      rotational: false
-```
-
-produces these files, which the build's embedded-Ignition read-back can be checked against:
-
-```text
-/etc/assisted/hostconfig/worker-01/root-device-hints.yaml
-/etc/assisted/hostconfig/worker-01/mac_addresses
-```
-
-```yaml
-# /etc/assisted/hostconfig/worker-01/root-device-hints.yaml
-rotational: false
-wwn: "0x5000c500a1b2c3d4"
-```
-
-```text
-# /etc/assisted/hostconfig/worker-01/mac_addresses   (lowercase, one per line)
-02:00:00:10:00:01
-```
-
-A host without `rootDeviceHints` gets no `root-device-hints.yaml`.
-`networkConfig` is rendered to NetworkManager keyfiles under `/etc/assisted/network/`.
-
-## Network cases
-
-Complete files for the cases the single-NIC DHCP example above does not cover. Every interface named in
-`networkConfig` is also listed under `interfaces` with its MAC.
-
-Two NICs, DHCP management and a static jumbo-frame storage link:
-
-```yaml
-hosts:
-  - hostname: worker-02
-    rootDeviceHints:
-      deviceName: /dev/disk/by-path/pci-0000:01:00.0-scsi-0:2:0:0
-    interfaces:
-      - name: eno1
-        macAddress: 02:00:00:10:00:11
-      - name: eno2
-        macAddress: 02:00:00:10:00:12
-    networkConfig:
-      interfaces:
-        - name: eno1
-          type: ethernet
-          state: up
-          mac-address: 02:00:00:10:00:11
-          ipv4:
-            enabled: true
-            dhcp: true
-          ipv6:
-            enabled: false
-        - name: eno2
-          type: ethernet
-          state: up
-          mac-address: 02:00:00:10:00:12
-          mtu: 9000
-          ipv4:
-            enabled: true
-            dhcp: false
-            address:
-              - ip: 192.0.2.11
-                prefix-length: 24
-          ipv6:
-            enabled: false
-```
-
-Two NICs bonded with LACP, jumbo frames, static address, DNS and default route:
-
-```yaml
-hosts:
-  - hostname: worker-03
-    rootDeviceHints:
-      wwn: "0x5000c500a1b2c3d4"
-    interfaces:
-      - name: eno1
-        macAddress: 02:00:00:10:00:21
-      - name: eno2
-        macAddress: 02:00:00:10:00:22
-    networkConfig:
-      interfaces:
-        - name: bond0
-          type: bond
-          state: up
-          mtu: 9000
-          link-aggregation:
-            mode: 802.3ad
-            options:
-              miimon: "100"
-            port:
-              - eno1
-              - eno2
-          ipv4:
-            enabled: true
-            dhcp: false
-            address:
-              - ip: 192.0.2.12
-                prefix-length: 24
-          ipv6:
-            enabled: false
-        - name: eno1
-          type: ethernet
-          state: up
-          mac-address: 02:00:00:10:00:21
-          mtu: 9000
-        - name: eno2
-          type: ethernet
-          state: up
-          mac-address: 02:00:00:10:00:22
-          mtu: 9000
-      dns-resolver:
-        config:
-          server:
-            - 192.0.2.1
-      routes:
-        config:
-          - destination: 0.0.0.0/0
-            next-hop-address: 192.0.2.1
-            next-hop-interface: bond0
-```
-
-Several hosts in one file with an architecture override and an SSH public key:
-
-```yaml
-cpuArchitecture: x86_64
-sshKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAwvoRVg9tj/8eE9Re9lY1R34rgiKjCQAXokfwY22gJJ example@bastion
-hosts:
-  - hostname: worker-04
-    rootDeviceHints:
-      serialNumber: S4EMNX0N123456
-    interfaces:
-      - name: eno1
-        macAddress: 02:00:00:10:00:31
-  - hostname: worker-05
-    rootDeviceHints:
-      hctl: "0:2:0:0"
-    interfaces:
-      - name: eno1
-        macAddress: 02:00:00:10:00:32
-```
-
-Source of the shape and rules: the installer's `pkg/types/agent`,
-`pkg/asset/agent/agentconfig` and `pkg/types/baremetal/validation` packages and `oc adm node-image create --help`
-at release 4.22.
+Use the [native OCP YAML example](ocp-node-input.md) for the caller-supplied MAC/NIC and network settings.
+The [native flag reference](ocp-node-image-flags.md) separates OpenShift flags from ci-skills inputs.
 
 ## Choose where the ISO stays
 
@@ -387,11 +112,49 @@ and retained resources. Add `--receipt-out result.json` for a saved report, or
 If transport ends without confirmed native completion, the report says so and retains the exact Pod/resources;
 it does not claim cleanup or a successful build.
 
+## Join a booted node
+
+Boot the intended machine from the generated ISO and read its build result's `run_id` into `RUN_ID`. Select the
+exact Kubernetes Node hostname and every IP address passed to OpenShift's native monitor. These are caller
+choices; ci-skills does not discover or replace them. Repeat `--ip-address` for a multi-address node.
+
+```bash
+python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" join --run-id "$RUN_ID" \
+  --node-name worker-01 --ip-address 192.0.2.10 --live-plan --json
+```
+
+Set `JOIN_DIGEST` to the `plan_digest` returned by that live plan, then apply it unchanged:
+
+```bash
+python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" join --run-id "$RUN_ID" \
+  --node-name worker-01 --ip-address 192.0.2.10 \
+  --apply --confirm-plan "$JOIN_DIGEST" --json
+```
+
+Replace the example hostname and address with the booted node's values. The plan binds the run ID, hostname,
+addresses, two fixed Kubernetes signers, target and installed functional code. It never binds provider-generated
+CSR names.
+
+The selected credentials need permission to list and read certificate signing requests, update the CSR approval
+subresource, read the selected Node, and remove the run-owned build resources after successful join. The command
+does not grant those permissions.
+
+Apply reads CSRs explicitly even without reverse DNS. It approves only the supplied hostname's client-kubelet
+and kubelet-serving requests, in that order, and reads each approval back by UID. Other signers remain untouched.
+The report distinguishes observed client issuance from bootstrap completion inferred from a serving request.
+
+After approval, native `oc adm node-image monitor` runs and the exact Node is independently checked for Ready.
+Roles and addresses are reported; monitor and Node addresses may differ across NAT or multiple networks.
+An already Ready Node returns `NO_OP` without claiming unobserved certificate issuance.
+
+Successful join cleans run-owned build resources last. Persistent storage and its ISO remain; temporary output
+is removed with its backing resources. Cleanup never deletes joined Nodes or issued certificates.
+
 ## Verify or remove a run
 
-Read the build result's `run_id` into `RUN_ID`. Verification resolves its live artifact record, reads the ISO
-in-cluster and compares its checksum and size before inspecting the embedded configuration. For persistent
-storage, it creates and cleans a temporary reader Pod; the selected credentials need those Pod permissions.
+Verification resolves the selected run's live artifact record, reads the ISO in-cluster and compares its checksum
+and size before inspecting the embedded configuration. For persistent storage, it creates and cleans a temporary
+reader Pod; the selected credentials need those Pod permissions.
 
 ```bash
 python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" verify --run-id "$RUN_ID" --json
@@ -404,5 +167,3 @@ Set `REMOVE_DIGEST` from the removal plan. Persistent output is read back before
 original build resources; its storage and final ISO are preserved. Removal of temporary output deletes its
 backing Pod and verifies absence. Once the run record is removed, repeating removal is `NO_OP`; the preserved
 persistent ISO can still be consumed directly from its selected storage path.
-
-[native]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/nodes/working-with-nodes

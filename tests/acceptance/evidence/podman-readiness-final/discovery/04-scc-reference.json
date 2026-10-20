@@ -1,0 +1,94 @@
+{
+  "choices": [
+    {
+      "id": "openshift-scc-access",
+      "kind": "read",
+      "next": {
+        "action": "read",
+        "args": [
+          "get",
+          "openshift-scc-access",
+          "openshift-scc-access",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "OpenShift SCC access",
+      "when": "Read when you need OpenShift SCC access."
+    },
+    {
+      "id": "discover-and-inspect",
+      "kind": "read",
+      "next": {
+        "action": "read",
+        "args": [
+          "get",
+          "openshift-scc-access",
+          "discover-and-inspect",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Discover and inspect",
+      "when": "Read when you need Discover and inspect."
+    },
+    {
+      "id": "read-permission",
+      "kind": "read",
+      "next": {
+        "action": "read",
+        "args": [
+          "get",
+          "openshift-scc-access",
+          "read-permission",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Read permission",
+      "when": "Read when you need Read permission."
+    },
+    {
+      "id": "read-the-admitted-scc",
+      "kind": "read",
+      "next": {
+        "action": "read",
+        "args": [
+          "get",
+          "openshift-scc-access",
+          "read-the-admitted-scc",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Read the admitted SCC",
+      "when": "Read when you need Read the admitted SCC."
+    },
+    {
+      "id": "compose-the-existing-callback",
+      "kind": "read",
+      "next": {
+        "action": "read",
+        "args": [
+          "get",
+          "openshift-scc-access",
+          "compose-the-existing-callback",
+          "--json"
+        ],
+        "entrypoint": "bin/reference.py"
+      },
+      "summary": "Compose the existing callback",
+      "when": "Read when you need Compose the existing callback."
+    }
+  ],
+  "continuation": null,
+  "kind": "reference_next",
+  "path": [
+    "k8s",
+    "image_build_readiness",
+    "read",
+    "openshift-scc-access"
+  ],
+  "schema_version": "1.0",
+  "summary": "Discover SCCs, inspect permission and read the admitted constraint."
+}

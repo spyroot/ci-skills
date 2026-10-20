@@ -83,6 +83,88 @@ def test_load_target_accepts_exact_nonsecret_authorities(target_file: Path) -> N
     assert target.kubernetes.kubeconfig is None
 
 
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    (
+        ("", "target is missing required authority tables: gitlab"),
+        ("[githb]\n", "target contains unsupported tables: githb"),
+        (
+            '[gitlab]\nurl = "https://gitlab.example.test"\n[extra]\n',
+            "target contains unsupported tables: extra",
+        ),
+    ),
+)
+def test_load_target_distinguishes_missing_from_unsupported_authorities(
+    tmp_path: Path, body: str, reason: str
+) -> None:
+    """Name the actual missing or unsupported table without conflating them.
+
+    :param tmp_path: Scratch directory containing the malformed target.
+    :param body: TOML with a missing required table or an unsupported table.
+    :param reason: Exact corrective diagnostic expected by the calling agent.
+    :returns: None; assertions verify the public target-loading error.
+    """
+    target_mod = import_script_module("lib.python.core.target")
+    target_path = tmp_path / "target.toml"
+    target_path.write_text(body, encoding="utf-8")
+
+    with pytest.raises(target_mod.TargetError) as error:
+        target_mod.load_target(target_path, required_surfaces=("gitlab",))
+
+    assert str(error.value) == reason
+
+
+@pytest.mark.parametrize(
+    ("table", "key"),
+    (
+        ("github", "host"),
+        ("github", "repository"),
+        ("gitlab", "url"),
+        ("harbor", "url"),
+        ("harbor", "project"),
+        ("kubernetes", "context"),
+        ("kubernetes", "server"),
+        ("kubernetes.node_diagnostics", "node"),
+        ("kubernetes.node_diagnostics.cilium", "namespace"),
+        ("kubernetes.node_diagnostics.journal", "directory"),
+    ),
+)
+def test_load_target_qualifies_required_string_diagnostics(
+    target_file: Path, table: str, key: str
+) -> None:
+    """Identify a missing string by its provider and complete nested table path.
+
+    :param target_file: Existing target fixture with valid provider settings.
+    :param table: Provider or nested diagnostic table whose required field is removed.
+    :param key: Required field missing from that table.
+    :returns: None; assertions identify the exact field the agent must supply.
+    """
+    target_mod = import_script_module("lib.python.core.target")
+    body = target_file.read_text(encoding="utf-8") + (
+        '\n[harbor]\nurl = "https://harbor.example.test"\nproject = "unit"\n'
+        'credential_file = "harbor.credential"\n'
+        '\n[kubernetes.node_diagnostics]\nnode = "worker-a"\n'
+        '\n[kubernetes.node_diagnostics.cilium]\nnamespace = "cilium"\n'
+        'selector = "app=cilium"\ncontainer = "agent"\n'
+        '\n[kubernetes.node_diagnostics.journal]\nnamespace = "diagnostics"\n'
+        'selector = "app=journal"\ncontainer = "reader"\n'
+        'directory = "/host-journal"\nhost_path = "/var/log/journal"\n'
+    )
+    current_table = ""
+    lines = []
+    for line in body.splitlines():
+        if line.startswith("["):
+            current_table = line[1:-1]
+        if current_table != table or not line.startswith(f"{key} ="):
+            lines.append(line)
+    target_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    with pytest.raises(target_mod.TargetError) as error:
+        target_mod.load_target(target_file, required_surfaces=(table.split(".")[0],))
+
+    assert str(error.value) == f"{table}.{key} must be a nonempty string"
+
+
 @pytest.mark.parametrize("declaration", ("relative", "absolute", "tilde"))
 def test_load_target_resolves_token_files_from_declared_location(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declaration: str

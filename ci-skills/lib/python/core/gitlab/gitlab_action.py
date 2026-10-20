@@ -319,7 +319,7 @@ class GitLabOperation(GitlabCallback[ActionPlan]):
         return record
 
     def run(self) -> JSONObject:
-        """Dispatch issue and wiki operations through their existing provider code.
+        """Dispatch the selected operation through its shared provider code.
 
         :returns: Provider action record and its independent read-back evidence.
         :raises ActionError: The target, operation, or provider response is invalid.
@@ -612,8 +612,12 @@ def operation_callback(plan: ActionPlan) -> GitLabOperation:
     """Choose the concrete operation declared by an already prepared plan.
 
     :param plan: Required operation inputs, independent of workflow state.
-    :returns: Selected milestone, runner, issue, or wiki callback.
+    :returns: Selected callback for the registered GitLab operation.
     """
+    from lib.python.core.gitlab.gitlab_merge_requests import (
+        CreateMergeRequest,
+        UpdateMergeRequest,
+    )
     from lib.python.core.gitlab.gitlab_milestones import (
         CreateMilestone,
         UpdateMilestone,
@@ -627,6 +631,11 @@ def operation_callback(plan: ActionPlan) -> GitLabOperation:
     )
 
     callbacks: Mapping[str, Mapping[str, type[GitLabOperation]]] = {
+        "gitlab_repository": {"commit": GitLabOperation},
+        "gitlab_merge_request": {
+            "create": CreateMergeRequest,
+            "update": UpdateMergeRequest,
+        },
         "gitlab_runner": {
             "assign": AttachToProject,
             "create": CreateRunner,

@@ -1,0 +1,35 @@
+{
+  "checks": [
+    {
+      "architecture": "amd64",
+      "exit_code": 1,
+      "image": "quay.io/podman/stable@sha256:24aa8442c468c62ffae6053c79942b3a53c169934098a80b93f653fd9f0f8783",
+      "operation": "oc image info --filter-by-os=linux/amd64",
+      "os": "linux",
+      "status": "manifest_unknown"
+    },
+    {
+      "architecture": "amd64",
+      "content_digest": "sha256:5118bdbb154b115d77f58107a2e69d65df4375bcb0d89a8da10b055754e8b9f3",
+      "exit_code": 0,
+      "image": "quay.io/podman/stable:latest",
+      "list_digest": "sha256:2fb39ca923dd9e0ee33f9e319c3a107a2bfde022a6a31560cbd56a862821e7d3",
+      "operation": "oc image info --filter-by-os=linux/amd64",
+      "os": "linux",
+      "podman_version": "5.8.7",
+      "status": "resolved"
+    },
+    {
+      "architecture": "amd64",
+      "content_digest": "sha256:66a6306db78bf2dbf3487f293aa8d6990d8e506fdffab9cc43fe422becf886e4",
+      "exit_code": 0,
+      "image": "docker.io/library/busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e",
+      "list_digest": "sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e",
+      "operation": "oc image info --filter-by-os=linux/amd64",
+      "os": "linux",
+      "status": "resolved"
+    }
+  ],
+  "kind": "registry_metadata_diagnosis",
+  "schema_version": "1.0"
+}
