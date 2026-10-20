@@ -243,7 +243,9 @@ class ApiReadAction(ApiProviderAction):
             validate_endpoint(self.endpoint)
         except APIError as exc:
             raise ReadToolError(
-                "a relative GET endpoint is required", ReadExit.USAGE
+                "a relative GET endpoint without a leading slash is required, "
+                "such as projects?membership=true",
+                ReadExit.USAGE,
             ) from exc
         if self.field is not None and not re.fullmatch(
             r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*", self.field

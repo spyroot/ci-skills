@@ -1827,6 +1827,24 @@ def test_api_check_rejects_transforms_before_action_construction(
         READ_CLI._api_callbacks(args, API_READ.ApiOutput.JSON)
 
 
+def test_api_read_names_the_leading_slash_when_rejecting_an_endpoint() -> None:
+    """Name the relative form, with an example, for a slash-prefixed endpoint.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    action = API_READ.ApiReadAction(
+        provider=API_READ.GitProvider.GITLAB, endpoint="/projects?membership=true"
+    )
+
+    with pytest.raises(
+        API_READ.ReadToolError, match="without a leading slash"
+    ) as failure:
+        action.validate()
+
+    assert failure.value.code == API_READ.ReadExit.USAGE
+    assert "such as projects?membership=true" in str(failure.value)
+
+
 def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:
     """Serialize absent selectors as the existing empty-string plan fields.
 

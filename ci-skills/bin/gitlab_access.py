@@ -13,7 +13,7 @@ import json
 import socket
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Optional
 
@@ -27,6 +27,12 @@ from lib.python.core.portable import write_portable_receipt
 from lib.python.core.report import emit
 from lib.python.core.target import TargetError, select_gitlab_reference
 from lib.python.sys.status import DRY_RUN, exit_code
+
+NEXT_STEPS: Mapping[str, str] = {
+    "select_exactly_one_gitlab_project_or_group": (
+        "Pass --project PATH or --group PATH, or select one in the target file."
+    ),
+}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -140,7 +146,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return exit_code(status)
     except (TargetError, OSError, RuntimeError, ValueError, TypeError) as exc:
         source = getattr(exc, "gitlab_setup_source", source)
-        return _failure(args, "gitlab_access", source, str(exc))
+        reason = str(exc)
+        return _failure(
+            args, "gitlab_access", source, reason, next_step=NEXT_STEPS.get(reason)
+        )
     except Exception as exc:  # noqa: BLE001 - keep unexpected failures machine-readable
         source = getattr(exc, "gitlab_setup_source", source)
         return _failure(args, "gitlab_access", source, "unexpected_runtime_failure")

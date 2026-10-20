@@ -780,6 +780,38 @@ def test_cli_dry_run_never_binds_credentials_or_calls_api(
     assert data["credential_source"] is None
 
 
+@pytest.mark.parametrize("dry_run", (True, False), ids=("plan", "live"))
+def test_cli_names_the_next_step_when_no_project_or_group_is_selected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    dry_run: bool,
+) -> None:
+    """Block a target without a project or group and say how to select one.
+
+    :param tmp_path: Directory receiving a target with neither selector.
+    :param monkeypatch: Pytest fixture selecting that target file.
+    :param capsys: Pytest fixture capturing the blocked JSON report.
+    :param dry_run: Whether the plan or the live path reports the block.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    path = _target(tmp_path)
+    monkeypatch.setenv("CI_SKILLS_TARGET", str(path))
+
+    result = SCRIPT.main(["check", "--json", *(["--dry-run"] if dry_run else [])])
+    data = json.loads(capsys.readouterr().out)
+
+    assert result == 2
+    assert data["status"] == "BLOCKED"
+    assert data["errors"] == [
+        {"source": "target", "reason": "select_exactly_one_gitlab_project_or_group"}
+    ]
+    assert data["next_step"] == (
+        "Pass --project PATH or --group PATH, or select one in the target file."
+    )
+
+
 def _smoke_target_layout(tmp_path: Path) -> MutableMapping[str, JSONValue]:
     """Create distinct project and home normal/smoke target files.
 
