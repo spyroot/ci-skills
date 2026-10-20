@@ -16,6 +16,7 @@ import subprocess
 import sys
 from collections.abc import Mapping, MutableMapping, Sequence
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Optional
@@ -28,6 +29,7 @@ from conftest import (
     load_module,
 )
 from jsonschema import Draft202012Validator
+from test_gitlab_actions import _plan, _tag_output
 
 ACCEPTANCE: Final = load_module(
     "proposed_check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
@@ -344,11 +346,17 @@ def _candidate_delivery_receipts(
     receipts = {}
     identity = setup["access.json"]
     gitlab = setup["gitlab-access.json"]
-    for name in ("toolbox-runner.json", "toolbox-runner-get.json"):
+    fixtures = {
+        "toolbox-runner.json": "chain-receipt.json",
+        "toolbox-runner-get.json": "runner-readback.json",
+    }
+    for name, fixture in fixtures.items():
         receipt = json.loads(
-            (REPO_ROOT / "tests/acceptance/candidate" / name).read_text(
-                encoding="utf-8"
-            )
+            (
+                REPO_ROOT
+                / "tests/acceptance/evidence/image-build-chain/92713cc"
+                / fixture
+            ).read_text(encoding="utf-8")
         )
         receipt["captured_at"] = (NOW - timedelta(days=1)).isoformat()
         receipt["tested_revision"] = identity["tested_revision"]
@@ -380,6 +388,63 @@ def _candidate_delivery_receipts(
     return receipts
 
 
+def _consumer_action_receipt(
+    setup: Mapping[str, JSONObject], kind: str, operation: str
+) -> JSONObject:
+    """Reuse the existing action envelope for supported repository and MR evidence.
+
+    :param setup: Existing setup fixture selecting the synthetic GitLab context.
+    :param kind: Repository or MR action kind delivered by PR103.
+    :param operation: Commit, create, or update operation selected by the caller.
+    :returns: Portable current-candidate action receipt with matching setup context.
+    """
+    gitlab = setup["gitlab-access.json"]
+    if kind == "gitlab_repository":
+        record = {
+            "action": "APPLIED",
+            "verified": True,
+            "mutated": True,
+            "branch": "consumer",
+            "commit_sha": "b" * 40,
+            "files": [{"file_path": "main.go", "content_sha256": "c" * 64}],
+        }
+    else:
+        record = {
+            "action": "APPLIED",
+            "verified": True,
+            "mutated": True,
+            "id": 81,
+            "iid": 7,
+            "title": "Consumer files",
+            "milestone_id": 113,
+        }
+    plan = replace(
+        _plan(kind, operation, {}),
+        origin=gitlab["origin"],
+        target_reference=gitlab["target"]["full_path"],
+    )
+    receipt = _tag_output(plan, record)
+    for field in (
+        "origin",
+        "execution_host",
+        "identity",
+        "credential_source",
+        "credential_digest",
+        "target_source",
+    ):
+        receipt[field] = deepcopy(gitlab[field])
+    receipt["identity"]["web_url"] = (
+        f"{gitlab['origin']}/{gitlab['identity']['username']}"
+    )
+    receipt["verified_target"] = deepcopy(gitlab["target"])
+    receipt["verified_target"]["web_url"] = (
+        f"{gitlab['origin']}/{gitlab['target']['full_path']}"
+    )
+    receipt["captured_at"] = (NOW - timedelta(days=1)).isoformat()
+    receipt["skill"].update(digest=_digest(), functional_digest=_functional_digest())
+    return PORTABLE.portable(receipt)
+
+
 def _complete_receipts(
     setup: Mapping[str, JSONObject],
 ) -> MutableMapping[str, JSONObject]:
@@ -402,6 +467,14 @@ def _complete_receipts(
         receipts[name] = receipt
     receipts["podman-probe.json"] = _podman_receipt(setup)
     receipts.update(_candidate_delivery_receipts(setup))
+    for kind, operation in (
+        ("gitlab_repository", "commit"),
+        ("gitlab_merge_request", "create"),
+        ("gitlab_merge_request", "update"),
+    ):
+        receipts[f"{kind}-{operation}-APPLIED.json"] = _consumer_action_receipt(
+            setup, kind, operation
+        )
     return receipts
 
 
@@ -469,7 +542,14 @@ def test_full_required_operation_set_is_bound_to_initial_runtime_setup() -> None
         (receipt.get("kind"), receipt.get("operation"), receipt.get("result_action"))
         for receipt in receipts.values()
         if receipt.get("kind") in ACCEPTANCE.GITLAB_RECEIPT_KINDS
-    } == ACCEPTANCE.REQUIRED_GITLAB_OPERATIONS
+    } == {
+        operation
+        for operation in (
+            ACCEPTANCE.REQUIRED_GITLAB_OPERATIONS
+            | ACCEPTANCE.REQUIRED_CAPABILITY_OPERATIONS
+        )
+        if operation[0] in ACCEPTANCE.GITLAB_RECEIPT_KINDS
+    }
 
 
 def test_required_podman_runtime_receipt_cannot_be_missing() -> None:
@@ -1667,3 +1747,45 @@ def test_aggregate_acceptance_requires_the_delivered_chain() -> None:
 
     assert result["status"] == "BLOCKED"
     assert "image_build_readiness:chain:check:receipt_missing" in result["problems"]
+
+
+@pytest.mark.parametrize(
+    ("kind", "operation"),
+    (
+        ("gitlab_repository", "commit"),
+        ("gitlab_merge_request", "create"),
+        ("gitlab_merge_request", "update"),
+    ),
+)
+def test_targeted_gitlab_actions_and_aggregate_require_delivery_readback(
+    kind: str, operation: str
+) -> None:
+    """Require each delivered action in full coverage and consistent targeted read-back.
+
+    :param kind: Installed repository or MR capability whose evidence is selected.
+    :param operation: Commit, MR creation, or milestone update operation to prove.
+    :returns: None after targeted success, read-back failure, and aggregate omission checks.
+    """
+    setup = _access_setup()
+    receipt = _consumer_action_receipt(setup, kind, operation)
+    selected = {"action.json": receipt}
+    result = ACCEPTANCE.evaluate(
+        {}, selected, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
+    )
+    assert result["status"] == "PASS", result["problems"]
+    assert result["accepted"] == ["action.json"]
+    receipt["readback"]["action"] = "NO_OP"
+    rejected = ACCEPTANCE.evaluate(
+        {}, selected, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
+    )
+    assert rejected["status"] == "BLOCKED"
+    assert rejected["accepted"] == []
+    assert "action.json:operation_readback_missing" in rejected["problems"]
+
+    complete = _complete_receipts(setup)
+    baseline = _evaluate(setup, complete)
+    assert baseline["status"] == "PASS", baseline["problems"]
+    del complete[f"{kind}-{operation}-APPLIED.json"]
+    missing = _evaluate(setup, complete)
+    assert missing["status"] == "BLOCKED"
+    assert f"{kind}:{operation}:APPLIED:receipt_missing" in missing["problems"]

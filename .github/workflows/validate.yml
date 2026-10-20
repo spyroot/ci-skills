@@ -140,6 +140,8 @@ jobs:
             ci-skills/lib/python/core/gitlab/gitlab_runners.py \
             ci-skills/lib/python/core/gitlab/gitlab_actions.py \
             ci-skills/lib/python/core/gitlab/gitlab_milestones.py \
+            ci-skills/lib/python/core/gitlab/gitlab_repository.py \
+            ci-skills/lib/python/core/gitlab/gitlab_merge_requests.py \
             ci-skills/lib/python/core/gitlab/gitlab_api.py \
             ci-skills/lib/python/core/gitlab/runner_manager \
             ci-skills/lib/python/core/gitlab/gitlab_pipelines.py \

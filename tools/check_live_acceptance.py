@@ -211,7 +211,13 @@ IMAGE_BUILD_READINESS_KEY: Final[OperationKey] = (
     None,
 )
 REQUIRED_CAPABILITY_OPERATIONS: Final = frozenset(
-    {IMAGE_BUILD_READINESS_KEY, ("image_build_readiness", "chain", None)}
+    {
+        IMAGE_BUILD_READINESS_KEY,
+        ("image_build_readiness", "chain", None),
+        ("gitlab_repository", "commit", "APPLIED"),
+        ("gitlab_merge_request", "create", "APPLIED"),
+        ("gitlab_merge_request", "update", "APPLIED"),
+    }
 )
 IMAGE_BUILD_READINESS_SCHEMA: Final = "results/image-build-readiness.schema.json"
 

@@ -11,7 +11,8 @@ import argparse
 import textwrap
 from collections.abc import Mapping, Sequence
 
-from lib.python.core.json_types import JSONObject
+from lib.python.core.catalog import proposition
+from lib.python.core.json_types import JSONObject, json_objects, json_string
 
 
 class CommandHelpFormatter(argparse.HelpFormatter):
@@ -104,7 +105,8 @@ class CommandHelp:
         :param parser: Parser whose option descriptions are filled from the catalogue.
         :returns: Human-readable help with consistent ordered sections.
         :raises TypeError: If a catalogue text, description map, or example is malformed.
-        :raises KeyError: If a catalogue example lacks its description or command.
+        :raises KeyError: If a catalogue example or reference lacks a required field.
+        :raises ValueError: If the command is not registered in the catalogue.
         """  # noqa: DOC502 - Catalogue example/label readers validate input shapes.
         formatter = parser._get_formatter()
         for heading, value in (
@@ -141,4 +143,14 @@ class CommandHelp:
         for code, meaning in self.labels("exit_codes").items():
             formatter.add_text(f"Exit {code}: {meaning}.")
         formatter.end_section()
+        references = json_objects(proposition(self.text("command"))["reference"])
+        if references:
+            formatter.start_section("References")
+            for reference in references:
+                name = json_string(reference["name"])
+                summary = json_string(reference["summary"])
+                pointer = json_string(reference["pointer"])
+                formatter.add_text(f"{name}: {summary}")
+                formatter.add_text(f"reference.py {pointer}")
+            formatter.end_section()
         return formatter.format_help()

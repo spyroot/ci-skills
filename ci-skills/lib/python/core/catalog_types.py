@@ -88,6 +88,10 @@ class CommandDefinition(TypedDict):
 
         Command-specific options and help text.
 
+    .. attribute :: examples
+
+        Short descriptions and runnable commands for the selected capability.
+
     .. attribute :: references
 
         Names from the shared proposition reference registry; empty when none apply.
@@ -133,6 +137,7 @@ class CommandDefinition(TypedDict):
     optional_requires: NotRequired[Sequence[str]]
     capabilities: Sequence[str]
     options: Mapping[str, str]
+    examples: NotRequired[Sequence[Mapping[str, str]]]
     references: NotRequired[Sequence[str]]
     returns: str
     mutates: NotRequired[bool]
