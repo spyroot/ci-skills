@@ -346,11 +346,17 @@ def _candidate_delivery_receipts(
     receipts = {}
     identity = setup["access.json"]
     gitlab = setup["gitlab-access.json"]
-    for name in ("toolbox-runner.json", "toolbox-runner-get.json"):
+    fixtures = {
+        "toolbox-runner.json": "chain-receipt.json",
+        "toolbox-runner-get.json": "runner-readback.json",
+    }
+    for name, fixture in fixtures.items():
         receipt = json.loads(
-            (REPO_ROOT / "tests/acceptance/candidate" / name).read_text(
-                encoding="utf-8"
-            )
+            (
+                REPO_ROOT
+                / "tests/acceptance/evidence/image-build-chain/92713cc"
+                / fixture
+            ).read_text(encoding="utf-8")
         )
         receipt["captured_at"] = (NOW - timedelta(days=1)).isoformat()
         receipt["tested_revision"] = identity["tested_revision"]
@@ -427,7 +433,13 @@ def _consumer_action_receipt(
         "target_source",
     ):
         receipt[field] = deepcopy(gitlab[field])
+    receipt["identity"]["web_url"] = (
+        f"{gitlab['origin']}/{gitlab['identity']['username']}"
+    )
     receipt["verified_target"] = deepcopy(gitlab["target"])
+    receipt["verified_target"]["web_url"] = (
+        f"{gitlab['origin']}/{gitlab['target']['full_path']}"
+    )
     receipt["captured_at"] = (NOW - timedelta(days=1)).isoformat()
     receipt["skill"].update(digest=_digest(), functional_digest=_functional_digest())
     return PORTABLE.portable(receipt)
