@@ -15,6 +15,7 @@ import os
 import stat
 import tempfile
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final, Optional
@@ -32,6 +33,8 @@ from lib.python.core.json_types import (
     JSONObject,
     copy_json_object,
     json_object,
+    json_objects,
+    json_string,
 )
 from lib.python.core.runtime import (
     CommandResult,
@@ -51,10 +54,26 @@ BUILD_FAILED_PHASES: Final = frozenset({"Failed", "Error", "Cancelled"})
 BUILD_POLL_SECONDS: Final = 5
 BUILD_LOG_BYTES: Final = 4096
 BUILD_LOG_LINES: Final = 40
+POD_MOUNT_FAILURE_SECONDS: Final = 60
+POD_READINESS_POLL_SECONDS: Final = 5
 
 
 class KubernetesError(RuntimeError):
     """A bounded native Kubernetes operation did not complete safely."""
+
+
+class PodMountFailure(KubernetesError):
+    """A Pending Pod has UID-correlated FailedMount evidence on its assigned node."""
+
+    def __init__(self, pod: JSONObject, events: Sequence[JSONObject]) -> None:
+        """Retain exact provider observations for owned-Pod recovery.
+
+        :param pod: Current Pending Pod read back from the selected cluster.
+        :param events: FailedMount events selected for that exact Pod UID.
+        """
+        super().__init__("tool_pod_failed_mount")
+        self.pod = copy_json_object(pod)
+        self.events = tuple(copy_json_object(event) for event in events)
 
 
 @dataclass
@@ -359,6 +378,103 @@ class KubernetesService:
         ):
             raise KubernetesError("pod_not_ready_after_wait")
         return pod
+
+    def wait_pod_mount_ready(
+        self,
+        name: str,
+        namespace: str,
+        *,
+        mount_failure_timeout: int = POD_MOUNT_FAILURE_SECONDS,
+        timeout: Optional[float] = None,
+    ) -> JSONObject:
+        """Observe bounded mount failures before completing normal Pod readiness.
+
+        :param name: Exact owned Pod name.
+        :param namespace: Exact owned Pod namespace.
+        :param mount_failure_timeout: Pending seconds after the first matching mount event.
+        :param timeout: Remaining shared readiness seconds, capped by the service timeout.
+        :returns: Ready Pod read back from the selected API.
+        :raises ValueError: The mount-detection bound is not positive.
+        :raises PodMountFailure: A UID-correlated mount failure remains Pending for the bound.
+        :raises KubernetesError: Readiness fails without a classified mount failure.
+        :raises TargetError: Bound kubeconfig changes during observation.
+        """  # noqa: DOC503 - Provider helpers propagate their declared errors.
+        operation_timeout = (
+            self.timeout if timeout is None else min(self.timeout, timeout)
+        )
+        if mount_failure_timeout <= 0 or operation_timeout <= 0:
+            raise ValueError("pod_mount_failure_timeout_invalid")
+        started = time.monotonic()
+        deadline = started + operation_timeout
+        failed_since: Optional[float] = None
+        observed_uid: Optional[str] = None
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            pod = self.read("Pod", name, namespace, timeout=remaining)
+            if pod is None:
+                raise KubernetesError("waited_resource_missing")
+            uid = json_string(json_object(pod.get("metadata", {})).get("uid"))
+            if observed_uid is not None and uid != observed_uid:
+                raise KubernetesError("tool_pod_uid_changed_before_ready")
+            observed_uid = uid
+            status = json_object(pod.get("status", {}))
+            conditions = json_objects(status.get("conditions", []))
+            if any(
+                item.get("type") == "Ready" and item.get("status") == "True"
+                for item in conditions
+            ):
+                return pod
+            if status.get("phase") in {"Failed", "Succeeded"}:
+                raise KubernetesError("tool_pod_terminal_before_ready")
+            node = json_object(pod.get("spec", {})).get("nodeName")
+            containers = json_objects(status.get("containerStatuses", []))
+            mounting = not containers or all(
+                json_object(json_object(item.get("state", {})).get("waiting", {})).get(
+                    "reason"
+                )
+                == "ContainerCreating"
+                for item in containers
+            )
+            if (
+                status.get("phase") == "Pending"
+                and mounting
+                and isinstance(node, str)
+                and node
+            ):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                response = self.json(
+                    *self._namespace_args(namespace),
+                    "get",
+                    "events",
+                    "--field-selector",
+                    f"involvedObject.uid={uid},reason=FailedMount",
+                    "-o",
+                    "json",
+                    timeout=remaining,
+                )
+                events = [
+                    item
+                    for item in json_objects(json_object(response).get("items", []))
+                    if item.get("reason") == "FailedMount"
+                    and json_object(item.get("involvedObject", {})).get("uid") == uid
+                ]
+                if events:
+                    if failed_since is None:
+                        failed_since = time.monotonic()
+                    if time.monotonic() - failed_since >= mount_failure_timeout:
+                        raise PodMountFailure(pod, events)
+                else:
+                    failed_since = None
+            else:
+                failed_since = None
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(POD_READINESS_POLL_SECONDS, remaining))
+        raise KubernetesError("tool_pod_ready_timeout")
 
     def wait_rollout(self, kind: str, name: str, namespace: str) -> JSONObject:
         """Wait for a native rollout, then read the exact workload back.
