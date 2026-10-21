@@ -110,18 +110,20 @@ Render each command's actual policy; do not change accepted modes to make an exa
 | H1 | `--receipt-out` in an offline plan | `receipt_out_requires_live_run` | Name accepted live modes. |
 | H2 | Offline `--output-dir` / `--log-file` | `dry_run_cannot_write_output` | State per-command restrictions. |
 
-- **PARTIALLY_IMPLEMENTED: H1.** `core/gitlab/gitlab_actions.py` rejects an offline receipt request; current
-  catalogue wording does not
-  make that restriction explicit. Add a concrete offline-plan example without a receipt and a confirmed live
-  example with one. The same shared help must describe READ receipts only for commands that support them.
-  Proof: existing command/help tests agree with mode validation; a fresh installed agent chooses the correct
-  invocation from help and obtains the affected operation's receipt without coaching or a failed discovery attempt.
-- **PARTIALLY_IMPLEMENTED: H2.** `core/gitlab/gitlab_action.py` and `core/action_modes.py` reject these output
-  requests in GitLab offline
-  mode while common option descriptions advertise them without the condition. This is a source-confirmed gap,
-  not a newly observed live failure. Explain valid modes and caller-selected paths using the command's policy.
-  Proof: shared help assertions cover the existing refusal cases in `tests/python/test_gitlab_actions.py`;
-  the installed agent can choose a valid output mode before invoking the affected command.
+- **IMPLEMENTED: H1.** Shared catalogue help now derives receipt eligibility from the existing mode policy.
+  GitLab action help names confirmed apply and limits READ receipts to runner `get/list`; offline and live-plan
+  receipts remain rejected. Repository and milestone examples pair an offline plan without persistence with a
+  confirmed live invocation using caller-selected receipt/report/log paths.
+- **IMPLEMENTED: H2.** The same policy supplies `--output-dir` and `--log-file` restrictions before invocation.
+  GitLab actions forbid offline persistence; tool Pod help preserves its allowed offline reports/logs. Shared help
+  also renders the existing provider, required-input, side-effect, result and reference declarations.
+
+[PR108](https://github.com/spyroot/ci-skills/pull/108) supplies public help/contract regressions and an installed
+consumer receipt in `tests/acceptance/candidate/milestone-create.json`. At installed revision
+`fa44dc7dcf83a8f9aacb36582dfcc18eaf765b95`, a fresh consumer used help before its offline plan and confirmed
+milestone creation, obtained verified read-back, and wrote receipt, paired reports and diagnostics at its selected
+paths. No rejected mode combination or repeated Podman check was needed. This closes H1/H2 only; the remaining
+port and workflow rows below retain their own delivery and proof requirements.
 
 The same help pass must show purpose, required inputs, selected-provider prerequisites, side effects, output,
 examples and the command's existing reference pointers. Preserve optional providers and native validation.

@@ -27,6 +27,13 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from types import MappingProxyType
 from typing import Final, Optional, Union
 
+from lib.python.core.action_modes import (
+    GITLAB_MODE_POLICY,
+    GITLAB_RUNNER_READ_OPERATIONS,
+    TOOL_POD_MODE_POLICY,
+    ActionMode,
+    ActionModePolicy,
+)
 from lib.python.core.catalog_types import (
     CommandDefinition,
     DiscoveryDefinition,
@@ -60,6 +67,61 @@ UNIVERSAL_OPTIONS: dict[str, str] = {
     "--log-file": "also append sanitized diagnostics to this exact path",
     "--run-id": "caller-selected identifier included in diagnostic logs",
 }
+
+
+def persistence_options(
+    policy: ActionModePolicy,
+    receipt: str,
+    *,
+    read_operations: Sequence[str] = (),
+    live_plan: bool = False,
+) -> dict[str, str]:
+    """Describe existing persistence rules for a command's reachable modes.
+
+    :param policy: The same policy used by the command's mode validator.
+    :param receipt: Existing description of the command's portable receipt.
+    :param read_operations: Operations that run in read mode without mode flags.
+    :param live_plan: Whether the command exposes a live-plan option.
+    :returns: Receipt, report and log descriptions for help and discovery.
+    """
+    modes = {
+        ActionMode.OFFLINE: "offline (--dry-run)",
+        ActionMode.APPLY: "confirmed apply (--apply --confirm-plan SHA256)",
+    }
+    if live_plan:
+        modes[ActionMode.LIVE_PLAN] = "live-plan (--live-plan)"
+    if read_operations:
+        modes[ActionMode.READ] = (
+            f"read ({'/'.join(read_operations)} without mode flags)"
+        )
+    receipts = [label for mode, label in modes.items() if mode in policy.receipt_modes]
+    forbidden = [
+        mode.value
+        for mode in (ActionMode.OFFLINE, ActionMode.LIVE_PLAN)
+        if mode not in policy.receipt_modes
+    ]
+    receipt_rule = f"Allowed in {'; '.join(receipts)}."
+    if forbidden:
+        receipt_rule += f" Not allowed in {' or '.join(forbidden)} mode."
+    outputs = [
+        label
+        for mode, label in modes.items()
+        if mode != ActionMode.OFFLINE or policy.allow_offline_output
+    ]
+    output_rule = f"Allowed in {'; '.join(outputs)}."
+    if not policy.allow_offline_output:
+        default = (
+            " (the default for changes)"
+            if policy.default_mode == ActionMode.OFFLINE
+            else ""
+        )
+        output_rule += f" Not allowed in offline mode{default}."
+    return {
+        "--receipt-out": f"{receipt}. {receipt_rule}",
+        "--output-dir": f"{UNIVERSAL_OPTIONS['--output-dir']}. {output_rule}",
+        "--log-file": f"{UNIVERSAL_OPTIONS['--log-file']}. {output_rule}",
+    }
+
 
 # Capability tiers. A command declaring a capability accepts all of its options.
 CAPABILITY_OPTIONS: dict[str, dict[str, str]] = {
@@ -388,7 +450,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--apply": "perform the exact confirmed operation",
             "--confirm-plan": "plan digest binding target, inputs, run ID and functional code",
             "--timeout": "positive operation timeout in seconds (default: 300)",
-            "--receipt-out": "write a sanitized operation receipt",
+            **persistence_options(
+                TOOL_POD_MODE_POLICY,
+                "write a sanitized operation receipt",
+                live_plan=True,
+            ),
         },
         "subcommands": {
             "prepare": {
@@ -778,7 +844,10 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--apply": "perform the validated change",
             "--confirm-plan": "SHA-256 fingerprint printed by the dry-run plan",
             "--timeout": "maximum seconds for each external request",
-            "--receipt-out": "write a sanitized, shareable operation receipt",
+            **persistence_options(
+                GITLAB_MODE_POLICY,
+                "write a sanitized, shareable operation receipt",
+            ),
         },
         "subcommands": {
             "create": {
@@ -794,6 +863,16 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "result_schema": GITLAB_ACTION_SCHEMA,
             },
         },
+        "examples": [
+            {
+                "description": "Offline plan without persistent files; retain plan_digest from stdout",
+                "command": 'gitlab_milestone.py create --project "$PROJECT" --title "Release review" --dry-run --json',
+            },
+            {
+                "description": "Apply the same inputs with plan_digest as PLAN_DIGEST and caller-selected paths",
+                "command": 'gitlab_milestone.py create --project "$PROJECT" --title "Release review" --apply --confirm-plan "$PLAN_DIGEST" --receipt-out receipt.json --output-dir reports --log-file action.log --json',
+            },
+        ],
         "returns": "A sanitized plan or verified milestone record and independent GET evidence.",
     },
     "gitlab_issue.py": {
@@ -813,7 +892,10 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--apply": "perform the validated change",
             "--confirm-plan": "SHA-256 fingerprint printed by the dry-run plan",
             "--timeout": "maximum seconds for each external request",
-            "--receipt-out": "write a sanitized, shareable operation receipt",
+            **persistence_options(
+                GITLAB_MODE_POLICY,
+                "write a sanitized, shareable operation receipt",
+            ),
         },
         "subcommands": {
             "open-bug": {
@@ -847,7 +929,10 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--apply": "perform the confirmed commit",
             "--confirm-plan": "SHA-256 fingerprint printed by the dry-run plan",
             "--timeout": "maximum seconds for each external request",
-            "--receipt-out": "write the verified branch, commit and file digests",
+            **persistence_options(
+                GITLAB_MODE_POLICY,
+                "write the verified branch, commit and file digests",
+            ),
         },
         "subcommands": {
             "commit": {
@@ -859,8 +944,12 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         },
         "examples": [
             {
-                "description": "Plan files on a new branch",
-                "command": 'gitlab_repository.py commit --project "$PROJECT" --branch "$BRANCH" --start-branch "$BASE" --commit-message "Add consumer example" --actions-file actions.json',
+                "description": "Offline plan without persistent files; retain plan_digest from stdout",
+                "command": 'gitlab_repository.py commit --project "$PROJECT" --branch "$BRANCH" --start-branch "$BASE" --commit-message "Add consumer example" --actions-file actions.json --dry-run --json',
+            },
+            {
+                "description": "Apply the same inputs with plan_digest as PLAN_DIGEST and caller-selected paths",
+                "command": 'gitlab_repository.py commit --project "$PROJECT" --branch "$BRANCH" --start-branch "$BASE" --commit-message "Add consumer example" --actions-file actions.json --apply --confirm-plan "$PLAN_DIGEST" --receipt-out receipt.json --output-dir reports --log-file action.log --json',
             },
         ],
         "returns": "A plan or verified branch, commit SHA and per-file content digests.",
@@ -890,7 +979,10 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--apply": "perform the confirmed MR change",
             "--confirm-plan": "SHA-256 fingerprint printed by the dry-run plan",
             "--timeout": "maximum seconds for each external request",
-            "--receipt-out": "write a sanitized operation receipt",
+            **persistence_options(
+                GITLAB_MODE_POLICY,
+                "write a sanitized operation receipt",
+            ),
         },
         "subcommands": {
             "create": {
@@ -934,7 +1026,10 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--apply": "perform the validated change",
             "--confirm-plan": "SHA-256 fingerprint printed by the dry-run plan",
             "--timeout": "maximum seconds for each external request",
-            "--receipt-out": "write a sanitized, shareable operation receipt",
+            **persistence_options(
+                GITLAB_MODE_POLICY,
+                "write a sanitized, shareable operation receipt",
+            ),
         },
         "subcommands": {
             "create": {
@@ -972,7 +1067,12 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--apply": "perform the validated change",
             "--confirm-plan": "SHA-256 fingerprint from the live plan for group assignment or delete, otherwise the dry-run plan",
             "--timeout": "maximum seconds for each external request",
-            "--receipt-out": "write a sanitized, shareable operation receipt",
+            **persistence_options(
+                GITLAB_MODE_POLICY,
+                "write a sanitized, shareable operation receipt",
+                read_operations=GITLAB_RUNNER_READ_OPERATIONS,
+                live_plan=True,
+            ),
         },
         "subcommands": {
             "get": {
