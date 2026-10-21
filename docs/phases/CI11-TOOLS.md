@@ -61,6 +61,28 @@ flowchart TD
 For the toolbox/runner workflow, the execution path is build → published image digest → configured runner.
 Discovery connections are choices for the consumer; they never insert callbacks into that execution path.
 
+### Existing CI topology
+
+The existing [.github/workflows/validate.yml](../../.github/workflows/validate.yml) owns this topology.
+Every parallel job checks out the same `CI_SOURCE_SHA`. The plan adds no jobs or ordering edges.
+
+```mermaid
+flowchart TD
+  S[Exact PR source SHA] -->|same checkout| V[validate: static, contracts, tests, selected receipts]
+  S -->|same checkout| E[gate-ci-skills-endpoints]
+  S -->|same checkout| I[test-install]
+  V -->|job result and ci-evidence-validate| R[required-result: always, after all three]
+  E -->|job result and endpoint evidence| R
+  I -->|job result and install evidence| R
+  R -->|verified results for source SHA| C[ci-skills/required commit status]
+  C -->|success required| M[Merge eligibility]
+```
+
+`tools/ci_required_result.py` consumes the job evidence and existing inventory; missing or failed required evidence
+prevents a successful required status. The receipt step validates captured live proof; these jobs do not execute
+the private-target consumer task. Live operation failures stop dependent callbacks and return through the existing
+result/cleanup lifecycle described below; discovery failures never execute that lifecycle.
+
 ## Implementation Plan
 
 ### Current delivery and remaining work
@@ -88,12 +110,14 @@ Render each command's actual policy; do not change accepted modes to make an exa
 | H1 | `--receipt-out` in an offline plan | `receipt_out_requires_live_run` | Name accepted live modes. |
 | H2 | Offline `--output-dir` / `--log-file` | `dry_run_cannot_write_output` | State per-command restrictions. |
 
-- **H1:** `core/gitlab/gitlab_actions.py` rejects an offline receipt request; current catalogue wording does not
+- **PARTIALLY_IMPLEMENTED: H1.** `core/gitlab/gitlab_actions.py` rejects an offline receipt request; current
+  catalogue wording does not
   make that restriction explicit. Add a concrete offline-plan example without a receipt and a confirmed live
   example with one. The same shared help must describe READ receipts only for commands that support them.
   Proof: existing command/help tests agree with mode validation; a fresh installed agent chooses the correct
   invocation from help and obtains the affected operation's receipt without coaching or a failed discovery attempt.
-- **H2:** `core/gitlab/gitlab_action.py` and `core/action_modes.py` reject these output requests in GitLab offline
+- **PARTIALLY_IMPLEMENTED: H2.** `core/gitlab/gitlab_action.py` and `core/action_modes.py` reject these output
+  requests in GitLab offline
   mode while common option descriptions advertise them without the condition. This is a source-confirmed gap,
   not a newly observed live failure. Explain valid modes and caller-selected paths using the command's policy.
   Proof: shared help assertions cover the existing refusal cases in `tests/python/test_gitlab_actions.py`;
@@ -109,44 +133,52 @@ and reuse its applicable changes instead of opening a competing implementation. 
 Each group below uses its existing detailed source row for flags, limits and negative cases. Split groups into
 one runnable capability per PR. Existing public verbs listed here must remain working during additions.
 
-- **C1 — descriptive workflow names.** `image_build_readiness.py probe|chain` currently dispatches two different
+- **IMPLEMENTED_REQUIRES_REFACTORING: C1 — descriptive workflow names.** `image_build_readiness.py probe|chain`
+  currently dispatches two different
   tasks. Introduce descriptive mains, proposed `probe_podman.py` and `build_publish_toolbox_runner.py`, calling the
   existing Podman and `core/kubernetes/image_build_chain/` implementations. Keep the old dispatch as a compatible
   thin entrypoint while updating primary catalogue routing/help/examples. Do not create another result schema,
   engine or verification callback. Proof: discover the named workflow; build/publish once and read the requested
   persistent runner's image digest. Existing unaffected Podman evidence remains historical proof, not a rerun task.
-- **C2 — jobs and pipelines.** Job `get|list` and pipeline `get|start|watch` exist. Add job `watch|logs` and numeric
+- **PARTIALLY_IMPLEMENTED: C2 — jobs and pipelines.** Job `get|list` and pipeline `get|start|watch` exist. Add job
+  `watch|logs` and numeric
   selectors; pipeline `list|logs|children|retry|cancel` and newest-by-ref selection. Reuse `core/gitlab/job_read.py`,
   `gitlab_jobs.py`, `gitlab_pipelines.py`, the pipeline graph reader and `CLIAPIClient.get_text` for bounded text.
   Proof: exact-ID selection, bounded/redacted traces, terminal/manual/timeout behavior, child graph accounting and
   read-back of explicitly requested retry/cancel. Repeating `start` with the same plan is already idempotent;
   it is not GitLab's native pipeline retry. Test-job creation remains an explicit consumer action outside combos.
-- **C3 — schedules.** `gitlab_schedule.py list|get|play|create|update` is absent. Reuse the authenticated GitLab
+- **NOT_IMPLEMENTED: C3 — schedules.** `gitlab_schedule.py list|get|play|create|update` is absent. Reuse the
+  authenticated GitLab
   operation framework and native schedule APIs. Proof: scoped paginated reads, idempotent create/update, and the
   exact schedule pipeline returned by an explicit play. Do not silently schedule this repository's own CI.
-- **C4 — MR checks and failure correlation.** MR `create|update` exists; add `check` using
+- **PARTIALLY_IMPLEMENTED: C4 — MR checks and failure correlation.** MR `create|update` exists; add `check` using
   `core/gitlab/gitlab_merge_requests.py` and existing pipeline/job readers. Implement `ci_failure_trace.py` using
   the existing job reader and Kubernetes `event_trace.py` collectors. Proof: select the MR's exact head despite a
   newer unrelated pipeline; correlate the selected job's time window; keep failed traces bounded and redacted.
-- **C5 — runner additions.** `assign|create|delete|get|list|tag` exists. Add `reset-token`, manager/executor reads
+- **PARTIALLY_IMPLEMENTED: C5 — runner additions.** `assign|create|delete|get|list|tag` exists. Add `reset-token`,
+  manager/executor reads
   and the planned unique-description delete selector in `core/gitlab/gitlab_runners.py`. Reuse existing scope,
   identity and token handling. Proof: ambiguity refuses mutation, manager data is returned or explicitly unavailable,
   token output uses the selected private destination, and delete independently verifies exact runner absence.
-- **C6 — variables and milestone selection.** Add `gitlab_variable.py show|set|set-secret`, milestone `list --state`
+- **PARTIALLY_IMPLEMENTED: C6 — variables and milestone selection.** Add `gitlab_variable.py show|set|set-secret`,
+  milestone `list --state`
   and issue milestone-title resolution using existing GitLab actions. Milestone create/update/adjust-time and issue
   create-bug/open-bug already exist. Proof: environment/scope-correct metadata without secret disclosure, selected
   value-file apply with read-back and repeated NO_OP, paginated milestones and unambiguous title association.
-- **C7 — cluster visibility.** Add the planned route, HA, machine, Kubernetes-state and cluster-health commands
+- **PARTIALLY_IMPLEMENTED: C7 — cluster visibility.** Add the planned route, HA, machine, Kubernetes-state and
+  cluster-health commands
   over existing `core/kubernetes/` collectors. Proof: selected native objects, bounded shared concurrency,
   independent provider reads and explicit missing/incomplete components. Preserve existing storage/Ceph/Cilium tools.
-- **C8 — remaining node and storage operations.** Native node ISO build/verify/remove/join already exists.
+- **PARTIALLY_IMPLEMENTED: C8 — remaining node and storage operations.** Native node ISO build/verify/remove/join
+  already exists.
   Remaining source ports are RHCOS report/download/serve, standalone CSR operations, MTU MachineConfig extension,
   Ceph benchmark and NFS checks. Reuse native ISO, selected-joiner CSR, MTU and storage lifecycle owners.
   Proof: stored artifact checksum/location, explicit MTU apply/read-back and second NO_OP, bounded benchmark,
   read-only NFS inspection and separately requested write check. CSR approval/join remains the operator-approved
   mocked exception because a real joining node is required. Preserve shared PVCs and unrelated files; delete only
   exact owned test artifacts. CI12's existing ISO comparison work stays in its own delivery.
-- **C9 — Harbor additions.** Toolbox create/update/delete and Harbor push/pull exist. Add robot creation,
+- **PARTIALLY_IMPLEMENTED: C9 — Harbor additions.** Toolbox create/update/delete and Harbor push/pull exist. Add
+  robot creation,
   registry sanity, chart inspection and pull-secret synchronization. Reuse `core/harbor/registry_mirror.py`'s
   service/auth/copy/read-back and existing Kubernetes resource/credential callbacks. Proof: selected robot metadata
   and private token output, paginated project/repository reads, chart version/content comparison, and key-by-key
@@ -1731,6 +1763,42 @@ matching existing result contract, focused regressions and affected live proof i
 - Live proof follows the procedure below and [README validation](../../README.md#validation). Normal merges use
   affected-capability proof. Aggregate is explicitly requested and requires one installed SHA across its coverage.
   Historical receipts retain their original provenance; they are not relabeled as proof of new behavior.
+
+### Canonical remaining-delivery traceability
+
+H1/H2 and C1–C9 are stable requirement IDs for the bounded deltas above. For every row: authority is this phase's
+`Authority` section and the named existing source row; owning phase is CI11; grounding is GROUNDED; remaining-delta
+verification is UNVERIFIED. Existing portions use the inspected main snapshot and the evidence below. The matching
+ID's delivery paragraph is the sole owner of its component, deliverable, acceptance evidence and remaining gap.
+This map adds planning links, not a second copy of those requirements.
+
+| Requirement | Producing planning PR | Wave | Dependency |
+| --- | --- | --- | --- |
+| H1, H2 | PR-CI11-HELP | W-CI11-1 | Existing mode policy and help renderer |
+| C1 | PR-CI11-NAMES | W-CI11-2 | H1/H2; existing toolbox/runner implementation |
+| C2 | PR-CI11-JOB, PR-CI11-PIPELINE | W-CI11-2 | Existing readers and graph traversal |
+| C3 | PR-CI11-SCHEDULE | W-CI11-2 | Existing GitLab actions |
+| C4 | PR-CI11-MR-CHECK, PR-CI11-FAILURE-TRACE | W-CI11-3 | C2 readers plus existing events |
+| C5 | PR-CI11-RUNNER | W-CI11-2 | Existing runner lifecycle |
+| C6 | PR-CI11-VARIABLE, PR-CI11-MILESTONE | W-CI11-2 | Existing GitLab actions |
+| C7 | PR-CI11-ROUTE, HA, MACHINE, STATE, HEALTH | W-CI11-2 | Existing Kubernetes collectors |
+| C8 | PR-CI11-RHCOS, CSR, MTU, CEPH-BENCH, NFS | W-CI11-2 | Existing node/storage owners |
+| C9 | PR-CI11-ROBOT, SANITY, CHARTS, PULL-SECRET | W-CI11-2 | Existing Harbor/Kubernetes services |
+
+In abbreviated rows, each uppercase suffix expands with the same `PR-CI11-` prefix. Each planning PR names one
+command capability; split its verbs into incremental PRs when necessary, retaining its ID in their descriptions.
+Waves indicate available dependencies, not a requirement to serialize independent work or deliver all ports now.
+CI09 owns its own reference requirements and PR/wave map; no duplicate CI11 requirement is created for them.
+
+All rows use these existing acceptance checks:
+
+- **`ci-skills/required` — enforced:** `.github/workflows/validate.yml` joins static, command/contract, endpoint,
+  installer and selected-receipt results for the PR head. Add each delivered behavior's focused assertions to
+  existing tests. Required evidence is that head's successful check and its linked test results.
+- **`check_live_acceptance.py` — existing evaluator; new-row coverage pending:** the procedure below supplies
+  the installed-agent trace and exact operation read-back specified by each delivery. Extend existing coverage
+  when that operation lands. H1/H2 proof records help used before the affected live operation; CSR/join retains
+  its explicit mocked exception. Missing proof keeps that row UNVERIFIED, even when code tests pass.
 
 ### Read-back
 

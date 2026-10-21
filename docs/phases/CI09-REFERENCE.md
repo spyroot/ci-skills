@@ -143,7 +143,7 @@ How a declared tool operation is checked against the installed binary (section 1
 flowchart LR
     Code["ci-skills code<br/>one call site per operation"]
     Decl["core/tool_operations.py<br/>argv, method, flags, mutates"]
-    Verb["bin/ci-skills tools [NAME]"]
+    Verb["ci-skills/bin/tool_operations.py [NAME]"]
     Bin["installed binary<br/>path, version, digest; __complete"]
     Fix["recorded fixtures<br/>tests/python/fixtures/complete/"]
     Result["tool_operations result<br/>every operation resolved, or tool_missing"]
@@ -190,6 +190,8 @@ nodes-config-example` returns the one section holding a `nodes-config.yaml`: a `
 states, with pointers to its subsections (section 3, `get`). The reference is a node; the command node did not
 have to carry any of that text, and nothing forced the expansion.
 
+CI09 uses the [existing CI topology](CI11-TOOLS.md#existing-ci-topology) documented once in CI11.
+
 ## Implementation Plan
 
 ### Current State and Intended Outcome
@@ -197,14 +199,17 @@ have to carry any of that text, and nothing forced the expansion.
 Inspected main: `69eea01700d16cc30dbc2005281e65a3580f6755` (2026-10-21). This is a source inventory;
 the linked merged PRs and recorded receipts prove only their delivered portions. Remaining rows are not certified.
 
-- **Implemented:** `reference.py` and `core/catalog.py` emit the existing version `3.0` proposition with ordered
+- **IMPLEMENTED: existing discovery and local reading.** `reference.py` and `core/catalog.py` emit the existing
+  version `3.0` proposition with ordered
   reference arrays. Command relations, per-command references, provider placement, root scoping and deduplication
   already exist. `core/navigate_references.py` implements local `get`, heading selection, own-text reads, search and
   bounded paging. Preserve these implementations and `tests/python/test_propositions.py` coverage.
-- **Partially implemented:** references and sections expand only within their own document. Markdown `Related`
+- **PARTIALLY_IMPLEMENTED: reference connections.** references and sections expand only within their own document.
+  Markdown `Related`
   links are text, not machine-readable connections. The current `reference_document()` supplies no tools;
   `section_document()` supplies only child sections. The existing section schema has no `tools` member.
-- **Not implemented:** pinned upstream collection, generated index/lock, offline verification against expected
+- **NOT_IMPLEMENTED: upstream lifecycle and operation inventory.** pinned upstream collection, generated index/lock,
+  offline verification against expected
   bytes, update/refresh/retire transactions, and declared external-operation compatibility checks. Parsed `--card`
   and `--part` options currently report `tier_unavailable`; they do not prove indexed cards exist.
 
@@ -253,6 +258,7 @@ The proposed `tools/update_reference.py` and `reference.py verify` remain unavai
 
 **2 implementation and proof.** The planned `bin/ci-skills` root is absent. Expose the declared operation listing
 through a descriptive installed main, proposed `tool_operations.py`, backed by `core/tool_operations.py`.
+Historical `bin/ci-skills tools ...` examples below map to this main; they do not require a new root dispatcher.
 Reuse the current runtime and API adapters; declarations describe actual calls and do not replace authentication
 or introduce another executor. Recorded completion fixtures cover parsing; installed-binary checks record path,
 version and digest and resolve the declared command/flag combinations. Distinguish read calls from mutating calls;
@@ -276,7 +282,7 @@ its inputs need.
 | --- | --- |
 | Capability | declare every external operation our code runs and check it against the installed binary |
 | Owner | `ci-skills/lib/python/core/tool_operations.py` (the declarations, the `__complete` parser, the checks) |
-| Entrypoint | `bin/ci-skills tools [NAME] [--describe ID] [--complete]` (the root maintenance command, CI05) |
+| Entrypoint | Proposed `ci-skills/bin/tool_operations.py [NAME] [--describe ID] [--complete]` |
 | Result | `tool_operations` (`schemas/tool-operations.schema.json`, CI07-SCHEMA) |
 | Read-back | `tests/python/test_tool_operations.py`, against fixtures and, on the D-SMOKE executor, the binaries |
 
@@ -402,7 +408,7 @@ C as optional navigation.**
   version and digest. Against recorded fixtures it tests only the parser;
   on the D-SMOKE executor, against the real binaries, it proves
   compatibility.
-- **Navigate.** `bin/ci-skills tools [NAME]` lists tools and their declared
+- **Navigate.** `ci-skills/bin/tool_operations.py [NAME]` lists tools and their declared
   operations; `--complete` walks `__complete` for a wider view: every query
   bounded in time and output, argument values never completed, directive and
   active-help lines dropped, the parser tested against recorded and hostile
@@ -2205,7 +2211,7 @@ combo lands without what the agent needs to run it and read for it:
         requirementIds: [R-CI09-001]
         dependsOn: []
         waveId: W-CI09-2
-        owns: [ci-skills/lib/python/core/tool_operations.py, ci-skills/schemas/tool-operations.schema.json, bin/ci-skills, tests/python/test_tool_operations.py, tests/python/fixtures/complete/]
+        owns: [ci-skills/lib/python/core/tool_operations.py, ci-skills/schemas/tool-operations.schema.json, ci-skills/bin/tool_operations.py, tests/python/test_tool_operations.py, tests/python/fixtures/complete/]
     waves:
       - id: W-CI09-1
         prIds: [PR-CI09-1]
@@ -2232,7 +2238,7 @@ combo lands without what the agent needs to run it and read for it:
         requirementIds: [R-CI09-002, R-CI09-004]
         command: ci-skills/bin/reference.py verify --json over every vendored tree, as section 5 names it
         environment: The validate job, once the verb exists
-        enforcement: Proposed; the wrapper section 5 names, scripts/check.sh, is not on main
+        enforcement: Proposed; verification will run through existing validate once the capability exists
         evidence: [PASS with the declared file_count for every vendored tree]
       - id: G-CI09-LIVE
         requirementIds: [R-CI09-001, R-CI09-002, R-CI09-003, R-CI09-004, R-CI09-005]
