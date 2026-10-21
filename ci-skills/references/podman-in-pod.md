@@ -3,15 +3,15 @@
 The [readiness probe](podman-readiness.md) proves one arrangement: a privileged Job with native `overlay`
 storage and `cgroupfs`. The [chain](image-build-chain.md) publishes a toolbox whose runner builds images with the
 same nested Podman. This reference lists the inputs that decide whether such a build works inside a Pod and how
-it pushes, as the man pages state them at Podman v6.1.4 with containers/common v0.69.2 and containers/storage
-v1.64.2, the library versions that release pins. Values are examples; the comment on each key is its type,
-default and meaning.
+it pushes, as the man pages state them at Podman v6.1.4 with the common v0.69.2 and storage v1.64.2 libraries
+that release pins. Values are examples; the comment on each key is its type, default and meaning.
 
-Configuration files live in the toolbox image or in a mounted ConfigMap. Podman reads
-`/usr/share/containers/storage.conf`, then `/etc/containers/storage.conf`, then
-`$XDG_CONFIG_HOME/containers/storage.conf` (`$HOME/.config/containers/storage.conf`), each with a `.conf.d/`
-directory, the later file overriding the earlier; `containers.conf` follows the same order, `CONTAINERS_CONF`
-replaces it, `CONTAINERS_CONF_OVERRIDE` is loaded last, and `--module PATH` adds a file before any sub-command.
+Configuration files live in the toolbox image or in a mounted ConfigMap. For `storage.conf` and `containers.conf`
+alike, one main file loads: the first that exists of `$XDG_CONFIG_HOME/containers/NAME.conf`
+(`$HOME/.config/containers/NAME.conf`), `/etc/containers/NAME.conf` and `/usr/share/containers/NAME.conf`, so a
+user file replaces the image's `/etc` file whole. Drop-ins under the matching `NAME.conf.d/` directories then load
+in file-name order and override it. `CONTAINERS_CONF` replaces the `containers.conf` set, `CONTAINERS_CONF_OVERRIDE`
+is loaded last, and `--module PATH` adds a file before any sub-command.
 
 ## Storage configuration
 
@@ -67,19 +67,21 @@ comma-separated `STORAGE_OPTS` do the same from the environment. `--root` and `-
 
 ## Which storage arrangement works
 
-Podman's troubleshooting notes for Podman inside a container give three arrangements:
+Three arrangements, from Podman's troubleshooting notes on Podman inside a container (entries 13 and 42) and the
+storage man page:
 
-- Mount a volume at `/var/lib/containers/storage` (at least that directory). With the Pod's own rootfs as the store,
-  a nested `overlay` falls back to `fuse-overlayfs`, which makes `COPY`, `ADD` and I/O-heavy `RUN` lines slow or
-  hanging. The probe does this: an `emptyDir` sized by `--storage-size` at `/var/lib/containers`, another at
-  `/run/containers`, then `podman --root /var/lib/containers/storage --runroot /run/containers/storage
-  --storage-driver overlay --storage-opt= --cgroup-manager cgroupfs`. The native kernel overlay then needs the
-  mount permitted for the Pod's user, which its privileged Job has.
-- Keep `overlay` with `mount_program = "/usr/bin/fuse-overlayfs"` when the kernel mount is refused. The `fuse`
-  module must be loaded on the node and `/dev/fuse` present in the container (`fuse: device not found` otherwise);
-  a nested container reaches it with `--device /dev/fuse`.
-- Set `driver = "vfs"` when neither mount is available. Every layer is copied, so it is slower and larger, and it
-  works without overlay, fuse or extra capabilities.
+- Mount a volume at `/var/lib/containers/storage` (at least that directory) and keep the native kernel `overlay`.
+  With the Pod's own rootfs as the store, a nested overlay falls back to `fuse-overlayfs`, which makes `COPY`, `ADD`
+  and I/O-heavy `RUN` lines slow or hanging. The probe does this: an `emptyDir` sized by `--storage-size` at
+  `/var/lib/containers`, another at `/run/containers`, then `podman --root /var/lib/containers/storage
+  --runroot /run/containers/storage --storage-driver overlay --storage-opt= --cgroup-manager cgroupfs`. The kernel
+  overlay needs the mount permitted for the Pod's user, which its privileged Job has.
+- Set `driver = "vfs"` when the Pod spec cannot add that volume, as in a fixed CI job. Every layer is copied, so it
+  uses more space, and it works without overlay, fuse or extra capabilities; the notes rate it slower than the
+  volume route and well ahead of `fuse-overlayfs`.
+- Keep `overlay` with `mount_program = "/usr/bin/fuse-overlayfs"` where the kernel refuses the mount and the slower
+  writes are acceptable. The `fuse` module must be loaded on the node and `/dev/fuse` present in the container
+  (`fuse: device not found` otherwise); a nested container reaches it with `--device /dev/fuse`.
 
 Sharing the node's `/var/lib/containers/storage` into the Pod also requires its `/run/libpod` and
 `/run/containers/storage`; without them Podman treats the missing run files as a reboot and resets container state.
@@ -180,7 +182,8 @@ build=(
   --tls-verify=true                    # bool; default true; false skips certificate verification; unset honours
                                        # the insecure list in registries.conf
   --cert-dir /etc/containers/certs.d   # path to *.crt, *.cert and *.key; default /etc/containers/certs.d
-  --creds USER:PASSWORD                # registry credentials for the base image only; --authfile is the usual route
+  --creds USER:PASSWORD                # credentials for the registries the build contacts, not for mirrors or
+                                       # rewritten registries; --authfile is the usual route
   --format oci                         # "oci" (default)|"docker"; manifest and config format; BUILDAH_FORMAT
   --file Containerfile                 # path or URL; "-" reads stdin; repeatable, FROM honoured from the last
   --tag registry.example.internal/toolbox/runner:v1   # image name; "localhost/" is prepended without a registry
@@ -221,7 +224,8 @@ push=(
   --cert-dir /etc/containers/certs.d   # path; default /etc/containers/certs.d
   --creds USER:PASSWORD                # registry credentials; --authfile is the usual route
   --digestfile /tmp/digest             # write the pushed manifest digest to this file
-  --format oci                         # "oci"|"v2s2"|"v2s1"; manifest type at the destination; unset keeps the source
+  --format oci                         # "oci"|"v2s2"|"v2s1"; manifest type at the destination; unset follows
+                                       # [engine] image_default_format, whose default matches the source image
   --compression-format gzip            # "gzip" (default)|"zstd"|"zstd:chunked"; containers.conf compression_format
                                        # changes the default; zstd:chunked becomes zstd with encryption
   --compression-level 5                # int; gzip 1 to 9, default 5; zstd 1 to 20, default 3
@@ -250,8 +254,8 @@ A build by an unprivileged user inside the Pod needs these in place:
   After a change, `podman system migrate` as that user restarts its pause process.
 - Writable rootless stores: `graphroot` at `$HOME/.local/share/containers/storage` and `runroot` under
   `$XDG_RUNTIME_DIR/containers`, both owned by the build user.
-- An overlay the user may mount: the kernel overlay where it is permitted, else `mount_program` with
-  `fuse-overlayfs` and `/dev/fuse` in the container, else `driver = "vfs"`.
+- A store the user can mount: the kernel overlay where it is permitted; otherwise `driver = "vfs"`, or
+  `mount_program` with `fuse-overlayfs` and `/dev/fuse` in the container when its slower writes are acceptable.
 - cgroups: `cgroupfs` is unavailable rootless, and a Pod offers no systemd session, so `cgroups = "disabled"`
   keeps nested containers in the Pod's cgroup.
 - Network for `RUN`: `pasta` from `helper_binaries_dir`, or `--network host` or `--network none`.
@@ -262,7 +266,9 @@ A build by an unprivileged user inside the Pod needs these in place:
 
 Podman v6.1.4: `docs/source/markdown/podman.1.md`, `podman-build.1.md.in`, `podman-push.1.md.in` and
 `options/*.md`; `docs/tutorials/rootless_tutorial.md`; `troubleshooting.md` entries 13, 24 and 42; `go.mod` for
-the library versions. containers/common v0.69.2: `docs/containers.conf.5.md`. containers/storage v1.64.2:
-`docs/containers-storage.conf.5.md`, `storage.conf`, `drivers/overlay/overlay.go` (option keys). The Podman
+the library versions. Tags `common/v0.69.2` and `storage/v1.64.2` of the `podman-container-tools/container-libs`
+repository, where `go.podman.io/common` and `go.podman.io/storage` live: `common/docs/containers.conf.5.md`,
+`common/docs/containers-config.5.md`, `common/pkg/config/containers.conf`, `storage/docs/containers-storage.conf.5.md`,
+`storage/storage.conf` and `storage/drivers/overlay/overlay.go` (option keys). The Podman
 container image profile: `podman/containers.conf`, `podman-containers.conf` and `Containerfile` in
 `containers/image_build` at commit `b86020d8c306c4724780adfb6fc492d0a2d9cc48`.

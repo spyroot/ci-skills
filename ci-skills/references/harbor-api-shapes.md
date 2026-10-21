@@ -1,13 +1,15 @@
 # Harbor API request shapes
 
-The toolbox chain pushes an image with `bin/harbor_push.py` and consumes it with `bin/harbor_pull.py`; the
+ci-skills publishes a toolbox image to Harbor through `bin/harbor_push.py` and the chain's shared push callback,
+and consumes it with `bin/harbor_pull.py`; the
 [toolbox specification](../schemas/toolbox.schema.json) is the input it validates. Around that chain Harbor's
 v2 API accepts the request shapes below. Each block lists every key the swagger declares for that request, with
 the type, default and meaning the swagger and the request handlers state at Harbor v2.15.4. Values are examples;
 server-assigned keys (`id`, `project_id`, `creator`, `status` and the timestamps) are left out of request blocks.
 
 Requests go to `https://HARBOR/api/v2.0`, authenticated with HTTP basic: a user, or a robot's full login name
-and secret. `project_name_or_id` is a name; send the header `X-Is-Resource-Name: false` to pass an id. A `/` inside
+and secret. `project_name_or_id` is read as an id when it is all digits and as a name otherwise; the header
+`X-Is-Resource-Name: true` forces the name reading. A `/` inside
 `repository_name` is URL-encoded twice: `toolbox/runner` travels as `toolbox%252Frunner`. List endpoints share
 `page` (default 1), `page_size` (default 10), `sort` (`field1,-field2`) and `q`
 (`k=v` exact, `k=~v` fuzzy, `k=[min~max]` range, `k={v1 v2}` union, `k=(v1 v2)` intersection, comma-separated).
@@ -46,8 +48,9 @@ limit of an existing project changes through its [quota](#project-quotas).
 ```
 
 The handler rejects a `metadata.public` other than `"true"` or `"false"`, a `registry_id` at or below zero or of a
-type not permitted for proxy caching, and any `metadata.retention_id`: Harbor sets that key itself when a
-[retention policy](#retention-policies) is created for the project. `proxy_speed_kb` and `max_upstream_conn` are
+type not permitted for proxy caching, and a `metadata.retention_id` other than empty on create or other than the
+project's current value on update: Harbor sets that key itself when a [retention policy](#retention-policies) is
+created for the project. `proxy_speed_kb` and `max_upstream_conn` are
 dropped on a project without `registry_id`; `enable_content_trust` is dropped on a proxy-cache project.
 
 Metadata is also written one key at a time. `POST /projects/{project_name_or_id}/metadatas/` and
@@ -67,10 +70,10 @@ for a system robot.
 {
   "name": "pusher",                       // string; ^[a-z0-9]+(?:[._-][a-z0-9]+)*$
   "description": "pushes the toolbox",    // string
-  "secret": "",                           // string; omit for a generated secret; a supplied one has 8 to 128
-                                          // characters with a lowercase letter, an uppercase letter and a digit
+  "secret": "",                           // string; ignored on create: the secret is generated and returned once
+                                          // in the 201 body; set one later with PATCH, see below
   "level": "project",                     // "project"|"system"
-  "disable": false,                       // boolean; default false
+  "disable": false,                       // boolean; default false; applied by PUT only, not on create
   "duration": 30,                         // int64 days; -1 for no expiry, otherwise a positive integer
   "permissions": [                        // required; a project robot holds exactly one entry
     {
@@ -87,11 +90,14 @@ for a system robot.
 ```
 
 `GET /robots?q=Level=project,ProjectID=12` lists; `GET /robots/{robot_id}` reads; `PUT /robots/{robot_id}` takes the
-same keys plus `id` and replaces `permissions`, `description`, `disable` and `duration`, keeping `name` and `level`;
-`PATCH /robots/{robot_id}` with `{"secret": ""}` generates a new secret and with a supplied value sets it;
+same keys plus `id`, with `name` and `level` exactly as `GET` returns them (the full login name); it replaces
+`permissions`, `description`, `disable` and `duration`;
+`PATCH /robots/{robot_id}` with `{"secret": ""}` generates a new secret and with a supplied value sets it, when
+that value has 8 to 128 characters with a lowercase letter, an uppercase letter and a digit;
 `DELETE /robots/{robot_id}` removes the robot. `GET /permissions` returns the live `system` and `project` pair lists.
+The rows marked provider in the tables are added by the API's robot permission provider on top of the policy map.
 
-### Project-kind access pairs
+Project-kind pairs, one row per resource:
 
 | resource | actions |
 | --- | --- |
@@ -113,8 +119,11 @@ same keys plus `id` and replaces `permissions`, `description`, `disable` and `du
 | `immutable-tag` | `create`, `update`, `delete`, `list` |
 | `notification-policy` | `read`, `create`, `update`, `delete`, `list` |
 | `preheat-policy` | `read`, `create`, `update`, `delete`, `list` |
+| `robot` | `create`, `read`, `list`, `delete` (provider) |
+| `member` | `create`, `read`, `update`, `list`, `delete` (provider) |
+| `export-cve` | `create`, `read` (provider) |
 
-### System-kind access pairs
+System-kind pairs:
 
 | resource | actions |
 | --- | --- |
@@ -135,6 +144,11 @@ same keys plus `id` and replaces `permissions`, `description`, `disable` and `du
 | `system-volumes` | `read` |
 | `security-hub` | `read`, `list` |
 | `preheat-instance` | `read`, `create`, `update`, `delete`, `list` |
+| `robot` | `create`, `read`, `list`, `delete` (provider) |
+| `user` | `create`, `read`, `update`, `list`, `delete` (provider) |
+| `user-group` | `create`, `read`, `update`, `list`, `delete` (provider) |
+| `ldap-user` | `create`, `list` (provider) |
+| `quota` | `update` (provider; `read` and `list` above) |
 
 ## Retention policies
 
@@ -222,8 +236,8 @@ by an enabled rule cannot be overwritten or deleted, and artifact listings with 
 
 A quota reads back as `{"id": 3, "ref": {"id": 12, "name": "toolbox", "owner_name": "admin"},
 "hard": {"storage": 21474836480}, "used": {"storage": 734003200}, "creation_time": "...", "update_time": "..."}`.
-A push that would exceed `hard.storage` is refused with `QUOTA_EXCEED`, one of the [webhook](#webhook-policies)
-events.
+A push that would exceed `hard.storage` is denied with the message "Quota exceeded when processing the request";
+the matching [webhook](#webhook-policies) event is `QUOTA_EXCEED`.
 
 ## Registries
 
@@ -249,8 +263,9 @@ and returns `201`; `GET /registries/{id}` reads it; `DELETE /registries/{id}` re
 ```
 
 `POST /registries/ping` checks reachability with either `{"id": 3}` or the flat keys `type`, `url`,
-`credential_type`, `access_key`, `access_secret`, `insecure` and `ca_certificate`. `PUT /registries/{id}` takes those
-flat keys plus `name` and `description`; an omitted key keeps its value. `GET /replication/adapters` lists the
+`credential_type`, `access_key`, `access_secret`, `insecure` and `ca_certificate`. `PUT /registries/{id}` takes
+`name`, `description`, `url`, `credential_type`, `access_key`, `access_secret`, `insecure` and `ca_certificate`; an
+omitted key keeps its value. `GET /replication/adapters` lists the
 adapter types the server has; `GET /registries/{id}/info` lists the filters and triggers one registry supports.
 
 ## Replication policies
