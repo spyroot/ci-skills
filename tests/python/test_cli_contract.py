@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 from collections.abc import Callable, Collection, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -353,3 +354,111 @@ def test_help_offers_same_reference_pointers_as_command_proposition(
         assert " ".join(reference["name"].split()) in help_text
         assert " ".join(reference["summary"].split()) in help_text
         assert f"reference.py {reference['pointer']}" in help_text
+
+
+@pytest.mark.parametrize(
+    "script_name",
+    (
+        "gitlab_repository.py",
+        "gitlab_milestone.py",
+        "gitlab_runner.py",
+        "prepare_tool_pod.py",
+    ),
+)
+def test_pre_use_help_explains_receipt_modes_before_invocation(
+    script_name: str,
+) -> None:
+    """Expose accepted receipt modes in human help and the same command contract.
+
+    :param script_name: Command with existing live receipt persistence rules.
+    """
+    result = run_script(script_name, "--help")
+    description = run_script(script_name, "--describe")
+    assert result.returncode == description.returncode == 0
+    contract = parse_json_output(description)
+    receipt = contract["options"]["--receipt-out"]
+    help_text = " ".join(result.stdout.split())
+
+    assert " ".join(receipt.split()) in help_text
+    assert "--apply --confirm-plan" in receipt
+    assert "offline" in receipt and "live-plan" in receipt
+    assert any(
+        phrase in receipt.lower()
+        for phrase in ("not allowed", "forbidden", "unavailable", "rejected")
+    )
+    if script_name == "gitlab_runner.py":
+        assert "get/list" in receipt and "read" in receipt.lower()
+    else:
+        assert "get/list" not in receipt
+
+
+@pytest.mark.parametrize("option", ("--output-dir", "--log-file"))
+@pytest.mark.parametrize(
+    ("script_name", "offline_allowed"),
+    (("gitlab_milestone.py", False), ("prepare_tool_pod.py", True)),
+)
+def test_pre_use_help_preserves_command_specific_offline_output_rules(
+    script_name: str, offline_allowed: bool, option: str
+) -> None:
+    """Distinguish GitLab's offline refusal from the tool Pod's permitted outputs.
+
+    :param script_name: Command whose existing persistence policy is described.
+    :param offline_allowed: Whether that command permits ordinary offline output.
+    :param option: Caller-selected report directory or diagnostic log destination.
+    """
+    result = run_script(script_name, "--help")
+    description = run_script(script_name, "--describe")
+    assert result.returncode == description.returncode == 0
+    contract = parse_json_output(description)
+    meaning = contract["options"][option]
+    assert " ".join(meaning.split()) in " ".join(result.stdout.split())
+    assert "offline" in meaning.lower()
+    assert "path" in meaning.lower()
+    if offline_allowed:
+        assert "allowed" in meaning.lower()
+        assert "not allowed" not in meaning.lower()
+    else:
+        assert any(
+            phrase in meaning.lower()
+            for phrase in ("not allowed", "forbidden", "unavailable", "rejected")
+        )
+        assert "--apply" in meaning
+
+
+@pytest.mark.parametrize("script_name", ("gitlab_repository.py", "gitlab_milestone.py"))
+def test_pre_use_examples_plan_without_files_and_apply_with_live_evidence(
+    script_name: str,
+) -> None:
+    """Show usable plan/apply pairs with persistence confined to live execution.
+
+    :param script_name: GitLab operation whose examples must work before first use.
+    """
+    catalogue = import_script_module("lib.python.core.catalog")
+    workflow = import_script_module("lib.python.core.gitlab.gitlab_action")
+    command = import_script_module(script_name.removesuffix(".py"))
+    parser = command.build_parser()
+    examples = catalogue.describe(script_name)["examples"]
+    parsed = [
+        parser.parse_args(shlex.split(example["command"])[1:]) for example in examples
+    ]
+    offline = [args for args in parsed if args.dry_run]
+    confirmed = [args for args in parsed if args.apply and args.confirm_plan]
+    assert offline and confirmed
+
+    for args in offline:
+        assert not (args.receipt_out or args.output_dir or args.log_file)
+        assert workflow._workflow_mode(args) == "offline"
+    for args in confirmed:
+        assert args.receipt_out and args.output_dir and args.log_file
+        assert workflow._workflow_mode(args) == "apply"
+        if script_name == "gitlab_repository.py":
+            assert args.action == "commit"
+            assert (
+                args.project
+                and args.branch
+                and args.commit_message
+                and args.actions_file
+            )
+        else:
+            assert args.action == "create"
+            assert args.project and args.title

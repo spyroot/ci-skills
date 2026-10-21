@@ -95,9 +95,15 @@ def test_adapter_timeout_policy_is_preserved(adapter: str, timeout: int) -> None
         _mode(adapter, _arguments({"timeout": timeout}))
 
 
-def test_policy_differences_remain_owned_by_their_adapters() -> None:
-    """Extraction preserves Pod output and long timeouts without relaxing GitLab."""
-    output = _arguments({"output_dir": "reports"})
+@pytest.mark.parametrize("output_option", ("output_dir", "log_file"))
+def test_policy_differences_remain_owned_by_their_adapters(
+    output_option: str,
+) -> None:
+    """Preserve both offline Pod outputs without allowing GitLab persistence.
+
+    :param output_option: Ordinary report or diagnostic path selected by the caller.
+    """
+    output = _arguments({output_option: "reports"})
     assert POD_CLI.execution_mode(output) == MODES.ActionMode.OFFLINE
     with pytest.raises(GITLAB.ActionError, match="^dry_run_cannot_write_output$"):
         GITLAB._workflow_mode(output)
