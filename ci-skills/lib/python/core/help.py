@@ -12,11 +12,31 @@ import textwrap
 from collections.abc import Mapping, Sequence
 
 from lib.python.core.catalog import proposition
-from lib.python.core.json_types import JSONObject, json_objects, json_string
+from lib.python.core.json_types import (
+    JSONObject,
+    json_object,
+    json_objects,
+    json_string,
+    json_strings,
+)
 
 
 class CommandHelpFormatter(argparse.HelpFormatter):
     """Wrap catalogue prose without splitting executable names or options."""
+
+    def _split_lines(self, text: str, width: int) -> list[str]:
+        """Wrap option descriptions without breaking a flag at its hyphens.
+
+        :param text: Option description supplied by argparse.
+        :param width: Available terminal column width.
+        :returns: Lines retaining complete option names for the caller to copy.
+        """
+        return textwrap.wrap(
+            self._whitespace_matcher.sub(" ", text).strip(),
+            width,
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
 
     def _fill_text(self, text: str, width: int, indent: str) -> str:
         """Wrap text at spaces while preserving complete command tokens.
@@ -115,6 +135,31 @@ class CommandHelp:
         ):
             formatter.start_section(heading)
             formatter.add_text(value)
+            if heading == "Description":
+                authorities = json_strings(
+                    self.document.get("requires_authorities", [])
+                )
+                if authorities:
+                    formatter.add_text(
+                        f"Providers: {', '.join(authorities)}. Configure access for "
+                        "those required by the selected operation."
+                    )
+                for operation, fields in json_object(
+                    self.document.get("subcommands", {})
+                ).items():
+                    required = json_strings(
+                        json_object(fields).get("required_options", [])
+                    )
+                    if required:
+                        formatter.add_text(
+                            f"{operation} requires: {', '.join(required)}."
+                        )
+                for label, field in (
+                    ("Side effects", "side_effects"),
+                    ("Returns", "returns"),
+                ):
+                    if self.text(field):
+                        formatter.add_text(f"{label}: {self.text(field)}")
             formatter.end_section()
         formatter.start_section("Examples")
         for example in self.examples(parser.prog):

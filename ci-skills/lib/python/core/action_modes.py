@@ -77,6 +77,21 @@ class ActionModePolicy:
     maximum_timeout: Optional[int] = None
 
 
+MAX_ACTION_TIMEOUT: Final = 300
+GITLAB_RUNNER_READ_OPERATIONS: Final = ("get", "list")
+GITLAB_MODE_POLICY: Final = ActionModePolicy(
+    default_mode=ActionMode.OFFLINE,
+    receipt_modes=frozenset((ActionMode.APPLY, ActionMode.READ)),
+    allow_offline_output=False,
+    maximum_timeout=MAX_ACTION_TIMEOUT,
+)
+TOOL_POD_MODE_POLICY: Final = ActionModePolicy(
+    default_mode=ActionMode.OFFLINE,
+    receipt_modes=frozenset((ActionMode.APPLY,)),
+    allow_offline_output=True,
+)
+
+
 def validate_action_mode(
     *,
     apply: bool,
