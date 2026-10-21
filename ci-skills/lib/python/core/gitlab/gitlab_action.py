@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass, replace
-from typing import Final, Literal, Optional, Union
+from typing import Literal, Optional, Union
 
 from lib.python.access.gitlab import check_gitlab_operation_access
 from lib.python.access.gitlab_credentials import bind_gitlab_session
@@ -18,8 +18,9 @@ from lib.python.core.abstract.callback import AbstractCallback
 from lib.python.core.abstract.callbacks import Callbacks
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.action_modes import (
+    GITLAB_MODE_POLICY,
+    GITLAB_RUNNER_READ_OPERATIONS,
     ActionMode,
-    ActionModePolicy,
     validate_action_mode,
 )
 from lib.python.core.cli import _failure
@@ -48,13 +49,6 @@ from lib.python.core.target import GitLabOperationTarget, TargetError
 from lib.python.sys.status import DRY_RUN, PARTIAL, PASS, PLANNED
 
 WorkflowMode = Union[ActionMode, Literal["describe"]]
-MAX_ACTION_TIMEOUT: Final = 300
-GITLAB_MODE_POLICY: Final = ActionModePolicy(
-    default_mode=ActionMode.OFFLINE,
-    receipt_modes=frozenset((ActionMode.APPLY, ActionMode.READ)),
-    allow_offline_output=False,
-    maximum_timeout=MAX_ACTION_TIMEOUT,
-)
 
 
 def _runner_read(plan: ActionPlan) -> bool:
@@ -63,7 +57,9 @@ def _runner_read(plan: ActionPlan) -> bool:
     :param plan: Concrete operation selected during planning.
     :returns: Whether the operation gets or lists scoped runners.
     """
-    return plan.kind == "gitlab_runner" and plan.operation in {"get", "list"}
+    return (
+        plan.kind == "gitlab_runner" and plan.operation in GITLAB_RUNNER_READ_OPERATIONS
+    )
 
 
 def _requires_snapshot(plan: ActionPlan) -> bool:
@@ -88,7 +84,9 @@ def _workflow_mode(args: argparse.Namespace) -> WorkflowMode:
     """
     if not args.action:
         raise ActionError("action_required")
-    runner_read = args.kind == "gitlab_runner" and args.action in {"get", "list"}
+    runner_read = (
+        args.kind == "gitlab_runner" and args.action in GITLAB_RUNNER_READ_OPERATIONS
+    )
     live_plan = getattr(args, "live_plan", False)
     if runner_read and (args.apply or args.confirm_plan or live_plan):
         raise ActionError("runner_read_rejects_apply_options")
