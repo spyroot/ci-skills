@@ -107,7 +107,7 @@ def test_policy_differences_remain_owned_by_their_adapters(
     assert POD_CLI.execution_mode(output) == MODES.ActionMode.OFFLINE
     with pytest.raises(GITLAB.ActionError, match="^dry_run_cannot_write_output$"):
         GITLAB._workflow_mode(output)
-    timeout = _arguments({"timeout": GITLAB.MAX_ACTION_TIMEOUT + 1})
+    timeout = _arguments({"timeout": MODES.MAX_ACTION_TIMEOUT + 1})
     assert POD_CLI.execution_mode(timeout) == MODES.ActionMode.OFFLINE
     with pytest.raises(GITLAB.ActionError, match="^timeout_out_of_range$"):
         GITLAB._workflow_mode(timeout)
