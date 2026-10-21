@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 from collections.abc import MutableMapping, Sequence
-from typing import Optional
+from typing import Final, Optional
 from urllib.parse import urlencode
 
 from lib.python.core.gitlab.gitlab_action import GitLabOperation
@@ -79,7 +79,7 @@ def prepare(args: Namespace) -> PreparedOperation:
     return PreparedOperation(body, resource_id=identifier)
 
 
-READBACK_FIELDS = ("start_date", "due_date", "state")
+READBACK_FIELDS: Final[tuple[str, ...]] = ("start_date", "due_date", "state")
 
 
 def _readback_fields(observed: JSONObject) -> JSONObject:

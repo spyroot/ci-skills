@@ -807,9 +807,37 @@ def test_cli_names_the_next_step_when_no_project_or_group_is_selected(
     assert data["errors"] == [
         {"source": "target", "reason": "select_exactly_one_gitlab_project_or_group"}
     ]
-    assert data["next_step"] == (
-        "Pass --project PATH or --group PATH, or select one in the target file."
+    assert data["safe_next_step"] == (
+        "Pass --project PATH_OR_ID or --group PATH_OR_ID, "
+        "or set gitlab.project or gitlab.group in the target file."
     )
+
+
+def test_cli_human_block_prints_the_next_step_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Print the reason and the next step on stderr in human mode.
+
+    :param tmp_path: Directory receiving a target with neither selector.
+    :param monkeypatch: Pytest fixture selecting that target file.
+    :param capsys: Pytest fixture capturing the human-mode streams.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    monkeypatch.setenv("CI_SKILLS_TARGET", str(_target(tmp_path)))
+
+    result = SCRIPT.main(["check", "--dry-run", "--human"])
+    captured = capsys.readouterr()
+
+    assert result == 2
+    assert captured.out == ""
+    assert captured.err.splitlines()[-2:] == [
+        "BLOCKED: select_exactly_one_gitlab_project_or_group",
+        (
+            "next: Pass --project PATH_OR_ID or --group PATH_OR_ID, "
+            "or set gitlab.project or gitlab.group in the target file."
+        ),
+    ]
 
 
 def _smoke_target_layout(tmp_path: Path) -> MutableMapping[str, JSONValue]:

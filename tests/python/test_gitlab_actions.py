@@ -740,6 +740,27 @@ def test_milestone_update_blocks_failed_readback() -> None:
     assert result["errors"][0]["reason"] == "milestone_readback_mismatch"
 
 
+def test_milestone_prepare_maps_closed_state_to_the_close_event() -> None:
+    """Translate --state closed on update into GitLab's state_event close.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    prepared = MILESTONES.prepare(
+        SimpleNamespace(
+            action="update",
+            milestone_id=9,
+            title=None,
+            description_file=None,
+            start_date=None,
+            due_date=None,
+            state="closed",
+        )
+    )
+
+    assert prepared.body == {"state_event": "close"}
+    assert prepared.resource_id == 9
+
+
 def test_milestone_close_readback_reports_dates_and_state(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

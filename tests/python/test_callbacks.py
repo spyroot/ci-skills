@@ -1827,22 +1827,51 @@ def test_api_check_rejects_transforms_before_action_construction(
         READ_CLI._api_callbacks(args, API_READ.ApiOutput.JSON)
 
 
-def test_api_read_names_the_leading_slash_when_rejecting_an_endpoint() -> None:
-    """Name the relative form, with an example, for a slash-prefixed endpoint.
+@pytest.mark.parametrize(
+    ("endpoint", "provider", "expected", "absent"),
+    (
+        (
+            "/projects?membership=true",
+            "gitlab",
+            "without a leading slash is required, such as projects?membership=true",
+            "no scheme",
+        ),
+        (
+            "https://gitlab.example.test/api/v4/projects",
+            "gitlab",
+            "projects?membership=true; no scheme, host, fragment or dot segments",
+            "leading slash",
+        ),
+        (
+            "repos/../user",
+            "github",
+            "user/repos?per_page=100; no scheme, host, fragment or dot segments",
+            "leading slash",
+        ),
+    ),
+    ids=("leading-slash", "absolute-url", "dot-segment"),
+)
+def test_api_read_names_the_rejected_endpoint_form(
+    endpoint: str, provider: str, expected: str, absent: str
+) -> None:
+    """Name the leading slash only when it is the fault, with a provider example.
 
+    :param endpoint: Rejected endpoint value supplied by the caller.
+    :param provider: Native provider selecting the example in the diagnostic.
+    :param expected: Fragment the diagnostic must contain.
+    :param absent: Fragment the diagnostic must not contain.
     :returns: None; assertions in the body validate the regression.
     """
     action = API_READ.ApiReadAction(
-        provider=API_READ.GitProvider.GITLAB, endpoint="/projects?membership=true"
+        provider=API_READ.GitProvider(provider), endpoint=endpoint
     )
 
-    with pytest.raises(
-        API_READ.ReadToolError, match="without a leading slash"
-    ) as failure:
+    with pytest.raises(API_READ.ReadToolError) as failure:
         action.validate()
 
     assert failure.value.code == API_READ.ReadExit.USAGE
-    assert "such as projects?membership=true" in str(failure.value)
+    assert expected in str(failure.value)
+    assert absent not in str(failure.value)
 
 
 def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:

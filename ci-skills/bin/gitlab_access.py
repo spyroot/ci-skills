@@ -15,7 +15,8 @@ import sys
 import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Optional
+from types import MappingProxyType
+from typing import Final, Optional
 
 import _bootstrap  # noqa: F401
 from lib.python.core.catalog import describe
@@ -28,11 +29,14 @@ from lib.python.core.report import emit
 from lib.python.core.target import TargetError, select_gitlab_reference
 from lib.python.sys.status import DRY_RUN, exit_code
 
-NEXT_STEPS: Mapping[str, str] = {
-    "select_exactly_one_gitlab_project_or_group": (
-        "Pass --project PATH or --group PATH, or select one in the target file."
-    ),
-}
+NEXT_STEPS: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "select_exactly_one_gitlab_project_or_group": (
+            "Pass --project PATH_OR_ID or --group PATH_OR_ID, "
+            "or set gitlab.project or gitlab.group in the target file."
+        ),
+    }
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -148,7 +152,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         source = getattr(exc, "gitlab_setup_source", source)
         reason = str(exc)
         return _failure(
-            args, "gitlab_access", source, reason, next_step=NEXT_STEPS.get(reason)
+            args,
+            "gitlab_access",
+            source,
+            reason,
+            safe_next_step=NEXT_STEPS.get(reason),
         )
     except Exception as exc:  # noqa: BLE001 - keep unexpected failures machine-readable
         source = getattr(exc, "gitlab_setup_source", source)
