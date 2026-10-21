@@ -246,6 +246,59 @@ def select_reader(state: MODELS.OCPArtifactState, cluster: FilePodCluster) -> No
     )
 
 
+@pytest.mark.parametrize(
+    "node_name", ("", "successful-build-node"), ids=("legacy", "observed")
+)
+def test_persisted_build_node_selects_reader_preference_without_changing_storage(
+    node_name: str, tmp_path: Path
+) -> None:
+    """Round-trip observed nodes while retaining the original legacy record shape.
+
+    :param node_name: Observed producer placement or a legacy record without it.
+    :param tmp_path: Existing isolated artifact and in-memory provider fixture.
+    """
+    state, cluster = artifact_state(tmp_path)
+    original = state.artifact_record
+    producer = replace(original.artifact.pod, node_name=node_name)
+    artifact = replace(original.artifact, pod=producer)
+    record = replace(original, artifact=artifact, node_selector={"storage": "iso"})
+    document = RECORDS.artifact_record_document(state.artifact_scope, record)
+    observed = cluster.apply(document)
+
+    decoded = RECORDS.decode_artifact_record_resource(observed)
+    selected = LIFECYCLE.verification_pod_inputs(
+        decoded, state.artifact_scope, timeout=37
+    )
+
+    assert decoded.artifact.pod.node_name == node_name
+    assert decoded.artifact.pod == original.artifact.pod
+    assert ("node_name" in decoded.artifact.pod.as_dict()) is bool(node_name)
+    assert decoded.as_dict() == record.as_dict()
+    assert selected.preparation.preferred_node == node_name
+    assert selected.preparation.node_selector == {"storage": "iso"}
+    assert selected.preparation.mounts == (original.destination.tool_pod_mount(),)
+    assert selected.preparation.timeout == 37
+    assert selected.scope.namespace == state.artifact_scope.namespace
+    assert selected.scope.run_id != original.run_id
+    assert selected.preparation.run_id == selected.scope.run_id
+    assert selected.preparation.retain is False
+    assert not selected.reuses_build_pod
+    reader = POD_RESOURCES.tool_pod_document(selected.scope, selected.preparation)
+    assert reader["spec"]["nodeSelector"] == {"storage": "iso"}
+    assert "nodeName" not in reader["spec"]
+    if node_name:
+        preferences = reader["spec"]["affinity"]["nodeAffinity"][
+            "preferredDuringSchedulingIgnoredDuringExecution"
+        ]
+        assert any(
+            item["weight"] > 0
+            and item["preference"]["matchFields"]
+            == [{"key": "metadata.name", "operator": "In", "values": [node_name]}]
+            for item in preferences
+        )
+    assert cluster.deleted == []
+
+
 @pytest.fixture
 def native_inspection(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate native Ignition inspection while preserving real storage read-back.
