@@ -1,14 +1,15 @@
 # PARTIALLY_IMPLEMENTED: CI09 — references, tool operations and upstream knowledge
 
 - grounding: GROUNDED
-- verification: UNVERIFIED
-- planningStage: PROPOSED
+- verification: PARTIALLY_VERIFIED
+- planningStage: PLANNED
 
 ## Authority
 
-Status: proposed. Order and dependencies: CI10-PHASES, Phases. Followed by
-CI08-ROUTING, whose routing points at this phase's navigator (section 3), and
-CI11-TOOLS, whose commands the same tool advertises.
+The existing CI09 requirements below and the operator's approved proposition design govern this phase.
+The operator requested this concrete remaining-delivery plan on 2026-10-20 and the binding update on 2026-10-21.
+CI11 owns the command catalogue and proposition contract; CI09 owns reference knowledge, connections and lifecycle.
+This update does not restore the deleted CI10 document or make it an implementation prerequisite.
 
 A reference is something an agent consults before acting. This phase owns two
 kinds, declared with the same `uses` pointers (CI07-SCHEMA):
@@ -44,11 +45,13 @@ This document plans from:
   the router and `SKILL.md`, [`CI02-CLI`](CI02-CLI.md) for the command contract, as the sections below cite them;
 - the project motivation in [`README.md`](../../README.md#motivation): one go instead of N round trips;
 - the shared standards: the phase format of `system-architecture.md` and the classification values of
-  `work-classification.md` at standards revision `cae52b2`.
+  `work-classification.md` at the exact revision selected by [standards-binding.yaml](../../standards-binding.yaml),
+  currently `5bd31f103621dcd7e49ec6e6af55583de7056d7d`.
 
-Not on main `54ceb7f`, although the sections below cite them: the phase documents `CI03-GATES`, `CI05-VENDOR`
+Not on inspected main `69eea017`, although historical sections below cite them: the phase documents `CI03-GATES`, `CI05-VENDOR`
 and `CI10-PHASES`, the gate wrapper `scripts/check.sh`, the root command `bin/ci-skills` and the D-SMOKE
-executor. The validate workflow is the required gate (`ci-skills/required`).
+executor. Those historical names do not authorize recreating them. The current delivery order and proof procedure
+below replace those dependencies. The validate workflow remains the required gate (`ci-skills/required`).
 
 ## Consumer
 
@@ -66,9 +69,9 @@ Motivations, in the contract's categories: the capability it adds, discovery one
 fact per read and a declared, checked set of tool operations (`README.md#motivation`); the necessity it
 addresses, today the agent reads `--help` text or upstream documentation to choose a command and its flags, and
 nothing records which operations our code relies on or fails when an upgrade renames one (section 1, Context);
-the limitation in established code it resolves, the proposition offers four fixed references chosen by provider
-with no row for a reference scoped to one command, and no operation is declared (`core/catalog.py`,
-`PROPOSITION_REFERENCES` and `_proposition_offering`, main `54ceb7f`).
+the remaining limitation in established code, reference nodes expose sections but not declared cross-document or
+reference-to-tool connections, and external operations have no declared compatibility inventory. Command-scoped
+references already exist (`core/catalog.py` and `core/navigate_references.py`, main `69eea017`).
 
 ## Motivation
 
@@ -191,28 +194,69 @@ have to carry any of that text, and nothing forced the expansion.
 
 ### Current State and Intended Outcome
 
-Inspected at main `54ceb7f`; evidence is from main unless stated.
+Inspected main: `69eea01700d16cc30dbc2005281e65a3580f6755` (2026-10-21). This is a source inventory;
+the linked merged PRs and recorded receipts prove only their delivered portions. Remaining rows are not certified.
 
-- `NOT_IMPLEMENTED: tool operations (section 1)`. `core/tool_operations.py`, `schemas/tool-operations.schema.json`,
-  the `tools` verb and the completion fixtures do not exist. Intended: the declared operations checked against
-  the installed binaries, as section 1 decides.
-- `PARTIALLY_IMPLEMENTED: knowledge references (sections 2 and 4)`. Three local references exist,
-  `references/access.md`, `references/mcp.md` and `references/project-binding.md`, offered through
-  `PROPOSITION_REFERENCES` in `core/catalog.py`. The vendored tree `references/vendor/`, `vendor/vendor.toml`,
-  `vendor/vendor.lock.json`, `tools/update_reference.py` and `core/reference.py` do not exist. Intended: a
-  reference is declared once, collected and refreshed by the update tool, verified from the committed files and
-  served one chunk at a time, as sections 2 and 4 specify.
-- `PARTIALLY_IMPLEMENTED: the proposition interface (section 3)`. `ci-skills/bin/reference.py [node]` returns
-  the version `2.0` node of CI11, built by `proposition()` in `core/catalog.py` from `PROPOSITION_CLUSTERS` and
-  the commands' provider authorities; `schemas/reference-next.schema.json` owns that shape and still carries
-  the 1.x `choices` envelope, now retired. Not yet built from section 3: the `get` verb, the hierarchical nodes
-  and placement tables, the verb purposes, `--search`, cards and paging, the renders, and a row for a reference
-  scoped to one command; the proposition today offers four fixed references chosen by provider. The planned
-  verbs of section 3, the verbs CI11-TOOLS names for existing commands and has not delivered, are rendered there
-  as 1.x choices with `available: false`; the node cannot carry them, and this phase delivers none of them
-  (open decision below). The `run` and `read` segments of section 3 are not required steps: one answer per node
-  carries tools and references together, and `get` is the agent's optional expansion into a reference's
-  sections.
+- **Implemented:** `reference.py` and `core/catalog.py` emit the existing version `3.0` proposition with ordered
+  reference arrays. Command relations, per-command references, provider placement, root scoping and deduplication
+  already exist. `core/navigate_references.py` implements local `get`, heading selection, own-text reads, search and
+  bounded paging. Preserve these implementations and `tests/python/test_propositions.py` coverage.
+- **Partially implemented:** references and sections expand only within their own document. Markdown `Related`
+  links are text, not machine-readable connections. The current `reference_document()` supplies no tools;
+  `section_document()` supplies only child sections. The existing section schema has no `tools` member.
+- **Not implemented:** pinned upstream collection, generated index/lock, offline verification against expected
+  bytes, update/refresh/retire transactions, and declared external-operation compatibility checks. Parsed `--card`
+  and `--part` options currently report `tier_unavailable`; they do not prove indexed cards exist.
+
+### Concrete remaining deliveries
+
+These are subdivisions of the existing `PR-CI09-1` and `PR-CI09-2` delivery IDs, not a parallel roadmap.
+Each subdivision lands as a bounded capability PR with its own proof. Existing requirements retain their IDs.
+
+- **1a: connections; R-CI09-003/005.** Owner: `core/catalog.py`, `core/navigate_references.py`. Follow reference →
+  related reference or installed tool at the selected node. Preserve ordered arrays and paging.
+- **1b: knowledge; R-CI09-002/003.** Owner: Catalogue reference declarations and `ci-skills/references/`. Reach
+  native keys, flags and usable examples for the selected task through short summaries and resolving pointers.
+- **1c: pinned collection; R-CI09-002/004.** Owner: Existing HTTP, provenance and installer transaction facilities.
+  Collect one pinned GitLab YAML source, write chunks/index/lock transactionally, and verify exact reassembly.
+- **1d: lifecycle; R-CI09-002/004.** Owner: Reader plus the collection owner from 1c. Offline verification detects
+  corruption; refresh changes the expected chunks; retire rejects dangling references.
+- **2: operations; R-CI09-001.** Owner: Existing subprocess/API call sites; new shared operation declarations. List
+  exact operations and prove their commands/flags against installed binaries without executing mutations.
+
+**1a implementation and proof.** Add explicit ordered connections to the existing catalogue; do not infer all
+Markdown links as graph edges or introduce a second registry. Render immediate connections through the existing
+reader. Extend only the existing section schema as needed for tool offerings; keep proposition version `3.0` and
+its renderer. Resolve pointers, deduplicate by registered identity and paginate using the existing limits.
+The installed consumer must traverse runner configuration → feature flags and a second family such as OCP flags →
+native YAML, then reach a related installed command. Reading must not recursively fetch documents or call providers.
+Extend existing proposition tests for these paths and absent, repeated, cyclic and paged edges.
+
+**1b implementation and proof.** Integrate the focused runner, Harbor, milestone and wiki knowledge already
+prepared in [PR95](https://github.com/spyroot/ci-skills/pull/95), rather than authoring duplicate references.
+Review [PR105](https://github.com/spyroot/ci-skills/pull/105)'s Harbor/Podman material as bounded sections before
+integration. Every declared reference needs a central identity, task summary and executable `get` pointer.
+Register the shipped `ocp-node-image.md` reference, currently omitted from `PROPOSITION_REFERENCES`, and connect
+native input/flag examples to it. Inventory installed documents against registry reachability, not just already
+registered roots. Preserve the locked CI11 cross-integration example byte-for-byte.
+Knowledge entries state accepted names, meaning, units/defaults where relevant, an example, and the official
+source/version. They can explain native provider capabilities beyond ci-skills' commands. Upstream text remains
+distinct from authored distillation. Pointer reads stay bounded; reading a returned reference is the agent's choice.
+
+**1c/1d implementation and proof.** Reuse `core/navigate_references.py` for serving, `protocol/http.py` for retrieval,
+`core/provenance.py` for hashing and the installer's transaction/recovery implementation. Extract a shared transaction
+only where both consumers need it; do not copy the installer. The existing chunk, index, licensing and lifecycle
+requirements in sections 2 and 4 remain the acceptance specification. Prove one pinned tree's bytes and expected
+file set, interrupted publication recovery, changed-source refresh and safe retirement. Existing local references
+must still read without an index. `get --card/--part` must either serve a declared tier or retain its honest error.
+The proposed `tools/update_reference.py` and `reference.py verify` remain unavailable until delivered.
+
+**2 implementation and proof.** The planned `bin/ci-skills` root is absent. Expose the declared operation listing
+through a descriptive installed main, proposed `tool_operations.py`, backed by `core/tool_operations.py`.
+Reuse the current runtime and API adapters; declarations describe actual calls and do not replace authentication
+or introduce another executor. Recorded completion fixtures cover parsing; installed-binary checks record path,
+version and digest and resolve the declared command/flag combinations. Distinguish read calls from mutating calls;
+compatibility inspection never invokes a mutation. Missing binaries identify the required tool and next action.
 
 ### Design and Decomposition
 
@@ -2043,65 +2087,33 @@ The `ReferenceSource`, `Chunker` and `Joiner` seams are introduced with the seco
 
 ### Open Decisions and Scope Boundary
 
-- D-LICENSE: a per-tree notice only (recommended), or a repository license.
-- The one home of the hash walk that `bin/ci-skills verify` (CI05-VENDOR)
-  and `ci-skills/bin/reference.py verify` share, and whether
-  `bin/ci-skills verify` also walks the lock's `references` entries
-  (CI05-VENDOR, Interface).
-- The placement path. `REFERENCE_SECTIONS` in section 3 places a section under hierarchical nodes such as
-  `("gitlab", "issue")`, while the live proposition's nodes are the flat clusters of `PROPOSITION_CLUSTERS` and
-  the command keys. Affected requirements: `R-CI09-003`, `R-CI09-005`. Options: render the hierarchical path
-  onto the cluster and command nodes that exist, or add the hierarchical nodes to the proposition. Missing
-  authority: an owner decision; the Proposition interface shows only cluster and command nodes. Decision owner:
-  the owner. Work it prevents: placing any reference section under a node, `PR-CI09-1`.
-
-- Planned verbs under the node. Section 3 renders a verb CI11-TOOLS names but has not delivered as a 1.x
-  choice with `available: false` and no pointer; the node has no verb entries and CI11 forbids advertising a
-  proposed command. Affected requirements: `R-CI09-003`, `R-CI09-005`. Options: surface them in the command's
-  `--describe`, or not at all until delivered. Missing authority: an owner decision. Decision owner: the owner. Work it
-  prevents: the `PLANNED_VERBS` rows of `PR-CI09-1`.
-
-This document stops at references, tool operations and their placement in the proposition; the proposition
-itself, its schema and the catalogue recipe are CI11's.
+- Existing cluster and command nodes own placement. A reference may connect to another reference or installed
+  command. The approved CI11 proposition contract resolves the older hierarchical-placement question.
+- Proposed commands and verbs remain in this plan, never in executable offerings before implementation.
+- Section 3's 1.x renders are historical examples only; CI11's ordered-array v3 contract owns current output.
+- The first vendored source still needs its declared license notice checked against the selected upstream revision.
+  This affects source collection, not completion of local reference connections.
+- Reuse the existing installer transaction and provenance hash walk for collection; the absent CI05/CI10 wrapper
+  is not a prerequisite. No new general-purpose workflow engine is part of this phase.
 
 ## PR Order
 
-- `PR-CI09-1`, wave `W-CI09-1`: `tools/update_reference.py`, `reference.py get` and `verify`, and the `REFERENCES`
-  rows; requirements `R-CI09-002`, `R-CI09-003`, `R-CI09-004`, `R-CI09-005`; depends on the pipeline watch and
-  block 0 named in section 6; non-goal: a second `ReferenceSource`, `Chunker` or `Joiner` before a second source exists.
-- `PR-CI09-2`, wave `W-CI09-2`: `core/tool_operations.py` and the `tools` verb; requirement `R-CI09-001`; depends on
-  nothing in this map; non-goal: tools not built with cobra, until one is added.
+1. `PR-CI09-1`, wave `W-CI09-1`, subdivision 1a: finish immediate reference graph connections and reachability.
+2. Subdivision 1b: land the existing focused-reference work with its pointers; coordinate catalogue conflicts once.
+3. Subdivision 1c: collect and serve one pinned upstream reference with its index/lock and byte proof.
+4. Subdivision 1d: add offline verification, refresh and retirement using that same collection owner.
+5. `PR-CI09-2`, wave `W-CI09-2`: external-operation inventory and installed-binary compatibility inspection.
+   This capability is independent of source collection and can proceed separately.
 
-`PR-CI09-1` supplies the declared and collected references and their pointers; `PR-CI09-2` is independent of it.
-Section 6, the owner's steps, follows as written.
-
-### 6. Steps
-
-1. Block 0 of CI10-PHASES (the locator and path repairs) lands first; the
-   navigator and `get` depend on importable bins and a current `tools.json`.
-2. Add `ci-skills/lib/python/core/{reference,navigate,http,tool_operations}.py`, the
-   offline command path in `core/cli.py`, and the `OFFLINE_COMMANDS` and
-   `REFERENCES` tables in `core/catalog.py` (this phase owns `REFERENCES`;
-   CI08-ROUTING adds the tags); regenerate `tools.json`.
-3. Add `tools/skillkit/reference_update.py` over `tools/skillkit/transaction.py`
-   (CI05-VENDOR) and the thin main `tools/update_reference.py`.
-4. Declare `gitlab-ci-yaml` in `vendor/vendor.toml`; run `update --sha
-   9892f2e6cf006fa1acc3f4d744f707757111db58`, then the same command with
-   `--apply --confirm-plan DIGEST`; commit the tree, the
-   lock, `schemas/reference-index.schema.json`, `schemas/tool-operations.schema.json`
-   and the tests of section 5.
-5. Add the `tools` verb to `bin/ci-skills` with the recorded fixtures for
-   `glab` 1.120.0, `gh` 2.98.0 and `kubectl` v1.36.4; the `uses` pointers
-   (CI07-SCHEMA) name the operations of section 1.
-6. The `SKILL.md` sentence of section 3, Steps; the description gains the
-   reference and the navigator.
-7. Read back: the smoke in section 7.
+CI11's pre-use help correction can land before or alongside 1a. Existing `get`, v3 discovery, search and paging
+are dependencies already delivered, not new work. The steps above replace the earlier CI10 bootstrap dependency.
+Each PR extends the current required validation path; no extra CI workflow or gate is introduced by this plan update.
 
 ## Gates
 
-Acceptance is section 5 below and the read-back CI11 defines: the proposition lists each new reference pointer
-and the command's `--help` names it. Enforcement today: the validate workflow exists; the `reference` gate and the
-smoke runs of section 7 are proposed, since the wrapper and the executor they name are not on main.
+Acceptance is section 5 below and CI11's installed consumer procedure: the proposition lists each new reference
+pointer and command help names it. Extend the existing validate workflow's checks as each capability lands;
+reference verification and declared-operation checks remain pending implementation.
 
 The basic gate, `G-CI09-REGISTRATION`, runs one check per installed command on every pull request head, so no
 combo lands without what the agent needs to run it and read for it:
@@ -2140,7 +2152,7 @@ combo lands without what the agent needs to run it and read for it:
           verification: UNVERIFIED
         deliverable: An upstream page is declared once in vendor/vendor.toml, fetched at a pinned or latest commit by tools/update_reference.py, chunked by heading into references/vendor/<name>/ with a derived index.json and a lock entry, verified from the committed files and served one chunk at a time; a local reference is one file under references/.
         owner: ci-skills/lib/python/core/reference.py
-        preserve: [The three local references and their pointers]
+        preserve: [Existing local references and their pointers]
         prIds: [PR-CI09-1]
         gateIds: [G-CI09-STATIC, G-CI09-REFERENCE, G-CI09-LIVE]
         evidence: []
@@ -2151,7 +2163,7 @@ combo lands without what the agent needs to run it and read for it:
           grounding: GROUNDED
           implementation: PARTIALLY_IMPLEMENTED
           verification: UNVERIFIED
-        deliverable: Every reference and reference section is offered through the proposition node of the commands that need it, as a summary and a pointer rendered from the REFERENCES and REFERENCE_SECTIONS declarations in core/catalog.py, and named by those commands' --help; no second navigator or inventory.
+        deliverable: Every reference and reference section is offered through the proposition node of the commands that need it, as a summary and a pointer rendered from the existing catalogue declarations and their immediate connections, and named by those commands' --help; no second navigator or inventory.
         owner: ci-skills/lib/python/core/catalog.py
         preserve: [The Proposition interface and schema of CI11, Existing clusters and pointers]
         prIds: [PR-CI09-1]
@@ -2206,7 +2218,7 @@ combo lands without what the agent needs to run it and read for it:
     gates:
       - id: G-CI09-STATIC
         requirementIds: [R-CI09-001, R-CI09-002, R-CI09-003, R-CI09-004, R-CI09-005]
-        command: ./bless.sh --all locally; the validate workflow on the pull request head
+        command: ./bless.sh --staged locally; the validate workflow on the pull request head
         environment: GitHub Actions on the pull request head; ruleset "protected" on main requires the ci-skills/required status
         enforcement: Existing
         evidence: [Exact head SHA, validate run URL, ci-skills/required SUCCESS, tools.json regenerated from the catalogue source]
@@ -2214,7 +2226,7 @@ combo lands without what the agent needs to run it and read for it:
         requirementIds: [R-CI09-001, R-CI09-003, R-CI09-005]
         command: One test over the catalogue on the pull request head, the six checks listed above, one per installed command
         environment: The validate job; offline, no credentials
-        enforcement: Proposed; the placement, pointer and declared-operation checks do not exist on main
+        enforcement: Partial; existing proposition tests cover placement and pointers; graph edges, orphan documents and declared-operation coverage remain
         evidence: [Every installed command passes the six checks on the exact head SHA]
       - id: G-CI09-REFERENCE
         requirementIds: [R-CI09-002, R-CI09-004]
@@ -2224,10 +2236,10 @@ combo lands without what the agent needs to run it and read for it:
         evidence: [PASS with the declared file_count for every vendored tree]
       - id: G-CI09-LIVE
         requirementIds: [R-CI09-001, R-CI09-002, R-CI09-003, R-CI09-004, R-CI09-005]
-        command: The five smoke runs of section 7, each with --receipt-out
+        command: The installed-consumer procedure in Live Smoke Evidence, selected for each delivered capability
         environment: The installed candidate; offline for get, next and verify, live for update --dry-run and tools
-        enforcement: Proposed; the executor section 7 names is not on main
-        evidence: [The five receipts of section 7 part 4, bound to the installed functional checksum]
+        enforcement: Partial; use the existing installed-consumer procedure; new capability receipts remain outstanding
+        evidence: [Consumer trace and operation read-back, Installed revision and functional checksum, Targeted acceptance result]
 <!-- /architecture-map:v1 -->
 <!-- markdownlint-enable MD046 -->
 
@@ -2247,54 +2259,30 @@ combo lands without what the agent needs to run it and read for it:
   tree is excluded from the executed-code digest (D-DIGEST) and digested on
   its own in the lock.
 - `tests/python/test_tool_operations.py`: section 1's read-back.
-- Gate `reference`, a profile of `scripts/check.sh` (CI03-GATES, G1): it
-  runs `ci-skills/bin/reference.py verify --json` over every vendored tree
-  and fails on anything but `PASS`.
-- Run on the gate route (D-GATE; CI03-GATES, G0).
+- Once delivered, run `ci-skills/bin/reference.py verify --json` over every vendored tree through the existing
+  GitHub validate path and fail on anything but `PASS`. Do not recreate the historical `scripts/check.sh` wrapper.
 
 ## Live Smoke Evidence
 
-Planned, not observed. Section 7 follows as written; its receipts are the evidence of `G-CI09-LIVE`.
+[PR89](https://github.com/spyroot/ci-skills/pull/89) delivered v3 navigation;
+[PR97](https://github.com/spyroot/ci-skills/pull/97) corrected root expansion/provider reference mixing.
+These establish existing behavior, not completion of the missing graph edges or pinned-source lifecycle.
+The existing main validation run is [39359986047](https://github.com/spyroot/ci-skills/actions/runs/39359986047).
+No new runtime proof is claimed by this planning change.
 
-### 7. Delivery, test and proof
-
-1. *Delivery*: the files of steps 2 to 6, plus `ci-skills/references/vendor/gitlab-ci-yaml/`
-   (177 files), `vendor/vendor.toml`, `vendor/vendor.lock.json`, the
-   regenerated `tools.json`, the `ignores` entry in `.markdownlint-cli2.yaml`
-   and the `-whitespace` line in `.gitattributes` (Layout), and the five
-   smoke receipts of parts 3 and 4. Runtime setup follows
-   [CI11-TOOLS, Smoke cases](CI11-TOOLS.md#smoke-cases-runtime-setup-and-read-back).
-2. *Tests*: section 5, by file; written with the block, run status
-   UNVERIFIED (CI03-GATES, G0).
-3. *Smoke*, fixed arguments, on the D-SMOKE executor, each run with
-   `--receipt-out` and its receipt path of part 4 (CI02-CLI, item 7):
-   - `ci-skills/bin/reference.py get gitlab-ci-yaml triggerforward --json`
-     reads back `kind: reference_section`, `anchor: triggerforward`, `pinned`
-     equal to the declared sha, and `text` whose first line is
-     ``#### `trigger:forward` ``;
-   - `ci-skills/bin/reference.py next gitlab pipeline run --json` reads back
-     Render 4 (section 3) and validates against `schemas/reference-next.schema.json`;
-   - `ci-skills/bin/reference.py verify gitlab-ci-yaml --json` reads back
-     `PASS` with `file_count: 177`;
-   - `tools/update_reference.py gitlab-ci-yaml --sha 9892f2e6cf006fa1acc3f4d744f707757111db58 --dry-run --json`
-     reads back, live from gitlab.com, HTTP 200, length 254048 and a raw
-     `sha256` equal to `upstream.sha256` in the index, and writes nothing;
-   - `bin/ci-skills tools glab --json` reads back the installed binary's
-     version and digest and every declared operation resolved.
-4. *Evidence*: `tests/acceptance/receipts/reference-get-trigger-forward.json`,
-   `reference-next-gitlab-pipeline.json`, `reference-verify.json`,
-   `reference-update-dry-run.json`, `tool-operations-glab.json`; fields:
-   `kind`, `status`, `records`, `readback`, `skill.digest`, `execution_host`,
-   `captured_at`.
-5. *Verification*: once this phase's receipt support is implemented,
-   `tools/check_live_acceptance.py --root . --json` must accept the five
-   receipts, print `"status": "PASS"` and exit 0. Their read-back remains
-   defined in part 3; selected target and identity values come from runtime
-   setup receipts, as CI11-TOOLS specifies. Provenance and applicable cleanup
-   evidence remain required.
+For each remaining delivery, follow [CI11's installed consumer procedure](CI11-TOOLS.md#end-to-end-test).
+Capture the selected installed SHA, help and pointers actually used, commands, outcomes and read-back.
+For 1a/1b, the agent follows the offered related reference/tool paths without implementation-source guidance.
+For 1c/1d, it reads one known upstream section, verifies the pinned tree, and observes the explicitly selected
+update/retirement operation. For 2, it reads the real installed binary's identity and compatibility results.
+Extend the existing acceptance checker only for each delivered operation's declared evidence; do not invent
+receipts for unimplemented verbs or require an unrelated Podman run.
 
 ## End-to-End Test
 
-The journey is section 7, part 3: `reference.py next` to one pointer, `get` for one chunk, `verify` over the
-committed tree, `update --dry-run` against upstream, `tools` against the installed binary. Its acceptance gate is
-`G-CI09-LIVE`; no execution is recorded.
+Install the candidate, start a fresh agent, and ask it to use ci-skills for a concrete task needing a reference.
+The agent discovers the command, reads `--help`, follows the returned reference pointer if useful, and uses the
+accepted native keys without a parent-supplied command recipe. Check the resulting state independently.
+The trace must show bounded current-node output, useful related connections, and no guessed replacement API.
+Use targeted proof for the affected delivery; an explicitly requested aggregate run uses one installed SHA for
+all required capabilities. Outstanding rows above keep CI09 partially implemented until their own proof lands.

@@ -1,7 +1,29 @@
-# CI11-TOOLS: the tool catalogue and the port of the source repo's scripts
+# PARTIALLY_IMPLEMENTED: CI11 — agent tools, help and reusable workflows
 
-Status: proposed. Order and dependencies: CI10-PHASES, Phases. Delivered one
-tool per pull request, in the order of the catalogue.
+- grounding: GROUNDED
+- verification: PARTIALLY_VERIFIED
+- planningStage: PLANNED
+
+## Authority
+
+The existing catalogue, source rows and callback/proposition contracts in this document own CI11's delivery.
+The operator requested the concrete closure plan on 2026-10-20 and this binding update on 2026-10-21.
+[CI09](CI09-REFERENCE.md) owns reference connections and knowledge lifecycle; it does not own workflow execution.
+[standards-binding.yaml](../../standards-binding.yaml) selects all mandatory shared contracts at
+`5bd31f103621dcd7e49ec6e6af55583de7056d7d`, including `system-architecture` and `js-standards`.
+This plan extends the existing phase; it does not recreate the removed CI10 document or another roadmap.
+
+The operator's boundary is concrete: the toolbox/runner combo builds the toolbox, publishes it and configures
+the requested durable runner to use it. Pipeline/job execution is a separate consumer request for verification.
+Do not insert test jobs, consumer-image pushes or a test-runner lifecycle into that combo.
+
+## Consumer
+
+An agent acting for a user consumes a normally installed ci-skills package. It sees a compact proposition,
+chooses a descriptive workflow filename, reads that command's `--help`, and supplies the user's values.
+The same view offers related references with exact native keys, flags and examples. Reading is optional;
+delivering those offerings is mandatory. The result states what happened and the independent read-back.
+This addresses repeated API discovery, guessed JSON keys and corrective calls observed in the operator's workflow.
 
 ## Motivation
 
@@ -21,7 +43,124 @@ the same milestone at the same instant is not, by itself, a reason to add coordi
 Additional handling needs an existing requirement or a demonstrated defect in behavior ci-skills owns. Preserve the
 existing safeguards while refactoring and keep tests focused on actual parsing, execution, and failure paths.
 
-## Proposition interface
+## Diagram
+
+```mermaid
+flowchart TD
+  A[User task] --> B[Agent using installed ci-skills]
+  B --> C[Catalogue proposition: tools and reference array]
+  C --> D[Selected command --help]
+  C --> E[Selected reference]
+  E --> F[Related reference or installed tool]
+  D --> G[Typed workflow inputs]
+  G --> H[Shared executor and atomic callbacks]
+  H --> I[Provider operation and read-back]
+  I --> J[Result returned to agent]
+```
+
+For the toolbox/runner workflow, the execution path is build → published image digest → configured runner.
+Discovery connections are choices for the consumer; they never insert callbacks into that execution path.
+
+## Implementation Plan
+
+### Current delivery and remaining work
+
+Snapshot: main `69eea01700d16cc30dbc2005281e65a3580f6755`, inspected 2026-10-21.
+[PR99](https://github.com/spyroot/ci-skills/pull/99) delivered the durable toolbox/runner combination.
+[PR103](https://github.com/spyroot/ci-skills/pull/103) delivered repository file commits and MR creation/milestone
+assignment. Existing callback execution, GitLab authentication, mode policies, v3 discovery and shared help are
+implementation dependencies to reuse, not tasks to rebuild. New provider work belongs under the existing
+`core/gitlab/`, `core/kubernetes/` and `core/harbor/` packages; older flat paths below identify source ownership,
+not permission to duplicate these packages.
+
+The following delivery rows refine the existing catalogue. Each row names remaining work and proof; none is
+declared implemented by this plan. All ordinary checks run through existing validation, with live proof through
+the installed consumer procedure below. A missing public verb stays out of executable propositions until it lands.
+
+### Pre-use help: two explicit gaps
+
+Help is read before execution, so an error message after a failed attempt does not close either gap.
+Keep `core/catalog.py`, `core/help.py` and the existing `core/action_modes.py` policy as the shared owners.
+Render each command's actual policy; do not change accepted modes to make an example pass.
+
+| ID | Pre-use gap | Current evidence | Required help |
+| --- | --- | --- | --- |
+| H1 | `--receipt-out` in an offline plan | `receipt_out_requires_live_run` | Name accepted live modes. |
+| H2 | Offline `--output-dir` / `--log-file` | `dry_run_cannot_write_output` | State per-command restrictions. |
+
+- **H1:** `core/gitlab/gitlab_actions.py` rejects an offline receipt request; current catalogue wording does not
+  make that restriction explicit. Add a concrete offline-plan example without a receipt and a confirmed live
+  example with one. The same shared help must describe READ receipts only for commands that support them.
+  Proof: existing command/help tests agree with mode validation; a fresh installed agent chooses the correct
+  invocation from help and obtains the affected operation's receipt without coaching or a failed discovery attempt.
+- **H2:** `core/gitlab/gitlab_action.py` and `core/action_modes.py` reject these output requests in GitLab offline
+  mode while common option descriptions advertise them without the condition. This is a source-confirmed gap,
+  not a newly observed live failure. Explain valid modes and caller-selected paths using the command's policy.
+  Proof: shared help assertions cover the existing refusal cases in `tests/python/test_gitlab_actions.py`;
+  the installed agent can choose a valid output mode before invoking the affected command.
+
+The same help pass must show purpose, required inputs, selected-provider prerequisites, side effects, output,
+examples and the command's existing reference pointers. Preserve optional providers and native validation.
+[PR104](https://github.com/spyroot/ci-skills/pull/104) contains related recovery/read-back improvements; inspect
+and reuse its applicable changes instead of opening a competing implementation. Recovery text alone is not H1/H2.
+
+### Remaining port and workflow deliveries
+
+Each group below uses its existing detailed source row for flags, limits and negative cases. Split groups into
+one runnable capability per PR. Existing public verbs listed here must remain working during additions.
+
+- **C1 — descriptive workflow names.** `image_build_readiness.py probe|chain` currently dispatches two different
+  tasks. Introduce descriptive mains, proposed `probe_podman.py` and `build_publish_toolbox_runner.py`, calling the
+  existing Podman and `core/kubernetes/image_build_chain/` implementations. Keep the old dispatch as a compatible
+  thin entrypoint while updating primary catalogue routing/help/examples. Do not create another result schema,
+  engine or verification callback. Proof: discover the named workflow; build/publish once and read the requested
+  persistent runner's image digest. Existing unaffected Podman evidence remains historical proof, not a rerun task.
+- **C2 — jobs and pipelines.** Job `get|list` and pipeline `get|start|watch` exist. Add job `watch|logs` and numeric
+  selectors; pipeline `list|logs|children|retry|cancel` and newest-by-ref selection. Reuse `core/gitlab/job_read.py`,
+  `gitlab_jobs.py`, `gitlab_pipelines.py`, the pipeline graph reader and `CLIAPIClient.get_text` for bounded text.
+  Proof: exact-ID selection, bounded/redacted traces, terminal/manual/timeout behavior, child graph accounting and
+  read-back of explicitly requested retry/cancel. Repeating `start` with the same plan is already idempotent;
+  it is not GitLab's native pipeline retry. Test-job creation remains an explicit consumer action outside combos.
+- **C3 — schedules.** `gitlab_schedule.py list|get|play|create|update` is absent. Reuse the authenticated GitLab
+  operation framework and native schedule APIs. Proof: scoped paginated reads, idempotent create/update, and the
+  exact schedule pipeline returned by an explicit play. Do not silently schedule this repository's own CI.
+- **C4 — MR checks and failure correlation.** MR `create|update` exists; add `check` using
+  `core/gitlab/gitlab_merge_requests.py` and existing pipeline/job readers. Implement `ci_failure_trace.py` using
+  the existing job reader and Kubernetes `event_trace.py` collectors. Proof: select the MR's exact head despite a
+  newer unrelated pipeline; correlate the selected job's time window; keep failed traces bounded and redacted.
+- **C5 — runner additions.** `assign|create|delete|get|list|tag` exists. Add `reset-token`, manager/executor reads
+  and the planned unique-description delete selector in `core/gitlab/gitlab_runners.py`. Reuse existing scope,
+  identity and token handling. Proof: ambiguity refuses mutation, manager data is returned or explicitly unavailable,
+  token output uses the selected private destination, and delete independently verifies exact runner absence.
+- **C6 — variables and milestone selection.** Add `gitlab_variable.py show|set|set-secret`, milestone `list --state`
+  and issue milestone-title resolution using existing GitLab actions. Milestone create/update/adjust-time and issue
+  create-bug/open-bug already exist. Proof: environment/scope-correct metadata without secret disclosure, selected
+  value-file apply with read-back and repeated NO_OP, paginated milestones and unambiguous title association.
+- **C7 — cluster visibility.** Add the planned route, HA, machine, Kubernetes-state and cluster-health commands
+  over existing `core/kubernetes/` collectors. Proof: selected native objects, bounded shared concurrency,
+  independent provider reads and explicit missing/incomplete components. Preserve existing storage/Ceph/Cilium tools.
+- **C8 — remaining node and storage operations.** Native node ISO build/verify/remove/join already exists.
+  Remaining source ports are RHCOS report/download/serve, standalone CSR operations, MTU MachineConfig extension,
+  Ceph benchmark and NFS checks. Reuse native ISO, selected-joiner CSR, MTU and storage lifecycle owners.
+  Proof: stored artifact checksum/location, explicit MTU apply/read-back and second NO_OP, bounded benchmark,
+  read-only NFS inspection and separately requested write check. CSR approval/join remains the operator-approved
+  mocked exception because a real joining node is required. Preserve shared PVCs and unrelated files; delete only
+  exact owned test artifacts. CI12's existing ISO comparison work stays in its own delivery.
+- **C9 — Harbor additions.** Toolbox create/update/delete and Harbor push/pull exist. Add robot creation,
+  registry sanity, chart inspection and pull-secret synchronization. Reuse `core/harbor/registry_mirror.py`'s
+  service/auth/copy/read-back and existing Kubernetes resource/credential callbacks. Proof: selected robot metadata
+  and private token output, paginated project/repository reads, chart version/content comparison, and key-by-key
+  Secret read-back with repeated NO_OP. These operations do not add a consumer-image push to the runner combo.
+
+### Proof still required for phase closure
+
+Main's passing checks and selected live receipts do not prove every port above. Required missing proof is
+H1/H2's help-before-use journey, CI09's cross-reference traversal, the installed renamed workflow, and each newly
+delivered verb's source-row read-back. No fresh aggregate run at one installed SHA has been established by this
+plan. An aggregate result covers the existing checker's declared operation set; as remaining capabilities land,
+their evidence must join that set before claiming full CI09/CI11 closure. Merely counting green receipts is insufficient.
+
+### Proposition interface
 
 A **proposition** is a compact, machine-readable offering of the tools and references available at one node. The
 entrypoint proposes the main clusters; each selected node proposes its own relevant tools and references using the
@@ -191,11 +330,11 @@ is superseded by this specification. Existing per-command help and result contra
 `ci-skills/bin/reference.py`, the installed discovery entrypoint, accepts a cluster or installed filename and emits this
 node shape without fetching references. For example: `reference.py glab` or `reference.py gitlab_job.py`.
 
-## Callback workflow boilerplate
+### Callback workflow boilerplate
 
 Every workflow main follows this composition pattern. `core/action.py` implements the shared callback lifecycle,
 provider bases, context, executor, and emitter. Existing GitLab action mains compose `GitLabAuth` and their concrete
-operation callbacks. The toolbox/Harbor atoms in this example remain assigned to their delivery rows below.
+operation callbacks. The toolbox/Harbor atoms already exist; reuse their delivery owners below.
 
 `build_parser()` owns this workflow's arguments; the action models map those arguments;
 `ExecutionContext` supplies the selected targets and provider services; `Executor` runs the ordered callbacks;
@@ -265,8 +404,8 @@ and reuse these facilities. Do not copy them into parallel implementations.
   interface. `GitLabAuth` calls the existing binding/access path.
 - **`gitlab_session.py`, `access.py`, `gitlab_api.py`**: Reuse `BoundGitLabSession`, `check_gitlab_operation_access()`,
   and `GlabAPIClient` as GitLab callback services.
-- **`gitlab_actions.py`**: Extract shared plan/apply/report orchestration from `run_action_cli()` into the
-  already-planned `core/action.py`; `Executor` owns sequencing. Keep CLI parsing at the boundary.
+- **`gitlab_actions.py`**: Extract shared plan/apply/report orchestration from `run_action_cli()` through the
+  existing `core/action.py`; `Executor` owns sequencing. Keep CLI parsing at the boundary.
 - **`gitlab_milestones.py`**: Move `prepare()`, `apply()`, and `_create()` behavior into typed milestone actions and
   callbacks, preserving exact-match checks and create guards.
 - **`gitlab_runners.py`**: Move `_create()`, `_assign()`, `_tag()`, and `read()` into create, attach, tag, and
@@ -282,7 +421,7 @@ splitting that guard incorrectly across hooks. Existing commands keep their argu
 refactor. Harbor/toolbox and other missing atoms follow their delivery rows below; their absence is not a reason to
 rebuild the transports or collectors already present.
 
-## Goal
+### Goal
 
 Every tool does one task we named, with a machine-readable spec, and nothing
 more. No open-ended implementation, no invented behaviour: a tool exists only
@@ -292,7 +431,7 @@ script by path relative to the source repo root at the inventory commit,
 both recorded in the private source inventory. That project's name never
 enters a tracked file: the neutrality gate forbids it.
 
-## The catalogue
+### The catalogue
 
 Commands that ship today are in [docs/README.md](../README.md), Capabilities; this table lists only
 what this phase adds or changes.
@@ -445,7 +584,7 @@ sections below (inventory of 2026-10-06 at the source commit recorded in the
 private source inventory); the tests per tool are the
 `tests/python/test_<module>.py` files of "Delivery, test and proof".
 
-## The port recipe
+### The port recipe
 
 The same ten steps for every row; the row repeats them with the real paths.
 
@@ -528,7 +667,7 @@ The same ten steps for every row; the row repeats them with the real paths.
     `SKILL.md`; the row here carries source, destination, adaptation and
     receipt kind. The source repo is not edited.
 
-## Target access and workflow inputs
+### Target access and workflow inputs
 
 `core/endpoints.py` owns target keys; new target entries contain endpoint and access information only. The proposed
 Harbor entries below use nonsecret values and credential file references, mode 0600, never credential values in a
@@ -581,7 +720,7 @@ not as `target.toml` keys. The source defaults below remain proposed inputs for 
 - **Latest alias and source TLS verification**: `toolbox_image.bash:639,680`; both true in the proposed port.
 - **Builder selection**: Explicit `openshift` or `podman`, selected by the workflow's declared `--builder` option.
 
-## One query grammar for every object class
+### One query grammar for every object class
 
 One grammar for every object class (job, pipeline, runner, merge request,
 schedule, route, node, machine, Pod, claim):
@@ -613,7 +752,7 @@ The requests we recorded, in this grammar: `gitlab_job.py list --project P
 matching the glob); `gitlab_runner.py list --project P` (the runner quick
 view; fields and the executor read are in its interface bullet).
 
-## Combos
+### Combos
 
 A combo is one workflow main composing reusable atomic callbacks through the
 [callback boilerplate](#callback-workflow-boilerplate). It calls shared Python operations rather than subprocesses
@@ -639,7 +778,8 @@ component reports, never the reports inline.
   - Operations combined: authenticate to OpenShift, build the toolbox, authenticate to Harbor and publish the image,
     authenticate to GitLab, configure the selected runner/CI to use the image, and verify; use the callback chain above.
   - Completion evidence: selected source revision, build identity, published image digest, Harbor read-back, and
-    runner/CI use of that image agree. Reuse pipeline/job readers and watch when that verification needs them.
+    runner use of that image agree through the runner and manager's own read-back. Running a pipeline or job to
+    exercise that runner is a separate, explicitly requested consumer test; it is not a callback in this combo.
 - **Milestone create, tag and MR check.**
   - Operations combined: create or resolve the milestone; apply the specified associations and labels to the
     selected work items; inspect the related MRs; verify their expected milestone/label associations.
@@ -1040,7 +1180,7 @@ Results
   status, interval, runner), the window, the events in it, and the
   correlated subset. This is the README's "CI Combo" in one command.
 
-## Smoke cases: runtime setup and read-back
+### Smoke cases: runtime setup and read-back
 
 Shared setup resolves the selected target and verifies authentication and target
 identity through API read-back before any mutation. Its returned dictionary supplies
@@ -1139,7 +1279,7 @@ configuration. Relative credential filenames resolve beside the selected file.
 
 A tool without a committed receipt for its case is not delivered.
 
-## Source rows: OpenShift and Kubernetes (inventory of 2026-10-06)
+### Source rows: OpenShift and Kubernetes (inventory of 2026-10-06)
 
 Inventory of 2026-10-06 at the source commit recorded with the source repo
 root in the private source inventory; paths are relative to that
@@ -1296,7 +1436,7 @@ that no source script performs; it is built to the sentence and nothing more.
   tooling), `scripts/ceph_tool.py`'s SSH path (the node model here is an
   existing Pod) and its Intersight lookup (outside the authorities).
 
-## Source rows: GitLab (inventory of 2026-10-06)
+### Source rows: GitLab (inventory of 2026-10-06)
 
 The source has three GitLab transports (the shared `glab api` wrapper at
 `automation/lib/access/gitlab_auth.bash:195`, `curl` with the token on argv at
@@ -1430,7 +1570,7 @@ status mapping is in the cross-cutting adaptations above.
 - The source README's policies (secrets never on argv, exact-title match,
   read-back as the evidence) are already this skill's: `docs/gitlab-toolbelt-plan.md`.
 
-## Source rows: toolbox and Harbor (inventory of 2026-10-06)
+### Source rows: toolbox and Harbor (inventory of 2026-10-06)
 
 The source has no Harbor REST mutation at all: in the scripts and libraries
 read there is no POST, PUT, PATCH or DELETE on `/api/v2.0`, no robot, retention, replication,
@@ -1563,50 +1703,84 @@ credential values stay out of the target, as with `token_file` today.
 - `scripts/refresh_inventory.sh` and the lab inventory Python tools (hardware
   inventory, not a Harbor or toolbox task).
 
+## PR Order
+
+1. **Help delivery (H1/H2):** one shared help correction with the relevant existing PR104 work, preserving modes.
+2. **Reference connections and knowledge:** CI09 subdivisions 1a/1b; reuse PR95 and PR105. These complete the
+   immediate reference graph and compact task knowledge, not the full upstream collection lifecycle.
+3. **Naming delivery (C1):** descriptive mains over the existing implementations, then affected installed proof.
+4. **Port deliveries (C2–C9):** retain the catalogue's order below, one capability/verb group per PR; reuse merged
+   pieces and current provider owners. C4 consumes C2 readers; other groups need only the shared auth/execution
+   facilities already on main. Do not make an unrelated cluster operation a prerequisite for a GitLab-only command.
+5. **CI09 source lifecycle and operation declarations:** its independent remaining delivery IDs own that work.
+6. **Phase closure:** reconcile the catalogue, help, reference reachability and declared acceptance coverage,
+   then run an explicitly requested aggregate consumer session at one installed SHA.
+
+Open PR numbers above identify existing work to integrate, not approval to merge a failing head. Obtain current
+check results at integration time. Every capability needs its actual installed entrypoint, reference connections,
+matching existing result contract, focused regressions and affected live proof in the same delivery.
+
 ## Gates
 
-- Static: per CI10-PHASES, "How a phase lands", plus the catalog contract
-  test for each new command (`tests/python/test_catalog.py`).
-- Tests: the files named in "Delivery, test and proof"; run on the gate route
-  (D-GATE).
-- Live: the smoke case of each row; a tool without a committed receipt for
-  its case is not delivered.
+- Static checks use `bless.sh` and the existing required GitHub validation workflow. Add assertions to existing
+  catalogue/help/proposition/command tests with each capability; no new workflow is required by this plan.
+- Pre-use help is an acceptance condition: before calling the command, the installed agent can identify required
+  values, applicable modes, effects, outputs and the next reference. Post-failure guidance does not substitute.
+- Existing v3 schema and renderer remain the proposition contract. Preserve the locked example and test provider
+  placement, immediate relations, central reference identities and per-node deduplication against that behavior.
+- Live proof follows the procedure below and [README validation](../../README.md#validation). Normal merges use
+  affected-capability proof. Aggregate is explicitly requested and requires one installed SHA across its coverage.
+  Historical receipts retain their original provenance; they are not relabeled as proof of new behavior.
 
-## Read-back
+### Read-back
 
 After each capability lands: its relevant proposition lists the installed tool and scoped reference pointers;
 the tool's native `--help` exposes its arguments and `<tool> --describe` validates against `command-contract`;
 `tools/render_manifest.py --check` reports CURRENT; the neutrality checker
 reports PASS.
 
-## Delivery, test and proof
+## Live Smoke Evidence
 
-1. *Delivery*, per tool: `ci-skills/bin/<tool>.py`, the Library module cell
-   under `ci-skills/lib/python/core/`, the catalog entry and the regenerated
-   `tools.json`, any endpoint/access additions to `target.toml.template` and its workflow inputs, its
-   smoke case; the command that runs is the tool's smoke line.
+The main validation run [39359986047](https://github.com/spyroot/ci-skills/actions/runs/39359986047) passed.
+PR103 recorded 1,401 command/contract tests and 85 acceptance tests. These results are tied to that candidate.
+The installed copy was read back at `69eea01700d16cc30dbc2005281e65a3580f6755`; its package digest was
+`7194c1819ad07de0b5046e14614a32bd1e50cf71021a9cc05ecb43aeabbb1001`.
 
-2. *Tests*: `tests/python/test_<module>.py` per Library module (mocked `gh`,
-   `glab`, `kubectl`, `oc`, `skopeo` and `podman` through the `conftest.py`
-   fixtures; the pinned mutating matrix for every `apply`; the worker bound
-   and per-call timeout asserted on a fake executor); written with the block;
-   run status UNVERIFIED (CI03-GATES, G0).
-3. *Smoke*: the row's line under "Smoke cases", on the D-SMOKE executor.
+- [PR99 evidence](../../tests/acceptance/evidence/image-build-chain/92713cc/) records toolbox publication and
+  persistent runner 107 using the returned image. The receipt retains its original installed revision.
+- [PR103 candidate evidence](../../tests/acceptance/candidate/) records file commits, MR creation and milestone
+  association through the installed interface. It does not claim the Go/Dockerfile content was executed.
+- No new live test is part of this binding/plan change. Remaining proof is listed with H1/H2 and C1–C9 above.
 
-4. *Evidence*: `tests/acceptance/receipts/<tool>-<case>.json` with `kind`,
-   `status`, `records`, `plan_digest` and `readback` (mutations),
-   `result_action` (`APPLIED` then `NO_OP`), `execution_host`, `captured_at`.
+## End-to-End Test
 
-5. *Verification*: follow [Validation](../../README.md#validation). Live
-   setup and operation receipts must prove the affected installed capability
-   for the candidate, with read-back and cleanup. GitHub runs static checks
-   and mocked tests. The full-publication checker applies when that
-   capability is under test; unrelated runtime targets do not gate code CI.
+Repeat this concrete procedure for an affected capability:
 
-## Open decisions
+1. **Install ci-skills.** Use `tools/install_ci_skills.py` to install the nested package as the normal independent
+   skill copy. For an existing installation, use its documented upgrade plan/apply path. Read back the installed
+   revision and package identity; changing a checkout alone does not upgrade that copy.
+2. **Start a fresh agent.** Give it the user goal, selected real target and permission to use ci-skills. Let the
+   installed skill supply discovery, help and references. Do not supply a source-tree tour, implementation reads
+   or a parent-written command sequence as a substitute for discoverability.
+3. **Ask it to use ci-skills.** For the runner case: build/publish the requested toolbox and add the runner to the
+   selected project. Ask for a pipeline/job, issue, wiki or milestone only as a separate user task when that
+   capability is under test. No verification job belongs inside the toolbox/runner combination.
+4. **Inspect its actual calls.** Record proposition output, `--help` read before use, reference pointers followed,
+   accepted inputs, exit/result and independent read-back of the exact returned identities. If it cannot discover
+   a needed value or invents an unsupported flag, record the help/reference defect; do not hide it with coaching.
+5. **Keep the requested result.** A durable runner remains available. Remove only explicitly owned disposable
+   test resources; preserve caller namespaces, shared PVCs and unrelated files. Fix a demonstrated defect, reinstall
+   and repeat only the affected capability. Do not cycle unrelated Podman or ISO checks.
+6. **Evaluate the selected evidence.** Use the existing checker and provenance rules; the examples below show its
+   real modes. No new receipt schema or acceptance framework is introduced.
 
-- The `scripts/supply-chain/lib` sources behind `push_images.sh` and
-  `push_helm.sh` were outside the authorized read set; `harbor_push.py` is
-  built from `bootstrap_runner_images.bash:22-66` and the adapters' flags
-  until they are read.
-- Module layout: flat `core/<name>.py` until CI10-PHASES' Modularity decision.
+```bash
+# Affected capability only; RECEIPTS is the selected evidence directory.
+python tools/check_live_acceptance.py --root . --no-aggregate --receipts "$RECEIPTS" --json
+# Explicit full declared coverage from one installed SHA.
+python tools/check_live_acceptance.py --root . --aggregate --receipts "$RECEIPTS" --json
+```
+
+The evaluator checks receipts; it does not itself prove an agent completed the procedure. Preserve the consumer
+trace and provider read-back alongside the receipts. Aggregate cannot mix installed SHAs or turn old partial
+coverage into a phase-completion claim. CI09/CI11 remain partial until their remaining required rows and proof land.
