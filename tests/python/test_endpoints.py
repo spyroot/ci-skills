@@ -450,9 +450,10 @@ def test_native_config_fences_parse_and_keep_keys_under_their_own_table() -> Non
     """Parse every excluded Runner fence, since the gate no longer reads it.
 
     A TOML table header owns every key below it until the next header; indentation
-    does not close it. Each fence must parse, and no key may sit less indented than
-    the first key of the table header above it, which is how a key meant for the
-    parent table ends up in a sub-table.
+    does not close it. Each fence must parse, and every key under an indented
+    sub-table header must sit deeper than that header, which is how a key meant for
+    the parent table is told apart from one meant for the sub-table. Lines inside a
+    multi-line string are not keys.
 
     :returns: None; assertions check parsing and key placement in each fence.
     """
@@ -469,18 +470,21 @@ def test_native_config_fences_parse_and_keep_keys_under_their_own_table() -> Non
         runner_entries.extend(
             entry for entry in document.get("runners", []) if isinstance(entry, dict)
         )
-        first_key_indent = None
+        header_indent = 0
+        in_string = False
         for line in body.splitlines():
             stripped = line.strip()
+            if in_string:
+                in_string = not stripped.startswith("'''")
+                continue
             if not stripped or stripped.startswith("#"):
                 continue
             indent = len(line) - len(line.lstrip())
             if stripped.startswith("["):
-                first_key_indent = -1
-            elif first_key_indent == -1:
-                first_key_indent = indent
-            elif first_key_indent is not None:
-                assert indent >= first_key_indent, stripped
+                header_indent = indent
+            elif header_indent:
+                assert indent > header_indent, stripped
+            in_string = stripped.endswith("= '''")
     runner = next(entry for entry in runner_entries if "request_concurrency" in entry)
     assert runner["allowed_docker_credential_helpers"] == {
         "ecr-login": ["*.dkr.ecr.*.amazonaws.com"]
