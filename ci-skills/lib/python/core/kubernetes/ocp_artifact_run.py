@@ -13,7 +13,12 @@ from typing import Final
 
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.cli_api import response_decoder
-from lib.python.core.json_types import JSONObject, json_object, json_string
+from lib.python.core.json_types import (
+    JSONObject,
+    copy_json_object,
+    json_object,
+    json_string,
+)
 from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
 from lib.python.core.kubernetes.objects import KubernetesObject
 from lib.python.core.kubernetes.ocp_artifact_models import (
@@ -125,6 +130,12 @@ class PersistNodeArtifactRecord(ToolPodK8SCallback[RecordArtifactAction]):
             if state.storage_handle.destination.is_temporary
             else ArtifactLifetime.CALLER_SELECTED_VOLUME
         )
+        comparison_value = state.readback.get("native_input_comparison")
+        comparison = (
+            copy_json_object(json_object(comparison_value))
+            if comparison_value is not None
+            else None
+        )
         record = NodeArtifactRecord(
             run_id=state.run_scope.run_id,
             destination=state.storage_handle.destination,
@@ -134,6 +145,7 @@ class PersistNodeArtifactRecord(ToolPodK8SCallback[RecordArtifactAction]):
             storage=state.storage_handle,
             lifetime=lifetime,
             node_selector=self.action.preparation.node_selector,
+            native_input_comparison=comparison,
         )
         resources = state.run_scope.resources(self.kubernetes)
         desired = artifact_record_document(state.run_scope, record)

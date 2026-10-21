@@ -10,13 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from lib.python.core.abstract.skill_action import SkillAction
-from lib.python.core.json_types import JSONObject
+from lib.python.core.json_types import JSONObject, copy_json_object
 from lib.python.core.kubernetes.artifact_storage_runtime import (
     normalized_digest,
     observe_artifact,
 )
 from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
 from lib.python.core.kubernetes.objects import KubernetesObject
+from lib.python.core.kubernetes.ocp_artifact_models import NativeComparisonStatus
 from lib.python.core.kubernetes.ocp_artifact_run import (
     ARTIFACT_RECORD_ROLE,
     ArtifactLifetime,
@@ -156,6 +157,26 @@ def _readback(state: OCPArtifactState) -> JSONObject:
     return observed.as_dict()
 
 
+def _comparison_readback(record: NodeArtifactRecord) -> JSONObject:
+    """Report the original comparison only after the ISO digest is unchanged.
+
+    :param record: Immutable record whose artifact was freshly read back.
+    :returns: Historical comparison or explicit legacy unverified evidence.
+    """
+    if record.native_input_comparison is None:
+        return {
+            "status": NativeComparisonStatus.UNVERIFIED,
+            "artifact_sha256": record.artifact.sha256,
+            "input_identity": {},
+            "matched_fields": [],
+            "unverified_fields": ["legacy_record_without_input_comparison"],
+            "artifact_unchanged": True,
+        }
+    result = copy_json_object(record.native_input_comparison)
+    result["artifact_unchanged"] = True
+    return result
+
+
 def _require_build_resources_absent(state: OCPArtifactState) -> None:
     """Prove original Pod and script ConfigMap removal through live reads.
 
@@ -190,6 +211,8 @@ class VerifyArtifactReference(K8SCallback[ResolveRunScopeAction]):
             raise KubernetesError("node_artifact_action_mismatch")
         artifact = _readback(state)
         inspection = inspect_verified_node_image(state, state.stored_artifact)
+        comparison = _comparison_readback(record)
+        state.readback["native_input_comparison"] = comparison
         return {
             "action": VERIFIED,
             "verified": True,
@@ -197,6 +220,7 @@ class VerifyArtifactReference(K8SCallback[ResolveRunScopeAction]):
             "lifetime": record.lifetime.value,
             "artifact": artifact,
             "inspection": inspection,
+            "native_input_comparison": comparison,
         }
 
 

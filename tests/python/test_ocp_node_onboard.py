@@ -25,6 +25,7 @@ INVOCATION = import_script_module("lib.python.core.kubernetes.ocp_invocation")
 DISCOVERY = import_script_module("lib.python.core.kubernetes.ocp_boot_image")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 PLAN = import_script_module("lib.python.core.report")
+SCHEMA = import_script_module("lib.python.core.schema")
 BUILD_WORKFLOW = import_script_module("lib.python.core.kubernetes.ocp_build_workflow")
 RUNTIME = import_script_module("lib.python.core.runtime")
 
@@ -474,6 +475,7 @@ class NativeLifecycleCluster(FilePodCluster, PlanningCluster):
         self.native_timeout = False
         self.native_calls = 0
         self.native_status_path = Path()
+        self.embedded_ignition = '{"ignition":{"version":"3.4.0"}}'
         self.apply({"kind": "Namespace", "metadata": {"name": "consumer-storage"}})
         self.apply(
             {
@@ -570,9 +572,7 @@ class NativeLifecycleCluster(FilePodCluster, PlanningCluster):
             return RUNTIME.CommandResult(tuple(argv), 0, "", "")
         if label == "ocp-node-image" and argv[4] == "inspect":
             self.executed.append(argv)
-            return RUNTIME.CommandResult(
-                tuple(argv), 0, '{"ignition":{"version":"3.4.0"}}', ""
-            )
+            return RUNTIME.CommandResult(tuple(argv), 0, self.embedded_ignition, "")
         if label in ("artifact-storage", "pod-file", "ocp-node-image"):
             return FilePodCluster.pod_exec(
                 self, namespace, name, container, *argv, input_data=input_data
@@ -609,7 +609,25 @@ def test_same_run_and_input_rebuild_reads_verified_iso_without_native_rerun(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Repeating a successful build verifies the saved ISO and returns a no-op."""
+    caller_inputs.native.write_text(
+        "hosts:\n  - interfaces:\n      - name: ens3\n"
+        '        macAddress: "02:00:00:10:00:01"\n',
+        encoding="utf-8",
+    )
     cluster = lifecycle_inputs(caller_inputs, tmp_path, monkeypatch)
+    cluster.embedded_ignition = json.dumps(
+        {
+            "ignition": {"version": "3.4.0"},
+            "storage": {
+                "files": [
+                    {
+                        "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+                        "contents": {"source": "data:,02:00:00:10:00:01"},
+                    }
+                ]
+            },
+        }
+    )
     argv = caller_inputs.argv(
         "--tool-pod-spec", str(caller_inputs.tools), "--run-id", "repeat-build"
     )
@@ -618,6 +636,14 @@ def test_same_run_and_input_rebuild_reads_verified_iso_without_native_rerun(
     applied = [*argv, "--apply", "--confirm-plan", planned["plan_digest"]]
     first_code, first = run_cli(applied, capsys)
     assert first_code == 0, first
+    record = first["readback"]["artifact_record"]
+    assert record["schema_version"] == "1.1"
+    assert (
+        record["native_input_comparison"]["artifact_sha256"]
+        == first["artifact"]["sha256"]
+    )
+    assert record["native_input_comparison"]["matched_fields"]
+    SCHEMA.validate_specification(first, "results/ocp-node-onboard.schema.json")
     assert cluster.native_calls == 1
     expected = (tmp_path / "node.iso").read_bytes()
     original = first["artifact"]
@@ -626,6 +652,7 @@ def test_same_run_and_input_rebuild_reads_verified_iso_without_native_rerun(
 
     assert second_code == 0, second
     assert second["status"] == "PASS"
+    SCHEMA.validate_specification(second, "results/ocp-node-onboard.schema.json")
     assert second["artifact"]["sha256"] == original["sha256"]
     assert any(record.get("action") == "NO_OP" for record in second["records"])
     assert cluster.native_calls == 1
