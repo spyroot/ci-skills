@@ -17,8 +17,10 @@ from lib.python.access.credentials import bind_sources
 from lib.python.core.abstract.callbacks import AbstractCallbacks, Callbacks
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.action_modes import (
+    TOOL_POD_MODE_POLICY as MODE_POLICY,
+)
+from lib.python.core.action_modes import (
     ActionMode,
-    ActionModePolicy,
     validate_action_mode,
 )
 from lib.python.core.catalog import describe
@@ -52,11 +54,6 @@ from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, PLANNED
 TOOL_POD_KIND: Final = "tool_pod"
 TOOL_POD_COMMAND: Final = "prepare_tool_pod.py"
 DEFAULT_TIMEOUT: Final = 300
-MODE_POLICY: Final = ActionModePolicy(
-    default_mode=ActionMode.OFFLINE,
-    receipt_modes=frozenset((ActionMode.APPLY,)),
-    allow_offline_output=True,
-)
 
 
 class ToolPodOperation(StrEnum):
