@@ -1615,6 +1615,71 @@ def test_targeted_acceptance_requires_only_the_selected_current_capability() -> 
     assert aggregate["status"] == "BLOCKED"
 
 
+@pytest.mark.parametrize(
+    "failure", ("none", "artifact", "record", "embedded", "cleanup")
+)
+def test_targeted_iso_verification_requires_matching_readbacks_and_reader_cleanup(
+    failure: str,
+) -> None:
+    """Accept native ISO verification only with bound artifact and cleanup evidence.
+
+    :param failure: Valid proof or the single evidence relationship to invalidate.
+    """
+    receipt = json.loads(
+        (
+            REPO_ROOT
+            / "tests/acceptance/evidence/ocp-node-image-final/yaml/03-verify.json"
+        ).read_text(encoding="utf-8")
+    )
+    identity = _access_setup()["access.json"]
+    receipt["captured_at"] = identity["captured_at"]
+    receipt["tested_revision"] = identity["tested_revision"]
+    receipt["skill"].update(
+        digest=identity["skill"]["digest"],
+        functional_digest=identity["skill"]["functional_digest"],
+    )
+    receipt["skill"]["revision"].update(identity["skill"]["revision"])
+    name = "iso-verify.json"
+    baseline = ACCEPTANCE.evaluate(
+        {}, {name: receipt}, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
+    )
+    assert baseline["status"] == "PASS", baseline["problems"]
+    assert baseline["accepted"] == [name]
+    if failure == "none":
+        return
+    forward = {
+        item["callback"]: item
+        for item in receipt["records"]
+        if item.get("hook") != "cleanup"
+    }
+    if failure == "artifact":
+        forward["VerifyArtifactReference"]["artifact"]["sha256"] = "b" * 64
+        reason = "artifact_readback_unproven"
+    elif failure == "record":
+        forward["ResolveNodeArtifactRecord"]["record"]["run_id"] = "other-build-run"
+        reason = "artifact_readback_unproven"
+    elif failure == "embedded":
+        receipt["readback"]["embedded_ignition"]["version"] = (
+            "different-observed-version"
+        )
+        reason = "embedded_readback_unproven"
+    else:
+        receipt["cleanup"]["resources"] = [
+            resource
+            for resource in receipt["cleanup"]["resources"]
+            if resource.get("kind") != "Pod"
+        ]
+        reason = "cleanup_unproven"
+
+    rejected = ACCEPTANCE.evaluate(
+        {}, {name: receipt}, SKILL_ROOT, NOW, max_age_days=MAX_AGE_DAYS, aggregate=False
+    )
+
+    assert rejected["status"] == "BLOCKED"
+    assert name not in rejected["accepted"]
+    assert f"{name}:{reason}" in rejected["problems"]
+
+
 def test_targeted_acceptance_still_rejects_other_candidate_bytes() -> None:
     """Keep current runtime identity mandatory for selected capability proof.
 

@@ -119,7 +119,8 @@ def decode_pod_handle(document: JSONObject) -> PodHandle:
     :returns: Typed immutable Pod handle.
     :raises KubernetesError: If any identity field is malformed.
     """  # noqa: DOC503 - caught validation is normalized to KubernetesError.
-    _fields(document, _POD_FIELDS, "pod")
+    expected = _POD_FIELDS | ({"node_name"} if "node_name" in document else set())
+    _fields(document, frozenset(expected), "pod")
     try:
         restart_count = json_integer(document["restart_count"])
         if restart_count < 0:
@@ -131,6 +132,7 @@ def decode_pod_handle(document: JSONObject) -> PodHandle:
             container=json_string(document["container"]),
             image=json_string(document["image"]),
             restart_count=restart_count,
+            node_name=json_string(document.get("node_name", "")),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise KubernetesError("node_artifact_pod_invalid") from exc

@@ -154,7 +154,14 @@ is removed with its backing resources. Cleanup never deletes joined Nodes or iss
 
 Verification resolves the selected run's live artifact record, reads the ISO in-cluster and compares its checksum
 and size before inspecting the embedded configuration. For persistent storage, it creates and cleans a temporary
-reader Pod; the selected credentials need those Pod permissions.
+reader Pod with a read-only destination mount; the selected credentials need those Pod permissions.
+New build records include the actual build node. A later reader prefers that node while preserving the recorded
+placement constraints; older records remain readable without that preference. The shared tool-Pod callback
+handles bounded mount recovery and reports attempted nodes and failure events.
+
+Embedded configuration readback includes native IPv4/IPv6 addressing, routes and DNS settings plus decoded
+root-device hints. Unreadable or oversized observations remain explicitly unobserved with file digests;
+ci-skills does not validate or rewrite the native OCP input.
 
 ```bash
 python "$CI_SKILLS_ROOT/bin/ocp_node_onboard.py" verify --run-id "$RUN_ID" --json

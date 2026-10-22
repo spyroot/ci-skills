@@ -8,11 +8,12 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import argparse
+import json
 from collections import UserList
 from collections.abc import Callable, MutableMapping, Sequence
 from pathlib import Path
 from types import MappingProxyType, ModuleType
-from typing import TYPE_CHECKING, NoReturn, TypeAlias, Union
+from typing import TYPE_CHECKING, NoReturn, Optional, TypeAlias, Union
 
 import pytest
 from conftest import import_script_module
@@ -252,6 +253,117 @@ def test_kubernetes_read_returns_none_for_empty_successful_response(
     monkeypatch.setattr(service, "command", lambda *_args: _command_result(""))
 
     assert service.read("configmap", "unit", "default") is None
+
+
+@pytest.mark.parametrize("outcome", ("success", "conflict", "replacement"))
+def test_kubernetes_conditional_delete_transmits_uid_and_never_deletes_replacement(
+    outcome: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Delete the observed UID atomically and retain concurrent replacements.
+
+    :param outcome: Successful absence, API precondition conflict, or replacement read-back.
+    :param monkeypatch: Replace only native command and read-back provider boundaries.
+    """
+    service = KUBERNETES.KubernetesService(_kubernetes_target())
+    deletes: list[tuple[tuple[str, ...], Optional[bytes]]] = []
+    reads: list[tuple[str, str, str]] = []
+
+    def command(
+        *args: str,
+        openshift: bool = False,
+        input_data: Optional[bytes] = None,
+        timeout: Optional[float] = None,
+    ) -> CommandResult:
+        """Expose native discovery and enforce the API UID precondition.
+
+        :param *args: Discovery or raw delete arguments sent to the native client.
+        :param openshift: Whether the OpenShift client was selected.
+        :param input_data: Native DeleteOptions sent privately through stdin.
+        :param timeout: Optional remaining operation bound.
+        :returns: Discovery, successful deletion, or terminal precondition conflict.
+        """
+        assert openshift is False
+        assert timeout is None or timeout > 0
+        if args[0] == "get":
+            assert "--raw" in args
+            assert "/api/v1" in args
+            assert input_data is None
+            return _command_result(
+                json.dumps(
+                    {
+                        "resources": [
+                            {
+                                "name": "pods",
+                                "kind": "Pod",
+                                "namespaced": True,
+                                "verbs": ["get", "delete"],
+                            }
+                        ]
+                    }
+                )
+            )
+        assert args[0] == "delete"
+        deletes.append((args, input_data))
+        assert len(deletes) == 1
+        assert args == (
+            "delete",
+            "--raw",
+            "/api/v1/namespaces/storage/pods/reader",
+            "-f",
+            "-",
+        )
+        assert json.loads(input_data) == {
+            "apiVersion": "v1",
+            "kind": "DeleteOptions",
+            "preconditions": {"uid": "observed-uid"},
+            "propagationPolicy": "Foreground",
+        }
+        if outcome == "conflict":
+            return _command_result(
+                "", returncode=1, stderr="409 Conflict: UID precondition failed"
+            )
+        return _command_result('{"status":"Success"}')
+
+    def read(
+        kind: str, name: str, namespace: str, *, timeout: Optional[float] = None
+    ) -> Optional[JSONObject]:
+        """Return the original Pod before deletion and selected independent read-back.
+
+        :param kind: Kind selected for the conditional operation.
+        :param name: Exact selected resource name.
+        :param namespace: Original selected namespace.
+        :param timeout: Optional remaining provider command bound.
+        :returns: Original UID, replacement UID, or independently observed absence.
+        """
+        assert (kind.casefold(), name, namespace) == ("pod", "reader", "storage")
+        assert timeout is None or timeout > 0
+        reads.append((kind, name, namespace))
+        assert len(reads) <= 2
+        if not deletes:
+            return {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {
+                    "name": name,
+                    "namespace": namespace,
+                    "uid": "observed-uid",
+                },
+            }
+        return (
+            {"metadata": {"uid": "replacement-uid"}}
+            if outcome == "replacement"
+            else None
+        )
+
+    monkeypatch.setattr(service, "command", command)
+    monkeypatch.setattr(service, "read", read)
+    if outcome == "success":
+        service.delete("Pod", "reader", "storage", expected_uid="observed-uid")
+        assert reads
+    else:
+        with pytest.raises(KUBERNETES.KubernetesError):
+            service.delete("Pod", "reader", "storage", expected_uid="observed-uid")
+    assert len(deletes) == 1
 
 
 @pytest.mark.parametrize(
