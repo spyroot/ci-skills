@@ -276,7 +276,8 @@ def test_persisted_build_node_selects_reader_preference_without_changing_storage
     assert decoded.as_dict() == record.as_dict()
     assert selected.preparation.preferred_node == node_name
     assert selected.preparation.node_selector == {"storage": "iso"}
-    assert selected.preparation.mounts == (original.destination.tool_pod_mount(),)
+    expected_mount = replace(original.destination.tool_pod_mount(), read_only=True)
+    assert selected.preparation.mounts == (expected_mount,)
     assert selected.preparation.timeout == 37
     assert selected.scope.namespace == state.artifact_scope.namespace
     assert selected.scope.run_id != original.run_id
@@ -284,6 +285,22 @@ def test_persisted_build_node_selects_reader_preference_without_changing_storage
     assert selected.preparation.retain is False
     assert not selected.reuses_build_pod
     reader = POD_RESOURCES.tool_pod_document(selected.scope, selected.preparation)
+    rendered_mount = next(
+        mount
+        for mount in reader["spec"]["containers"][0]["volumeMounts"]
+        if mount["name"] == expected_mount.name
+    )
+    assert rendered_mount["readOnly"] is True
+    assert rendered_mount["mountPath"] == original.destination.mount_path
+    rendered_volume = next(
+        volume
+        for volume in reader["spec"]["volumes"]
+        if volume["name"] == expected_mount.name
+    )
+    assert rendered_volume == {
+        "name": expected_mount.name,
+        **original.destination.volume_source,
+    }
     assert reader["spec"]["nodeSelector"] == {"storage": "iso"}
     assert "nodeName" not in reader["spec"]
     if node_name:

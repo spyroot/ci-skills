@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final, Optional
+from urllib.parse import quote
 
 from lib.python.access.credentials import bind_sources
 from lib.python.access.kubernetes import kubectl_argv, kubernetes_env, oc_argv
@@ -56,6 +57,7 @@ BUILD_LOG_BYTES: Final = 4096
 BUILD_LOG_LINES: Final = 40
 POD_MOUNT_FAILURE_SECONDS: Final = 60
 POD_READINESS_POLL_SECONDS: Final = 5
+DELETE_POLL_SECONDS: Final = 1
 
 
 class KubernetesError(RuntimeError):
@@ -287,17 +289,28 @@ class KubernetesService:
         except TypeError as exc:
             raise KubernetesError("invalid_object_response") from exc
 
-    def delete(self, kind: str, name: str, namespace: str) -> None:
+    def delete(
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        *,
+        expected_uid: Optional[str] = None,
+    ) -> None:
         """Delete one exact object and independently verify absence.
 
         :param kind: Kubernetes resource kind accepted by the native client.
         :param name: Exact resource name.
         :param namespace: Resource namespace, or an empty string for cluster scope.
+        :param expected_uid: Optional immutable identity enforced by native DeleteOptions.
         :raises KubernetesError: If deletion fails or the object remains present.
         :raises TargetError: If the bound kubeconfig changed before execution.
         :raises OSError: If deletion or read-back cannot start its native process
             or read its output.
         """  # noqa: DOC502,DOC503 - read and command propagate their errors
+        if expected_uid is not None:
+            self._delete_with_uid(kind, name, namespace, expected_uid)
+            return
         args = [*self._namespace_args(namespace), "delete", f"{kind}/{name}"]
         args.extend(
             (
@@ -312,6 +325,78 @@ class KubernetesService:
             raise KubernetesError(error_class(result))
         if self.read(kind, name, namespace) is not None:
             raise KubernetesError("resource_delete_incomplete")
+
+    def _delete_with_uid(
+        self, kind: str, name: str, namespace: str, expected_uid: str
+    ) -> None:
+        """Delete through native API preconditions without replacing target binding.
+
+        :param kind: Native resource kind accepted by kubectl.
+        :param name: Exact selected resource name.
+        :param namespace: Selected namespace, empty for cluster-scoped resources.
+        :param expected_uid: Immutable identity that the API must enforce atomically.
+        :raises KubernetesError: Identity, discovery, deletion or absence proof fails.
+        """
+        if not expected_uid:
+            raise KubernetesError("resource_delete_identity_missing")
+        current = self.read(kind, name, namespace)
+        if current is None:
+            return
+        if json_object(current.get("metadata", {})).get("uid") != expected_uid:
+            raise KubernetesError("resource_delete_identity_mismatch")
+        version = json_string(current.get("apiVersion"))
+        api_root = f"/apis/{version}" if "/" in version else f"/api/{version}"
+        discovery = json_object(self.json("get", "--raw", api_root))
+        resources = [
+            item
+            for item in json_objects(discovery.get("resources", []))
+            if item.get("kind") == current.get("kind")
+            and item.get("namespaced") is bool(namespace)
+            and "/" not in json_string(item.get("name", ""))
+        ]
+        if len(resources) != 1:
+            raise KubernetesError("resource_delete_discovery_not_unique")
+        resource = quote(json_string(resources[0].get("name")), safe="")
+        prefix = (
+            f"{api_root}/namespaces/{quote(namespace, safe='')}"
+            if namespace
+            else api_root
+        )
+        options = {
+            "apiVersion": "v1",
+            "kind": "DeleteOptions",
+            "preconditions": {"uid": expected_uid},
+            "propagationPolicy": "Foreground",
+        }
+        result = self.command(
+            "delete",
+            "--raw",
+            f"{prefix}/{resource}/{quote(name, safe='')}",
+            "-f",
+            "-",
+            input_data=json.dumps(
+                options, separators=(",", ":"), sort_keys=True
+            ).encode("utf-8"),
+        )
+        if result.returncode:
+            observed = self.read(kind, name, namespace)
+            if (
+                observed is not None
+                and json_object(observed.get("metadata", {})).get("uid") != expected_uid
+            ):
+                raise KubernetesError("resource_delete_identity_mismatch")
+            raise KubernetesError(error_class(result))
+        deadline = time.monotonic() + self.timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise KubernetesError("resource_delete_incomplete")
+            observed = self.read(kind, name, namespace, timeout=remaining)
+            if observed is None:
+                return
+            if json_object(observed.get("metadata", {})).get("uid") != expected_uid:
+                raise KubernetesError("resource_delete_identity_mismatch")
+            time.sleep(min(DELETE_POLL_SECONDS, max(0, deadline - time.monotonic())))
 
     def pod_exec(
         self,

@@ -122,6 +122,24 @@ class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
         super().__init__(action)
         self.resources: Optional[ResourceSet] = None
 
+    def _retain_identity_conflict(self) -> None:
+        """Preserve a replacement and its backing resources after an identity conflict."""
+        state = self.tool_state
+        scope = state.run_scope
+        state.retained_resources.update(
+            (
+                _resource("Pod", scope.name(TOOL_POD_ROLE), scope.namespace),
+                _resource(
+                    "ConfigMap", scope.name(TOOL_POD_SCRIPT_ROLE), scope.namespace
+                ),
+            )
+        )
+        if scope.owns_namespace:
+            state.retained_resources.add(_resource("Namespace", scope.namespace, ""))
+        reason = "resource_delete_identity_mismatch"
+        if reason not in state.cleanup_failures:
+            state.cleanup_failures.append(reason)
+
     def run(self) -> JSONObject:
         """Reuse a matching live Pod or create and read back a new one.
 
@@ -209,8 +227,14 @@ class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
                 node = json_string(
                     json_object(exc.pod.get("spec", {})).get("nodeName", "")
                 )
-                uid = json_object(exc.pod.get("metadata", {})).get("uid")
+                uid = json_string(json_object(exc.pod.get("metadata", {})).get("uid"))
                 current = self.kubernetes.read("Pod", pod_name, scope.namespace)
+                if (
+                    current is not None
+                    and json_object(current.get("metadata", {})).get("uid") != uid
+                ):
+                    self._retain_identity_conflict()
+                    raise KubernetesError("resource_delete_identity_mismatch") from exc
                 if (
                     not node
                     or node in excluded_nodes
@@ -222,7 +246,12 @@ class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
                     raise KubernetesError(
                         "tool_pod_mount_failure_identity_mismatch"
                     ) from exc
-                resources.delete("Pod", pod_name)
+                try:
+                    resources.delete("Pod", pod_name, expected_uid=uid)
+                except KubernetesError as deletion:
+                    if "resource_delete_identity_mismatch" in str(deletion):
+                        self._retain_identity_conflict()
+                    raise
                 excluded_nodes = (*excluded_nodes, node)
                 if len(excluded_nodes) >= TOOL_POD_MAX_ATTEMPTS:
                     raise KubernetesError("tool_pod_mount_retry_exhausted") from exc
@@ -273,6 +302,7 @@ class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
         """Remove created unretained objects and preserve retained identities.
 
         :returns: Verified removed and retained resource identities.
+        :raises KubernetesError: Cleanup encounters an identity conflict or cannot verify removal.
         """
         state = self.tool_state
         removed: list[JSONObject] = []
@@ -283,7 +313,12 @@ class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
                 for kind, name in reversed(self.resources.created)
                 if _resource(kind, name, self.resources.namespace) not in retained
             ]
-            self.resources.cleanup_owned(selected)
+            try:
+                self.resources.cleanup_owned(selected)
+            except KubernetesError as exc:
+                if "resource_delete_identity_mismatch" in str(exc):
+                    self._retain_identity_conflict()
+                raise
             removed.extend(
                 {
                     "kind": kind,
