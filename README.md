@@ -161,12 +161,25 @@ The repository's [`toolchain-dependencies.json`](toolchain-dependencies.json) de
 names. Its version 1.0 contract is checked against the [toolchain schema](schemas/configuration/toolchain-dependencies.schema.json)
 before installation; unknown fields and malformed JSON block the plan.
 
-For a different skills directory, use the Python installer:
+`--scope` selects a named location instead of the default:
+
+| `--scope` | Installed at |
+| --- | --- |
+| `codex-home` | `$CODEX_HOME/skills/ci-skills`, or `~/.codex/skills/ci-skills`; same as no flag |
+| `claude-user` | `~/.claude/skills/ci-skills` |
+| `claude-project` | `<git root>/.claude/skills/ci-skills` of the repository containing the current directory |
+
+`--scope`, `--skills-dir` and `--destination` are mutually exclusive. Outside a Git repository,
+`--scope claude-project` returns `BLOCKED` with reason `agent_repository_unavailable`. `--scope` changes only the
+`ci-skills` copy;
+`glab-stack` still goes to `$REPO_ROOT/.agents/skills`. For a Claude user install:
 
 ```bash
 conda run -n ci-skills python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
-  --skills-dir ~/.claude/skills --dry-run --json
+  --scope claude-user --dry-run --json
 ```
+
+For any other skills directory, pass `--skills-dir DIR`.
 
 To upgrade an existing copy or checkout link, make a new plan and use its fingerprint:
 
