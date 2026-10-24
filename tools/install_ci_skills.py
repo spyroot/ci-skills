@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the repository's CI skill into a local Codex skills directory.
+"""Install the repository's CI skill into a local Codex or Claude skills directory.
 
 Author Mustafa Bayramov
 mbayramo@cisco.com
@@ -22,14 +22,25 @@ import sys
 import tempfile
 import time
 import uuid
-from collections.abc import Iterator, Mapping, MutableMapping, MutableSequence, Sequence
+from collections.abc import (
+    Callable,
+    Iterator,
+    Mapping,
+    MutableMapping,
+    MutableSequence,
+    Sequence,
+)
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
-from types import ModuleType
-from typing import Optional
+from types import MappingProxyType, ModuleType
+from typing import Final, Optional
 
 SKILL_NAME = "ci-skills"
+SKILLS_DIRECTORY_NAME: Final = "skills"
+CODEX_HOME_DIRECTORY_NAME: Final = ".codex"
+CLAUDE_HOME_DIRECTORY_NAME: Final = ".claude"
 JOURNAL_NAME = f".{SKILL_NAME}.install-transaction.json"
 LOCK_NAME = f".{SKILL_NAME}.install.lock"
 LOCK_WAIT_SECONDS = 30
@@ -96,8 +107,81 @@ def skills_directory() -> Path:
     """
     codex_home = os.environ.get("CODEX_HOME")
     return (
-        Path(codex_home).expanduser() if codex_home else Path.home() / ".codex"
-    ) / "skills"
+        Path(codex_home).expanduser()
+        if codex_home
+        else Path.home() / CODEX_HOME_DIRECTORY_NAME
+    ) / SKILLS_DIRECTORY_NAME
+
+
+class InstallScope(StrEnum):
+    """Named skills locations accepted by ``--scope``."""
+
+    CODEX_HOME = "codex-home"
+    CLAUDE_USER = "claude-user"
+    CLAUDE_PROJECT = "claude-project"
+
+
+def repository_root(working_directory: Path) -> Path:
+    """Resolve the Git repository that contains the working directory.
+
+    :param working_directory: Directory inside the consuming repository.
+    :returns: Repository root reported by ``git rev-parse --show-toplevel``.
+    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when the directory is not
+        inside a Git repository or Git cannot be run.
+    """
+    repository = _git(working_directory, "rev-parse", "--show-toplevel")
+    if repository is None:
+        raise AgentProfileError(AgentProfileReason.REPOSITORY_UNAVAILABLE)
+    return Path(repository)
+
+
+def claude_user_skills_directory() -> Path:
+    """Resolve the Claude user skills directory at invocation time.
+
+    :returns: ``~/.claude/skills``.
+    """
+    return Path.home() / CLAUDE_HOME_DIRECTORY_NAME / SKILLS_DIRECTORY_NAME
+
+
+def claude_project_skills_directory(working_directory: Path) -> Path:
+    """Resolve the Claude project skills directory of the enclosing Git repository.
+
+    :param working_directory: Directory inside the repository that receives the skill.
+    :returns: ``<git root>/.claude/skills``.
+    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when ``working_directory``
+        is not inside a Git repository or Git cannot be run.
+    """  # noqa: DOC502 - repository_root raises AgentProfileError.
+    return (
+        repository_root(working_directory)
+        / CLAUDE_HOME_DIRECTORY_NAME
+        / SKILLS_DIRECTORY_NAME
+    )
+
+
+SCOPE_SKILLS_DIRECTORIES: Final[Mapping[InstallScope, Callable[[Path], Path]]] = (
+    MappingProxyType(
+        {
+            InstallScope.CODEX_HOME: lambda _working_directory: skills_directory(),
+            InstallScope.CLAUDE_USER: (
+                lambda _working_directory: claude_user_skills_directory()
+            ),
+            InstallScope.CLAUDE_PROJECT: claude_project_skills_directory,
+        }
+    )
+)
+
+
+def scope_skills_directory(scope: InstallScope, working_directory: Path) -> Path:
+    """Resolve the parent skills directory named by one ``--scope`` value.
+
+    :param scope: Requested install scope.
+    :param working_directory: Directory used to find the Git repository for
+        ``claude-project``; user scopes ignore it.
+    :returns: Directory that receives the ``ci-skills`` entry.
+    :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when ``claude-project`` is
+        requested outside a Git repository.
+    """  # noqa: DOC502 - The claude-project resolver raises AgentProfileError.
+    return SCOPE_SKILLS_DIRECTORIES[scope](working_directory)
 
 
 def plan_fingerprint(plan: JSONObject) -> str:
@@ -696,7 +780,8 @@ class InstallerCLI:
         :param parser: Parser used to report argument errors consistently.
         :param args: Parsed command-line namespace from ``argparse``.
         :param started: Monotonic timestamp captured before parsing began.
-        :raises SystemExit: If the explicit destination is not an absolute skill path.
+        :raises SystemExit: If the explicit destination is not an absolute skill path,
+            or ``--scope claude-project`` runs outside a Git repository.
         :raises OSError: If the destination cannot be resolved on this filesystem.
         """  # noqa: DOC502 - Destination resolution and parser errors propagate failures.
         self.parser = parser
@@ -736,6 +821,15 @@ class InstallerCLI:
             help=(
                 "Codex skills directory "
                 "(default: $CODEX_HOME/skills or ~/.codex/skills)"
+            ),
+        )
+        location.add_argument(
+            "--scope",
+            choices=tuple(scope.value for scope in InstallScope),
+            help=(
+                "named skills directory: codex-home ($CODEX_HOME/skills or "
+                "~/.codex/skills), claude-user (~/.claude/skills), "
+                "claude-project (<git root>/.claude/skills of the current directory)"
             ),
         )
         location.add_argument(
@@ -818,8 +912,16 @@ class InstallerCLI:
         """Resolve the parent skills directory from mutually exclusive inputs.
 
         :returns: Directory containing the installed ``ci-skills`` entry.
-        :raises SystemExit: If ``--destination`` is not an absolute ci-skills path.
+        :raises SystemExit: If ``--destination`` is not an absolute ci-skills path,
+            or a repository scope runs outside a Git repository.
         """  # noqa: DOC502 - parser.error exits when the destination is invalid.
+        if self.args.scope is not None:
+            try:
+                return scope_skills_directory(InstallScope(self.args.scope), Path.cwd())
+            except AgentProfileError as exc:
+                self.parser.error(
+                    f"--scope {self.args.scope}: {exc.reason}: {RECOVERY[exc.reason]}"
+                )
         skills_dir = self.args.skills_dir or skills_directory()
         if self.args.destination is not None:
             if (
@@ -971,10 +1073,7 @@ class InstallerCLI:
         :raises TypeError: If source or profile metadata has an invalid shape.
         :raises ValueError: If source or profile metadata cannot be decoded or validated.
         """  # noqa: DOC503 - Profile construction and fingerprint helpers propagate failures.
-        repository = _git(Path.cwd(), "rev-parse", "--show-toplevel")
-        if repository is None:
-            raise AgentProfileError(AgentProfileReason.REPOSITORY_UNAVAILABLE)
-        profile = AgentProfile(SOURCE.parent, Path(repository))
+        profile = AgentProfile(SOURCE.parent, repository_root(Path.cwd()))
         agent_plan = profile.plan()
         fingerprint = plan_fingerprint(plan)
         plan["agent"] = agent_plan
