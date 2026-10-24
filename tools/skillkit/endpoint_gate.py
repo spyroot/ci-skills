@@ -19,10 +19,12 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from enum import IntEnum, StrEnum
 from pathlib import Path
-from typing import Optional, TypeAlias, Union
+from typing import Final, Optional, TypeAlias, Union
 
+from lib.python.core.catalog import TARGET_FILENAME
 from lib.python.core.endpoints import TARGET_CONTRACT, Role, TargetContract
 from lib.python.core.json_types import JSONObject
+from lib.python.core.project_binding import SMOKE_TARGET_FILENAME
 from lib.python.core.runtime import run_command
 from lib.python.sys import status
 
@@ -65,6 +67,11 @@ class ParsedTarget:
 SCHEMA_VERSION = "1.0"
 REPORT_KIND = "ci_skills_endpoints"
 CONTRACT_SOURCE = "ci-skills/lib/python/core/endpoints.py"
+# Basenames of the target format, compared without case; a fence that names one of
+# them is a target example even when it carries native-config.
+TARGET_FILENAMES: Final = frozenset(
+    name.casefold() for name in (TARGET_FILENAME, SMOKE_TARGET_FILENAME)
+)
 
 
 class Rule(StrEnum):
@@ -349,11 +356,13 @@ class TargetDocument:
 
 
 class MarkdownExamples:
-    """The fenced TOML blocks of one Markdown file that show a target file."""
+    """Read target TOML fences; native-config=path/file.toml identifies other formats."""
 
     _OPEN = re.compile(
-        r"^(?P<indent>\s*)(?P<fence>`{3,}|~{3,})\s*toml\b.*$", re.IGNORECASE
+        r"^(?P<indent>\s*)(?P<fence>`{3,}|~{3,})\s*toml\b(?P<info>.*)$",
+        re.IGNORECASE,
     )
+    _NATIVE_CONFIG = re.compile(r"(?:^|\s)native-config=(\S*)")
 
     def __init__(self, source: str, markdown: str):
         """Retain one Markdown file for fenced target-example discovery.
@@ -383,11 +392,32 @@ class MarkdownExamples:
             while end < len(lines) and not self._closes(lines[end], fence):
                 end += 1
             body = "\n".join(line[indent:] for line in lines[start:end])
-            document = TargetDocument(self.source, body, start + 1)
-            if body.strip() and not document.is_binding():
-                found.append(document)
+            if body.strip() and not self._is_native_config(opening.group("info")):
+                document = TargetDocument(self.source, body, start + 1)
+                if not document.is_binding():
+                    found.append(document)
             index = end + 1
         return tuple(found)
+
+    @classmethod
+    def _is_native_config(cls, info: str) -> bool:
+        """Recognize one explicit native TOML filename while retaining target checks.
+
+        :param info: Fence attributes after the TOML language name.
+        :returns: True for exactly one native-config path whose basename has a name
+            before .toml and is not a target filename, compared without case; a
+            missing, repeated, nameless or non-TOML value stays checked.
+        """
+        paths = cls._NATIVE_CONFIG.findall(info)
+        if len(paths) != 1:
+            return False
+        filename = Path(paths[0].replace("\\", "/")).name.casefold()
+        suffix = ".toml"
+        return (
+            filename.endswith(suffix)
+            and len(filename) > len(suffix)
+            and filename not in TARGET_FILENAMES
+        )
 
     @staticmethod
     def _closes(line: str, fence: str) -> bool:
