@@ -795,21 +795,30 @@ class BindAPI(ApiProviderCallback[ApiProviderAction]):
         """Initialize the selected provider observation once before any endpoint read.
 
         :returns: True after observing and checking the declared provider access.
-        :raises ValueError: Identity, repository selection, or required role is invalid.
+        :raises ValueError: Identity or repository selection is invalid.
+        :raises ReadToolError: The credential lacks the required provider role.
         :raises APIError: The native provider identity request fails.
         :raises OSError: The native provider process cannot start.
-        """  # noqa: DOC502 - Shared provider initialization propagates access failures.
+        """  # noqa: DOC502,DOC503 - Shared provider initialization propagates access failures.
         service = self.state.service
-        if self.action.provider == GitProvider.GITHUB:
-            establish_github_identity(
-                self.state,
-                service.session,
-                self.state.selection.repository or "",
-                service.client,
-            )
-        else:
-            establish_gitlab_identity(self.state, service.session, service.client)
-        return super().whoami()
+        try:
+            if self.action.provider == GitProvider.GITHUB:
+                establish_github_identity(
+                    self.state,
+                    service.session,
+                    self.state.selection.repository or "",
+                    service.client,
+                )
+            else:
+                establish_gitlab_identity(self.state, service.session, service.client)
+            return super().whoami()
+        except ValueError as exc:
+            reason = str(exc)
+            if not reason.startswith(
+                f"{self.action.provider.value}_required_role_missing:"
+            ):
+                raise
+            raise ReadToolError(reason, ReadExit.BLOCKED) from exc
 
     def run(self) -> JSONObject:
         """Store a private native service and report only its credential reference.
