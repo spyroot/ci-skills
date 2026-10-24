@@ -65,6 +65,7 @@ class ParsedTarget:
 SCHEMA_VERSION = "1.0"
 REPORT_KIND = "ci_skills_endpoints"
 CONTRACT_SOURCE = "ci-skills/lib/python/core/endpoints.py"
+TARGET_TEMPLATE = "target.toml.template"
 
 
 class Rule(StrEnum):
@@ -349,11 +350,13 @@ class TargetDocument:
 
 
 class MarkdownExamples:
-    """The fenced TOML blocks of one Markdown file that show a target file."""
+    """Read target TOML fences; native-config=path/file.toml identifies other formats."""
 
     _OPEN = re.compile(
-        r"^(?P<indent>\s*)(?P<fence>`{3,}|~{3,})\s*toml\b.*$", re.IGNORECASE
+        r"^(?P<indent>\s*)(?P<fence>`{3,}|~{3,})\s*toml\b(?P<info>.*)$",
+        re.IGNORECASE,
     )
+    _NATIVE_CONFIG = re.compile(r"(?:^|\s)native-config=(\S*)")
 
     def __init__(self, source: str, markdown: str):
         """Retain one Markdown file for fenced target-example discovery.
@@ -383,11 +386,26 @@ class MarkdownExamples:
             while end < len(lines) and not self._closes(lines[end], fence):
                 end += 1
             body = "\n".join(line[indent:] for line in lines[start:end])
-            document = TargetDocument(self.source, body, start + 1)
-            if body.strip() and not document.is_binding():
-                found.append(document)
+            if body.strip() and not self._is_native_config(opening.group("info")):
+                document = TargetDocument(self.source, body, start + 1)
+                if not document.is_binding():
+                    found.append(document)
             index = end + 1
         return tuple(found)
+
+    @classmethod
+    def _is_native_config(cls, info: str) -> bool:
+        """Recognize one explicit native TOML filename while retaining target checks.
+
+        :param info: Fence attributes after the TOML language name.
+        :returns: True for one native-config path ending in .toml whose basename
+            is not target.toml; missing, repeated or malformed attributes stay checked.
+        """
+        paths = cls._NATIVE_CONFIG.findall(info)
+        if len(paths) != 1:
+            return False
+        filename = Path(paths[0].replace("\\", "/")).name
+        return filename.endswith(".toml") and filename != Path(TARGET_TEMPLATE).stem
 
     @staticmethod
     def _closes(line: str, fence: str) -> bool:
@@ -631,7 +649,7 @@ class EndpointGate:
         Repository document globs whose fenced TOML examples are checked.
     """
 
-    TEMPLATE = "target.toml.template"
+    TEMPLATE = TARGET_TEMPLATE
     # Shipped documents whose fenced TOML examples show a target file. Phase
     # plans under docs/ propose future keys and are not examples of this format.
     EXAMPLE_PATTERNS = ("README.md", "ci-skills/**/*.md")

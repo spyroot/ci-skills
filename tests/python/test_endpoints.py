@@ -347,7 +347,83 @@ def test_a_binding_block_is_another_format_and_a_target_block_is_read() -> None:
     assert "harbor_url" in {use.path for use in documents[0].uses()}
 
 
+@pytest.mark.parametrize(
+    ("attributes", "native"),
+    [
+        pytest.param("native-config=gitlab-runner/config.toml", True, id="runner"),
+        pytest.param("native-config=other/settings.toml", True, id="other-provider"),
+        pytest.param("", False, id="unannotated"),
+        pytest.param("title=example", False, id="ordinary-attribute"),
+        pytest.param("native-config=ci-skills/target.toml", False, id="target"),
+        pytest.param("native-config=target.toml.template", False, id="target-template"),
+        pytest.param("native-config=", False, id="missing-filename"),
+        pytest.param("native-config=config.yaml", False, id="wrong-extension"),
+        pytest.param(
+            "native-config=config.toml native-config=other.toml",
+            False,
+            id="repeated-attribute",
+        ),
+    ],
+)
+def test_native_toml_requires_an_explicit_non_target_filename(
+    attributes: str, native: bool
+) -> None:
+    """Exclude identified native TOML while retaining ambiguous target examples.
+
+    :param attributes: Filename annotation or malformed fence metadata.
+    :param native: Whether this fence explicitly identifies another TOML format.
+    :returns: None; assertions verify extraction and retained source locations.
+    """
+    markdown = (
+        f"```toml {attributes}\n"
+        'environment = ["FF_SCRIPT_SECTIONS=1"]\n'
+        "[runners.feature_flags]\n"
+        "FF_USE_DIRECT_DOWNLOAD = true\n"
+        "```\n"
+    )
+    documents = GATE_LIB.MarkdownExamples("doc.md", markdown).documents()
+    if native:
+        assert documents == ()
+    else:
+        assert len(documents) == 1
+        assert documents[0].source == "doc.md"
+        assert documents[0].first_line == 2
+        assert "environment" in {use.path for use in documents[0].uses()}
+
+
 # --- the gate, run as a command ------------------------------------------------------
+
+
+def test_native_runner_reference_keeps_adjacent_target_validation(repo: Path) -> None:
+    """Accept native Runner configuration without hiding adjacent target errors.
+
+    :param repo: Isolated repository containing the real Runner reference.
+    :returns: None; assertions check successful classification and target rejection.
+    """
+    source = "ci-skills/references/gitlab-runner-feature-flags.md"
+    reference = repo / source
+    reference.write_text(
+        reference.read_text().replace(
+            "```toml\n", "```toml native-config=gitlab-runner/config.toml\n"
+        )
+    )
+    code, record = _gate(repo)
+    assert code == 0
+    assert record["status"] == "PASS"
+    assert not any(
+        document.startswith(f"{source}:") for document in record["documents"]
+    )
+
+    _append(
+        reference,
+        '\n```toml native-config=ci-skills/target.toml\n[gitlab]\nnamespace = "x"\n```\n',
+    )
+    code, record = _gate(repo)
+    assert code == 1
+    assert record["status"] == "FAIL"
+    assert [
+        (item["rule"], item["path"], item["source"]) for item in record["findings"]
+    ] == [("undeclared", "gitlab.namespace", source)]
 
 
 def test_the_gate_passes_the_real_documents_and_lists_the_value_keys(

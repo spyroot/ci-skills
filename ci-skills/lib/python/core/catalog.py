@@ -496,6 +496,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         ),
     },
     "toolbox.py": {
+        "references": ("Harbor authentication", "Harbor Helm OCI"),
         "kind": "toolbox",
         "purpose": "Build or delete a toolbox using the configured OpenShift and Harbor.",
         "use_when": "Build one validated toolbox specification independently of a runner.",
@@ -533,6 +534,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "are cleaned on exit.",
     },
     "harbor_push.py": {
+        "references": ("Harbor authentication", "Harbor Helm OCI"),
         "kind": "harbor_push",
         "purpose": "Copy a selected image to Harbor and verify the immutable digest.",
         "use_when": "Publish an existing image without building or creating a runner.",
@@ -565,6 +567,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "are cleaned on exit.",
     },
     "harbor_pull.py": {
+        "references": ("Harbor authentication", "Harbor Helm OCI"),
         "kind": "harbor_pull",
         "purpose": "Pull a Harbor toolbox in Kubernetes and execute its doctor.",
         "use_when": "Prove a published toolbox image works, with temporary Job cleanup.",
@@ -687,6 +690,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
     },
     "gitlab_job.py": {
+        "references": (
+            "GitLab runner configuration",
+            "GitLab Runner feature flags",
+            "GitLab Runner cache tuning",
+        ),
         "related": ("gitlab_pipeline.py", "gitlab_runner.py"),
         "kind": "gitlab_job",
         "purpose": "Get one CI job or list bounded jobs from one GitLab project.",
@@ -825,6 +833,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "returns": "The effective source, identity, origin, and numeric project or group ID.",
     },
     "gitlab_milestone.py": {
+        "references": ("GitLab milestone dates",),
         "kind": "gitlab_milestone",
         "purpose": "Create or update an exact GitLab milestone with independent read-back.",
         "use_when": "A selected project or group milestone needs a requested change.",
@@ -876,6 +885,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "returns": "A sanitized plan or verified milestone record and independent GET evidence.",
     },
     "gitlab_issue.py": {
+        "references": ("GitLab milestone dates",),
         "kind": "gitlab_issue",
         "purpose": "Create or reuse an exact GitLab bug issue with independent read-back.",
         "use_when": "A selected project needs a requested bug issue.",
@@ -1011,6 +1021,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "returns": "A plan or verified MR ID, project-local IID and milestone ID.",
     },
     "gitlab_wiki.py": {
+        "references": ("GitLab wiki content",),
         "kind": "gitlab_wiki",
         "purpose": "Create or update an exact GitLab wiki page with independent read-back.",
         "use_when": "A selected project wiki page needs requested content.",
@@ -1044,6 +1055,12 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "returns": "A sanitized plan or verified wiki slug and independent GET evidence.",
     },
     "gitlab_runner.py": {
+        "references": (
+            "GitLab runner configuration",
+            "GitLab Runner feature flags",
+            "GitLab Runner cache tuning",
+            "GitLab Runner Operator",
+        ),
         "related": ("gitlab_job.py", "gitlab_pipeline.py"),
         "kind": "gitlab_runner",
         "purpose": "Read and manage a selected GitLab runner record with verified actions.",
@@ -1438,6 +1455,38 @@ PROPOSITION_CLUSTERS: Final = MappingProxyType(
 )
 PROPOSITION_REFERENCES: Final = MappingProxyType(
     {
+        "GitLab runner configuration": {
+            "summary": "Runner record inputs, token handoff, native registration and job selection.",
+            "pointer": "references/gitlab-runner-config.md",
+        },
+        "GitLab Runner feature flags": {
+            "summary": "Feature flag keys, defaults, job scope and runner configuration precedence.",
+            "pointer": "references/gitlab-runner-feature-flags.md",
+        },
+        "GitLab Runner cache tuning": {
+            "summary": "CACHE_CHUNK_SIZE, CACHE_CONCURRENCY, units, backend limits and memory costs.",
+            "pointer": "references/gitlab-runner-cache.md",
+        },
+        "GitLab Runner Operator": {
+            "summary": "OpenShift Runner spec.env, spec.config, ConfigMap examples and versioned properties.",
+            "pointer": "references/gitlab-runner-operator.md",
+        },
+        "GitLab milestone dates": {
+            "summary": "Milestone dates, state changes and distinct tag or label identities.",
+            "pointer": "references/gitlab-milestones.md",
+        },
+        "GitLab wiki content": {
+            "summary": "Wiki content, slug selection, markup formats and native API examples.",
+            "pointer": "references/gitlab-wiki.md",
+        },
+        "Harbor authentication": {
+            "summary": "Credential file keys, robot scope and OIDC CLI authentication.",
+            "pointer": "references/harbor-authentication.md",
+        },
+        "Harbor Helm OCI": {
+            "summary": "Chart coordinates, Helm registry login, publishing and installation.",
+            "pointer": "references/harbor-helm-oci.md",
+        },
         "access": {
             "summary": "Selected authority and credential sources.",
             "pointer": "references/access.md",

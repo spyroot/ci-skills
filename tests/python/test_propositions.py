@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 import yaml
 from conftest import (
     REPO_ROOT,
@@ -54,7 +55,6 @@ FAKE_TOOL = '#!/bin/sh\nprintf \'{"tool": "%s"}\\n\' "$0" >> "$FAKE_JOURNAL"\nex
 if TYPE_CHECKING:
     from types import ModuleType
 
-    import pytest
     from lib.python.core.json_types import JSONObject
 
 
@@ -521,6 +521,95 @@ def test_next_verb_is_retired() -> None:
     _validate(payload)
     assert payload["error"] == {"reason": "path_unknown", "input": "next"}
     assert payload["tools"] == {} and payload["reference"] == []
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_stems"),
+    [
+        (
+            command,
+            (
+                "gitlab-runner-config",
+                "gitlab-runner-feature-flags",
+                "gitlab-runner-cache",
+                "gitlab-runner-operator",
+            ),
+        )
+        for command in ("gitlab_runner.py", "gitlab_job.py")
+    ]
+    + [
+        ("gitlab_milestone.py", ("gitlab-milestones",)),
+        ("gitlab_issue.py", ("gitlab-milestones",)),
+        ("gitlab_wiki.py", ("gitlab-wiki",)),
+    ]
+    + [
+        (command, ("harbor-authentication", "harbor-helm-oci"))
+        for command in ("toolbox.py", "harbor_push.py", "harbor_pull.py")
+    ],
+)
+def test_task_references_route_to_related_commands_and_read_installed_text(
+    command: str,
+    expected_stems: tuple[str, ...],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Resolve focused task references from their command without unrelated offers.
+
+    :param command: Installed command whose task references must be discoverable.
+    :param expected_stems: Exact reference files expected at this related-tool node.
+    :param capsys: Captures public parser output while following returned pointers.
+    :returns: None; assertions prove routing, exclusion and installed section reads.
+    """
+    references = {
+        "gitlab-runner-config": ("GitLab runner configuration", "Record fields"),
+        "gitlab-runner-feature-flags": (
+            "GitLab Runner feature flags",
+            "Selected keys",
+        ),
+        "gitlab-runner-cache": ("GitLab Runner cache tuning", "Keys"),
+        "gitlab-runner-operator": ("GitLab Runner Operator", "Properties"),
+        "gitlab-milestones": ("GitLab milestone dates", "Fields and dates"),
+        "gitlab-wiki": ("GitLab wiki content", "Fields and format"),
+        "harbor-authentication": ("Harbor authentication", "Select credentials"),
+        "harbor-helm-oci": ("Harbor Helm OCI", "Values"),
+    }
+    names = {name for name, _ in references.values()}
+    expected_names = {references[stem][0] for stem in expected_stems}
+    offered = _entries(CATALOG.proposition(command))
+    assert set(offered) & names == expected_names
+    assert not names & set(_entries(CATALOG.proposition("storage_report.py")))
+
+    node = _reference_cli(capsys, command, "--json")
+    assert command in node["tools"]
+    readable = _entries(node)
+    assert set(readable) & names == expected_names
+    unrelated = _reference_cli(capsys, "storage_report.py", "--json")
+    assert not names & set(_entries(unrelated))
+
+    for stem in expected_stems:
+        name, heading = references[stem]
+        pointer = f"references/{stem}.md"
+        slug = CATALOG.reference_slug(name)
+        assert offered[name]["pointer"] == f"get {slug}"
+        assert offered[name]["summary"]
+        assert readable[name] == offered[name]
+        assert _registered_file(name) == SCRIPT_ROOT.parent / pointer
+        sections = _reference_cli(
+            capsys, *shlex.split(readable[name]["pointer"]), "--json"
+        )
+        assert len(sections["reference"]) == 1
+        root = _reference_cli(
+            capsys, *shlex.split(sections["reference"][0]["pointer"]), "--json"
+        )
+        section = _reference_cli(
+            capsys, *shlex.split(_entries(root)[heading]["pointer"]), "--json"
+        )
+        anchor = heading.lower().replace(" ", "-")
+        assert section["document"] == slug
+        assert section["anchor"] == anchor
+        source = (SCRIPT_ROOT.parent / pointer).read_text(encoding="utf-8")
+        start = source.index(f"## {heading}\n")
+        end = source.find("\n## ", start + 1)
+        assert section["text"] == source[start : end + 1 if end >= 0 else None]
 
 
 def test_get_lists_sections_then_reads_own_text_and_subsections(
