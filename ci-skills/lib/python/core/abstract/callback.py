@@ -63,6 +63,18 @@ class AbstractCallback(ABC, Generic[StateT, ActionT_co]):
         """
         raise NotImplementedError("callbacks must implement is_configured")
 
+    @abstractmethod
+    def whoami(self) -> bool:
+        """Require the provider identity and access established in invocation state.
+
+        Provider authentication callbacks establish their runtime observation once;
+        subsequent callbacks validate that retained observation without remote reads.
+
+        :returns: True only when the declared provider requirements are satisfied.
+        :raises NotImplementedError: A provider base omits its identity/access hook.
+        """
+        raise NotImplementedError("callbacks must implement whoami")
+
     @property
     def action(self) -> ActionT_co:
         """Read the concrete action retained by this callback.
@@ -253,5 +265,12 @@ class LocalCallback(Callback[StateT, ActionT_co]):
         """Accept a local callback whose required action was already constructed.
 
         :returns: True because this plugin has no external configuration.
+        """
+        return True
+
+    def whoami(self) -> bool:
+        """Accept an action whose execution requires no provider identity.
+
+        :returns: True because this callback performs no external provider operation.
         """
         return True

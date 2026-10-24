@@ -10,9 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 from argparse import Namespace
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from lib.python.core.cli import Collector
+from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.gitlab.job_read import collect_gitlab_job
 from lib.python.core.json_types import (
     JSONObject,
@@ -144,20 +146,23 @@ def _evidence(result: JSONObject) -> MutableMapping[str, JSONValue]:
 
 
 def collect_live_checks(
-    target: Target, args: Namespace, receipt: MutableMapping[str, JSONValue]
+    target: Target,
+    args: Namespace,
+    receipt: MutableMapping[str, JSONValue],
+    *,
+    state: DeliveryState | None = None,
 ) -> MutableMapping[str, JSONValue]:
     """Run independent collectors and attach their access evidence to a receipt.
 
     :param target: Bound target shared by all selected collectors.
     :param args: Optional GitLab job URL and Ceph namespace enabling extra reads.
     :param receipt: Mutable access receipt updated with live checks and blockers.
+    :param state: Established provider runtime shared by all selected collectors.
     :returns: Same receipt with ``live_checks``, aggregate status, and sorted
         blocking collector names.
     :raises RuntimeError: If the worker pool cannot start or submit its diagnostic reads.
     """  # noqa: DOC502 - Executor setup and task submission may fail.
-    tasks: MutableMapping[
-        str, tuple[Callable[[Target, Namespace], JSONObject], Namespace]
-    ] = {}
+    tasks: MutableMapping[str, tuple[Collector, Namespace]] = {}
     if "kubernetes" in target.active_surfaces:
         tasks.update(_kubernetes_checks())
     if "gitlab" in target.active_surfaces and getattr(args, "job_url", None):
@@ -183,7 +188,7 @@ def collect_live_checks(
     if tasks:
         with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
             futures = {
-                pool.submit(function, target, options): name
+                pool.submit(function, target, options, state=state): name
                 for name, (function, options) in tasks.items()
             }
 
@@ -219,9 +224,7 @@ def collect_live_checks(
     return receipt
 
 
-def _kubernetes_checks() -> Mapping[
-    str, tuple[Callable[[Target, Namespace], JSONObject], Namespace]
-]:
+def _kubernetes_checks() -> Mapping[str, tuple[Collector, Namespace]]:
     """Select the standard Kubernetes collectors and their default read options.
 
     :returns: Storage, event, and Cilium collectors for a configured Kubernetes target.

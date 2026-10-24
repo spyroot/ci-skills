@@ -13,7 +13,7 @@ import socket
 import subprocess
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Optional
 
@@ -21,6 +21,8 @@ from lib.python.access.sources import (
     _token_source,
     resolve_skill_identity,
 )
+from lib.python.core.abstract.skill_state import SkillState
+from lib.python.core.abstract.spec import load_spec
 from lib.python.core.catalog import (
     GITLAB_VARIABLES,
 )
@@ -183,6 +185,7 @@ def bind_gitlab_session(
     target_reference: str,
     target_source: str,
     revision: Optional[str] = None,
+    invocation: SkillState | None = None,
 ) -> BoundGitLabSession:
     """Bind the selected target through the shared authentication interface.
 
@@ -191,12 +194,20 @@ def bind_gitlab_session(
     :param target_reference: Exact project or group reference.
     :param target_source: Reportable source of the selected target.
     :param revision: Explicit skill revision for an installed copy.
+    :param invocation: Existing workflow state; otherwise start a standalone invocation.
     :returns: Bound session for access read-back and API operations.
     :raises TargetError: If target selection or credential binding fails.
+    :raises OSError: The required default specification cannot be read.
+    :raises ValueError: The required specification is invalid JSON.
+    :raises TypeError: The required specification has an invalid object shape.
     """  # noqa: DOC502 - ConfiguredGitLabAuthentication.bind validates inputs.
-    return ConfiguredGitLabAuthentication(target).bind(
-        target_kind=target_kind,
-        target_reference=target_reference,
-        target_source=target_source,
-        revision=revision,
+    state = invocation if invocation is not None else SkillState(spec=load_spec())
+    return replace(
+        ConfiguredGitLabAuthentication(target).bind(
+            target_kind=target_kind,
+            target_reference=target_reference,
+            target_source=target_source,
+            revision=revision,
+        ),
+        invocation=state,
     )

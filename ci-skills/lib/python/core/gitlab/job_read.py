@@ -13,7 +13,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Final, Optional, Union
 from urllib.parse import quote, urlsplit
 
-from lib.python.access.gitlab import gitlab_env, glab_argv
+from lib.python.access.gitlab import glab_argv, require_gitlab_access
+from lib.python.core.abstract.skill_state import SkillState
+from lib.python.core.cli_api import APISession
 from lib.python.core.collection import CommandReadError, _read_json, _search
 from lib.python.core.json_types import JSONValue
 from lib.python.core.report import report
@@ -148,26 +150,37 @@ def collect_gitlab_job(
     target: Union[Target, GitLabOperationTarget],
     args: Namespace,
     credential: Optional[Mapping[str, Optional[str]]] = None,
+    *,
+    state: SkillState | None = None,
+    session: APISession | None = None,
 ) -> MutableMapping[str, JSONValue]:
     """Read one GitLab job and its referenced pipeline and runner.
 
     :param target: GitLab target selected by the caller.
     :param args: Required job URL and optional text-search filter.
-    :param credential: Bound child environment; when absent, a full target
-        resolves its own GitLab credentials.
+    :param credential: Bound child environment; omission reuses the verified session.
+    :param state: Invocation whose identity initializer has already completed.
+    :param session: Verified native session; omission uses the diagnostic state's session.
     :returns: Reduced job report, bounded trace and per-reference errors.
     :raises ValueError: The URL or GitLab authority is absent/invalid, or an
-        operation target lacks its injected credential environment.
+        invocation lacks its verified identity and session.
     :raises OSError: A native job, metadata or trace process cannot be started.
     """  # noqa: DOC503 - URL, target and native I/O failures propagate.
     if not getattr(args, "job_url", None):
         raise ValueError("--job-url is required; see --describe for the contract")
     selected = target.require_gitlab() if isinstance(target, Target) else target.gitlab
     project, job_id = gitlab_job_reference(args.job_url, selected.host)
+    if state is None:
+        raise ValueError("gitlab_identity_state_missing")
+    if session is None:
+        session = getattr(state, "gitlab_session", None)
+    if session is None or session.host != selected.host:
+        raise ValueError("bound_gitlab_credential_required")
+    require_gitlab_access(state, session)
     if credential is None:
-        if isinstance(target, GitLabOperationTarget):
-            raise ValueError("bound_gitlab_credential_required")
-        credential = gitlab_env(target)
+        credential = session.environment
+    elif credential != session.environment:
+        raise ValueError("gitlab_credential_binding_mismatch")
     base = f"projects/{quote(project, safe='')}"
     filters = {"job_url": args.job_url, "search": args.search}
     try:

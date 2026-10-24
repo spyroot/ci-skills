@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional
 
+from lib.python.access.gitlab import require_gitlab_access
 from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import ActionT_co
@@ -136,8 +137,25 @@ class GitlabCallback(Callback[GitLabState, ActionT_co]):
         """  # noqa: DOC502 - Direct callers must supply the existing service.
         if not hasattr(self.state, "gitlab"):
             raise TargetError(f"{SkillPluginType.GITLAB.value}_configuration_missing")
-        self.state.configured_session = self.gitlab.session
+        self.state.configured_session = self.state.gitlab.session
         return {}
+
+    def whoami(self) -> bool:
+        """Require the identity established by GitLab authentication once.
+
+        :returns: True after comparing retained access with the declaration.
+        :raises ValueError: Identity, required role, or credential binding is absent.
+        """  # noqa: DOC502 - The shared provider guard validates retained evidence.
+        require_gitlab_access(self.state, self.state.configured_session)
+        return True
+
+    @property
+    def role(self) -> str | None:
+        """Read the actual role retained by the first authentication callback.
+
+        :returns: The observed role, or None before its prerequisite ran.
+        """
+        return self.state.gitlab_runtime.role
 
     def is_configured(self) -> bool:
         """Check that the shared state holds this plugin's concrete session.
@@ -152,8 +170,11 @@ class GitlabCallback(Callback[GitLabState, ActionT_co]):
 
         :returns: GitLab client, bound session, and verified numeric target.
         :raises AttributeError: Authentication has not populated the shared service.
+        :raises ValueError: Runtime access is absent or no longer matches the binding.
         """  # noqa: DOC502 - reading the uninitialized state field raises AttributeError.
-        return self.state.gitlab
+        service = self.state.gitlab
+        require_gitlab_access(self.state, service.session)
+        return service
 
     @property
     def complete(self) -> bool:

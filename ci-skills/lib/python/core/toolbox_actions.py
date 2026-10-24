@@ -555,6 +555,8 @@ class HarborBuild(RegistryToolboxCallback):
         )
         builder = BuildToolbox(build)
         builder.bind(self.state)
+        if builder.whoami() is not True:
+            raise ValueError("toolbox_identity_preflight_failed")
         self._builder = builder
         builder.collect()
         self._candidate_snapshot = TagSnapshot.capture(

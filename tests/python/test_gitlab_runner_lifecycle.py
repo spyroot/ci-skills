@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_gitlab_session, import_script_module
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
@@ -116,18 +116,20 @@ def _bound_session(
     :param credential_digest: Credential continuity digest recorded in receipts.
     :returns: Bound GitLab session matching the production workflow shape.
     """
-    return GITLAB_SESSION.BoundGitLabSession(
-        origin=plan.origin,
-        host="gitlab.example.test",
-        target_kind=plan.target_kind,
-        target_reference=plan.target_reference,
-        target_source=plan.target_source,
-        target_file=Path(plan.target_file),
-        credential_source=credential_source,
-        credential_digest=credential_digest,
-        execution_host="unit-host",
-        skill=skill,
-        environment={},
+    return authenticated_gitlab_session(
+        GITLAB_SESSION.BoundGitLabSession(
+            origin=plan.origin,
+            host="gitlab.example.test",
+            target_kind=plan.target_kind,
+            target_reference=plan.target_reference,
+            target_source=plan.target_source,
+            target_file=Path(plan.target_file),
+            credential_source=credential_source,
+            credential_digest=credential_digest,
+            execution_host="unit-host",
+            skill=skill,
+            environment={},
+        )
     )
 
 
@@ -522,7 +524,11 @@ def test_runner_live_operation_refuses_unverified_skill_before_api(
         GITLAB_ACTION, "resolve_gitlab_target", lambda *a, **kw: (object(), "unit")
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *a, **kw: plan)
-    monkeypatch.setattr(GITLAB_ACTION, "bind_gitlab_session", lambda *a, **kw: session)
+    monkeypatch.setattr(
+        GITLAB_ACTION,
+        "bind_gitlab_session",
+        lambda *a, **kw: authenticated_gitlab_session(session, kw.get("invocation")),
+    )
     monkeypatch.setattr(
         GITLAB_ACTION,
         "GlabAPIClient",
@@ -553,7 +559,11 @@ def test_runner_read_cli_writes_portable_live_receipt(
         GITLAB_ACTION, "resolve_gitlab_target", lambda *a, **kw: (object(), "unit")
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *a, **kw: plan)
-    monkeypatch.setattr(GITLAB_ACTION, "bind_gitlab_session", lambda *a, **kw: session)
+    monkeypatch.setattr(
+        GITLAB_ACTION,
+        "bind_gitlab_session",
+        lambda *a, **kw: authenticated_gitlab_session(session, kw.get("invocation")),
+    )
     monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda **kw: object())
     monkeypatch.setattr(
         GITLAB_ACTION,

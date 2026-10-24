@@ -10,6 +10,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -22,11 +23,18 @@ from typing import Final, Optional
 from urllib.parse import quote
 
 from lib.python.access.credentials import bind_sources
-from lib.python.access.kubernetes import kubectl_argv, kubernetes_env, oc_argv
+from lib.python.access.kubernetes import (
+    cluster_admin_permissions,
+    kubectl_argv,
+    kubernetes_env,
+    oc_argv,
+)
 from lib.python.access.sources import Sources
 from lib.python.core.abstract.callback import Callback
+from lib.python.core.abstract.provider_runtime import KubernetesRuntime
 from lib.python.core.abstract.skill_action import ActionT_co
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
+from lib.python.core.abstract.skill_state import SkillState
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
 from lib.python.core.json_types import (
@@ -84,6 +92,7 @@ class KubernetesService:
 
     :param target: Selected context, server, and bound credential sources.
     :param timeout: Per-command runtime bound in seconds.
+    :param state: Shared declaration and observed access; None prevents operations.
     :ivar identity: Cluster username read after target verification.
     :ivar configuration: Concrete Kubernetes selection retained at construction.
 
@@ -97,6 +106,11 @@ class KubernetesService:
 
         Per-command runtime bound in seconds.
 
+    .. attribute :: state
+        :type: Optional[SkillState]
+
+        Shared invocation state required by every operational command.
+
     .. attribute :: identity
         :type: str
 
@@ -106,12 +120,15 @@ class KubernetesService:
         :type: KubernetesTarget
 
         Concrete Kubernetes selection retained at construction.
+
     """
 
     target: Target
     timeout: int = DEFAULT_COMMAND_TIMEOUT
+    state: Optional[SkillState] = field(default=None, repr=False)
     identity: str = field(init=False, repr=False)
     configuration: KubernetesTarget = field(init=False, repr=False)
+    _observed_permissions: tuple[str, ...] = field(default=(), init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Reject an unusable service before any provider command is built.
@@ -125,6 +142,46 @@ class KubernetesService:
         if selected is None:
             raise TargetError("kubernetes_target_missing")
         self.configuration = selected
+
+    @property
+    def credential_identity(self) -> str:
+        """Bind retained access to this context and frozen authentication source.
+
+        :returns: Non-secret digest of the bound context, files, and source digests.
+        :raises TargetError: The service has no frozen Kubernetes credential source.
+        """  # noqa: DOC502 - Sources.require validates the bound provider source.
+        sources = self.target.sources
+        if not isinstance(sources, Sources):
+            raise TargetError("kubernetes_credential_unresolved")
+        source = sources.require(SkillPluginType.KUBERNETES)
+        binding = (
+            self.configuration.context,
+            source.reference,
+            tuple(str(path) for path in sources.kubeconfig_files),
+            sources.kubeconfig_digests,
+        )
+        return hashlib.sha256(json.dumps(binding).encode()).hexdigest()
+
+    def require_access(self) -> None:
+        """Check retained identity and declared access without a provider request.
+
+        :raises ValueError: Invocation state, expected role, or observed access is missing
+            or differs from the current authority and credential binding.
+        :raises TargetError: The service has no frozen Kubernetes credential source.
+        """  # noqa: DOC502,DOC503 - Shared state and binding helpers validate retained access.
+        if self.state is None:
+            raise ValueError("kubernetes_identity_preflight_missing")
+        expected = self.state.provider_spec(SkillPluginType.KUBERNETES).get(
+            "cluster_role"
+        )
+        if not isinstance(expected, str) or not expected:
+            raise ValueError("kubernetes_cluster_role_declaration_missing")
+        self.state.require_runtime(
+            SkillPluginType.KUBERNETES,
+            expected,
+            authority=self.configuration.server,
+            credential_identity=self.credential_identity,
+        )
 
     def command(
         self,
@@ -144,6 +201,29 @@ class KubernetesService:
         :raises TargetError: If the bound kubeconfig changed before execution.
         :raises OSError: If the native process cannot start or its output cannot be read.
         """  # noqa: DOC502,DOC503 - Binding and native process failures propagate.
+        self.require_access()
+        return self._command(
+            *args, openshift=openshift, input_data=input_data, timeout=timeout
+        )
+
+    def _command(
+        self,
+        *args: str,
+        openshift: bool = False,
+        input_data: Optional[bytes] = None,
+        timeout: Optional[float] = None,
+    ) -> CommandResult:
+        """Execute the private transport used by initial identity and guarded operations.
+
+        :param *args: Native arguments after the selected context flags.
+        :param openshift: Select the OpenShift CLI.
+        :param input_data: Optional exact process input, excluded from evidence.
+        :param timeout: Optional remaining seconds, capped by the service timeout.
+        :returns: Bounded native process result.
+        :raises ValueError: The effective timeout is not positive.
+        :raises TargetError: Bound kubeconfig contents have changed.
+        :raises OSError: The native process cannot start or its output cannot be read.
+        """  # noqa: DOC502,DOC503 - Bound transport helpers propagate native failures.
         command_timeout = (
             self.timeout if timeout is None else min(self.timeout, timeout)
         )
@@ -182,6 +262,16 @@ class KubernetesService:
             openshift=openshift,
             **({"timeout": timeout} if timeout is not None else {}),
         )
+        return self._json_response(result)
+
+    @staticmethod
+    def _json_response(result: CommandResult) -> JSONDocument:
+        """Decode one bounded native response for operational and identity reads.
+
+        :param result: Result from the bound native transport.
+        :returns: Decoded provider object or array.
+        :raises KubernetesError: The command failed or did not return an object or array.
+        """
         if result.returncode:
             raise KubernetesError(error_class(result))
         try:
@@ -607,6 +697,7 @@ class KubernetesService:
         :raises KubernetesError: If the wait fails, Build is absent, or phase differs.
         :raises TargetError: If the bound kubeconfig changed before execution.
         """  # noqa: DOC502,DOC503 - helpers propagate their declared errors
+        self.require_access()
         deadline = time.monotonic() + self.timeout
         observed_phase = None
         try:
@@ -632,6 +723,7 @@ class KubernetesService:
                 time.sleep(min(BUILD_POLL_SECONDS, remaining))
         finally:
             if trace_enabled() and observed_phase != BUILD_COMPLETE_PHASE:
+                self.require_access()
                 result = run_command_tail(
                     oc_argv(
                         self.target,
@@ -658,7 +750,19 @@ class KubernetesService:
                 )
 
     def verify(self) -> str:
-        """Verify the selected context, API server, and native identity.
+        """Read the identity already verified by the authentication initializer.
+
+        :returns: Kubernetes username retained in this invocation's runtime.
+        :raises ValueError: Retained access or the declared role is unavailable.
+        :raises TargetError: No Kubernetes credential source is bound.
+        """  # noqa: DOC502,DOC503 - require_access validates retained state and binding.
+        self.require_access()
+        if self.state is None or self.state.kubernetes_runtime.identity is None:
+            raise ValueError("kubernetes_identity_preflight_missing")
+        return self.state.kubernetes_runtime.identity
+
+    def _verify_identity(self) -> str:
+        """Verify the selected context, API server, and native identity once.
 
         This operation-specific proof does not replace or claim the broader
         diagnostic ``kubernetes_access`` receipt.
@@ -667,7 +771,9 @@ class KubernetesService:
         :raises KubernetesError: If context, server, or identity read-back differs.
         :raises TargetError: If the bound kubeconfig changed.
         """  # noqa: DOC503 - Native command setup checks the bound kubeconfig.
-        configuration = self.json("config", "view", "--minify", "-o", "json")
+        configuration = self._json_response(
+            self._command("config", "view", "--minify", "-o", "json")
+        )
         if not isinstance(configuration, dict):
             raise KubernetesError("invalid_context_response")
         expected = self.configuration
@@ -698,7 +804,7 @@ class KubernetesService:
         if not isinstance(cluster, dict) or cluster.get("server") != expected.server:
             raise KubernetesError("api_server_mismatch")
 
-        whoami = self.json("auth", "whoami", "-o", "json")
+        whoami = self._json_response(self._command("auth", "whoami", "-o", "json"))
         if not isinstance(whoami, dict):
             raise KubernetesError("invalid_identity_response")
         status = whoami.get("status")
@@ -784,14 +890,32 @@ class K8SCallback(Callback[DeliveryState, ActionT_co]):
         """
         return hasattr(self.state, "kubernetes_target")
 
+    def whoami(self) -> bool:
+        """Check the initializer's retained identity and access using state only.
+
+        :returns: True after retained identity and declared access match.
+        :raises ValueError: The initializer is missing or declared access is unmet.
+        :raises TargetError: The service has no credential-bound Kubernetes target.
+        """  # noqa: DOC502,DOC503 - The service property validates shared access and binding.
+        if self.state.kubernetes_runtime.cluster_role is None:
+            raise ValueError("kubernetes_identity_preflight_missing")
+        self.kubernetes.require_access()
+        return True
+
     @property
     def kubernetes(self) -> KubernetesService:
         """Read the service established by the preceding authentication action.
 
         :returns: The workflow's verified Kubernetes service.
+        :raises ValueError: The service belongs to another invocation or access is missing.
+        :raises TargetError: The bound Kubernetes credential source is unavailable.
         :raises AttributeError: If composition omitted Kubernetes authentication.
-        """  # noqa: DOC502 - Missing composition state raises AttributeError.
-        return self.state.kubernetes
+        """  # noqa: DOC502,DOC503 - Shared state and the service validate their binding.
+        service = self.state.kubernetes
+        if service.state is not self.state:
+            raise ValueError("kubernetes_runtime_state_mismatch")
+        service.require_access()
+        return service
 
 
 class K8SAuth(K8SCallback[ProviderAuthAction]):
@@ -833,22 +957,56 @@ class K8SAuth(K8SCallback[ProviderAuthAction]):
         self.state.kubernetes_target = target
         return {}
 
-    def run(self) -> JSONObject:
-        """Freeze existing credentials and retain the verified private service.
+    def whoami(self) -> bool:
+        """Establish actual identity and effective administration once for this provider.
 
-        :returns: Safe identity and selected context/server evidence.
+        :returns: True after initialization and the declared access check.
+        :raises ValueError: Authorization is denied, the declaration is missing or
+            unmet, or an existing observation belongs to another binding.
         :raises KubernetesError: If live context or identity verification fails.
         :raises TargetError: If target or credential source binding is invalid.
         :raises OSError: If configured credential inputs cannot be read.
-        """  # noqa: DOC502 - Credential binding and service verification can fail.
+        """  # noqa: DOC502,DOC503 - Shared state, credential and native helpers validate access.
         target = self.state.kubernetes_target
-        service = KubernetesService(target, self.action.timeout)
-        identity = service.verify()
-        self.state.kubernetes = service
-        evidence = {
-            "identity": identity,
+        if self.action.target.kubernetes != target.kubernetes:
+            raise ValueError("kubernetes_runtime_authority_mismatch")
+        service = KubernetesService(target, self.action.timeout, state=self.state)
+        if isinstance(self.action.target.sources, Sources):
+            selected_service = KubernetesService(
+                self.action.target, self.action.timeout, state=self.state
+            )
+            if selected_service.credential_identity != service.credential_identity:
+                raise ValueError("kubernetes_runtime_credential_mismatch")
+        if self.state.kubernetes_runtime.cluster_role is None:
+            identity = service._verify_identity()
+            service._observed_permissions = cluster_admin_permissions(
+                lambda arguments: service._command(*arguments)
+            )
+            self.state.establish_runtime(
+                self.plugin_type,
+                KubernetesRuntime(
+                    role="cluster-admin",
+                    identity=identity,
+                    authority=service.configuration.server,
+                    credential_identity=service.credential_identity,
+                ),
+            )
+            self.state.kubernetes = service
+        super().whoami()
+        runtime = self.state.kubernetes_runtime
+        self.state.access_evidence[KUBERNETES_SERVICE_KEY] = {
+            "identity": runtime.identity,
             "context": service.configuration.context,
             "server": service.configuration.server,
         }
-        self.state.access_evidence[KUBERNETES_SERVICE_KEY] = evidence
-        return evidence
+        return True
+
+    def run(self) -> JSONObject:
+        """Reuse initialized Kubernetes identity and declared access from shared state.
+
+        :returns: Safe access evidence retained by the first whoami hook.
+        :raises ValueError: The initializer is missing or declared access is unmet.
+        :raises TargetError: The bound credential source is unavailable.
+        """  # noqa: DOC502 - The provider base validates retained access.
+        super().whoami()
+        return self.state.access_evidence[KUBERNETES_SERVICE_KEY]

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import pytest
-from conftest import import_script_module
+from conftest import configure_kubernetes_auth, import_script_module
 from test_artifact_storage import FilePodCluster
 from test_tool_pod import MemoryCluster
 
@@ -158,23 +158,13 @@ def bind_provider(monkeypatch: pytest.MonkeyPatch, cluster: PlanningCluster) -> 
     :param cluster: Finite provider responses and mutation journal.
     """
 
-    def configure(callback: KUBERNETES.K8SAuth) -> dict[str, object]:
-        callback.state.kubernetes_target = callback.action.target
-        return {}
-
-    def authenticate(callback: KUBERNETES.K8SAuth) -> dict[str, object]:
-        callback.state.kubernetes = cluster
-        callback.state.access_evidence["kubernetes"] = {"identity": "unit-user"}
-        return {"identity": "unit-user"}
-
     def publication(url: str, timeout: int) -> str:
         assert url.endswith("/4.19.26/sha256sum.txt")
         assert timeout > 0
         return "a" * 64 + "  openshift-client-linux-amd64-rhel9-4.19.26.tar.gz\n"
 
     monkeypatch.setattr(CLI, "bind_sources", lambda target, **_kwargs: target)
-    monkeypatch.setattr(KUBERNETES.K8SAuth, "read_config", configure)
-    monkeypatch.setattr(KUBERNETES.K8SAuth, "run", authenticate)
+    configure_kubernetes_auth(monkeypatch, cluster)
     monkeypatch.setattr(DISCOVERY, "_published_text", publication)
 
 

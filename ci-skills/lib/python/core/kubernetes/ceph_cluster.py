@@ -16,6 +16,7 @@ from typing import Optional
 
 from lib.python.access.kubernetes import kubernetes_env, oc_argv
 from lib.python.core.cli_api import response_decoder
+from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.json_types import JSONObject, JSONValue, json_object, json_objects
 from lib.python.core.kubernetes.kubernetes import KubernetesService
 from lib.python.core.kubernetes.objects import KubernetesObject
@@ -385,11 +386,14 @@ def _osd_tree(payload: JSONValue) -> tuple[Sequence[JSONObject], Sequence[JSONOb
     return CephOsdTree(payload).observations()
 
 
-def discover_ceph_operator(target: Target, namespace: str) -> str:
+def discover_ceph_operator(
+    target: Target, namespace: str, *, state: DeliveryState | None = None
+) -> str:
     """Discover the unique Rook operator Deployment in the selected namespace.
 
     :param target: Bound Kubernetes authority for the read-only Deployment query.
     :param namespace: Caller-selected Ceph namespace used to scope discovery.
+    :param state: Shared declaration and previously observed Kubernetes access.
     :returns: Live Deployment name matching the established default operator.
     :raises ValueError: If the default Deployment is absent or ambiguous,
         or its name or namespace does not match the requested selection.
@@ -398,7 +402,7 @@ def discover_ceph_operator(target: Target, namespace: str) -> str:
     :raises TargetError: If the target lacks Kubernetes authority or bound sources change.
     :raises OSError: If the native discovery process cannot be started.
     """  # noqa: DOC503 - Discovery, field readers, and native I/O can fail.
-    payload = KubernetesService(target).json(
+    payload = KubernetesService(target, state=state).json(
         "-n",
         namespace,
         "get",
@@ -431,19 +435,24 @@ def discover_ceph_operator(target: Target, namespace: str) -> str:
 class CephClusterRead:
     """Collect independent Ceph queries and combine their validated observations."""
 
-    def __init__(self, target: Target, args: Namespace):
+    def __init__(
+        self, target: Target, args: Namespace, *, state: DeliveryState | None = None
+    ):
         """Validate caller selection and construct the known read-only queries.
 
         :param target: Bound Kubernetes authority used by every oc command.
         :param args: Namespace, optional operator, config path, node and Pod filters.
             An omitted operator resolves the default Deployment by name; an omitted
             config path follows /var/lib/rook/<namespace>/<namespace>.config.
+        :param state: Shared declaration and previously observed Kubernetes access.
         :raises ValueError: If namespace, operator, config path, or condition is invalid.
         :raises TypeError: If operator discovery returns malformed resource fields.
         :raises KubernetesError: If operator discovery fails or returns invalid JSON.
         :raises OSError: If the native discovery process cannot be started.
         :raises TargetError: If bound kubeconfig sources change while creating queries.
         """  # noqa: DOC503 - Discovery, field readers, and native I/O can fail.
+        KubernetesService(target, state=state).require_access()
+        self.state = state
         self.target = target
         self.args = args
         namespace = self.args.namespace
@@ -459,7 +468,7 @@ class CephClusterRead:
             raise ValueError("invalid_ceph_config_path")
         self.condition = _condition_filter(self.args.condition)
         if operator is None:
-            operator = discover_ceph_operator(target, namespace)
+            operator = discover_ceph_operator(target, namespace, state=state)
         if (
             not isinstance(operator, str)
             or not KUBERNETES_NAME.fullmatch(operator)
@@ -482,6 +491,7 @@ class CephClusterRead:
         :raises TargetError: If bound credential sources change before execution.
         :raises OSError: If a native query process cannot be started.
         """  # noqa: DOC502 - Native reads and selection helpers propagate failures.
+        KubernetesService(self.target, state=self.state).require_access()
         environment = kubernetes_env(self.target)
         with ThreadPoolExecutor(max_workers=len(self.commands)) as pool:
             futures = {
@@ -609,12 +619,13 @@ class CephClusterRead:
 
 
 def collect_ceph_cluster(
-    target: Target, args: Namespace
+    target: Target, args: Namespace, *, state: DeliveryState | None = None
 ) -> MutableMapping[str, JSONValue]:
     """Read selected Ceph health, OSD, placement-group, and Pod evidence.
 
     :param target: Bound Kubernetes target used by all read-only oc queries.
     :param args: Namespace, operator, config path, node, readiness and condition filters.
+    :param state: Shared declaration and previously observed Kubernetes access.
     :returns: Ceph report with independent query errors and PASS or PARTIAL status.
     :raises ValueError: If caller selection is invalid before query dispatch.
     :raises TypeError: If optional operator discovery returns malformed resource fields.
@@ -622,4 +633,4 @@ def collect_ceph_cluster(
     :raises TargetError: If bound Kubernetes credentials change before queries.
     :raises OSError: If a native query process cannot be started.
     """  # noqa: DOC502 - Native reads and selection helpers propagate failures.
-    return CephClusterRead(target, args).read()
+    return CephClusterRead(target, args, state=state).read()

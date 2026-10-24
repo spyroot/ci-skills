@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from importlib import import_module, util
 from pathlib import Path
 from types import ModuleType
@@ -29,7 +30,12 @@ CORE_ROOT = LIB_ROOT / "core"
 
 
 if TYPE_CHECKING:
+    from lib.python.core.abstract.skill_state import SkillState
+    from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
     from lib.python.core.json_types import JSONObject, JSONValue
+    from lib.python.core.kubernetes.kubernetes import K8SAuth, KubernetesService
+    from lib.python.core.runtime import CommandResult
+    from lib.python.core.target import Target
 
 
 def load_module(module_name: str, path: Path) -> ModuleType:
@@ -62,6 +68,294 @@ def import_script_module(module_name: str) -> ModuleType:
         sys.path.insert(0, str(SCRIPT_ROOT))
     import_module("_bootstrap")
     return import_module(module_name)
+
+
+def authenticated_gitlab_session(
+    session: BoundGitLabSession, state: SkillState | None = None
+) -> BoundGitLabSession:
+    """Initialize native identity for tests focused on later GitLab operations.
+
+    :param session: Synthetic provider session with no real credentials.
+    :param state: Existing callback invocation, or None for direct library tests.
+    :returns: Session bound to a declaration and genuine initialized runtime state.
+    """
+    access = import_script_module("lib.python.access.gitlab")
+    contexts = import_script_module("lib.python.core.gitlab.callback")
+    specifications = import_script_module("lib.python.core.abstract.spec")
+    invocation = contexts.GitLabState() if state is None else state
+    if invocation.spec is None:
+        invocation.spec = specifications.load_spec()
+    bound = (
+        session
+        if session.invocation is invocation
+        else replace(session, invocation=invocation)
+    )
+
+    class NativeIdentity:
+        """Expose only the native current-user fixture to the real initializer."""
+
+        def get_json(self, selected: BoundGitLabSession, endpoint: str) -> JSONObject:
+            """Return a native admin identity for the exact synthetic authority.
+
+            :param selected: Session chosen by the operation under test.
+            :param endpoint: Fixed identity endpoint required by initialization.
+            :returns: Nonsecret native user fields accepted by the initializer.
+            """
+            assert endpoint == "user"
+            return {
+                "id": 17,
+                "username": "unit-admin",
+                "is_admin": True,
+                "web_url": f"https://{selected.host}/unit-admin",
+            }
+
+    access.establish_gitlab_identity(invocation, bound, NativeIdentity())
+    return bound
+
+
+def _frozen_kubernetes_target(target: Target) -> Target:
+    """Bind a synthetic credential source without establishing runtime identity.
+
+    :param target: Existing test authority and optional frozen sources.
+    :returns: Same target when bound, otherwise a copy with fixture sources.
+    """
+    sources = import_script_module("lib.python.access.sources")
+    if target.sources is not None:
+        return target
+    return replace(
+        target,
+        sources=sources.Sources(
+            github=None,
+            gitlab=None,
+            kubernetes=sources.CredentialSource("fixture:kubernetes", {}),
+            kubeconfig_files=(),
+            execution_host="unit-host",
+        ),
+    )
+
+
+def configure_kubernetes_auth(
+    monkeypatch: pytest.MonkeyPatch, selected: object
+) -> Target:
+    """Exercise real native identity initialization before swapping an operation double.
+
+    :param monkeypatch: Fixture replacing only native responses and post-auth transport.
+    :param selected: Target for a real service, or operation double with a target field.
+    :returns: Frozen target used by the actual authentication callback.
+    """
+    kubernetes = import_script_module("lib.python.core.kubernetes.kubernetes")
+    runtime = import_script_module("lib.python.core.runtime")
+    targets = import_script_module("lib.python.core.target")
+    specifications = import_script_module("lib.python.core.abstract.spec")
+    target = selected if isinstance(selected, targets.Target) else selected.target
+    if not isinstance(target, targets.Target):
+        raise TypeError("Kubernetes auth fixture requires a Target")
+    target = _frozen_kubernetes_target(target)
+    swap = not isinstance(selected, targets.Target)
+    if swap:
+        selected.target = target
+    original_run = kubernetes.K8SAuth.run
+
+    def configure(callback: K8SAuth) -> JSONObject:
+        """Retain frozen credentials while leaving observed runtime identity null.
+
+        :param callback: Authentication callback whose genuine whoami will run next.
+        :returns: Empty local configuration evidence.
+        """
+        if callback.state.spec is None:
+            callback.state.spec = specifications.load_spec()
+        callback.state.kubernetes_target = target
+        return {}
+
+    def native(
+        service: KubernetesService,
+        *args: str,
+        openshift: bool = False,
+        input_data: bytes | None = None,
+        timeout: float | None = None,
+    ) -> CommandResult:
+        """Serve only fixed native bootstrap responses and reject real operations.
+
+        :param service: Real credential-bound service created by K8SAuth.whoami.
+        :param args: Native configuration, identity, or administration probe arguments.
+        :param openshift: Native executable selector; identity uses kubectl.
+        :param input_data: Native stdin, absent during identity initialization.
+        :param timeout: Optional per-request deadline accepted by the real transport.
+        :returns: Native response consumed by the actual initializer.
+        """
+        assert not openshift and input_data is None
+        assert timeout is None or timeout > 0
+        configuration = service.configuration
+        if args == ("config", "view", "--minify", "-o", "json"):
+            document = {
+                "contexts": [
+                    {"name": configuration.context, "context": {"cluster": "unit"}}
+                ],
+                "clusters": [
+                    {"name": "unit", "cluster": {"server": configuration.server}}
+                ],
+            }
+            output = json.dumps(document)
+        elif args == ("auth", "whoami", "-o", "json"):
+            output = json.dumps({"status": {"userInfo": {"username": "unit-user"}}})
+        else:
+            assert args[:2] == ("auth", "can-i"), f"unexpected native operation: {args}"
+            output = "yes\n"
+        return runtime.CommandResult(("kubectl", *args), 0, output, "")
+
+    def authenticated(callback: K8SAuth) -> JSONObject:
+        """Keep the genuine auth result and guard while replacing later operations.
+
+        :param callback: Callback whose whoami has populated shared runtime state.
+        :returns: Actual provider authentication evidence.
+        """
+        evidence = original_run(callback)
+        if swap:
+            service = callback.state.kubernetes
+            selected.state = callback.state
+            selected.configuration = service.configuration
+            selected.require_access = service.require_access
+            callback.state.kubernetes = selected
+        return evidence
+
+    monkeypatch.setattr(kubernetes.K8SAuth, "read_config", configure)
+    monkeypatch.setattr(kubernetes.KubernetesService, "_command", native)
+    monkeypatch.setattr(kubernetes.K8SAuth, "run", authenticated)
+    return target
+
+
+def authenticated_kubernetes_service(
+    target: Target, timeout: int = 30, *, state: SkillState | None = None
+) -> KubernetesService:
+    """Provide retained cluster access to tests of later Kubernetes service behavior.
+
+    :param target: Synthetic cluster and optional frozen credential sources.
+    :param timeout: Native command bound used by the service under test.
+    :param state: Existing invocation for callback composition, or a fresh test state.
+    :returns: Real service guarded by explicit declared and observed test access.
+    """
+    contexts = import_script_module("lib.python.core.delivery_state")
+    kubernetes = import_script_module("lib.python.core.kubernetes.kubernetes")
+    observations = import_script_module("lib.python.core.abstract.provider_runtime")
+    plugins = import_script_module("lib.python.core.abstract.skill_plugin_type")
+    specifications = import_script_module("lib.python.core.abstract.spec")
+    invocation = contexts.DeliveryState() if state is None else state
+    if invocation.spec is None:
+        invocation.spec = specifications.load_spec()
+    selected = _frozen_kubernetes_target(target)
+    service = kubernetes.KubernetesService(selected, timeout=timeout, state=invocation)
+    invocation.establish_runtime(
+        plugins.SkillPluginType.KUBERNETES,
+        observations.KubernetesRuntime(
+            role="cluster-admin",
+            identity="unit-admin",
+            authority=service.configuration.server,
+            credential_identity=service.credential_identity,
+        ),
+    )
+    return service
+
+
+def bind_kubernetes_fixture(state: SkillState, service: object) -> None:
+    """Give an operation-only Kubernetes double the real retained access guard.
+
+    :param state: Invocation used by the callback under test.
+    :param service: Existing operation double whose transport behavior stays unchanged.
+    :returns: None; the shared state retains the double with a real access prerequisite.
+    """
+    targets = import_script_module("lib.python.core.target")
+    target = getattr(service, "target", None)
+    if not isinstance(target, targets.Target):
+        target = targets.Target(
+            github=None,
+            gitlab=None,
+            kubernetes=targets.KubernetesTarget(
+                "unit-context", "https://api.cluster.example.test:6443", None
+            ),
+            active_surfaces=("kubernetes",),
+        )
+    verified = authenticated_kubernetes_service(target, state=state)
+    service.state = state
+    service.target = verified.target
+    service.configuration = verified.configuration
+    service.require_access = verified.require_access
+    state.kubernetes = service
+
+
+def bind_harbor_fixture(state: SkillState, service: object) -> None:
+    """Supply explicit native admin evidence to an operation-only Harbor double.
+
+    :param state: Invocation used by the callback under test.
+    :param service: Existing repository or tag-operation double.
+    :returns: None; provider guards consume the retained declaration and observation.
+    """
+    registry = import_script_module("lib.python.core.harbor.registry_mirror")
+    targets = import_script_module("lib.python.core.target")
+    observations = import_script_module("lib.python.core.abstract.provider_runtime")
+    plugins = import_script_module("lib.python.core.abstract.skill_plugin_type")
+    specifications = import_script_module("lib.python.core.abstract.spec")
+    if state.spec is None:
+        state.spec = specifications.load_spec()
+    original = getattr(service, "target", None)
+    host = getattr(original, "host", "registry.example.test")
+    project = getattr(original, "project", "unit")
+    target = targets.HarborTarget(f"https://{host}", host, project)
+    credential = getattr(service, "credential", None)
+    if not isinstance(credential, registry.RegistryCredential):
+        credential = registry.RegistryCredential(
+            "unit-admin", "fixture-secret", "fixture"
+        )
+    if isinstance(service, registry.HarborService):
+        assert service.invocation is state
+        target = service.target
+    else:
+        service.target = target
+        service.credential = credential
+    state.harbor = service
+    state.harbor_target = target
+    state.harbor_credential = credential
+    state.establish_runtime(
+        plugins.SkillPluginType.HARBOR,
+        observations.ProviderRuntime(
+            role="admin",
+            identity=credential.username,
+            authority=target.url,
+            credential_identity=registry._harbor_credential_identity(credential),
+        ),
+    )
+
+
+def bind_github_fixture(state: SkillState, service: object) -> None:
+    """Supply explicit repository identity to an operation-only GitHub double.
+
+    :param state: Invocation used by the callback under test.
+    :param service: Existing runner-operation double.
+    :returns: None; provider callbacks retain genuine local authorization checks.
+    """
+    github = import_script_module("lib.python.core.github.github")
+    targets = import_script_module("lib.python.core.target")
+    plugins = import_script_module("lib.python.core.abstract.skill_plugin_type")
+    specifications = import_script_module("lib.python.core.abstract.spec")
+    if state.spec is None:
+        state.spec = specifications.load_spec()
+    target = targets.GitHubTarget("github.example.test", "unit/repo")
+    session = github.ReadSession(
+        target.host, {"GH_TOKEN": "fixture-token"}, "fixture", state, target.repository
+    )
+    state.github = service
+    state.github_target = target
+    state.github_session = session
+    state.establish_runtime(
+        plugins.SkillPluginType.GITHUB,
+        github.GitHubRuntime(
+            role="admin",
+            identity="unit-admin",
+            authority=f"https://{target.host}/repos/{target.repository}",
+            credential_identity=github._github_credential_identity(session),
+            repository_id=42,
+            user_id=17,
+        ),
+    )
 
 
 def selected_test_paths(command: str) -> tuple[str, ...]:

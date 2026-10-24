@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Optional, TypeAlias, Union
 
 import pytest
 import yaml
-from conftest import import_script_module
+from conftest import authenticated_gitlab_session, import_script_module
 from jsonschema import Draft202012Validator
 
 JobReadObservation: TypeAlias = tuple[SimpleNamespace, int, Optional[int]]
@@ -73,7 +73,15 @@ def _list_session() -> SimpleNamespace:
 
     :returns: Bound-session fixture with verified skill metadata.
     """
+    sessions = import_script_module("lib.python.core.cli_api")
+    bound = authenticated_gitlab_session(
+        sessions.ReadSession(
+            "gitlab.example.test", {"GITLAB_TOKEN": "selected-token"}, "fixture:gitlab"
+        )
+    )
     return SimpleNamespace(
+        host=bound.host,
+        invocation=bound.invocation,
         environment={"GITLAB_TOKEN": "selected-token"},
         execution_host="worker.example.test",
         target_source="env:CI_SKILLS_TARGET;argv:--project",
@@ -145,16 +153,27 @@ def test_live_job_uses_exact_gitlab_project_access_and_bound_token(
         observed["binding"] = kwargs
         return session
 
-    def collect(target: Target, args: Sequence[str], *, credential: str) -> JSONValue:
+    def collect(
+        target: Target,
+        args: Sequence[str],
+        *,
+        credential: Mapping[str, str],
+        state: object,
+        session: object,
+    ) -> JSONValue:
         """Record collector inputs and return a passing selected-job report.
 
         :param target: GitLab operation target selected from the job URL.
         :param args: Parsed job command arguments.
         :param credential: Selected child token environment from the bound session.
+        :param state: Shared identity state retained by the bound session.
+        :param session: Exact session passed through to the guarded collector.
         :returns: Minimal job report with the requested job ID.
         """
         observed["target"] = target
         observed["credential"] = credential
+        observed["state"] = state
+        observed["session"] = session
         return REPORT.report("gitlab_job", target.gitlab.url, {}, [{"job_id": 123}], [])
 
     monkeypatch.setattr(CLI, "bind_gitlab_session", bind)
@@ -179,6 +198,8 @@ def test_live_job_uses_exact_gitlab_project_access_and_bound_token(
     assert observed["binding"]["target_kind"] == "project"
     assert observed["binding"]["target_reference"] == "unit/repo"
     assert observed["credential"] == {"GITLAB_TOKEN": "selected-token"}
+    assert observed["state"] is session.invocation
+    assert observed["session"] is session
     assert isinstance(observed["target"], TARGET.GitLabOperationTarget)
     assert "selected-token" not in json.dumps(data)
 
@@ -302,6 +323,7 @@ def test_bound_job_collector_checks_runner_on_exact_host(
     :returns: None; assertions in the body validate the regression.
     """
     target = TARGET.load_gitlab_target(_target(tmp_path))
+    session = _list_session()
     calls = []
 
     def read(
@@ -348,6 +370,8 @@ def test_bound_job_collector_checks_runner_on_exact_host(
         target,
         SimpleNamespace(job_url=JOB_URL, search=None),
         credential={"GITLAB_TOKEN": "selected-token"},
+        state=session.invocation,
+        session=session,
     )
 
     assert result["status"] == "PASS"
@@ -364,6 +388,31 @@ def test_bound_job_collector_checks_runner_on_exact_host(
         for argv, env in calls
     )
     assert "selected-token" not in json.dumps(result)
+
+
+def test_bound_job_collector_rejects_a_different_credential_before_native_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject token substitution after the selected identity was verified.
+
+    :param tmp_path: Directory receiving the synthetic GitLab target.
+    :param monkeypatch: Fixture rejecting any metadata or trace read.
+    :returns: None; credential continuity is enforced before native operations.
+    """
+    target = TARGET.load_gitlab_target(_target(tmp_path))
+    session = _list_session()
+    native = lambda *_args, **_kwargs: pytest.fail("credential mismatch read GitLab")
+    monkeypatch.setattr(COLLECTION, "run_command", native)
+    monkeypatch.setattr(COLLECT, "run_command_tail", native)
+
+    with pytest.raises(ValueError, match="gitlab_credential_binding_mismatch"):
+        COLLECT.collect_gitlab_job(
+            target,
+            SimpleNamespace(job_url=JOB_URL, search=None),
+            credential={"GITLAB_TOKEN": "different-token"},
+            state=session.invocation,
+            session=session,
+        )
 
 
 @pytest.mark.parametrize("mode", ("--json", "--yaml"))

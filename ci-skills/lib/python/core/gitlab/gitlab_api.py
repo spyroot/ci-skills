@@ -32,8 +32,14 @@ from lib.python.core.cli_api import (
     READ_ATTEMPTS as READ_ATTEMPTS,  # noqa: PLC0414 - compatibility export
 )
 from lib.python.core.cli_api import APIError as GitLabAPIError
-from lib.python.core.cli_api import APISession, CLIAPIClient, validate_endpoint
-from lib.python.core.json_types import JSONObject
+from lib.python.core.cli_api import (
+    APISession,
+    CLIAPIClient,
+    NativeResponse,
+    RequestDeadline,
+    validate_endpoint,
+)
+from lib.python.core.json_types import JSONDocument, JSONObject
 
 CREATE_LOCK_WAIT_SECONDS = 30
 _UNCERTAIN_WRITE = frozenset(
@@ -244,6 +250,61 @@ def runner_update_guard(origin: str, runner_id: int) -> Iterator[None]:
 
 class GlabAPIClient(CLIAPIClient):
     """Bind the shared CLI transport to GitLab's native API command."""
+
+    def _identity_json(self, session: APISession) -> JSONDocument:
+        """Read only the authenticated user before runtime state is established.
+
+        :param session: Exact host and credential selected by authentication.
+        :returns: Native user object used by the provider's identity initializer.
+        :raises GitLabAPIError: The identity read or response decoding fails.
+        :raises OSError: The native command cannot start or complete its I/O.
+        """  # noqa: DOC502 - The shared transport propagates request failures.
+        response = super()._exchange(session, "GET", "user")
+        return self._decode_response(response.text, "GET")
+
+    def _exchange(
+        self,
+        session: APISession,
+        method: str,
+        endpoint: str,
+        body: Optional[JSONObject] = None,
+        *,
+        raw: bool = False,
+        paginate: bool = False,
+        deadline: Optional[RequestDeadline] = None,
+    ) -> NativeResponse:
+        """Require retained access before every public native API operation.
+
+        :param session: Selected host, credential, and shared invocation state.
+        :param method: HTTP operation supplied by the caller.
+        :param endpoint: Provider-relative request path.
+        :param body: Optional JSON request fields.
+        :param raw: Whether the caller requests response text without headers.
+        :param paginate: Whether the native CLI collects all pages.
+        :param deadline: Optional absolute deadline shared by related reads.
+        :returns: The existing bounded native response.
+        :raises GitLabAPIError: Runtime access, transport, or response handling fails.
+        :raises OSError: Native process or private request-file I/O fails.
+        """  # noqa: DOC502,DOC503 - The shared transport propagates native failures.
+        from lib.python.access.gitlab import require_gitlab_access
+        from lib.python.core.abstract.skill_state import SkillState
+
+        state = getattr(session, "invocation", None)
+        if not isinstance(state, SkillState):
+            raise GitLabAPIError("gitlab_identity_preflight_missing")
+        try:
+            require_gitlab_access(state, session)
+        except ValueError as exc:
+            raise GitLabAPIError(str(exc)) from exc
+        return super()._exchange(
+            session,
+            method,
+            endpoint,
+            body,
+            raw=raw,
+            paginate=paginate,
+            deadline=deadline,
+        )
 
     def argv(self, host: str, method: str, endpoint: str) -> MutableSequence[str]:
         """Build GitLab's native JSON API invocation.

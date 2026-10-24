@@ -256,7 +256,11 @@ def execute_gitlab_job(args: argparse.Namespace) -> int:
             else:
                 source = "collect_gitlab_job"
                 data = collect_gitlab_job(
-                    target, args, credential=dict(session.environment)
+                    target,
+                    args,
+                    credential=dict(session.environment),
+                    state=session.invocation,
+                    session=session,
                 )
             data["access"] = gate
             data["execution_host"] = session.execution_host

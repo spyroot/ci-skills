@@ -12,7 +12,10 @@ from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass, replace
 from typing import Literal, Optional, Union
 
-from lib.python.access.gitlab import check_gitlab_operation_access
+from lib.python.access.gitlab import (
+    check_gitlab_operation_access,
+    require_gitlab_access,
+)
 from lib.python.access.gitlab_credentials import bind_gitlab_session
 from lib.python.core.abstract.callback import AbstractCallback
 from lib.python.core.abstract.callbacks import Callbacks
@@ -169,6 +172,7 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
             target_reference=plan.target_reference,
             target_source=plan.target_source,
             revision=self.action.revision,
+            invocation=self.state,
         )
         self.state.session = session
         if (
@@ -218,10 +222,10 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
             ),
         )
 
-    def run(self) -> JSONObject:
-        """Verify access and retain a typed service and refreshed plan in state.
+    def whoami(self) -> bool:
+        """Establish identity once and verify the selected operation target.
 
-        :returns: Bounded access evidence without the private provider client.
+        :returns: True after retaining a role-verified service in invocation state.
         :raises TargetError: The selected target or credential cannot be resolved.
         :raises ActionError: Revision, access, target binding, or snapshot checks fail.
         :raises GitLabAPIError: Live preflight cannot read selected provider resources.
@@ -236,8 +240,18 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
         target_id = self.state.plan.verified_target_id(session, access)
         service = GitLabService(api, session, target_id, access)
         self.state.gitlab = service
-        self.state.plan = self._snapshot(service)
-        return access
+        return True
+
+    def run(self) -> JSONObject:
+        """Read required plan snapshots after identity preflight has completed.
+
+        :returns: Bounded access evidence without the private provider client.
+        :raises ActionError: The selected snapshot is invalid.
+        :raises GitLabAPIError: A snapshot cannot be read from the selected host.
+        :raises ValueError: The identity prerequisite is absent or mismatched.
+        """  # noqa: DOC502 - The service guard and snapshot readers propagate failures.
+        self.state.plan = self._snapshot(self.gitlab)
+        return self.state.access
 
 
 class ConfirmGitLabOperation(GitlabCallback[ConfirmGitLabAction]):
@@ -339,10 +353,21 @@ class GitLabOperation(GitlabCallback[ActionPlan]):
         :raises GitLabAPIError: A provider read or write fails.
         :raises BaseException: A lifecycle or cleanup hook fails and the executor
             propagates the original exception after cleanup.
-        """  # noqa: DOC502 - WorkflowExecutor propagates callback and cleanup failures.
-        state = GitLabState(session=session)
+        """  # noqa: DOC502,DOC503 - WorkflowExecutor propagates callback and cleanup failures.
+        if session.invocation is None:
+            raise ActionError("gitlab_identity_preflight_missing")
+        invocation = session.invocation
+        require_gitlab_access(invocation, session)
+        service = getattr(invocation, "gitlab", None)
+        access = service.access if isinstance(service, GitLabService) else {}
+        state = GitLabState(
+            session=session,
+            spec=invocation.spec,
+            gitlab_runtime=invocation.gitlab_runtime,
+            access=access,
+        )
         state.plan = self.action
-        state.gitlab = GitLabService(api, session, target_id)
+        state.gitlab = GitLabService(api, session, target_id, access)
         WorkflowExecutor(state, Callbacks(self)).run()
         return state.operation_result
 

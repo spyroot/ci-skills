@@ -22,6 +22,7 @@ import pytest
 from conftest import (
     REPO_ROOT,
     SCRIPT_ROOT,
+    bind_harbor_fixture,
     import_script_module,
     load_module,
 )
@@ -639,7 +640,7 @@ def test_confirm_workflow_resolves_source_digest_and_requires_its_exact_plan(
 
     callback = WORKFLOWS.ConfirmWorkflow(action=action)
     state = DELIVERY_STATE.DeliveryState()
-    state.harbor = Harbor()
+    bind_harbor_fixture(state, Harbor())
     callback.bind(state)
     result = callback.run()
 
@@ -666,6 +667,7 @@ def test_registry_copy_uses_digest_only_native_references_with_registry_ports(
     native_destination = (
         "docker://registry.example.test:5443/unit/destination@sha256:" + "a" * 64
     )
+    state = DELIVERY_STATE.DeliveryState()
     service = REGISTRY.HarborService(
         target=TARGET.HarborTarget(
             url="https://registry.example.test:5443",
@@ -675,7 +677,9 @@ def test_registry_copy_uses_digest_only_native_references_with_registry_ports(
         credential=REGISTRY.RegistryCredential("unit", "secret", "fixture"),
         authfile=tmp_path / "auth.json",
         timeout=30,
+        invocation=state,
     )
+    bind_harbor_fixture(state, service)
     raw_manifest = '{"schemaVersion":2}'
     expected_digest = "sha256:" + hashlib.sha256(raw_manifest.encode()).hexdigest()
     calls: MutableSequence[tuple[str, ...]] = []

@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from lib.python.core.json_types import JSONValue
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_gitlab_session, import_script_module
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
 GITLAB_ACTION = import_script_module("lib.python.core.gitlab.gitlab_action")
@@ -74,21 +74,23 @@ def _bound_session(plan: ACTION.ActionPlan) -> BoundGitLabSession:
     :param plan: Runner action plan whose target fields identify the session.
     :returns: Bound session carrying verified skill and credential provenance.
     """
-    return GITLAB_SESSION.BoundGitLabSession(
-        origin=plan.origin,
-        host="gitlab.example.test",
-        target_kind=plan.target_kind,
-        target_reference=plan.target_reference,
-        target_source=plan.target_source,
-        target_file=Path(plan.target_file),
-        credential_source="env:GITLAB_TOKEN",
-        credential_digest="sha256:unit",
-        execution_host="unit-host",
-        skill={
-            "digest": "unit",
-            "revision": {"value": "a" * 40, "verified": True},
-        },
-        environment={},
+    return authenticated_gitlab_session(
+        GITLAB_SESSION.BoundGitLabSession(
+            origin=plan.origin,
+            host="gitlab.example.test",
+            target_kind=plan.target_kind,
+            target_reference=plan.target_reference,
+            target_source=plan.target_source,
+            target_file=Path(plan.target_file),
+            credential_source="env:GITLAB_TOKEN",
+            credential_digest="sha256:unit",
+            execution_host="unit-host",
+            skill={
+                "digest": "unit",
+                "revision": {"value": "a" * 40, "verified": True},
+            },
+            environment={},
+        )
     )
 
 
@@ -248,7 +250,11 @@ def test_live_plan_cli_binds_group_ids_without_post(
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
-        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+        GITLAB_ACTION,
+        "bind_gitlab_session",
+        lambda *_args, **_kwargs: authenticated_gitlab_session(
+            session, _kwargs.get("invocation")
+        ),
     )
     monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: api)
     monkeypatch.setattr(

@@ -14,9 +14,14 @@ from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Optional, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import (
+    authenticated_gitlab_session,
+    authenticated_kubernetes_service,
+    import_script_module,
+)
 
 if TYPE_CHECKING:
+    from lib.python.core.cli_api import ReadSession
     from lib.python.core.json_types import JSONObject, JSONValue
     from lib.python.core.runtime import CommandResult
     from lib.python.core.target import Target
@@ -29,6 +34,23 @@ def _target(path: Path) -> Target:
     :returns: Parsed target object used by the collector APIs under test.
     """
     return import_script_module("lib.python.core.target").load_target(path)
+
+
+def _job_session(target: Target) -> ReadSession:
+    """Initialize the selected mock GitLab identity before metadata reads.
+
+    :param target: Synthetic target and optional frozen credential selection.
+    :returns: Session retaining a native admin identity in shared invocation state.
+    """
+    access = import_script_module("lib.python.access.gitlab")
+    sessions = import_script_module("lib.python.core.cli_api")
+    return authenticated_gitlab_session(
+        sessions.ReadSession(
+            target.require_gitlab().host,
+            dict(access.gitlab_env(target) or {}),
+            "fixture:gitlab",
+        )
+    )
 
 
 def _write_gitlab_token_target(tmp_path: Path, token_file: Path) -> Path:
@@ -152,6 +174,7 @@ def test_storage_report_records_malformed_list_envelopes_as_errors(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
@@ -187,7 +210,7 @@ def test_storage_report_records_malformed_list_envelopes_as_errors(
         search=None,
     )
 
-    result = collect.collect_storage(_target(target_file), args)
+    result = collect.collect_storage(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert result["summary"]["record_count"] == 0
@@ -208,6 +231,7 @@ def test_storage_report_records_malformed_pv_and_pvc_fields_as_errors(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
@@ -248,7 +272,7 @@ def test_storage_report_records_malformed_pv_and_pvc_fields_as_errors(
         namespace="all", node=None, storage_class=None, phase="all", search=None
     )
 
-    result = collect.collect_storage(_target(target_file), args)
+    result = collect.collect_storage(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert result["records"] == []
@@ -276,6 +300,7 @@ def test_storage_report_includes_orphaned_pvs_for_phase_filters(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
@@ -321,7 +346,7 @@ def test_storage_report_includes_orphaned_pvs_for_phase_filters(
         search=None,
     )
 
-    result = collect.collect_storage(_target(target_file), args)
+    result = collect.collect_storage(service.target, args, state=service.state)
 
     assert result["status"] == "PASS"
     assert [row["volume"] for row in result["records"]] == [expected_volume]
@@ -343,6 +368,7 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     inventory = {
@@ -444,7 +470,7 @@ def test_storage_report_filters_and_correlates_claim_pod_volume_and_node(
         search="selected",
     )
 
-    result = collect.collect_storage(_target(target_file), args)
+    result = collect.collect_storage(service.target, args, state=service.state)
 
     assert result["status"] == "PASS"
     assert result["summary"]["record_count"] == 1
@@ -468,6 +494,7 @@ def test_storage_controller_lookup_uses_kind_namespace_and_daemonset_counters(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     payloads = _empty_storage_payloads()
@@ -568,10 +595,11 @@ def test_storage_controller_lookup_uses_kind_namespace_and_daemonset_counters(
 
     _patch_json_commands(monkeypatch, fake_run)
     result = collect.collect_storage(
-        _target(target_file),
+        service.target,
         SimpleNamespace(
             namespace="app", node=None, storage_class=None, phase="all", search=None
         ),
+        state=service.state,
     )
 
     assert result["status"] == "PASS"
@@ -593,6 +621,7 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     events = {
@@ -695,7 +724,7 @@ def test_event_trace_filters_reason_object_search_and_sorts_by_source_time(
         search="selected",
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PASS"
     assert [row["message"] for row in result["records"]] == [
@@ -715,8 +744,9 @@ def test_event_trace_rejects_naive_and_reversed_time_bounds(target_file: Path) -
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
-    target = _target(target_file)
+    target = service.target
     base = {
         "namespace": "all",
         "kind": None,
@@ -733,6 +763,7 @@ def test_event_trace_rejects_naive_and_reversed_time_bounds(target_file: Path) -
                 from_time="2026-10-01T10:00:00",
                 to_time="2026-10-01T10:10:00Z",
             ),
+            state=service.state,
         )
     with pytest.raises(ValueError, match="--from"):
         collect.collect_events(
@@ -742,6 +773,7 @@ def test_event_trace_rejects_naive_and_reversed_time_bounds(target_file: Path) -
                 from_time="2026-10-01T10:10:00Z",
                 to_time="2026-10-01T10:00:00Z",
             ),
+            state=service.state,
         )
 
 
@@ -756,6 +788,7 @@ def test_event_trace_uses_series_last_observed_time_inside_window(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     events = {
@@ -811,7 +844,7 @@ def test_event_trace_uses_series_last_observed_time_inside_window(
         search="series",
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PASS"
     assert result["summary"]["record_count"] == 1
@@ -833,6 +866,7 @@ def test_event_trace_keeps_first_observation_in_window_after_later_repeat(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
 
@@ -883,7 +917,7 @@ def test_event_trace_keeps_first_observation_in_window_after_later_repeat(
         search=None,
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PASS"
     assert len(result["records"]) == 1
@@ -906,6 +940,7 @@ def test_event_trace_prefers_deprecated_count_before_core_count(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     event = {
@@ -955,7 +990,7 @@ def test_event_trace_prefers_deprecated_count_before_core_count(
         search="deprecated count",
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PASS"
     assert result["records"][0]["count"] == 5
@@ -972,6 +1007,7 @@ def test_event_trace_reports_malformed_event_items_as_partial(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     events = {
@@ -1020,7 +1056,7 @@ def test_event_trace_reports_malformed_event_items_as_partial(
         search=None,
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert result["records"] == []
@@ -1053,6 +1089,7 @@ def test_event_trace_reports_malformed_nested_fields_as_partial(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     event = {
@@ -1090,7 +1127,7 @@ def test_event_trace_reports_malformed_nested_fields_as_partial(
         search=None,
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert result["records"] == []
@@ -1109,6 +1146,7 @@ def test_event_trace_accepts_reference_without_optional_kind(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     event = {
@@ -1144,7 +1182,7 @@ def test_event_trace_accepts_reference_without_optional_kind(
         search=None,
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PASS"
     assert result["errors"] == []
@@ -1174,6 +1212,7 @@ def test_event_trace_does_not_fallback_on_preferred_api_server_failure(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     calls: MutableSequence[str] = []
@@ -1208,7 +1247,7 @@ def test_event_trace_does_not_fallback_on_preferred_api_server_failure(
         search=None,
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert result["records"] == []
@@ -1227,6 +1266,7 @@ def test_event_trace_falls_back_and_records_compatibility_reason(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     calls: MutableSequence[str] = []
@@ -1283,7 +1323,7 @@ def test_event_trace_falls_back_and_records_compatibility_reason(
         search="fallback",
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert result["errors"] == [
@@ -1309,6 +1349,7 @@ def test_event_trace_does_not_hide_preferred_api_access_denial(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     calls: MutableSequence[str] = []
@@ -1339,7 +1380,7 @@ def test_event_trace_does_not_hide_preferred_api_access_denial(
         search=None,
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert result["errors"] == [{"source": "events_v1", "reason": "authorization"}]
@@ -1357,6 +1398,7 @@ def test_event_trace_reports_both_errors_when_fallback_is_malformed(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     runtime = import_script_module("lib.python.core.runtime")
     calls: MutableSequence[str] = []
@@ -1395,7 +1437,7 @@ def test_event_trace_reports_both_errors_when_fallback_is_malformed(
         search=None,
     )
 
-    result = collect.collect_events(_target(target_file), args)
+    result = collect.collect_events(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert result["errors"] == [
@@ -1416,6 +1458,7 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.cilium_status")
     runtime = import_script_module("lib.python.core.runtime")
     exec_calls: MutableSequence[tuple[str, ...]] = []
@@ -1491,7 +1534,7 @@ def test_cilium_status_records_unknown_health_and_uses_non_tty_exec(
     _patch_cilium_commands(monkeypatch, collect, fake_run)
     args = SimpleNamespace(namespace="auto", node=None, search=None)
 
-    result = collect.collect_cilium(_target(target_file), args)
+    result = collect.collect_cilium(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     rows = {row["name"]: row for row in result["records"]}
@@ -1530,6 +1573,7 @@ def test_cilium_status_uses_daemonset_selector_for_agent_pods(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.cilium_status")
     runtime = import_script_module("lib.python.core.runtime")
     resources = {
@@ -1588,7 +1632,7 @@ def test_cilium_status_uses_daemonset_selector_for_agent_pods(
     _patch_cilium_commands(monkeypatch, collect, fake_run)
     args = SimpleNamespace(namespace="networking", node=None, search=None)
 
-    result = collect.collect_cilium(_target(target_file), args)
+    result = collect.collect_cilium(service.target, args, state=service.state)
 
     assert result["status"] == "PASS"
     assert result["summary"]["record_count"] == 1
@@ -1606,6 +1650,7 @@ def test_cilium_status_exposes_failed_peer_but_proves_successful_read(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.cilium_status")
     live = import_script_module("lib.python.core.live")
     runtime = import_script_module("lib.python.core.runtime")
@@ -1655,7 +1700,7 @@ def test_cilium_status_exposes_failed_peer_but_proves_successful_read(
     _patch_cilium_commands(monkeypatch, collect, fake_run)
     args = SimpleNamespace(namespace="networking", node=None, search=None)
 
-    result = collect.collect_cilium(_target(target_file), args)
+    result = collect.collect_cilium(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert result["errors"] == [
@@ -1681,6 +1726,7 @@ def test_cilium_status_reports_partial_for_explicit_namespace_with_zero_pods(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.cilium_status")
     runtime = import_script_module("lib.python.core.runtime")
     resources = {
@@ -1724,7 +1770,7 @@ def test_cilium_status_reports_partial_for_explicit_namespace_with_zero_pods(
     _patch_cilium_commands(monkeypatch, collect, fake_run)
     args = SimpleNamespace(namespace="missing", node=None, search=None)
 
-    result = collect.collect_cilium(_target(target_file), args)
+    result = collect.collect_cilium(service.target, args, state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert result["summary"]["record_count"] == 1
@@ -1834,8 +1880,10 @@ def test_gitlab_job_collects_metadata_and_bounded_sanitized_trace(
         search="selected",
     )
 
+    target = _target(_write_gitlab_token_target(tmp_path, token_file))
+    session = _job_session(target)
     result = collect.collect_gitlab_job(
-        _target(_write_gitlab_token_target(tmp_path, token_file)), args
+        target, args, state=session.invocation, session=session
     )
 
     assert result["status"] == "PASS"
@@ -1921,7 +1969,11 @@ def test_gitlab_job_records_malformed_nested_api_responses(
         search="selected",
     )
 
-    result = collect.collect_gitlab_job(_target(target_file), args)
+    target = _target(target_file)
+    session = _job_session(target)
+    result = collect.collect_gitlab_job(
+        target, args, state=session.invocation, session=session
+    )
 
     assert result["status"] == "PARTIAL"
     reasons = {error["source"]: error["reason"] for error in result["errors"]}
@@ -2045,7 +2097,10 @@ def test_gitlab_job_uses_effective_gitlab_env_token_for_all_reads(
         search="selected",
     )
 
-    result = collect.collect_gitlab_job(target, args)
+    session = _job_session(target)
+    result = collect.collect_gitlab_job(
+        target, args, state=session.invocation, session=session
+    )
 
     assert result["status"] == "PASS"
     assert observed_envs
@@ -2062,6 +2117,7 @@ def test_a_kubernetes_report_identifies_the_api_server_not_only_the_context(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.storage")
     runtime = import_script_module("lib.python.core.runtime")
     monkeypatch.setattr(
@@ -2073,10 +2129,11 @@ def test_a_kubernetes_report_identifies_the_api_server_not_only_the_context(
     )
 
     report = collect.collect_storage(
-        _target(target_file),
+        service.target,
         SimpleNamespace(
             namespace="all", node=None, storage_class=None, phase="all", search=None
         ),
+        state=service.state,
     )
 
     assert report["target"] == ("unit-context -> https://api.cluster.example.test:6443")
@@ -2198,6 +2255,7 @@ def test_event_trace_refuses_a_relative_window_combined_with_bounds(
 
     :returns: None; assertions in the body validate the regression.
     """
+    service = authenticated_kubernetes_service(_target(target_file))
     collect = import_script_module("lib.python.core.kubernetes.events")
     args = SimpleNamespace(
         last=last,
@@ -2211,4 +2269,4 @@ def test_event_trace_refuses_a_relative_window_combined_with_bounds(
     )
 
     with pytest.raises(ValueError, match="--last"):
-        collect.collect_events(_target(target_file), args)
+        collect.collect_events(service.target, args, state=service.state)

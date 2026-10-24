@@ -14,8 +14,10 @@ from typing import Optional
 
 from lib.python.access.kubernetes import kubectl_argv, kubernetes_env
 from lib.python.core.collection import CommandReadError, _read_json, _search
+from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.collect import _items, _meta
+from lib.python.core.kubernetes.kubernetes import KubernetesService
 from lib.python.core.kubernetes.objects import KubernetesObject
 from lib.python.core.report import report
 from lib.python.core.runtime import sanitize
@@ -310,11 +312,14 @@ class EventInventory:
         return result
 
 
-def collect_events(target: Target, args: Namespace) -> MutableMapping[str, JSONValue]:
+def collect_events(
+    target: Target, args: Namespace, *, state: DeliveryState | None = None
+) -> MutableMapping[str, JSONValue]:
     """Read cluster Events for a validated time window and object selection.
 
     :param target: Bound Kubernetes authority used for Event list queries.
     :param args: Relative/absolute time window and namespace, object, reason, text filters.
+    :param state: Shared declaration and previously observed Kubernetes access.
     :returns: Event report with unique sorted rows and independent source errors.
     :raises ValueError: If time options conflict, a timestamp is invalid, or the
         target has no Kubernetes authority.
@@ -322,6 +327,7 @@ def collect_events(target: Target, args: Namespace) -> MutableMapping[str, JSONV
     :raises TargetError: If pinned Kubernetes credentials changed before a read.
     :raises OSError: If a native Event query cannot be started.
     """  # noqa: DOC502 - Target/query helpers and worker reads propagate failures.
+    KubernetesService(target, state=state).require_access()
     inventory = EventInventory(args)
     data, errors, fallback_reason = _event_data(target)
     return inventory.report(target, data, errors, fallback_reason)

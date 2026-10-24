@@ -7,6 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import signal
@@ -20,7 +21,12 @@ from types import SimpleNamespace
 from typing import Optional
 
 import pytest
-from conftest import import_script_module
+from conftest import (
+    authenticated_gitlab_session,
+    bind_kubernetes_fixture,
+    configure_kubernetes_auth,
+    import_script_module,
+)
 from test_tool_pod import MemoryCluster
 
 ACTION = import_script_module("lib.python.core.gitlab.runner_manager.action")
@@ -35,8 +41,10 @@ WORKLOAD = import_script_module("lib.python.core.gitlab.runner_manager.workload"
 SCRIPT = import_script_module("gitlab_runner_manager")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 GITLAB_API = import_script_module("lib.python.core.gitlab.gitlab_api")
+GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
 RUNTIME = import_script_module("lib.python.core.runtime")
 SCHEMA = import_script_module("lib.python.core.schema")
+REGISTRY = import_script_module("lib.python.core.harbor.registry_mirror")
 
 PRIVATE_TOKEN = "glrt-private-unit-value"
 CHANGED_PRIVATE_TOKEN = "glrt-changed-unit"
@@ -161,6 +169,26 @@ def _action(
     return selected
 
 
+def _session() -> GITLAB_SESSION.BoundGitLabSession:
+    """Select the manager fixture's concrete session without authenticating.
+
+    :returns: Synthetic session for the fixed project and credential identity.
+    """
+    return GITLAB_SESSION.BoundGitLabSession(
+        origin="https://gitlab.example.test",
+        host="gitlab.example.test",
+        target_kind="project",
+        target_reference="team/project",
+        target_source="fixture",
+        target_file=Path("/unit/target.toml"),
+        credential_source="fixture",
+        credential_digest="sha256:" + "d" * 64,
+        execution_host="unit-host",
+        skill={"digest": "c" * 64},
+        environment={"GITLAB_TOKEN": "fixture-token"},
+    )
+
+
 def _bind_gitlab(
     action: ACTION.GitLabRunnerManagerAction,
 ) -> ACTION.GitLabRunnerManagerState:
@@ -170,12 +198,7 @@ def _bind_gitlab(
     :returns: The action's shared manager state.
     """
     state = action.context
-    session = SimpleNamespace(
-        origin="https://gitlab.example.test",
-        target_kind="project",
-        target_reference="team/project",
-        credential_digest="sha256:" + "d" * 64,
-    )
+    session = authenticated_gitlab_session(_session(), state)
     state.gitlab = SimpleNamespace(api=object(), session=session, target_id=42)
     state.configured_session = session
     state.run_scope = action.candidate_scope
@@ -476,7 +499,7 @@ def test_online_verification_retains_only_verified_manager_owned_resources(
                 },
             }
 
-    state.kubernetes = Kubernetes()
+    bind_kubernetes_fixture(state, Kubernetes())
     monkeypatch.setattr(
         CALLBACKS,
         "read_runner_record",
@@ -580,9 +603,10 @@ def test_entered_manager_workload_delegates_failure_cleanup(
     """
     action = _action()
     state = _bind_gitlab(action)
+    bind_kubernetes_fixture(state, MemoryCluster())
     events: list[str] = []
 
-    class Child:
+    class Child(KUBERNETES.K8SCallback):
         """Record manager delegation without repeating shared runner behavior."""
 
         def __init__(self, runner: object) -> None:
@@ -590,15 +614,7 @@ def test_entered_manager_workload_delegates_failure_cleanup(
 
             :param runner: Run-scoped manager workload inputs.
             """
-            self.action = runner
-
-        def bind(self, selected: object) -> None:
-            """Retain the shared workflow state.
-
-            :param selected: Manager state supplied by the wrapper.
-            :returns: None after binding the state.
-            """
-            self.state = selected
+            super().__init__(runner)
 
         def run(self) -> dict[str, bool]:
             """Record entry into the shared runner operation.
@@ -687,7 +703,7 @@ def test_delete_targets_only_run_owned_manager_identities() -> None:
             self.deleted.append((kind, name, namespace))
             assert self.read(kind, name, namespace) is None
 
-    state.kubernetes = Kubernetes()
+    bind_kubernetes_fixture(state, Kubernetes())
     callback = WORKLOAD.DeleteManagerRunner(action.workload())
     callback.bind(state)
 
@@ -752,7 +768,7 @@ def test_remove_scc_access_preserves_preexisting_external_binding() -> None:
             """
             raise AssertionError(f"deleted external {kind}/{namespace}/{name}")
 
-    state.kubernetes = Kubernetes()
+    bind_kubernetes_fixture(state, Kubernetes())
     callback = SCC_ACCESS.RemoveSCCAccess(action.scc_access())
     callback.bind(state)
 
@@ -805,7 +821,7 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
             """
             raise AssertionError(f"unexpected delete {kind}/{namespace}/{name}")
 
-    state.kubernetes = Kubernetes()
+    bind_kubernetes_fixture(state, Kubernetes())
     select = WORKLOAD.SelectResolvedManagerScope(action.workload())
     select.bind(state)
     selected = select.run()
@@ -1039,42 +1055,80 @@ def _manager_cli_harness(
     cluster.token_path = tmp_path / "runner.token"
     cluster.token_path.write_text(PRIVATE_TOKEN, encoding="utf-8")
     cluster.token_path.chmod(0o600)
-    session = SimpleNamespace(
-        origin="https://gitlab.example.test",
-        target_kind="project",
-        target_reference="team/project",
-        credential_digest="sha256:" + "d" * 64,
-    )
-
-    def k8s_config(callback: KUBERNETES.K8SAuth) -> dict:
-        callback.state.kubernetes_target = cluster.target
-        return {}
-
-    def k8s_auth(callback: KUBERNETES.K8SAuth) -> dict:
-        callback.state.kubernetes = cluster
-        callback.state.access_evidence["kubernetes"] = {"identity": "unit-user"}
-        return {"identity": "unit-user"}
+    session = _session()
 
     def gitlab_config(callback: CALLBACKS.GitLabManagerAuth) -> dict:
+        nonlocal session
+        session = replace(session, invocation=callback.state)
         callback.state.configured_session = session
         return {}
 
-    def gitlab_auth(callback: CALLBACKS.GitLabManagerAuth) -> dict:
-        callback.state.gitlab = SimpleNamespace(
-            api=object(), session=session, target_id=42
-        )
-        callback.state.access_evidence["gitlab"] = {"identity": "unit-user"}
-        return {"identity": "unit-user"}
+    def gitlab_command(
+        argv: Sequence[str], *, timeout: int, env: Mapping[str, Optional[str]]
+    ) -> RUNTIME.CommandResult:
+        """Supply finite native responses without replacing API access guards.
 
-    def harbor_config(callback: SCRIPT.HarborAuth) -> dict:
-        callback.state.harbor_target = cluster.target.harbor
-        callback.state.harbor_credential = object()
-        return {}
+        :param argv: Exact native GitLab request selected by the real client.
+        :param timeout: Positive bounded request duration.
+        :param env: Synthetic credential environment retained by this invocation.
+        :returns: Native current-user or project response for the declared host.
+        """
+        assert argv[:2] == ["glab", "api"]
+        assert argv[3:] == [
+            "--hostname",
+            "gitlab.example.test",
+            "--method",
+            "GET",
+            "--output",
+            "json",
+            "--include",
+        ]
+        assert timeout > 0 and env == session.environment
+        endpoint = argv[2]
+        if endpoint == "user":
+            document = {
+                "id": 17,
+                "username": "unit-user",
+                "is_admin": True,
+                "web_url": "https://gitlab.example.test/unit-user",
+            }
+        else:
+            assert endpoint == "projects/team%2Fproject"
+            document = {
+                "id": 42,
+                "path_with_namespace": "team/project",
+                "web_url": "https://gitlab.example.test/team/project",
+            }
+        return RUNTIME.CommandResult(tuple(argv), 0, json.dumps(document), "")
 
-    def harbor_auth(callback: SCRIPT.HarborAuth) -> dict:
-        callback.state.harbor = SimpleNamespace(dockerconfig=b'{"auths":{}}')
-        callback.state.access_evidence["harbor"] = {"identity": "unit-user"}
-        return {"identity": "unit-user"}
+    class HarborAPI:
+        """Return native identity and registry claims to the real initializer."""
+
+        def request(self, method: str, endpoint: str) -> dict:
+            """Serve the exact current-user and pull-grant fixture responses.
+
+            :param method: Provider method; only GET is expected.
+            :param endpoint: Native current-user or registry token endpoint.
+            :returns: Nonsecret admin identity or synthetic pull-only claims.
+            """
+            assert method == "GET"
+            if endpoint == "api/v2.0/users/current":
+                return {"username": "unit-user", "sysadmin_flag": True}
+            assert endpoint == (
+                "service/token?service=harbor-registry&"
+                "scope=repository%3Atoolbox%2Fci%3Apull"
+            )
+            claims = {
+                "access": [
+                    {
+                        "type": "repository",
+                        "name": "toolbox/ci",
+                        "actions": ["pull"],
+                    }
+                ]
+            }
+            payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode()
+            return {"token": f"fixture.{payload.rstrip('=')}.fixture"}
 
     def runner_read(
         api: object,
@@ -1113,12 +1167,21 @@ def _manager_cli_harness(
         ACTION, "resolve_target", lambda *_args, **_kwargs: cluster.target
     )
     monkeypatch.setattr(ACTION, "bind_sources", lambda target, **_kwargs: target)
-    monkeypatch.setattr(KUBERNETES.K8SAuth, "read_config", k8s_config)
-    monkeypatch.setattr(KUBERNETES.K8SAuth, "run", k8s_auth)
+    configure_kubernetes_auth(monkeypatch, cluster)
     monkeypatch.setattr(CALLBACKS.GitLabManagerAuth, "read_config", gitlab_config)
-    monkeypatch.setattr(CALLBACKS.GitLabManagerAuth, "run", gitlab_auth)
-    monkeypatch.setattr(SCRIPT.HarborAuth, "read_config", harbor_config)
-    monkeypatch.setattr(SCRIPT.HarborAuth, "run", harbor_auth)
+    monkeypatch.setattr(
+        CALLBACKS,
+        "GlabAPIClient",
+        lambda: GITLAB_API.GlabAPIClient(command=gitlab_command),
+    )
+    monkeypatch.setattr(
+        REGISTRY,
+        "resolve_harbor_credential",
+        lambda _target: REGISTRY.RegistryCredential(
+            "unit-user", "fixture-secret", "fixture"
+        ),
+    )
+    monkeypatch.setattr(REGISTRY.HarborService, "_api", lambda _service: HarborAPI())
     monkeypatch.setattr(CALLBACKS, "read_runner_record", runner_read)
     monkeypatch.setattr(CALLBACKS, "runner_update_guard", guard, raising=False)
     monkeypatch.setattr(GITLAB_API, "_lock_root", lambda: tmp_path / "locks")

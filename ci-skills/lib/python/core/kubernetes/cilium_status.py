@@ -15,6 +15,7 @@ from typing import Optional
 from lib.python.access.kubernetes import kubectl_argv, kubernetes_env
 from lib.python.core.cli_api import response_decoder
 from lib.python.core.collection import _search
+from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.cilium import (
     AGENT_DAEMONSET,
@@ -27,6 +28,7 @@ from lib.python.core.kubernetes.cilium import (
     valid_health,
 )
 from lib.python.core.kubernetes.collect import _batch, _meta
+from lib.python.core.kubernetes.kubernetes import KubernetesService
 from lib.python.core.kubernetes.objects import KubernetesObject
 from lib.python.core.report import report
 from lib.python.core.runtime import error_class, run_command
@@ -43,6 +45,8 @@ class CiliumInventory:
         args: Namespace,
         data: Mapping[str, Sequence[JSONObject]],
         errors: MutableSequence[Mapping[str, str]],
+        *,
+        state: DeliveryState | None = None,
     ):
         """Keep one resource snapshot and the caller's report filters.
 
@@ -50,8 +54,10 @@ class CiliumInventory:
         :param args: Namespace selection, node restriction, and report text filter.
         :param data: Validated resource lists from the shared concurrent reader.
         :param errors: Collection failures extended with selection and health errors.
+        :param state: Shared declaration and previously observed Kubernetes access.
         """
         self.target = target
+        self.state = state
         self.args = args
         self.errors = errors
         self.data: MutableMapping[str, Sequence[JSONObject]] = {}
@@ -148,6 +154,7 @@ class CiliumInventory:
         :raises TargetError: If bound kubeconfig sources changed or are unreadable.
         :raises OSError: If the native process cannot be started.
         """  # noqa: DOC502 - Field readers and native health queries can fail.
+        KubernetesService(self.target, state=self.state).require_access()
         resource = KubernetesObject(pod)
         ready = is_ready(pod)
         row: MutableMapping[str, JSONValue] = {
@@ -288,17 +295,21 @@ class CiliumInventory:
         return result
 
 
-def collect_cilium(target: Target, args: Namespace) -> JSONObject:
+def collect_cilium(
+    target: Target, args: Namespace, *, state: DeliveryState | None = None
+) -> JSONObject:
     """Read Cilium agent, operator, and CiliumNode status on one target.
 
     :param target: Bound Kubernetes target for resource lists and agent health.
     :param args: Namespace selector, optional node, and text-search filter.
+    :param state: Shared declaration and previously observed Kubernetes access.
     :returns: Cilium report with agent records, component findings, related
         inventories, and errors when selection or health reads fail.
     :raises TargetError: If bound kubeconfig sources changed or are unreadable.
     :raises ValueError: If the target has no Kubernetes authority.
     :raises OSError: If a native resource or health process cannot be started.
     """  # noqa: DOC502 - Target/query helpers and worker reads propagate failures.
+    KubernetesService(target, state=state).require_access()
     data, errors = _batch(
         target,
         {
@@ -308,4 +319,4 @@ def collect_cilium(target: Target, args: Namespace) -> JSONObject:
             "ciliumnodes": ("ciliumnodes.cilium.io", False),
         },
     )
-    return CiliumInventory(target, args, data, errors).report()
+    return CiliumInventory(target, args, data, errors, state=state).report()

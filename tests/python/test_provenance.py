@@ -398,7 +398,8 @@ def test_functional_digest_excludes_documents_tests_and_caches(
 
 
 @pytest.mark.parametrize(
-    "operation", ("python", "bash_add", "schema", "delete", "mode")
+    "operation",
+    ("python", "bash_add", "schema", "delete", "mode", "spec", "spec_delete"),
 )
 def test_functional_digest_tracks_runtime_bytes_and_shapes(
     installed: Path, operation: str
@@ -410,6 +411,9 @@ def test_functional_digest_tracks_runtime_bytes_and_shapes(
     :returns: None; assertions in the body validate the regression.
     """
     provenance = _provenance()
+    declaration = installed / "ci_skills.spec.json"
+    if operation in {"spec", "spec_delete"}:
+        declaration.write_text('{"gitlab":{"role":"admin"}}\n', encoding="utf-8")
     before = provenance.functional_digest(installed)
     bin_file = installed / "bin" / "thing.sh"
     lib_file = installed / "lib" / "python" / "thing.py"
@@ -424,6 +428,10 @@ def test_functional_digest_tracks_runtime_bytes_and_shapes(
         schema_file.write_text('{"type":"string"}\n', encoding="utf-8")
     elif operation == "delete":
         lib_file.unlink()
+    elif operation == "spec":
+        declaration.write_text('{"gitlab":{"role":"user"}}\n', encoding="utf-8")
+    elif operation == "spec_delete":
+        declaration.unlink()
     else:
         bin_file.chmod(bin_file.stat().st_mode | 0o100)
 

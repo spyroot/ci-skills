@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import Optional
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_kubernetes_service, import_script_module
 
 CSR = import_script_module("lib.python.core.kubernetes.ocp_csr")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
@@ -334,7 +334,7 @@ def test_csr_deadline_caps_the_real_service_native_request_timeout(
     """A slow native list is bounded by both the join budget and service default."""
     from test_tool_pod import MemoryCluster
 
-    service = KUBERNETES.KubernetesService(MemoryCluster().target, timeout=30)
+    service = authenticated_kubernetes_service(MemoryCluster().target, timeout=30)
     timeouts: list[float] = []
 
     def native(

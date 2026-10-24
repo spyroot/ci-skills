@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import (
+    authenticated_kubernetes_service,
+    bind_kubernetes_fixture,
+    import_script_module,
+)
 
 PODS = import_script_module("lib.python.core.kubernetes.tool_pod")
 POD_RESOURCES = import_script_module("lib.python.core.kubernetes.tool_pod_resources")
@@ -259,7 +263,7 @@ def specification() -> PODS.ToolPodSpec:
 def _state(cluster: MemoryCluster) -> PODS.ToolPodState:
     """Bind the fake transport as an already authenticated library consumer."""
     state = PODS.ToolPodState()
-    state.kubernetes = cluster
+    bind_kubernetes_fixture(state, cluster)
     return state
 
 
@@ -370,7 +374,7 @@ def test_pending_mount_detection_is_bounded_and_requires_current_pod_uid(
     :param outcome: Current or stale event, terminal provider refusal, or ready Pod.
     :param monkeypatch: Replace only provider reads and time with deterministic inputs.
     """
-    service = KUBERNETES.KubernetesService(_target(), timeout=240)
+    service = authenticated_kubernetes_service(_target(), timeout=240)
     elapsed = 0.0
     reads: list[float] = []
     event_calls: list[tuple[str, ...]] = []
@@ -1040,6 +1044,7 @@ def _bind_cli_cluster(monkeypatch: pytest.MonkeyPatch, cluster: MemoryCluster) -
         return cluster.target
 
     def configure(callback: KUBERNETES.K8SAuth) -> JSONObject:
+        bind_kubernetes_fixture(callback.state, cluster)
         callback.state.kubernetes_target = cluster.target
         return {}
 

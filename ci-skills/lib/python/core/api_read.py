@@ -20,11 +20,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Optional, TypeVar
 
+from lib.python.access.gitlab import establish_gitlab_identity, require_gitlab_access
 from lib.python.access.sources import _token_source
 from lib.python.core.abstract.callback import LocalCallback
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
+from lib.python.core.abstract.skill_state import SkillState
 from lib.python.core.catalog import (
     GITHUB_DOTCOM_HOST,
     GITHUB_TOKEN_VARIABLES,
@@ -38,7 +40,12 @@ from lib.python.core.cli_api import (
     response_decoder,
     validate_endpoint,
 )
-from lib.python.core.github.github import GitHubAPIClient
+from lib.python.core.github.github import (
+    GitHubAPIClient,
+    establish_github_identity,
+    pin_github_environment,
+    require_github_runtime,
+)
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.project_binding import SMOKE_ENV, resolve_target_file
@@ -275,6 +282,7 @@ class ApiProviderSelection:
     :param host: Validated hostname from runtime configuration or the explicit option.
     :param token_file: Selected credential-file reference; absent uses shared native
         credential resolution when the binding callback runs.
+    :param repository: Repository selected by the GitHub endpoint or target configuration.
 
     .. attribute :: provider
         :type: GitProvider
@@ -291,11 +299,17 @@ class ApiProviderSelection:
 
         Selected credential-file reference; absent uses shared native credential resolution when
         the binding callback runs.
+
+    .. attribute :: repository
+        :type: Optional[str]
+
+        Repository whose declared GitHub access is checked before the request.
     """
 
     provider: GitProvider
     host: str
     token_file: Optional[Path] = None
+    repository: Optional[str] = None
 
     @classmethod
     def from_action(cls, action: ApiProviderAction) -> ApiProviderSelection:
@@ -308,6 +322,7 @@ class ApiProviderSelection:
         :raises ReadToolError: If the provider hostname is missing or malformed.
         """
         host, token_file = action.host, action.token_file
+        repository = None
         try:
             path, _source = resolve_target_file(None)
         except TargetError as exc:
@@ -325,11 +340,17 @@ class ApiProviderSelection:
             if host is None or host.lower() == configured.host:
                 host = configured.host
                 token_file = token_file or configured.token_file
+                if action.provider == GitProvider.GITHUB:
+                    repository = target.require_github().repository
         if host is None and action.provider == GitProvider.GITHUB:
             host = GITHUB_DOTCOM_HOST
         if not host or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", host):
             raise ReadToolError("select a provider host in target.toml", ReadExit.USAGE)
-        return cls(action.provider, host.lower(), token_file)
+        if action.provider == GitProvider.GITHUB and isinstance(action, ApiReadAction):
+            parts = action.endpoint.split("/")
+            if len(parts) >= 3 and parts[0] == "repos":
+                repository = "/".join(parts[1:3])
+        return cls(action.provider, host.lower(), token_file, repository)
 
 
 @dataclass(frozen=True)
@@ -354,10 +375,13 @@ class ApiReadService:
     session: ReadSession = field(repr=False)
 
     @classmethod
-    def bind(cls, selection: ApiProviderSelection) -> ApiReadService:
+    def bind(
+        cls, selection: ApiProviderSelection, state: SkillState | None = None
+    ) -> ApiReadService:
         """Read the selected credential source and construct its native transport.
 
         :param selection: Provider and host already resolved by the selection step.
+        :param state: Invocation owning the required provider observation.
         :returns: Client and exact-host credential session for authenticated reads.
         :raises TargetError: If a selected credential file or environment value is invalid.
         """  # noqa: DOC502 - Credential-source binding propagates TargetError.
@@ -373,9 +397,41 @@ class ApiReadService:
             max_response_bytes=MAX_READ_BYTES,
             max_retry_after=MAX_READ_RETRY_AFTER,
         )
-        return cls(
-            client, ReadSession(selection.host, source.environment, source.reference)
+        environment = (
+            pin_github_environment(
+                selection.host, source.reference, source.environment, client.timeout
+            )
+            if github
+            else source.environment
         )
+        return cls(
+            client,
+            ReadSession(
+                selection.host,
+                environment,
+                source.reference,
+                invocation=state,
+                repository=selection.repository,
+            ),
+        )
+
+    def require_access(self, provider: GitProvider) -> JSONObject:
+        """Read retained identity after checking the declared provider access.
+
+        :param provider: Provider selected by the pending operation.
+        :returns: Native identity fields already observed by the initializer.
+        :raises ValueError: Identity or declared access has not been established.
+        """  # noqa: DOC502 - Provider guards validate retained state and binding.
+        state = self.session.invocation
+        if state is None:
+            raise ValueError(f"{provider.value}_identity_preflight_missing")
+        if provider == GitProvider.GITHUB:
+            observed = require_github_runtime(
+                state, self.session, self.session.repository or ""
+            )
+        else:
+            observed = require_gitlab_access(state, self.session)
+        return {"id": observed.user_id, "username": observed.identity}
 
     def read(self, action: ApiReadAction) -> JSONValue:
         """Read one GET response and select the caller's bounded native value.
@@ -387,6 +443,7 @@ class ApiReadService:
         :raises OSError: If the native provider process cannot be started.
         """  # noqa: DOC502 - Native reads and response selection propagate failures.
         action.validate()
+        self.require_access(action.provider)
         text = self.client.get_text(
             self.session, action.endpoint, paginate=action.paginate
         ).rstrip("\n")
@@ -403,8 +460,7 @@ class ApiReadService:
         :raises OSError: If the native provider process cannot be started.
         """  # noqa: DOC502 - Native reads and identity selection propagate failures.
         action.validate()
-        text = self.client.get_text(self.session, "user").rstrip("\n")
-        value = ApiJSONDecoder(action.provider).decode(text)
+        value = self.require_access(action.provider)
         return ApiIdentitySelector(action, self.session.host).select(value)
 
 
@@ -691,7 +747,7 @@ class ApiProviderCallback(ApiSelectionCallback[ApiActionT_co]):
         """  # noqa: DOC502 - Shared selection and credential readers propagate failures.
         if not hasattr(self.state, "service"):
             super().read_config()
-            self.state.service = ApiReadService.bind(self.state.selection)
+            self.state.service = ApiReadService.bind(self.state.selection, self.state)
         return {}
 
     def is_configured(self) -> bool:
@@ -700,6 +756,15 @@ class ApiProviderCallback(ApiSelectionCallback[ApiActionT_co]):
         :returns: Whether this invocation has a credential-bound native transport.
         """
         return hasattr(self.state, "service")
+
+    def whoami(self) -> bool:
+        """Check the provider observation without authenticating a missing prerequisite.
+
+        :returns: True after the declared access and selected binding match.
+        :raises ValueError: Provider identity, role, or binding is missing or mismatched.
+        """  # noqa: DOC502 - The service guard checks retained access.
+        self.state.service.require_access(self.action.provider)
+        return True
 
 
 class SelectAPI(ApiSelectionCallback[ApiProviderAction]):
@@ -721,6 +786,26 @@ class SelectAPI(ApiSelectionCallback[ApiProviderAction]):
 
 class BindAPI(ApiProviderCallback[ApiProviderAction]):
     """Bind the selected provider's existing credentials before its read callback."""
+
+    def whoami(self) -> bool:
+        """Initialize the selected provider observation once before any endpoint read.
+
+        :returns: True after observing and checking the declared provider access.
+        :raises ValueError: Identity, repository selection, or required role is invalid.
+        :raises APIError: The native provider identity request fails.
+        :raises OSError: The native provider process cannot start.
+        """  # noqa: DOC502 - Shared provider initialization propagates access failures.
+        service = self.state.service
+        if self.action.provider == GitProvider.GITHUB:
+            establish_github_identity(
+                self.state,
+                service.session,
+                self.state.selection.repository or "",
+                service.client,
+            )
+        else:
+            establish_gitlab_identity(self.state, service.session, service.client)
+        return super().whoami()
 
     def run(self) -> JSONObject:
         """Store a private native service and report only its credential reference.

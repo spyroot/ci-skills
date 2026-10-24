@@ -11,6 +11,24 @@ and its kubeconfig through the [project binding](project-binding.md).
 project for identity and project access read-back before job, pipeline, runner,
 and trace reads.
 
+## Provider identity and required roles
+
+The installed `ci_skills.spec.json` declares the expected provider roles:
+Kubernetes `cluster_role: cluster-admin`; GitLab and Harbor `role: admin`;
+GitHub `role: admin` on the selected repository. GitHub repository Admin does
+not establish every permission of a fine-grained token; native API denials
+still fail the requested operation.
+
+The shared executor loads this file unless its library caller supplies `Spec`.
+Provider authentication establishes identity and actual role once per invocation.
+Every callback first calls `whoami()`; later callbacks check the retained runtime
+against the declaration without another identity request. An unset role or a
+mismatch fails before the operation. A fresh invocation starts with unset roles.
+`--help` and `--describe` do not authenticate.
+
+The installer rejects a missing declaration. The existing required installation
+check exercises absence, exact restoration, and successful installed loading.
+
 ## Where the target file comes from
 
 Without a project binding, three declared places are checked in order, and the winner is reported back in
@@ -111,7 +129,8 @@ checksums to live receipts that carry a `skill` identity:
 - `skill.digest` identifies the installer-checked skill file tree, including
   documentation. The installer uses it to verify copied files. Its own record,
   symlinks, bytecode caches, and platform metadata are excluded.
-- `skill.functional_digest` identifies files under `bin/`, `lib/`, and `schemas/`.
+- `skill.functional_digest` identifies files under `bin/`, `lib/`, and `schemas/`,
+  plus `ci_skills.spec.json`. Changing a declared role changes this checksum.
   Live reports and the GitHub acceptance checker use the same calculation over
   sorted relative paths, executable bits, and file contents. Documentation,
   tests, and bytecode caches are excluded. Matching checksums bind the captured
@@ -141,7 +160,7 @@ identifies the execution host, time, revision, sources, targets, identities,
 and individual results.
 
 - GitHub: authenticate the selected host, read back the identity and exact
-  repository. Publication mode also requires repository administration and
+  repository and its declared role. Publication mode additionally requires
   read-back of nonempty required status checks on the protected main branch.
 - GitLab: authenticate the exact origin, read back an identity with
   `is_admin: true` and matching host, and read the instance runner API.

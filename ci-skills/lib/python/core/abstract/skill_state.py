@@ -13,8 +13,11 @@ from collections.abc import Mapping, MutableMapping, MutableSequence
 from dataclasses import dataclass, field
 from typing import ClassVar, Self, TypedDict, TypeVar
 
+from lib.python.core.abstract.provider_runtime import KubernetesRuntime, ProviderRuntime
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.abstract.skill_result import SkillResult
+from lib.python.core.abstract.spec import Spec
+from lib.python.core.json_types import JSONObject
 
 
 class CleanupFailure(TypedDict):
@@ -56,6 +59,11 @@ class SkillState:
     :param verbose: Caller-selected verbose output setting.
     :param environment: Caller-supplied invocation environment values.
     :param plugin_ready: Successful configuration checks for this invocation only.
+    :param spec: Declared provider requirements, loaded before callback binding.
+    :param gitlab_runtime: GitLab identity and access observed during this invocation.
+    :param kubernetes_runtime: Kubernetes identity and access observed during this invocation.
+    :param github_runtime: GitHub identity and access observed during this invocation.
+    :param harbor_runtime: Harbor identity and access observed during this invocation.
 
     .. attribute :: result
         :type: SkillResult
@@ -112,6 +120,31 @@ class SkillState:
 
         Configuration readiness keyed by plugin identity, initially empty.
 
+    .. attribute :: spec
+        :type: Spec | None
+
+        Provider requirements supplied by the caller or the installed specification.
+
+    .. attribute :: gitlab_runtime
+        :type: ProviderRuntime
+
+        Write-once GitLab observation; its role is initially None.
+
+    .. attribute :: kubernetes_runtime
+        :type: KubernetesRuntime
+
+        Write-once Kubernetes observation; its cluster_role is initially None.
+
+    .. attribute :: github_runtime
+        :type: ProviderRuntime
+
+        Write-once GitHub observation; its role is initially None.
+
+    .. attribute :: harbor_runtime
+        :type: ProviderRuntime
+
+        Write-once Harbor observation; its role is initially None.
+
     .. attribute :: json_encoder
         :type: ClassVar[type[json.JSONEncoder]]
 
@@ -133,7 +166,100 @@ class SkillState:
     plugin_ready: MutableMapping[SkillPluginType, bool] = field(
         default_factory=dict, repr=False
     )
+    spec: Spec | None = field(default=None, repr=False)
+    gitlab_runtime: ProviderRuntime = field(default_factory=ProviderRuntime, repr=False)
+    kubernetes_runtime: KubernetesRuntime = field(
+        default_factory=KubernetesRuntime, repr=False
+    )
+    github_runtime: ProviderRuntime = field(default_factory=ProviderRuntime, repr=False)
+    harbor_runtime: ProviderRuntime = field(default_factory=ProviderRuntime, repr=False)
     json_encoder: ClassVar[type[json.JSONEncoder]] = json.JSONEncoder
+
+    def provider_spec(self, plugin_type: SkillPluginType) -> JSONObject:
+        """Select one provider's declaration without interpreting its requirements.
+
+        :param plugin_type: Provider key declared by the callback base.
+        :returns: That provider's specification object.
+        :raises ValueError: No specification or provider section has been bound.
+        """
+        if self.spec is None or plugin_type.value not in self.spec:
+            raise ValueError(f"{plugin_type.value}_specification_missing")
+        return self.spec[plugin_type.value]
+
+    def provider_runtime(self, plugin_type: SkillPluginType) -> ProviderRuntime:
+        """Read the typed runtime observation selected by the callback's provider.
+
+        :param plugin_type: Provider key declared by the callback base.
+        :returns: Immutable observation, including its initial null role.
+        :raises ValueError: The plugin has no external provider runtime.
+        """
+        runtimes = {
+            SkillPluginType.GITLAB: self.gitlab_runtime,
+            SkillPluginType.KUBERNETES: self.kubernetes_runtime,
+            SkillPluginType.GITHUB: self.github_runtime,
+            SkillPluginType.HARBOR: self.harbor_runtime,
+        }
+        if plugin_type not in runtimes:
+            raise ValueError(f"{plugin_type.value}_runtime_unavailable")
+        return runtimes[plugin_type]
+
+    def establish_runtime(
+        self, plugin_type: SkillPluginType, observation: ProviderRuntime
+    ) -> None:
+        """Write a provider's actual observation once, after authentication.
+
+        :param plugin_type: Provider key declared by its authentication callback.
+        :param observation: Observed identity, role, and authentication binding.
+        :raises TypeError: Kubernetes receives a non-Kubernetes runtime observation.
+        :raises ValueError: Runtime is already established, or the observation is unset.
+        """  # noqa: DOC502 - provider_runtime rejects plugins without runtime state.
+        if self.provider_runtime(plugin_type).role is not None:
+            raise ValueError(f"{plugin_type.value}_runtime_already_established")
+        if observation.role is None:
+            raise ValueError(f"{plugin_type.value}_runtime_role_missing")
+        if plugin_type is SkillPluginType.KUBERNETES:
+            if not isinstance(observation, KubernetesRuntime):
+                raise TypeError("kubernetes runtime must be KubernetesRuntime")
+            self.kubernetes_runtime = observation
+        elif plugin_type is SkillPluginType.GITLAB:
+            self.gitlab_runtime = observation
+        elif plugin_type is SkillPluginType.GITHUB:
+            self.github_runtime = observation
+        elif plugin_type is SkillPluginType.HARBOR:
+            self.harbor_runtime = observation
+
+    def require_runtime(
+        self,
+        plugin_type: SkillPluginType,
+        expected_role: str,
+        *,
+        authority: str | None = None,
+        credential_identity: str | None = None,
+    ) -> ProviderRuntime:
+        """Validate retained access locally without authenticating or populating state.
+
+        :param plugin_type: Provider key declared by the callback base.
+        :param expected_role: Required role interpreted from that provider's declaration.
+        :param authority: Provider authority the pending operation will use, when supplied.
+        :param credential_identity: Bound authentication identifier, when supplied.
+        :returns: The existing observation after all requested comparisons succeed.
+        :raises ValueError: Runtime is unset, has a different role, or belongs to another binding.
+        """  # noqa: DOC502 - provider_runtime rejects plugins without runtime state.
+        runtime = self.provider_runtime(plugin_type)
+        if runtime.role is None:
+            raise ValueError(f"{plugin_type.value}_identity_preflight_missing")
+        if runtime.role != expected_role:
+            raise ValueError(
+                f"{plugin_type.value}_required_role_missing:{expected_role}"
+            )
+        if authority is not None and runtime.authority != authority:
+            raise ValueError(f"{plugin_type.value}_runtime_authority_mismatch")
+        if (
+            credential_identity is not None
+            and runtime.credential_identity != credential_identity
+        ):
+            raise ValueError(f"{plugin_type.value}_runtime_credential_mismatch")
+        return runtime
 
     def trace(self, event: str, details: Mapping[str, object]) -> None:
         """Accept an execution event; concrete states may send it to a logger.
@@ -194,7 +320,7 @@ class SkillState:
         """Restore a concrete state from a caller-selected trusted pickle file.
 
         :param file_path: Path previously written by save_state_to_file.
-        :returns: Deserialized instance of this concrete state class.
+        :returns: Deserialized concrete state with provider authentication observations reset.
         :raises OSError: The file cannot be opened or read.
         :raises EOFError: The file ends before a pickle value can be read.
         :raises pickle.UnpicklingError: The file contains invalid pickle data.
@@ -206,6 +332,11 @@ class SkillState:
             state = pickle.load(handle)
         if not isinstance(state, cls):
             raise TypeError(f"Expected {cls.__name__}, got {type(state).__name__}.")
+        state.gitlab_runtime = ProviderRuntime()
+        state.kubernetes_runtime = KubernetesRuntime()
+        state.github_runtime = ProviderRuntime()
+        state.harbor_runtime = ProviderRuntime()
+        state.plugin_ready = {}
         return state
 
     def save_state_to_file(self, file_path: str) -> None:

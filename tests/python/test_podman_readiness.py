@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Final, NoReturn, Optional
 import pytest
 from conftest import (
     SKILL_ROOT,
+    bind_kubernetes_fixture,
     import_script_module,
     install_executable,
     parse_json_output,
@@ -851,7 +852,7 @@ def _executor(
         PODMAN_CALLBACKS.RunPodmanProbe(action),
     ]
     state = PODMAN_CALLBACKS.PodmanProbeState()
-    state.kubernetes = service
+    bind_kubernetes_fixture(state, service)
     return EXECUTOR.WorkflowExecutor(state, CALLBACKS.Callbacks(callbacks))
 
 
@@ -866,6 +867,38 @@ def _reported_apply_status(state: PodmanProbeState) -> str:
     )
     controller.state = state
     return controller._apply_status()
+
+
+@pytest.mark.parametrize(
+    ("role", "reason"),
+    (
+        (None, "kubernetes_identity_preflight_missing"),
+        ("viewer", "kubernetes_required_role_missing:cluster-admin"),
+    ),
+)
+def test_probe_rejects_unestablished_or_insufficient_role_before_provider_operations(
+    tmp_path: Path, role: Optional[str], reason: str
+) -> None:
+    """A configured workflow still requires retained cluster administration.
+
+    :param tmp_path: Isolated target path used by the existing probe fixture.
+    :param role: Missing or insufficient identity observation supplied by the caller.
+    :param reason: Required failure before provider operations or probe resource writes.
+    :returns: None; provider journals prove no operation crossed the access gate.
+    """
+    service = FakeKubernetes(_target(tmp_path))
+    executor = _executor(_apply_action(tmp_path), service)
+    executor.state.kubernetes_runtime = replace(
+        executor.state.kubernetes_runtime, role=role
+    )
+
+    with pytest.raises(ValueError, match=reason):
+        executor.run()
+
+    assert service.commands == []
+    assert service.mutations == []
+    assert service.deletions == []
+    assert service.resources == {}
 
 
 def test_marker_parser_proves_nested_run_exit_propagation_and_cleanup() -> None:

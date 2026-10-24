@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Final, Optional, Union
 
 import pytest
-from conftest import import_script_module, load_module
+from conftest import authenticated_gitlab_session, import_script_module, load_module
 from jsonschema import Draft202012Validator
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
@@ -126,18 +126,20 @@ def _bound_session(
         "digest": "unit",
         "revision": {"value": "a" * 40, "verified": True},
     }
-    return GITLAB_SESSION.BoundGitLabSession(
-        origin=plan.origin,
-        host="gitlab.example.test",
-        target_kind=plan.target_kind,
-        target_reference=plan.target_reference,
-        target_source=plan.target_source,
-        target_file=Path("/selected/target.toml"),
-        credential_source=credential_source,
-        credential_digest=credential_digest,
-        execution_host="unit-host",
-        skill=selected_skill,
-        environment={},
+    return authenticated_gitlab_session(
+        GITLAB_SESSION.BoundGitLabSession(
+            origin=plan.origin,
+            host="gitlab.example.test",
+            target_kind=plan.target_kind,
+            target_reference=plan.target_reference,
+            target_source=plan.target_source,
+            target_file=Path("/selected/target.toml"),
+            credential_source=credential_source,
+            credential_digest=credential_digest,
+            execution_host="unit-host",
+            skill=selected_skill,
+            environment={},
+        )
     )
 
 
@@ -202,7 +204,11 @@ def _live_action_dependencies(
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
-        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+        GITLAB_ACTION,
+        "bind_gitlab_session",
+        lambda *_args, **_kwargs: authenticated_gitlab_session(
+            session, _kwargs.get("invocation")
+        ),
     )
     monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: object())
     monkeypatch.setattr(
@@ -1509,7 +1515,11 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
-        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+        GITLAB_ACTION,
+        "bind_gitlab_session",
+        lambda *_args, **_kwargs: authenticated_gitlab_session(
+            session, _kwargs.get("invocation")
+        ),
     )
     monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: api)
     monkeypatch.setattr(
@@ -1571,7 +1581,11 @@ def test_action_access_failure_preserves_the_failed_subcheck(
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     session = _bound_session(plan)
     monkeypatch.setattr(
-        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+        GITLAB_ACTION,
+        "bind_gitlab_session",
+        lambda *_args, **_kwargs: authenticated_gitlab_session(
+            session, _kwargs.get("invocation")
+        ),
     )
     monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: object())
     monkeypatch.setattr(
@@ -1635,7 +1649,11 @@ def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
-        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+        GITLAB_ACTION,
+        "bind_gitlab_session",
+        lambda *_args, **_kwargs: authenticated_gitlab_session(
+            session, _kwargs.get("invocation")
+        ),
     )
     monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: object())
     monkeypatch.setattr(

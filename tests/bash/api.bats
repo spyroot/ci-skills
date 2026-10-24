@@ -4,8 +4,62 @@ setup() {
   tool="${BATS_TEST_DIRNAME}/../../bin/ci-api"
   export CI_TEST_GH_MARKER="${BATS_TEST_TMPDIR}/gh-calls"
   mkdir -p "${BATS_TEST_TMPDIR}/mock"
+  export CI_TEST_API_AUTH="${BATS_TEST_TMPDIR}/native-identity.bash"
+  export CI_TEST_GH_AUTH_MARKER="${BATS_TEST_TMPDIR}/github-identity"
+  export CI_TEST_API_CALLS="${BATS_TEST_TMPDIR}/api-calls"
+  export CI_TEST_GH_USER=unit-admin
+  export CI_TEST_GH_ADMIN=true CI_TEST_GL_ADMIN=true
+  export GH_TOKEN=fixture-token GH_ENTERPRISE_TOKEN=fixture-enterprise-token
+  export GITLAB_TOKEN=fixture-gitlab-token
+  export CI_SKILLS_TARGET="${BATS_TEST_TMPDIR}/target.toml"
+  cat > "$CI_SKILLS_TARGET" <<'TARGET'
+[github]
+host = "github.com"
+repository = "example/repo"
+[gitlab]
+url = "https://gitlab.example.invalid"
+TARGET
+  cat > "$CI_TEST_API_AUTH" <<'IDENTITY'
+ci_test_native_identity() {
+  local tool="$1" endpoint="" host=github.com previous="" argument
+  shift
+  printf '%s\n' "$tool $*" >> "$CI_TEST_API_CALLS"
+  for argument in "$@"; do
+    if [[ $previous == --hostname ]]; then
+      host=$argument
+    fi
+    case "$argument" in
+      user | repos/*) endpoint=$argument ;;
+    esac
+    previous=$argument
+  done
+  if [[ $endpoint == user ]]; then
+    if [[ $tool == gh ]]; then
+      printf '{"id":17,"login":"%s"}\n' "$CI_TEST_GH_USER"
+    else
+      printf '{"id":17,"username":"unit-admin","is_admin":%s,"web_url":"https://%s/unit-admin"}\n' \
+        "$CI_TEST_GL_ADMIN" "$host"
+    fi
+    return 0
+  fi
+  if [[ $tool == gh && $endpoint == repos/* && ! -e $CI_TEST_GH_AUTH_MARKER ]]; then
+    local selected="${endpoint#repos/}" owner repository
+    owner="${selected%%/*}"
+    selected="${selected#*/}"
+    repository="${selected%%/*}"
+    repository="${repository%%\?*}"
+    printf '%s\n' verified > "$CI_TEST_GH_AUTH_MARKER"
+    printf '{"id":42,"full_name":"%s/%s","permissions":{"admin":%s}}\n' \
+      "$owner" "$repository" "$CI_TEST_GH_ADMIN"
+    return 0
+  fi
+  return 1
+}
+ci_test_native_identity "$@"
+IDENTITY
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' '{"content":"b25lCnR3\nbwp0aHJlZQo="}'
 MOCK
   chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
@@ -24,6 +78,7 @@ MOCK
 @test 'dry-run prints a plan and makes no provider call' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' 'provider was called' >&2
 exit 99
 MOCK
@@ -31,6 +86,39 @@ MOCK
   run "$tool" get --provider github --endpoint repos/example/repo --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *'"mode":"dry-run"'* ]]
+  [ ! -e "$CI_TEST_API_CALLS" ]
+}
+
+@test 'GitHub repository admin refusal prevents the requested endpoint read' {
+  export CI_TEST_GH_ADMIN=false
+  cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
+#!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
+printf '%s\n' requested > "$CI_TEST_GH_MARKER"
+printf '%s\n' '{"content":"unreachable"}'
+MOCK
+  chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
+  run "$tool" get --provider github \
+    --endpoint repos/example/repo/contents/file --log-level error
+  [ "$status" -eq 69 ]
+  [[ "$output" == *github_required_role_missing* ]]
+  [ ! -e "$CI_TEST_GH_MARKER" ]
+}
+
+@test 'GitLab instance admin refusal prevents the requested endpoint read' {
+  export CI_TEST_GL_ADMIN=false
+  cat > "${BATS_TEST_TMPDIR}/mock/glab" <<'MOCK'
+#!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
+printf '%s\n' requested > "$CI_TEST_GH_MARKER"
+printf '%s\n' '{"id":42}'
+MOCK
+  chmod +x "${BATS_TEST_TMPDIR}/mock/glab"
+  run "$tool" get --provider gitlab --host gitlab.example.invalid \
+    --endpoint projects/7/jobs/42 --log-level error
+  [ "$status" -eq 69 ]
+  [[ "$output" == *gitlab_required_role_missing* ]]
+  [ ! -e "$CI_TEST_GH_MARKER" ]
 }
 
 @test 'unknown field fails instead of printing a null result' {
@@ -42,6 +130,7 @@ MOCK
 @test 'false is a present JSON field' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' '{"enabled":false}'
 MOCK
   chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
@@ -54,6 +143,7 @@ MOCK
 @test 'HTTP 429 GET is retried and then returns data' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 if [[ ! -e $CI_TEST_GH_MARKER ]]; then
   printf '%s\n' called > "$CI_TEST_GH_MARKER"
   printf '%s\n' 'HTTP 429: rate limited' >&2
@@ -72,6 +162,7 @@ MOCK
 @test 'HTTP 401 GET fails without retry' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' called >> "$CI_TEST_GH_MARKER"
 printf '%s\n' 'HTTP 401: unauthorized' >&2
 exit 1
@@ -87,6 +178,7 @@ MOCK
   export CI_TEST_SLEEP_MARKER="${BATS_TEST_TMPDIR}/sleep-called"
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' called >> "$CI_TEST_GH_MARKER"
 printf '%s\n' 'HTTP 429: rate limited' 'Retry-After: 6' >&2
 exit 1
@@ -107,6 +199,7 @@ MOCK
 @test 'GitLab plain-text trace can return a bounded line range' {
   cat > "${BATS_TEST_TMPDIR}/mock/glab" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' 'first trace line' 'second trace line' 'third trace line'
 MOCK
   chmod +x "${BATS_TEST_TMPDIR}/mock/glab"
@@ -121,6 +214,7 @@ MOCK
   cat > "${BATS_TEST_TMPDIR}/mock/glab" <<'MOCK'
 #!/usr/bin/env bash
 [[ ${GITLAB_TOKEN:-} == ci-test-token ]] || exit 97
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' '{"status":"success"}'
 MOCK
   chmod +x "${BATS_TEST_TMPDIR}/mock/glab"
@@ -135,6 +229,7 @@ MOCK
 @test 'GitLab paginated JSON arrays combine into one collection' {
   cat > "${BATS_TEST_TMPDIR}/mock/glab" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' '[{"id":1}]' '[{"id":2}]'
 MOCK
   chmod +x "${BATS_TEST_TMPDIR}/mock/glab"
@@ -147,6 +242,7 @@ MOCK
 @test 'GitHub paginated JSON arrays combine into one collection' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' '[[{"id":1}],[{"id":2}]]'
 MOCK
   chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
@@ -159,6 +255,7 @@ MOCK
 @test 'GitHub pagination rejects a non-collection page' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' '[[{"id":1}],{"id":2}]'
 MOCK
   chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
@@ -169,11 +266,18 @@ MOCK
 }
 
 @test 'Enterprise GitHub token file overrides every ambient token source' {
+  export CI_TEST_GH_USER=selected
+  cat > "$CI_SKILLS_TARGET" <<'TARGET'
+[github]
+host = "github.enterprise.example.test"
+repository = "example/repo"
+TARGET
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
 [[ ${GH_ENTERPRISE_TOKEN:-} == ci-selected-token ]] || exit 97
 [[ ! ${GH_TOKEN+x} ]] || exit 98
 [[ ! ${GITHUB_TOKEN+x} && ! ${GITHUB_ENTERPRISE_TOKEN+x} ]] || exit 99
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' '{"login":"selected"}'
 MOCK
   chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
@@ -193,6 +297,7 @@ MOCK
 @test 'connection refusal is classified and never displays a token' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' called >> "$CI_TEST_GH_MARKER"
 printf '%s\n' 'error connecting: connection refused' >&2
 exit 1
@@ -214,6 +319,7 @@ MOCK
 @test 'multiline token file fails before the provider is called' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' called > "$CI_TEST_GH_MARKER"
 MOCK
   chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
@@ -228,6 +334,7 @@ MOCK
 @test 'unreadable token path fails before the provider is called' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' called > "$CI_TEST_GH_MARKER"
 MOCK
   chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
@@ -240,6 +347,7 @@ MOCK
 @test 'HTTP 404 fails without retry and names the missing resource class' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
 printf '%s\n' called >> "$CI_TEST_GH_MARKER"
 printf '%s\n' 'HTTP 404: Not Found' >&2
 exit 1

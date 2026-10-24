@@ -317,6 +317,53 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
 
 
 @pytest.mark.parametrize(
+    ("script_name", "required"),
+    (
+        ("ceph_cluster.py", "--namespace"),
+        ("ci-binary-build", "--spec"),
+        ("ci-api", "--provider"),
+    ),
+)
+def test_pre_use_help_renders_top_level_required_inputs(
+    script_name: str,
+    required: str,
+) -> None:
+    """Expose contract-root requirements even when argparse flags remain optional.
+
+    :param script_name: Installed entrypoint declaring a root required option.
+    :param required: Root-level input that must be distinguished from optional flags.
+    :returns: None; assertions prove human help includes the declared prerequisite.
+    """
+    result = run_script(script_name, "--help")
+    description = run_script(script_name, "--describe")
+    assert result.returncode == description.returncode == 0
+    contract = parse_json_output(description)
+    assert required in contract["required_options"]
+    normalized = " ".join(result.stdout.split())
+    assert f"Requires: {', '.join(contract['required_options'])}." in normalized
+
+
+def test_pre_use_help_preserves_per_operation_required_inputs() -> None:
+    """Root prerequisite rendering preserves existing operation requirements.
+
+    :returns: None; assertions prove each declared subcommand requirement is visible.
+    """
+    result = run_script("gitlab_runner.py", "--help")
+    description = run_script("gitlab_runner.py", "--describe")
+    assert result.returncode == description.returncode == 0
+    contract = parse_json_output(description)
+    normalized = " ".join(result.stdout.split())
+    requirements = {
+        operation: fields["required_options"]
+        for operation, fields in contract["subcommands"].items()
+        if fields.get("required_options")
+    }
+    assert requirements
+    for operation, required in requirements.items():
+        assert f"{operation} requires: {', '.join(required)}." in normalized
+
+
+@pytest.mark.parametrize(
     "script_name", ("gitlab_runner.py", "gitlab_repository.py", "gitlab_mr.py")
 )
 def test_help_offers_same_reference_pointers_as_command_proposition(

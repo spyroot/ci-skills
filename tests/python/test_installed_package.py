@@ -116,9 +116,9 @@ if tool == "gh":
     if args[:3] == ["api", "--hostname", "github.example.test"]:
         endpoint = args[3]
         if endpoint == "user":
-            emit({"login": "unit-gh"})
+            emit({"id": 17, "login": "unit-gh"})
         if endpoint == "repos/unit/repo":
-            emit({"full_name": "unit/repo"})
+            emit({"id": 42, "full_name": "unit/repo", "permissions": {"admin": True}})
     raise SystemExit(98)
 
 if tool == "glab":
@@ -629,6 +629,70 @@ def test_installed_manifest_result_schemas_are_shipped_with_the_skill(
     for pointer in pointers:
         assert not Path(pointer).is_absolute()
         assert (installed / pointer).is_file(), pointer
+
+
+def test_installed_default_specification_loads_from_its_own_package(
+    tmp_path: Path,
+) -> None:
+    """Resolve the shipped declaration from an unrelated directory without a target.
+
+    :param tmp_path: Isolated installation and consumer working directory.
+    :returns: None; assertions prove installed bytes determine the loaded declaration.
+    """
+    installed = _install_skill(tmp_path)
+    declaration = installed / "ci_skills.spec.json"
+    assert declaration.read_bytes() == (SKILL_ROOT / declaration.name).read_bytes()
+    unrelated = tmp_path / "consumer"
+    unrelated.mkdir()
+    environment = dict(os.environ)
+    environment.pop("PYTHONPATH", None)
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import json, sys; "
+            "sys.path.insert(0, sys.argv[1]); import _bootstrap; "
+            "from lib.python.core.abstract.spec import load_spec; "
+            "print(json.dumps(load_spec()))"
+        ),
+        str(installed / "bin"),
+    ]
+
+    def load_installed_specification() -> subprocess.CompletedProcess[str]:
+        """Read the same installed default through an isolated consumer process.
+
+        :returns: Exit status and output from the real package loader.
+        """
+        return subprocess.run(
+            command,
+            cwd=unrelated,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+
+    result = load_installed_specification()
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == json.loads(
+        declaration.read_text(encoding="utf-8")
+    )
+    retained = declaration.read_bytes()
+    try:
+        declaration.unlink()
+        missing = load_installed_specification()
+        assert missing.returncode != 0
+        assert "FileNotFoundError" in missing.stderr
+        assert "ci_skills.spec.json" in missing.stderr
+    finally:
+        declaration.write_bytes(retained)
+
+    restored = load_installed_specification()
+    assert declaration.read_bytes() == retained
+    assert restored.returncode == 0, restored.stderr
+    assert json.loads(restored.stdout) == json.loads(result.stdout)
 
 
 def test_installed_reference_schema_validates_v3_and_resolves_watch_pointers(

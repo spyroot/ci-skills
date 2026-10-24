@@ -15,10 +15,10 @@ from typing import Final, Optional
 
 from lib.python.access.gitlab import check_gitlab_operation_access
 from lib.python.access.gitlab_credentials import bind_gitlab_session
-from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.skill_action import ActionT_co
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.delivery_state import ProviderAuthAction
+from lib.python.core.gitlab.callback import GitlabCallback
 from lib.python.core.gitlab.gitlab_actions import ActionError
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient, runner_update_guard
 from lib.python.core.gitlab.gitlab_runners import read_runner_record
@@ -110,16 +110,8 @@ class GitLabManagerAuthAction(ProviderAuthAction):
     revision: Optional[str]
 
 
-class GitLabRunnerManagerCallback(Callback[GitLabRunnerManagerState, ActionT_co]):
+class GitLabRunnerManagerCallback(GitlabCallback[ActionT_co]):
     """Share the GitLab service retained by manager authentication."""
-
-    @property
-    def plugin_type(self) -> SkillPluginType:
-        """Identify GitLab as this callback's configuration owner.
-
-        :returns: GitLab plugin identity.
-        """
-        return SkillPluginType.GITLAB
 
     @property
     def manager_state(self) -> GitLabRunnerManagerState:
@@ -131,33 +123,6 @@ class GitLabRunnerManagerCallback(Callback[GitLabRunnerManagerState, ActionT_co]
         if not isinstance(self.state, GitLabRunnerManagerState):
             raise TypeError("gitlab_runner_manager_state_required")
         return self.state
-
-    def read_config(self) -> JSONObject:
-        """Reuse a caller-bound GitLab service for direct composition.
-
-        :returns: Empty setup evidence after retaining the existing session.
-        :raises TargetError: A direct caller supplied no GitLab service.
-        """
-        if not hasattr(self.manager_state, "gitlab"):
-            raise TargetError("gitlab_configuration_missing")
-        self.manager_state.configured_session = self.manager_state.gitlab.session
-        return {}
-
-    def is_configured(self) -> bool:
-        """Check that configuration retained one private session.
-
-        :returns: Whether GitLab credential selection completed.
-        """
-        return hasattr(self.manager_state, "configured_session")
-
-    @property
-    def gitlab(self) -> GitLabService:
-        """Read the service established by authentication.
-
-        :returns: Bound client, session, target ID, and access evidence.
-        :raises AttributeError: Authentication has not assigned the service.
-        """  # noqa: DOC502 - Ordered composition owns assignment.
-        return self.manager_state.gitlab
 
 
 class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
@@ -217,13 +182,14 @@ class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
             target_reference=action.target_reference,
             target_source=action.target_source,
             revision=action.revision,
+            invocation=self.state,
         )
         return {}
 
-    def run(self) -> JSONObject:
-        """Verify identity and scope, then retain the numeric target.
+    def whoami(self) -> bool:
+        """Establish shared identity once, then verify the runner target.
 
-        :returns: Existing safe GitLab access receipt.
+        :returns: True after retaining the verified service and target.
         :raises ActionError: Access is blocked or lacks a numeric target ID.
         """
         session = self.manager_state.configured_session
@@ -233,8 +199,16 @@ class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
             raise ActionError("gitlab_access_blocked")
         target_id = json_integer(json_object(access["target"])["id"])
         self.manager_state.gitlab = GitLabService(api, session, target_id, access)
-        self.state.access_evidence[SkillPluginType.GITLAB.value] = access
-        return access
+        self.manager_state.access_evidence[SkillPluginType.GITLAB.value] = access
+        return True
+
+    def run(self) -> JSONObject:
+        """Return the access evidence established by the first lifecycle hook.
+
+        :returns: Existing safe GitLab access receipt.
+        :raises ValueError: The shared identity prerequisite is absent or mismatched.
+        """  # noqa: DOC502 - The provider service getter checks retained access.
+        return self.gitlab.access
 
 
 class GitLabManagerComponent(GitLabRunnerManagerCallback[GitLabRunnerManagerAction]):

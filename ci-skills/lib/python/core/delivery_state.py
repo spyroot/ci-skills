@@ -58,6 +58,7 @@ class DeliveryState(ExecutionContext):
     :ivar harbor_credential: Private registry credential read once per invocation.
     :ivar github_target: Concrete GitHub selection retained during configuration.
     :ivar github_session: Private native session read once per invocation.
+    :ivar gitlab_session: Private GitLab session retained by the access initializer.
     :ivar kubernetes: Verified Kubernetes service assigned by K8SAuth.
     :ivar harbor: Private registry service assigned by HarborAuth.
     :ivar github: Verified GitHub service assigned by GitHubAuth.
@@ -92,6 +93,11 @@ class DeliveryState(ExecutionContext):
         :type: ReadSession
 
         Private native credential session retained before execution.
+
+    .. attribute :: gitlab_session
+        :type: ReadSession
+
+        Private GitLab credential session reused by diagnostic collectors.
 
     .. attribute :: kubernetes
         :type: KubernetesService
@@ -144,6 +150,7 @@ class DeliveryState(ExecutionContext):
     harbor_credential: RegistryCredential = field(init=False, repr=False)
     github_target: GitHubTarget = field(init=False, repr=False)
     github_session: ReadSession = field(init=False, repr=False)
+    gitlab_session: ReadSession = field(init=False, repr=False)
     kubernetes: KubernetesService = field(init=False, repr=False)
     harbor: HarborService = field(init=False, repr=False)
     github: GitHubService = field(init=False, repr=False)

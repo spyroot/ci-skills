@@ -1,0 +1,14 @@
+{
+  "kubernetes": {
+    "cluster_role": "cluster-admin"
+  },
+  "gitlab": {
+    "role": "admin"
+  },
+  "harbor": {
+    "role": "admin"
+  },
+  "github": {
+    "role": "admin"
+  }
+}

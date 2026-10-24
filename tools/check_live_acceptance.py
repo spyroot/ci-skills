@@ -7,7 +7,8 @@ the receipt a real host produced and refuses it when it is missing, stale, from
 a different authenticated setup, or produced by different code.
 
 The candidate check compares the recorded functional checksum with ``bin/``,
-``lib/``, and ``schemas/`` using the installed skill's shared implementation.
+``lib/``, ``schemas/``, and ``ci_skills.spec.json`` using the installed skill's
+shared implementation.
 The receipt directories and the freshness window are declared once in the
 tracked ``inventory/ci/live-acceptance.json`` policy; nothing here hardcodes them.
 The whole-package checksum remains evidence of the original installed package;

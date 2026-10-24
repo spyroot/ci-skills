@@ -24,7 +24,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import NoReturn, Optional, Protocol
+from typing import TYPE_CHECKING, NoReturn, Optional, Protocol
 from urllib.parse import urlsplit
 
 from lib.python.core.json_types import (
@@ -40,6 +40,9 @@ from lib.python.core.runtime import (
     run_command_bounded,
     trace_event,
 )
+
+if TYPE_CHECKING:
+    from lib.python.core.abstract.skill_state import SkillState
 
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 READ_ATTEMPTS = 3
@@ -101,6 +104,8 @@ class ReadSession:
     :param host: Exact provider hostname selected for the request.
     :param environment: Child environment overrides; ``None`` removes a variable.
     :param credential_source: Reportable file, environment, or CLI-store reference.
+    :param invocation: Shared state owning this request's identity observation.
+    :param repository: Selected GitHub repository whose retained access is required.
 
     .. attribute :: host
         :type: str
@@ -116,11 +121,23 @@ class ReadSession:
         :type: str
 
         Reportable file, environment, or CLI-store reference.
+
+    .. attribute :: invocation
+        :type: SkillState | None
+
+        Shared invocation state; None carries no verified provider access.
+
+    .. attribute :: repository
+        :type: str | None
+
+        Selected GitHub repository; unused for other providers.
     """
 
     host: str
     environment: Mapping[str, Optional[str]] = field(repr=False)
     credential_source: str
+    invocation: SkillState | None = field(default=None, repr=False, compare=False)
+    repository: str | None = None
 
 
 class APIError(RuntimeError):

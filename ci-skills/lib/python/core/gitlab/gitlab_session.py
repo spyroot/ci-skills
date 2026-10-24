@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from lib.python.core.abstract.provider_runtime import ProviderRuntime
+from lib.python.core.abstract.skill_state import SkillState
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.json_types import JSONObject
 from lib.python.core.provenance import SkillIdentity
@@ -32,6 +34,7 @@ class BoundGitLabSession:
     :param execution_host: Runtime host identity recorded in receipts.
     :param skill: Installed skill identity bound to the session.
     :param environment: Private child-process environment; never serialize it.
+    :param invocation: Shared state owning this session's identity observation.
 
     .. attribute :: origin
         :type: str
@@ -87,6 +90,11 @@ class BoundGitLabSession:
         :type: Mapping[str, Optional[str]]
 
         Private child-process environment; never serialize it.
+
+    .. attribute :: invocation
+        :type: SkillState | None
+
+        Shared state whose identity observation authorizes this session's API calls.
     """
 
     origin: str
@@ -100,6 +108,32 @@ class BoundGitLabSession:
     execution_host: str
     skill: SkillIdentity
     environment: Mapping[str, Optional[str]] = field(repr=False, compare=False)
+    invocation: SkillState | None = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class GitLabRuntime(ProviderRuntime):
+    """Retain native GitLab identity fields for subsequent access receipts.
+
+    ProviderRuntime documents the inherited role, identity, authority, and
+    credential binding fields.
+
+    :param user_id: Positive user identifier returned by the selected host.
+    :param web_url: User URL validated against that same host.
+
+    .. attribute :: user_id
+        :type: int | None
+
+        Native user identifier retained for access receipts.
+
+    .. attribute :: web_url
+        :type: str | None
+
+        Native user URL retained for access receipts.
+    """
+
+    user_id: int | None = None
+    web_url: str | None = None
 
 
 @dataclass(frozen=True)

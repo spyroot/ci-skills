@@ -7,18 +7,23 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Mapping, MutableMapping, MutableSequence
 from datetime import UTC, datetime
 from typing import Optional, Union
 from urllib.parse import quote, urlsplit
 
-from lib.python.access.shared import Surface, _blocked, _json, _token_file
+from lib.python.access.shared import Surface, _blocked, _token_file
 from lib.python.access.sources import Sources
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
+from lib.python.core.abstract.skill_state import SkillState
+from lib.python.core.abstract.spec import load_spec
 from lib.python.core.catalog import GITLAB_VARIABLES
-from lib.python.core.gitlab.gitlab_api import GlabAPIClient
-from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
+from lib.python.core.cli_api import APISession, CLIAPIClient, ReadSession
+from lib.python.core.delivery_state import DeliveryState
+from lib.python.core.gitlab.gitlab_api import GitLabAPIError, GlabAPIClient
+from lib.python.core.gitlab.gitlab_session import BoundGitLabSession, GitLabRuntime
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -70,16 +75,18 @@ def gitlab_env(target: Target) -> Optional[Mapping[str, Optional[str]]]:
     return _token_file(selected.token_file, GITLAB_VARIABLES[0])
 
 
-def gitlab_access(target: Target) -> Surface:
-    """Verify instance-admin identity and runner-list access on GitLab.
+def gitlab_access(target: Target, *, state: SkillState | None = None) -> Surface:
+    """Verify the declared GitLab role and diagnostic runner-list access.
 
     :param target: Runtime target containing the selected GitLab host.
+    :param state: Existing invocation state; otherwise load the installed declaration.
     :returns: PASS surface with the verified username, or BLOCKED surface when
         authentication, host identity, admin status, or runner access fails.
     :raises ValueError: If the target does not select a GitLab authority.
     :raises OSError: If a native authentication or API process cannot be started.
     """  # noqa: DOC503 - Response validation is caught; native I/O can escape.
     selected = target.require_gitlab()
+    invocation = state if state is not None else SkillState(spec=load_spec())
     host = selected.host
     observed: MutableSequence[str] = []
     source = (
@@ -112,22 +119,31 @@ def gitlab_access(target: Target) -> Surface:
         )
     observed.append("authenticated_host")
     try:
-        user = _json(run_command(glab_argv(target, "user"), env=credential))
-        if not isinstance(user, dict) or user.get("is_admin") is not True:
-            raise ValueError("instance_admin_required")
-        web_url = user.get("web_url")
-        if not isinstance(web_url, str) or urlsplit(web_url).netloc.lower() != host:
-            raise ValueError("host_mismatch")
-        identity = user.get("username")
-        if not isinstance(identity, str) or not identity:
-            raise ValueError("missing_identity")
-        observed.append("instance_admin_identity")
-        runners = _json(
-            run_command(glab_argv(target, "runners/all?per_page=1"), env=credential)
+        if isinstance(invocation, DeliveryState) and hasattr(
+            invocation, "gitlab_session"
+        ):
+            session = invocation.gitlab_session
+        else:
+            session = ReadSession(
+                host,
+                dict(credential or {}),
+                source or f"glab-credential-store:{host}",
+                invocation=invocation,
+            )
+            if isinstance(invocation, DeliveryState):
+                invocation.gitlab_session = session
+        api = GlabAPIClient()
+        establish_gitlab_identity(invocation, session, api)
+        identity = invocation.gitlab_runtime.identity
+        observed.append(
+            "instance_admin_identity"
+            if invocation.gitlab_runtime.role == "admin"
+            else "identity_read"
         )
+        runners = api.get_json(session, "runners/all?per_page=1")
         if not isinstance(runners, list):
             raise TypeError("runner_api_invalid_response")
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, GitLabAPIError) as exc:
         return _blocked(
             "gitlab",
             selected.url,
@@ -192,8 +208,103 @@ def _gitlab_safe_reason(error: Exception) -> str:
     return "provider_request_failed"
 
 
+def _credential_identity(session: APISession) -> str:
+    """Fingerprint the concrete GitLab token without retaining or exposing it.
+
+    :param session: Session whose credential selection has already completed.
+    :returns: Token fingerprint, or the exact session identity for a native store.
+    """
+    token = next(
+        (
+            session.environment[name]
+            for name in GITLAB_VARIABLES
+            if session.environment.get(name)
+        ),
+        None,
+    )
+    if token:
+        return "sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return f"native-session:{id(session)}"
+
+
+def require_gitlab_access(state: SkillState, session: APISession) -> GitLabRuntime:
+    """Check the declared role and retained binding without a provider request.
+
+    :param state: Invocation containing its declaration and prior observation.
+    :param session: Exact selected host and pinned credential for this operation.
+    :returns: The previously established GitLab identity and role.
+    :raises ValueError: The declaration, runtime, role, or binding is invalid.
+    :raises TypeError: The retained observation lacks native GitLab identity fields.
+    """  # noqa: DOC502 - Shared state and credential checks reject incomplete bindings.
+    expected = state.provider_spec(SkillPluginType.GITLAB).get("role")
+    if not isinstance(expected, str) or not expected:
+        raise ValueError("gitlab_specification_role_missing")
+    runtime = state.require_runtime(
+        SkillPluginType.GITLAB,
+        expected,
+        authority=f"https://{session.host}",
+        credential_identity=_credential_identity(session),
+    )
+    if not isinstance(runtime, GitLabRuntime):
+        raise TypeError("gitlab_identity_evidence_missing")
+    return runtime
+
+
+def establish_gitlab_identity(
+    state: SkillState, session: APISession, api_client: CLIAPIClient
+) -> JSONObject:
+    """Authenticate once and retain the native GitLab identity and actual role.
+
+    :param state: Shared state whose null role identifies the first authentication.
+    :param session: Selected host and concrete credential used for the identity read.
+    :param api_client: Existing native API transport used by this invocation.
+    :returns: Safe native identity fields reused by later access receipts.
+    :raises ValueError: Identity, required role, or credential binding is invalid.
+    :raises GitLabAPIError: The selected host cannot return the current user.
+    """  # noqa: DOC502,DOC503 - Native requests and shared requirement checks propagate failures.
+    expected = state.provider_spec(SkillPluginType.GITLAB).get("role")
+    if not isinstance(expected, str) or not expected:
+        raise ValueError("gitlab_specification_role_missing")
+    if state.gitlab_runtime.role is None:
+        credential = _credential_identity(session)
+        user = (
+            api_client._identity_json(session)
+            if isinstance(api_client, GlabAPIClient)
+            else api_client.get_json(session, "user")
+        )
+        if (
+            not isinstance(user, dict)
+            or not _gitlab_positive_id(user.get("id"))
+            or not isinstance(user.get("username"), str)
+            or not user["username"].strip()
+        ):
+            raise ValueError("user_identity_invalid")
+        if not _gitlab_origin_matches(user.get("web_url"), f"https://{session.host}"):
+            raise ValueError("user_host_mismatch")
+        state.establish_runtime(
+            SkillPluginType.GITLAB,
+            GitLabRuntime(
+                role="admin" if user.get("is_admin") is True else "user",
+                identity=user["username"],
+                authority=f"https://{session.host}",
+                credential_identity=credential,
+                user_id=user["id"],
+                web_url=user["web_url"],
+            ),
+        )
+    runtime = require_gitlab_access(state, session)
+    return {
+        "id": runtime.user_id,
+        "username": runtime.identity,
+        "web_url": runtime.web_url,
+    }
+
+
 def check_gitlab_operation_access(
-    session: BoundGitLabSession, api_client: Optional[GlabAPIClient] = None
+    session: BoundGitLabSession,
+    api_client: Optional[GlabAPIClient] = None,
+    *,
+    state: SkillState | None = None,
 ) -> JSONObject:
     """Verify one bound GitLab identity and its selected project or group.
 
@@ -201,6 +312,7 @@ def check_gitlab_operation_access(
         environment reused for both access reads.
     :param api_client: Injectable native GitLab client; omission selects the shared
         GlabAPIClient implementation.
+    :param state: Shared identity owner; otherwise use the session's invocation.
     :returns: Versioned access receipt with verified numeric identity and target on
         PASS, or BLOCKED with classified errors and the observations made before
         failure. Credentials and response bodies are excluded from the receipt.
@@ -231,21 +343,10 @@ def check_gitlab_operation_access(
     try:
         if api_client is None:
             api_client = GlabAPIClient()
-        user = api_client.get_json(session, "user")
-        if (
-            not isinstance(user, dict)
-            or not _gitlab_positive_id(user.get("id"))
-            or not isinstance(user.get("username"), str)
-            or not user["username"].strip()
-        ):
-            raise ValueError("user_identity_invalid")
-        if not _gitlab_origin_matches(user.get("web_url"), session.origin):
-            raise ValueError("user_host_mismatch")
-        receipt["identity"] = {
-            "id": user["id"],
-            "username": user["username"],
-            "web_url": user["web_url"],
-        }
+        invocation = state if state is not None else session.invocation
+        if invocation is None:
+            raise ValueError("gitlab_identity_state_missing")
+        receipt["identity"] = establish_gitlab_identity(invocation, session, api_client)
         observations.append("identity_read")
 
         source = "target"
@@ -279,5 +380,11 @@ def check_gitlab_operation_access(
         observations.append("target_read")
         receipt["status"] = PASS
     except Exception as exc:  # noqa: BLE001 - keep every provider failure structured
-        errors.append({"source": source, "reason": _gitlab_safe_reason(exc)})
+        reason = (
+            "gitlab_required_role_missing"
+            if isinstance(exc, ValueError)
+            and str(exc).startswith("gitlab_required_role_missing:")
+            else _gitlab_safe_reason(exc)
+        )
+        errors.append({"source": source, "reason": reason})
     return receipt
