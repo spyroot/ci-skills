@@ -80,6 +80,12 @@ def authenticated_gitlab_session(
     :returns: Session bound to a declaration and genuine initialized runtime state.
     """
     access = import_script_module("lib.python.access.gitlab")
+    catalog = import_script_module("lib.python.core.catalog")
+    if not any(session.environment.get(name) for name in catalog.GITLAB_VARIABLES):
+        session = replace(
+            session,
+            environment={**session.environment, "GITLAB_TOKEN": "fixture-gitlab-token"},
+        )
     contexts = import_script_module("lib.python.core.gitlab.callback")
     specifications = import_script_module("lib.python.core.abstract.spec")
     invocation = contexts.GitLabState() if state is None else state

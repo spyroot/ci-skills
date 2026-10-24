@@ -94,14 +94,11 @@ class GitLabAuthentication(ABC):
             raise TargetError("gitlab_target_missing")
         credential = self.resolve()
         identity = resolve_skill_identity(revision)
-        environment: Mapping[str, Optional[str]] = {
-            **dict.fromkeys(GITLAB_VARIABLES),
-            "CI_JOB_TOKEN": None,
-            "GLAB_ENABLE_CI_AUTOLOGIN": None,
-            "GITLAB_HOST": self._target.gitlab.host,
-            "GLAB_NO_PROMPT": "1",
-            "GITLAB_TOKEN": credential.token,
-        }
+        environment = pin_gitlab_environment(
+            self._target.gitlab.host,
+            credential.source,
+            {"GITLAB_TOKEN": credential.token},
+        )
         return BoundGitLabSession(
             origin=self._target.gitlab.url,
             host=self._target.gitlab.host,
@@ -115,7 +112,7 @@ class GitLabAuthentication(ABC):
             ),
             execution_host=socket.getfqdn(),
             skill=identity,
-            environment=MappingProxyType(environment),
+            environment=environment,
         )
 
 
@@ -133,16 +130,50 @@ class ConfiguredGitLabAuthentication(GitLabAuthentication):
             GITLAB_VARIABLES,
             f"glab-credential-store:{self._target.gitlab.host}",
         )
-        if source.reference.startswith("glab-credential-store:"):
-            token = _glab_store_token(self._target.gitlab.host)
-        else:
-            selected = [
-                value for value in source.environment.values() if value is not None
-            ]
-            if len(selected) != 1:
-                raise TargetError("credential_source_unresolved")
-            token = selected[0]
+        environment = pin_gitlab_environment(
+            self._target.gitlab.host, source.reference, source.environment
+        )
+        token = environment["GITLAB_TOKEN"]
+        if token is None:
+            raise TargetError("credential_source_unresolved")
         return ResolvedGitLabCredential(source.reference, token)
+
+
+def pin_gitlab_environment(
+    host: str,
+    source: str,
+    environment: Mapping[str, Optional[str]],
+) -> Mapping[str, Optional[str]]:
+    """Pin the selected GitLab token into one private child environment.
+
+    :param host: Exact provider hostname selected before credential binding.
+    :param source: Reportable file, environment, or exact-host native store reference.
+    :param environment: Previously selected token overrides; None clears a variable.
+    :returns: Immutable overrides retaining one token and the selected host.
+    :raises TargetError: The selected source has no single token or cannot be pinned.
+    """
+    selected = [
+        environment[name]
+        for name in GITLAB_VARIABLES
+        if environment.get(name) is not None
+    ]
+    if not selected and source == f"glab-credential-store:{host}":
+        token = _glab_store_token(host)
+    elif len(selected) == 1 and selected[0]:
+        token = selected[0]
+    else:
+        raise TargetError("credential_source_unresolved")
+    return MappingProxyType(
+        {
+            **environment,
+            **dict.fromkeys(GITLAB_VARIABLES),
+            "CI_JOB_TOKEN": None,
+            "GLAB_ENABLE_CI_AUTOLOGIN": None,
+            "GITLAB_HOST": host,
+            "GLAB_NO_PROMPT": "1",
+            "GITLAB_TOKEN": token,
+        }
+    )
 
 
 def _glab_store_token(host: str) -> str:

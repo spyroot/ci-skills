@@ -880,7 +880,7 @@ class K8SCallback(Callback[DeliveryState, ActionT_co]):
             raise TargetError(
                 f"{SkillPluginType.KUBERNETES.value}_configuration_missing"
             )
-        self.state.kubernetes_target = self.kubernetes.target
+        self.state.kubernetes_target = self.state.kubernetes.target
         return {}
 
     def is_configured(self) -> bool:

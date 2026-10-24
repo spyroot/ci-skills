@@ -113,12 +113,22 @@ def emit(value):
 if tool == "gh":
     if args[:2] == ["auth", "status"]:
         raise SystemExit(0)
+    if args == ["auth", "token", "--hostname", "github.example.test"]:
+        print("unit-github-token")
+        raise SystemExit(0)
     if args[:3] == ["api", "--hostname", "github.example.test"]:
-        endpoint = args[3]
+        endpoint = args[-1]
+        if "--method" in args and args[args.index("--method") + 1] != "GET":
+            raise SystemExit(98)
         if endpoint == "user":
             emit({"id": 17, "login": "unit-gh"})
         if endpoint == "repos/unit/repo":
-            emit({"id": 42, "full_name": "unit/repo", "permissions": {"admin": True}})
+            emit({
+                "id": 42,
+                "full_name": "unit/repo",
+                "permissions": {"admin": True},
+                "enabled": False,
+            })
     raise SystemExit(98)
 
 if tool == "glab":
@@ -254,6 +264,7 @@ if tool == "kubectl":
     if kargs in (
         ["config", "view", "-o", "json"],
         ["config", "view", "--raw", "-o", "json"],
+        ["config", "view", "--minify", "-o", "json"],
     ):
         emit({
             "contexts": [{
@@ -849,9 +860,7 @@ def test_installed_bash_entrypoints_run_from_unrelated_directory(
     elsewhere.mkdir()
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
-    install_executable(
-        fake_bin, "gh", "#!/bin/sh\nprintf '%s\\n' '{\"enabled\":false}'\n"
-    )
+    install_executable(fake_bin, "gh", FAKE_NATIVE_TOOLS)
     env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
 
@@ -861,6 +870,8 @@ def test_installed_bash_entrypoints_run_from_unrelated_directory(
             "get",
             "--provider",
             "github",
+            "--host",
+            "github.example.test",
             "--endpoint",
             "repos/unit/repo",
             "--field",

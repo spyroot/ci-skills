@@ -113,6 +113,7 @@ def _bound_session(
     credential_source: str = "env:GITLAB_TOKEN",
     credential_digest: str = "sha256:unit",
     skill: Optional[JSONObject] = None,
+    environment: Optional[Mapping[str, Optional[str]]] = None,
 ) -> BoundGitLabSession:
     """Create the concrete session shape used by GitLab workflow failures.
 
@@ -120,6 +121,7 @@ def _bound_session(
     :param credential_source: Nonsecret credential provenance for receipts.
     :param credential_digest: One-way credential continuity digest.
     :param skill: Optional installed-skill identity supplied by the test.
+    :param environment: Explicit synthetic child credentials for transport tests.
     :returns: Bound GitLab session with nonsecret fixture identity.
     """
     selected_skill = skill or {
@@ -138,7 +140,7 @@ def _bound_session(
             credential_digest=credential_digest,
             execution_host="unit-host",
             skill=selected_skill,
-            environment={},
+            environment={} if environment is None else environment,
         )
     )
 
@@ -702,7 +704,7 @@ def test_milestone_create_reads_back_numeric_id() -> None:
             ],
         }
     )
-    result = MILESTONES.apply(api, object(), plan, 42)
+    result = MILESTONES.apply(api, _bound_session(plan), plan, 42)
     assert result == {
         "action": "APPLIED",
         "id": 5,
@@ -729,7 +731,7 @@ def test_milestone_update_blocks_failed_readback() -> None:
             ("PUT", base): [{"id": 5}],
         }
     )
-    result = MILESTONES.apply(api, object(), plan, 42)
+    result = MILESTONES.apply(api, _bound_session(plan), plan, 42)
     assert result["verified"] is False
     assert result["mutated"] is True
     assert result["id"] == 5
@@ -751,7 +753,7 @@ def test_issue_reuses_exact_open_title_only_after_independent_get() -> None:
             ],
         }
     )
-    result = ISSUES.apply(api, object(), plan, 42)
+    result = ISSUES.apply(api, _bound_session(plan), plan, 42)
     assert result == {"action": "NO_OP", "iid": 8, "verified": True}
     assert all(method == "GET" for method, _, _ in api.calls)
 
@@ -791,8 +793,8 @@ def test_issue_create_accepts_provider_trimmed_terminal_description_newline(
         }
     )
 
-    applied = ISSUES.apply(api, object(), plan, 42)
-    repeated = ISSUES.apply(api, object(), plan, 42)
+    applied = ISSUES.apply(api, _bound_session(plan), plan, 42)
+    repeated = ISSUES.apply(api, _bound_session(plan), plan, 42)
 
     assert applied == {
         "action": "APPLIED",
@@ -868,7 +870,7 @@ def test_issue_create_rejects_changes_beyond_terminal_description_newline(
         }
     )
 
-    result = ISSUES.apply(api, object(), plan, 42)
+    result = ISSUES.apply(api, _bound_session(plan), plan, 42)
 
     assert result["action"] == "APPLIED"
     assert result["verified"] is False
@@ -889,7 +891,7 @@ def test_issue_create_refuses_closed_exact_title_instead_of_duplicating() -> Non
         }
     )
     with pytest.raises(ACTION.ActionError, match="existing_issue_closed"):
-        ISSUES.apply(api, object(), plan, 42)
+        ISSUES.apply(api, _bound_session(plan), plan, 42)
     assert [call[0] for call in api.calls] == ["GET"]
 
 
@@ -906,7 +908,7 @@ def test_issue_create_blocks_when_independent_readback_is_not_open() -> None:
             ("GET", base + "/9"): [{"iid": 9, "title": "broken", "state": "closed"}],
         }
     )
-    result = ISSUES.apply(api, object(), plan, 42)
+    result = ISSUES.apply(api, _bound_session(plan), plan, 42)
     assert result["verified"] is False
     assert result["mutated"] is True
     assert result["iid"] == 9
@@ -929,7 +931,7 @@ def test_wiki_update_reads_back_new_slug() -> None:
             ("GET", base + "/new"): [{"slug": "new", "content": "new", "title": "New"}],
         }
     )
-    assert WIKIS.apply(api, object(), plan, 42)["slug"] == "new"
+    assert WIKIS.apply(api, _bound_session(plan), plan, 42)["slug"] == "new"
 
 
 def test_wiki_create_accepts_provider_normalized_title_and_reuses_page(
@@ -961,8 +963,8 @@ def test_wiki_create_accepts_provider_normalized_title_and_reuses_page(
             ("GET", base + "/ci-skills-acceptance"): [page, page],
         }
     )
-    first = WIKIS.apply(api, object(), plan, 42)
-    second = WIKIS.apply(api, object(), plan, 42)
+    first = WIKIS.apply(api, _bound_session(plan), plan, 42)
+    second = WIKIS.apply(api, _bound_session(plan), plan, 42)
     assert first["action"] == "APPLIED" and first["verified"] is True
     assert second["action"] == "NO_OP" and second["verified"] is True
     assert [call[0] for call in api.calls].count("POST") == 1
@@ -994,7 +996,7 @@ def test_wiki_update_accepts_provider_normalized_title() -> None:
             ],
         }
     )
-    result = WIKIS.apply(api, object(), plan, 42)
+    result = WIKIS.apply(api, _bound_session(plan), plan, 42)
     assert result["action"] == "APPLIED" and result["verified"] is True
 
 
@@ -1030,7 +1032,7 @@ def test_runner_group_assign_verifies_each_project_and_marks_partial() -> None:
             ("POST", "projects/12/runners"): [{"id": 7}],
         }
     )
-    result = RUNNERS.apply(api, object(), plan, 42)
+    result = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert result["verified"] is False
     assert result["action"] == "PARTIAL"
     assert [item["project_id"] for item in result["projects"]] == [11]
@@ -1076,7 +1078,7 @@ def test_runner_create_saves_token_0600_without_reporting_it(
             ],
         }
     )
-    result = RUNNERS.apply(api, object(), plan, 42)
+    result = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert result["action"] == "APPLIED"
     assert result["id"] == 23
     assert result["verified"] is True
@@ -1111,7 +1113,7 @@ def test_runner_tag_adds_to_selected_runner_and_reads_back() -> None:
             ("PUT", "runners/23"): [{"id": 23}],
         }
     )
-    result = RUNNERS.apply(api, object(), plan, 42)
+    result = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert result == {
         "action": "APPLIED",
         "id": 23,
@@ -1181,7 +1183,7 @@ def test_runner_tag_is_no_op_when_tag_already_exists() -> None:
             ("GET", _list("projects/42/runners")): [[{"id": 23}]],
         }
     )
-    result = RUNNERS.apply(api, object(), plan, 42)
+    result = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert result["action"] == "NO_OP"
     assert result["mutated"] is False
     assert all(call[0] != "PUT" for call in api.calls)
@@ -1207,7 +1209,7 @@ def test_runner_tag_refuses_runner_outside_selected_project() -> None:
         }
     )
     with pytest.raises(ACTION.ActionError, match="runner_scope_readback_mismatch"):
-        RUNNERS.apply(api, object(), plan, 42)
+        RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert all(call[0] != "PUT" for call in api.calls)
 
 
@@ -1233,7 +1235,7 @@ def test_runner_tag_partial_output_requires_readback_and_cleanup() -> None:
             ("PUT", "runners/23"): [{"id": 23}, {"id": 23}],
         }
     )
-    result = RUNNERS.apply(api, object(), plan, 42)
+    result = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert result["verified"] is False
     assert result["action"] == "UNVERIFIED"
     assert result["mutated"] is None
@@ -1265,7 +1267,7 @@ def test_runner_tag_uncertain_put_and_failed_readback_has_unknown_mutation() -> 
             ("PUT", "runners/23"): [API.GitLabAPIError("timeout")],
         }
     )
-    result = RUNNERS.apply(api, object(), plan, 42)
+    result = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert result["action"] == "UNVERIFIED"
     assert result["mutated"] is None
     assert result["verified"] is False
@@ -1346,9 +1348,9 @@ def test_concurrent_runner_tag_additions_preserve_both_tags(
     first = _plan("gitlab_runner", "tag", {"tag_list": ["alpha"]}, resource_id=23)
     second = _plan("gitlab_runner", "tag", {"tag_list": ["beta"]}, resource_id=23)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        alpha = pool.submit(RUNNERS.apply, api, object(), first, 42)
+        alpha = pool.submit(RUNNERS.apply, api, _bound_session(first), first, 42)
         assert first_write_started.wait(2)
-        beta = pool.submit(RUNNERS.apply, api, object(), second, 42)
+        beta = pool.submit(RUNNERS.apply, api, _bound_session(second), second, 42)
         if second_runner_read.wait(0.1):
             beta.result(timeout=2)
         release_first_write.set()
@@ -1411,7 +1413,7 @@ def test_runner_create_uncertain_provider_result_leaves_no_token_file(
             ("POST", "user/runners"): [API.GitLabAPIError("provider_5xx")],
         }
     )
-    result = RUNNERS.apply(api, object(), plan, 42)
+    result = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert result["action"] == "PARTIAL"
     assert result["mutated"] is None
     assert result["cleanup"]["status"] == "BLOCKED"
@@ -1471,8 +1473,9 @@ def test_transport_pins_host_and_sends_body_through_private_file() -> None:
         )
         return SimpleNamespace(returncode=0, stdout='{"id":23}', stderr="")
 
-    session = SimpleNamespace(
-        host="gitlab.example.test", environment={"GITLAB_TOKEN": "selected"}
+    session = _bound_session(
+        _plan("gitlab_runner", "create", {}),
+        environment={"GITLAB_TOKEN": "selected"},
     )
     result = API.GlabAPIClient(command=command).post_json(
         session, "user/runners", {"description": "runner"}

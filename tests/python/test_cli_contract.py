@@ -286,17 +286,20 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
     monkeypatch.setattr(
         cli,
         "check_access",
-        lambda _target, publication=False, cilium=False: {
+        lambda _target, publication=False, cilium=False, state=None: {
             "kind": "access_check",
             "status": status.PASS,
         },
     )
 
-    def collect_storage(_target: Target, _args: argparse.Namespace) -> None:
+    def collect_storage(
+        _target: Target, _args: argparse.Namespace, *, state=None
+    ) -> None:
         """Simulate malformed provider data reaching the collector boundary.
 
         :param _target: Selected target, unused by this failure fake.
         :param _args: Parsed collector options, unused by this failure fake.
+        :param state: Shared invocation accepted by the collector double.
         :returns: None; the helper records behavior through its side effects.
         :raises ValueError: Always reports the nested response failure.
 

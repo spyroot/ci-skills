@@ -6,11 +6,11 @@ import json
 from collections.abc import Callable, Mapping, MutableSequence, Sequence
 from pathlib import Path
 from threading import Barrier
-from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional
 
 import pytest
 from conftest import import_script_module
+from test_gitlab_actions import _bound_session, _plan
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
 GRAPH = import_script_module("lib.python.core.gitlab.gitlab_pipeline_graph")
@@ -386,7 +386,7 @@ def test_watch_transport_caps_requests_and_retry_delays_by_whole_timeout() -> No
     api = API.GlabAPIClient(command=command, timeout=25, sleep=clock.sleep)
     result = WATCH_RUNTIME.watch_pipeline(
         api,
-        SimpleNamespace(host="gitlab.example.test", environment={}),
+        _bound_session(_plan("gitlab_pipeline", "watch", {})),
         42,
         TYPES.PipelineWatchAction(17, None, 0.5, 1.0),
         monotonic=clock.monotonic,

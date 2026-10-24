@@ -239,7 +239,7 @@ def test_get_from_failed_job_resolves_runner_relation_without_raw_payload() -> N
             ("GET", _list()): [[{"id": 23}]],
         }
     )
-    result = RUNNERS.read(api, object(), plan, 42)
+    result = RUNNERS.read(api, _bound_session(plan), plan, 42)
     assert result.related_job == {
         "id": 9,
         "status": "failed",
@@ -284,7 +284,7 @@ def test_get_from_unassigned_job_reports_relation_without_guessing_runner() -> N
             ]
         }
     )
-    result = RUNNERS.read(api, object(), plan, 42)
+    result = RUNNERS.read(api, _bound_session(plan), plan, 42)
     assert result.records == []
     assert result.related_job["runner_id"] is None
     assert api.calls == [("GET", "projects/42/jobs/9")]
@@ -309,7 +309,7 @@ def test_list_filters_protected_runner_and_limits_public_fields() -> None:
             ("GET", "runners/24"): [_runner(24, access_level="not_protected")],
         }
     )
-    result = RUNNERS.read(api, object(), plan, 42)
+    result = RUNNERS.read(api, _bound_session(plan), plan, 42)
     assert [item["id"] for item in result.records] == [23]
     assert result.truncated is False
 
@@ -344,10 +344,10 @@ def test_delete_requires_scope_and_global_404_readback(
             ("DELETE", "runners/23"): [{}],
         }
     )
-    planned = RUNNERS.delete_snapshot(api, object(), plan, 42)
+    planned = RUNNERS.delete_snapshot(api, _bound_session(plan), plan, 42)
     assert planned == snapshot
     plan = replace(plan, runner_snapshot=planned)
-    record = RUNNERS.apply(api, object(), plan, 42)
+    record = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert record["action"] == "APPLIED"
     assert record["after"]["global_get_status"] == 404
     assert record["after"]["scoped_absent"] is True
@@ -395,7 +395,7 @@ def test_repeat_delete_is_verified_no_op_without_write(
             ("GET", _list()): [[]],
         }
     )
-    record = RUNNERS.apply(api, object(), plan, 42)
+    record = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert record["action"] == "NO_OP"
     assert record["mutated"] is False
     assert all(method == "GET" for method, _ in api.calls)
@@ -431,7 +431,7 @@ def test_delete_refuses_runner_outside_selected_project(
         }
     )
     with pytest.raises(ACTION.ActionError, match="runner_scope_readback_mismatch"):
-        RUNNERS.apply(api, object(), plan, 42)
+        RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert all(method == "GET" for method, _ in api.calls)
 
 
@@ -474,7 +474,7 @@ def test_delete_refuses_identity_or_assignment_drift_before_write(
         }
     )
     with pytest.raises(ACTION.ActionError, match=reason):
-        RUNNERS.apply(api, object(), plan, 42)
+        RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert all(method == "GET" for method, _ in api.calls)
 
 

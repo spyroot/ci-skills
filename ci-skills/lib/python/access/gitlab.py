@@ -14,8 +14,9 @@ from datetime import UTC, datetime
 from typing import Optional, Union
 from urllib.parse import quote, urlsplit
 
+from lib.python.access.gitlab_credentials import pin_gitlab_environment
 from lib.python.access.shared import Surface, _blocked, _token_file
-from lib.python.access.sources import Sources
+from lib.python.access.sources import Sources, _token_source
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.abstract.skill_state import SkillState
 from lib.python.core.abstract.spec import load_spec
@@ -95,7 +96,39 @@ def gitlab_access(target: Target, *, state: SkillState | None = None) -> Surface
         else None
     )
     try:
-        credential = gitlab_env(target)
+        bound = (
+            target.sources.require(SkillPluginType.GITLAB)
+            if isinstance(target.sources, Sources)
+            else _token_source(
+                selected.token_file,
+                GITLAB_VARIABLES,
+                f"glab-credential-store:{host}",
+            )
+        )
+        source = bound.reference
+        if isinstance(invocation, DeliveryState) and hasattr(
+            invocation, "gitlab_session"
+        ):
+            session = invocation.gitlab_session
+            if session.host != host:
+                raise ValueError("gitlab_runtime_authority_mismatch")
+            if source != session.credential_source:
+                raise ValueError("gitlab_runtime_credential_mismatch")
+            if source != f"glab-credential-store:{host}" or any(
+                bound.environment.get(name) is not None for name in GITLAB_VARIABLES
+            ):
+                current = ReadSession(host, bound.environment, source)
+                if _credential_identity(current) != _credential_identity(session):
+                    raise ValueError("gitlab_runtime_credential_mismatch")
+        else:
+            session = ReadSession(
+                host,
+                pin_gitlab_environment(host, source, bound.environment),
+                source,
+                invocation=invocation,
+            )
+            if isinstance(invocation, DeliveryState):
+                invocation.gitlab_session = session
     except ValueError as exc:
         return _blocked(
             "gitlab",
@@ -107,7 +140,9 @@ def gitlab_access(target: Target, *, state: SkillState | None = None) -> Surface
         )
     if source and source.startswith("file:"):
         observed.append("token_file_read")
-    auth = run_command(["glab", "auth", "status", "--hostname", host], env=credential)
+    auth = run_command(
+        ["glab", "auth", "status", "--hostname", host], env=session.environment
+    )
     if auth.returncode:
         return _blocked(
             "gitlab",
@@ -119,19 +154,6 @@ def gitlab_access(target: Target, *, state: SkillState | None = None) -> Surface
         )
     observed.append("authenticated_host")
     try:
-        if isinstance(invocation, DeliveryState) and hasattr(
-            invocation, "gitlab_session"
-        ):
-            session = invocation.gitlab_session
-        else:
-            session = ReadSession(
-                host,
-                dict(credential or {}),
-                source or f"glab-credential-store:{host}",
-                invocation=invocation,
-            )
-            if isinstance(invocation, DeliveryState):
-                invocation.gitlab_session = session
         api = GlabAPIClient()
         establish_gitlab_identity(invocation, session, api)
         identity = invocation.gitlab_runtime.identity
@@ -212,7 +234,8 @@ def _credential_identity(session: APISession) -> str:
     """Fingerprint the concrete GitLab token without retaining or exposing it.
 
     :param session: Session whose credential selection has already completed.
-    :returns: Token fingerprint, or the exact session identity for a native store.
+    :returns: Fingerprint of the concrete token retained by this session.
+    :raises ValueError: The session has no pinned GitLab token.
     """
     token = next(
         (
@@ -224,7 +247,7 @@ def _credential_identity(session: APISession) -> str:
     )
     if token:
         return "sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
-    return f"native-session:{id(session)}"
+    raise ValueError("gitlab_credential_unpinned")
 
 
 def require_gitlab_access(state: SkillState, session: APISession) -> GitLabRuntime:

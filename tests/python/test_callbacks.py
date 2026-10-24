@@ -16,7 +16,7 @@ import sys
 from argparse import Namespace
 from collections.abc import Iterable, Mapping, MutableMapping, MutableSequence, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import TYPE_CHECKING, Optional, TypeAlias, Union
@@ -998,6 +998,40 @@ def test_github_initializer_reads_native_identity_once_and_enforces_repo_role(
     assert state.github_runtime.role == ("admin" if admin else "read")
 
 
+def test_github_initializer_rejects_absent_repository_before_native_requests() -> None:
+    """Host selection alone cannot establish the declared repository role.
+
+    :returns: None; native requests remain absent and identity stays unestablished.
+    """
+    state = CONTEXT.ExecutionContext(spec={"github": {"role": "admin"}})
+    session = GITHUB.ReadSession(
+        host="github.example.test",
+        environment={"GH_TOKEN": "fixture-token"},
+        credential_source="fixture",
+        invocation=state,
+    )
+    requests: MutableSequence[tuple[str, ...]] = []
+
+    def native(argv: Sequence[str], **_kwargs: object) -> RUNTIME.CommandResult:
+        """Reject every process request when repository selection is absent.
+
+        :param argv: Native command that must remain undispatched.
+        :param _kwargs: Unused process settings supplied by the real API client.
+        :returns: This fixture never returns a provider response.
+        :raises Failed: An incomplete repository selection reached native transport.
+        """
+        requests.append(tuple(argv))
+        pytest.fail("missing repository reached native transport")
+
+    with pytest.raises(ValueError, match="github_repository_required"):
+        GITHUB.establish_github_identity(
+            state, session, "", GITHUB.GitHubAPIClient(command=native)
+        )
+
+    assert requests == []
+    assert state.github_runtime.role is None
+
+
 @pytest.mark.parametrize("admin", (True, False))
 def test_harbor_initializer_reads_native_admin_once_before_operations(
     admin: bool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1131,6 +1165,79 @@ def test_kubernetes_auth_and_dependent_callbacks_observe_identity_once(
 
     assert calls.count(("auth", "whoami", "-o", "json")) == 1
     assert operations == (["first", "second"] if admin else [])
+
+
+def test_kubernetes_raw_service_binds_before_identity_but_whoami_rejects_it() -> None:
+    """Configuration binding must leave identity enforcement to the lifecycle hook.
+
+    :returns: None; binding preserves a null identity and whoami rejects it.
+    """
+    configured = DELIVERY_STATE.DeliveryState()
+    bind_kubernetes_fixture(configured, SimpleNamespace())
+    state = DELIVERY_STATE.DeliveryState(spec=configured.spec)
+    service = KUBERNETES.KubernetesService(configured.kubernetes.target, state=state)
+    state.kubernetes = service
+    callback = KUBERNETES.K8SCallback(RecordedAction("prebound"))
+
+    CALLBACK_COLLECTIONS.Callbacks([callback]).bind(state)
+
+    assert state.kubernetes_target is service.target
+    assert callback.is_configured()
+    assert state.kubernetes_runtime.role is None
+    with pytest.raises(ValueError, match="kubernetes_identity_preflight_missing"):
+        callback.whoami()
+    assert state.records == []
+
+
+@pytest.mark.parametrize("harbor_role", (None, "user", "admin"))
+def test_registry_toolbox_requires_both_retained_provider_roles_without_native_reads(
+    harbor_role: Optional[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Valid Kubernetes access cannot authorize a missing or nonadmin Harbor role.
+
+    :param harbor_role: Absent, insufficient, or valid retained registry role.
+    :param monkeypatch: Refuse native identity rechecks after fixture initialization.
+    :returns: None; both guards accept valid roles and reject incomplete registry access.
+    """
+    state = DELIVERY_STATE.DeliveryState()
+    bind_kubernetes_fixture(state, SimpleNamespace())
+    bind_harbor_fixture(state, SimpleNamespace())
+    state.harbor_runtime = replace(state.harbor_runtime, role=harbor_role)
+    kubernetes_observation = state.kubernetes_runtime
+    harbor_observation = state.harbor_runtime
+    callback = TOOLBOX_ACTIONS.RegistryToolboxCallback(
+        TOOLBOX_ACTIONS.WorkflowAction(Namespace())
+    )
+
+    def native(*_args: object, **_kwargs: object) -> None:
+        """Fail if local retained-role guards perform another provider request.
+
+        :param _args: Unexpected native transport arguments.
+        :param _kwargs: Unexpected native transport options.
+        :raises Failed: Guard validation attempted a native identity recheck.
+        """
+        pytest.fail("retained provider guard attempted a native recheck")
+
+    monkeypatch.setattr(KUBERNETES.KubernetesService, "_command", native)
+    monkeypatch.setattr(REGISTRY.HarborService, "_api", native)
+    CALLBACK_COLLECTIONS.Callbacks([callback]).bind(state)
+    assert callback.is_configured()
+
+    for _ in range(2):
+        if harbor_role == "admin":
+            assert callback.whoami() is True
+        else:
+            reason = (
+                "harbor_identity_preflight_missing"
+                if harbor_role is None
+                else "harbor_required_role_missing:admin"
+            )
+            with pytest.raises(ValueError, match=reason):
+                callback.whoami()
+
+    assert state.kubernetes_runtime is kubernetes_observation
+    assert state.harbor_runtime is harbor_observation
+    assert state.records == []
 
 
 def test_executor_orders_hooks_and_passes_typed_callback_results() -> None:
@@ -2177,9 +2284,8 @@ def test_read_api_chains_nested_empty_object_payload() -> None:
     )
     context = API_READ.ApiReadState()
     client = Client()
-    context.service = API_READ.ApiReadService(
-        client, API_READ.ReadSession("github.example.test", {}, "fixture")
-    )
+    bind_github_fixture(context, client)
+    context.service = API_READ.ApiReadService(client, context.github_session)
     read = API_READ.ReadAPI(action)
     dependent = Dependent(RecordedAction("dependent"))
 
@@ -2220,9 +2326,9 @@ def test_read_api_preserves_false_scalar_and_rejects_null_selection() -> None:
             return '{"enabled":false,"empty":null}'
 
     context = API_READ.ApiReadState()
-    context.service = API_READ.ApiReadService(
-        Client(), API_READ.ReadSession("github.example.test", {}, "fixture")
-    )
+    client = Client()
+    bind_github_fixture(context, client)
+    context.service = API_READ.ApiReadService(client, context.github_session)
     false_read = API_READ.ReadAPI(
         API_READ.ApiReadAction(
             provider=API_READ.GitProvider.GITHUB,
@@ -2384,11 +2490,11 @@ def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:
                 "provider": "github",
                 "host": "github.example.test",
                 "authenticated": True,
-                "user": "octo",
-                "id": 7,
+                "user": "unit-admin",
+                "id": 17,
             },
         ),
-        (API_READ.ApiOutput.TEXT, "octo"),
+        (API_READ.ApiOutput.TEXT, "unit-admin"),
     ),
     ids=("json", "text"),
 )
@@ -2432,9 +2538,8 @@ def test_check_api_preserves_identity_json_and_text_outputs(
 
     client = Client()
     context = API_READ.ApiReadState()
-    context.service = API_READ.ApiReadService(
-        client, API_READ.ReadSession("github.example.test", {}, "fixture")
-    )
+    bind_github_fixture(context, client)
+    context.service = API_READ.ApiReadService(client, context.github_session)
     callback = API_READ.CheckAPI(
         API_READ.ApiCheckAction(API_READ.GitProvider.GITHUB, output=output)
     )
@@ -2443,7 +2548,7 @@ def test_check_api_preserves_identity_json_and_text_outputs(
         context=context, callbacks=CALLBACK_COLLECTIONS.Callbacks(callback)
     ).run()
 
-    assert client.calls == ["user"]
+    assert client.calls == []
     assert context.payload == expected
     assert callback.result == {"value": expected}
 

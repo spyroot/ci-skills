@@ -75,6 +75,25 @@ MOCK
   [ "$output" = '2:two' ]
 }
 
+
+@test 'GitHub repository query is preserved after observing the repository role' {
+  cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
+#!/usr/bin/env bash
+bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" && exit 0
+printf '%s\n' '{"value":"query-preserved"}'
+MOCK
+  chmod +x "${BATS_TEST_TMPDIR}/mock/gh"
+  run "$tool" get --provider github --endpoint 'repos/unit/repo?foo=bar' \
+    --field value --output text --log-level error
+  [ "$status" -eq 0 ]
+  [ "$output" = query-preserved ]
+  mapfile -t api_calls < "$CI_TEST_API_CALLS"
+  [ "${#api_calls[@]}" -eq 3 ]
+  [[ "${api_calls[0]}" == *" user" ]]
+  [[ "${api_calls[1]}" == *" repos/unit/repo" ]]
+  [[ "${api_calls[2]}" == *" repos/unit/repo?foo=bar" ]]
+}
+
 @test 'dry-run prints a plan and makes no provider call' {
   cat > "${BATS_TEST_TMPDIR}/mock/gh" <<'MOCK'
 #!/usr/bin/env bash
@@ -224,6 +243,43 @@ MOCK
     --field status --output text --log-level error
   [ "$status" -eq 0 ]
   [ "$output" = success ]
+}
+
+
+@test 'GitLab API retains its verified token after the native store changes' {
+  unset GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN CI_JOB_TOKEN GLAB_ENABLE_CI_AUTOLOGIN
+  export CI_TEST_GL_STORE="${BATS_TEST_TMPDIR}/glab-store"
+  export CI_TEST_GL_STORE_READS="${BATS_TEST_TMPDIR}/glab-store-reads"
+  export CI_TEST_GL_IDENTITIES="${BATS_TEST_TMPDIR}/glab-identities"
+  export CI_TEST_GL_OPERATION_TOKEN="${BATS_TEST_TMPDIR}/glab-operation-token"
+  printf '%s\n' original-store-token > "$CI_TEST_GL_STORE"
+  cat > "${BATS_TEST_TMPDIR}/mock/glab" <<'MOCK'
+#!/usr/bin/env bash
+if [[ $1 == config && $2 == get && $3 == token ]]; then
+  [[ $4 == --host && $5 == gitlab.example.invalid ]] || exit 97
+  printf '%s\n' read >> "$CI_TEST_GL_STORE_READS"
+  cat "$CI_TEST_GL_STORE"
+  exit 0
+fi
+if [[ $1 == api && $2 == user ]]; then
+  printf '%s\n' identity >> "$CI_TEST_GL_IDENTITIES"
+  bash "$CI_TEST_API_AUTH" "${0##*/}" "$@" || exit 98
+  printf '%s\n' replacement-store-token > "$CI_TEST_GL_STORE"
+  exit 0
+fi
+[[ $1 == api && $2 == projects/7/jobs/42 ]] || exit 99
+printf '%s\n' "${GITLAB_TOKEN:-$(cat "$CI_TEST_GL_STORE")}" > "$CI_TEST_GL_OPERATION_TOKEN"
+printf '%s\n' '{"id":42}'
+MOCK
+  chmod +x "${BATS_TEST_TMPDIR}/mock/glab"
+  run "$tool" get --provider gitlab --host gitlab.example.invalid \
+    --endpoint projects/7/jobs/42 --field id --output text --log-level error
+  [ "$status" -eq 0 ]
+  [ "$output" = 42 ]
+  [ "$(cat "$CI_TEST_GL_OPERATION_TOKEN")" = original-store-token ]
+  [ "$(cat "$CI_TEST_GL_STORE")" = replacement-store-token ]
+  [ "$(wc -l < "$CI_TEST_GL_STORE_READS")" -eq 1 ]
+  [ "$(wc -l < "$CI_TEST_GL_IDENTITIES")" -eq 1 ]
 }
 
 @test 'GitLab paginated JSON arrays combine into one collection' {

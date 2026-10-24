@@ -56,12 +56,15 @@ def emit(value):
     raise SystemExit(0)
 
 if tool == "gh":
+    if args[:2] == ["auth", "token"]:
+        print("fixture-github-store-token")
+        raise SystemExit(0)
     if args[:2] == ["auth", "status"]:
         raise SystemExit(0)
     if args[:3] == ["api", "--hostname", "github.example.test"]:
-        endpoint = args[3]
+        endpoint = next(value for value in args if value == "user" or value.startswith("repos/"))
         if endpoint == "user":
-            emit({"login": "unit-gh"})
+            emit({"id": 17, "login": "unit-gh"})
         if endpoint == "repos/unit/repo/branches/main/protection":
             if os.environ.get("FAKE_GH_PROTECTION_FAIL") == "1":
                 print("not found", file=sys.stderr)
@@ -85,22 +88,30 @@ if tool == "gh":
             malformed = os.environ.get("FAKE_GH_REPOSITORY_JSON")
             if malformed is not None:
                 emit(json.loads(malformed))
-            emit({"full_name": "unit/repo"})
+            emit({
+                "id": 42,
+                "full_name": "unit/repo",
+                "permissions": {"admin": os.environ.get("FAKE_GH_ADMIN", "true") == "true"},
+            })
     raise SystemExit(98)
 
 if tool == "glab":
+    if args[:3] == ["config", "get", "token"]:
+        print("fixture-gitlab-store-token")
+        raise SystemExit(0)
     if args[:2] == ["auth", "status"]:
         raise SystemExit(0)
-    if args[-1] == "user":
+    if args[0] == "api" and args[1] == "user":
         if os.environ.get("FAKE_GLAB_DENY") == "1":
             print("401 Unauthorized", file=sys.stderr)
             raise SystemExit(1)
         emit({
+            "id": 17,
             "username": "unit-gl",
             "is_admin": True,
             "web_url": "https://gitlab.example.test/unit-gl",
         })
-    if args[-1] == "runners/all?per_page=1":
+    if args[0] == "api" and args[1] == "runners/all?per_page=1":
         emit([{"id": 1}])
     raise SystemExit(98)
 
@@ -110,6 +121,7 @@ if tool == "kubectl":
     if kargs in (
         ["config", "view", "-o", "json"],
         ["config", "view", "--raw", "-o", "json"],
+        ["config", "view", "--minify", "-o", "json"],
     ):
         emit({
             "contexts": [{
@@ -478,7 +490,7 @@ def test_access_check_publication_denies_non_admin_identity(
     assert data["status"] == "BLOCKED"
     assert data["publication"] is True
     assert data["surfaces"]["github"]["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["reason"] == "admin_required"
+    assert data["surfaces"]["github"]["reason"] == "github_required_role_missing:admin"
 
 
 def test_access_check_publication_blocks_when_protection_read_fails(
@@ -566,7 +578,7 @@ def test_access_check_blocks_when_github_repository_name_is_not_text(
     assert result.returncode == 2
     assert data["status"] == "BLOCKED"
     assert data["surfaces"]["github"]["status"] == "BLOCKED"
-    assert data["surfaces"]["github"]["reason"] == "JSON string required"
+    assert data["surfaces"]["github"]["reason"] == "github_repository_mismatch"
 
 
 @pytest.mark.parametrize(

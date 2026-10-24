@@ -868,6 +868,7 @@ def _smoke_target_layout(tmp_path: Path) -> MutableMapping[str, JSONValue]:
         "identity": {
             "id": 17,
             "username": "operator",
+            "is_admin": True,
             "web_url": "https://gitlab.example.test/operator",
         },
         "target": {

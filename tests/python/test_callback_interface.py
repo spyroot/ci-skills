@@ -205,6 +205,10 @@ class ProviderConfigurationCallback(CALLBACK.Callback[CounterState, UnitAction])
         """Return the provider identity selected for this test callback."""
         return self._plugin_type
 
+    def whoami(self) -> bool:
+        """Satisfy identity for this provider-configuration-only test double."""
+        return True
+
     def read_config(self) -> JSONObject:
         """Record one provider configuration read and optionally fail."""
         self.events.append(f"{self.action.name}.read_config")

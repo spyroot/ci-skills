@@ -421,7 +421,11 @@ def test_changed_live_plan_inputs_invalidate_confirmation_before_any_build_callb
 
     assert code == 2
     assert rejected["status"] == "BLOCKED"
-    assert rejected["errors"][0]["reason"] == "confirm_plan_mismatch_rerun_plan"
+    assert rejected["errors"][0]["reason"] == (
+        "kubernetes_runtime_authority_mismatch"
+        if change == "target"
+        else "confirm_plan_mismatch_rerun_plan"
+    )
     assert rejected["plan_digest"] != planned["plan_digest"]
     assert cluster.applied == cluster.deleted == cluster.executed == []
 

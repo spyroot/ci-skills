@@ -14,7 +14,7 @@ from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_kubernetes_service, import_script_module
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONValue
@@ -185,7 +185,8 @@ def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
     """
     ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
     runtime = import_script_module("lib.python.core.runtime")
-    target = _target(tmp_path)
+    service = authenticated_kubernetes_service(_target(tmp_path))
+    target = service.target
     kubeconfig = str(target.kubernetes.kubeconfig)
     responses = {
         "status": {"health": {"status": "HEALTH_WARN"}},
@@ -222,7 +223,7 @@ def test_ceph_cluster_uses_exact_target_bound_oc_commands_and_shapes(
 
     monkeypatch.setattr(ceph_cluster, "run_command_tail", fake_run_tail)
 
-    result = ceph_cluster.collect_ceph_cluster(target, _args())
+    result = ceph_cluster.collect_ceph_cluster(target, _args(), state=service.state)
 
     prefix = (
         "oc",
@@ -335,7 +336,8 @@ def test_ceph_cluster_discovers_default_operator_by_name_without_metadata_label(
     ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
     kubernetes = import_script_module("lib.python.core.kubernetes.kubernetes")
     runtime = import_script_module("lib.python.core.runtime")
-    target = _target(tmp_path)
+    service = authenticated_kubernetes_service(_target(tmp_path))
+    target = service.target
     namespace = "openshift-storage"
     operator = "rook-ceph-operator"
     calls: MutableSequence[tuple[str, ...]] = []
@@ -375,6 +377,7 @@ def test_ceph_cluster_discovers_default_operator_by_name_without_metadata_label(
     reader = ceph_cluster.CephClusterRead(
         target,
         _args(namespace=namespace, operator=None),
+        state=service.state,
     )
 
     assert calls == [
@@ -412,7 +415,8 @@ def test_ceph_cluster_filters_pods_by_node_ready_and_condition(
     """
     ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
     runtime = import_script_module("lib.python.core.runtime")
-    target = _target(tmp_path)
+    service = authenticated_kubernetes_service(_target(tmp_path))
+    target = service.target
     responses = {
         "status": {"health": {"status": "HEALTH_OK"}},
         "osd_tree": {"nodes": []},
@@ -451,6 +455,7 @@ def test_ceph_cluster_filters_pods_by_node_ready_and_condition(
     result = ceph_cluster.collect_ceph_cluster(
         target,
         _args(node="worker-a", ready="false", condition="PodScheduled=False"),
+        state=service.state,
     )
 
     assert result["status"] == "PASS"
@@ -544,7 +549,8 @@ def test_ceph_cluster_records_malformed_response_and_denied_command(
     """
     ceph_cluster = import_script_module("lib.python.core.kubernetes.ceph_cluster")
     runtime = import_script_module("lib.python.core.runtime")
-    target = _target(tmp_path)
+    service = authenticated_kubernetes_service(_target(tmp_path))
+    target = service.target
     responses = {
         "status": {"health": {"status": "HEALTH_OK"}},
         "osd_tree": {"nodes": []},
@@ -575,7 +581,7 @@ def test_ceph_cluster_records_malformed_response_and_denied_command(
 
     monkeypatch.setattr(ceph_cluster, "run_command_tail", fake_run_tail)
 
-    result = ceph_cluster.collect_ceph_cluster(target, _args())
+    result = ceph_cluster.collect_ceph_cluster(target, _args(), state=service.state)
 
     assert result["status"] == "PARTIAL"
     assert expected in result["errors"]

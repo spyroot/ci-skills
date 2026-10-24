@@ -197,9 +197,15 @@ def test_the_receipt_records_which_checks_blocked(
             "ciliumnodes": [],
         },
     }
-    monkeypatch.setattr(live, "collect_storage", lambda *_a: results["storage_report"])
-    monkeypatch.setattr(live, "collect_events", lambda *_a: results["event_trace"])
-    monkeypatch.setattr(live, "collect_cilium", lambda *_a: results["cilium_status"])
+    monkeypatch.setattr(
+        live, "collect_storage", lambda *_a, state=None: results["storage_report"]
+    )
+    monkeypatch.setattr(
+        live, "collect_events", lambda *_a, state=None: results["event_trace"]
+    )
+    monkeypatch.setattr(
+        live, "collect_cilium", lambda *_a, state=None: results["cilium_status"]
+    )
 
     target = import_script_module("lib.python.core.target").load_target(target_file)
     receipt = live.collect_live_checks(target, object(), {})
@@ -225,7 +231,7 @@ def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(
     monkeypatch.setattr(
         live,
         "collect_storage",
-        lambda *_a: {
+        lambda *_a, state=None: {
             "kind": "storage_report",
             "status": status.PASS,
             "records": [],
@@ -235,7 +241,7 @@ def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(
     monkeypatch.setattr(
         live,
         "collect_events",
-        lambda *_a: {
+        lambda *_a, state=None: {
             "kind": "event_trace",
             "status": status.PASS,
             "records": [],
@@ -245,7 +251,7 @@ def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(
     monkeypatch.setattr(
         live,
         "collect_cilium",
-        lambda *_a: {
+        lambda *_a, state=None: {
             "kind": "cilium_status",
             "status": status.PASS,
             "records": [],
@@ -254,11 +260,12 @@ def test_ceph_live_check_uses_selected_namespace_and_blocks_failed_read(
     )
     selected = []
 
-    def fake_ceph(_target: Target, options: Sequence[str]) -> JSONObject:
+    def fake_ceph(_target: Target, options: Sequence[str], *, state=None) -> JSONObject:
         """Return a denied Ceph status query in the requested namespace.
 
         :param _target: Selected target accepted by the fake collector.
         :param options: Ceph filter options carrying the selected namespace.
+        :param state: Shared invocation accepted by the collector double.
         :returns: Partial Ceph record with authorization failure.
         """
         selected.append(options.namespace)

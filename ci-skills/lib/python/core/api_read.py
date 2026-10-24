@@ -19,8 +19,10 @@ from dataclasses import field as action_field
 from enum import StrEnum
 from pathlib import Path
 from typing import Optional, TypeVar
+from urllib.parse import urlsplit
 
 from lib.python.access.gitlab import establish_gitlab_identity, require_gitlab_access
+from lib.python.access.gitlab_credentials import pin_gitlab_environment
 from lib.python.access.sources import _token_source
 from lib.python.core.abstract.callback import LocalCallback
 from lib.python.core.abstract.context import ExecutionContext
@@ -347,7 +349,7 @@ class ApiProviderSelection:
         if not host or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", host):
             raise ReadToolError("select a provider host in target.toml", ReadExit.USAGE)
         if action.provider == GitProvider.GITHUB and isinstance(action, ApiReadAction):
-            parts = action.endpoint.split("/")
+            parts = urlsplit(action.endpoint).path.split("/")
             if len(parts) >= 3 and parts[0] == "repos":
                 repository = "/".join(parts[1:3])
         return cls(action.provider, host.lower(), token_file, repository)
@@ -383,7 +385,7 @@ class ApiReadService:
         :param selection: Provider and host already resolved by the selection step.
         :param state: Invocation owning the required provider observation.
         :returns: Client and exact-host credential session for authenticated reads.
-        :raises TargetError: If a selected credential file or environment value is invalid.
+        :raises TargetError: If the selected credential is invalid or cannot be pinned.
         """  # noqa: DOC502 - Credential-source binding propagates TargetError.
         github = selection.provider == GitProvider.GITHUB
         source = _token_source(
@@ -402,7 +404,9 @@ class ApiReadService:
                 selection.host, source.reference, source.environment, client.timeout
             )
             if github
-            else source.environment
+            else pin_gitlab_environment(
+                selection.host, source.reference, source.environment
+            )
         )
         return cls(
             client,

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Mapping, MutableSequence, Sequence
+from dataclasses import replace
 from os import PathLike
 from pathlib import Path
 from types import ModuleType
@@ -185,6 +186,10 @@ def _patch_provider_commands(
     monkeypatch.setattr(kubernetes, "bind_sources", bind_cluster)
     monkeypatch.setattr(_provider_modules()[0], "GitHubAPIClient", NativeGitHubClient)
     monkeypatch.setattr(gitlab, "GlabAPIClient", NativeGitLabClient)
+    credentials = import_script_module("lib.python.access.gitlab_credentials")
+    monkeypatch.setattr(
+        credentials, "_glab_store_token", lambda _host: "fixture-glab-store-token"
+    )
 
 
 def _bind_target(path: Path) -> Target:
@@ -1291,7 +1296,143 @@ def test_gitlab_access_without_token_file_uses_glab_host_profile(
     surface = gitlab.gitlab_access(_load_target(target_file))
 
     assert surface.status == "PASS"
-    assert all(not env or "GITLAB_TOKEN" not in env for env in observed_envs)
+    assert observed_envs
+    assert all(
+        env and env.get("GITLAB_TOKEN") == "fixture-glab-store-token"
+        for env in observed_envs
+    )
+
+
+def test_gitlab_access_pins_native_store_token_across_cached_identity_reads(
+    monkeypatch: pytest.MonkeyPatch, target_file: Path
+) -> None:
+    """Keep the verified token when glab's native store changes during a diagnostic.
+
+    :param monkeypatch: Offline store and native API boundaries.
+    :param target_file: Synthetic target with no explicit GitLab token file.
+    :returns: None; repeated access retains one identity and concrete credential.
+    """
+    _clear_token_env(monkeypatch)
+    _access, runtime = _access_modules()
+    contexts = import_script_module("lib.python.core.delivery_state")
+    credentials = import_script_module("lib.python.access.gitlab_credentials")
+    gitlab = import_script_module("lib.python.access.gitlab")
+    current = {"token": "original-store-token"}
+    store_reads: list[str] = []
+    identity_reads: list[str] = []
+    operation_tokens: list[str] = []
+
+    def store_token(host: str) -> str:
+        """Read the current synthetic native-store entry.
+
+        :param host: Exact GitLab authority selected by the diagnostic.
+        :returns: Store token at this call, allowing deterministic rotation.
+        """
+        store_reads.append(host)
+        return current["token"]
+
+    def native(argv: Sequence[str], **kwargs: Unpack[_CommandOptions]) -> CommandResult:
+        """Rotate native credentials after identity and record later effective tokens.
+
+        :param argv: Bounded glab command from the real access implementation.
+        :param **kwargs: Child environment and request bounds.
+        :returns: Native identity, runner inventory, or authentication response.
+        """
+        command = tuple(argv)
+        if command[1:3] == ("auth", "status"):
+            return runtime.CommandResult(command, 0, "", "")
+        endpoint = command[2]
+        environment = kwargs.get("env") or {}
+        effective_token = environment.get("GITLAB_TOKEN") or current["token"]
+        if endpoint == "user":
+            identity_reads.append(effective_token)
+            current["token"] = "replacement-store-token"
+            payload = {
+                "id": 17,
+                "username": "unit-gl",
+                "is_admin": True,
+                "web_url": "https://gitlab.example.test/unit-gl",
+            }
+        else:
+            assert endpoint == "runners/all?per_page=1"
+            operation_tokens.append(effective_token)
+            payload = [{"id": 1}]
+        return runtime.CommandResult(command, 0, json.dumps(payload), "")
+
+    _patch_provider_commands(monkeypatch, native)
+    monkeypatch.setattr(credentials, "_glab_store_token", store_token)
+    state = contexts.DeliveryState()
+    target = _load_target(target_file, required_surfaces=("gitlab",))
+
+    first = gitlab.gitlab_access(target, state=state)
+    second = gitlab.gitlab_access(target, state=state)
+
+    assert first.status == second.status == "PASS"
+    assert store_reads == ["gitlab.example.test"]
+    assert identity_reads == ["original-store-token"]
+    assert operation_tokens == ["original-store-token", "original-store-token"]
+    assert current["token"] == "replacement-store-token"
+
+
+@pytest.mark.parametrize(
+    ("changed", "reason"),
+    (
+        ("host", "gitlab_runtime_authority_mismatch"),
+        ("source", "gitlab_runtime_credential_mismatch"),
+        ("token", "gitlab_runtime_credential_mismatch"),
+    ),
+)
+def test_gitlab_access_rejects_changed_selection_before_cached_session_requests(
+    monkeypatch: pytest.MonkeyPatch, target_file: Path, changed: str, reason: str
+) -> None:
+    """Reject a different target or credential before reusing observed admin access.
+
+    :param monkeypatch: Native command fixture retaining actual state guards.
+    :param target_file: Synthetic GitLab target whose selection changes after access.
+    :param changed: Host, credential-source reference, or concrete selected token.
+    :param reason: Declared retained-binding refusal reported by the diagnostic.
+    :returns: None; the second selection performs no authentication or API request.
+    """
+    _access, runtime = _access_modules()
+    contexts = import_script_module("lib.python.core.delivery_state")
+    sources = import_script_module("lib.python.access.sources")
+    gitlab = import_script_module("lib.python.access.gitlab")
+    runner, calls = _fake_access_runner(runtime, "success")
+    _patch_provider_commands(monkeypatch, runner)
+    source = sources.CredentialSource(
+        "env:GITLAB_TOKEN", {"GITLAB_TOKEN": "selected-token"}
+    )
+    target = replace(
+        _load_target(target_file, required_surfaces=("gitlab",)),
+        sources=sources.Sources(None, source, None, (), "unit-host"),
+    )
+    state = contexts.DeliveryState()
+    assert gitlab.gitlab_access(target, state=state).status == "PASS"
+    initial_calls = list(calls)
+
+    if changed == "host":
+        selected = replace(
+            target,
+            gitlab=replace(
+                target.require_gitlab(),
+                host="other.example.test",
+                url="https://other.example.test",
+            ),
+        )
+    else:
+        replacement = sources.CredentialSource(
+            "env:GITLAB_ACCESS_TOKEN" if changed == "source" else source.reference,
+            {"GITLAB_ACCESS_TOKEN": "selected-token"}
+            if changed == "source"
+            else {"GITLAB_TOKEN": "replacement-token"},
+        )
+        selected = replace(target, sources=replace(target.sources, gitlab=replacement))
+
+    result = gitlab.gitlab_access(selected, state=state)
+
+    assert result.status == "BLOCKED"
+    assert result.reason == reason
+    assert calls == initial_calls
 
 
 @pytest.mark.parametrize(

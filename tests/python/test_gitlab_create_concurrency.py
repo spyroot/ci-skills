@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 import pytest
 from conftest import import_script_module
+from test_gitlab_actions import _bound_session
 
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
@@ -237,7 +238,7 @@ def test_timed_out_create_blocks_replay_until_independent_readback(
             ("GET", resource): [detail],
         }
     )
-    session = SimpleNamespace()
+    session = _bound_session(plan)
     with pytest.raises(ACTION.ActionError, match="outcome_uncertain"):
         module.apply(api, session, plan, 42)
     lock_file = next(tmp_path.glob("*.lock"))
@@ -270,7 +271,12 @@ def test_create_reconciles_a_lost_post_response_without_reposting(
             ("GET", base + "/9"): [{"iid": 9, "title": "broken", "state": "opened"}],
         }
     )
-    result = ISSUES.apply(api, SimpleNamespace(), _plan("gitlab_issue", "broken"), 42)
+    result = ISSUES.apply(
+        api,
+        _bound_session(_plan("gitlab_issue", "broken")),
+        _plan("gitlab_issue", "broken"),
+        42,
+    )
     assert result["action"] == "APPLIED"
     assert result["reconciled"] is True
     assert [method for method, _ in api.calls].count("POST") == 1
@@ -350,7 +356,7 @@ def test_absent_uncertain_create_clears_marker_but_never_reposts_in_same_call(
         }
     )
     plan = _plan(kind, title, content=content)
-    session = SimpleNamespace()
+    session = _bound_session(plan)
 
     with pytest.raises(ACTION.ActionError, match="outcome_uncertain"):
         module.apply(api, session, plan, 42)
@@ -430,7 +436,12 @@ def test_terminal_create_refusal_keeps_its_class_and_does_not_reconcile(
         }
     )
     with pytest.raises(API.GitLabAPIError) as failure:
-        module.apply(api, SimpleNamespace(), _plan(kind, title, content=content), 42)
+        module.apply(
+            api,
+            _bound_session(_plan(kind, title, content=content)),
+            _plan(kind, title, content=content),
+            42,
+        )
     assert failure.value.reason == reason
     assert [method for method, _ in api.calls] == ["GET", "POST"]
     assert next(tmp_path.glob("*.lock")).read_text() == ""
@@ -535,7 +546,10 @@ def test_successful_create_with_mismatched_readback_keeps_mutation_evidence(
         }
     )
     record = module.apply(
-        api, SimpleNamespace(), _plan(kind, title, content=content), 42
+        api,
+        _bound_session(_plan(kind, title, content=content)),
+        _plan(kind, title, content=content),
+        42,
     )
     assert record["action"] == "APPLIED"
     assert record["verified"] is False
@@ -582,7 +596,7 @@ def test_milestone_put_timeout_reconciles_by_id_without_reposting() -> None:
             ("PUT", endpoint): [API.GitLabAPIError("timeout")],
         }
     )
-    result = MILESTONES.apply(api, SimpleNamespace(), plan, 42)
+    result = MILESTONES.apply(api, _bound_session(plan), plan, 42)
     assert result["action"] == "APPLIED"
     assert result["reconciled"] is True
     assert [method for method, _ in api.calls].count("PUT") == 1
@@ -617,7 +631,7 @@ def test_wiki_rename_put_timeout_reconciles_by_new_title_without_reposting() -> 
             ],
         }
     )
-    result = WIKIS.apply(api, SimpleNamespace(), plan, 42)
+    result = WIKIS.apply(api, _bound_session(plan), plan, 42)
     assert result["action"] == "APPLIED"
     assert result["reconciled"] is True
     assert [method for method, _ in api.calls].count("PUT") == 1
@@ -650,7 +664,7 @@ def test_successful_milestone_put_with_stale_readback_returns_partial_record() -
             ("PUT", endpoint): [{"id": 9}],
         }
     )
-    record = MILESTONES.apply(api, SimpleNamespace(), plan, 42)
+    record = MILESTONES.apply(api, _bound_session(plan), plan, 42)
     assert record["verified"] is False
     assert record["mutated"] is True
     assert record["id"] == 9
@@ -687,7 +701,7 @@ def test_successful_wiki_put_with_stale_readback_returns_partial_record() -> Non
             ("PUT", endpoint): [{"slug": "Guide"}],
         }
     )
-    record = WIKIS.apply(api, SimpleNamespace(), plan, 42)
+    record = WIKIS.apply(api, _bound_session(plan), plan, 42)
     assert record["verified"] is False
     assert record["mutated"] is True
     assert record["slug"] == "Guide"

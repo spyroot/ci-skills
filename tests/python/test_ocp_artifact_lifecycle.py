@@ -11,7 +11,7 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 import pytest
-from conftest import import_script_module
+from conftest import bind_kubernetes_fixture, import_script_module
 from test_artifact_storage import (
     FilePodCluster,
     checked_destination,
@@ -46,7 +46,7 @@ def test_native_failure_removes_exact_partial_output_and_report(
     """A known native failure cannot leave its partial ISO on shared storage."""
     base, cluster = storage_state(tmp_path)
     state = MODELS.OCPArtifactState()
-    state.kubernetes = cluster
+    bind_kubernetes_fixture(state, cluster)
     state.pod = base.pod
     state.run_scope = base.run_scope
     private = tmp_path / "private"
@@ -107,7 +107,7 @@ def test_final_iso_receipt_preserves_successful_cleanup_hook_evidence(
     """The final report retains cleanup outcomes emitted by the real executor."""
     base, cluster = storage_state(tmp_path)
     state = MODELS.OCPArtifactState()
-    state.kubernetes = cluster
+    bind_kubernetes_fixture(state, cluster)
     state.pod = base.pod
     state.run_scope = base.run_scope
     action = PODS.RemoveToolPodAction(state.run_scope.run_id)
@@ -168,7 +168,7 @@ def artifact_state(
     """
     base, cluster = storage_state(tmp_path)
     state = MODELS.OCPArtifactState()
-    state.kubernetes = cluster
+    bind_kubernetes_fixture(state, cluster)
     state.pod = base.pod
     state.run_scope = base.run_scope
     state.artifact_scope = base.run_scope
@@ -489,7 +489,7 @@ def test_repeat_remove_of_an_absent_run_is_noop_without_provider_deletes() -> No
     """An absent labeled run can be removed again without claiming an artifact exists."""
     state = MODELS.OCPArtifactState()
     cluster = FilePodCluster()
-    state.kubernetes = cluster
+    bind_kubernetes_fixture(state, cluster)
     action = SCOPES.ResolveRunScopeAction("absent-artifact-run")
 
     result = invoke(LIFECYCLE.DeleteNodeArtifactRecord(action), state)

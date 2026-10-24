@@ -198,7 +198,7 @@ def test_pod_exec_only_enables_interactive_input_for_supplied_bytes(
         :returns: Successful native command result.
         """
         assert timeout == 30
-        assert env is None
+        assert env == {}
         observed.append((tuple(argv), input_data))
         return RUNTIME.CommandResult(tuple(argv), 0, "staged", "")
 

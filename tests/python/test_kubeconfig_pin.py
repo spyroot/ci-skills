@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from lib.python.core.target import Target
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_kubernetes_service, import_script_module
 
 ORIGINAL = "apiVersion: v1\nkind: Config\n"
 REWRITTEN = "apiVersion: v1\nkind: Config\nchanged: true\n"
@@ -180,6 +180,7 @@ def test_a_changed_kubeconfig_blocks_the_collector_rather_than_degrading_it(
     _credentials, _access, _target_module = _modules()
     collect = import_script_module("lib.python.core.kubernetes.storage")
     bound = _target(tmp_path, kubeconfig)
+    service = authenticated_kubernetes_service(bound)
 
     kubeconfig.write_text(REWRITTEN, encoding="utf-8")
 
@@ -193,6 +194,7 @@ def test_a_changed_kubeconfig_blocks_the_collector_rather_than_degrading_it(
                 phase="all",
                 search=None,
             ),
+            state=service.state,
         )
 
 

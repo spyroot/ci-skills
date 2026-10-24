@@ -159,6 +159,11 @@ def establish_github_identity(
     :raises ValueError: The retained or observed access does not match the declaration.
     :raises OSError: A native provider command cannot be launched.
     """  # noqa: DOC503 - Native reads propagate process errors.
+    if not repository:
+        raise ValueError(
+            "github_repository_required: select github.repository in target.toml "
+            "to check the declared repository role"
+        )
     if state.github_runtime.role is not None:
         return require_github_runtime(state, session, repository)
     user, headers, record = api._identity_documents(session, repository)

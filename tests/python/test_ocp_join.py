@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from typing import Optional
 
 import pytest
-from conftest import import_script_module
+from conftest import bind_kubernetes_fixture, import_script_module
 from test_artifact_storage import FilePodCluster
 from test_ocp_artifact_lifecycle import artifact_state
 from test_ocp_csr import CSRService, csr_document, described_subject
@@ -153,7 +153,7 @@ class ArtifactRelease(KUBERNETES.K8SCallback):
 def join_state(service: JoinService) -> JOIN.OCPJoinState:
     """Bind a mocked provider to a fresh join-aware workflow state."""
     state = JOIN.OCPJoinState()
-    state.kubernetes = service
+    bind_kubernetes_fixture(state, service)
     return state
 
 
