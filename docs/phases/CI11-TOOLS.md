@@ -119,7 +119,7 @@ Render each command's actual policy; do not change accepted modes to make an exa
   also renders the existing provider, required-input, side-effect, result and reference declarations.
 
 [PR108](https://github.com/spyroot/ci-skills/pull/108) supplies public help/contract regressions and an installed
-consumer receipt in `tests/acceptance/candidate/milestone-create.json`. At installed revision
+consumer receipt in `tests/acceptance/historical/pre-issue100/milestone-create.json`. At installed revision
 `fa44dc7dcf83a8f9aacb36582dfcc18eaf765b95`, a fresh consumer used help before its offline plan and confirmed
 milestone creation, obtained verified read-back, and wrote receipt, paired reports and diagnostics at its selected
 paths. No rejected mode combination or repeated Podman check was needed. This closes H1/H2 only; the remaining
@@ -188,8 +188,8 @@ one runnable capability per PR. Existing public verbs listed here must remain wo
 
 ### Proof still required for phase closure
 
-Main's passing checks and selected live receipts do not prove every port above. Required missing proof is
-H1/H2's help-before-use journey, CI09's cross-reference traversal, the installed renamed workflow, and each newly
+Main's passing checks and selected live receipts do not prove every port above. H1/H2's help-before-use journey is
+complete. Required missing proof is CI09's cross-reference traversal, the installed renamed workflow, and each newly
 delivered verb's source-row read-back. No fresh aggregate run at one installed SHA has been established by this
 plan. An aggregate result covers the existing checker's declared operation set; as remaining capabilities land,
 their evidence must join that set before claiming full CI09/CI11 closure. Merely counting green receipts is insufficient.
