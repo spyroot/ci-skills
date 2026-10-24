@@ -17,6 +17,7 @@ from urllib.parse import quote, urlsplit
 from lib.python.access.gitlab_credentials import pin_gitlab_environment
 from lib.python.access.shared import Surface, _blocked, _token_file
 from lib.python.access.sources import Sources, _token_source
+from lib.python.core.abstract.provider_runtime import ProviderRoleMismatch
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.abstract.skill_state import SkillState
 from lib.python.core.abstract.spec import load_spec
@@ -24,6 +25,7 @@ from lib.python.core.catalog import GITLAB_VARIABLES
 from lib.python.core.cli_api import APISession, CLIAPIClient, ReadSession
 from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.gitlab.gitlab_api import GitLabAPIError, GlabAPIClient
+from lib.python.core.gitlab.gitlab_role import GitLabRole
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession, GitLabRuntime
 from lib.python.core.json_types import (
     JSONObject,
@@ -159,7 +161,7 @@ def gitlab_access(target: Target, *, state: SkillState | None = None) -> Surface
         identity = invocation.gitlab_runtime.identity
         observed.append(
             "instance_admin_identity"
-            if invocation.gitlab_runtime.role == "admin"
+            if invocation.gitlab_runtime.role == GitLabRole.ADMIN
             else "identity_read"
         )
         runners = api.get_json(session, "runners/all?per_page=1")
@@ -256,9 +258,11 @@ def require_gitlab_access(state: SkillState, session: APISession) -> GitLabRunti
     :param state: Invocation containing its declaration and prior observation.
     :param session: Exact selected host and pinned credential for this operation.
     :returns: The previously established GitLab identity and role.
-    :raises ValueError: The declaration, runtime, role, or binding is invalid.
+    :raises ProviderRoleError: The runtime role has not been observed.
+    :raises ProviderRoleMismatch: The observed role differs from the declaration.
+    :raises ValueError: The declaration or authentication binding is invalid.
     :raises TypeError: The retained observation lacks native GitLab identity fields.
-    """  # noqa: DOC502 - Shared state and credential checks reject incomplete bindings.
+    """  # noqa: DOC502,DOC503 - Shared state and credential checks propagate failures.
     expected = state.provider_spec(SkillPluginType.GITLAB).get("role")
     if not isinstance(expected, str) or not expected:
         raise ValueError("gitlab_specification_role_missing")
@@ -282,7 +286,9 @@ def establish_gitlab_identity(
     :param session: Selected host and concrete credential used for the identity read.
     :param api_client: Existing native API transport used by this invocation.
     :returns: Safe native identity fields reused by later access receipts.
-    :raises ValueError: Identity, required role, or credential binding is invalid.
+    :raises ProviderRoleError: The runtime role has not been observed.
+    :raises ProviderRoleMismatch: The observed role differs from the declaration.
+    :raises ValueError: Identity, role declaration, or credential binding is invalid.
     :raises GitLabAPIError: The selected host cannot return the current user.
     """  # noqa: DOC502,DOC503 - Native requests and shared requirement checks propagate failures.
     expected = state.provider_spec(SkillPluginType.GITLAB).get("role")
@@ -307,7 +313,11 @@ def establish_gitlab_identity(
         state.establish_runtime(
             SkillPluginType.GITLAB,
             GitLabRuntime(
-                role="admin" if user.get("is_admin") is True else "user",
+                role=(
+                    GitLabRole.ADMIN.value
+                    if user.get("is_admin") is True
+                    else GitLabRole.USER.value
+                ),
                 identity=user["username"],
                 authority=f"https://{session.host}",
                 credential_identity=credential,
@@ -405,8 +415,7 @@ def check_gitlab_operation_access(
     except Exception as exc:  # noqa: BLE001 - keep every provider failure structured
         reason = (
             "gitlab_required_role_missing"
-            if isinstance(exc, ValueError)
-            and str(exc).startswith("gitlab_required_role_missing:")
+            if isinstance(exc, ProviderRoleMismatch)
             else _gitlab_safe_reason(exc)
         )
         errors.append({"source": source, "reason": reason})

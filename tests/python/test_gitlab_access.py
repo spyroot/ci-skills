@@ -597,6 +597,12 @@ def test_gitlab_identity_is_observed_once_and_role_precedes_target_reads(
     second = ACCESS.check_gitlab_operation_access(session, api_client=api)
 
     assert first["status"] == second["status"] == ("PASS" if is_admin else "BLOCKED")
+    if not is_admin:
+        assert (
+            first["errors"]
+            == second["errors"]
+            == [{"source": "user", "reason": "gitlab_required_role_missing"}]
+        )
     endpoints = [endpoint for _, endpoint in api.calls]
     assert endpoints.count("user") == 1
     assert endpoints.count("projects/team%2Frepo") == (2 if is_admin else 0)

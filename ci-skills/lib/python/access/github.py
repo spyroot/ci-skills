@@ -196,13 +196,17 @@ def _required_check_names(result: CommandResult) -> Sequence[str]:
 
 
 def _publication_result(
-    base: Surface, required_checks: Sequence[str], names: Sequence[str]
+    base: Surface,
+    required_checks: Sequence[str],
+    names: Sequence[str],
+    role: str | None,
 ) -> Surface:
     """Compare declared publication checks with the observed branch protection.
 
     :param base: Successful repository access probe whose identity is retained.
     :param required_checks: Check names required by the selected target configuration.
     :param names: Nonempty validated check names observed in branch protection.
+    :param role: Observed repository role; None omits the role capability label.
     :returns: PASS with verified check names when every declaration is present;
         otherwise BLOCKED naming absent declarations or missing required checks.
     """
@@ -233,7 +237,7 @@ def _publication_result(
         base.target,
         [
             *base.observed_capability,
-            "repository_admin",
+            *([f"repository_{role}"] if role is not None else []),
             "protection_read",
             "required_checks_read",
         ],
@@ -246,12 +250,12 @@ def _publication_result(
 def github_publication_access(
     target: Target, *, state: SkillState | None = None
 ) -> Surface:
-    """Verify repository administration and declared required checks.
+    """Verify the declared repository role and required checks.
 
     :param target: Runtime target containing GitHub repository and required checks.
     :param state: Shared invocation whose GitHub identity is established at most once.
-    :returns: PASS surface when repository access, administration, and all declared
-        checks are verified; otherwise a BLOCKED surface with recovery guidance.
+    :returns: PASS surface when the declared repository role and required checks
+        are verified; otherwise a BLOCKED surface with recovery guidance.
     :raises TargetError: If a configured credential file becomes invalid after
         the initial access probe and before the publication probes.
     :raises OSError: If a publication probe process cannot be started.
@@ -275,15 +279,6 @@ def github_publication_access(
     if base.status != PASS:
         return base
     identity = require_github_runtime(invocation, session, selected.repository)
-    if identity.role != "admin":
-        return _blocked(
-            "github",
-            base.target,
-            base.observed_capability,
-            "admin_required",
-            "Use a repository administrator identity to configure and read back the required check.",
-            base.credential_source,
-        )
     result = run_command(
         [
             "gh",
@@ -314,4 +309,4 @@ def github_publication_access(
             "Configure and read back at least one required main-branch status check.",
             base.credential_source,
         )
-    return _publication_result(base, selected.required_checks, names)
+    return _publication_result(base, selected.required_checks, names, identity.role)

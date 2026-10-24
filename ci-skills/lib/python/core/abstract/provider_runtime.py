@@ -10,6 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+class ProviderRoleError(ValueError):
+    """A provider role or identity prerequisite is unmet."""
+
+
+class ProviderRoleMismatch(ProviderRoleError):
+    """The observed provider role differs from its declared requirement."""
+
+
 @dataclass(frozen=True)
 class ProviderRuntime:
     """Record observed identity and access, independently of declared requirements.

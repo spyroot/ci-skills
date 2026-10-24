@@ -26,6 +26,10 @@ from lib.python.access.gitlab_credentials import pin_gitlab_environment
 from lib.python.access.sources import _token_source
 from lib.python.core.abstract.callback import LocalCallback
 from lib.python.core.abstract.context import ExecutionContext
+from lib.python.core.abstract.provider_runtime import (
+    ProviderRoleError,
+    ProviderRoleMismatch,
+)
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.abstract.skill_state import SkillState
@@ -424,11 +428,13 @@ class ApiReadService:
 
         :param provider: Provider selected by the pending operation.
         :returns: Native identity fields already observed by the initializer.
-        :raises ValueError: Identity or declared access has not been established.
-        """  # noqa: DOC502 - Provider guards validate retained state and binding.
+        :raises ProviderRoleError: Invocation state or observed identity is missing.
+        :raises ProviderRoleMismatch: The observed role differs from the declaration.
+        :raises ValueError: The declaration or authentication binding is invalid.
+        """  # noqa: DOC502,DOC503 - Provider guards propagate role and binding failures.
         state = self.session.invocation
         if state is None:
-            raise ValueError(f"{provider.value}_identity_preflight_missing")
+            raise ProviderRoleError(f"{provider.value}_identity_preflight_missing")
         if provider == GitProvider.GITHUB:
             observed = require_github_runtime(
                 state, self.session, self.session.repository or ""
@@ -795,7 +801,8 @@ class BindAPI(ApiProviderCallback[ApiProviderAction]):
         """Initialize the selected provider observation once before any endpoint read.
 
         :returns: True after observing and checking the declared provider access.
-        :raises ValueError: Identity or repository selection is invalid.
+        :raises ProviderRoleError: The provider identity prerequisite is missing.
+        :raises ValueError: Identity, declaration, or repository selection is invalid.
         :raises ReadToolError: The credential lacks the required provider role.
         :raises APIError: The native provider identity request fails.
         :raises OSError: The native provider process cannot start.
@@ -812,13 +819,8 @@ class BindAPI(ApiProviderCallback[ApiProviderAction]):
             else:
                 establish_gitlab_identity(self.state, service.session, service.client)
             return super().whoami()
-        except ValueError as exc:
-            reason = str(exc)
-            if not reason.startswith(
-                f"{self.action.provider.value}_required_role_missing:"
-            ):
-                raise
-            raise ReadToolError(reason, ReadExit.BLOCKED) from exc
+        except ProviderRoleMismatch as exc:
+            raise ReadToolError(str(exc), ReadExit.BLOCKED) from exc
 
     def run(self) -> JSONObject:
         """Store a private native service and report only its credential reference.

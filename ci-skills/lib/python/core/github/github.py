@@ -16,7 +16,7 @@ from typing import Final, Optional
 from lib.python.access.credentials import bind_sources
 from lib.python.access.sources import Sources
 from lib.python.core.abstract.callback import Callback
-from lib.python.core.abstract.provider_runtime import ProviderRuntime
+from lib.python.core.abstract.provider_runtime import ProviderRoleError, ProviderRuntime
 from lib.python.core.abstract.skill_action import ActionT_co
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.abstract.skill_state import SkillState
@@ -125,9 +125,11 @@ def require_github_runtime(
     :param session: Credential and hostname selected for the pending operation.
     :param repository: Exact owner/repository selected by the caller.
     :returns: The previously established repository identity and role.
-    :raises ValueError: Declaration, runtime, role, or selected binding is invalid.
+    :raises ProviderRoleError: The runtime role has not been observed.
+    :raises ProviderRoleMismatch: The observed role differs from the declaration.
+    :raises ValueError: The declaration or selected binding is invalid.
     :raises TypeError: The retained observation lacks native GitHub identity fields.
-    """
+    """  # noqa: DOC503 - Shared runtime checks propagate role failures.
     expected = state.provider_spec(SkillPluginType.GITHUB).get("role")
     if not isinstance(expected, str) or not expected.strip():
         raise ValueError("github_role_requirement_missing")
@@ -156,7 +158,9 @@ def establish_github_identity(
     :param api: Existing bounded GitHub transport.
     :returns: Retained repository role, identity, and separately observed token scopes.
     :raises APIError: Provider identity or repository response is invalid.
-    :raises ValueError: The retained or observed access does not match the declaration.
+    :raises ProviderRoleError: The runtime role has not been observed.
+    :raises ProviderRoleMismatch: The observed role differs from the declaration.
+    :raises ValueError: The repository, declaration, or authentication binding is invalid.
     :raises OSError: A native provider command cannot be launched.
     """  # noqa: DOC503 - Native reads propagate process errors.
     if not repository:
@@ -269,14 +273,16 @@ class GitHubAPIClient(CLIAPIClient):
         :param deadline: Optional shared read deadline.
         :returns: Existing bounded transport result after local authorization checks.
         :raises TypeError: The caller did not supply a supported bound session.
-        :raises ValueError: Invocation state, role, or repository binding is invalid.
+        :raises ProviderRoleError: Invocation state or the identity prerequisite is missing.
+        :raises ProviderRoleMismatch: The observed role differs from the declaration.
+        :raises ValueError: The declaration or repository binding is invalid.
         :raises APIError: Provider request, decoding, or response bounds fail.
         :raises OSError: The native process or private request-file operation fails.
         """  # noqa: DOC502,DOC503 - Shared guards and transport propagate provider failures.
         if not isinstance(session, (ReadSession, GitHubService)):
             raise TypeError("github_identity_preflight_missing")
         if session.invocation is None or session.repository is None:
-            raise ValueError("github_identity_preflight_missing")
+            raise ProviderRoleError("github_identity_preflight_missing")
         selected = ReadSession(
             session.host, session.environment, session.credential_source
         )
@@ -391,10 +397,12 @@ class GitHubService:
         """Reject direct library operations that omit the identity prerequisite.
 
         :returns: Previously verified repository role and authentication binding.
-        :raises ValueError: Invocation state or its required observation is missing.
-        """  # noqa: DOC502 - The shared runtime guard rejects invalid bindings.
+        :raises ProviderRoleError: Invocation state or its role observation is missing.
+        :raises ProviderRoleMismatch: The observed role differs from the declaration.
+        :raises ValueError: The declaration or authentication binding is invalid.
+        """  # noqa: DOC502,DOC503 - The shared runtime guard propagates access failures.
         if self.invocation is None:
-            raise ValueError("github_identity_preflight_missing")
+            raise ProviderRoleError("github_identity_preflight_missing")
         return require_github_runtime(
             self.invocation,
             ReadSession(self.host, self.environment, self.credential_source),

@@ -34,14 +34,14 @@ def _selected_targets(target: Target) -> MutableMapping[str, JSONValue]:
     :raises TargetError: A selected provider section is absent.
     """  # noqa: DOC502 - Required provider selectors validate optional sections.
     selected: MutableMapping[str, JSONValue] = {}
-    if "github" in target.active_surfaces:
+    if SkillPluginType.GITHUB.value in target.active_surfaces:
         github = target.require_github()
-        selected["github"] = f"{github.host}/{github.repository}"
-    if "gitlab" in target.active_surfaces:
-        selected["gitlab"] = target.require_gitlab().url
-    if "kubernetes" in target.active_surfaces:
+        selected[SkillPluginType.GITHUB.value] = f"{github.host}/{github.repository}"
+    if SkillPluginType.GITLAB.value in target.active_surfaces:
+        selected[SkillPluginType.GITLAB.value] = target.require_gitlab().url
+    if SkillPluginType.KUBERNETES.value in target.active_surfaces:
         kubernetes = target.require_kubernetes()
-        selected["kubernetes"] = {
+        selected[SkillPluginType.KUBERNETES.value] = {
             "context": kubernetes.context,
             "server": kubernetes.server,
         }
@@ -88,7 +88,8 @@ def check_access(
     """Probe active authorities and combine their observed access results.
 
     :param target: Runtime target declaring active authorities and their sources.
-    :param publication: Whether GitHub requires administration and required-check probes.
+    :param publication: Whether to probe GitHub branch protection and required checks
+        under the declared repository role.
     :param cilium: Whether Kubernetes requires the Cilium health exec probe.
     :param state: Shared declaration and runtime; omitted creates one invocation state.
     :returns: Access receipt with per-surface results; overall PASS requires every
@@ -101,16 +102,18 @@ def check_access(
     elif state.spec is None:
         state.spec = load_spec()
     checks = {
-        "github": github_publication_access if publication else github_access,
-        "gitlab": gitlab_access,
-        "kubernetes": partial(kubernetes_access, cilium=cilium),
+        SkillPluginType.GITHUB.value: (
+            github_publication_access if publication else github_access
+        ),
+        SkillPluginType.GITLAB.value: gitlab_access,
+        SkillPluginType.KUBERNETES.value: partial(kubernetes_access, cilium=cilium),
     }
     _selected = target.active_surfaces
 
     if not _selected or any(name not in checks for name in _selected):
         raise ValueError("required_target_surfaces_invalid")
 
-    if publication and "github" not in _selected:
+    if publication and SkillPluginType.GITHUB.value not in _selected:
         raise ValueError("publication_requires_github")
     surfaces = [checks[name](target, state=state) for name in _selected]
 
@@ -137,17 +140,21 @@ def dry_run_access(
     :raises ValueError: Publication lacks GitHub or an active provider is unconfigured.
     """
     selected = target.active_surfaces
-    if publication and "github" not in selected:
+    if publication and SkillPluginType.GITHUB.value not in selected:
         raise ValueError("publication_requires_github")
     probes = {
-        "github": [
+        SkillPluginType.GITHUB.value: [
             "gh auth status",
             "gh api user",
             "gh api repository",
             *(["repository admin"] if publication else []),
         ],
-        "gitlab": ["glab auth status", "GET /user is_admin", "GET /runners/all"],
-        "kubernetes": [
+        SkillPluginType.GITLAB.value: [
+            "glab auth status",
+            "GET /user is_admin",
+            "GET /runners/all",
+        ],
+        SkillPluginType.KUBERNETES.value: [
             "context server",
             "TLS API version",
             "auth whoami",

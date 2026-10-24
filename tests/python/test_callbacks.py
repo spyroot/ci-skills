@@ -714,22 +714,31 @@ def test_whoami_requires_confirmation() -> None:
     assert events == []
 
 
+@pytest.mark.parametrize(
+    "provider",
+    (
+        SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
+        SKILL_PLUGIN_TYPE.SkillPluginType.GITHUB,
+        SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES,
+        SKILL_PLUGIN_TYPE.SkillPluginType.HARBOR,
+    ),
+)
 @pytest.mark.parametrize("observed_role", (None, "developer"))
 def test_whoami_blocks_unset_or_wrong_role_before_operations(
+    provider: SKILL_PLUGIN_TYPE.SkillPluginType,
     observed_role: str | None,
 ) -> None:
     """A dependent operation cannot initialize or accept insufficient access.
 
+    :param provider: Provider whose retained role is checked before operations.
     :param observed_role: Missing prerequisite or insufficient observed provider role.
     :returns: None; assertions prove no operation or later callback was entered.
     """
     events: MutableSequence[str] = []
-    state = CONTEXT.ExecutionContext(spec={"gitlab": {"role": "admin"}})
-    provider = SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB
+    state = CONTEXT.ExecutionContext(spec={provider.value: {"role": "admin"}})
     if observed_role is not None:
-        state.establish_runtime(
-            provider, PROVIDER_RUNTIME.ProviderRuntime(role=observed_role)
-        )
+        observation = replace(state.provider_runtime(provider), role=observed_role)
+        state.establish_runtime(provider, observation)
 
     class Guarded(Recorded):
         """Consume retained identity without populating missing prerequisites."""
@@ -746,15 +755,23 @@ def test_whoami_blocks_unset_or_wrong_role_before_operations(
             return True
 
     reason = (
-        "gitlab_identity_preflight_missing"
+        f"{provider.value}_identity_preflight_missing"
         if observed_role is None
-        else "gitlab_required_role_missing:admin"
+        else f"{provider.value}_required_role_missing:admin"
     )
-    with pytest.raises(ValueError, match=reason):
+    with pytest.raises(ValueError) as raised:
         _run_callbacks([Guarded(events, "guarded"), Recorded(events, "later")], state)
 
+    expected_error = (
+        PROVIDER_RUNTIME.ProviderRoleError
+        if observed_role is None
+        else PROVIDER_RUNTIME.ProviderRoleMismatch
+    )
+    assert type(raised.value) is expected_error
+    assert isinstance(raised.value, PROVIDER_RUNTIME.ProviderRoleError)
+    assert str(raised.value) == reason
     assert events == []
-    assert state.gitlab_runtime.role == observed_role
+    assert state.provider_runtime(provider).role == observed_role
 
 
 def test_serial_and_nested_executors_reuse_one_provider_observation() -> None:
@@ -2351,6 +2368,68 @@ def test_read_api_preserves_false_scalar_and_rejects_null_selection() -> None:
         EXECUTOR.WorkflowExecutor(
             context=context, callbacks=CALLBACK_COLLECTIONS.Callbacks(null_read)
         ).run()
+
+
+@pytest.mark.parametrize("provider", tuple(API_READ.GitProvider))
+@pytest.mark.parametrize("failure_kind", ("mismatch", "missing", "untyped"))
+def test_api_binding_maps_only_typed_role_mismatch_to_blocked(
+    provider: API_READ.GitProvider,
+    failure_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Classify role failures by their shared type rather than diagnostic text.
+
+    :param provider: Git provider selected by the bound read callback.
+    :param failure_kind: Typed mismatch, missing observation, or misleading text.
+    :param monkeypatch: Replace only the identity initializer's failure boundary.
+    :returns: None; typed mismatches retain exit 69 and other failures propagate.
+    """
+    if failure_kind == "mismatch":
+        failure = PROVIDER_RUNTIME.ProviderRoleMismatch("declared role not observed")
+    elif failure_kind == "missing":
+        failure = PROVIDER_RUNTIME.ProviderRoleError(
+            f"{provider.value}_identity_preflight_missing"
+        )
+    else:
+        failure = ValueError(f"{provider.value}_required_role_missing:admin")
+
+    def initialize(*_args: object) -> None:
+        """Raise the selected initializer failure without contacting a provider.
+
+        :param *_args: Invocation, session, repository, and client inputs.
+        :returns: None; the configured failure prevents initialization.
+        :raises ValueError: Configured provider-role or unrelated validation failure.
+        """
+        raise failure
+
+    monkeypatch.setattr(API_READ, f"establish_{provider.value}_identity", initialize)
+    state = API_READ.ApiReadState()
+    state.selection = API_READ.ApiProviderSelection(
+        provider, f"{provider.value}.example.test", repository="unit/repo"
+    )
+    state.service = API_READ.ApiReadService(
+        SimpleNamespace(),
+        API_READ.ReadSession(
+            state.selection.host,
+            {},
+            "fixture",
+            invocation=state,
+            repository="unit/repo",
+        ),
+    )
+    callback = API_READ.BindAPI(API_READ.ApiCheckAction(provider))
+    callback.bind(state)
+
+    with pytest.raises(ValueError) as raised:
+        callback.whoami()
+
+    if failure_kind == "mismatch":
+        assert isinstance(raised.value, API_READ.ReadToolError)
+        assert raised.value.code == 69
+        assert str(raised.value) == str(failure)
+        assert raised.value.__cause__ is failure
+    else:
+        assert raised.value is failure
 
 
 @pytest.mark.parametrize(

@@ -22,7 +22,7 @@ from lib.python.access.harbor_credentials import (
     resolve_harbor_credential,
 )
 from lib.python.core.abstract.callback import Callback
-from lib.python.core.abstract.provider_runtime import ProviderRuntime
+from lib.python.core.abstract.provider_runtime import ProviderRoleError, ProviderRuntime
 from lib.python.core.abstract.skill_action import ActionT_co, SkillAction
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.abstract.skill_state import SkillState
@@ -62,8 +62,10 @@ def require_harbor_runtime(
     :param target: Selected Harbor origin for the pending operation.
     :param credential: Private credential bound to that operation.
     :returns: The previously established native Harbor role and identity.
-    :raises ValueError: Required role, observation, or authentication binding is invalid.
-    """
+    :raises ProviderRoleError: The runtime role has not been observed.
+    :raises ProviderRoleMismatch: The observed role differs from the declaration.
+    :raises ValueError: The role declaration or authentication binding is invalid.
+    """  # noqa: DOC503 - The shared runtime guard propagates role failures.
     expected = state.provider_spec(SkillPluginType.HARBOR).get("role")
     if not isinstance(expected, str) or not expected.strip():
         raise ValueError("harbor_role_requirement_missing")
@@ -148,21 +150,25 @@ class HarborService:
         """Reject library operations that have no preceding identity observation.
 
         :returns: Retained native role after local binding and declaration checks.
-        :raises ValueError: Invocation or required runtime access is missing or invalid.
-        """  # noqa: DOC502 - The shared runtime guard checks the declared access.
+        :raises ProviderRoleError: Invocation state or its role observation is missing.
+        :raises ProviderRoleMismatch: The observed role differs from the declaration.
+        :raises ValueError: The role declaration or authentication binding is invalid.
+        """  # noqa: DOC502,DOC503 - The shared runtime guard propagates access failures.
         if self.invocation is None:
-            raise ValueError("harbor_identity_preflight_missing")
+            raise ProviderRoleError("harbor_identity_preflight_missing")
         return require_harbor_runtime(self.invocation, self.target, self.credential)
 
     def _establish_identity(self) -> ProviderRuntime:
         """Observe native Harbor admin flags only for the authentication callback.
 
         :returns: Write-once identity observation matching the caller's declaration.
-        :raises ValueError: Invocation state or required role is unavailable.
+        :raises ProviderRoleError: Invocation state or its role observation is missing.
+        :raises ProviderRoleMismatch: The observed role differs from the declaration.
+        :raises ValueError: The role declaration or authentication binding is invalid.
         :raises APIError: Native current-user response is invalid or inaccessible.
-        """
+        """  # noqa: DOC503 - The shared runtime guard propagates access failures.
         if self.invocation is None:
-            raise ValueError("harbor_identity_preflight_missing")
+            raise ProviderRoleError("harbor_identity_preflight_missing")
         if self.invocation.harbor_runtime.role is None:
             user = self._api().request("GET", f"{HARBOR_API}/users/current")
             identity = user.get("username")

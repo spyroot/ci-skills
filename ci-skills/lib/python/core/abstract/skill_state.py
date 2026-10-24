@@ -13,7 +13,12 @@ from collections.abc import Mapping, MutableMapping, MutableSequence
 from dataclasses import dataclass, field
 from typing import ClassVar, Self, TypedDict, TypeVar
 
-from lib.python.core.abstract.provider_runtime import KubernetesRuntime, ProviderRuntime
+from lib.python.core.abstract.provider_runtime import (
+    KubernetesRuntime,
+    ProviderRoleError,
+    ProviderRoleMismatch,
+    ProviderRuntime,
+)
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.abstract.skill_result import SkillResult
 from lib.python.core.abstract.spec import Spec
@@ -211,12 +216,13 @@ class SkillState:
         :param plugin_type: Provider key declared by its authentication callback.
         :param observation: Observed identity, role, and authentication binding.
         :raises TypeError: Kubernetes receives a non-Kubernetes runtime observation.
-        :raises ValueError: Runtime is already established, or the observation is unset.
+        :raises ProviderRoleError: The observation has no runtime role.
+        :raises ValueError: Runtime is already established or the plugin has no runtime.
         """  # noqa: DOC502 - provider_runtime rejects plugins without runtime state.
         if self.provider_runtime(plugin_type).role is not None:
             raise ValueError(f"{plugin_type.value}_runtime_already_established")
         if observation.role is None:
-            raise ValueError(f"{plugin_type.value}_runtime_role_missing")
+            raise ProviderRoleError(f"{plugin_type.value}_runtime_role_missing")
         if plugin_type is SkillPluginType.KUBERNETES:
             if not isinstance(observation, KubernetesRuntime):
                 raise TypeError("kubernetes runtime must be KubernetesRuntime")
@@ -243,13 +249,15 @@ class SkillState:
         :param authority: Provider authority the pending operation will use, when supplied.
         :param credential_identity: Bound authentication identifier, when supplied.
         :returns: The existing observation after all requested comparisons succeed.
-        :raises ValueError: Runtime is unset, has a different role, or belongs to another binding.
+        :raises ProviderRoleError: The runtime role has not been observed.
+        :raises ProviderRoleMismatch: The observed role differs from the declared role.
+        :raises ValueError: The plugin has no runtime or its binding differs.
         """  # noqa: DOC502 - provider_runtime rejects plugins without runtime state.
         runtime = self.provider_runtime(plugin_type)
         if runtime.role is None:
-            raise ValueError(f"{plugin_type.value}_identity_preflight_missing")
+            raise ProviderRoleError(f"{plugin_type.value}_identity_preflight_missing")
         if runtime.role != expected_role:
-            raise ValueError(
+            raise ProviderRoleMismatch(
                 f"{plugin_type.value}_required_role_missing:{expected_role}"
             )
         if authority is not None and runtime.authority != authority:

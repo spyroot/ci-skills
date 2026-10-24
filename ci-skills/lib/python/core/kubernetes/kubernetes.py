@@ -31,7 +31,10 @@ from lib.python.access.kubernetes import (
 )
 from lib.python.access.sources import Sources
 from lib.python.core.abstract.callback import Callback
-from lib.python.core.abstract.provider_runtime import KubernetesRuntime
+from lib.python.core.abstract.provider_runtime import (
+    KubernetesRuntime,
+    ProviderRoleError,
+)
 from lib.python.core.abstract.skill_action import ActionT_co
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.abstract.skill_state import SkillState
@@ -165,12 +168,13 @@ class KubernetesService:
     def require_access(self) -> None:
         """Check retained identity and declared access without a provider request.
 
-        :raises ValueError: Invocation state, expected role, or observed access is missing
-            or differs from the current authority and credential binding.
+        :raises ProviderRoleError: Invocation state or its role observation is missing.
+        :raises ProviderRoleMismatch: The observed role differs from the declaration.
+        :raises ValueError: The role declaration or authentication binding is invalid.
         :raises TargetError: The service has no frozen Kubernetes credential source.
         """  # noqa: DOC502,DOC503 - Shared state and binding helpers validate retained access.
         if self.state is None:
-            raise ValueError("kubernetes_identity_preflight_missing")
+            raise ProviderRoleError("kubernetes_identity_preflight_missing")
         expected = self.state.provider_spec(SkillPluginType.KUBERNETES).get(
             "cluster_role"
         )
@@ -753,12 +757,14 @@ class KubernetesService:
         """Read the identity already verified by the authentication initializer.
 
         :returns: Kubernetes username retained in this invocation's runtime.
-        :raises ValueError: Retained access or the declared role is unavailable.
+        :raises ProviderRoleError: Invocation state, observed role, or identity is missing.
+        :raises ProviderRoleMismatch: The observed role differs from the declaration.
+        :raises ValueError: The role declaration or authentication binding is invalid.
         :raises TargetError: No Kubernetes credential source is bound.
         """  # noqa: DOC502,DOC503 - require_access validates retained state and binding.
         self.require_access()
         if self.state is None or self.state.kubernetes_runtime.identity is None:
-            raise ValueError("kubernetes_identity_preflight_missing")
+            raise ProviderRoleError("kubernetes_identity_preflight_missing")
         return self.state.kubernetes_runtime.identity
 
     def _verify_identity(self) -> str:
@@ -894,11 +900,13 @@ class K8SCallback(Callback[DeliveryState, ActionT_co]):
         """Check the initializer's retained identity and access using state only.
 
         :returns: True after retained identity and declared access match.
-        :raises ValueError: The initializer is missing or declared access is unmet.
+        :raises ProviderRoleError: The initializer has not established a role observation.
+        :raises ProviderRoleMismatch: The observed role differs from the declaration.
+        :raises ValueError: The role declaration or authentication binding is invalid.
         :raises TargetError: The service has no credential-bound Kubernetes target.
         """  # noqa: DOC502,DOC503 - The service property validates shared access and binding.
         if self.state.kubernetes_runtime.cluster_role is None:
-            raise ValueError("kubernetes_identity_preflight_missing")
+            raise ProviderRoleError("kubernetes_identity_preflight_missing")
         self.kubernetes.require_access()
         return True
 

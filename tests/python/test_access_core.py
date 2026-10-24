@@ -469,9 +469,28 @@ def _fake_access_runner(
                             "id": 42,
                             "full_name": "unit/repo",
                             "permissions": {
-                                "admin": scenario != "github_non_admin",
+                                "admin": scenario
+                                not in (
+                                    "github_non_admin",
+                                    "github_maintain",
+                                    "github_maintain_protection_denied",
+                                ),
+                                "maintain": scenario.startswith("github_maintain"),
                                 "pull": True,
                             },
+                        }
+                    ),
+                )
+            if command[-1] == "repos/unit/repo/branches/main/protection":
+                if scenario == "github_maintain_protection_denied":
+                    return completed(command, 1, stderr="HTTP 403 forbidden")
+                return completed(
+                    command,
+                    stdout=json.dumps(
+                        {
+                            "required_status_checks": {
+                                "contexts": ["portable-required-check"],
+                            }
                         }
                     ),
                 )
@@ -718,6 +737,61 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
         "cilium_namespace_not_unique"
     )
     assert any("daemonsets" in call for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_status", "expected_reason"),
+    (
+        ("github_maintain", "PASS", None),
+        ("github_maintain_protection_denied", "BLOCKED", "authorization"),
+    ),
+)
+def test_github_publication_uses_declared_role_before_native_protection_read(
+    monkeypatch: pytest.MonkeyPatch,
+    target_file: Path,
+    scenario: str,
+    expected_status: str,
+    expected_reason: Optional[str],
+) -> None:
+    """Honor a declared maintain role while preserving actual provider denials.
+
+    :param monkeypatch: Install only the existing offline native command boundary.
+    :param target_file: Target selecting the publication repository.
+    :param scenario: Protection read success or a native authorization denial.
+    :param expected_status: Surface outcome required by the provider response.
+    :param expected_reason: Existing denial classification, or no failure reason.
+    :returns: None; protection is read once after retaining the declared role.
+    """
+    _access, runtime = _access_modules()
+    runner, calls = _fake_access_runner(runtime, scenario)
+    _patch_provider_commands(monkeypatch, runner)
+    target = _load_target(target_file, required_surfaces=("github",))
+    target = replace(
+        target,
+        github=replace(
+            target.require_github(), required_checks=("portable-required-check",)
+        ),
+    )
+    delivery = import_script_module("lib.python.core.delivery_state")
+    state = delivery.DeliveryState(spec={"github": {"role": "maintain"}})
+
+    surface = _provider_modules()[0].github_publication_access(target, state=state)
+
+    assert surface.status == expected_status
+    assert surface.reason == expected_reason
+    assert state.github_runtime.role == "maintain"
+    endpoints = [call[-1] for call in calls if call[:2] == ("gh", "api")]
+    assert endpoints == [
+        "user",
+        "repos/unit/repo",
+        "repos/unit/repo/branches/main/protection",
+    ]
+    if expected_status == "PASS":
+        assert surface.details == {"required_checks": ["portable-required-check"]}
+        assert "repository_maintain" in surface.observed_capability
+        assert "repository_admin" not in surface.observed_capability
+        assert "protection_read" in surface.observed_capability
+        assert "required_checks_read" in surface.observed_capability
 
 
 def test_check_access_passes_when_all_three_authorities_are_admin(
