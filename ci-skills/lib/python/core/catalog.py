@@ -524,6 +524,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             },
         },
         "related": ("harbor_push.py", "harbor_pull.py", "create_selfhosted_runner.py"),
+        "references": ("Harbor API shapes", "Podman inside a Pod"),
         "required_tools": ("oc", "kubectl", "skopeo"),
         "returns": "Versioned operation plan or independently verified callback results, with "
         "cleanup evidence.",
@@ -556,6 +557,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             }
         },
         "related": ("toolbox.py", "harbor_pull.py"),
+        "references": ("Harbor API shapes",),
         "required_tools": ("skopeo",),
         "returns": "Versioned operation plan or independently verified callback results, with "
         "cleanup evidence.",
@@ -587,6 +589,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             }
         },
         "related": ("toolbox.py", "harbor_push.py"),
+        "references": ("Harbor API shapes",),
         "required_tools": ("kubectl",),
         "returns": "Versioned operation plan or independently verified callback results, with "
         "cleanup evidence.",
@@ -657,6 +660,8 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "Nested Podman readiness",
             "Image build chain",
             "OpenShift SCC access",
+            "Podman inside a Pod",
+            "Harbor API shapes",
         ),
         "required_tools": (
             "kubectl",
@@ -1489,6 +1494,14 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         "GitLab merge requests": {
             "summary": "Source/target branches, MR IID and milestone ID examples.",
             "pointer": "references/gitlab-merge-requests.md",
+        },
+        "Harbor API shapes": {
+            "summary": "Project, robot, retention, quota, registry, replication, webhook and artifact request shapes.",
+            "pointer": "references/harbor-api-shapes.md",
+        },
+        "Podman inside a Pod": {
+            "summary": "Storage, containers.conf, build and push inputs that decide a nested Podman build.",
+            "pointer": "references/podman-in-pod.md",
         },
         "mcp": {
             "summary": "GitLab MCP configuration and toolsets.",
