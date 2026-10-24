@@ -92,6 +92,20 @@ make_install_fixture() {
   [ ! -e "$caller_root/.claude" ]
 }
 
+@test 'scope claude-project outside a Git repository reports BLOCKED JSON without usage text' {
+  make_install_fixture
+  outside="${BATS_TEST_TMPDIR}/outside"
+  mkdir -p "$outside"
+  cd "$outside"
+  run env GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" "$tool" --scope claude-project --dry-run
+  [ "$status" -eq 2 ]
+  jq -e '.status == "BLOCKED" and .kind == "skill_install" and .scope == "claude-project"
+    and .reason == "agent_repository_unavailable" and (.safe_next_step | length > 0)' \
+    <<<"$output" >/dev/null
+  [[ "$output" != *'usage:'* ]]
+  [ ! -e "$outside/.claude" ]
+}
+
 @test 'scope cannot be combined with another location flag' {
   make_install_fixture
   run "$tool" --scope claude-user --destination "$destination" --dry-run

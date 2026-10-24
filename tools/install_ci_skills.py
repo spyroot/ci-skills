@@ -69,6 +69,7 @@ from lib.python.core.provenance import (
     tree_digest,
 )
 from lib.python.sys.signals import recoverable_signals as _recoverable_signals
+from lib.python.sys.status import BLOCKED
 
 RECOVERY = {
     "skill_manifest_missing": "Use a checkout containing ci-skills/SKILL.md.",
@@ -780,15 +781,23 @@ class InstallerCLI:
         :param parser: Parser used to report argument errors consistently.
         :param args: Parsed command-line namespace from ``argparse``.
         :param started: Monotonic timestamp captured before parsing began.
-        :raises SystemExit: If the explicit destination is not an absolute skill path,
-            or ``--scope claude-project`` runs outside a Git repository.
+        :raises SystemExit: If the explicit destination is not an absolute skill path.
         :raises OSError: If the destination cannot be resolved on this filesystem.
         """  # noqa: DOC502 - Destination resolution and parser errors propagate failures.
         self.parser = parser
         self.args = args
         self.started = started
-        self.skills_dir = self._resolve_skills_dir()
-        self.destination = self.skills_dir.expanduser().resolve() / SKILL_NAME
+        self.location_error: Optional[AgentProfileError] = None
+        self._skills_dir: Optional[Path] = None
+        self._destination: Optional[Path] = None
+        try:
+            skills_dir = self._resolve_skills_dir()
+        except AgentProfileError as exc:
+            # run() reports this as a BLOCKED result in the selected output format.
+            self.location_error = exc
+        else:
+            self._skills_dir = skills_dir
+            self._destination = skills_dir.expanduser().resolve() / SKILL_NAME
         self.explicit_logging = any(
             value is not None
             for value in (
@@ -908,20 +917,42 @@ class InstallerCLI:
         self._emit(result)
         return 0 if result["status"] in {"PASS", "DRY_RUN"} else 2
 
+    @property
+    def skills_dir(self) -> Path:
+        """Parent skills directory selected by the location options.
+
+        :returns: Directory containing the installed ``ci-skills`` entry.
+        :raises AgentProfileError: If ``--scope`` could not be resolved; ``run`` reports
+            that failure before any operation reads this property.
+        """
+        if self._skills_dir is None:
+            assert self.location_error is not None
+            raise self.location_error
+        return self._skills_dir
+
+    @property
+    def destination(self) -> Path:
+        """Installed ``ci-skills`` path selected by the location options.
+
+        :returns: Resolved ``<skills directory>/ci-skills`` path.
+        :raises AgentProfileError: If ``--scope`` could not be resolved; ``run`` reports
+            that failure before any operation reads this property.
+        """
+        if self._destination is None:
+            assert self.location_error is not None
+            raise self.location_error
+        return self._destination
+
     def _resolve_skills_dir(self) -> Path:
         """Resolve the parent skills directory from mutually exclusive inputs.
 
         :returns: Directory containing the installed ``ci-skills`` entry.
-        :raises SystemExit: If ``--destination`` is not an absolute ci-skills path,
-            or a repository scope runs outside a Git repository.
-        """  # noqa: DOC502 - parser.error exits when the destination is invalid.
+        :raises SystemExit: If ``--destination`` is not an absolute ci-skills path.
+        :raises AgentProfileError: ``REPOSITORY_UNAVAILABLE`` when a repository scope
+            runs outside a Git repository.
+        """  # noqa: DOC502 - parser.error exits; the scope resolver raises.
         if self.args.scope is not None:
-            try:
-                return scope_skills_directory(InstallScope(self.args.scope), Path.cwd())
-            except AgentProfileError as exc:
-                self.parser.error(
-                    f"--scope {self.args.scope}: {exc.reason}: {RECOVERY[exc.reason]}"
-                )
+            return scope_skills_directory(InstallScope(self.args.scope), Path.cwd())
         skills_dir = self.args.skills_dir or skills_directory()
         if self.args.destination is not None:
             if (
@@ -965,9 +996,28 @@ class InstallerCLI:
 
         :returns: Structured result ready for optional logging and output.
         """
+        if self.location_error is not None:
+            return self._location_blocked(self.location_error.reason)
         if self.args.recover:
             return self._recover()
         return self._install_or_plan()
+
+    def _location_blocked(
+        self, reason: AgentProfileReason
+    ) -> MutableMapping[str, JSONValue]:
+        """Report a ``--scope`` that has no skills directory from this working directory.
+
+        :param reason: Classified scope resolution failure.
+        :returns: BLOCKED result naming the scope, reason, and recovery step.
+        """
+        return {
+            "schema_version": "1.0",
+            "kind": "skill_install_recovery" if self.args.recover else "skill_install",
+            "status": BLOCKED,
+            "scope": self.args.scope,
+            "reason": reason.value,
+            "safe_next_step": RECOVERY[reason],
+        }
 
     def _recover(self) -> MutableMapping[str, JSONValue]:
         """Plan or apply interrupted-install recovery.
@@ -1181,7 +1231,10 @@ class InstallerCLI:
         elif self.args.json:
             print(json.dumps(result, sort_keys=True))
         else:
-            print(f"{result['status']}: {result['destination']}")
+            # A scope that could not be resolved has no destination; name the scope.
+            print(
+                f"{result['status']}: {result.get('destination', result.get('scope'))}"
+            )
             if result.get("reason"):
                 print(result["reason"], file=sys.stderr)
 

@@ -169,7 +169,9 @@ before installation; unknown fields and malformed JSON block the plan.
 | `claude-user` | `~/.claude/skills/ci-skills` |
 | `claude-project` | `<git root>/.claude/skills/ci-skills` of the repository containing the current directory |
 
-`--scope`, `--skills-dir` and `--destination` are mutually exclusive. `--scope` changes only the `ci-skills` copy;
+`--scope`, `--skills-dir` and `--destination` are mutually exclusive. Outside a Git repository,
+`--scope claude-project` returns `BLOCKED` with reason `agent_repository_unavailable`. `--scope` changes only the
+`ci-skills` copy;
 `glab-stack` still goes to `$REPO_ROOT/.agents/skills`. For a Claude user install:
 
 ```bash
