@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 from collections.abc import MutableMapping, Sequence
-from typing import Optional
+from typing import Final, Optional
 from urllib.parse import urlencode
 
 from lib.python.core.gitlab.gitlab_action import GitLabOperation
@@ -79,6 +79,19 @@ def prepare(args: Namespace) -> PreparedOperation:
     return PreparedOperation(body, resource_id=identifier)
 
 
+READBACK_FIELDS: Final[tuple[str, ...]] = ("start_date", "due_date", "state")
+
+
+def _readback_fields(observed: JSONObject) -> JSONObject:
+    """Copy the dates and state GitLab returned for a verified milestone.
+
+    :param observed: Milestone record read back after the write.
+    :returns: The ``start_date``, ``due_date`` and ``state`` values present in
+        the record, unchanged.
+    """
+    return {field: observed[field] for field in READBACK_FIELDS if field in observed}
+
+
 class UpdateMilestone(GitLabOperation):
     """Update milestone fields and verify the provider result."""
 
@@ -118,6 +131,7 @@ class UpdateMilestone(GitLabOperation):
                 "id": identifier,
                 "verified": True,
                 "title": observed["title"],
+                **_readback_fields(observed),
                 "reconciled": True,
             }
         try:
@@ -144,6 +158,7 @@ class UpdateMilestone(GitLabOperation):
             "id": identifier,
             "verified": True,
             "title": observed["title"],
+            **_readback_fields(observed),
         }
 
 
@@ -288,6 +303,7 @@ class CreateMilestone(GitLabOperation):
             "id": identifier,
             "verified": True,
             "title": observed["title"],
+            **_readback_fields(observed),
         }
         if reconciled:
             result["reconciled"] = True

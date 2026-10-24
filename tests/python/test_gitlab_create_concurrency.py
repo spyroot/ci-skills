@@ -277,6 +277,50 @@ def test_create_reconciles_a_lost_post_response_without_reposting(
     assert next(tmp_path.glob("*.lock")).read_text() == ""
 
 
+def test_milestone_create_reconciled_record_carries_read_back_fields(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Carry the read-back dates and state on a milestone reconciled after timeout.
+
+    :param monkeypatch: Pytest fixture selecting scratch lock storage.
+    :param tmp_path: Private directory holding the create marker.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    tmp_path.chmod(0o700)
+    monkeypatch.setattr(API, "_lock_root", lambda: tmp_path)
+    base = "projects/42/milestones"
+    query = base + "?title=release&per_page=100&page=1"
+    observed = {
+        "id": 9,
+        "title": "release",
+        "start_date": None,
+        "due_date": "2026-10-31",
+        "state": "active",
+    }
+    api = ScriptedAPI(
+        {
+            ("GET", query): [[], [{"id": 9, "title": "release"}]],
+            ("POST", base): [API.GitLabAPIError("timeout")],
+            ("GET", base + "/9"): [observed],
+        }
+    )
+    result = MILESTONES.apply(
+        api, SimpleNamespace(), _plan("gitlab_milestone", "release"), 42
+    )
+    assert result == {
+        "action": "APPLIED",
+        "id": 9,
+        "verified": True,
+        "title": "release",
+        "start_date": None,
+        "due_date": "2026-10-31",
+        "state": "active",
+        "reconciled": True,
+    }
+    assert [method for method, _ in api.calls].count("POST") == 1
+
+
 @pytest.mark.parametrize(
     ("module", "kind", "title", "content", "base", "query", "created", "detail"),
     (
@@ -585,6 +629,8 @@ def test_milestone_put_timeout_reconciles_by_id_without_reposting() -> None:
     result = MILESTONES.apply(api, SimpleNamespace(), plan, 42)
     assert result["action"] == "APPLIED"
     assert result["reconciled"] is True
+    assert result["due_date"] == "2026-10-31"
+    assert "state" not in result
     assert [method for method, _ in api.calls].count("PUT") == 1
 
 
