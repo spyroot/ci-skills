@@ -12,11 +12,11 @@ import math
 import sys
 from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from pathlib import Path
-from types import MappingProxyType, SimpleNamespace
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Optional, TypeAlias
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_gitlab_session, import_script_module
 
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
 RUNTIME = import_script_module("lib.python.core.runtime")
@@ -25,16 +25,20 @@ CallRecord: TypeAlias = tuple[tuple[str, ...], int, Mapping[str, Optional[str]]]
 
 
 if TYPE_CHECKING:
+    from lib.python.core.cli_api import ReadSession
     from lib.python.core.json_types import JSONObject, JSONValue
 
 
-def _session() -> SimpleNamespace:
+def _session() -> ReadSession:
     """Provide a selected GitLab host and child token environment.
 
     :returns: Session-shaped fixture for native glab transport calls.
     """
-    return SimpleNamespace(
-        host="gitlab.example.test", environment={"GITLAB_TOKEN": "selected"}
+    sessions = import_script_module("lib.python.core.cli_api")
+    return authenticated_gitlab_session(
+        sessions.ReadSession(
+            "gitlab.example.test", {"GITLAB_TOKEN": "selected"}, "fixture:gitlab"
+        )
     )
 
 

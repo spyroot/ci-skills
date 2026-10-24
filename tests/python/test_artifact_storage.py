@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
-from conftest import SKILL_ROOT, import_script_module
+from conftest import SKILL_ROOT, bind_kubernetes_fixture, import_script_module
 from test_tool_pod import MemoryCluster
 
 MODELS = import_script_module("lib.python.core.kubernetes.artifact_storage_models")
@@ -82,7 +82,7 @@ def storage_state(tmp_path: Path) -> tuple[MODELS.ArtifactStorageState, FilePodC
     """
     cluster = FilePodCluster()
     state = MODELS.ArtifactStorageState()
-    state.kubernetes = cluster
+    bind_kubernetes_fixture(state, cluster)
     state.run_scope = SCOPES.RunScope.new(
         namespace="consumer-storage", run_id="storage-proof"
     )

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_gitlab_session, import_script_module
 
 PIPELINES = import_script_module("lib.python.core.gitlab.gitlab_pipelines")
 GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
@@ -32,18 +32,20 @@ def _session() -> BoundGitLabSession:
 
     :returns: Bound session carrying target and credential provenance.
     """
-    return GITLAB_SESSION.BoundGitLabSession(
-        origin="https://gitlab.example.test",
-        host="gitlab.example.test",
-        target_kind="project",
-        target_reference="unit/repo",
-        target_source="fixture",
-        target_file=Path("/selected/target.toml"),
-        credential_source="env:GITLAB_TOKEN",
-        credential_digest="sha256:unit",
-        execution_host="unit-host",
-        skill={"digest": "unit", "revision": {"value": "a" * 40, "verified": True}},
-        environment={},
+    return authenticated_gitlab_session(
+        GITLAB_SESSION.BoundGitLabSession(
+            origin="https://gitlab.example.test",
+            host="gitlab.example.test",
+            target_kind="project",
+            target_reference="unit/repo",
+            target_source="fixture",
+            target_file=Path("/selected/target.toml"),
+            credential_source="env:GITLAB_TOKEN",
+            credential_digest="sha256:unit",
+            execution_host="unit-host",
+            skill={"digest": "unit", "revision": {"value": "a" * 40, "verified": True}},
+            environment={},
+        )
     )
 
 

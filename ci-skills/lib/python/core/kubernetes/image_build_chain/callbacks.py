@@ -86,6 +86,8 @@ class DeferredComponent(LocalCallback[ImageBuildChainState, ImageBuildChainActio
         require_result(child.read_config())
         if not child.is_configured():
             raise ValueError("deferred_component_configuration_missing")
+        if child.whoami() is not True:
+            raise ValueError("deferred_component_identity_preflight_failed")
         self.child = child
         return child.collect()
 

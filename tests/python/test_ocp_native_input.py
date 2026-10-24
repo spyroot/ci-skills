@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Optional
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_kubernetes_service, import_script_module
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
@@ -47,7 +47,7 @@ def pod_file_state() -> MODELS.ToolPodState:
         active_surfaces=("kubernetes",),
     )
     state = MODELS.ToolPodState()
-    state.kubernetes = KUBERNETES.KubernetesService(target)
+    state.kubernetes = authenticated_kubernetes_service(target, state=state)
     state.pod = MODELS.PodHandle(
         "unit-ns", "unit-pod", "unit-uid", "tools", "unit-image", 0
     )

@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import NoReturn, Optional
+from typing import NoReturn, Optional, Protocol
 
 from lib.python.access.access import check_access, dry_run_access
 from lib.python.access.credentials import bind_sources
@@ -31,6 +31,7 @@ from lib.python.core.catalog import (
     describe,
     missing_required_options,
 )
+from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.help import CommandHelp, CommandHelpFormatter
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json_object
 from lib.python.core.logging import add_log_arguments, log_event
@@ -299,8 +300,34 @@ def _failure(
     return 2
 
 
-Collector = Callable[[Target, argparse.Namespace], JSONObject]
-ReportReader = Callable[[Target, argparse.Namespace, JSONObject], JSONObject]
+class Collector(Protocol):
+    """Read one diagnostic using the invocation's retained provider access.
+
+    The existing collector function name selects its command contract.
+    """
+
+    __name__: str
+
+    def __call__(
+        self,
+        target: Target,
+        args: argparse.Namespace,
+        *,
+        state: DeliveryState | None = None,
+    ) -> JSONObject:
+        """Read the selected diagnostic after shared authentication.
+
+        :param target: Credential-bound runtime authority.
+        :param args: Diagnostic filters and selected operation inputs.
+        :param state: Invocation declaration and observed provider access.
+        :returns: The diagnostic's existing JSON report.
+        """
+        ...
+
+
+ReportReader = Callable[
+    [Target, argparse.Namespace, JSONObject, DeliveryState], JSONObject
+]
 
 COLLECTION_PROBES: Mapping[str, Sequence[str]] = {
     "collect_storage": (
@@ -327,36 +354,42 @@ COLLECTION_PROBES: Mapping[str, Sequence[str]] = {
 
 
 def _access_report(
-    target: Target, args: argparse.Namespace, gate: JSONObject
+    target: Target, args: argparse.Namespace, gate: JSONObject, state: DeliveryState
 ) -> JSONObject:
     """Return the access evidence already collected for this invocation.
 
     :param target: Resolved runtime authority, retained by the shared reader interface.
     :param args: Parsed command inputs, retained by the shared reader interface.
     :param gate: Completed access report from the selected authority checks.
+    :param state: Shared runtime retained for the selected authority checks.
     :returns: The same access report without an additional provider call.
     """
     return gate
 
 
 def _live_access_report(
-    target: Target, args: argparse.Namespace, gate: JSONObject
+    target: Target, args: argparse.Namespace, gate: JSONObject, state: DeliveryState
 ) -> JSONObject:
     """Extend a passing access report with the installed diagnostic read bundle.
 
     :param target: Runtime target used for each independent diagnostic read.
     :param args: Optional job and Ceph selections from the command parser.
     :param gate: Successful access report copied before attaching live evidence.
+    :param state: Shared provider runtime reused by every selected collector.
     :returns: Access report containing each collector's independent read-back.
     :raises RuntimeError: If the worker pool cannot start or submit its reads.
     """  # noqa: DOC502 - The collector thread pool can fail to start.
     from lib.python.core.live import collect_live_checks
 
-    return collect_live_checks(target, args, copy_json_object(gate))
+    return collect_live_checks(target, args, copy_json_object(gate), state=state)
 
 
 def _collector_report(
-    collect: Collector, target: Target, args: argparse.Namespace, gate: JSONObject
+    collect: Collector,
+    target: Target,
+    args: argparse.Namespace,
+    gate: JSONObject,
+    state: DeliveryState,
 ) -> JSONObject:
     """Read one diagnostic and attach the access evidence that authorized it.
 
@@ -364,12 +397,13 @@ def _collector_report(
     :param target: Resolved runtime target for that collector.
     :param args: Parsed collection filters and command options.
     :param gate: Successful prerequisite access evidence.
+    :param state: Shared declaration and observed access passed to the collector.
     :returns: Collector report copied into an owned mapping with its access summary.
     :raises Exception: If the selected collector fails; the command boundary converts
         that original failure into a blocked result with its collection stage.
     :raises RecursionError: If collector evidence contains cyclic nested containers.
     """  # noqa: DOC502 - The supplied collector and recursive copy can fail.
-    data = copy_json_object(collect(target, args))
+    data = copy_json_object(collect(target, args, state=state))
     data["access"] = access_evidence(gate)
     return data
 
@@ -415,6 +449,7 @@ def _diagnostic_gate(
     kind: str,
     probes: Sequence[str],
     profile: str,
+    state: DeliveryState,
 ) -> MutableMapping[str, JSONValue]:
     """Check declared access or construct its non-contacting plan.
 
@@ -423,6 +458,7 @@ def _diagnostic_gate(
     :param kind: Canonical result kind, used to select Cilium prerequisites.
     :param probes: Planned collection operations; empty for an access-only command.
     :param profile: Live access profile declared by the calling command.
+    :param state: One invocation state populated by the selected access checks.
     :returns: Mutable access evidence or plan with the selected profile.
     :raises TargetError: If a required authority cannot be selected or verified.
     :raises OSError: If a prerequisite probe cannot read its local configuration.
@@ -432,7 +468,9 @@ def _diagnostic_gate(
     gate = copy_json_object(
         dry_run_access(target, publication=publication, cilium=needs_cilium)
         if args.dry_run
-        else check_access(target, publication=publication, cilium=needs_cilium)
+        else check_access(
+            target, publication=publication, cilium=needs_cilium, state=state
+        )
     )
     if args.dry_run and kind != ACCESS_CHECK_KIND:
         gate["collection_probes"] = probes
@@ -510,14 +548,15 @@ def _execute_report(
     source = "target"
     try:
         target = _diagnostic_target(args, script)
+        state = DeliveryState(args=args)
         source = "access_check"
-        gate = _diagnostic_gate(args, target, kind, probes, profile)
+        gate = _diagnostic_gate(args, target, kind, probes, profile, state)
         data: JSONObject
         if args.dry_run or gate["status"] != PASS:
             data = gate
         else:
             source = kind
-            data = read(target, args, gate)
+            data = read(target, args, gate, state)
         source = "output"
         return _write_diagnostic(args, data, kind, started)
     except (

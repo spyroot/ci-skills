@@ -61,6 +61,7 @@ from lib.python.sys.signals import recoverable_signals as _recoverable_signals
 
 RECOVERY = {
     "skill_manifest_missing": "Use a checkout containing ci-skills/SKILL.md.",
+    "skill_specification_missing": "Use a checkout containing ci-skills/ci_skills.spec.json.",
     "skill_symlink_unexpected": "Remove the symlink from the source skill tree and retry.",
     "source_revision_unverified": "Install from a clean checkout of the merged skill revision.",
     "destination_exists": "Inspect the installed skill, then use --upgrade --apply --confirm-upgrade.",
@@ -172,10 +173,13 @@ def package_files(source: Path) -> Sequence[Path]:
 
     :param source: Source skill directory to inventory.
     :returns: Included file paths relative to the source directory.
-    :raises ValueError: If SKILL.md is missing or any source entry is a symlink.
+    :raises ValueError: If SKILL.md or ci_skills.spec.json is missing, or any
+        source entry is a symlink.
     """
     if not (source / "SKILL.md").is_file():
         raise ValueError("skill_manifest_missing")
+    if not (source / "ci_skills.spec.json").is_file():
+        raise ValueError("skill_specification_missing")
     for path in source.rglob("*"):
         if path.is_symlink():
             raise ValueError("skill_symlink_unexpected")

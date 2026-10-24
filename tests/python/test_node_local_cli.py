@@ -56,7 +56,9 @@ def _selected_existing_pods(monkeypatch: pytest.MonkeyPatch, target_file: Path) 
     )
     monkeypatch.setattr(cli, "bind_sources", lambda target, **_kwargs: target)
     monkeypatch.setattr(
-        cli, "check_access", lambda _target, *, cilium=False: {"status": "PASS"}
+        cli,
+        "check_access",
+        lambda _target, *, cilium=False, state=None: {"status": "PASS"},
     )
     monkeypatch.setattr(cli, "access_evidence", lambda _gate: {"status": "PASS"})
     monkeypatch.setattr(cli, "select_node_pod", lambda *_args, **_kwargs: object())

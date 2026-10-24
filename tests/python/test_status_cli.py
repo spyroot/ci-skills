@@ -66,16 +66,21 @@ def test_cli_execute_uses_shared_exit_mapping(
     monkeypatch.setattr(
         cli,
         "check_access",
-        lambda _target, publication=False, cilium=False: {"status": status.PASS},
+        lambda _target, publication=False, cilium=False, state=None: {
+            "status": status.PASS
+        },
     )
     monkeypatch.setattr(cli, "bind_sources", lambda target, revision=None: target)
-    monkeypatch.setattr(cli, "emit", lambda data, _mode, _output_dir: json.dumps(data))
+    monkeypatch.setattr(
+        cli, "emit", lambda data, _mode, _output_dir=None: json.dumps(data)
+    )
 
-    def collect(_target: Target, _args: JSONValue) -> JSONObject:
+    def collect(_target: Target, _args: JSONValue, *, state=None) -> JSONObject:
         """Return the selected status through a fake collector report.
 
         :param _target: Bound target unused by this fake.
         :param _args: Parsed options unused by this fake.
+        :param state: Shared invocation accepted by the collector double.
         :returns: Minimal report with the parametrized collector status.
         """
         return {"kind": "unit", "status": collector_status, "records": [], "errors": []}

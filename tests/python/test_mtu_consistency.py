@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_kubernetes_service, import_script_module
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject, JSONValue
@@ -250,6 +250,8 @@ def test_non_openshift_target_blocks_before_debug_pod_creation(
     :returns: None; assertions in the body validate the regression.
     """
     target = _target(tmp_path)
+    service = authenticated_kubernetes_service(target)
+    target = service.target
     monkeypatch.setattr(MTU.shutil, "which", lambda _name: "/fake/oc")
     monkeypatch.setattr(
         MTU,
@@ -265,7 +267,7 @@ def test_non_openshift_target_blocks_before_debug_pod_creation(
     )
 
     with pytest.raises(ValueError, match="cluster:openshift_api_absent"):
-        MTU.build_plan(target, _args())
+        MTU.build_plan(target, _args(), state=service.state)
 
 
 def test_mtu_mismatch_is_partial_with_action_and_verified_cleanup(
@@ -279,6 +281,8 @@ def test_mtu_mismatch_is_partial_with_action_and_verified_cleanup(
     :returns: None; assertions in the body validate the regression.
     """
     target = _target(tmp_path)
+    service = authenticated_kubernetes_service(target)
+    target = service.target
     monkeypatch.setattr(
         MTU,
         "_read_one",
@@ -300,7 +304,9 @@ def test_mtu_mismatch_is_partial_with_action_and_verified_cleanup(
         lambda *_args: {"status": "PASS", "verified": True, "remaining_pods": []},
     )
 
-    result = MTU.collect_mtu_consistency(target, _args(), _plan(), "unit-marker")
+    result = MTU.collect_mtu_consistency(
+        target, _args(), _plan(), "unit-marker", state=service.state
+    )
 
     assert result["status"] == "PARTIAL"
     assert result["condition"] == "INCONSISTENT"
@@ -320,6 +326,8 @@ def test_identical_multi_nic_nodes_are_consistent(
     :returns: None; assertions in the body validate the regression.
     """
     target = _target(tmp_path)
+    service = authenticated_kubernetes_service(target)
+    target = service.target
 
     def fake_read(
         _target: Target, _plan: MtuPlan, node: str, _marker: str, _timeout: int
@@ -343,7 +351,9 @@ def test_identical_multi_nic_nodes_are_consistent(
         lambda *_args: {"status": "PASS", "verified": True, "remaining_pods": []},
     )
 
-    result = MTU.collect_mtu_consistency(target, _args(), _plan(), "unit-marker")
+    result = MTU.collect_mtu_consistency(
+        target, _args(), _plan(), "unit-marker", state=service.state
+    )
 
     assert result["status"] == "PASS"
     assert result["condition"] == "CONSISTENT"
@@ -366,6 +376,8 @@ def test_cleanup_failure_blocks_even_when_nic_reads_succeed(
     :returns: None; assertions in the body validate the regression.
     """
     target = _target(tmp_path)
+    service = authenticated_kubernetes_service(target)
+    target = service.target
     monkeypatch.setattr(
         MTU,
         "_read_one",
@@ -384,7 +396,9 @@ def test_cleanup_failure_blocks_even_when_nic_reads_succeed(
         },
     )
 
-    result = MTU.collect_mtu_consistency(target, _args(), _plan(), "unit-marker")
+    result = MTU.collect_mtu_consistency(
+        target, _args(), _plan(), "unit-marker", state=service.state
+    )
 
     assert result["status"] == "BLOCKED"
     assert result["condition"] == "UNKNOWN"
@@ -499,6 +513,8 @@ def test_timeout_keeps_partial_evidence_and_still_verifies_cleanup(
     :returns: None; assertions in the body validate the regression.
     """
     target = _target(tmp_path)
+    service = authenticated_kubernetes_service(target)
+    target = service.target
     called = []
 
     def fake_read(
@@ -540,7 +556,9 @@ def test_timeout_keeps_partial_evidence_and_still_verifies_cleanup(
     monkeypatch.setattr(MTU, "_read_one", fake_read)
     monkeypatch.setattr(MTU, "_cleanup", fake_cleanup)
 
-    result = MTU.collect_mtu_consistency(target, _args(), _plan(), "unit-marker")
+    result = MTU.collect_mtu_consistency(
+        target, _args(), _plan(), "unit-marker", state=service.state
+    )
 
     assert called == ["cleanup"]
     assert result["status"] == "PARTIAL"
@@ -561,6 +579,8 @@ def test_interrupted_debug_still_runs_cleanup(
     :returns: None; assertions in the body validate the regression.
     """
     target = _target(tmp_path)
+    service = authenticated_kubernetes_service(target)
+    target = service.target
     called = []
     original_int = MTU.signal.getsignal(MTU.signal.SIGINT)
     original_term = MTU.signal.getsignal(MTU.signal.SIGTERM)
@@ -590,7 +610,9 @@ def test_interrupted_debug_still_runs_cleanup(
     monkeypatch.setattr(MTU, "_read_one", interrupted)
     monkeypatch.setattr(MTU, "_cleanup", fake_cleanup)
 
-    result = MTU.collect_mtu_consistency(target, _args(), _plan(), "unit-marker")
+    result = MTU.collect_mtu_consistency(
+        target, _args(), _plan(), "unit-marker", state=service.state
+    )
 
     assert called == ["cleanup"]
     assert result["status"] == "BLOCKED"
@@ -615,18 +637,22 @@ def test_default_plan_and_mismatched_confirmation_never_launch_debug(
     monkeypatch.setattr(MTU, "resolve_target", lambda *_args, **_kwargs: target)
     monkeypatch.setattr(MTU, "bind_sources", lambda target, **_kwargs: target)
 
-    def base_kubernetes_access(_target: Target, *, cilium: str) -> JSONObject:
+    def base_kubernetes_access(
+        _target: Target, *, cilium: bool, state: MTU.DeliveryState
+    ) -> JSONObject:
         """Allow base cluster access without requiring a Cilium probe.
 
         :param _target: Selected cluster target accepted by the fake gate.
         :param cilium: Must be false for the MTU-only access path.
+        :param state: Actual invocation receiving the preceding identity observation.
         :returns: Passing base Kubernetes access result.
         """
         assert cilium is False
+        authenticated_kubernetes_service(_target, state=state)
         return {"status": "PASS"}
 
     monkeypatch.setattr(MTU, "check_access", base_kubernetes_access)
-    monkeypatch.setattr(MTU, "build_plan", lambda *_args: _plan())
+    monkeypatch.setattr(MTU, "build_plan", lambda *_args, **_kwargs: _plan())
     monkeypatch.setattr(
         MTU,
         "collect_mtu_consistency",
@@ -655,11 +681,13 @@ def test_plan_digest_changes_when_selected_nodes_change(
     :returns: None; assertions in the body validate the regression.
     """
     target = _target(tmp_path)
+    service = authenticated_kubernetes_service(target)
+    target = service.target
     monkeypatch.setattr(MTU, "_verify_openshift", lambda _target: None)
     monkeypatch.setattr(MTU, "_read_namespace", lambda _target: "diagnostics")
     monkeypatch.setattr(MTU, "_read_nodes", lambda *_args: ("node-a", "node-b"))
-    first = MTU.build_plan(target, _args())
+    first = MTU.build_plan(target, _args(), state=service.state)
     monkeypatch.setattr(MTU, "_read_nodes", lambda *_args: ("node-a",))
-    second = MTU.build_plan(target, _args())
+    second = MTU.build_plan(target, _args(), state=service.state)
 
     assert first.digest != second.digest

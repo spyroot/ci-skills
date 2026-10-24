@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_gitlab_session, import_script_module
 
 START = import_script_module("lib.python.core.gitlab.gitlab_pipeline_start")
 CALLBACK = import_script_module("lib.python.core.gitlab.callback")
@@ -52,25 +52,27 @@ def _marker(state: GitLabState) -> JSONObject:
 
 def _session() -> BoundGitLabSession:
     """Return a bound nonsecret GitLab test session."""
-    return SESSION.BoundGitLabSession(
-        origin="https://gitlab.example.test",
-        host="gitlab.example.test",
-        target_kind="project",
-        target_reference="unit/repo",
-        target_source="fixture",
-        target_file=Path("/selected/target.toml"),
-        credential_source="env:GITLAB_TOKEN",
-        credential_digest="sha256:unit",
-        execution_host="unit-host",
-        skill={
-            "algorithm": "sha256-tree-v1",
-            "digest": "d" * 64,
-            "functional_digest": "e" * 64,
-            "file_count": 1,
-            "revision": {"value": SHA, "source": "fixture", "verified": True},
-            "consuming_project": {"commit": None, "source": None},
-        },
-        environment={},
+    return authenticated_gitlab_session(
+        SESSION.BoundGitLabSession(
+            origin="https://gitlab.example.test",
+            host="gitlab.example.test",
+            target_kind="project",
+            target_reference="unit/repo",
+            target_source="fixture",
+            target_file=Path("/selected/target.toml"),
+            credential_source="env:GITLAB_TOKEN",
+            credential_digest="sha256:unit",
+            execution_host="unit-host",
+            skill={
+                "algorithm": "sha256-tree-v1",
+                "digest": "d" * 64,
+                "functional_digest": "e" * 64,
+                "file_count": 1,
+                "revision": {"value": SHA, "source": "fixture", "verified": True},
+                "consuming_project": {"commit": None, "source": None},
+            },
+            environment={},
+        )
     )
 
 
@@ -133,9 +135,12 @@ class StartAPI:
 
 def _state(api: StartAPI, body: JSONObject) -> GitLabState:
     """Bind a direct plan and provider double to shared state."""
-    state = CALLBACK.GitLabState(args=argparse.Namespace())
+    session = _session()
+    state = session.invocation
+    assert isinstance(state, CALLBACK.GitLabState)
+    state.args = argparse.Namespace()
     state.plan = _plan(body)
-    state.gitlab = SESSION.GitLabService(api, _session(), 42)
+    state.gitlab = SESSION.GitLabService(api, session, 42)
     return state
 
 

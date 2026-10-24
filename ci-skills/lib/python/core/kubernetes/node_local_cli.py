@@ -21,6 +21,7 @@ from lib.python.access.credentials import bind_sources
 from lib.python.access.shared import access_evidence
 from lib.python.core.argument_parser import TrackedArgumentParser
 from lib.python.core.catalog import NODE_LOCAL_COMMANDS, describe_node
+from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.node_local import (
     CEPH_CLASSIFICATIONS,
@@ -248,6 +249,7 @@ class NodeDiagnosticRun:
             raise ValueError("unsupported_node_diagnostic")
         self.kind = kind
         self.args = args
+        self.state = DeliveryState(args=args)
         self.stage = "target"
         self.data: MutableMapping[str, JSONValue] = {
             "schema_version": "1.0",
@@ -342,7 +344,7 @@ class NodeDiagnosticRun:
             selection.target, revision=getattr(self.args, "revision", None)
         )
         self.stage = "access_check"
-        gate = check_access(target, cilium=self.kind == "cilium_node")
+        gate = check_access(target, cilium=self.kind == "cilium_node", state=self.state)
         self.data["access"] = access_evidence(gate)
         if gate["status"] != PASS:
             surfaces = gate.get("surfaces", {})
@@ -361,7 +363,9 @@ class NodeDiagnosticRun:
             )
             raise NodePodError("required_live_access_failed")
         self.stage = "pod_selection"
-        reader = select_node_pod(target, selection.pod, journal=selection.journal)
+        reader = select_node_pod(
+            target, selection.pod, journal=selection.journal, state=self.state
+        )
         self.stage = self.kind
         if self.kind == "cilium_node":
             data = collect_cilium_node(reader)

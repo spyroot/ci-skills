@@ -15,7 +15,7 @@ from collections.abc import Mapping, MutableSequence, Sequence
 from typing import Optional
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_kubernetes_service, import_script_module
 
 RUNTIME = import_script_module("lib.python.core.runtime")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
@@ -198,7 +198,7 @@ def test_pod_exec_only_enables_interactive_input_for_supplied_bytes(
         :returns: Successful native command result.
         """
         assert timeout == 30
-        assert env is None
+        assert env == {}
         observed.append((tuple(argv), input_data))
         return RUNTIME.CommandResult(tuple(argv), 0, "staged", "")
 
@@ -211,7 +211,7 @@ def test_pod_exec_only_enables_interactive_input_for_supplied_bytes(
         ),
         active_surfaces=("kubernetes",),
     )
-    service = KUBERNETES.KubernetesService(target)
+    service = authenticated_kubernetes_service(target)
 
     result = service.pod_exec(
         "unit-namespace", "unit-pod", "unit-container", "cat", input_data=payload

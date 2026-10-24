@@ -162,6 +162,7 @@ class ScopedRunnerCallback(K8SCallback[ManagerWorkloadAction]):
             runner = self.action.runner(self.manager_state.run_scope)
             self.child = self.child_type(runner)
             self.child.bind(self.state)
+        self.child.whoami()
         return self.child
 
     def run(self) -> JSONObject:

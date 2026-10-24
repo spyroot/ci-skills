@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from lib.python.core.json_types import JSONValue
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_gitlab_session, import_script_module
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
 GITLAB_ACTION = import_script_module("lib.python.core.gitlab.gitlab_action")
@@ -74,21 +74,23 @@ def _bound_session(plan: ACTION.ActionPlan) -> BoundGitLabSession:
     :param plan: Runner action plan whose target fields identify the session.
     :returns: Bound session carrying verified skill and credential provenance.
     """
-    return GITLAB_SESSION.BoundGitLabSession(
-        origin=plan.origin,
-        host="gitlab.example.test",
-        target_kind=plan.target_kind,
-        target_reference=plan.target_reference,
-        target_source=plan.target_source,
-        target_file=Path(plan.target_file),
-        credential_source="env:GITLAB_TOKEN",
-        credential_digest="sha256:unit",
-        execution_host="unit-host",
-        skill={
-            "digest": "unit",
-            "revision": {"value": "a" * 40, "verified": True},
-        },
-        environment={},
+    return authenticated_gitlab_session(
+        GITLAB_SESSION.BoundGitLabSession(
+            origin=plan.origin,
+            host="gitlab.example.test",
+            target_kind=plan.target_kind,
+            target_reference=plan.target_reference,
+            target_source=plan.target_source,
+            target_file=Path(plan.target_file),
+            credential_source="env:GITLAB_TOKEN",
+            credential_digest="sha256:unit",
+            execution_host="unit-host",
+            skill={
+                "digest": "unit",
+                "revision": {"value": "a" * 40, "verified": True},
+            },
+            environment={},
+        )
     )
 
 
@@ -179,7 +181,12 @@ def test_group_apply_refuses_missing_or_changed_project_set_before_post(
         ACTION.ActionError,
         match="group_assignment_requires_live_plan|group_projects_changed",
     ):
-        RUNNERS.apply(api, object(), _plan(project_ids=confirmed), 42)
+        RUNNERS.apply(
+            api,
+            _bound_session(_plan(project_ids=confirmed)),
+            _plan(project_ids=confirmed),
+            42,
+        )
     assert all(method == "GET" for method, _, _ in api.calls)
 
 
@@ -212,7 +219,12 @@ def test_group_repeat_returns_no_op_with_independent_membership_readback() -> No
             ): [[{"id": 12}, {"id": 11}]],
         }
     )
-    result = RUNNERS.apply(api, object(), _plan(project_ids=(11, 12)), 42)
+    result = RUNNERS.apply(
+        api,
+        _bound_session(_plan(project_ids=(11, 12))),
+        _plan(project_ids=(11, 12)),
+        42,
+    )
     assert result["action"] == "NO_OP"
     assert result["verified"] is True
     assert result["cleanup"]["status"] == "NOT_APPLICABLE"
@@ -248,7 +260,11 @@ def test_live_plan_cli_binds_group_ids_without_post(
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
-        GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
+        GITLAB_ACTION,
+        "bind_gitlab_session",
+        lambda *_args, **_kwargs: authenticated_gitlab_session(
+            session, _kwargs.get("invocation")
+        ),
     )
     monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: api)
     monkeypatch.setattr(
@@ -330,7 +346,10 @@ def test_runner_token_write_readback_failure_deletes_created_runner(
 
     monkeypatch.setattr(Path, "read_text", fail_token_read)
     result = RUNNERS.apply(
-        api, object(), _plan(operation="create", token_out=token_out), 42
+        api,
+        _bound_session(_plan(operation="create", token_out=token_out)),
+        _plan(operation="create", token_out=token_out),
+        42,
     )
     assert result["action"] == "PARTIAL"
     assert result["verified"] is False
@@ -366,7 +385,9 @@ def test_group_runner_is_not_accepted_for_project_assignment() -> None:
     with pytest.raises(
         ACTION.ActionError, match="runner_assignment_requires_project_type"
     ):
-        RUNNERS.apply(api, object(), _plan(project_ids=(11,)), 42)
+        RUNNERS.apply(
+            api, _bound_session(_plan(project_ids=(11,))), _plan(project_ids=(11,)), 42
+        )
     assert api.calls == [("GET", "runners/7", None)]
 
 
@@ -414,7 +435,12 @@ def test_terminal_runner_post_failure_clears_pending_and_preserves_reason(
         }
     )
     with pytest.raises(API.GitLabAPIError, match=reason):
-        RUNNERS.apply(api, object(), _plan(operation="create", token_out=token_out), 42)
+        RUNNERS.apply(
+            api,
+            _bound_session(_plan(operation="create", token_out=token_out)),
+            _plan(operation="create", token_out=token_out),
+            42,
+        )
     assert not token_out.exists()
     assert [path.read_bytes() for path in (tmp_path / "locks").glob("*.lock")] == [b""]
 
@@ -438,7 +464,10 @@ def test_malformed_runner_create_response_keeps_uncertain_recovery_marker(
         }
     )
     result = RUNNERS.apply(
-        api, object(), _plan(operation="create", token_out=token_out), 42
+        api,
+        _bound_session(_plan(operation="create", token_out=token_out)),
+        _plan(operation="create", token_out=token_out),
+        42,
     )
     assert result["action"] == "PARTIAL"
     assert result["mutated"] is None
@@ -472,18 +501,18 @@ def test_absent_runner_after_uncertain_post_requires_separate_retry(
         }
     )
     plan = _plan(operation="create", token_out=token_out)
-    first = RUNNERS.apply(api, object(), plan, 42)
+    first = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert first["action"] == "PARTIAL"
     lock_file = next((tmp_path / "locks").glob("*.lock"))
     assert lock_file.read_text() == "pending\n"
 
     with pytest.raises(API.GitLabAPIError, match="absent_after_readback_retry"):
-        RUNNERS.apply(api, object(), plan, 42)
+        RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert lock_file.read_text() == ""
     assert [method for method, _, _ in api.calls].count("POST") == 1
 
     with pytest.raises(API.GitLabAPIError, match="authentication"):
-        RUNNERS.apply(api, object(), plan, 42)
+        RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert [method for method, _, _ in api.calls].count("POST") == 2
     assert not token_out.exists()
 
@@ -509,6 +538,11 @@ def test_existing_runner_error_names_manual_recovery_not_missing_command(
     with pytest.raises(
         ACTION.ActionError, match="verify_and_remove_record_before_retry"
     ):
-        RUNNERS.apply(api, object(), _plan(operation="create", token_out=token_out), 42)
+        RUNNERS.apply(
+            api,
+            _bound_session(_plan(operation="create", token_out=token_out)),
+            _plan(operation="create", token_out=token_out),
+            42,
+        )
     assert not token_out.exists()
     assert all(method == "GET" for method, _, _ in api.calls)

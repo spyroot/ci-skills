@@ -11,9 +11,19 @@ from collections.abc import Mapping, MutableSequence, Sequence
 from typing import Optional
 
 from lib.python.access.shared import Surface, _blocked, _json, _token_file
-from lib.python.access.sources import Sources
+from lib.python.access.sources import Sources, _token_source
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
-from lib.python.core.catalog import github_variables
+from lib.python.core.abstract.skill_state import SkillState
+from lib.python.core.abstract.spec import load_spec
+from lib.python.core.catalog import GITHUB_TOKEN_VARIABLES, github_variables
+from lib.python.core.cli_api import APIError, ReadSession
+from lib.python.core.delivery_state import DeliveryState
+from lib.python.core.github.github import (
+    GitHubAPIClient,
+    establish_github_identity,
+    pin_github_environment,
+    require_github_runtime,
+)
 from lib.python.core.json_types import (
     json_object,
     json_objects,
@@ -40,83 +50,123 @@ def github_env(target: Target) -> Optional[Mapping[str, Optional[str]]]:
     return _token_file(selected.token_file, github_variables(selected.host)[0])
 
 
-def github_access(target: Target) -> Surface:
-    """Verify GitHub authentication and access to the selected repository.
+def _github_session(target: Target, state: SkillState) -> ReadSession:
+    """Reuse configured credentials or pin one standalone diagnostic session.
 
-    :param target: Runtime target containing the GitHub host and repository.
-    :returns: PASS surface with verified login and repository access, or BLOCKED
-        surface with the failed capability and a suggested recovery action.
-    :raises ValueError: If the target does not select a GitHub authority.
-    :raises OSError: If a native authentication or API process cannot be started.
-    """  # noqa: DOC503 - Response validation is caught; native I/O can escape.
+    :param target: Caller-selected GitHub authority and credential source.
+    :param state: Shared invocation, optionally already carrying a delivery session.
+    :returns: Private session bound to this state and the selected repository.
+    :raises ValueError: The target or an existing provider binding is invalid.
+    :raises OSError: The native credential store cannot be read.
+    """  # noqa: DOC502,DOC503 - Credential selectors and native-store reads propagate failures.
     selected = target.require_github()
-    host = selected.host
-    repo = selected.repository
-    observed: MutableSequence[str] = []
+    if isinstance(state, DeliveryState) and hasattr(state, "github_session"):
+        if state.github_target != selected:
+            raise ValueError("github_configuration_binding_mismatch")
+        return state.github_session
     source = (
-        target.sources.require(SkillPluginType.GITHUB).reference
+        target.sources.require(SkillPluginType.GITHUB)
         if isinstance(target.sources, Sources)
-        else None
+        else _token_source(
+            selected.token_file,
+            github_variables(selected.host),
+            f"gh-credential-store:{selected.host}",
+            clear_names=GITHUB_TOKEN_VARIABLES,
+        )
     )
-    try:
-        credential = github_env(target)
-    except ValueError as exc:
-        return _blocked(
-            "github",
-            f"{host}/{repo}",
-            observed,
-            str(exc),
-            "Provide a readable, nonempty GitHub token file outside the skill.",
-            source,
-        )
-    if source and source.startswith("file:"):
+    session = ReadSession(
+        selected.host,
+        pin_github_environment(selected.host, source.reference, source.environment, 25),
+        source.reference,
+        invocation=state,
+        repository=selected.repository,
+    )
+    if isinstance(state, DeliveryState):
+        state.github_target = selected
+        state.github_session = session
+    return session
+
+
+def _github_access(target: Target, state: SkillState, session: ReadSession) -> Surface:
+    """Produce the existing access surface from shared identity initialization.
+
+    :param target: Selected GitHub authority and repository.
+    :param state: Shared declaration and write-once provider observation.
+    :param session: Credential-bound session reused by publication read-back.
+    :returns: Existing PASS/BLOCKED surface shape with no extra token-permission claim.
+    :raises ValueError: The target does not select GitHub.
+    :raises OSError: A native authentication or provider command cannot start.
+    """  # noqa: DOC502,DOC503 - Native transport and target readers propagate failures.
+    selected = target.require_github()
+    host, repo = selected.host, selected.repository
+    source = session.credential_source
+    observed: MutableSequence[str] = []
+    if source.startswith("file:"):
         observed.append("token_file_read")
-    auth = run_command(["gh", "auth", "status", "--hostname", host], env=credential)
-    if auth.returncode:
-        return _blocked(
-            "github",
-            f"{host}/{repo}",
-            observed,
-            error_class(auth),
-            "Authenticate gh for the selected host.",
-            source,
+    if state.github_runtime.role is None:
+        auth = run_command(
+            ["gh", "auth", "status", "--hostname", host], env=session.environment
         )
+        if auth.returncode:
+            return _blocked(
+                "github",
+                f"{host}/{repo}",
+                observed,
+                error_class(auth),
+                "Authenticate gh for the selected host.",
+                source,
+            )
     observed.append("authenticated_host")
     try:
-        user = _json(
-            run_command(["gh", "api", "--hostname", host, "user"], env=credential)
-        )
-        repository = _json(
-            run_command(
-                ["gh", "api", "--hostname", host, f"repos/{repo}"], env=credential
-            )
-        )
-        if not isinstance(user, dict) or not isinstance(repository, dict):
-            raise TypeError("invalid_response")
-        if json_string(repository.get("full_name", "")).lower() != repo.lower():
-            raise ValueError("repository_mismatch")
-        login = user.get("login")
-        if not isinstance(login, str) or not login:
-            raise ValueError("missing_identity")
-    except (ValueError, TypeError) as exc:
+        identity = establish_github_identity(state, session, repo, GitHubAPIClient())
+    except (APIError, ValueError, TypeError) as exc:
         return _blocked(
             "github",
             f"{host}/{repo}",
             observed,
             str(exc),
-            "Check gh API authentication and repository access for this host.",
+            "Check the selected repository role and GitHub token access for this host.",
             source,
         )
     observed += ["identity_read", "repository_read"]
     return Surface(
         "github",
         PASS,
-        login,
+        identity.identity,
         f"{host}/{repo}",
         observed,
         None,
         credential_source=source,
     )
+
+
+def github_access(target: Target, *, state: SkillState | None = None) -> Surface:
+    """Verify GitHub authentication and access to the selected repository.
+
+    :param target: Runtime target containing the GitHub host and repository.
+    :param state: Shared invocation; a standalone call loads the installed declaration.
+    :returns: PASS surface with verified login and repository access, or BLOCKED
+        surface with the failed capability and a suggested recovery action.
+    :raises ValueError: If the target does not select a GitHub authority.
+    :raises OSError: If a native authentication or API process cannot be started.
+    """  # noqa: DOC502,DOC503 - Response validation is caught; target and native I/O errors propagate.
+    selected = target.require_github()
+    host = selected.host
+    repo = selected.repository
+    invocation = state if state is not None else SkillState()
+    if invocation.spec is None:
+        invocation.spec = load_spec()
+    try:
+        session = _github_session(target, invocation)
+    except ValueError as exc:
+        return _blocked(
+            "github",
+            f"{host}/{repo}",
+            [],
+            str(exc),
+            "Provide the configured GitHub credential and matching repository binding.",
+        )
+    return _github_access(target, invocation, session)
 
 
 def _required_check_names(result: CommandResult) -> Sequence[str]:
@@ -146,13 +196,17 @@ def _required_check_names(result: CommandResult) -> Sequence[str]:
 
 
 def _publication_result(
-    base: Surface, required_checks: Sequence[str], names: Sequence[str]
+    base: Surface,
+    required_checks: Sequence[str],
+    names: Sequence[str],
+    role: str | None,
 ) -> Surface:
     """Compare declared publication checks with the observed branch protection.
 
     :param base: Successful repository access probe whose identity is retained.
     :param required_checks: Check names required by the selected target configuration.
     :param names: Nonempty validated check names observed in branch protection.
+    :param role: Observed repository role; None omits the role capability label.
     :returns: PASS with verified check names when every declaration is present;
         otherwise BLOCKED naming absent declarations or missing required checks.
     """
@@ -183,7 +237,7 @@ def _publication_result(
         base.target,
         [
             *base.observed_capability,
-            "repository_admin",
+            *([f"repository_{role}"] if role is not None else []),
             "protection_read",
             "required_checks_read",
         ],
@@ -193,21 +247,38 @@ def _publication_result(
     )
 
 
-def github_publication_access(target: Target) -> Surface:
-    """Verify repository administration and declared required checks.
+def github_publication_access(
+    target: Target, *, state: SkillState | None = None
+) -> Surface:
+    """Verify the declared repository role and required checks.
 
     :param target: Runtime target containing GitHub repository and required checks.
-    :returns: PASS surface when repository access, administration, and all declared
-        checks are verified; otherwise a BLOCKED surface with recovery guidance.
+    :param state: Shared invocation whose GitHub identity is established at most once.
+    :returns: PASS surface when the declared repository role and required checks
+        are verified; otherwise a BLOCKED surface with recovery guidance.
     :raises TargetError: If a configured credential file becomes invalid after
         the initial access probe and before the publication probes.
     :raises OSError: If a publication probe process cannot be started.
     :raises ValueError: If the target does not select a GitHub authority.
     """  # noqa: DOC502 - Target, credential, and native process helpers propagate failures.
     selected = target.require_github()
-    base = github_access(target)
+    invocation = state if state is not None else SkillState()
+    if invocation.spec is None:
+        invocation.spec = load_spec()
+    try:
+        session = _github_session(target, invocation)
+    except ValueError as exc:
+        return _blocked(
+            "github",
+            f"{selected.host}/{selected.repository}",
+            [],
+            str(exc),
+            "Provide the configured GitHub credential and matching repository binding.",
+        )
+    base = _github_access(target, invocation, session)
     if base.status != PASS:
         return base
+    identity = require_github_runtime(invocation, session, selected.repository)
     result = run_command(
         [
             "gh",
@@ -216,29 +287,8 @@ def github_publication_access(target: Target) -> Surface:
             selected.host,
             f"repos/{selected.repository}/branches/main/protection",
         ],
-        env=github_env(target),
+        env=session.environment,
     )
-    info = run_command(
-        [
-            "gh",
-            "api",
-            "--hostname",
-            selected.host,
-            f"repos/{selected.repository}",
-            "--jq",
-            ".permissions.admin",
-        ],
-        env=github_env(target),
-    )
-    if info.returncode or info.stdout.strip().lower() != "true":
-        return _blocked(
-            "github",
-            base.target,
-            base.observed_capability,
-            "admin_required",
-            "Use a repository administrator identity to configure and read back the required check.",
-            base.credential_source,
-        )
     if result.returncode:
         return _blocked(
             "github",
@@ -259,4 +309,4 @@ def github_publication_access(target: Target) -> Surface:
             "Configure and read back at least one required main-branch status check.",
             base.credential_source,
         )
-    return _publication_result(base, selected.required_checks, names)
+    return _publication_result(base, selected.required_checks, names, identity.role)

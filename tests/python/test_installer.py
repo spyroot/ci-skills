@@ -40,7 +40,7 @@ def _installer() -> ModuleType:
 
 
 def _source(tmp_path: Path) -> Path:
-    """Create a minimal skill package with a manifest and one script.
+    """Create a minimal skill package with its required declaration and one script.
 
     :param tmp_path: Pytest temporary directory containing the source package.
     :returns: Path to the generated package root.
@@ -48,6 +48,9 @@ def _source(tmp_path: Path) -> Path:
     source = tmp_path / "source"
     (source / "scripts").mkdir(parents=True)
     (source / "SKILL.md").write_text("---\nname: unit\n---\n", encoding="utf-8")
+    (source / "ci_skills.spec.json").write_text(
+        '{"gitlab": {"role": "admin"}}\n', encoding="utf-8"
+    )
     (source / "scripts" / "check.py").write_text("print('ok')\n", encoding="utf-8")
     return source
 
@@ -69,9 +72,12 @@ def test_install_copies_all_package_files_and_reads_back_digest(tmp_path: Path) 
 
     destination = skills_dir / installer.SKILL_NAME
     assert result["status"] == "PASS"
-    assert result["file_count"] == 2
+    assert result["file_count"] == 3
     assert result["algorithm"] == "sha256-tree-v1"
     assert (destination / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
+    assert (destination / "ci_skills.spec.json").read_bytes() == (
+        source / "ci_skills.spec.json"
+    ).read_bytes()
     assert (destination / "scripts" / "check.py").read_bytes() == (
         source / "scripts" / "check.py"
     ).read_bytes()
@@ -162,7 +168,34 @@ def test_package_files_ignores_generated_and_platform_noise(tmp_path: Path) -> N
 
     files = installer.package_files(source)
 
-    assert files == [Path("SKILL.md"), Path("scripts/check.py")]
+    assert files == [
+        Path("SKILL.md"),
+        Path("ci_skills.spec.json"),
+        Path("scripts/check.py"),
+    ]
+
+
+def test_missing_specification_blocks_without_creating_destination(
+    tmp_path: Path,
+) -> None:
+    """Reject a package missing the declaration before creating installed files.
+
+    :param tmp_path: Isolated source and installation parent.
+    :returns: None; assertions prove the missing-file failure is non-mutating.
+    """
+    installer = _installer()
+    source = _source(tmp_path)
+    (source / "ci_skills.spec.json").unlink()
+    skills_dir = tmp_path / "skills"
+
+    result = installer.install(
+        source, skills_dir, dry_run=False, require_verified=False
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert result["reason"] == "skill_specification_missing"
+    assert result["safe_next_step"]
+    assert not skills_dir.exists()
 
 
 def test_missing_manifest_blocks_without_creating_destination(tmp_path: Path) -> None:
@@ -420,6 +453,9 @@ def test_recovery_finishes_verified_activation_without_rolling_it_back(
     destination.rename(previous)
     destination.mkdir()
     (destination / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())
+    (destination / "ci_skills.spec.json").write_bytes(
+        (source / "ci_skills.spec.json").read_bytes()
+    )
     (destination / "scripts").mkdir()
     (destination / "scripts" / "check.py").write_bytes(
         (source / "scripts" / "check.py").read_bytes()

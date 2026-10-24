@@ -16,7 +16,13 @@ from typing import TYPE_CHECKING, Optional
 import pytest
 import test_gitlab_runner_lifecycle as runner_lifecycle
 import test_gitlab_runner_manager as runner_manager
-from conftest import import_script_module
+from conftest import (
+    authenticated_gitlab_session,
+    bind_harbor_fixture,
+    bind_kubernetes_fixture,
+    configure_kubernetes_auth,
+    import_script_module,
+)
 from test_podman_readiness import _node
 
 ABSTRACT_CALLBACK = import_script_module("lib.python.core.abstract.callback")
@@ -266,6 +272,10 @@ def test_chain_toolbox_build_can_complete_after_command_default_timeout(
     :returns: None; the real shared service observes a complete Build at 35 seconds.
     """
     action = _prepared_action()
+    action.target = configure_kubernetes_auth(monkeypatch, action.target)
+    action.state.spec = import_script_module(
+        "lib.python.core.abstract.spec"
+    ).load_spec()
     action.args = _args(timeout=300)
     action.state.args = action.args
     action.state.runner_auth_plan = action._runner_auth_plan()
@@ -280,10 +290,8 @@ def test_chain_toolbox_build_can_complete_after_command_default_timeout(
         callback for callback in callbacks if isinstance(callback, KUBERNETES.K8SAuth)
     )
     authentication.bind(action.state)
-    action.state.kubernetes_target = action.target
-    monkeypatch.setattr(
-        KUBERNETES.KubernetesService, "verify", lambda _service: "unit-builder"
-    )
+    authentication.read_config()
+    authentication.whoami()
     authentication.run()
     service = action.state.kubernetes
     elapsed = [0.0]
@@ -365,7 +373,7 @@ def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
     action = _prepared_action(apply=True)
     action.args.confirm_plan = confirmation
     action.state.selected_node = NODE
-    action.state.kubernetes = SimpleNamespace(json=_read_nodes)
+    bind_kubernetes_fixture(action.state, SimpleNamespace(json=_read_nodes))
     mutations: list[str] = []
     callbacks = ABSTRACT_CALLBACKS.Callbacks(
         [
@@ -499,7 +507,7 @@ def _lifecycle_executor(
         return cluster_json(*args)
 
     monkeypatch.setattr(kubernetes, "json", read_cluster)
-    state.kubernetes = kubernetes
+    bind_kubernetes_fixture(state, kubernetes)
     state.selected_node = NODE
     state.run_scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, owns_namespace)
     if owns_namespace:
@@ -514,17 +522,22 @@ def _lifecycle_executor(
             RUN_SCOPE.namespace_document(state.run_scope)
         )
     kubernetes.objects[("namespace", "", CALLER_NAMESPACE)] = namespace
+    session = authenticated_gitlab_session(
+        runner_lifecycle._bound_session(_runner_plan()), state
+    )
     state.gitlab = SimpleNamespace(
-        session=SimpleNamespace(
-            origin="https://gitlab.example.test", target_kind="project"
-        ),
+        session=session,
         api=object(),
         target_id=42,
     )
+    state.configured_session = session
     monkeypatch.setattr(
         runner_manager.GITLAB_API, "_lock_root", lambda: tmp_path / "locks"
     )
-    state.harbor = SimpleNamespace(dockerconfig=b'{"auths":{}}')
+    bind_harbor_fixture(
+        state,
+        SimpleNamespace(target=action.target.harbor, dockerconfig=b'{"auths":{}}'),
+    )
     state.runner_runtime = runner_manager.CALLBACKS.RunnerRuntime(
         init_command=("/bin/true",),
         command=("gitlab-runner",),
@@ -813,7 +826,10 @@ def test_chain_runner_cleanup_uses_delete_plan_and_restores_execution_context(
             else [{}],
         }
     )
-    state.runner_gitlab = SimpleNamespace(api=api, session=object(), target_id=42)
+    session = authenticated_gitlab_session(
+        runner_lifecycle._bound_session(state.runner_create_plan), state
+    )
+    state.runner_gitlab = SimpleNamespace(api=api, session=session, target_id=42)
     records: list[JSONObject] = []
     failures: list[JSONObject] = []
 

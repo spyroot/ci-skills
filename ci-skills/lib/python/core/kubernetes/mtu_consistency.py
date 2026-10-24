@@ -32,7 +32,9 @@ from lib.python.access.kubernetes import kubectl_argv, kubernetes_env, oc_argv
 from lib.python.access.sources import Sources
 from lib.python.core.cli import _failure, output_mode
 from lib.python.core.cli_api import response_decoder
+from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.json_types import JSONObject, JSONValue
+from lib.python.core.kubernetes.kubernetes import KubernetesService
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import emit, report
 from lib.python.core.runtime import (
@@ -366,11 +368,14 @@ def _source_digest(target: Target) -> str:
     return digest.hexdigest()
 
 
-def build_plan(target: Target, args: Namespace) -> MtuPlan:
+def build_plan(
+    target: Target, args: Namespace, *, state: DeliveryState | None = None
+) -> MtuPlan:
     """Plan exact OpenShift node reads without creating debug Pods.
 
     :param target: Bound Kubernetes target with selected context and source files.
     :param args: Optional node filter and requested command timeout.
+    :param state: Shared declaration and previously observed Kubernetes access.
     :returns: Namespace, selected node names, source-bound inputs, and plan digest.
     :raises ValueError: OpenShift discovery, namespace, or node inventory is
         unavailable or invalid.
@@ -378,6 +383,7 @@ def build_plan(target: Target, args: Namespace) -> MtuPlan:
     :raises OSError: If a source file is unreadable or a native read cannot start.
     :raises TargetError: Bound source changes or source file is unresolved.
     """  # noqa: DOC503 - Discovery and source fingerprint helpers can fail.
+    KubernetesService(target, state=state).require_access()
     if target.kubernetes is None:
         raise TargetError("kubernetes_target_missing")
     _verify_openshift(target)
@@ -690,7 +696,12 @@ def _read_one(
 
 
 def collect_mtu_consistency(
-    target: Target, args: Namespace, plan: MtuPlan, marker: str
+    target: Target,
+    args: Namespace,
+    plan: MtuPlan,
+    marker: str,
+    *,
+    state: DeliveryState | None = None,
 ) -> MutableMapping[str, JSONValue]:
     """Read planned node MTUs and clean every marked temporary debug Pod.
 
@@ -698,11 +709,13 @@ def collect_mtu_consistency(
     :param args: Node filter and per-node command timeout.
     :param plan: Confirmed namespace, nodes, and digest.
     :param marker: Unique invocation marker used to identify cleanup candidates.
+    :param state: Shared declaration and previously observed Kubernetes access.
     :returns: MTU records, mismatch findings, cleanup read-back, and ``PASS``,
         ``PARTIAL``, or ``BLOCKED`` status.
     :raises ValueError: If the plan has no nodes, observations are malformed, or
         signal handling is attempted outside the main thread.
     """  # noqa: DOC502 - Pool sizing and final observation validation can fail.
+    KubernetesService(target, state=state).require_access()
     records: MutableSequence[JSONObject] = []
     errors: MutableSequence[Mapping[str, str]] = []
     executor = ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(plan.nodes)))
@@ -840,7 +853,8 @@ def run(args: Namespace) -> int:
         stage = "credential_source"
         target = bind_sources(target, revision=args.revision)
         stage = "access_check"
-        gate = check_access(target, cilium=False)
+        state = DeliveryState(args=args)
+        gate = check_access(target, cilium=False, state=state)
         gate["profile"] = PROFILE_BASE
         if gate["status"] != PASS:
             data = report(
@@ -856,7 +870,7 @@ def run(args: Namespace) -> int:
             sys.stdout.write(emit(data, output_mode(args), args.output_dir))
             return 2
         stage = "plan"
-        plan = build_plan(target, args)
+        plan = build_plan(target, args, state=state)
         if not args.apply:
             data = _base_result(target, plan, gate, DRY_RUN)
             data["summary"] = {
@@ -876,7 +890,7 @@ def run(args: Namespace) -> int:
             old_term = signal.signal(signal.SIGTERM, _signal_interrupt)
             old_int = signal.signal(signal.SIGINT, _signal_interrupt)
             try:
-                data = collect_mtu_consistency(target, args, plan, marker)
+                data = collect_mtu_consistency(target, args, plan, marker, state=state)
             finally:
                 signal.signal(signal.SIGTERM, old_term)
                 signal.signal(signal.SIGINT, old_int)

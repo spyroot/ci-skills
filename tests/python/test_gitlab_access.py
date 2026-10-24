@@ -489,6 +489,7 @@ def test_relative_file_source_overrides_ambient_tokens_and_reads_exact_project(
     api = FakeAPI(
         {
             "user": {
+                "is_admin": True,
                 "id": 17,
                 "username": "operator",
                 "web_url": "https://gitlab.example.test/operator",
@@ -549,6 +550,7 @@ def test_wrong_project_or_host_blocks_with_sanitized_evidence(
     api = FakeAPI(
         {
             "user": {
+                "is_admin": True,
                 "id": 17,
                 "username": "operator",
                 "web_url": "https://gitlab.example.test/operator",
@@ -561,6 +563,51 @@ def test_wrong_project_or_host_blocks_with_sanitized_evidence(
     assert receipt["target"] is None
     assert receipt["errors"] == [{"source": "target", "reason": reason}]
     assert "selected-token" not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize("is_admin", (True, False))
+def test_gitlab_identity_is_observed_once_and_role_precedes_target_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, is_admin: bool
+) -> None:
+    """Reuse one native identity and reject insufficient access before target work.
+
+    :param tmp_path: Isolated target and credential fixture directory.
+    :param monkeypatch: Fixture selecting only the synthetic configured credential.
+    :param is_admin: Native current-user administrator flag returned by GitLab.
+    :returns: None; assertions prove identity request counts and operation ordering.
+    """
+    session = _bound_project(tmp_path, monkeypatch)
+    api = FakeAPI(
+        {
+            "user": {
+                "id": 17,
+                "username": "operator",
+                "is_admin": is_admin,
+                "web_url": "https://gitlab.example.test/operator",
+            },
+            "projects/team%2Frepo": {
+                "id": 42,
+                "path_with_namespace": "team/repo",
+                "web_url": "https://gitlab.example.test/team/repo",
+            },
+        }
+    )
+
+    first = ACCESS.check_gitlab_operation_access(session, api_client=api)
+    second = ACCESS.check_gitlab_operation_access(session, api_client=api)
+
+    assert first["status"] == second["status"] == ("PASS" if is_admin else "BLOCKED")
+    if not is_admin:
+        assert (
+            first["errors"]
+            == second["errors"]
+            == [{"source": "user", "reason": "gitlab_required_role_missing"}]
+        )
+    endpoints = [endpoint for _, endpoint in api.calls]
+    assert endpoints.count("user") == 1
+    assert endpoints.count("projects/team%2Frepo") == (2 if is_admin else 0)
+    assert session.invocation is not None
+    assert session.invocation.gitlab_runtime.role == ("admin" if is_admin else "user")
 
 
 def test_selected_missing_file_never_falls_back_to_ambient_token(
@@ -677,6 +724,7 @@ def test_group_id_readback_requires_the_selected_numeric_id(
     api = FakeAPI(
         {
             "user": {
+                "is_admin": True,
                 "id": 17,
                 "username": "operator",
                 "web_url": "https://gitlab.example.test/operator",
@@ -736,6 +784,7 @@ def test_malformed_target_response_blocks_after_identity_read(
         api_client=FakeAPI(
             {
                 "user": {
+                    "is_admin": True,
                     "id": 17,
                     "username": "operator",
                     "web_url": "https://gitlab.example.test/operator",
@@ -825,6 +874,7 @@ def _smoke_target_layout(tmp_path: Path) -> MutableMapping[str, JSONValue]:
         "identity": {
             "id": 17,
             "username": "operator",
+            "is_admin": True,
             "web_url": "https://gitlab.example.test/operator",
         },
         "target": {
@@ -965,6 +1015,7 @@ def test_live_receipt_is_portable_redacted_and_parseable(
     api = FakeAPI(
         {
             "user": {
+                "is_admin": True,
                 "id": 17,
                 "username": "operator",
                 "web_url": "https://gitlab.example.test/operator",

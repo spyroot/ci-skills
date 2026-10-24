@@ -22,8 +22,10 @@ from lib.python.access.harbor_credentials import (
     resolve_harbor_credential,
 )
 from lib.python.core.abstract.callback import Callback
+from lib.python.core.abstract.provider_runtime import ProviderRoleError, ProviderRuntime
 from lib.python.core.abstract.skill_action import ActionT_co, SkillAction
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
+from lib.python.core.abstract.skill_state import SkillState
 from lib.python.core.cli_api import APIError, response_decoder
 from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
 from lib.python.core.json_types import JSONObject
@@ -39,6 +41,40 @@ HARBOR_API: Final = "api/v2.0"
 REGISTRY_TOKEN_ENDPOINT: Final = "service/token"
 REGISTRY_TOKEN_SERVICE: Final = "harbor-registry"
 COPY_FLAGS: Final = ("--all", "--preserve-digests")
+
+
+def _harbor_credential_identity(credential: RegistryCredential) -> str:
+    """Bind retained access to the selected credential without exposing its value.
+
+    :param credential: Already-resolved native registry credential.
+    :returns: Private fingerprint used only for invocation continuity checks.
+    """
+    raw = f"{credential.source}\0{credential.username}\0{credential.password}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def require_harbor_runtime(
+    state: SkillState, target: HarborTarget, credential: RegistryCredential
+) -> ProviderRuntime:
+    """Check retained Harbor identity and role without querying the provider.
+
+    :param state: Shared declaration and runtime observation.
+    :param target: Selected Harbor origin for the pending operation.
+    :param credential: Private credential bound to that operation.
+    :returns: The previously established native Harbor role and identity.
+    :raises ProviderRoleError: The runtime role has not been observed.
+    :raises ProviderRoleMismatch: The observed role differs from the declaration.
+    :raises ValueError: The role declaration or authentication binding is invalid.
+    """  # noqa: DOC503 - The shared runtime guard propagates role failures.
+    expected = state.provider_spec(SkillPluginType.HARBOR).get("role")
+    if not isinstance(expected, str) or not expected.strip():
+        raise ValueError("harbor_role_requirement_missing")
+    return state.require_runtime(
+        SkillPluginType.HARBOR,
+        expected,
+        authority=target.url.rstrip("/"),
+        credential_identity=_harbor_credential_identity(credential),
+    )
 
 
 def image_at_digest(image: str, digest: str) -> str:
@@ -76,6 +112,7 @@ class HarborService:
     :param credential: Resolved registry username and password kept out of reports.
     :param authfile: Private native-client auth file path.
     :param timeout: Runtime bound for registry API and native commands.
+    :param invocation: Shared state whose observed role protects library operations.
 
     .. attribute :: target
         :type: HarborTarget
@@ -96,12 +133,63 @@ class HarborService:
         :type: int
 
         Runtime bound for registry API and native commands.
+
+    .. attribute :: invocation
+        :type: SkillState | None
+
+        Shared invocation state, required before provider operations.
     """
 
     target: HarborTarget
     credential: RegistryCredential = field(repr=False)
     authfile: Path = field(repr=False)
     timeout: int
+    invocation: SkillState | None = field(default=None, repr=False, compare=False)
+
+    def require_access(self) -> ProviderRuntime:
+        """Reject library operations that have no preceding identity observation.
+
+        :returns: Retained native role after local binding and declaration checks.
+        :raises ProviderRoleError: Invocation state or its role observation is missing.
+        :raises ProviderRoleMismatch: The observed role differs from the declaration.
+        :raises ValueError: The role declaration or authentication binding is invalid.
+        """  # noqa: DOC502,DOC503 - The shared runtime guard propagates access failures.
+        if self.invocation is None:
+            raise ProviderRoleError("harbor_identity_preflight_missing")
+        return require_harbor_runtime(self.invocation, self.target, self.credential)
+
+    def _establish_identity(self) -> ProviderRuntime:
+        """Observe native Harbor admin flags only for the authentication callback.
+
+        :returns: Write-once identity observation matching the caller's declaration.
+        :raises ProviderRoleError: Invocation state or its role observation is missing.
+        :raises ProviderRoleMismatch: The observed role differs from the declaration.
+        :raises ValueError: The role declaration or authentication binding is invalid.
+        :raises APIError: Native current-user response is invalid or inaccessible.
+        """  # noqa: DOC503 - The shared runtime guard propagates access failures.
+        if self.invocation is None:
+            raise ProviderRoleError("harbor_identity_preflight_missing")
+        if self.invocation.harbor_runtime.role is None:
+            user = self._api().request("GET", f"{HARBOR_API}/users/current")
+            identity = user.get("username")
+            if not isinstance(identity, str) or not identity.strip():
+                raise APIError("harbor_identity_missing")
+            if identity != self.credential.username:
+                raise APIError("harbor_identity_mismatch")
+            admin = (
+                user.get("sysadmin_flag") is True
+                or user.get("admin_role_in_auth") is True
+            )
+            self.invocation.establish_runtime(
+                SkillPluginType.HARBOR,
+                ProviderRuntime(
+                    role="admin" if admin else "user",
+                    identity=identity,
+                    authority=self.target.url.rstrip("/"),
+                    credential_identity=_harbor_credential_identity(self.credential),
+                ),
+            )
+        return self.require_access()
 
     @property
     def dockerconfig(self) -> bytes:
@@ -109,6 +197,7 @@ class HarborService:
 
         :returns: Private Docker configuration; never include it in reports.
         """
+        self.require_access()
         return self.credential.dockerconfig(self.target.host)
 
     @property
@@ -116,6 +205,14 @@ class HarborService:
         """Return the shared HTTP client bound to this registry.
 
         :returns: Exact-origin API client with private Basic authentication.
+        """
+        self.require_access()
+        return self._api()
+
+    def _api(self) -> HTTPClient:
+        """Construct the existing transport for bootstrap or authorized operations.
+
+        :returns: Exact-origin client without introducing another transport layer.
         """
         encoded = base64.b64encode(
             f"{self.credential.username}:{self.credential.password}".encode()
@@ -171,6 +268,7 @@ class HarborService:
         :returns: SHA-256 digest of the returned manifest bytes.
         :raises APIError: If the native read fails or yields no manifest.
         """
+        self.require_access()
         result = run_command_bounded(
             [
                 "skopeo",
@@ -387,8 +485,8 @@ class HarborCallback(Callback[DeliveryState, ActionT_co]):
         """  # noqa: DOC502 - Direct library callers provide the existing service.
         if not hasattr(self.state, "harbor"):
             raise TargetError(f"{SkillPluginType.HARBOR.value}_configuration_missing")
-        self.state.harbor_target = self.harbor.target
-        self.state.harbor_credential = self.harbor.credential
+        self.state.harbor_target = self.state.harbor.target
+        self.state.harbor_credential = self.state.harbor.credential
         return {}
 
     def is_configured(self) -> bool:
@@ -400,6 +498,17 @@ class HarborCallback(Callback[DeliveryState, ActionT_co]):
             self.state, "harbor_credential"
         )
 
+    def whoami(self) -> bool:
+        """Check retained native Harbor access without initializing missing state.
+
+        :returns: True after checking the declaration and exact selected binding.
+        :raises ValueError: Required access or identity observation is missing or invalid.
+        """  # noqa: DOC502 - The shared guard validates the retained observation.
+        require_harbor_runtime(
+            self.state, self.state.harbor_target, self.state.harbor_credential
+        )
+        return True
+
     @property
     def harbor(self) -> HarborService:
         """Read the verified service retained in shared delivery state.
@@ -407,6 +516,7 @@ class HarborCallback(Callback[DeliveryState, ActionT_co]):
         :returns: Bound registry service with its private native auth file.
         :raises AttributeError: If composition omitted Harbor authentication.
         """  # noqa: DOC502 - Missing composition state raises AttributeError.
+        HarborCallback.whoami(self)
         return self.state.harbor
 
 
@@ -464,26 +574,46 @@ class HarborAuth(HarborCallback[HarborAuthAction]):
         self.state.harbor_credential = credential
         return {}
 
-    def run(self) -> JSONObject:
-        """Create private native credentials and retain the verified service.
+    def whoami(self) -> bool:
+        """Establish native identity once and retain this callback's private service.
 
-        :returns: Safe identity, origin, repository, and granted capabilities.
-        :raises TargetError: If Harbor target or credentials are unavailable.
-        :raises APIError: If the registry does not grant the required capabilities.
+        :returns: True after the provider role satisfies the shared declaration.
+        :raises ValueError: Native role or retained authentication binding is invalid.
+        :raises APIError: Native current-user identity cannot be verified.
         :raises OSError: If the private credential file cannot be created or written.
-        """  # noqa: DOC502 - Registry authorization and private-file writes can fail.
+        :raises BaseException: Initialization failures propagate after removing the private file.
+        """  # noqa: DOC502,DOC503 - Identity checks and private-file operations propagate failures.
         action = self.action
         target = self.state.harbor_target
         credential = self.state.harbor_credential
-        descriptor, name = tempfile.mkstemp(
-            prefix="ci-skills-registry-", suffix=".json"
-        )
-        self._path = Path(name)
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(credential.dockerconfig(target.host))
-        service = HarborService(target, credential, self._path, action.timeout)
-        evidence = service.authorize(action.repository, action.actions)
-        self.state.harbor = service
+        if action.target.harbor != target:
+            raise ValueError("harbor_configuration_binding_mismatch")
+        try:
+            if self._path is None:
+                descriptor, name = tempfile.mkstemp(
+                    prefix="ci-skills-registry-", suffix=".json"
+                )
+                self._path = Path(name)
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(credential.dockerconfig(target.host))
+            service = HarborService(
+                target, credential, self._path, action.timeout, self.state
+            )
+            service._establish_identity()
+            self.state.harbor = service
+        except BaseException:
+            self.cleanup()
+            raise
+        return True
+
+    def run(self) -> JSONObject:
+        """Verify the requested repository grant after native identity initialization.
+
+        :returns: Safe identity, origin, repository, and granted capabilities.
+        :raises ValueError: The identity prerequisite is missing or invalid.
+        :raises APIError: The registry does not grant the required capabilities.
+        """  # noqa: DOC502 - Access guards and registry authorization propagate failures.
+        evidence = self.harbor.authorize(self.action.repository, self.action.actions)
         self.state.access_evidence[HARBOR_SERVICE_KEY] = evidence
         return evidence
 
@@ -495,6 +625,7 @@ class HarborAuth(HarborCallback[HarborAuthAction]):
         """  # noqa: DOC502 - Path.unlink can propagate filesystem errors.
         if self._path is not None:
             self._path.unlink(missing_ok=True)
+            self._path = None
         return {}
 
 

@@ -410,6 +410,14 @@ class ConfirmWorkflow(HarborCallback[WorkflowAction]):
         """
         return self.plugin_type == SkillPluginType.LOCAL or super().is_configured()
 
+    def whoami(self) -> bool:
+        """Check retained identity only when this plan uses Harbor.
+
+        :returns: Whether the selected plan's identity prerequisite is satisfied.
+        :raises ValueError: Required Harbor access or its binding is invalid.
+        """  # noqa: DOC502 - The Harbor guard validates retained access.
+        return self.plugin_type == SkillPluginType.LOCAL or super().whoami()
+
     def run(self) -> JSONObject:
         """Resolve immutable image inputs and validate any requested plan confirmation.
 
@@ -518,6 +526,15 @@ class RegistryToolboxCallback(
         """
         return K8SCallback.is_configured(self) and HarborCallback.is_configured(self)
 
+    def whoami(self) -> bool:
+        """Check both retained provider identities before composed build operations.
+
+        :returns: True after Kubernetes and Harbor match their declarations.
+        :raises ValueError: Either provider identity or access is missing or invalid.
+        :raises TargetError: A required credential-bound provider is unavailable.
+        """  # noqa: DOC502,DOC503 - Both existing provider guards validate retained state.
+        return K8SCallback.whoami(self) and HarborCallback.whoami(self)
+
 
 class HarborBuild(RegistryToolboxCallback):
     """Construct the generic build action from preceding plan and registry state."""
@@ -555,6 +572,8 @@ class HarborBuild(RegistryToolboxCallback):
         )
         builder = BuildToolbox(build)
         builder.bind(self.state)
+        if builder.whoami() is not True:
+            raise ValueError("toolbox_identity_preflight_failed")
         self._builder = builder
         builder.collect()
         self._candidate_snapshot = TagSnapshot.capture(

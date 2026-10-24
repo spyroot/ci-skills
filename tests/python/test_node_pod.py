@@ -14,12 +14,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
+    from lib.python.core.delivery_state import DeliveryState
     from lib.python.core.json_types import JSONObject, JSONValue
+    from lib.python.core.kubernetes.kubernetes import KubernetesService
     from lib.python.core.runtime import CommandResult
     from lib.python.core.target import Target
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_kubernetes_service, import_script_module
 
 PODS = import_script_module("lib.python.core.kubernetes.node_pod")
 TARGET = import_script_module("lib.python.core.target")
@@ -27,11 +29,11 @@ RUNTIME = import_script_module("lib.python.core.runtime")
 
 
 @pytest.fixture
-def node_target(target_file: Path) -> Target:
-    """Extend target with selected existing Cilium and journal Pod routes.
+def node_service(target_file: Path) -> KubernetesService:
+    """Bind existing Cilium and journal Pod routes to retained cluster access.
 
     :param target_file: Fixture target file receiving node diagnostics fields.
-    :returns: Parsed target with both declared node-local routes.
+    :returns: Authenticated service with both declared node-local routes.
     """
     target_file.write_text(
         target_file.read_text(encoding="utf-8")
@@ -46,7 +48,28 @@ def node_target(target_file: Path) -> Target:
         + 'directory = "/host-journal"\nhost_path = "/var/log/journal"\n',
         encoding="utf-8",
     )
-    return TARGET.load_target(target_file)
+    return authenticated_kubernetes_service(TARGET.load_target(target_file))
+
+
+@pytest.fixture
+def node_target(node_service: KubernetesService) -> Target:
+    """Expose the frozen target shared by node-local operations.
+
+    :param node_service: Service owning this test's retained access observation.
+    :returns: Exact credential-bound target used by the observation.
+    """
+    return node_service.target
+
+
+@pytest.fixture
+def node_state(node_service: KubernetesService) -> DeliveryState:
+    """Expose the invocation that authenticated the node-local target.
+
+    :param node_service: Service shared by target selection and later operations.
+    :returns: Initialized state consumed by the actual provider guards.
+    """
+    assert node_service.state is not None
+    return node_service.state
 
 
 def _pod(*, journal: bool = False) -> JSONObject:
@@ -92,12 +115,13 @@ def _result(argv: Sequence[str], payload: JSONValue) -> RUNTIME.CommandResult:
 
 
 def test_selected_cilium_pod_is_pinned_to_node_context_and_uid(
-    monkeypatch: pytest.MonkeyPatch, node_target: Target
+    monkeypatch: pytest.MonkeyPatch, node_target: Target, node_state: DeliveryState
 ) -> None:
     """Pin Pod exec to selected node, context, and UID without TTY.
 
     :param monkeypatch: Pytest fixture replacing list, read-back, and exec calls.
     :param node_target: Target declaring the Cilium Pod route.
+    :param node_state: Initialized invocation retained for provider operations.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -138,7 +162,7 @@ def test_selected_cilium_pod_is_pinned_to_node_context_and_uid(
     monkeypatch.setattr(PODS, "run_command_tail", fake_tail)
 
     route = node_target.kubernetes.node_diagnostics.cilium
-    reader = PODS.select_node_pod(node_target, route)
+    reader = PODS.select_node_pod(node_target, route, state=node_state)
     output = reader.run("cilium-dbg", "status", "--output", "json")
 
     assert output.returncode == 0
@@ -150,12 +174,16 @@ def test_selected_cilium_pod_is_pinned_to_node_context_and_uid(
 
 @pytest.mark.parametrize("items", [[], [_pod(), _pod()]])
 def test_zero_or_multiple_pods_block_before_exec(
-    monkeypatch: pytest.MonkeyPatch, node_target: Target, items: Sequence[JSONValue]
+    monkeypatch: pytest.MonkeyPatch,
+    node_target: Target,
+    node_state: DeliveryState,
+    items: Sequence[JSONValue],
 ) -> None:
     """Reject non-unique Pod selection before any exec command.
 
     :param monkeypatch: Pytest fixture replacing the Pod list call.
     :param node_target: Target declaring the Cilium Pod route.
+    :param node_state: Initialized invocation retained for provider operations.
     :param items: Zero or two matching Pod records.
 
     :returns: None; assertions in the body validate the regression.
@@ -180,18 +208,19 @@ def test_zero_or_multiple_pods_block_before_exec(
     route = node_target.kubernetes.node_diagnostics.cilium
 
     with pytest.raises(PODS.NodePodError, match="pod_selection"):
-        PODS.select_node_pod(node_target, route)
+        PODS.select_node_pod(node_target, route, state=node_state)
     assert len(calls) == 1
     assert "exec" not in calls[0]
 
 
 def test_wrong_node_or_nonrunning_pod_blocks(
-    monkeypatch: pytest.MonkeyPatch, node_target: Target
+    monkeypatch: pytest.MonkeyPatch, node_target: Target, node_state: DeliveryState
 ) -> None:
     """Reject a selected Pod whose node differs from the target route.
 
     :param monkeypatch: Pytest fixture returning a Pod on another node.
     :param node_target: Target declaring node-a as the Cilium route.
+    :param node_state: Initialized invocation retained for provider operations.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -204,16 +233,17 @@ def test_wrong_node_or_nonrunning_pod_blocks(
     )
     route = node_target.kubernetes.node_diagnostics.cilium
     with pytest.raises(PODS.NodePodError, match="wrong_pod_or_container"):
-        PODS.select_node_pod(node_target, route)
+        PODS.select_node_pod(node_target, route, state=node_state)
 
 
 def test_journal_requires_readback_of_exact_host_mount(
-    monkeypatch: pytest.MonkeyPatch, node_target: Target
+    monkeypatch: pytest.MonkeyPatch, node_target: Target, node_state: DeliveryState
 ) -> None:
     """Reject wrong hostPath and accept exact declared journal mount.
 
     :param monkeypatch: Pytest fixture replacing Pod list/read-back.
     :param node_target: Target declaring the journal Pod and host path.
+    :param node_state: Initialized invocation retained for provider operations.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -236,20 +266,23 @@ def test_journal_requires_readback_of_exact_host_mount(
 
     monkeypatch.setattr(PODS, "run_command", fake_run)
     with pytest.raises(PODS.NodePodError, match="host_directory_not_mounted"):
-        PODS.select_node_pod(node_target, route.pod, journal=route)
+        PODS.select_node_pod(node_target, route.pod, journal=route, state=node_state)
 
     selected["spec"]["volumes"][0]["hostPath"]["path"] = "/var/log/journal"
-    reader = PODS.select_node_pod(node_target, route.pod, journal=route)
+    reader = PODS.select_node_pod(
+        node_target, route.pod, journal=route, state=node_state
+    )
     assert reader.evidence()["namespace"] == "diagnostics"
 
 
 def test_existing_host_root_mount_can_expose_declared_journal_path(
-    monkeypatch: pytest.MonkeyPatch, node_target: Target
+    monkeypatch: pytest.MonkeyPatch, node_target: Target, node_state: DeliveryState
 ) -> None:
     """Accept an existing host-root mount exposing the journal subpath.
 
     :param monkeypatch: Pytest fixture returning a Pod with root hostPath.
     :param node_target: Target declaring the journal host path.
+    :param node_state: Initialized invocation retained for provider operations.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -266,18 +299,19 @@ def test_existing_host_root_mount_can_expose_declared_journal_path(
         "run_command",
         lambda argv, **_kwargs: _result(argv, {"items": [selected]}),
     )
-    assert PODS.select_node_pod(node_target, route.pod, journal=route).uid == (
-        "selected-uid"
-    )
+    assert PODS.select_node_pod(
+        node_target, route.pod, journal=route, state=node_state
+    ).uid == ("selected-uid")
 
 
 def test_uid_change_after_selection_blocks_before_exec(
-    monkeypatch: pytest.MonkeyPatch, node_target: Target
+    monkeypatch: pytest.MonkeyPatch, node_target: Target, node_state: DeliveryState
 ) -> None:
     """Block Pod replacement detected between selection and exec.
 
     :param monkeypatch: Pytest fixture returning mismatched detail UID.
     :param node_target: Target declaring the Cilium Pod route.
+    :param node_state: Initialized invocation retained for provider operations.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -305,6 +339,6 @@ def test_uid_change_after_selection_blocks_before_exec(
         lambda *_args, **_kwargs: pytest.fail("executed a replacement Pod"),
     )
     route = node_target.kubernetes.node_diagnostics.cilium
-    reader = PODS.select_node_pod(node_target, route)
+    reader = PODS.select_node_pod(node_target, route, state=node_state)
     with pytest.raises(PODS.NodePodError, match="identity_changed"):
         reader.run("cilium-dbg", "status")

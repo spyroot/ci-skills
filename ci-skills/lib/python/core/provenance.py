@@ -3,7 +3,8 @@
 ``digest`` identifies installed package files, including documentation but
 excluding the installer record, symlinks, caches, and platform metadata. The
 installer uses it to verify copied files and the recorded source revision.
-``functional_digest`` identifies only ``bin/``, ``lib/``, and ``schemas/``.
+``functional_digest`` identifies ``bin/``, ``lib/``, ``schemas/``, and
+``ci_skills.spec.json``, which declares the required provider roles.
 Live receipts carrying skill identity and GitHub acceptance use the same
 calculation to compare runtime code and schemas. Documentation, tests, and
 bytecode caches do not contribute to it.
@@ -237,12 +238,12 @@ def _package_entries(root: Path) -> Mapping[Path, bytes]:
 
 
 def _is_functional(relative: Path) -> bool:
-    """Select runtime files from the three declared functional roots.
+    """Select runtime files and the installed provider declaration.
 
     :param relative: Included file path relative to the skill root.
     :returns: True for runtime files, excluding documentation and tests.
     """
-    return (
+    return relative == Path("ci_skills.spec.json") or (
         relative.parts[0] in FUNCTIONAL_ROOTS
         and not any(part in FUNCTIONAL_EXCLUDED_DIRECTORIES for part in relative.parts)
         and relative.suffix not in FUNCTIONAL_EXCLUDED_SUFFIXES
@@ -295,7 +296,8 @@ def tree_digest(root: Path) -> TreeDigest:
 def functional_digest(root: Path) -> str:
     """Hash runtime code and schemas using the package's existing tree encoder.
 
-    The file selection is rooted at ``bin/``, ``lib/``, and ``schemas/``.
+    The file selection includes ``bin/``, ``lib/``, ``schemas/``, and
+    the installed provider declaration ``ci_skills.spec.json``.
     Documentation, tests, bytecode caches, and platform metadata are excluded.
 
     :param root: Installed or checked-out skill directory to measure.

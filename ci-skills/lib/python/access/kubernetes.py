@@ -7,9 +7,9 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
+from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from lib.python.access.kubernetes_credentials import assert_kubeconfig_unchanged
 from lib.python.access.shared import Surface, _blocked, _json
@@ -27,9 +27,54 @@ from lib.python.core.kubernetes.cilium import (
     ready_agent_pods,
     valid_health,
 )
-from lib.python.core.runtime import run_command
+from lib.python.core.runtime import CommandResult, run_command
 from lib.python.core.target import Target
 from lib.python.sys.status import PASS
+
+if TYPE_CHECKING:
+    from lib.python.core.delivery_state import DeliveryState
+
+
+def cluster_admin_permissions(
+    command: Callable[[Sequence[str]], CommandResult],
+    *,
+    observed: Optional[MutableSequence[str]] = None,
+) -> tuple[str, ...]:
+    """Read the existing effective cluster-administration permission probes.
+
+    This proves effective authorization, not a literal ClusterRole binding name.
+
+    :param command: Credential-bound native command transport receiving arguments.
+    :param observed: Optional diagnostic observations extended after each success.
+    :returns: The administration capabilities successfully observed.
+    :raises ValueError: A required authorization probe fails.
+    :raises OSError: The supplied native transport cannot start.
+    """  # noqa: DOC503 - The supplied transport can propagate native process errors.
+    checks = (
+        ("cluster_wildcard", ("*", "*", "--all-namespaces")),
+        (
+            "clusterrolebinding_create",
+            ("create", "clusterrolebindings.rbac.authorization.k8s.io"),
+        ),
+        (
+            "clusterrolebinding_update",
+            ("update", "clusterrolebindings.rbac.authorization.k8s.io"),
+        ),
+        (
+            "clusterrolebinding_delete",
+            ("delete", "clusterrolebindings.rbac.authorization.k8s.io"),
+        ),
+        ("clusterrole_bind", ("bind", "clusterroles.rbac.authorization.k8s.io")),
+    )
+    capabilities = []
+    for label, arguments in checks:
+        result = command(("auth", "can-i", *arguments, "-q"))
+        if result.returncode:
+            raise ValueError(label + "_denied")
+        capabilities.append(label)
+        if observed is not None:
+            observed.append(label)
+    return tuple(capabilities)
 
 
 def kubectl_argv(target: Target, *args: str) -> MutableSequence[str]:
@@ -393,42 +438,36 @@ class KubernetesAccessProbe:
         :raises ValueError: If any required authorization probe is denied.
         :raises TargetError: If pinned kubeconfig files changed or are unreadable.
         :raises OSError: If the native process cannot be started.
-        """  # noqa: DOC503 - Kubeconfig validation and native reads can escape.
-        checks = (
-            ("cluster_wildcard", ("*", "*", "--all-namespaces")),
-            (
-                "clusterrolebinding_create",
-                ("create", "clusterrolebindings.rbac.authorization.k8s.io"),
-            ),
-            (
-                "clusterrolebinding_update",
-                ("update", "clusterrolebindings.rbac.authorization.k8s.io"),
-            ),
-            (
-                "clusterrolebinding_delete",
-                ("delete", "clusterrolebindings.rbac.authorization.k8s.io"),
-            ),
-            ("clusterrole_bind", ("bind", "clusterroles.rbac.authorization.k8s.io")),
-        )
-        for label, arguments in checks:
-            result = run_command(
-                kubectl_argv(self.target, "auth", "can-i", *arguments, "-q"),
+        """  # noqa: DOC502,DOC503 - Kubeconfig validation and native reads can escape.
+        cluster_admin_permissions(
+            lambda arguments: run_command(
+                kubectl_argv(self.target, *arguments),
                 env=kubernetes_env(self.target),
-            )
-            if result.returncode:
-                raise ValueError(label + "_denied")
-            self.observed.append(label)
+            ),
+            observed=self.observed,
+        )
 
 
-def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
+def kubernetes_access(
+    target: Target, *, cilium: bool = False, state: DeliveryState | None = None
+) -> Surface:
     """Verify cluster identity, TLS access, and the required permissions.
 
     :param target: Runtime target containing context, expected server, and sources.
     :param cilium: Whether to additionally verify the Cilium health exec path.
+    :param state: Shared identity/runtime initialized by the existing authentication callback.
     :returns: PASS surface with verified identity and capabilities, or a BLOCKED
         surface with observations made before the failed probe and recovery guidance.
     :raises ValueError: If the caller did not select a Kubernetes authority.
     """  # noqa: DOC502 - Probe construction rejects a missing authority.
+    from lib.python.core.abstract.callbacks import Callbacks
+    from lib.python.core.abstract.spec import load_spec
+    from lib.python.core.delivery_state import DeliveryState
+    from lib.python.core.executor import WorkflowExecutor
+    from lib.python.core.kubernetes.kubernetes import K8SAuth
+
+    if state is None:
+        state = DeliveryState(spec=load_spec())
     probe = KubernetesAccessProbe(target)
     selected = f"{probe.kubernetes.context} -> {probe.kubernetes.server}"
     source = (
@@ -438,9 +477,15 @@ def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
     )
     try:
         probe.check_file()
+        WorkflowExecutor(context=state, callbacks=Callbacks([K8SAuth(target)])).run()
         probe.check_context()
-        identity = probe.identity()
-        probe.check_permissions()
+        service = state.kubernetes
+        service.require_access()
+        probe.read("get", "--raw=/version")
+        probe.observed.append("tls_api_reachable")
+        identity = service.verify()
+        probe.observed.append("effective_identity")
+        probe.observed.extend(service._observed_permissions)
         if cilium:
             observed, details = _cilium_access(target)
             probe.observed.extend(observed)
@@ -452,6 +497,7 @@ def kubernetes_access(target: Target, *, cilium: bool = False) -> Surface:
         IndexError,
         OSError,
         AttributeError,
+        RuntimeError,
     ) as exc:
         return _blocked(
             "kubernetes",

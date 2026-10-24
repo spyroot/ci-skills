@@ -15,8 +15,10 @@ from types import MappingProxyType
 from typing import Final, TypeAlias
 
 from lib.python.core.collection import _search
+from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.json_types import JSONObject, JSONValue
 from lib.python.core.kubernetes.collect import _batch
+from lib.python.core.kubernetes.kubernetes import KubernetesService
 from lib.python.core.kubernetes.objects import KubernetesObject
 from lib.python.core.report import report
 from lib.python.core.target import Target, kubernetes_label
@@ -436,16 +438,20 @@ class StorageInventory:
         return result
 
 
-def collect_storage(target: Target, args: Namespace) -> MutableMapping[str, JSONValue]:
+def collect_storage(
+    target: Target, args: Namespace, *, state: DeliveryState | None = None
+) -> MutableMapping[str, JSONValue]:
     """Read storage resources and assemble their filtered relationship report.
 
     :param target: Bound Kubernetes target with context and credential sources.
     :param args: Namespace, node, storage-class, phase, and text filters.
+    :param state: Shared declaration and previously observed Kubernetes access.
     :returns: Storage report joining claims, volumes, pods, controllers, and
         attachments; failed or malformed resource lists produce a PARTIAL report.
     :raises TargetError: If pinned kubeconfig sources changed or cannot be read.
     :raises ValueError: If the target has no Kubernetes authority.
     :raises OSError: If a native resource process cannot be started.
     """  # noqa: DOC502 - Target/query helpers and worker reads propagate failures.
+    KubernetesService(target, state=state).require_access()
     data, errors = _batch(target, STORAGE_RESOURCES)
     return StorageInventory(data, args, errors).report(target)

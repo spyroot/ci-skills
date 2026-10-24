@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Optional, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_gitlab_session, import_script_module
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
@@ -116,18 +116,20 @@ def _bound_session(
     :param credential_digest: Credential continuity digest recorded in receipts.
     :returns: Bound GitLab session matching the production workflow shape.
     """
-    return GITLAB_SESSION.BoundGitLabSession(
-        origin=plan.origin,
-        host="gitlab.example.test",
-        target_kind=plan.target_kind,
-        target_reference=plan.target_reference,
-        target_source=plan.target_source,
-        target_file=Path(plan.target_file),
-        credential_source=credential_source,
-        credential_digest=credential_digest,
-        execution_host="unit-host",
-        skill=skill,
-        environment={},
+    return authenticated_gitlab_session(
+        GITLAB_SESSION.BoundGitLabSession(
+            origin=plan.origin,
+            host="gitlab.example.test",
+            target_kind=plan.target_kind,
+            target_reference=plan.target_reference,
+            target_source=plan.target_source,
+            target_file=Path(plan.target_file),
+            credential_source=credential_source,
+            credential_digest=credential_digest,
+            execution_host="unit-host",
+            skill=skill,
+            environment={},
+        )
     )
 
 
@@ -237,7 +239,7 @@ def test_get_from_failed_job_resolves_runner_relation_without_raw_payload() -> N
             ("GET", _list()): [[{"id": 23}]],
         }
     )
-    result = RUNNERS.read(api, object(), plan, 42)
+    result = RUNNERS.read(api, _bound_session(plan), plan, 42)
     assert result.related_job == {
         "id": 9,
         "status": "failed",
@@ -282,7 +284,7 @@ def test_get_from_unassigned_job_reports_relation_without_guessing_runner() -> N
             ]
         }
     )
-    result = RUNNERS.read(api, object(), plan, 42)
+    result = RUNNERS.read(api, _bound_session(plan), plan, 42)
     assert result.records == []
     assert result.related_job["runner_id"] is None
     assert api.calls == [("GET", "projects/42/jobs/9")]
@@ -307,7 +309,7 @@ def test_list_filters_protected_runner_and_limits_public_fields() -> None:
             ("GET", "runners/24"): [_runner(24, access_level="not_protected")],
         }
     )
-    result = RUNNERS.read(api, object(), plan, 42)
+    result = RUNNERS.read(api, _bound_session(plan), plan, 42)
     assert [item["id"] for item in result.records] == [23]
     assert result.truncated is False
 
@@ -342,10 +344,10 @@ def test_delete_requires_scope_and_global_404_readback(
             ("DELETE", "runners/23"): [{}],
         }
     )
-    planned = RUNNERS.delete_snapshot(api, object(), plan, 42)
+    planned = RUNNERS.delete_snapshot(api, _bound_session(plan), plan, 42)
     assert planned == snapshot
     plan = replace(plan, runner_snapshot=planned)
-    record = RUNNERS.apply(api, object(), plan, 42)
+    record = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert record["action"] == "APPLIED"
     assert record["after"]["global_get_status"] == 404
     assert record["after"]["scoped_absent"] is True
@@ -393,7 +395,7 @@ def test_repeat_delete_is_verified_no_op_without_write(
             ("GET", _list()): [[]],
         }
     )
-    record = RUNNERS.apply(api, object(), plan, 42)
+    record = RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert record["action"] == "NO_OP"
     assert record["mutated"] is False
     assert all(method == "GET" for method, _ in api.calls)
@@ -429,7 +431,7 @@ def test_delete_refuses_runner_outside_selected_project(
         }
     )
     with pytest.raises(ACTION.ActionError, match="runner_scope_readback_mismatch"):
-        RUNNERS.apply(api, object(), plan, 42)
+        RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert all(method == "GET" for method, _ in api.calls)
 
 
@@ -472,7 +474,7 @@ def test_delete_refuses_identity_or_assignment_drift_before_write(
         }
     )
     with pytest.raises(ACTION.ActionError, match=reason):
-        RUNNERS.apply(api, object(), plan, 42)
+        RUNNERS.apply(api, _bound_session(plan), plan, 42)
     assert all(method == "GET" for method, _ in api.calls)
 
 
@@ -522,7 +524,11 @@ def test_runner_live_operation_refuses_unverified_skill_before_api(
         GITLAB_ACTION, "resolve_gitlab_target", lambda *a, **kw: (object(), "unit")
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *a, **kw: plan)
-    monkeypatch.setattr(GITLAB_ACTION, "bind_gitlab_session", lambda *a, **kw: session)
+    monkeypatch.setattr(
+        GITLAB_ACTION,
+        "bind_gitlab_session",
+        lambda *a, **kw: authenticated_gitlab_session(session, kw.get("invocation")),
+    )
     monkeypatch.setattr(
         GITLAB_ACTION,
         "GlabAPIClient",
@@ -553,7 +559,11 @@ def test_runner_read_cli_writes_portable_live_receipt(
         GITLAB_ACTION, "resolve_gitlab_target", lambda *a, **kw: (object(), "unit")
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *a, **kw: plan)
-    monkeypatch.setattr(GITLAB_ACTION, "bind_gitlab_session", lambda *a, **kw: session)
+    monkeypatch.setattr(
+        GITLAB_ACTION,
+        "bind_gitlab_session",
+        lambda *a, **kw: authenticated_gitlab_session(session, kw.get("invocation")),
+    )
     monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda **kw: object())
     monkeypatch.setattr(
         GITLAB_ACTION,

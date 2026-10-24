@@ -10,18 +10,20 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Mapping, MutableSequence, Sequence
+from dataclasses import replace
 from os import PathLike
 from pathlib import Path
 from types import ModuleType
 from typing import IO, TYPE_CHECKING, Optional, Protocol, TypedDict, Union, Unpack
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_kubernetes_service, import_script_module
 
 TEST_REVISION = "a" * 40
 
 
 if TYPE_CHECKING:
+    from lib.python.core.delivery_state import DeliveryState
     from lib.python.core.json_types import JSONObject
     from lib.python.core.runtime import CommandResult
     from lib.python.core.target import Target
@@ -59,6 +61,7 @@ class _CommandOptions(TypedDict, total=False):
     timeout: int
     max_bytes: int
     max_lines: int
+    max_stdout_bytes: int
     env: Optional[Mapping[str, Optional[str]]]
     cwd: Optional[Union[str, Path]]
 
@@ -152,6 +155,41 @@ def _patch_provider_commands(
     """
     for provider in _provider_modules():
         monkeypatch.setattr(provider, "run_command", runner)
+    github = import_script_module("lib.python.core.github.github")
+    gitlab = import_script_module("lib.python.access.gitlab")
+    kubernetes = import_script_module("lib.python.core.kubernetes.kubernetes")
+
+    class NativeGitHubClient(github.GitHubAPIClient):
+        """Keep real identity/guard behavior with an offline command boundary."""
+
+        def __init__(self) -> None:
+            """Supply only the native command transport double."""
+            super().__init__(command=runner)
+
+    class NativeGitLabClient(gitlab.GlabAPIClient):
+        """Keep GitLab initialization and access guards with native fixtures."""
+
+        def __init__(self) -> None:
+            """Supply only the native command transport double."""
+            super().__init__(command=runner)
+
+    def bind_cluster(target: Target) -> Target:
+        """Freeze a synthetic credential source for otherwise unbound targets.
+
+        :param target: Selected cluster fixture with no real kubeconfig dependency.
+        :returns: Target carrying fixture credentials for the actual initializer.
+        """
+        return authenticated_kubernetes_service(target).target
+
+    monkeypatch.setattr(github, "run_command_bounded", runner)
+    monkeypatch.setattr(kubernetes, "run_command_bounded", runner)
+    monkeypatch.setattr(kubernetes, "bind_sources", bind_cluster)
+    monkeypatch.setattr(_provider_modules()[0], "GitHubAPIClient", NativeGitHubClient)
+    monkeypatch.setattr(gitlab, "GlabAPIClient", NativeGitLabClient)
+    credentials = import_script_module("lib.python.access.gitlab_credentials")
+    monkeypatch.setattr(
+        credentials, "_glab_store_token", lambda _host: "fixture-glab-store-token"
+    )
 
 
 def _bind_target(path: Path) -> Target:
@@ -382,6 +420,8 @@ def _fake_access_runner(
         :param stderr: Simulated provider diagnostic.
         :returns: Runtime command-result record.
         """
+        if "--include" in argv and code == 0:
+            stdout = "HTTP/2 200 OK\r\ncontent-type: application/json\r\n\r\n" + stdout
         return runtime.CommandResult(argv, code, stdout, stderr)
 
     def kube_args(argv: tuple[str, ...]) -> Sequence[str]:
@@ -403,8 +443,11 @@ def _fake_access_runner(
         command = tuple(str(part) for part in argv)
         calls.append(command)
         tool = command[0]
+        endpoint = command[2] if tool == "glab" and command[1] == "api" else command[-1]
 
         if tool == "gh":
+            if command[1:3] == ("auth", "token"):
+                return completed(command, stdout="fixture-github-token")
             if command[1:3] == ("auth", "status"):
                 if scenario == "github_auth_failed":
                     return completed(command, 1, stderr="not logged in")
@@ -412,12 +455,45 @@ def _fake_access_runner(
             if command[1:3] == ("api", "--hostname") and command[-1] == "user":
                 if scenario == "github_api_failed":
                     return completed(command, 1, stderr="HTTP 401 unauthorized")
-                return completed(command, stdout=json.dumps({"login": "unit-gh"}))
+                return completed(
+                    command, stdout=json.dumps({"id": 17, "login": "unit-gh"})
+                )
             if (
                 command[1:3] == ("api", "--hostname")
                 and command[-1] == "repos/unit/repo"
             ):
-                return completed(command, stdout=json.dumps({"full_name": "unit/repo"}))
+                return completed(
+                    command,
+                    stdout=json.dumps(
+                        {
+                            "id": 42,
+                            "full_name": "unit/repo",
+                            "permissions": {
+                                "admin": scenario
+                                not in (
+                                    "github_non_admin",
+                                    "github_maintain",
+                                    "github_maintain_protection_denied",
+                                ),
+                                "maintain": scenario.startswith("github_maintain"),
+                                "pull": True,
+                            },
+                        }
+                    ),
+                )
+            if command[-1] == "repos/unit/repo/branches/main/protection":
+                if scenario == "github_maintain_protection_denied":
+                    return completed(command, 1, stderr="HTTP 403 forbidden")
+                return completed(
+                    command,
+                    stdout=json.dumps(
+                        {
+                            "required_status_checks": {
+                                "contexts": ["portable-required-check"],
+                            }
+                        }
+                    ),
+                )
             return completed(command, 99, stderr="unexpected gh call")
 
         if tool == "glab":
@@ -427,7 +503,7 @@ def _fake_access_runner(
                         command, 1, stderr="not logged in to selected host"
                     )
                 return completed(command)
-            if command[-1] == "user":
+            if endpoint == "user":
                 web_host = (
                     "other.example.test"
                     if scenario == "gitlab_identity_wrong_host"
@@ -437,13 +513,14 @@ def _fake_access_runner(
                     command,
                     stdout=json.dumps(
                         {
+                            "id": 17,
                             "username": "unit-gl",
                             "is_admin": scenario != "gitlab_non_admin",
                             "web_url": f"https://{web_host}/unit-gl",
                         }
                     ),
                 )
-            if command[-1] == "runners/all?per_page=1":
+            if endpoint == "runners/all?per_page=1":
                 if scenario == "gitlab_runner_denied":
                     return completed(command, 1, stderr="HTTP 403 forbidden")
                 return completed(command, stdout=json.dumps([{"id": 1}]))
@@ -454,6 +531,7 @@ def _fake_access_runner(
             if args in (
                 ["config", "view", "-o", "json"],
                 ["config", "view", "--raw", "-o", "json"],
+                ["config", "view", "--minify", "-o", "json"],
             ):
                 server = (
                     "https://api.other.example.test:6443"
@@ -624,11 +702,14 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
         namespace="rook-ceph",
     )
 
-    def collect_ceph_cluster(_target: Target, _args: argparse.Namespace) -> JSONObject:
+    def collect_ceph_cluster(
+        _target: Target, _args: argparse.Namespace, *, state: DeliveryState
+    ) -> JSONObject:
         """Return a Ceph PASS record after Kubernetes-only access succeeds.
 
         :param _target: Resolved target accepted by the collector double.
         :param _args: Parsed command arguments accepted by the collector double.
+        :param state: Shared identity invocation retained by the CLI.
         :returns: Minimal passing Ceph report.
         """
         return {"kind": "ceph_cluster", "status": "PASS", "records": [], "errors": []}
@@ -637,11 +718,14 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
     assert json.loads(capsys.readouterr().out)["status"] == "PASS"
     assert not any("daemonsets" in call for call in calls)
 
-    def collect_cilium(_target: Target, _args: argparse.Namespace) -> None:
+    def collect_cilium(
+        _target: Target, _args: argparse.Namespace, *, state: DeliveryState
+    ) -> None:
         """Expose any Cilium collection before its access gate passes.
 
         :param _target: Resolved target accepted by the collector double.
         :param _args: Parsed command arguments accepted by the collector double.
+        :param state: Shared identity invocation retained by the CLI.
 
         :returns: None; the helper records behavior through its side effects.
         """
@@ -653,6 +737,61 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
         "cilium_namespace_not_unique"
     )
     assert any("daemonsets" in call for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_status", "expected_reason"),
+    (
+        ("github_maintain", "PASS", None),
+        ("github_maintain_protection_denied", "BLOCKED", "authorization"),
+    ),
+)
+def test_github_publication_uses_declared_role_before_native_protection_read(
+    monkeypatch: pytest.MonkeyPatch,
+    target_file: Path,
+    scenario: str,
+    expected_status: str,
+    expected_reason: Optional[str],
+) -> None:
+    """Honor a declared maintain role while preserving actual provider denials.
+
+    :param monkeypatch: Install only the existing offline native command boundary.
+    :param target_file: Target selecting the publication repository.
+    :param scenario: Protection read success or a native authorization denial.
+    :param expected_status: Surface outcome required by the provider response.
+    :param expected_reason: Existing denial classification, or no failure reason.
+    :returns: None; protection is read once after retaining the declared role.
+    """
+    _access, runtime = _access_modules()
+    runner, calls = _fake_access_runner(runtime, scenario)
+    _patch_provider_commands(monkeypatch, runner)
+    target = _load_target(target_file, required_surfaces=("github",))
+    target = replace(
+        target,
+        github=replace(
+            target.require_github(), required_checks=("portable-required-check",)
+        ),
+    )
+    delivery = import_script_module("lib.python.core.delivery_state")
+    state = delivery.DeliveryState(spec={"github": {"role": "maintain"}})
+
+    surface = _provider_modules()[0].github_publication_access(target, state=state)
+
+    assert surface.status == expected_status
+    assert surface.reason == expected_reason
+    assert state.github_runtime.role == "maintain"
+    endpoints = [call[-1] for call in calls if call[:2] == ("gh", "api")]
+    assert endpoints == [
+        "user",
+        "repos/unit/repo",
+        "repos/unit/repo/branches/main/protection",
+    ]
+    if expected_status == "PASS":
+        assert surface.details == {"required_checks": ["portable-required-check"]}
+        assert "repository_maintain" in surface.observed_capability
+        assert "repository_admin" not in surface.observed_capability
+        assert "protection_read" in surface.observed_capability
+        assert "required_checks_read" in surface.observed_capability
 
 
 def test_check_access_passes_when_all_three_authorities_are_admin(
@@ -685,7 +824,8 @@ def test_check_access_passes_when_all_three_authorities_are_admin(
         "cilium_health_exec" in report["surfaces"]["kubernetes"]["observed_capability"]
     )
     assert any(
-        call[:4] == ("glab", "api", "--hostname", "gitlab.example.test")
+        call[:2] == ("glab", "api")
+        and call[call.index("--hostname") + 1] == "gitlab.example.test"
         for call in calls
     )
     assert any(call[:3] == ("gh", "api", "--hostname") for call in calls)
@@ -1034,9 +1174,10 @@ def test_declared_token_file_blocks_embedded_token_fallback_when_unreadable(
     (
         ("github_auth_failed", "github", "authentication"),
         ("github_api_failed", "github", "authentication"),
+        ("github_non_admin", "github", "github_required_role_missing:admin"),
         ("gitlab_auth_wrong_host", "gitlab", "authentication"),
-        ("gitlab_non_admin", "gitlab", "instance_admin_required"),
-        ("gitlab_identity_wrong_host", "gitlab", "host_mismatch"),
+        ("gitlab_non_admin", "gitlab", "gitlab_required_role_missing:admin"),
+        ("gitlab_identity_wrong_host", "gitlab", "user_host_mismatch"),
         ("gitlab_runner_denied", "gitlab", "authorization"),
         ("k8s_wrong_server", "kubernetes", "api_server_mismatch"),
         ("k8s_not_admin", "kubernetes", "cluster_wildcard_denied"),
@@ -1147,12 +1288,13 @@ def test_gitlab_access_uses_token_file_only_as_subprocess_environment(
         assert token not in command
         if command[:4] == ("glab", "auth", "status", "--hostname"):
             return runtime.CommandResult(command, 0, "", "")
-        if command[-1] == "user":
+        if command[2] == "user":
             return runtime.CommandResult(
                 command,
                 0,
                 json.dumps(
                     {
+                        "id": 17,
                         "username": "unit-gl",
                         "is_admin": True,
                         "web_url": "https://gitlab.example.test/unit-gl",
@@ -1160,12 +1302,12 @@ def test_gitlab_access_uses_token_file_only_as_subprocess_environment(
                 ),
                 "",
             )
-        if command[-1] == "runners/all?per_page=1":
+        if command[2] == "runners/all?per_page=1":
             return runtime.CommandResult(command, 0, json.dumps([{"id": 1}]), "")
         return runtime.CommandResult(command, 99, "", "unexpected call")
 
     gitlab = import_script_module("lib.python.access.gitlab")
-    monkeypatch.setattr(gitlab, "run_command", fake_run)
+    _patch_provider_commands(monkeypatch, fake_run)
 
     surface = gitlab.gitlab_access(target)
 
@@ -1204,12 +1346,13 @@ def test_gitlab_access_without_token_file_uses_glab_host_profile(
         observed_envs.append(kwargs.get("env"))
         if command[:4] == ("glab", "auth", "status", "--hostname"):
             return runtime.CommandResult(command, 0, "", "")
-        if command[-1] == "user":
+        if command[2] == "user":
             return runtime.CommandResult(
                 command,
                 0,
                 json.dumps(
                     {
+                        "id": 17,
                         "username": "unit-gl",
                         "is_admin": True,
                         "web_url": "https://gitlab.example.test/unit-gl",
@@ -1217,17 +1360,155 @@ def test_gitlab_access_without_token_file_uses_glab_host_profile(
                 ),
                 "",
             )
-        if command[-1] == "runners/all?per_page=1":
+        if command[2] == "runners/all?per_page=1":
             return runtime.CommandResult(command, 0, json.dumps([{"id": 1}]), "")
         return runtime.CommandResult(command, 99, "", "unexpected call")
 
     gitlab = import_script_module("lib.python.access.gitlab")
-    monkeypatch.setattr(gitlab, "run_command", fake_run)
+    _patch_provider_commands(monkeypatch, fake_run)
 
     surface = gitlab.gitlab_access(_load_target(target_file))
 
     assert surface.status == "PASS"
-    assert all(not env or "GITLAB_TOKEN" not in env for env in observed_envs)
+    assert observed_envs
+    assert all(
+        env and env.get("GITLAB_TOKEN") == "fixture-glab-store-token"
+        for env in observed_envs
+    )
+
+
+def test_gitlab_access_pins_native_store_token_across_cached_identity_reads(
+    monkeypatch: pytest.MonkeyPatch, target_file: Path
+) -> None:
+    """Keep the verified token when glab's native store changes during a diagnostic.
+
+    :param monkeypatch: Offline store and native API boundaries.
+    :param target_file: Synthetic target with no explicit GitLab token file.
+    :returns: None; repeated access retains one identity and concrete credential.
+    """
+    _clear_token_env(monkeypatch)
+    _access, runtime = _access_modules()
+    contexts = import_script_module("lib.python.core.delivery_state")
+    specifications = import_script_module("lib.python.core.abstract.spec")
+    credentials = import_script_module("lib.python.access.gitlab_credentials")
+    gitlab = import_script_module("lib.python.access.gitlab")
+    current = {"token": "original-store-token"}
+    store_reads: list[str] = []
+    identity_reads: list[str] = []
+    operation_tokens: list[str] = []
+
+    def store_token(host: str) -> str:
+        """Read the current synthetic native-store entry.
+
+        :param host: Exact GitLab authority selected by the diagnostic.
+        :returns: Store token at this call, allowing deterministic rotation.
+        """
+        store_reads.append(host)
+        return current["token"]
+
+    def native(argv: Sequence[str], **kwargs: Unpack[_CommandOptions]) -> CommandResult:
+        """Rotate native credentials after identity and record later effective tokens.
+
+        :param argv: Bounded glab command from the real access implementation.
+        :param **kwargs: Child environment and request bounds.
+        :returns: Native identity, runner inventory, or authentication response.
+        """
+        command = tuple(argv)
+        if command[1:3] == ("auth", "status"):
+            return runtime.CommandResult(command, 0, "", "")
+        endpoint = command[2]
+        environment = kwargs.get("env") or {}
+        effective_token = environment.get("GITLAB_TOKEN") or current["token"]
+        if endpoint == "user":
+            identity_reads.append(effective_token)
+            current["token"] = "replacement-store-token"
+            payload = {
+                "id": 17,
+                "username": "unit-gl",
+                "is_admin": True,
+                "web_url": "https://gitlab.example.test/unit-gl",
+            }
+        else:
+            assert endpoint == "runners/all?per_page=1"
+            operation_tokens.append(effective_token)
+            payload = [{"id": 1}]
+        return runtime.CommandResult(command, 0, json.dumps(payload), "")
+
+    _patch_provider_commands(monkeypatch, native)
+    monkeypatch.setattr(credentials, "_glab_store_token", store_token)
+    state = contexts.DeliveryState(spec=specifications.load_spec())
+    target = _load_target(target_file, required_surfaces=("gitlab",))
+
+    first = gitlab.gitlab_access(target, state=state)
+    second = gitlab.gitlab_access(target, state=state)
+
+    assert first.status == second.status == "PASS"
+    assert store_reads == ["gitlab.example.test"]
+    assert identity_reads == ["original-store-token"]
+    assert operation_tokens == ["original-store-token", "original-store-token"]
+    assert current["token"] == "replacement-store-token"
+
+
+@pytest.mark.parametrize(
+    ("changed", "reason"),
+    (
+        ("host", "gitlab_runtime_authority_mismatch"),
+        ("source", "gitlab_runtime_credential_mismatch"),
+        ("token", "gitlab_runtime_credential_mismatch"),
+    ),
+)
+def test_gitlab_access_rejects_changed_selection_before_cached_session_requests(
+    monkeypatch: pytest.MonkeyPatch, target_file: Path, changed: str, reason: str
+) -> None:
+    """Reject a different target or credential before reusing observed admin access.
+
+    :param monkeypatch: Native command fixture retaining actual state guards.
+    :param target_file: Synthetic GitLab target whose selection changes after access.
+    :param changed: Host, credential-source reference, or concrete selected token.
+    :param reason: Declared retained-binding refusal reported by the diagnostic.
+    :returns: None; the second selection performs no authentication or API request.
+    """
+    _access, runtime = _access_modules()
+    contexts = import_script_module("lib.python.core.delivery_state")
+    specifications = import_script_module("lib.python.core.abstract.spec")
+    sources = import_script_module("lib.python.access.sources")
+    gitlab = import_script_module("lib.python.access.gitlab")
+    runner, calls = _fake_access_runner(runtime, "success")
+    _patch_provider_commands(monkeypatch, runner)
+    source = sources.CredentialSource(
+        "env:GITLAB_TOKEN", {"GITLAB_TOKEN": "selected-token"}
+    )
+    target = replace(
+        _load_target(target_file, required_surfaces=("gitlab",)),
+        sources=sources.Sources(None, source, None, (), "unit-host"),
+    )
+    state = contexts.DeliveryState(spec=specifications.load_spec())
+    assert gitlab.gitlab_access(target, state=state).status == "PASS"
+    initial_calls = list(calls)
+
+    if changed == "host":
+        selected = replace(
+            target,
+            gitlab=replace(
+                target.require_gitlab(),
+                host="other.example.test",
+                url="https://other.example.test",
+            ),
+        )
+    else:
+        replacement = sources.CredentialSource(
+            "env:GITLAB_ACCESS_TOKEN" if changed == "source" else source.reference,
+            {"GITLAB_ACCESS_TOKEN": "selected-token"}
+            if changed == "source"
+            else {"GITLAB_TOKEN": "replacement-token"},
+        )
+        selected = replace(target, sources=replace(target.sources, gitlab=replacement))
+
+    result = gitlab.gitlab_access(selected, state=state)
+
+    assert result.status == "BLOCKED"
+    assert result.reason == reason
+    assert calls == initial_calls
 
 
 @pytest.mark.parametrize(
@@ -1309,7 +1590,7 @@ def test_gitlab_access_blocks_missing_or_empty_token_file(
         pytest.fail("missing or empty token_file must block before glab runs")
 
     gitlab = import_script_module("lib.python.access.gitlab")
-    monkeypatch.setattr(gitlab, "run_command", fake_run)
+    _patch_provider_commands(monkeypatch, fake_run)
 
     surface = gitlab.gitlab_access(target)
 

@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 
 import pytest
 from conftest import import_script_module
-from test_gitlab_actions import FakeAPI, _list, _plan, _tag_output
+from test_gitlab_actions import FakeAPI, _bound_session, _list, _plan, _tag_output
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
@@ -119,7 +119,7 @@ def test_commit_preserves_native_bytes_and_requires_matching_readback(
         }
     )
 
-    result = REPOSITORY.apply(api, object(), plan, 42)
+    result = REPOSITORY.apply(api, _bound_session(plan), plan, 42)
 
     assert result["verified"] is matches
     writes = [call for call in api.calls if call[0] != "GET"]
@@ -135,7 +135,7 @@ def test_commit_preserves_native_bytes_and_requires_matching_readback(
                 "content_sha256": hashlib.sha256(binary).hexdigest(),
             },
         ]
-        repeated = REPOSITORY.apply(api, object(), plan, 42)
+        repeated = REPOSITORY.apply(api, _bound_session(plan), plan, 42)
         assert repeated["action"] == "NO_OP"
         assert repeated["commit_sha"] == sha
         assert repeated["verified"] is True
@@ -194,8 +194,8 @@ def test_mr_create_reads_exact_iid_and_repeated_creation_has_no_post() -> None:
         }
     )
 
-    created = MERGE_REQUESTS.apply(api, object(), plan, 42)
-    repeated = MERGE_REQUESTS.apply(api, object(), plan, 42)
+    created = MERGE_REQUESTS.apply(api, _bound_session(plan), plan, 42)
+    repeated = MERGE_REQUESTS.apply(api, _bound_session(plan), plan, 42)
 
     assert created == {
         "action": "APPLIED",
@@ -232,14 +232,14 @@ def test_mr_milestone_assignment_reads_back_before_success(matches: bool) -> Non
         }
     )
 
-    result = MERGE_REQUESTS.apply(api, object(), plan, 42)
+    result = MERGE_REQUESTS.apply(api, _bound_session(plan), plan, 42)
 
     assert result["verified"] is matches
     assert [call for call in api.calls if call[0] != "GET"] == [
         ("PUT", endpoint, {"milestone_id": 113})
     ]
     if matches:
-        repeated = MERGE_REQUESTS.apply(api, object(), plan, 42)
+        repeated = MERGE_REQUESTS.apply(api, _bound_session(plan), plan, 42)
         assert repeated["action"] == "NO_OP"
         assert repeated["milestone_id"] == 113
         assert [call[0] for call in api.calls].count("PUT") == 1

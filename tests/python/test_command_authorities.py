@@ -14,9 +14,14 @@ from typing import TYPE_CHECKING, Optional
 from unittest.mock import Mock
 
 import pytest
-from conftest import import_script_module
+from conftest import (
+    authenticated_gitlab_session,
+    authenticated_kubernetes_service,
+    import_script_module,
+)
 
 if TYPE_CHECKING:
+    from lib.python.core.delivery_state import DeliveryState
     from lib.python.core.json_types import JSONObject
     from lib.python.core.target import Target
 
@@ -119,22 +124,37 @@ def test_ceph_collector_uses_only_kubernetes_authority(
         "resolve_skill_identity",
         lambda _revision: _skill_identity(),
     )
-    monkeypatch.setattr(
-        access,
-        "kubernetes_access",
-        lambda _target, *, cilium=False: shared.Surface(
+
+    def cluster_access(
+        target: Target, *, cilium: bool = False, state: DeliveryState
+    ) -> shared.Surface:
+        """Retain the fixture identity in the invocation used by the collector.
+
+        :param target: Selected cluster and frozen credential source.
+        :param cilium: Optional health probe selector unused by the Ceph fixture.
+        :param state: Actual CLI invocation propagated to the selected provider.
+        :returns: Existing successful provider access receipt.
+        """
+        authenticated_kubernetes_service(target, state=state)
+        return shared.Surface(
             "kubernetes", "PASS", "unit-admin", "unit -> api", ["live-read"], None
-        ),
-    )
+        )
+
+    monkeypatch.setattr(access, "kubernetes_access", cluster_access)
     seen = []
 
-    def collect_ceph_cluster(target: Target, _args: Namespace) -> JSONObject:
+    def collect_ceph_cluster(
+        target: Target, _args: Namespace, *, state: DeliveryState
+    ) -> JSONObject:
         """Capture the target passed to a fake Ceph collector.
 
         :param target: Bound target whose active surfaces are asserted by the test.
         :param _args: Collector options unused by this fake.
+        :param state: Shared CLI invocation whose identity guard remains active.
         :returns: Minimal successful Ceph report.
         """
+        kubernetes = import_script_module("lib.python.core.kubernetes.kubernetes")
+        kubernetes.KubernetesService(target, state=state).require_access()
         seen.append(target)
         return {"kind": "ceph_cluster", "status": "PASS", "records": [], "errors": []}
 
@@ -179,21 +199,37 @@ def test_gitlab_job_does_not_require_cluster_or_github(
         "resolve_skill_identity",
         lambda _revision: _skill_identity(),
     )
-    monkeypatch.setattr(
-        access,
-        "gitlab_access",
-        lambda _target: shared.Surface(
-            "gitlab", "PASS", "unit-admin", "gitlab.example.test", ["live-read"], None
-        ),
-    )
 
-    def collect_gitlab_job(target: Target, _args: Namespace) -> JSONObject:
+    def gitlab_access(target: Target, *, state: DeliveryState) -> shared.Surface:
+        """Initialize only the selected native GitLab identity.
+
+        :param target: Selected GitLab authority with frozen credentials.
+        :param state: CLI invocation later supplied to the job collector.
+        :returns: Existing successful GitLab access receipt.
+        """
+        sessions = import_script_module("lib.python.core.cli_api")
+        state.gitlab_session = authenticated_gitlab_session(
+            sessions.ReadSession(target.require_gitlab().host, {}, "fixture:gitlab"),
+            state,
+        )
+        return shared.Surface(
+            "gitlab", "PASS", "unit-admin", "gitlab.example.test", ["live-read"], None
+        )
+
+    monkeypatch.setattr(access, "gitlab_access", gitlab_access)
+
+    def collect_gitlab_job(
+        target: Target, _args: Namespace, *, state: DeliveryState
+    ) -> JSONObject:
         """Assert non-GitLab authorities are absent from the collector target.
 
         :param target: Bound target selected for the GitLab job.
         :param _args: Collector options unused by this fake.
+        :param state: Same invocation whose selected GitLab identity was initialized.
         :returns: Minimal successful GitLab job report.
         """
+        gitlab = import_script_module("lib.python.access.gitlab")
+        gitlab.require_gitlab_access(state, state.gitlab_session)
         assert target.github is None and target.kubernetes is None
         return {"kind": "gitlab_job", "status": "PASS", "records": [], "errors": []}
 

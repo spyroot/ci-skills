@@ -16,7 +16,7 @@ from types import MappingProxyType, ModuleType
 from typing import TYPE_CHECKING, NoReturn, Optional, TypeAlias, Union
 
 import pytest
-from conftest import import_script_module
+from conftest import authenticated_kubernetes_service, import_script_module
 
 ACCESS_SOURCES: ModuleType = import_script_module("lib.python.access.sources")
 ACTION: ModuleType = import_script_module("lib.python.core.gitlab.gitlab_actions")
@@ -195,7 +195,7 @@ def test_kubernetes_apply_serializes_nested_immutable_document(
     :param monkeypatch: Pytest fixture replacing the native Kubernetes command.
     :returns: None; assertions validate serialization and temporary-file cleanup.
     """
-    service = KUBERNETES.KubernetesService(_kubernetes_target())
+    service = authenticated_kubernetes_service(_kubernetes_target())
     captured: MutableMapping[str, Union[str, bool]] = {}
 
     def command(*args: str, openshift: bool = False) -> CommandResult:
@@ -249,7 +249,7 @@ def test_kubernetes_read_returns_none_for_empty_successful_response(
     :param monkeypatch: Pytest fixture replacing the native Kubernetes command.
     :returns: None; assertions validate ignored empty read-back output.
     """
-    service = KUBERNETES.KubernetesService(_kubernetes_target())
+    service = authenticated_kubernetes_service(_kubernetes_target())
     monkeypatch.setattr(service, "command", lambda *_args: _command_result(""))
 
     assert service.read("configmap", "unit", "default") is None
@@ -264,7 +264,7 @@ def test_kubernetes_conditional_delete_transmits_uid_and_never_deletes_replaceme
     :param outcome: Successful absence, API precondition conflict, or replacement read-back.
     :param monkeypatch: Replace only native command and read-back provider boundaries.
     """
-    service = KUBERNETES.KubernetesService(_kubernetes_target())
+    service = authenticated_kubernetes_service(_kubernetes_target())
     deletes: list[tuple[tuple[str, ...], Optional[bytes]]] = []
     reads: list[tuple[str, str, str]] = []
 
@@ -398,7 +398,7 @@ def test_kubernetes_read_and_apply_classify_invalid_provider_responses(
     :param reason: Stable ``KubernetesError`` reason expected by the test.
     :returns: None; assertions validate the shared object-response boundary.
     """
-    service = KUBERNETES.KubernetesService(_kubernetes_target())
+    service = authenticated_kubernetes_service(_kubernetes_target())
     monkeypatch.setattr(
         service,
         "command",

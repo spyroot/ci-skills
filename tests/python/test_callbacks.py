@@ -16,13 +16,21 @@ import sys
 from argparse import Namespace
 from collections.abc import Iterable, Mapping, MutableMapping, MutableSequence, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import TYPE_CHECKING, Optional, TypeAlias, Union
 
 import pytest
-from conftest import SKILL_ROOT, import_script_module
+from conftest import (
+    SKILL_ROOT,
+    authenticated_gitlab_session,
+    authenticated_kubernetes_service,
+    bind_github_fixture,
+    bind_harbor_fixture,
+    bind_kubernetes_fixture,
+    import_script_module,
+)
 
 ACTION = import_script_module("lib.python.core.gitlab.gitlab_actions")
 CALLBACKS = import_script_module("lib.python.core.abstract.callback")
@@ -36,6 +44,7 @@ ABSTRACT_EXECUTOR = import_script_module("lib.python.core.abstract.executor")
 EXECUTOR = import_script_module("lib.python.core.executor")
 GITLAB_CALLBACK = import_script_module("lib.python.core.gitlab.callback")
 GITHUB_RUNNER = import_script_module("lib.python.core.github.runner")
+GITHUB = import_script_module("lib.python.core.github.github")
 GITLAB_SESSION = import_script_module("lib.python.core.gitlab.gitlab_session")
 JSON_TYPES = import_script_module("lib.python.core.json_types")
 KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
@@ -48,6 +57,8 @@ STATUS = import_script_module("lib.python.sys.status")
 SKILL_ACTION = import_script_module("lib.python.core.abstract.skill_action")
 SKILL_PLUGIN_TYPE = import_script_module("lib.python.core.abstract.skill_plugin_type")
 SKILL_STATE = import_script_module("lib.python.core.abstract.skill_state")
+PROVIDER_RUNTIME = import_script_module("lib.python.core.abstract.provider_runtime")
+PROVIDER_SPEC = import_script_module("lib.python.core.abstract.spec")
 TARGET = import_script_module("lib.python.core.target")
 TOOLBOX = import_script_module("lib.python.core.toolbox")
 TOOLBOX_ACTIONS = import_script_module("lib.python.core.toolbox_actions")
@@ -595,7 +606,7 @@ def test_toolbox_build_starts_by_name_then_reads_build_as_json() -> None:
     )
     callback = TOOLBOX.BuildToolbox(action=action)
     state = DELIVERY_STATE.DeliveryState()
-    state.kubernetes = service
+    bind_kubernetes_fixture(state, service)
     callback.bind(state)
 
     result = callback.run()
@@ -636,10 +647,614 @@ def test_abstract_hooks_are_required_but_callback_defaults_are_optional() -> Non
     """
     with pytest.raises(TypeError):
         CALLBACKS.AbstractCallback(RecordedAction("abstract"))
+    with pytest.raises(TypeError, match="whoami"):
+        CALLBACKS.Callback(RecordedAction("missing-identity-hook"))
 
     result = _run_callbacks(CALLBACKS.LocalCallback(RecordedAction("default")))
 
     assert result == {}
+
+
+def test_whoami_precedes_every_callback_lifecycle() -> None:
+    """Check identity before the first operational hook of each serial callback.
+
+    :returns: None; assertions prove ordering through recorded observable hooks.
+    """
+    events: MutableSequence[str] = []
+
+    class IdentityRecorded(Recorded):
+        """Record the identity prerequisite beside the existing lifecycle events."""
+
+        def whoami(self) -> bool:
+            """Confirm identity before this callback's operation starts.
+
+            :returns: True after recording the prerequisite.
+            """
+            self.events.append(f"{self.name}.whoami")
+            return True
+
+    _run_callbacks(
+        [IdentityRecorded(events, "first"), IdentityRecorded(events, "second")]
+    )
+
+    assert events == [
+        "first.whoami",
+        "first.collect",
+        "first.run",
+        "first.update",
+        "second.whoami",
+        "second.collect",
+        "second.run",
+        "second.update",
+        "second.cleanup",
+        "first.cleanup",
+    ]
+
+
+def test_whoami_requires_confirmation() -> None:
+    """A rejected identity cannot start an operational hook.
+
+    :returns: None; assertions prove neither this callback nor later work executes.
+    """
+    events: MutableSequence[str] = []
+
+    class InvalidIdentity(Recorded):
+        """Reject the identity prerequisite at the callback contract boundary."""
+
+        def whoami(self) -> bool:
+            """Supply rejected identity evidence to the real executor.
+
+            :returns: False because the prerequisite failed.
+            """
+            return False
+
+    with pytest.raises(ValueError, match="identity_preflight_failed"):
+        _run_callbacks([InvalidIdentity(events, "invalid"), Recorded(events, "later")])
+
+    assert events == []
+
+
+@pytest.mark.parametrize(
+    "provider",
+    (
+        SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
+        SKILL_PLUGIN_TYPE.SkillPluginType.GITHUB,
+        SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES,
+        SKILL_PLUGIN_TYPE.SkillPluginType.HARBOR,
+    ),
+)
+@pytest.mark.parametrize("observed_role", (None, "developer"))
+def test_whoami_blocks_unset_or_wrong_role_before_operations(
+    provider: SKILL_PLUGIN_TYPE.SkillPluginType,
+    observed_role: str | None,
+) -> None:
+    """A dependent operation cannot initialize or accept insufficient access.
+
+    :param provider: Provider whose retained role is checked before operations.
+    :param observed_role: Missing prerequisite or insufficient observed provider role.
+    :returns: None; assertions prove no operation or later callback was entered.
+    """
+    events: MutableSequence[str] = []
+    state = CONTEXT.ExecutionContext(spec={provider.value: {"role": "admin"}})
+    if observed_role is not None:
+        observation = replace(state.provider_runtime(provider), role=observed_role)
+        state.establish_runtime(provider, observation)
+
+    class Guarded(Recorded):
+        """Consume retained identity without populating missing prerequisites."""
+
+        def whoami(self) -> bool:
+            """Check the runtime against the caller's declared role.
+
+            :returns: True when retained access satisfies the declaration.
+            :raises ValueError: Identity was never set or has the wrong role.
+            """
+            expected = self.state.provider_spec(provider)["role"]
+            assert isinstance(expected, str)
+            self.state.require_runtime(provider, expected)
+            return True
+
+    reason = (
+        f"{provider.value}_identity_preflight_missing"
+        if observed_role is None
+        else f"{provider.value}_required_role_missing:admin"
+    )
+    with pytest.raises(ValueError) as raised:
+        _run_callbacks([Guarded(events, "guarded"), Recorded(events, "later")], state)
+
+    expected_error = (
+        PROVIDER_RUNTIME.ProviderRoleError
+        if observed_role is None
+        else PROVIDER_RUNTIME.ProviderRoleMismatch
+    )
+    assert type(raised.value) is expected_error
+    assert isinstance(raised.value, PROVIDER_RUNTIME.ProviderRoleError)
+    assert str(raised.value) == reason
+    assert events == []
+    assert state.provider_runtime(provider).role == observed_role
+
+
+def test_serial_and_nested_executors_reuse_one_provider_observation() -> None:
+    """Nested workflows retain the invocation's declaration and write-once identity.
+
+    :returns: None; assertions prove one initializer and three guarded consumers.
+    """
+    state = CONTEXT.ExecutionContext()
+    events: MutableSequence[str] = []
+    provider = SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB
+    observation = PROVIDER_RUNTIME.ProviderRuntime(
+        role="admin", identity="unit-admin", authority="https://gitlab.example.test"
+    )
+    declaration = {"gitlab": {"role": "admin"}}
+
+    class Initialize(Recorded):
+        """Represent the designated authentication callback in this executor test."""
+
+        def whoami(self) -> bool:
+            """Establish the one observed identity used by later callbacks.
+
+            :returns: True after the invocation's observation is established.
+            """
+            events.append("identity.lookup")
+            self.state.establish_runtime(provider, observation)
+            return True
+
+    class Consume(Recorded):
+        """Read the same retained observation without another identity lookup."""
+
+        def whoami(self) -> bool:
+            """Validate the provider role using the shared declaration.
+
+            :returns: True when the retained observation is the initialized object.
+            """
+            expected = self.state.provider_spec(provider)["role"]
+            assert isinstance(expected, str)
+            assert self.state.require_runtime(provider, expected) is observation
+            return True
+
+    class Nested(Consume):
+        """Execute a consumer through a nested executor sharing this invocation."""
+
+        def run(self) -> JSONObject:
+            """Run another consumer without supplying a replacement declaration.
+
+            :returns: Nested callback result.
+            """
+            return _run_callbacks(Consume(events, "nested"), context=self.state)
+
+    executor = EXECUTOR.WorkflowExecutor(
+        context=state,
+        callbacks=CALLBACK_COLLECTIONS.Callbacks(
+            [
+                Initialize(events, "auth"),
+                Consume(events, "first"),
+                Nested(events, "outer"),
+            ]
+        ),
+        spec=declaration,
+    )
+    executor.run()
+
+    assert events.count("identity.lookup") == 1
+    assert "first.run" in events
+    assert "nested.run" in events
+    assert state.spec == declaration
+    assert state.gitlab_runtime is observation
+    with pytest.raises(ValueError, match="gitlab_runtime_already_established"):
+        state.establish_runtime(provider, observation)
+    assert CONTEXT.ExecutionContext().gitlab_runtime.role is None
+
+
+@pytest.mark.parametrize(
+    "provider",
+    (
+        SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
+        SKILL_PLUGIN_TYPE.SkillPluginType.GITHUB,
+        SKILL_PLUGIN_TYPE.SkillPluginType.KUBERNETES,
+        SKILL_PLUGIN_TYPE.SkillPluginType.HARBOR,
+    ),
+)
+def test_direct_runtime_guard_rejects_unset_role(
+    provider: SKILL_PLUGIN_TYPE.SkillPluginType,
+) -> None:
+    """Library callers cannot substitute configuration readiness for observed access.
+
+    :param provider: Provider whose null runtime must block a direct library guard.
+    :returns: None; assertions prove no state was initialized by the check.
+    """
+    state = CONTEXT.ExecutionContext()
+    state.plugin_ready[provider] = True
+
+    with pytest.raises(ValueError, match="identity_preflight_missing"):
+        state.require_runtime(provider, "admin")
+
+    assert state.provider_runtime(provider).role is None
+
+
+@pytest.mark.parametrize("observed_role", (None, "developer"))
+def test_gitlab_callback_direct_access_requires_retained_role(
+    observed_role: str | None,
+) -> None:
+    """Bypassing the executor cannot expose the provider service without access.
+
+    :param observed_role: Missing identity or an insufficient native GitLab role.
+    :returns: None; both direct service access and the identity hook must reject it.
+    """
+    state = GITLAB_CALLBACK.GitLabState(spec={"gitlab": {"role": "admin"}})
+    session = API_READ.ReadSession(
+        "gitlab.example.test",
+        {"GITLAB_TOKEN": "fixture-gitlab-token"},
+        "fixture:gitlab",
+        invocation=state,
+    )
+    if observed_role is not None:
+        session = authenticated_gitlab_session(session, state)
+        state.gitlab_runtime = replace(state.gitlab_runtime, role=observed_role)
+    state.gitlab = SimpleNamespace(session=session)
+    state.configured_session = session
+    callback = GITLAB_CALLBACK.GitlabCallback(RecordedAction("direct"))
+    callback.bind(state)
+    reason = "identity_preflight_missing|required_role_missing:admin"
+
+    with pytest.raises(ValueError, match=reason):
+        callback.whoami()
+    with pytest.raises(ValueError, match=reason):
+        _ = callback.gitlab
+
+    assert state.gitlab_runtime.role == observed_role
+
+
+def test_restored_state_cannot_reuse_provider_authorization(tmp_path: Path) -> None:
+    """Persisted execution state cannot authorize a new invocation without whoami.
+
+    :param tmp_path: Isolated trusted state file created by this test.
+    :returns: None; assertions prove all restored provider roles return to null.
+    """
+    state = CONTEXT.ExecutionContext(spec={"gitlab": {"role": "admin"}})
+    provider = SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB
+    state.establish_runtime(provider, PROVIDER_RUNTIME.ProviderRuntime(role="admin"))
+    path = tmp_path / "state.pickle"
+    state.save_state_to_file(str(path))
+
+    restored = CONTEXT.ExecutionContext.load_state_from_file(str(path))
+
+    assert restored.spec == state.spec
+    assert restored.gitlab_runtime.role is None
+    assert restored.github_runtime.role is None
+    assert restored.kubernetes_runtime.cluster_role is None
+    assert restored.harbor_runtime.role is None
+    with pytest.raises(ValueError, match="gitlab_identity_preflight_missing"):
+        restored.require_runtime(provider, "admin")
+
+
+def test_executor_requires_default_spec_but_accepts_explicit_declaration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Default-file absence fails before execution; a supplied declaration is used.
+
+    :param monkeypatch: Redirect the default declaration to an empty package root.
+    :param tmp_path: Empty package root with no installed specification.
+    :returns: None; assertions prove required presence and explicit caller override.
+    """
+    monkeypatch.setattr(PROVIDER_SPEC, "SKILL_ROOT", tmp_path)
+    events: MutableSequence[str] = []
+    with pytest.raises(FileNotFoundError):
+        _callback_executor(Recorded(events, "missing"))
+    assert events == []
+
+    state = CONTEXT.ExecutionContext()
+    declaration = {"gitlab": {"role": "admin", "future_access": {"write": True}}}
+    executor = EXECUTOR.WorkflowExecutor(
+        context=state,
+        callbacks=CALLBACK_COLLECTIONS.Callbacks(Recorded(events, "explicit")),
+        spec=declaration,
+    )
+    executor.run()
+
+    assert state.spec == declaration
+    assert "explicit.run" in events
+
+
+@pytest.mark.parametrize("admin", (True, False))
+def test_github_initializer_reads_native_identity_once_and_enforces_repo_role(
+    admin: bool,
+) -> None:
+    """Reuse native repository access without interpreting it as token scope proof.
+
+    :param admin: Administrator permission returned for the selected repository.
+    :returns: None; assertions prove one native lookup and blocked downstream work.
+    """
+    state = CONTEXT.ExecutionContext(spec={"github": {"role": "admin"}})
+    session = GITHUB.ReadSession(
+        host="github.example.test",
+        environment={"GH_TOKEN": "unit-token"},
+        credential_source="fixture",
+        invocation=state,
+        repository="unit/repo",
+    )
+    lookups: MutableSequence[str] = []
+    operations: MutableSequence[str] = []
+
+    class NativeGitHub(GITHUB.GitHubAPIClient):
+        """Return native identity documents at the provider transport boundary."""
+
+        def _identity_documents(
+            self, selected: GITHUB.ReadSession, repository: str
+        ) -> tuple[JSONValue, str, JSONValue]:
+            """Serve the selected user and repository without external access.
+
+            :param selected: Credential-bound native session.
+            :param repository: Exact selected repository.
+            :returns: Native user, unreported token scopes, and repository permissions.
+            """
+            assert selected is session
+            assert repository == "unit/repo"
+            lookups.extend(("user", "repos/unit/repo"))
+            return (
+                {"id": 17, "login": "unit-admin"},
+                "",
+                {
+                    "id": 42,
+                    "full_name": repository,
+                    "permissions": {"admin": admin, "pull": True},
+                },
+            )
+
+    api = NativeGitHub()
+    for _ in range(2):
+        if admin:
+            GITHUB.establish_github_identity(state, session, "unit/repo", api)
+            operations.append("operation")
+        else:
+            with pytest.raises(ValueError, match="github_required_role_missing:admin"):
+                GITHUB.establish_github_identity(state, session, "unit/repo", api)
+
+    assert lookups == ["user", "repos/unit/repo"]
+    assert len(operations) == (2 if admin else 0)
+    assert state.github_runtime.token_scopes is None
+    assert state.github_runtime.role == ("admin" if admin else "read")
+
+
+def test_github_initializer_rejects_absent_repository_before_native_requests() -> None:
+    """Host selection alone cannot establish the declared repository role.
+
+    :returns: None; native requests remain absent and identity stays unestablished.
+    """
+    state = CONTEXT.ExecutionContext(spec={"github": {"role": "admin"}})
+    session = GITHUB.ReadSession(
+        host="github.example.test",
+        environment={"GH_TOKEN": "fixture-token"},
+        credential_source="fixture",
+        invocation=state,
+    )
+    requests: MutableSequence[tuple[str, ...]] = []
+
+    def native(argv: Sequence[str], **_kwargs: object) -> RUNTIME.CommandResult:
+        """Reject every process request when repository selection is absent.
+
+        :param argv: Native command that must remain undispatched.
+        :param _kwargs: Unused process settings supplied by the real API client.
+        :returns: This fixture never returns a provider response.
+        :raises Failed: An incomplete repository selection reached native transport.
+        """
+        requests.append(tuple(argv))
+        pytest.fail("missing repository reached native transport")
+
+    with pytest.raises(ValueError, match="github_repository_required"):
+        GITHUB.establish_github_identity(
+            state, session, "", GITHUB.GitHubAPIClient(command=native)
+        )
+
+    assert requests == []
+    assert state.github_runtime.role is None
+
+
+@pytest.mark.parametrize("admin", (True, False))
+def test_harbor_initializer_reads_native_admin_once_before_operations(
+    admin: bool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Retain native Harbor administration across services in one invocation.
+
+    :param admin: Native current-user system administrator flag.
+    :param monkeypatch: Replace only Harbor's external current-user API transport.
+    :param tmp_path: Isolated unused native-authfile location.
+    :returns: None; assertions prove one identity read and local subsequent guards.
+    """
+    state = CONTEXT.ExecutionContext(spec={"harbor": {"role": "admin"}})
+    target = TARGET.HarborTarget(
+        url="https://harbor.example.test", host="harbor.example.test", project="unit"
+    )
+    credential = REGISTRY.RegistryCredential("unit-admin", "fixture-secret", "fixture")
+    requests: MutableSequence[tuple[str, str]] = []
+    operations: MutableSequence[str] = []
+
+    class NativeHarbor:
+        """Return native current-user fields at the HTTP request boundary."""
+
+        def request(self, method: str, endpoint: str) -> JSONObject:
+            """Record the one expected identity request without network access.
+
+            :param method: Native HTTP verb.
+            :param endpoint: Fixed current-user API endpoint.
+            :returns: Native username and explicit administrator flag.
+            """
+            requests.append((method, endpoint))
+            return {"username": "unit-admin", "sysadmin_flag": admin}
+
+    monkeypatch.setattr(REGISTRY.HarborService, "_api", lambda _self: NativeHarbor())
+    for _ in range(2):
+        service = REGISTRY.HarborService(
+            target, credential, tmp_path / "auth", 30, state
+        )
+        if admin:
+            service._establish_identity()
+            service.require_access()
+            operations.append("operation")
+        else:
+            with pytest.raises(ValueError, match="harbor_required_role_missing:admin"):
+                service._establish_identity()
+
+    assert requests == [("GET", "api/v2.0/users/current")]
+    assert len(operations) == (2 if admin else 0)
+    assert state.harbor_runtime.role == ("admin" if admin else "user")
+
+
+@pytest.mark.parametrize("admin", (True, False))
+def test_kubernetes_auth_and_dependent_callbacks_observe_identity_once(
+    admin: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Use real authentication hooks and native permission probes before callbacks.
+
+    :param admin: Whether the native authorization probes permit administration.
+    :param monkeypatch: Replace only the bounded native Kubernetes process transport.
+    :returns: None; assertions prove one identity read and permission-first execution.
+    """
+    sources = import_script_module("lib.python.access.sources")
+    target = TARGET.Target(
+        github=None,
+        gitlab=None,
+        kubernetes=TARGET.KubernetesTarget(
+            context="unit-context",
+            server="https://api.cluster.example.test:6443",
+            kubeconfig=None,
+        ),
+        active_surfaces=("kubernetes",),
+        sources=sources.Sources(
+            github=None,
+            gitlab=None,
+            kubernetes=sources.CredentialSource("fixture:kubernetes", {}),
+            kubeconfig_files=(),
+            execution_host="unit-host",
+        ),
+    )
+    calls: MutableSequence[tuple[str, ...]] = []
+    operations: MutableSequence[str] = []
+
+    def native(argv: Sequence[str], **_kwargs: object) -> RUNTIME.CommandResult:
+        """Serve native context, identity, and effective authorization responses.
+
+        :param argv: Real service-generated native arguments.
+        :param _kwargs: Existing process limits and private environment.
+        :returns: Deterministic native output at the process boundary.
+        """
+        args = tuple(argv[3:])
+        calls.append(args)
+        if args[:2] == ("config", "view"):
+            value = {
+                "contexts": [{"name": "unit-context", "context": {"cluster": "unit"}}],
+                "clusters": [
+                    {"name": "unit", "cluster": {"server": target.kubernetes.server}}
+                ],
+            }
+            output = json.dumps(value)
+        elif args[:2] == ("auth", "whoami"):
+            output = json.dumps({"status": {"userInfo": {"username": "unit-admin"}}})
+        else:
+            assert args[:2] == ("auth", "can-i")
+            output = "yes\n" if admin else "no\n"
+        denied = args[:2] == ("auth", "can-i") and not admin
+        return RUNTIME.CommandResult(tuple(argv), 1 if denied else 0, output, "")
+
+    class Operation(KUBERNETES.K8SCallback[RecordedAction]):
+        """Consume the initialized Kubernetes service through the actual base guard."""
+
+        def run(self) -> JSONObject:
+            """Record downstream work only after inherited identity checks pass.
+
+            :returns: Empty operation evidence.
+            """
+            _ = self.kubernetes
+            operations.append(self.action.name)
+            return {}
+
+    monkeypatch.setattr(KUBERNETES, "run_command_bounded", native)
+    state = DELIVERY_STATE.DeliveryState()
+    callbacks = [
+        KUBERNETES.K8SAuth(target),
+        Operation(RecordedAction("first")),
+        Operation(RecordedAction("second")),
+    ]
+    if admin:
+        _run_callbacks(callbacks, state)
+    else:
+        with pytest.raises(ValueError):
+            _run_callbacks(callbacks, state)
+
+    assert calls.count(("auth", "whoami", "-o", "json")) == 1
+    assert operations == (["first", "second"] if admin else [])
+
+
+def test_kubernetes_raw_service_binds_before_identity_but_whoami_rejects_it() -> None:
+    """Configuration binding must leave identity enforcement to the lifecycle hook.
+
+    :returns: None; binding preserves a null identity and whoami rejects it.
+    """
+    configured = DELIVERY_STATE.DeliveryState()
+    bind_kubernetes_fixture(configured, SimpleNamespace())
+    state = DELIVERY_STATE.DeliveryState(spec=configured.spec)
+    service = KUBERNETES.KubernetesService(configured.kubernetes.target, state=state)
+    state.kubernetes = service
+    callback = KUBERNETES.K8SCallback(RecordedAction("prebound"))
+
+    CALLBACK_COLLECTIONS.Callbacks([callback]).bind(state)
+
+    assert state.kubernetes_target is service.target
+    assert callback.is_configured()
+    assert state.kubernetes_runtime.role is None
+    with pytest.raises(ValueError, match="kubernetes_identity_preflight_missing"):
+        callback.whoami()
+    assert state.records == []
+
+
+@pytest.mark.parametrize("harbor_role", (None, "user", "admin"))
+def test_registry_toolbox_requires_both_retained_provider_roles_without_native_reads(
+    harbor_role: Optional[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Valid Kubernetes access cannot authorize a missing or nonadmin Harbor role.
+
+    :param harbor_role: Absent, insufficient, or valid retained registry role.
+    :param monkeypatch: Refuse native identity rechecks after fixture initialization.
+    :returns: None; both guards accept valid roles and reject incomplete registry access.
+    """
+    state = DELIVERY_STATE.DeliveryState()
+    bind_kubernetes_fixture(state, SimpleNamespace())
+    bind_harbor_fixture(state, SimpleNamespace())
+    state.harbor_runtime = replace(state.harbor_runtime, role=harbor_role)
+    kubernetes_observation = state.kubernetes_runtime
+    harbor_observation = state.harbor_runtime
+    callback = TOOLBOX_ACTIONS.RegistryToolboxCallback(
+        TOOLBOX_ACTIONS.WorkflowAction(Namespace())
+    )
+
+    def native(*_args: object, **_kwargs: object) -> None:
+        """Fail if local retained-role guards perform another provider request.
+
+        :param _args: Unexpected native transport arguments.
+        :param _kwargs: Unexpected native transport options.
+        :raises Failed: Guard validation attempted a native identity recheck.
+        """
+        pytest.fail("retained provider guard attempted a native recheck")
+
+    monkeypatch.setattr(KUBERNETES.KubernetesService, "_command", native)
+    monkeypatch.setattr(REGISTRY.HarborService, "_api", native)
+    CALLBACK_COLLECTIONS.Callbacks([callback]).bind(state)
+    assert callback.is_configured()
+
+    for _ in range(2):
+        if harbor_role == "admin":
+            assert callback.whoami() is True
+        else:
+            reason = (
+                "harbor_identity_preflight_missing"
+                if harbor_role is None
+                else "harbor_required_role_missing:admin"
+            )
+            with pytest.raises(ValueError, match=reason):
+                callback.whoami()
+
+    assert state.kubernetes_runtime is kubernetes_observation
+    assert state.harbor_runtime is harbor_observation
+    assert state.records == []
 
 
 def test_executor_orders_hooks_and_passes_typed_callback_results() -> None:
@@ -735,8 +1350,14 @@ def test_incomplete_gitlab_result_stops_later_callbacks(record: JSONObject) -> N
             return self.state.result
 
     later = Recorded(events, "later")
-    state = GITLAB_CALLBACK.GitLabState()
-    state.gitlab = SimpleNamespace(session=object())
+    state = GITLAB_CALLBACK.GitLabState(spec={"gitlab": {"role": "admin"}})
+    session = authenticated_gitlab_session(
+        API_READ.ReadSession(
+            "gitlab.example.test", {}, "fixture:gitlab", invocation=state
+        ),
+        state,
+    )
+    state.gitlab = SimpleNamespace(session=session)
     _run_callbacks(
         [ResultCallback(RecordedAction("result")), later],
         context=state,
@@ -990,7 +1611,7 @@ def test_wait_build_fails_terminal_phase_without_sleep_and_traces_logs(
             kubeconfig=None,
         ),
     )
-    service = KUBERNETES.KubernetesService(target=target, timeout=30)
+    service = authenticated_kubernetes_service(target=target, timeout=30)
     monkeypatch.setattr(
         service,
         "read",
@@ -1063,7 +1684,7 @@ def test_wait_build_complete_does_not_capture_logs(
             kubeconfig=None,
         ),
     )
-    service = KUBERNETES.KubernetesService(target=target, timeout=30)
+    service = authenticated_kubernetes_service(target=target, timeout=30)
     build = {"status": {"phase": "Complete"}}
     monkeypatch.setattr(
         service,
@@ -1176,7 +1797,7 @@ def test_harbor_push_failure_cleanup_restores_prior_tag_or_removes_new_tag(
     events: MutableSequence[str] = []
     service = HarborService()
     context = DELIVERY_STATE.DeliveryState()
-    context.harbor = service
+    bind_harbor_fixture(context, service)
     context.source_image = "source.example/image@sha256:" + "a" * 64
     push = REGISTRY.HarborPush(action=REGISTRY.PushAction("toolbox", "smoke"))
     downstream = Recorded(
@@ -1438,8 +2059,8 @@ def test_harbor_build_failure_cleanup_restores_candidate_tag(
     workflow.spec = Spec()
     workflow.resolved_base = "registry.example.test/base@sha256:" + "b" * 64
     context = DELIVERY_STATE.DeliveryState()
-    context.harbor = harbor
-    context.kubernetes = KubernetesService()
+    bind_harbor_fixture(context, harbor)
+    bind_kubernetes_fixture(context, KubernetesService())
     build = TOOLBOX_ACTIONS.HarborBuild(workflow=workflow)
     build._resource_set = Resources()
     downstream = Recorded(
@@ -1613,7 +2234,7 @@ def test_github_runtime_cleanup_requires_the_original_runner_identity_and_labels
         action=RUNNER_CORE.RunnerAction("unit", "runner", "/runner", (), 30)
     )
     context = DELIVERY_STATE.DeliveryState(failed=True)
-    context.github = service
+    bind_github_fixture(context, service)
     runtime.bind(context)
     runtime.collect()
 
@@ -1676,9 +2297,8 @@ def test_read_api_chains_nested_empty_object_payload() -> None:
     )
     context = API_READ.ApiReadState()
     client = Client()
-    context.service = API_READ.ApiReadService(
-        client, API_READ.ReadSession("github.example.test", {}, "fixture")
-    )
+    bind_github_fixture(context, client)
+    context.service = API_READ.ApiReadService(client, context.github_session)
     read = API_READ.ReadAPI(action)
     dependent = Dependent(RecordedAction("dependent"))
 
@@ -1719,9 +2339,9 @@ def test_read_api_preserves_false_scalar_and_rejects_null_selection() -> None:
             return '{"enabled":false,"empty":null}'
 
     context = API_READ.ApiReadState()
-    context.service = API_READ.ApiReadService(
-        Client(), API_READ.ReadSession("github.example.test", {}, "fixture")
-    )
+    client = Client()
+    bind_github_fixture(context, client)
+    context.service = API_READ.ApiReadService(client, context.github_session)
     false_read = API_READ.ReadAPI(
         API_READ.ApiReadAction(
             provider=API_READ.GitProvider.GITHUB,
@@ -1748,6 +2368,68 @@ def test_read_api_preserves_false_scalar_and_rejects_null_selection() -> None:
         EXECUTOR.WorkflowExecutor(
             context=context, callbacks=CALLBACK_COLLECTIONS.Callbacks(null_read)
         ).run()
+
+
+@pytest.mark.parametrize("provider", tuple(API_READ.GitProvider))
+@pytest.mark.parametrize("failure_kind", ("mismatch", "missing", "untyped"))
+def test_api_binding_maps_only_typed_role_mismatch_to_blocked(
+    provider: API_READ.GitProvider,
+    failure_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Classify role failures by their shared type rather than diagnostic text.
+
+    :param provider: Git provider selected by the bound read callback.
+    :param failure_kind: Typed mismatch, missing observation, or misleading text.
+    :param monkeypatch: Replace only the identity initializer's failure boundary.
+    :returns: None; typed mismatches retain exit 69 and other failures propagate.
+    """
+    if failure_kind == "mismatch":
+        failure = PROVIDER_RUNTIME.ProviderRoleMismatch("declared role not observed")
+    elif failure_kind == "missing":
+        failure = PROVIDER_RUNTIME.ProviderRoleError(
+            f"{provider.value}_identity_preflight_missing"
+        )
+    else:
+        failure = ValueError(f"{provider.value}_required_role_missing:admin")
+
+    def initialize(*_args: object) -> None:
+        """Raise the selected initializer failure without contacting a provider.
+
+        :param *_args: Invocation, session, repository, and client inputs.
+        :returns: None; the configured failure prevents initialization.
+        :raises ValueError: Configured provider-role or unrelated validation failure.
+        """
+        raise failure
+
+    monkeypatch.setattr(API_READ, f"establish_{provider.value}_identity", initialize)
+    state = API_READ.ApiReadState()
+    state.selection = API_READ.ApiProviderSelection(
+        provider, f"{provider.value}.example.test", repository="unit/repo"
+    )
+    state.service = API_READ.ApiReadService(
+        SimpleNamespace(),
+        API_READ.ReadSession(
+            state.selection.host,
+            {},
+            "fixture",
+            invocation=state,
+            repository="unit/repo",
+        ),
+    )
+    callback = API_READ.BindAPI(API_READ.ApiCheckAction(provider))
+    callback.bind(state)
+
+    with pytest.raises(ValueError) as raised:
+        callback.whoami()
+
+    if failure_kind == "mismatch":
+        assert isinstance(raised.value, API_READ.ReadToolError)
+        assert raised.value.code == 69
+        assert str(raised.value) == str(failure)
+        assert raised.value.__cause__ is failure
+    else:
+        assert raised.value is failure
 
 
 @pytest.mark.parametrize(
@@ -1883,11 +2565,11 @@ def test_api_dry_run_plans_keep_legacy_blank_transform_fields() -> None:
                 "provider": "github",
                 "host": "github.example.test",
                 "authenticated": True,
-                "user": "octo",
-                "id": 7,
+                "user": "unit-admin",
+                "id": 17,
             },
         ),
-        (API_READ.ApiOutput.TEXT, "octo"),
+        (API_READ.ApiOutput.TEXT, "unit-admin"),
     ),
     ids=("json", "text"),
 )
@@ -1931,9 +2613,8 @@ def test_check_api_preserves_identity_json_and_text_outputs(
 
     client = Client()
     context = API_READ.ApiReadState()
-    context.service = API_READ.ApiReadService(
-        client, API_READ.ReadSession("github.example.test", {}, "fixture")
-    )
+    bind_github_fixture(context, client)
+    context.service = API_READ.ApiReadService(client, context.github_session)
     callback = API_READ.CheckAPI(
         API_READ.ApiCheckAction(API_READ.GitProvider.GITHUB, output=output)
     )
@@ -1942,7 +2623,7 @@ def test_check_api_preserves_identity_json_and_text_outputs(
         context=context, callbacks=CALLBACK_COLLECTIONS.Callbacks(callback)
     ).run()
 
-    assert client.calls == ["user"]
+    assert client.calls == []
     assert context.payload == expected
     assert callback.result == {"value": expected}
 
@@ -2106,6 +2787,7 @@ def test_read_runner_uses_the_real_composed_callback_operation() -> None:
             }
 
     api = API()
+    invocation = GITLAB_CALLBACK.GitLabState(spec={"gitlab": {"role": "admin"}})
     session = GITLAB_SESSION.BoundGitLabSession(
         origin=plan.origin,
         host="gitlab.example.test",
@@ -2118,7 +2800,9 @@ def test_read_runner_uses_the_real_composed_callback_operation() -> None:
         execution_host="unit-host",
         skill={"digest": "unit", "revision": {"value": "a" * 40, "verified": True}},
         environment={},
+        invocation=invocation,
     )
+    session = authenticated_gitlab_session(session, invocation)
     callback = RUNNERS.ReadRunner(action=plan)
     result = callback.execute(api, session, 42)
 

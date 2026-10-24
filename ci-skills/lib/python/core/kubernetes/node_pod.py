@@ -14,7 +14,9 @@ from typing import Optional
 
 from lib.python.access.kubernetes import kubectl_argv, kubernetes_env
 from lib.python.core.cli_api import response_decoder
+from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.json_types import JSONObject, JSONValue
+from lib.python.core.kubernetes.kubernetes import KubernetesService
 from lib.python.core.kubernetes.objects import KubernetesObject
 from lib.python.core.runtime import (
     CommandResult,
@@ -37,6 +39,7 @@ class NodePodReader:
     :param route: Existing Pod namespace, selector, and container route.
     :param name: Exact Pod name selected from the route.
     :param uid: Pod UID pinned for independent read-back before exec.
+    :param state: Shared declaration and previously observed Kubernetes access.
 
     .. attribute :: target
         :type: Target
@@ -57,12 +60,18 @@ class NodePodReader:
         :type: str
 
         Pod UID pinned for independent read-back before exec.
+
+    .. attribute :: state
+        :type: DeliveryState | None
+
+        Shared invocation access required before native reads and execution.
     """
 
     target: Target
     route: NodePodRoute
     name: str
     uid: str
+    state: DeliveryState | None = None
 
     def _assert_current(self) -> None:
         """Read back the selected Pod before executing another command.
@@ -72,6 +81,7 @@ class NodePodReader:
         :raises TargetError: Bound Kubernetes source changes before read-back.
         :raises OSError: If the Pod read-back process cannot be started.
         """  # noqa: DOC503 - Bound credentials and native Pod reads can fail.
+        KubernetesService(self.target, state=self.state).require_access()
         result = run_command(
             kubectl_argv(
                 self.target,
@@ -106,6 +116,7 @@ class NodePodReader:
             container, and supplied command.
         :raises TargetError: Bound kubeconfig changes before command construction.
         """  # noqa: DOC502 - kubectl_argv verifies bound kubeconfig sources.
+        KubernetesService(self.target, state=self.state).require_access()
         return kubectl_argv(
             self.target,
             "-n",
@@ -293,19 +304,25 @@ def _host_journal_mounted(pod: JSONObject, route: JournalPodRoute) -> bool:
 
 
 def select_node_pod(
-    target: Target, route: NodePodRoute, journal: Optional[JournalPodRoute] = None
+    target: Target,
+    route: NodePodRoute,
+    journal: Optional[JournalPodRoute] = None,
+    *,
+    state: DeliveryState | None = None,
 ) -> NodePodReader:
     """Select one existing running Pod on the declared node.
 
     :param target: Bound Kubernetes target with node diagnostics settings.
     :param route: Namespace, selector, and container route to select.
     :param journal: Optional route requiring an exact host journal mount.
+    :param state: Shared declaration and previously observed Kubernetes access.
     :returns: Reader bound to the selected Pod name and UID.
     :raises TargetError: Node diagnostics are absent or bound sources change.
     :raises OSError: If a native Pod list process cannot be started.
     :raises NodePodError: Listing fails, Pod selection is invalid or ambiguous,
         or the requested journal mount is absent.
     """  # noqa: DOC503 - Bound credentials and native Pod reads can fail.
+    KubernetesService(target, state=state).require_access()
     if target.kubernetes is None:
         raise TargetError("kubernetes_target_missing")
     selected = target.kubernetes.node_diagnostics
@@ -336,5 +353,9 @@ def select_node_pod(
         raise NodePodError("journal:host_directory_not_mounted")
     metadata = KubernetesObject(pod).metadata
     return NodePodReader(
-        target, route, metadata.required_text("name"), metadata.required_text("uid")
+        target,
+        route,
+        metadata.required_text("name"),
+        metadata.required_text("uid"),
+        state=state,
     )
