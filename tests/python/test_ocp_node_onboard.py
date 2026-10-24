@@ -426,7 +426,11 @@ def test_changed_live_plan_inputs_invalidate_confirmation_before_any_build_callb
         if change == "target"
         else "confirm_plan_mismatch_rerun_plan"
     )
-    assert rejected["plan_digest"] != planned["plan_digest"]
+    if change == "target":
+        assert rejected["plan"] == {}
+        assert "plan_digest" not in rejected
+    else:
+        assert rejected["plan_digest"] != planned["plan_digest"]
     assert cluster.applied == cluster.deleted == cluster.executed == []
 
 

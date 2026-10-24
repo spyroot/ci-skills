@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Optional, TypeAlias, Union
 import pytest
 from conftest import (
     SKILL_ROOT,
+    authenticated_gitlab_session,
     authenticated_kubernetes_service,
     bind_github_fixture,
     bind_harbor_fixture,
@@ -863,18 +864,17 @@ def test_gitlab_callback_direct_access_requires_retained_role(
     :returns: None; both direct service access and the identity hook must reject it.
     """
     state = GITLAB_CALLBACK.GitLabState(spec={"gitlab": {"role": "admin"}})
-    session = SimpleNamespace(host="gitlab.example.test", environment={})
+    session = API_READ.ReadSession(
+        "gitlab.example.test",
+        {"GITLAB_TOKEN": "fixture-gitlab-token"},
+        "fixture:gitlab",
+        invocation=state,
+    )
+    if observed_role is not None:
+        session = authenticated_gitlab_session(session, state)
+        state.gitlab_runtime = replace(state.gitlab_runtime, role=observed_role)
     state.gitlab = SimpleNamespace(session=session)
     state.configured_session = session
-    if observed_role is not None:
-        state.establish_runtime(
-            SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
-            GITLAB_SESSION.GitLabRuntime(
-                role=observed_role,
-                authority="https://gitlab.example.test",
-                credential_identity=f"native-session:{id(session)}",
-            ),
-        )
     callback = GITLAB_CALLBACK.GitlabCallback(RecordedAction("direct"))
     callback.bind(state)
     reason = "identity_preflight_missing|required_role_missing:admin"
@@ -1334,17 +1334,13 @@ def test_incomplete_gitlab_result_stops_later_callbacks(record: JSONObject) -> N
 
     later = Recorded(events, "later")
     state = GITLAB_CALLBACK.GitLabState(spec={"gitlab": {"role": "admin"}})
-    session = SimpleNamespace(host="gitlab.example.test", environment={})
-    state.gitlab = SimpleNamespace(session=session)
-    state.establish_runtime(
-        SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
-        GITLAB_SESSION.GitLabRuntime(
-            role="admin",
-            identity="unit-admin",
-            authority="https://gitlab.example.test",
-            credential_identity=f"native-session:{id(session)}",
+    session = authenticated_gitlab_session(
+        API_READ.ReadSession(
+            "gitlab.example.test", {}, "fixture:gitlab", invocation=state
         ),
+        state,
     )
+    state.gitlab = SimpleNamespace(session=session)
     _run_callbacks(
         [ResultCallback(RecordedAction("result")), later],
         context=state,
@@ -2727,15 +2723,7 @@ def test_read_runner_uses_the_real_composed_callback_operation() -> None:
         environment={},
         invocation=invocation,
     )
-    invocation.establish_runtime(
-        SKILL_PLUGIN_TYPE.SkillPluginType.GITLAB,
-        GITLAB_SESSION.GitLabRuntime(
-            role="admin",
-            identity="unit-admin",
-            authority=plan.origin,
-            credential_identity=f"native-session:{id(session)}",
-        ),
-    )
+    session = authenticated_gitlab_session(session, invocation)
     callback = RUNNERS.ReadRunner(action=plan)
     result = callback.execute(api, session, 42)
 

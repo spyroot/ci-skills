@@ -1315,6 +1315,7 @@ def test_gitlab_access_pins_native_store_token_across_cached_identity_reads(
     _clear_token_env(monkeypatch)
     _access, runtime = _access_modules()
     contexts = import_script_module("lib.python.core.delivery_state")
+    specifications = import_script_module("lib.python.core.abstract.spec")
     credentials = import_script_module("lib.python.access.gitlab_credentials")
     gitlab = import_script_module("lib.python.access.gitlab")
     current = {"token": "original-store-token"}
@@ -1361,7 +1362,7 @@ def test_gitlab_access_pins_native_store_token_across_cached_identity_reads(
 
     _patch_provider_commands(monkeypatch, native)
     monkeypatch.setattr(credentials, "_glab_store_token", store_token)
-    state = contexts.DeliveryState()
+    state = contexts.DeliveryState(spec=specifications.load_spec())
     target = _load_target(target_file, required_surfaces=("gitlab",))
 
     first = gitlab.gitlab_access(target, state=state)
@@ -1395,6 +1396,7 @@ def test_gitlab_access_rejects_changed_selection_before_cached_session_requests(
     """
     _access, runtime = _access_modules()
     contexts = import_script_module("lib.python.core.delivery_state")
+    specifications = import_script_module("lib.python.core.abstract.spec")
     sources = import_script_module("lib.python.access.sources")
     gitlab = import_script_module("lib.python.access.gitlab")
     runner, calls = _fake_access_runner(runtime, "success")
@@ -1406,7 +1408,7 @@ def test_gitlab_access_rejects_changed_selection_before_cached_session_requests(
         _load_target(target_file, required_surfaces=("gitlab",)),
         sources=sources.Sources(None, source, None, (), "unit-host"),
     )
-    state = contexts.DeliveryState()
+    state = contexts.DeliveryState(spec=specifications.load_spec())
     assert gitlab.gitlab_access(target, state=state).status == "PASS"
     initial_calls = list(calls)
 

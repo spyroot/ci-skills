@@ -453,6 +453,9 @@ def test_recovery_finishes_verified_activation_without_rolling_it_back(
     destination.rename(previous)
     destination.mkdir()
     (destination / "SKILL.md").write_bytes((source / "SKILL.md").read_bytes())
+    (destination / "ci_skills.spec.json").write_bytes(
+        (source / "ci_skills.spec.json").read_bytes()
+    )
     (destination / "scripts").mkdir()
     (destination / "scripts" / "check.py").write_bytes(
         (source / "scripts" / "check.py").read_bytes()
