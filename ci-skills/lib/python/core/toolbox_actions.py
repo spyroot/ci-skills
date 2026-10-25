@@ -65,11 +65,16 @@ FINGERPRINT_TAG_LENGTH: Final = 24
 def workflow_parser(kind: str) -> argparse.ArgumentParser:
     """Build a workflow parser from the existing command catalogue.
 
+    Catalogue ``repeatable_options`` collect every occurrence in a list, and
+    ``option_aliases`` add accepted names that set the same value as the option.
+
     :param kind: Registered workflow report kind.
     :returns: Parser with catalogue-owned options and shared output/target handling.
     :raises KeyError: If the requested workflow is absent from the catalogue.
     """  # noqa: DOC502 - Required catalogue entries are accessed by key.
     entry = COMMANDS[COMMAND_BY_KIND[kind]]
+    repeatable = entry.get("repeatable_options", ())
+    aliases = entry.get("option_aliases", {})
     result = parser(entry["purpose"], kind=kind)
     result.set_defaults(kind=kind)
     if "--spec" in entry["options"]:
@@ -78,16 +83,17 @@ def workflow_parser(kind: str) -> argparse.ArgumentParser:
         ) + f" Toolbox input schema: {SCHEMA_DIRECTORY / TOOLBOX_SCHEMA}"
     result.add_argument("action", nargs="?", choices=tuple(entry["subcommands"]))
     for option, help_text in entry["options"].items():
+        names = (option, *aliases.get(option, ()))
         if option == "--apply":
-            result.add_argument(option, help=help_text, action="store_true")
-        elif option == "--label":
-            result.add_argument(option, help=help_text, action="append", default=[])
+            result.add_argument(*names, help=help_text, action="store_true")
+        elif option in repeatable:
+            result.add_argument(*names, help=help_text, action="append", default=[])
         elif option == "--timeout":
             result.add_argument(
-                option, help=help_text, type=int, default=DEFAULT_OPERATION_TIMEOUT
+                *names, help=help_text, type=int, default=DEFAULT_OPERATION_TIMEOUT
             )
         else:
-            result.add_argument(option, help=help_text)
+            result.add_argument(*names, help=help_text)
     return result
 
 

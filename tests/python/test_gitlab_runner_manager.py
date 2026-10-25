@@ -72,7 +72,7 @@ def _args(
         group=None,
         image=IMAGE if action == "deploy" else None,
         kind="gitlab_runner_manager",
-        label=list(RUNNER_LABELS),
+        tag=list(RUNNER_LABELS),
         namespace=NAMESPACE,
         node="worker-ci13" if action == "deploy" else None,
         project="team/project",
@@ -1131,6 +1131,7 @@ def _manager_cli_arguments(
     action: str = "deploy",
     run_id: Optional[str] = None,
     flags: Sequence[str] = (),
+    tag_option: str = "--tag",
 ) -> list[str]:
     """Build public arguments without bypassing command preparation or confirmation."""
     args = [
@@ -1144,9 +1145,9 @@ def _manager_cli_arguments(
         "--binding",
         "/unit/target.toml",
         "--json",
-        "--label",
+        tag_option,
         RUNNER_LABELS[0],
-        "--label",
+        tag_option,
         RUNNER_LABELS[1],
         "--timeout",
         "30",
@@ -1177,10 +1178,13 @@ def _manager_cli_report(
     action: str = "deploy",
     run_id: Optional[str] = None,
     flags: Sequence[str] = (),
+    tag_option: str = "--tag",
 ) -> tuple[int, dict]:
     """Decode and validate the actual command report using the installed result schema."""
     code = SCRIPT.main(
-        _manager_cli_arguments(cluster, action=action, run_id=run_id, flags=flags)
+        _manager_cli_arguments(
+            cluster, action=action, run_id=run_id, flags=flags, tag_option=tag_option
+        )
     )
     captured = capsys.readouterr()
     assert PRIVATE_TOKEN not in captured.out + captured.err
@@ -1239,6 +1243,57 @@ def test_manager_main_plans_and_confirmation_refusal_never_write(
     assert cluster.objects == {}
     assert cluster.runner_reads == (0 if mode == "offline" else 1)
     assert not cluster.guard_held
+
+
+def test_manager_label_alias_plans_the_same_tags_as_tag(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Keep --label working: it plans the same tags and fingerprint as --tag.
+
+    Callers written before --tag matched gitlab_runner.py create still pass --label.
+    """
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    tag_code, tag_plan = _manager_cli_report(cluster, capsys, tag_option="--tag")
+    label_code, label_plan = _manager_cli_report(cluster, capsys, tag_option="--label")
+
+    assert (tag_code, tag_plan["status"]) == (0, "PLANNED")
+    assert (label_code, label_plan["status"]) == (0, "PLANNED")
+    assert label_plan["plan_digest"] == tag_plan["plan_digest"]
+    assert cluster.applied == cluster.deleted == []
+
+
+def test_manager_deploy_without_tag_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Refuse deploy when neither --tag nor --label names a runner tag."""
+    cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    arguments = [
+        value
+        for value in _manager_cli_arguments(cluster)
+        if value not in {"--tag", *RUNNER_LABELS}
+    ]
+
+    code = SCRIPT.main(arguments)
+
+    result = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert result["status"] == "BLOCKED"
+    assert "--tag" in json.dumps(result)
+    assert cluster.applied == cluster.deleted == []
+
+
+def test_manager_parser_declares_tag_with_label_alias() -> None:
+    """Parse repeated --tag and --label into one ordered tag list."""
+    parsed = SCRIPT.build_parser().parse_args(
+        ["deploy", "--tag", "first", "--label", "second", "--tag", "third"]
+    )
+
+    assert parsed.tag == ["first", "second", "third"]
+    assert not hasattr(parsed, "label")
 
 
 @pytest.mark.parametrize("run_id", (None, "explicit-manager-run"))
