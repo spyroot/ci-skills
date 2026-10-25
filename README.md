@@ -222,6 +222,8 @@ justify another coordination layer or test family.
 
 The discovery design reduces context too: offer the actions available here and small pointers to relevant references.
 A broad cluster returns little information; a selected smaller cluster can return more detail within that scope.
+The [documentation root](docs/README.md) routes from this consumer view to the capability model, combo candidates,
+interface contracts and delivery plans.
 
 ## Proposition interface
 
@@ -349,12 +351,20 @@ The result's `trace_artifact` points to that file; smoke reports link the artifa
   progress, runner details, and bounded traces; search within a job trace.
 - [Manage milestones](ci-skills/bin/gitlab_milestone.py): create or update a milestone's title, description, dates, and
   state.
+- [Commit repository files](ci-skills/bin/gitlab_repository.py): take caller-supplied file actions, branch and message,
+  then return the verified commit SHA and file digests.
+- [Manage merge requests](ci-skills/bin/gitlab_mr.py): create an MR from selected branches or assign an existing MR's
+  milestone, then read back its IDs and assignment.
 - [Open bug issues](ci-skills/bin/gitlab_issue.py): create or reuse an issue with caller-supplied labels and an optional
   milestone.
 - [Write wiki pages](ci-skills/bin/gitlab_wiki.py): create or update a page from supplied content, including
   documentation links.
 - [Manage runners](ci-skills/bin/gitlab_runner.py): inspect and list runners, assign or create a runner record, add
   tags, or delete an exact runner ID after a live plan.
+- [Prepare a tool Pod](ci-skills/bin/prepare_tool_pod.py): prepare from a caller-supplied tool specification or remove
+  by run ID, returning Pod identity, tool observations and cleanup evidence.
+- [Onboard an OpenShift node](ci-skills/bin/ocp_node_onboard.py): build and verify a cluster-held ISO from native
+  caller input, then join or remove the run; live ISO evidence is recorded, while CSR and join proof remains mocked.
 - [Diagnose Kubernetes and OpenShift](ci-skills/bin/): inspect storage, events, Cilium, Ceph, and node MTU consistency.
 - [Probe nested Podman readiness](ci-skills/bin/image_build_readiness.py): run an inner container on one worker,
   verify bind-mount writes and exit propagation, and remove the temporary Job and namespace. See the
@@ -470,8 +480,8 @@ agent: a Codex or Claude session that, through ci-skills, decides to create a ru
 ci-skills command instead of hand-rolled `glab`, `kubectl`, or `jq` calls. Every provider section is optional. A
 target that declares only `[kubernetes]` runs every command whose only declared authority is Kubernetes
 (`requires_authorities` in `--describe`); a command that needs a provider the target does not declare reports
-`BLOCKED` and names the authority tables it requires instead of running. The full `access_check.py` is the one command
-that needs the GitHub, GitLab, and Kubernetes tables together. The setup runs without the `ci-skills-smoke` switch,
+`BLOCKED` and names the authority tables it requires instead of running. `access_check.py` checks the configured
+authorities; `--publication` additionally requires `[github]`. The setup runs without the `ci-skills-smoke` switch,
 which would select `ci-skills-smoke.toml` instead. The target file is that user's configuration: it never carries this
 repository's CI, gate, or delivery settings.
 
@@ -480,7 +490,8 @@ repository's CI, gate, or delivery settings.
 For GitLab-only work, the selected target file may contain only `[gitlab]` with its exact `url`. Set `gitlab.project` or
 `gitlab.group` for the intended operation. `gitlab_job.py` selects its project from `--job-url`. The same
 target selection above applies. Storage, event, and Cilium diagnostics need only `[kubernetes]`; the full
-`access_check.py` needs all three authorities. Set `gitlab.project` in the selected target for the commands below. The
+`access_check.py` checks whichever authorities the target configures; `--publication` additionally needs GitHub.
+Set `gitlab.project` in the selected target for the commands below. The
 declared `--project` flag overrides it for one invocation.
 
 The operation access check reads back the effective GitLab identity and exact numeric target before a write:
@@ -530,7 +541,7 @@ Run `<command> --help` or `--describe` for shared options; only what is specific
 full source commit SHA with `--revision` when the installed copy has no Git metadata, and `--output-dir PATH` to write
 paired JSON and text files; without that option no report file is written.
 
-- `access_check.py` checks the three selected authorities and runs the declared live collector reads. `--publication`
+- `access_check.py` checks the configured authorities and runs the declared live collector reads. `--publication`
   also requires repository admin permission and read-back of required branch checks. `--job-url URL` also checks that
   job, pipeline, runner, and trace. `--ceph-namespace NAME` adds Ceph health, OSD, PG, and Pod reads to that receipt;
   use those options when testing the corresponding live capabilities.
@@ -551,8 +562,14 @@ paired JSON and text files; without that option no report file is written.
   Kubernetes access.
 - `gitlab_milestone.py create|update|adjust-time` manages exact milestone IDs and dates;
   `gitlab_issue.py open-bug|create-bug` creates or reuses a bug.
+- `gitlab_repository.py commit` accepts a selected GitLab project, branch, commit message and caller-supplied native
+  file actions. Its confirmed apply returns the commit SHA, branch and independently verified file digests.
+- `gitlab_mr.py create|update` accepts selected branches and a title for creation, or an MR IID and milestone ID for
+  assignment. Its confirmed apply returns the verified MR ID, IID and milestone ID.
 - `gitlab_wiki.py create|update` manages one selected page; `gitlab_runner.py assign|create|tag|delete` changes a
   selected runner scope. These actions require a matching plan fingerprint to apply; `get|list` are live reads.
+- `prepare_tool_pod.py prepare|remove` accepts a tool specification or an existing run ID. Confirmed preparation
+  returns the Pod and observed tools; removal reads back absence of its run-owned resources.
 - `ceph_cluster.py --namespace NAME` reads Ceph health, root/rack/host/OSD hierarchy, inactive PGs, and OSD/monitor Pods
   on the pinned cluster. It accepts `--operator`, `--node`, `--ready`, and `--condition` filters.
 - `k8s_verify_mtu_consistency.py --json` reads the selected node inventory and prints a plan digest. To collect PCI

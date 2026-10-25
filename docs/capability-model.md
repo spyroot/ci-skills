@@ -19,6 +19,15 @@ The `offline` cluster offers commands that need no provider credentials, includi
 reference navigation. `bin/ci-api` is offered in both GitHub and GitLab clusters; its `--provider` selects one.
 Command keys beginning with `bin/` are relative to the installed skill root; other tool names are in its `bin/` directory.
 
+## Architecture and dependency direction
+
+An agent selects a command through `reference.py` and the generated `tools.json`, then runs its thin `bin/` entrypoint.
+The entrypoint resolves only the required authorities from the selected target. Shared provider access and domain
+callbacks in `lib/python/` collect or change live state; `WorkflowExecutor` passes their ordered results through one
+shared state, and the report layer emits the command result. The [contribution guide](contribution_guide.md#1-inspect-and-reuse)
+maps these existing owners. A later callback consumes the preceding result it needs; catalog discovery never performs
+the operation itself.
+
 ## Work backward from an observed effect
 
 An operational command should compose the usual reads needed to answer one question. For a stuck GitLab job, the
@@ -34,9 +43,15 @@ resume at the needed path. These are recurring workflows, not a single command t
 
 ## Keep each capability provable
 
-An installed command owns a bounded behavior, a human view, JSON and YAML output, and a versioned result schema.
+An installed command owns bounded behavior, a human view, JSON and YAML output, and a declared report kind.
 Read commands report concrete values observed from the selected live target. Mutations report the before state, the
 action and an independent after read. Exit status alone is not evidence that the claimed behavior occurred.
 [CI07-SCHEMA](phases/CI07-SCHEMA.md) owns schema rules; [Use cases](use-cases.md) names the expected workflows.
 The installed [skill entry point](../ci-skills/SKILL.md) and generated `ci-skills/tools.json` determine what an agent
 can actually call today.
+
+Schemas give consuming agents stable fields and result types, so they can inspect bounded reports rather than infer
+success from prose or exit codes. Root [`schemas`](../schemas/) define command, manifest and reference contracts;
+installed [`ci-skills/schemas`](../ci-skills/schemas/) contain input and selected result schemas. The command catalog
+links selected command results to those schemas; [CI07-SCHEMA](phases/CI07-SCHEMA.md) records remaining per-kind
+coverage. A schema and a live receipt answer different questions: shape versus observed behavior on the target.
