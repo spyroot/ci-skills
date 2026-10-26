@@ -35,5 +35,6 @@ The [CI11-TOOLS plan](phases/CI11-TOOLS.md) distinguishes installed commands fro
 | [Node onboarding ExecPlan](exec-plans/active/ci12-node-onboarding.md) | CI12.0, CI12.1 and CI12.2 delivery and remaining proof |
 | [CI13-IMAGE-BUILD-READINESS](phases/CI13-IMAGE-BUILD-READINESS.md) | probe and chain installed; consumer-job proof remains external |
 | [Image-build readiness ExecPlan](exec-plans/active/ci13-image-build-readiness.md) | CI13 milestone order and remaining delivery |
+| [CI14-GITLAB-CONNECTIONS](phases/CI14-GITLAB-CONNECTIONS.md) | planned: GitLab-to-GitHub synchronization and GitLab Agent installation |
 | [GitLab tool belt](gitlab-toolbelt-plan.md) | delivery plan of the GitLab operations tool belt |
 | [CI Skills agent hooks](skill-session-hook.md) | lifecycle integration and delivery lock |
