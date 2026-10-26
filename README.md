@@ -43,18 +43,18 @@ conda run -n ci-skills python -m pip install -r requirements.txt
 Install the native clients for the capabilities you intend to use. The command's `--describe` output declares its
 `required_tools`; [catalog.py](ci-skills/lib/python/core/catalog.py) owns that declaration.
 
-| Capability | Native clients on the calling machine |
-| --- | --- |
-| GitLab operations | `glab` |
-| GitHub API reads | `gh` |
-| Kubernetes diagnostics | `kubectl` |
-| Nested Podman readiness probe | `kubectl`; Podman runs inside the probe Job |
-| OpenShift MTU checks | `kubectl`, `oc`; `ip` must be present on the selected node |
-| Toolbox create/update/delete | `kubectl`, `oc`, `skopeo` |
-| Harbor publication | `skopeo` |
-| Harbor pull verification | `kubectl` |
-| GitHub self-hosted runner create/update | `gh`, `kubectl`, `oc`, `skopeo` |
-| Local binary build planning | `git` |
+| Capability                              | Native clients on the calling machine                      |
+|-----------------------------------------|------------------------------------------------------------|
+| GitLab operations                       | `glab`                                                     |
+| GitHub API reads                        | `gh`                                                       |
+| Kubernetes diagnostics                  | `kubectl`                                                  |
+| Nested Podman readiness probe           | `kubectl`; Podman runs inside the probe Job                |
+| OpenShift MTU checks                    | `kubectl`, `oc`; `ip` must be present on the selected node |
+| Toolbox create/update/delete            | `kubectl`, `oc`, `skopeo`                                  |
+| Harbor publication                      | `skopeo`                                                   |
+| Harbor pull verification                | `kubectl`                                                  |
+| GitHub self-hosted runner create/update | `gh`, `kubectl`, `oc`, `skopeo`                            |
+| Local binary build planning             | `git`                                                      |
 
 The installer's [agent profile](toolchain-dependencies.json) provisions `glab` and the bundled `glab-stack` skill;
 it does not install the other native clients. For example, before using the runner workflow, check the selected

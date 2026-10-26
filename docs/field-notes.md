@@ -98,10 +98,10 @@ outside the digest. Still open as a cost, not a defect.
 Two committed receipts, three hours apart, both returned `PARTIAL` from the
 Cilium check with `access_proven: true` while the gate itself passed:
 
-| captured | agent health | errors |
-| --- | --- | --- |
-| `19:15:44Z` | 8 of 9 | one `agent_not_ready` |
-| `22:35:26Z` | 7 of 9 | two `agent_not_ready` |
+| captured    | agent health | errors                |
+|-------------|--------------|-----------------------|
+| `19:15:44Z` | 8 of 9       | one `agent_not_ready` |
+| `22:35:26Z` | 7 of 9       | two `agent_not_ready` |
 
 The cluster degraded further between them, and both runs reported *which*
 component was unhealthy rather than a failed read. That distinction is what

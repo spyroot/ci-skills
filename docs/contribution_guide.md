@@ -14,15 +14,31 @@ Use the project environment declared in [environment.yml](../environment.yml) fo
 Start with the nearest installed command in [ci-skills/bin](../ci-skills/bin/) and its reusable operation in
 [core](../ci-skills/lib/python/core/). Commands parse inputs and compose callbacks; provider logic belongs in `core`.
 
-| Responsibility | Existing owner |
-| --- | --- |
-| Callback hooks and ordered binding | [callback.py](../ci-skills/lib/python/core/abstract/callback.py), [callbacks.py](../ci-skills/lib/python/core/abstract/callbacks.py) |
-| Typed state, results and execution | [skill_state.py](../ci-skills/lib/python/core/abstract/skill_state.py), [SkillExecutor](../ci-skills/lib/python/core/abstract/executor.py), [Executor and WorkflowExecutor](../ci-skills/lib/python/core/executor.py) |
-| Targets and credential selection | [target.py](../ci-skills/lib/python/core/target.py), [credentials.py](../ci-skills/lib/python/access/credentials.py) |
-| Provider services and authentication | [GitlabCallback](../ci-skills/lib/python/core/gitlab/callback.py), [gitlab_session.py](../ci-skills/lib/python/core/gitlab/gitlab_session.py), [github.py](../ci-skills/lib/python/core/github/github.py), [kubernetes.py](../ci-skills/lib/python/core/kubernetes/kubernetes.py), [registry_mirror.py](../ci-skills/lib/python/core/harbor/registry_mirror.py) |
-| Runner inputs and provider operations | [runner.py](../ci-skills/lib/python/core/runner.py), [GitHub registration](../ci-skills/lib/python/core/github/runner.py), [Kubernetes workload](../ci-skills/lib/python/core/kubernetes/runner.py) |
-| Toolbox workflow inputs, planning and reports | [toolbox_actions.py](../ci-skills/lib/python/core/toolbox_actions.py) |
-| Command declaration, help and discovery | [catalog.py](../ci-skills/lib/python/core/catalog.py), [cli.py](../ci-skills/lib/python/core/cli.py) |
+- **Callback hooks and ordered binding:**
+  [callback.py](../ci-skills/lib/python/core/abstract/callback.py),
+  [callbacks.py](../ci-skills/lib/python/core/abstract/callbacks.py).
+- **Typed state, results and execution:**
+  [skill_state.py](../ci-skills/lib/python/core/abstract/skill_state.py),
+  [SkillExecutor](../ci-skills/lib/python/core/abstract/executor.py),
+  [Executor and WorkflowExecutor](../ci-skills/lib/python/core/executor.py).
+- **Targets and credential selection:**
+  [target.py](../ci-skills/lib/python/core/target.py),
+  [credentials.py](../ci-skills/lib/python/access/credentials.py).
+- **Provider services and authentication:**
+  [GitlabCallback](../ci-skills/lib/python/core/gitlab/callback.py),
+  [gitlab_session.py](../ci-skills/lib/python/core/gitlab/gitlab_session.py),
+  [github.py](../ci-skills/lib/python/core/github/github.py),
+  [kubernetes.py](../ci-skills/lib/python/core/kubernetes/kubernetes.py),
+  [registry_mirror.py](../ci-skills/lib/python/core/harbor/registry_mirror.py).
+- **Runner inputs and provider operations:**
+  [runner.py](../ci-skills/lib/python/core/runner.py),
+  [GitHub registration](../ci-skills/lib/python/core/github/runner.py),
+  [Kubernetes workload](../ci-skills/lib/python/core/kubernetes/runner.py).
+- **Toolbox workflow inputs, planning and reports:**
+  [toolbox_actions.py](../ci-skills/lib/python/core/toolbox_actions.py).
+- **Command declaration, help and discovery:**
+  [catalog.py](../ci-skills/lib/python/core/catalog.py),
+  [cli.py](../ci-skills/lib/python/core/cli.py).
 
 Consume existing provider APIs and native clients. Extend their shared adapters when needed; do not copy transport,
 credential lookup, JSON parsing, retry, or report code into an entrypoint.
