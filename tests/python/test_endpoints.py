@@ -14,9 +14,11 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import MutableSequence, MutableSet, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -347,7 +349,189 @@ def test_a_binding_block_is_another_format_and_a_target_block_is_read() -> None:
     assert "harbor_url" in {use.path for use in documents[0].uses()}
 
 
+@pytest.mark.parametrize(
+    ("attributes", "native"),
+    [
+        pytest.param("native-config=gitlab-runner/config.toml", True, id="runner"),
+        pytest.param("native-config=other/settings.toml", True, id="other-provider"),
+        pytest.param("", False, id="unannotated"),
+        pytest.param("title=example", False, id="ordinary-attribute"),
+        pytest.param("native-config=ci-skills/target.toml", False, id="target"),
+        pytest.param("native-config=target.toml.template", False, id="target-template"),
+        pytest.param("native-config=", False, id="missing-filename"),
+        pytest.param("native-config=config.yaml", False, id="wrong-extension"),
+        pytest.param(
+            "native-config=config.toml native-config=other.toml",
+            False,
+            id="repeated-attribute",
+        ),
+        pytest.param(
+            "native-config=.ci-skills/ci-skills-smoke.toml", False, id="smoke-target"
+        ),
+        pytest.param("native-config=~/.ci-skills/TARGET.toml", False, id="target-case"),
+        pytest.param("native-config=.toml", False, id="suffix-only"),
+        pytest.param("native-config=runner/.toml", False, id="nameless"),
+        pytest.param(r"native-config=C:\runner\config.toml", True, id="windows-path"),
+        pytest.param(r"native-config=C:\ci\target.toml", False, id="windows-target"),
+    ],
+)
+def test_native_toml_requires_an_explicit_non_target_filename(
+    attributes: str, native: bool
+) -> None:
+    """Exclude identified native TOML while retaining ambiguous target examples.
+
+    :param attributes: Filename annotation or malformed fence metadata.
+    :param native: Whether this fence explicitly identifies another TOML format.
+    :returns: None; assertions verify extraction and retained source locations.
+    """
+    markdown = (
+        f"```toml {attributes}\n"
+        'environment = ["FF_SCRIPT_SECTIONS=1"]\n'
+        "[runners.feature_flags]\n"
+        "FF_USE_DIRECT_DOWNLOAD = true\n"
+        "```\n"
+    )
+    documents = GATE_LIB.MarkdownExamples("doc.md", markdown).documents()
+    if native:
+        assert documents == ()
+    else:
+        assert len(documents) == 1
+        assert documents[0].source == "doc.md"
+        assert documents[0].first_line == 2
+        assert "environment" in {use.path for use in documents[0].uses()}
+
+
+@pytest.mark.parametrize(
+    ("markdown", "native"),
+    [
+        pytest.param(
+            "```TOML native-config=gitlab-runner/config.toml\n[runners]\n```\n",
+            True,
+            id="uppercase-fence",
+        ),
+        pytest.param(
+            "~~~toml native-config=gitlab-runner/config.toml\n[runners]\n~~~\n",
+            True,
+            id="tilde-fence",
+        ),
+        pytest.param(
+            "  ```toml native-config=gitlab-runner/config.toml\n  [runners]\n  ```\n",
+            True,
+            id="indented-fence",
+        ),
+        pytest.param(
+            "```toml\tnative-config=gitlab-runner/config.toml\n[runners]\n```\n",
+            True,
+            id="tab-separator",
+        ),
+        pytest.param(
+            "```toml\n# native-config=gitlab-runner/config.toml\n[runners]\n```\n",
+            False,
+            id="body-only",
+        ),
+    ],
+)
+def test_native_config_is_read_from_the_fence_info_string_only(
+    markdown: str, native: bool
+) -> None:
+    """Honor the annotation on every fence shape and only on the opening line.
+
+    :param markdown: One fenced TOML block in a selected fence shape.
+    :param native: Whether the block is excluded from target validation.
+    :returns: None; assertions verify exclusion or retention per fence shape.
+    """
+    documents = GATE_LIB.MarkdownExamples("doc.md", markdown).documents()
+    assert (documents == ()) is native
+    if not native:
+        assert "runners" in {use.path for use in documents[0].uses()}
+
+
+def test_native_config_fences_parse_and_keep_keys_under_their_own_table() -> None:
+    """Parse every excluded Runner fence, since the gate no longer reads it.
+
+    A TOML table header owns every key below it until the next header; indentation
+    does not close it. Each fence must parse, and every key under an indented
+    sub-table header must sit deeper than that header, which is how a key meant for
+    the parent table is told apart from one meant for the sub-table. Lines inside a
+    multi-line string are not keys.
+
+    :returns: None; assertions check parsing and key placement in each fence.
+    """
+    source = REPO_ROOT / "ci-skills/references/gitlab-runner.md"
+    fences = re.findall(
+        r"^```toml native-config=gitlab-runner/config\.toml\n(.*?)^```$",
+        source.read_text(encoding="utf-8"),
+        re.DOTALL | re.MULTILINE,
+    )
+    assert len(fences) >= 25
+    runner_entries = []
+    for body in fences:
+        document = tomllib.loads(body)
+        runner_entries.extend(
+            entry for entry in document.get("runners", []) if isinstance(entry, dict)
+        )
+        header_indent = 0
+        in_string = False
+        for line in body.splitlines():
+            stripped = line.strip()
+            if in_string:
+                in_string = not stripped.startswith("'''")
+                continue
+            if not stripped or stripped.startswith("#"):
+                continue
+            indent = len(line) - len(line.lstrip())
+            if stripped.startswith("["):
+                header_indent = indent
+            elif header_indent:
+                assert indent > header_indent, stripped
+            in_string = stripped.endswith("= '''")
+    runner = next(entry for entry in runner_entries if "request_concurrency" in entry)
+    assert runner["allowed_docker_credential_helpers"] == {
+        "ecr-login": ["*.dkr.ecr.*.amazonaws.com"]
+    }
+    assert runner["monitoring"] == {}
+    assert "use_slot_cgroups" in runner
+
+
 # --- the gate, run as a command ------------------------------------------------------
+
+
+def test_the_runner_reference_is_native_config_and_keeps_target_validation(
+    repo: Path,
+) -> None:
+    """Skip the shipped Runner config.toml fences without hiding adjacent target errors.
+
+    :param repo: Isolated repository containing the real Runner reference.
+    :returns: None; assertions check the exclusion and a retained target rejection.
+    """
+    source = "ci-skills/references/gitlab-runner.md"
+    reference = repo / source
+    fences = [
+        line
+        for line in reference.read_text().splitlines()
+        if line.startswith("```toml")
+    ]
+    assert fences
+    assert all(
+        line == "```toml native-config=gitlab-runner/config.toml" for line in fences
+    )
+    code, record = _gate(repo)
+    assert code == 0
+    assert record["status"] == "PASS"
+    assert not any(
+        document.startswith(f"{source}:") for document in record["documents"]
+    )
+
+    _append(
+        reference,
+        '\n```toml native-config=ci-skills/target.toml\n[gitlab]\nnamespace = "x"\n```\n',
+    )
+    code, record = _gate(repo)
+    assert code == 1
+    assert record["status"] == "FAIL"
+    assert [
+        (item["rule"], item["path"], item["source"]) for item in record["findings"]
+    ] == [("undeclared", "gitlab.namespace", source)]
 
 
 def test_the_gate_passes_the_real_documents_and_lists_the_value_keys(

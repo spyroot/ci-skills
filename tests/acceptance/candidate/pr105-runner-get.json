@@ -1,9 +1,9 @@
 {
-  "captured_at": "2026-10-28T05:17:07.446245+00:00",
+  "captured_at": "2026-10-28T11:49:36.532665+00:00",
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
-  "execution_host": "mac.lan",
+  "execution_host": "spyroots-macbook-pro.local",
   "identity": {
     "id": 6,
     "username": "spyroot",
@@ -38,7 +38,7 @@
     {
       "access_level": "not_protected",
       "architecture": "amd64",
-      "contacted_at": "2026-10-28T05:16:56.112Z",
+      "contacted_at": "2026-10-28T11:49:26.101Z",
       "description": "go-golangci-toolbox-20261020",
       "id": 107,
       "is_shared": false,
@@ -65,12 +65,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "366876391bc8df3befc70a1d1f21df596b9788bd7eb11f56ded776482d4e4268",
-    "file_count": 243,
-    "functional_digest": "dfc616773bacabbea867c270af6b70e2cbf8313ff01fa30ce40708830af75cd8",
+    "digest": "499adf4e48ef27206e20b116ab8e8033f2976777c221ff554829ec104185c930",
+    "file_count": 245,
+    "functional_digest": "2fa96ef17a0a0f824a9342724b880c3887bf956c7811c5f6d36394839fa6514b",
     "revision": {
       "source": "installer_record",
-      "value": "3e8ec4b3ae7aaa290bff15ddbe97250ac37efa07",
+      "value": "b46347f8ff944e9100048c15bedf97d1c948f2f7",
       "verified": true
     }
   },
@@ -85,7 +85,7 @@
   },
   "target_file": "path:5e5380df1eda",
   "target_source": "env:CI_SKILLS_TARGET;argv:--project",
-  "tested_revision": "3e8ec4b3ae7aaa290bff15ddbe97250ac37efa07",
+  "tested_revision": "b46347f8ff944e9100048c15bedf97d1c948f2f7",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

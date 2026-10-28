@@ -693,6 +693,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "returns": "A receipt: credential sources, identities, targets, skill digest, and one entry per live check.",
     },
     "gitlab_job.py": {
+        "references": ("GitLab runner",),
         "related": ("gitlab_pipeline.py", "gitlab_runner.py"),
         "kind": "gitlab_job",
         "purpose": "Get one CI job or list bounded jobs from one GitLab project.",
@@ -746,7 +747,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "required_tools": ("glab",),
         "mutates": True,
         "side_effects": "Confirmed start may create one pipeline on the selected ref.",
-        "references": ("GitLab pipeline execution",),
+        "references": (
+            "GitLab pipeline execution",
+            "GitLab runner",
+            "GitLab REST inputs",
+        ),
         "options": {
             "--project": (
                 "exact project path or numeric ID; otherwise use gitlab.project"
@@ -831,6 +836,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "returns": "The effective source, identity, origin, and numeric project or group ID.",
     },
     "gitlab_milestone.py": {
+        "references": ("GitLab REST inputs",),
         "kind": "gitlab_milestone",
         "purpose": "Create or update an exact GitLab milestone with independent read-back.",
         "use_when": "A selected project or group milestone needs a requested change.",
@@ -1017,6 +1023,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "returns": "A plan or verified MR ID, project-local IID and milestone ID.",
     },
     "gitlab_wiki.py": {
+        "references": ("GitLab REST inputs",),
         "kind": "gitlab_wiki",
         "purpose": "Create or update an exact GitLab wiki page with independent read-back.",
         "use_when": "A selected project wiki page needs requested content.",
@@ -1050,6 +1057,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "returns": "A sanitized plan or verified wiki slug and independent GET evidence.",
     },
     "gitlab_runner.py": {
+        "references": ("GitLab runner", "GitLab REST inputs"),
         "related": ("gitlab_job.py", "gitlab_pipeline.py"),
         "kind": "gitlab_runner",
         "purpose": "Read and manage a selected GitLab runner record with verified actions.",
@@ -1201,7 +1209,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "gitlab_job.py",
             "image_build_readiness.py",
         ),
-        "references": ("GitLab runner manager", "OpenShift SCC access"),
+        "references": (
+            "GitLab runner manager",
+            "OpenShift SCC access",
+            "GitLab runner",
+        ),
         "required_tools": ("glab", "kubectl", "oc on OpenShift"),
         "returns": "A run ID and confirmed plan, or verified workload and exact "
         "GitLab runner read-back with cleanup evidence.",
@@ -1499,6 +1511,14 @@ PROPOSITION_REFERENCES: Final = MappingProxyType(
         "GitLab merge requests": {
             "summary": "Source/target branches, MR IID and milestone ID examples.",
             "pointer": "references/gitlab-merge-requests.md",
+        },
+        "GitLab runner": {
+            "summary": "config.toml tables, concurrency, speed up and cache variables, feature flags, Operator CR.",
+            "pointer": "references/gitlab-runner.md",
+        },
+        "GitLab REST inputs": {
+            "summary": "Runner, milestone, pipeline, schedule, wiki, Harbor and agent config.yaml inputs.",
+            "pointer": "references/gitlab-rest-inputs.md",
         },
         "Harbor API shapes": {
             "summary": "Project, robot, retention, quota, registry, replication, webhook and artifact request shapes.",
