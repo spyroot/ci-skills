@@ -411,10 +411,17 @@ def test_embedded_native_host_and_network_observations_exclude_credentials(
     network = (
         b"[connection]\ninterface-name=ens3\ntype=ethernet\n"
         b"[ethernet]\nmac-address=02:00:00:10:00:01\nmtu=9000\n"
+        b"[ipv4]\nmethod=manual\naddress1=192.0.2.10/24,192.0.2.1\n"
+        b"dns=192.0.2.53;192.0.2.54;\ndns-search=example.test;\n"
+        b"route1=198.51.100.0/24,192.0.2.1,100\nroute1_options=table=100\n"
+        b"[ipv6]\nmethod=manual\naddress1=2001:db8::10/64,2001:db8::1\n"
+        b"dns=2001:db8::53;\nroute1=2001:db8:1::/64,2001:db8::1,100\n"
         b"[wifi-security]\npsk=private-wifi-marker\n"
         b"[802-1x]\npassword=private-password-marker\n"
     )
-    root_hints = b"deviceName: /dev/sda\nserialNumber: private-disk-marker\n"
+    root_hints = (
+        b"deviceName: /dev/sda\nserialNumber: fixture-disk-123\nminSizeGigabytes: 120\n"
+    )
     files = [
         {
             "path": "/etc/assisted/hostconfig/worker-01/mac_addresses",
@@ -463,6 +470,20 @@ def test_embedded_native_host_and_network_observations_exclude_credentials(
     assert by_kind["network"]["observations"] == {
         "connection": {"interface-name": "ens3", "type": "ethernet"},
         "ethernet": {"mac-address": "02:00:00:10:00:01", "mtu": "9000"},
+        "ipv4": {
+            "method": "manual",
+            "address1": "192.0.2.10/24,192.0.2.1",
+            "dns": "192.0.2.53;192.0.2.54;",
+            "dns-search": "example.test;",
+            "route1": "198.51.100.0/24,192.0.2.1,100",
+            "route1_options": "table=100",
+        },
+        "ipv6": {
+            "method": "manual",
+            "address1": "2001:db8::10/64,2001:db8::1",
+            "dns": "2001:db8::53;",
+            "route1": "2001:db8:1::/64,2001:db8::1,100",
+        },
     }
     assert by_kind["hostname"]["observations"] == {"hostname": "worker-01"}
     for kind, content in (("mac_addresses", mac), ("network", network)):
@@ -471,7 +492,14 @@ def test_embedded_native_host_and_network_observations_exclude_credentials(
     assert (
         by_kind["root_device_hints"]["sha256"] == hashlib.sha256(root_hints).hexdigest()
     )
-    assert by_kind["root_device_hints"]["unobserved"] == "digest_only"
+    assert by_kind["root_device_hints"]["observations"] == {
+        "root_device_hints": {
+            "deviceName": "/dev/sda",
+            "serialNumber": "fixture-disk-123",
+            "minSizeGigabytes": 120,
+        }
+    }
+    assert "root_device_hints" not in configuration["unobserved_fields"]
     report = json.dumps(evidence)
     assert "private-" not in report
     assert "pull-secret" not in report

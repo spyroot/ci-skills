@@ -22,12 +22,15 @@ python "$CI_SKILL_DIR/bin/prepare_tool_pod.py" --describe --json
 ```
 
 Save the invocation document as `tools.json` in your working directory. Its
-[schema](../schemas/tool-pod.schema.json) contains two fields:
+[schema](../schemas/tool-pod.schema.json) requires `image` and `dependencies`; placement fields are optional:
 
 | Field | Caller supplies |
 | --- | --- |
 | `image` | Container image suitable for the required tools and the cluster's admission settings. |
 | `dependencies` | Tool names, executable names, optional probe argv and installation routes. |
+| `nodeSelector` | Native Kubernetes node-label selection. |
+| `affinity` | Native Kubernetes node/Pod affinity. |
+| `tolerations` | Native Kubernetes taint tolerations. |
 
 This example verifies the existing shell and installs a missing `yq` executable in a writable directory:
 
@@ -54,6 +57,10 @@ This example verifies the existing shell and installs a missing `yq` executable 
   ]
 }
 ```
+
+To select a worker, add `"nodeSelector": {"kubernetes.io/hostname": "worker-01"}` to the input, using
+your actual node label. Kubernetes validates native placement fields. They are bound to the plan with the tools;
+recovery never removes caller constraints.
 
 The image and Linux amd64 artifact above are examples, not command defaults. Select inputs for your platform.
 Pin the selected image by digest when reproducibility matters. A tool with no installation route must already
@@ -90,7 +97,7 @@ python "$CI_SKILL_DIR/bin/prepare_tool_pod.py" prepare \
 ```
 
 On success, read `run_id`, `pod` and `readback` from the result. `pod` identifies the actual namespace,
-name, UID and container. Callback records distinguish newly installed tools (`APPLIED`) from already-present
+name, UID, container and observed `node_name`. Callback records distinguish newly installed tools (`APPLIED`) from already-present
 tools (`NO_OP`), and final probes show what ran. The Pod remains available until explicit removal.
 
 ## Reuse and remove
@@ -119,3 +126,12 @@ not deleted merely because a later tool operation fails; the report retains its 
 The result's `cleanup` distinguishes removed resources, retained resources and cleanup failures. Use
 `--receipt-out PATH` to save an apply receipt. `--log-level debug --log-format json --log-file PATH` produces
 the shared sanitized execution trace when a diagnostic artifact is needed.
+
+## Mounted-volume readiness
+
+For workflows that supply volume mounts, staging observes Pod readiness and UID-matched `FailedMount`
+events. A continuing mount failure triggers recovery after 60 seconds of observation, within the caller timeout.
+The shared staging callback deletes only its owned failed Pod and retries with that node excluded, for at most
+three total attempts. The target, namespace, run ID, mounts and caller placement constraints stay selected.
+`readback.pod_attempts` records attempted nodes and sanitized event evidence, including exhaustion.
+Authentication and unrelated readiness failures do not trigger this mount-recovery loop.

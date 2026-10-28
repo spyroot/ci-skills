@@ -346,7 +346,7 @@ def _manager_args(
         group=action.args.group if action.runner_kind == "group" else None,
         runner_id=state.created_runner_id,
         description=action.args.runner_description,
-        label=list(action.args.runner_label),
+        tag=list(action.args.runner_label),
         node=state.selected_node,
         image=state.published_image,
         token_file=str(state.token_path),

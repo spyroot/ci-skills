@@ -1,0 +1,1636 @@
+{
+  "access": {
+    "kubernetes": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "artifact": {
+    "path": "/output/gpu5/node-gpu5.iso",
+    "pod": {
+      "container": "ci-skills-pod",
+      "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+      "name": "ci-skills-run-tool-pod-1994681e08829b12",
+      "namespace": "node-iso",
+      "restart_count": 0,
+      "uid": "a1ee86d5-ba8c-46a0-bc90-48f10369307b"
+    },
+    "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+    "size": 1379328000
+  },
+  "artifact_lifetime": "caller_selected_volume",
+  "captured_at": "2026-10-22T23:30:55.500343+00:00",
+  "cleanup": {
+    "failures": [],
+    "resources": [
+      {
+        "absent": true,
+        "index": 2,
+        "kind": "PodArtifact",
+        "path": "/tmp/ci-skills-dependency-2",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "Pod",
+        "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+        "namespace": "node-iso",
+        "status": "PASS"
+      },
+      {
+        "absent": true,
+        "kind": "ConfigMap",
+        "name": "ci-skills-run-tool-pod-scripts-5e19cdd4b0877224",
+        "namespace": "node-iso",
+        "status": "PASS"
+      }
+    ],
+    "retained": [
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-record-1994681e08829b12",
+        "namespace": "node-iso"
+      },
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-1994681e08829b12",
+        "namespace": "node-iso"
+      }
+    ],
+    "status": "PASS"
+  },
+  "errors": [],
+  "filters": {},
+  "kind": "ocp_node_onboard",
+  "operation": "verify",
+  "plan": {
+    "functional_digest": "d16d950c841811abe7b6101f2422f4464fad539169c4f4b6446653edf1a0decb",
+    "inputs": {
+      "artifact_record": {
+        "artifact": {
+          "path": "/output/gpu5/node-gpu5.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-1994681e08829b12",
+            "namespace": "node-iso",
+            "restart_count": 0,
+            "uid": "a1ee86d5-ba8c-46a0-bc90-48f10369307b"
+          },
+          "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+          "size": 1379328000
+        },
+        "destination": {
+          "artifactPath": "/output/gpu5/node-gpu5.iso",
+          "buildOutput": "destination",
+          "mountPath": "/output",
+          "namespace": "node-iso",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "gpu5-iso"
+            }
+          }
+        },
+        "lifetime": "caller_selected_volume",
+        "node_selector": {
+          "kubernetes.io/arch": "amd64"
+        },
+        "run_id": "d5f769b7657a45848205b6aad80f5c58",
+        "schema_version": "1.0",
+        "storage": {
+          "access_route": "ocs-storagecluster-cephnfs-service:/0001-0011-openshift-storage-0000000000000001-55f444d4-fc8e-43da-b5e0-dec3c891823b",
+          "artifact_path": "/output/gpu5/node-gpu5.iso",
+          "build_output": "destination",
+          "destination_fingerprint": "sha256:16ad2e04136b8f76c5d40af113c9a8d73480502c4026034e8d25090574145a85",
+          "lifetime": "caller_selected_volume",
+          "mount_path": "/output",
+          "namespace": "node-iso",
+          "observed_mount_path": "/output",
+          "output_absent": true,
+          "protocol": "nfs4",
+          "volume_source_types": [
+            "persistentVolumeClaim"
+          ],
+          "writable": true
+        },
+        "tool_mounts": [
+          {
+            "mountPath": "/output",
+            "name": "artifact-destination",
+            "readOnly": false,
+            "volumeSource": {
+              "persistentVolumeClaim": {
+                "claimName": "gpu5-iso"
+              }
+            }
+          },
+          {
+            "mountPath": "/ci-skills-work/d5f769b7657a45848205b6aad80f5c58",
+            "name": "node-image-work",
+            "readOnly": false,
+            "volumeSource": {
+              "emptyDir": {}
+            }
+          }
+        ],
+        "tool_spec": {
+          "dependencies": [
+            {
+              "commands": [
+                "coreos-installer"
+              ],
+              "name": "coreos-installer",
+              "probe": [
+                "coreos-installer",
+                "--version"
+              ]
+            },
+            {
+              "commands": [
+                "rsync"
+              ],
+              "name": "rsync",
+              "probe": [
+                "rsync",
+                "--version"
+              ],
+              "yum": [
+                "rsync"
+              ]
+            },
+            {
+              "commands": [
+                "oc"
+              ],
+              "linux": {
+                "destination": "/tmp/ci-skills-tools/bin",
+                "files": [
+                  "oc"
+                ],
+                "method": "archive",
+                "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+                "stripComponents": 0,
+                "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz"
+              },
+              "name": "oc",
+              "probe": [
+                "oc",
+                "version",
+                "--client",
+                "-o",
+                "json"
+              ]
+            }
+          ],
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71"
+        }
+      },
+      "artifact_record_present": true,
+      "recovery_record": {
+        "build_path": "/output/gpu5/node-gpu5.iso",
+        "destination": {
+          "artifactPath": "/output/gpu5/node-gpu5.iso",
+          "buildOutput": "destination",
+          "mountPath": "/output",
+          "namespace": "node-iso",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "gpu5-iso"
+            }
+          }
+        },
+        "input_fingerprint": "sha256:2277de24594cfb71904f4309e5e2c3ffaa699b8971af2ad80608a91af80df14c",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-1994681e08829b12",
+          "namespace": "node-iso",
+          "restart_count": 0,
+          "uid": "a1ee86d5-ba8c-46a0-bc90-48f10369307b"
+        },
+        "run_id": "d5f769b7657a45848205b6aad80f5c58",
+        "schema_version": "1.0",
+        "status_path": "/ci-skills-work/d5f769b7657a45848205b6aad80f5c58/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:8e9e5adcfdd9bb315116ff969f21b6d4fba180bd3363204e3e8b705b48d2c4c7",
+        "tool_pod_fingerprint_label": "r2pfvxh53g5tcuiw76lj6inw2t52daf5gnrsatr6rnyfwsgsytdq"
+      },
+      "recovery_record_present": true
+    },
+    "kind": "ocp_node_onboard",
+    "operation": "verify",
+    "run_id": "d5f769b7657a45848205b6aad80f5c58",
+    "target": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    },
+    "timeout_seconds": 1800
+  },
+  "plan_digest": "11befec006f801a279893767354b30cc56085114a9529d879e5bfe201baea0e7",
+  "pod": {
+    "container": "ci-skills-pod",
+    "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+    "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+    "namespace": "node-iso",
+    "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+    "restart_count": 0,
+    "uid": "639914fc-8952-4471-9964-93bd5b173539"
+  },
+  "readback": {
+    "artifact_live_readback": {
+      "path": "/output/gpu5/node-gpu5.iso",
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+        "namespace": "node-iso",
+        "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+        "restart_count": 0,
+        "uid": "639914fc-8952-4471-9964-93bd5b173539"
+      },
+      "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+      "size": 1379328000
+    },
+    "artifact_record": {
+      "artifact": {
+        "path": "/output/gpu5/node-gpu5.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-1994681e08829b12",
+          "namespace": "node-iso",
+          "restart_count": 0,
+          "uid": "a1ee86d5-ba8c-46a0-bc90-48f10369307b"
+        },
+        "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+        "size": 1379328000
+      },
+      "destination": {
+        "artifactPath": "/output/gpu5/node-gpu5.iso",
+        "buildOutput": "destination",
+        "mountPath": "/output",
+        "namespace": "node-iso",
+        "volumeSource": {
+          "persistentVolumeClaim": {
+            "claimName": "gpu5-iso"
+          }
+        }
+      },
+      "lifetime": "caller_selected_volume",
+      "node_selector": {
+        "kubernetes.io/arch": "amd64"
+      },
+      "run_id": "d5f769b7657a45848205b6aad80f5c58",
+      "schema_version": "1.0",
+      "storage": {
+        "access_route": "ocs-storagecluster-cephnfs-service:/0001-0011-openshift-storage-0000000000000001-55f444d4-fc8e-43da-b5e0-dec3c891823b",
+        "artifact_path": "/output/gpu5/node-gpu5.iso",
+        "build_output": "destination",
+        "destination_fingerprint": "sha256:16ad2e04136b8f76c5d40af113c9a8d73480502c4026034e8d25090574145a85",
+        "lifetime": "caller_selected_volume",
+        "mount_path": "/output",
+        "namespace": "node-iso",
+        "observed_mount_path": "/output",
+        "output_absent": true,
+        "protocol": "nfs4",
+        "volume_source_types": [
+          "persistentVolumeClaim"
+        ],
+        "writable": true
+      },
+      "tool_mounts": [
+        {
+          "mountPath": "/output",
+          "name": "artifact-destination",
+          "readOnly": false,
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "gpu5-iso"
+            }
+          }
+        },
+        {
+          "mountPath": "/ci-skills-work/d5f769b7657a45848205b6aad80f5c58",
+          "name": "node-image-work",
+          "readOnly": false,
+          "volumeSource": {
+            "emptyDir": {}
+          }
+        }
+      ],
+      "tool_spec": {
+        "dependencies": [
+          {
+            "commands": [
+              "coreos-installer"
+            ],
+            "name": "coreos-installer",
+            "probe": [
+              "coreos-installer",
+              "--version"
+            ]
+          },
+          {
+            "commands": [
+              "rsync"
+            ],
+            "name": "rsync",
+            "probe": [
+              "rsync",
+              "--version"
+            ],
+            "yum": [
+              "rsync"
+            ]
+          },
+          {
+            "commands": [
+              "oc"
+            ],
+            "linux": {
+              "destination": "/tmp/ci-skills-tools/bin",
+              "files": [
+                "oc"
+              ],
+              "method": "archive",
+              "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+              "stripComponents": 0,
+              "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz"
+            },
+            "name": "oc",
+            "probe": [
+              "oc",
+              "version",
+              "--client",
+              "-o",
+              "json"
+            ]
+          }
+        ],
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71"
+      }
+    },
+    "embedded_ignition": {
+      "configuration": {
+        "files": [
+          {
+            "kind": "network",
+            "observations": {
+              "connection": {
+                "interface-name": "eno1",
+                "type": "802-3-ethernet"
+              },
+              "ethernet": {
+                "cloned-mac-address": "F8:14:DD:72:3E:CE",
+                "mtu": "9000"
+              },
+              "ipv4": {
+                "dns": "198.18.194.210",
+                "dns-priority": "40",
+                "ignore-auto-dns": "true",
+                "ignore-auto-routes": "false",
+                "method": "auto",
+                "never-default": "false"
+              },
+              "ipv6": {
+                "method": "disabled"
+              }
+            },
+            "path": "/etc/assisted/network/host0/eno1.nmconnection",
+            "sha256": "bb751d2dde09dc46263c1d45d34c56c47fc7e255f492004db418464ed52e2d2f",
+            "size": 459
+          },
+          {
+            "kind": "network",
+            "observations": {
+              "connection": {
+                "interface-name": "eno2",
+                "type": "802-3-ethernet"
+              },
+              "ethernet": {
+                "cloned-mac-address": "F8:14:DD:72:3E:CF",
+                "mtu": "9000"
+              },
+              "ipv4": {
+                "ignore-auto-dns": "true",
+                "ignore-auto-routes": "true",
+                "method": "auto",
+                "never-default": "true"
+              },
+              "ipv6": {
+                "method": "disabled"
+              }
+            },
+            "path": "/etc/assisted/network/host0/eno2.nmconnection",
+            "sha256": "76b07285e121e1ddf95234518a0379431e948b553b8b395cd8eb82c388afe2f0",
+            "size": 422
+          },
+          {
+            "kind": "network",
+            "path": "/etc/assisted/network/host0/mac_interface.ini",
+            "sha256": "564e2259ac00a968d1d944fefe62e7fe17aed6e532b0b5386dd2cfbac8887ef9",
+            "size": 45,
+            "unobserved": "inline_content_or_fields_unreadable"
+          },
+          {
+            "kind": "mac_addresses",
+            "observations": {
+              "mac_addresses": [
+                "f8:14:dd:72:3e:ce",
+                "f8:14:dd:72:3e:cf"
+              ]
+            },
+            "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+            "sha256": "01299fafe09f25b0a3433d368f089df33711b12b9ad702c3a45518a234392805",
+            "size": 36
+          },
+          {
+            "kind": "root_device_hints",
+            "observations": {
+              "root_device_hints": {
+                "deviceName": "/dev/sda"
+              }
+            },
+            "path": "/etc/assisted/hostconfig/host-0/root-device-hints.yaml",
+            "sha256": "1fb9d3e631a2c6135eaa9f93799a32d74d12b7bbf13aeadc83b4a8ae54f178c0",
+            "size": 21
+          }
+        ],
+        "unobserved_fields": [
+          "role",
+          "hostname"
+        ]
+      },
+      "sha256": "d87be0b47522c0b830f0de37ba39b54f7299417e8a0135b41f17880d6e42bbc8",
+      "size": 130216,
+      "version": "3.2.0"
+    },
+    "owns_namespace": false,
+    "pod": {
+      "container": "ci-skills-pod",
+      "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+      "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+      "namespace": "node-iso",
+      "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+      "restart_count": 0,
+      "uid": "639914fc-8952-4471-9964-93bd5b173539"
+    },
+    "pod_attempts": [
+      {
+        "attempt": 1,
+        "classification": "Ready",
+        "duration": {
+          "unit": "seconds",
+          "value": 11.922867
+        },
+        "events": [],
+        "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+        "pod_uid": "639914fc-8952-4471-9964-93bd5b173539"
+      }
+    ],
+    "recovery_record": {
+      "build_path": "/output/gpu5/node-gpu5.iso",
+      "destination": {
+        "artifactPath": "/output/gpu5/node-gpu5.iso",
+        "buildOutput": "destination",
+        "mountPath": "/output",
+        "namespace": "node-iso",
+        "volumeSource": {
+          "persistentVolumeClaim": {
+            "claimName": "gpu5-iso"
+          }
+        }
+      },
+      "input_fingerprint": "sha256:2277de24594cfb71904f4309e5e2c3ffaa699b8971af2ad80608a91af80df14c",
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "name": "ci-skills-run-tool-pod-1994681e08829b12",
+        "namespace": "node-iso",
+        "restart_count": 0,
+        "uid": "a1ee86d5-ba8c-46a0-bc90-48f10369307b"
+      },
+      "run_id": "d5f769b7657a45848205b6aad80f5c58",
+      "schema_version": "1.0",
+      "status_path": "/ci-skills-work/d5f769b7657a45848205b6aad80f5c58/private/node-image-status.json",
+      "tool_pod_fingerprint": "sha256:8e9e5adcfdd9bb315116ff969f21b6d4fba180bd3363204e3e8b705b48d2c4c7",
+      "tool_pod_fingerprint_label": "r2pfvxh53g5tcuiw76lj6inw2t52daf5gnrsatr6rnyfwsgsytdq"
+    },
+    "retained_resources": [
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-record-1994681e08829b12",
+        "namespace": "node-iso"
+      },
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-1994681e08829b12",
+        "namespace": "node-iso"
+      }
+    ],
+    "run_id": "75fa1c2c5f5e46d7af05c6068800d5b4",
+    "tools": [
+      {
+        "index": 0,
+        "name": "coreos-installer",
+        "observed": "coreos-installer 0.27.0\n",
+        "probe": [
+          "coreos-installer",
+          "--version"
+        ],
+        "verified": true
+      },
+      {
+        "index": 1,
+        "name": "rsync",
+        "observed": "rsync  version 3.5.1-g315819c5  protocol version 33\nCopyright (C) 1996-2026 by Andrew Tridgell, Wayne Davison, and others.\nWeb site: https://rsync.samba.org/\nCapabilities:\n    64-bit files, 64-bit inums, 64-bit timestamps, 64-bit long ints,\n    socketpairs, symlinks, symtimes, hardlinks, hardlink-specials,\n    hardlink-symlinks, IPv6, atimes, batchfiles, inplace, append, ACLs,\n    ACL-at, ACL-libacl-at, xattrs, optional secluded-args, iconv, prealloc,\n    stop-at, no crtimes, IDN\nOptimizations:\n    SIMD-roll, no asm-roll, openssl-crypto, no asm-MD5\nChecksum list:\n    xxh128 xxh3 xxh64 (xxhash) md5 md4 sha1 none\nCompress list:\n    zstd lz4 zlibx zlib none\nDaemon auth list:\n    sha512 sha256 sha1 md5 md4\n\nrsync comes with ABSOLUTELY NO WARRANTY.  This is free software, and you\nare welcome to redistribute it under certain conditions.  See the GNU\nGeneral Public Licence for details.\n",
+        "probe": [
+          "rsync",
+          "--version"
+        ],
+        "verified": true
+      },
+      {
+        "index": 2,
+        "name": "oc",
+        "observed": "{\n  \"clientVersion\": {\n    \"major\": \"\",\n    \"minor\": \"\",\n    \"gitVersion\": \"4.19.0-202602262001.p2.g24755b6.assembly.stream.el9-24755b6\",\n    \"gitCommit\": \"24755b6e82745a4dfa5a6db4b467564c237f244c\",\n    \"gitTreeState\": \"clean\",\n    \"buildDate\": \"2026-02-27T05:16:59Z\",\n    \"goVersion\": \"go1.23.10 (Red Hat 1.23.10-10.el9) X:strictfipsruntime\",\n    \"compiler\": \"gc\",\n    \"platform\": \"linux/amd64\"\n  },\n  \"kustomizeVersion\": \"v5.5.0\",\n  \"releaseClientVersion\": \"4.19.26\"\n}\n",
+        "probe": [
+          "oc",
+          "version",
+          "--client",
+          "-o",
+          "json"
+        ],
+        "verified": true
+      }
+    ]
+  },
+  "records": [
+    {
+      "callback": "K8SAuth",
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveRunScopes",
+      "run_id": "d5f769b7657a45848205b6aad80f5c58",
+      "scopes": [
+        {
+          "namespace": "node-iso",
+          "owns_namespace": false,
+          "run_id": "d5f769b7657a45848205b6aad80f5c58"
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveNodeArtifactRecord",
+      "present": true,
+      "record": {
+        "artifact": {
+          "path": "/output/gpu5/node-gpu5.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-1994681e08829b12",
+            "namespace": "node-iso",
+            "restart_count": 0,
+            "uid": "a1ee86d5-ba8c-46a0-bc90-48f10369307b"
+          },
+          "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+          "size": 1379328000
+        },
+        "destination": {
+          "artifactPath": "/output/gpu5/node-gpu5.iso",
+          "buildOutput": "destination",
+          "mountPath": "/output",
+          "namespace": "node-iso",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "gpu5-iso"
+            }
+          }
+        },
+        "lifetime": "caller_selected_volume",
+        "node_selector": {
+          "kubernetes.io/arch": "amd64"
+        },
+        "run_id": "d5f769b7657a45848205b6aad80f5c58",
+        "schema_version": "1.0",
+        "storage": {
+          "access_route": "ocs-storagecluster-cephnfs-service:/0001-0011-openshift-storage-0000000000000001-55f444d4-fc8e-43da-b5e0-dec3c891823b",
+          "artifact_path": "/output/gpu5/node-gpu5.iso",
+          "build_output": "destination",
+          "destination_fingerprint": "sha256:16ad2e04136b8f76c5d40af113c9a8d73480502c4026034e8d25090574145a85",
+          "lifetime": "caller_selected_volume",
+          "mount_path": "/output",
+          "namespace": "node-iso",
+          "observed_mount_path": "/output",
+          "output_absent": true,
+          "protocol": "nfs4",
+          "volume_source_types": [
+            "persistentVolumeClaim"
+          ],
+          "writable": true
+        },
+        "tool_mounts": [
+          {
+            "mountPath": "/output",
+            "name": "artifact-destination",
+            "readOnly": false,
+            "volumeSource": {
+              "persistentVolumeClaim": {
+                "claimName": "gpu5-iso"
+              }
+            }
+          },
+          {
+            "mountPath": "/ci-skills-work/d5f769b7657a45848205b6aad80f5c58",
+            "name": "node-image-work",
+            "readOnly": false,
+            "volumeSource": {
+              "emptyDir": {}
+            }
+          }
+        ],
+        "tool_spec": {
+          "dependencies": [
+            {
+              "commands": [
+                "coreos-installer"
+              ],
+              "name": "coreos-installer",
+              "probe": [
+                "coreos-installer",
+                "--version"
+              ]
+            },
+            {
+              "commands": [
+                "rsync"
+              ],
+              "name": "rsync",
+              "probe": [
+                "rsync",
+                "--version"
+              ],
+              "yum": [
+                "rsync"
+              ]
+            },
+            {
+              "commands": [
+                "oc"
+              ],
+              "linux": {
+                "destination": "/tmp/ci-skills-tools/bin",
+                "files": [
+                  "oc"
+                ],
+                "method": "archive",
+                "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+                "stripComponents": 0,
+                "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz"
+              },
+              "name": "oc",
+              "probe": [
+                "oc",
+                "version",
+                "--client",
+                "-o",
+                "json"
+              ]
+            }
+          ],
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71"
+        }
+      },
+      "resource": {
+        "kind": "ConfigMap",
+        "name": "ci-skills-run-node-artifact-record-1994681e08829b12",
+        "namespace": "node-iso",
+        "uid": "bed2d6d8-4cde-4be7-9f0b-cae15261b63b"
+      },
+      "run_id": "d5f769b7657a45848205b6aad80f5c58",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveNodeRecoveryRecord",
+      "present": true,
+      "recovery": {
+        "build_path": "/output/gpu5/node-gpu5.iso",
+        "destination": {
+          "artifactPath": "/output/gpu5/node-gpu5.iso",
+          "buildOutput": "destination",
+          "mountPath": "/output",
+          "namespace": "node-iso",
+          "volumeSource": {
+            "persistentVolumeClaim": {
+              "claimName": "gpu5-iso"
+            }
+          }
+        },
+        "input_fingerprint": "sha256:2277de24594cfb71904f4309e5e2c3ffaa699b8971af2ad80608a91af80df14c",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-1994681e08829b12",
+          "namespace": "node-iso",
+          "restart_count": 0,
+          "uid": "a1ee86d5-ba8c-46a0-bc90-48f10369307b"
+        },
+        "run_id": "d5f769b7657a45848205b6aad80f5c58",
+        "schema_version": "1.0",
+        "status_path": "/ci-skills-work/d5f769b7657a45848205b6aad80f5c58/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:8e9e5adcfdd9bb315116ff969f21b6d4fba180bd3363204e3e8b705b48d2c4c7",
+        "tool_pod_fingerprint_label": "r2pfvxh53g5tcuiw76lj6inw2t52daf5gnrsatr6rnyfwsgsytdq"
+      },
+      "resource": {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-1994681e08829b12",
+        "namespace": "node-iso",
+        "uid": "a93903b8-a8bf-4cbf-9f2b-eb7630d61dbd"
+      },
+      "run_id": "d5f769b7657a45848205b6aad80f5c58",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveRunScopes",
+      "run_id": "75fa1c2c5f5e46d7af05c6068800d5b4",
+      "scopes": [],
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "OpenRunScope",
+      "namespace": "node-iso",
+      "owns_namespace": false,
+      "reused": false,
+      "run_id": "75fa1c2c5f5e46d7af05c6068800d5b4",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "StageToolPod",
+      "owns_namespace": false,
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+        "namespace": "node-iso",
+        "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+        "restart_count": 0,
+        "uid": "639914fc-8952-4471-9964-93bd5b173539"
+      },
+      "reused": false,
+      "run_id": "75fa1c2c5f5e46d7af05c6068800d5b4",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ReadToolState",
+      "environment": {
+        "package_manager": "dnf",
+        "pod_uid": "639914fc-8952-4471-9964-93bd5b173539",
+        "restart_count": 0,
+        "runtime": "uid=0\ngid=0\nLinux 5.14.0-570.98.1.el9_6.x86_64 x86_64\nos=fedora\nos_version=44\n",
+        "search_paths": [
+          "/tmp/ci-skills-tools/bin",
+          "/tmp/ci-skills-tools/bin/bin"
+        ]
+      },
+      "tools": [
+        {
+          "commands": [
+            "coreos-installer"
+          ],
+          "index": 0,
+          "name": "coreos-installer",
+          "pod_uid": "639914fc-8952-4471-9964-93bd5b173539",
+          "present": true,
+          "restart_count": 0,
+          "route": "present",
+          "writable": []
+        },
+        {
+          "commands": [
+            "rsync"
+          ],
+          "index": 1,
+          "name": "rsync",
+          "package_manager": "dnf",
+          "pod_uid": "639914fc-8952-4471-9964-93bd5b173539",
+          "present": false,
+          "restart_count": 0,
+          "route": "package",
+          "writable": [
+            {
+              "observed": "/var/lib/rpm",
+              "requested": "/var/lib/rpm"
+            },
+            {
+              "observed": "/var/cache",
+              "requested": "/var/cache/dnf"
+            }
+          ]
+        },
+        {
+          "commands": [
+            "oc"
+          ],
+          "index": 2,
+          "name": "oc",
+          "pod_uid": "639914fc-8952-4471-9964-93bd5b173539",
+          "present": false,
+          "restart_count": 0,
+          "route": "artifact",
+          "writable": [
+            {
+              "observed": "/tmp",
+              "requested": "/tmp/ci-skills-tools/bin"
+            },
+            {
+              "observed": "/tmp",
+              "requested": "/tmp"
+            }
+          ]
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "InstallArtifact",
+      "index": 0,
+      "name": "coreos-installer",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "InstallArtifact",
+      "commands": [
+        "rsync"
+      ],
+      "index": 1,
+      "name": "rsync",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "artifact": {
+        "path": "/tmp/ci-skills-dependency-2",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+          "namespace": "node-iso",
+          "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+          "restart_count": 0,
+          "uid": "639914fc-8952-4471-9964-93bd5b173539"
+        },
+        "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+        "size": 74247777
+      },
+      "callback": "DownloadArtifact",
+      "index": 2,
+      "name": "oc",
+      "verified": true
+    },
+    {
+      "action": "APPLIED",
+      "callback": "InstallArtifact",
+      "commands": [
+        "oc"
+      ],
+      "index": 2,
+      "name": "oc",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "VerifyTools",
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+        "namespace": "node-iso",
+        "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+        "restart_count": 0,
+        "uid": "639914fc-8952-4471-9964-93bd5b173539"
+      },
+      "retained_resources": [
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-record-1994681e08829b12",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-recovery-1994681e08829b12",
+          "namespace": "node-iso"
+        }
+      ],
+      "run_id": "75fa1c2c5f5e46d7af05c6068800d5b4",
+      "tools": [
+        {
+          "index": 0,
+          "name": "coreos-installer",
+          "observed": "coreos-installer 0.27.0\n",
+          "probe": [
+            "coreos-installer",
+            "--version"
+          ],
+          "verified": true
+        },
+        {
+          "index": 1,
+          "name": "rsync",
+          "observed": "rsync  version 3.5.1-g315819c5  protocol version 33\nCopyright (C) 1996-2026 by Andrew Tridgell, Wayne Davison, and others.\nWeb site: https://rsync.samba.org/\nCapabilities:\n    64-bit files, 64-bit inums, 64-bit timestamps, 64-bit long ints,\n    socketpairs, symlinks, symtimes, hardlinks, hardlink-specials,\n    hardlink-symlinks, IPv6, atimes, batchfiles, inplace, append, ACLs,\n    ACL-at, ACL-libacl-at, xattrs, optional secluded-args, iconv, prealloc,\n    stop-at, no crtimes, IDN\nOptimizations:\n    SIMD-roll, no asm-roll, openssl-crypto, no asm-MD5\nChecksum list:\n    xxh128 xxh3 xxh64 (xxhash) md5 md4 sha1 none\nCompress list:\n    zstd lz4 zlibx zlib none\nDaemon auth list:\n    sha512 sha256 sha1 md5 md4\n\nrsync comes with ABSOLUTELY NO WARRANTY.  This is free software, and you\nare welcome to redistribute it under certain conditions.  See the GNU\nGeneral Public Licence for details.\n",
+          "probe": [
+            "rsync",
+            "--version"
+          ],
+          "verified": true
+        },
+        {
+          "index": 2,
+          "name": "oc",
+          "observed": "{\n  \"clientVersion\": {\n    \"major\": \"\",\n    \"minor\": \"\",\n    \"gitVersion\": \"4.19.0-202602262001.p2.g24755b6.assembly.stream.el9-24755b6\",\n    \"gitCommit\": \"24755b6e82745a4dfa5a6db4b467564c237f244c\",\n    \"gitTreeState\": \"clean\",\n    \"buildDate\": \"2026-02-27T05:16:59Z\",\n    \"goVersion\": \"go1.23.10 (Red Hat 1.23.10-10.el9) X:strictfipsruntime\",\n    \"compiler\": \"gc\",\n    \"platform\": \"linux/amd64\"\n  },\n  \"kustomizeVersion\": \"v5.5.0\",\n  \"releaseClientVersion\": \"4.19.26\"\n}\n",
+          "probe": [
+            "oc",
+            "version",
+            "--client",
+            "-o",
+            "json"
+          ],
+          "verified": true
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "artifact": {
+        "path": "/output/gpu5/node-gpu5.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+          "namespace": "node-iso",
+          "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+          "restart_count": 0,
+          "uid": "639914fc-8952-4471-9964-93bd5b173539"
+        },
+        "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+        "size": 1379328000
+      },
+      "callback": "VerifyArtifactReference",
+      "inspection": {
+        "artifact": {
+          "path": "/output/gpu5/node-gpu5.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+            "namespace": "node-iso",
+            "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+            "restart_count": 0,
+            "uid": "639914fc-8952-4471-9964-93bd5b173539"
+          },
+          "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+          "size": 1379328000
+        },
+        "embedded_ignition": {
+          "configuration": {
+            "files": [
+              {
+                "kind": "network",
+                "observations": {
+                  "connection": {
+                    "interface-name": "eno1",
+                    "type": "802-3-ethernet"
+                  },
+                  "ethernet": {
+                    "cloned-mac-address": "F8:14:DD:72:3E:CE",
+                    "mtu": "9000"
+                  },
+                  "ipv4": {
+                    "dns": "198.18.194.210",
+                    "dns-priority": "40",
+                    "ignore-auto-dns": "true",
+                    "ignore-auto-routes": "false",
+                    "method": "auto",
+                    "never-default": "false"
+                  },
+                  "ipv6": {
+                    "method": "disabled"
+                  }
+                },
+                "path": "/etc/assisted/network/host0/eno1.nmconnection",
+                "sha256": "bb751d2dde09dc46263c1d45d34c56c47fc7e255f492004db418464ed52e2d2f",
+                "size": 459
+              },
+              {
+                "kind": "network",
+                "observations": {
+                  "connection": {
+                    "interface-name": "eno2",
+                    "type": "802-3-ethernet"
+                  },
+                  "ethernet": {
+                    "cloned-mac-address": "F8:14:DD:72:3E:CF",
+                    "mtu": "9000"
+                  },
+                  "ipv4": {
+                    "ignore-auto-dns": "true",
+                    "ignore-auto-routes": "true",
+                    "method": "auto",
+                    "never-default": "true"
+                  },
+                  "ipv6": {
+                    "method": "disabled"
+                  }
+                },
+                "path": "/etc/assisted/network/host0/eno2.nmconnection",
+                "sha256": "76b07285e121e1ddf95234518a0379431e948b553b8b395cd8eb82c388afe2f0",
+                "size": 422
+              },
+              {
+                "kind": "network",
+                "path": "/etc/assisted/network/host0/mac_interface.ini",
+                "sha256": "564e2259ac00a968d1d944fefe62e7fe17aed6e532b0b5386dd2cfbac8887ef9",
+                "size": 45,
+                "unobserved": "inline_content_or_fields_unreadable"
+              },
+              {
+                "kind": "mac_addresses",
+                "observations": {
+                  "mac_addresses": [
+                    "f8:14:dd:72:3e:ce",
+                    "f8:14:dd:72:3e:cf"
+                  ]
+                },
+                "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+                "sha256": "01299fafe09f25b0a3433d368f089df33711b12b9ad702c3a45518a234392805",
+                "size": 36
+              },
+              {
+                "kind": "root_device_hints",
+                "observations": {
+                  "root_device_hints": {
+                    "deviceName": "/dev/sda"
+                  }
+                },
+                "path": "/etc/assisted/hostconfig/host-0/root-device-hints.yaml",
+                "sha256": "1fb9d3e631a2c6135eaa9f93799a32d74d12b7bbf13aeadc83b4a8ae54f178c0",
+                "size": 21
+              }
+            ],
+            "unobserved_fields": [
+              "role",
+              "hostname"
+            ]
+          },
+          "sha256": "d87be0b47522c0b830f0de37ba39b54f7299417e8a0135b41f17880d6e42bbc8",
+          "size": 130216,
+          "version": "3.2.0"
+        }
+      },
+      "lifetime": "caller_selected_volume",
+      "run_id": "d5f769b7657a45848205b6aad80f5c58",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "artifact": {
+        "path": "/output/gpu5/node-gpu5.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+          "namespace": "node-iso",
+          "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+          "restart_count": 0,
+          "uid": "639914fc-8952-4471-9964-93bd5b173539"
+        },
+        "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+        "size": 1379328000
+      },
+      "callback": "VerifyArtifactReference",
+      "hook": "cleanup",
+      "inspection": {
+        "artifact": {
+          "path": "/output/gpu5/node-gpu5.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+            "namespace": "node-iso",
+            "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+            "restart_count": 0,
+            "uid": "639914fc-8952-4471-9964-93bd5b173539"
+          },
+          "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+          "size": 1379328000
+        },
+        "embedded_ignition": {
+          "configuration": {
+            "files": [
+              {
+                "kind": "network",
+                "observations": {
+                  "connection": {
+                    "interface-name": "eno1",
+                    "type": "802-3-ethernet"
+                  },
+                  "ethernet": {
+                    "cloned-mac-address": "F8:14:DD:72:3E:CE",
+                    "mtu": "9000"
+                  },
+                  "ipv4": {
+                    "dns": "198.18.194.210",
+                    "dns-priority": "40",
+                    "ignore-auto-dns": "true",
+                    "ignore-auto-routes": "false",
+                    "method": "auto",
+                    "never-default": "false"
+                  },
+                  "ipv6": {
+                    "method": "disabled"
+                  }
+                },
+                "path": "/etc/assisted/network/host0/eno1.nmconnection",
+                "sha256": "bb751d2dde09dc46263c1d45d34c56c47fc7e255f492004db418464ed52e2d2f",
+                "size": 459
+              },
+              {
+                "kind": "network",
+                "observations": {
+                  "connection": {
+                    "interface-name": "eno2",
+                    "type": "802-3-ethernet"
+                  },
+                  "ethernet": {
+                    "cloned-mac-address": "F8:14:DD:72:3E:CF",
+                    "mtu": "9000"
+                  },
+                  "ipv4": {
+                    "ignore-auto-dns": "true",
+                    "ignore-auto-routes": "true",
+                    "method": "auto",
+                    "never-default": "true"
+                  },
+                  "ipv6": {
+                    "method": "disabled"
+                  }
+                },
+                "path": "/etc/assisted/network/host0/eno2.nmconnection",
+                "sha256": "76b07285e121e1ddf95234518a0379431e948b553b8b395cd8eb82c388afe2f0",
+                "size": 422
+              },
+              {
+                "kind": "network",
+                "path": "/etc/assisted/network/host0/mac_interface.ini",
+                "sha256": "564e2259ac00a968d1d944fefe62e7fe17aed6e532b0b5386dd2cfbac8887ef9",
+                "size": 45,
+                "unobserved": "inline_content_or_fields_unreadable"
+              },
+              {
+                "kind": "mac_addresses",
+                "observations": {
+                  "mac_addresses": [
+                    "f8:14:dd:72:3e:ce",
+                    "f8:14:dd:72:3e:cf"
+                  ]
+                },
+                "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+                "sha256": "01299fafe09f25b0a3433d368f089df33711b12b9ad702c3a45518a234392805",
+                "size": 36
+              },
+              {
+                "kind": "root_device_hints",
+                "observations": {
+                  "root_device_hints": {
+                    "deviceName": "/dev/sda"
+                  }
+                },
+                "path": "/etc/assisted/hostconfig/host-0/root-device-hints.yaml",
+                "sha256": "1fb9d3e631a2c6135eaa9f93799a32d74d12b7bbf13aeadc83b4a8ae54f178c0",
+                "size": 21
+              }
+            ],
+            "unobserved_fields": [
+              "role",
+              "hostname"
+            ]
+          },
+          "sha256": "d87be0b47522c0b830f0de37ba39b54f7299417e8a0135b41f17880d6e42bbc8",
+          "size": 130216,
+          "version": "3.2.0"
+        }
+      },
+      "lifetime": "caller_selected_volume",
+      "run_id": "d5f769b7657a45848205b6aad80f5c58",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "artifact": {
+        "path": "/output/gpu5/node-gpu5.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+          "namespace": "node-iso",
+          "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+          "restart_count": 0,
+          "uid": "639914fc-8952-4471-9964-93bd5b173539"
+        },
+        "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+        "size": 1379328000
+      },
+      "callback": "VerifyTools",
+      "hook": "cleanup",
+      "inspection": {
+        "artifact": {
+          "path": "/output/gpu5/node-gpu5.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+            "namespace": "node-iso",
+            "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+            "restart_count": 0,
+            "uid": "639914fc-8952-4471-9964-93bd5b173539"
+          },
+          "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+          "size": 1379328000
+        },
+        "embedded_ignition": {
+          "configuration": {
+            "files": [
+              {
+                "kind": "network",
+                "observations": {
+                  "connection": {
+                    "interface-name": "eno1",
+                    "type": "802-3-ethernet"
+                  },
+                  "ethernet": {
+                    "cloned-mac-address": "F8:14:DD:72:3E:CE",
+                    "mtu": "9000"
+                  },
+                  "ipv4": {
+                    "dns": "198.18.194.210",
+                    "dns-priority": "40",
+                    "ignore-auto-dns": "true",
+                    "ignore-auto-routes": "false",
+                    "method": "auto",
+                    "never-default": "false"
+                  },
+                  "ipv6": {
+                    "method": "disabled"
+                  }
+                },
+                "path": "/etc/assisted/network/host0/eno1.nmconnection",
+                "sha256": "bb751d2dde09dc46263c1d45d34c56c47fc7e255f492004db418464ed52e2d2f",
+                "size": 459
+              },
+              {
+                "kind": "network",
+                "observations": {
+                  "connection": {
+                    "interface-name": "eno2",
+                    "type": "802-3-ethernet"
+                  },
+                  "ethernet": {
+                    "cloned-mac-address": "F8:14:DD:72:3E:CF",
+                    "mtu": "9000"
+                  },
+                  "ipv4": {
+                    "ignore-auto-dns": "true",
+                    "ignore-auto-routes": "true",
+                    "method": "auto",
+                    "never-default": "true"
+                  },
+                  "ipv6": {
+                    "method": "disabled"
+                  }
+                },
+                "path": "/etc/assisted/network/host0/eno2.nmconnection",
+                "sha256": "76b07285e121e1ddf95234518a0379431e948b553b8b395cd8eb82c388afe2f0",
+                "size": 422
+              },
+              {
+                "kind": "network",
+                "path": "/etc/assisted/network/host0/mac_interface.ini",
+                "sha256": "564e2259ac00a968d1d944fefe62e7fe17aed6e532b0b5386dd2cfbac8887ef9",
+                "size": 45,
+                "unobserved": "inline_content_or_fields_unreadable"
+              },
+              {
+                "kind": "mac_addresses",
+                "observations": {
+                  "mac_addresses": [
+                    "f8:14:dd:72:3e:ce",
+                    "f8:14:dd:72:3e:cf"
+                  ]
+                },
+                "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+                "sha256": "01299fafe09f25b0a3433d368f089df33711b12b9ad702c3a45518a234392805",
+                "size": 36
+              },
+              {
+                "kind": "root_device_hints",
+                "observations": {
+                  "root_device_hints": {
+                    "deviceName": "/dev/sda"
+                  }
+                },
+                "path": "/etc/assisted/hostconfig/host-0/root-device-hints.yaml",
+                "sha256": "1fb9d3e631a2c6135eaa9f93799a32d74d12b7bbf13aeadc83b4a8ae54f178c0",
+                "size": 21
+              }
+            ],
+            "unobserved_fields": [
+              "role",
+              "hostname"
+            ]
+          },
+          "sha256": "d87be0b47522c0b830f0de37ba39b54f7299417e8a0135b41f17880d6e42bbc8",
+          "size": 130216,
+          "version": "3.2.0"
+        }
+      },
+      "lifetime": "caller_selected_volume",
+      "run_id": "d5f769b7657a45848205b6aad80f5c58",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "artifact": {
+        "path": "/output/gpu5/node-gpu5.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+          "namespace": "node-iso",
+          "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+          "restart_count": 0,
+          "uid": "639914fc-8952-4471-9964-93bd5b173539"
+        },
+        "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+        "size": 1379328000
+      },
+      "callback": "InstallArtifact",
+      "hook": "cleanup",
+      "inspection": {
+        "artifact": {
+          "path": "/output/gpu5/node-gpu5.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+            "namespace": "node-iso",
+            "node_name": "node-4.ww-ocp-shared-mgmt-1.dcloud.local",
+            "restart_count": 0,
+            "uid": "639914fc-8952-4471-9964-93bd5b173539"
+          },
+          "sha256": "48192f57863eeaf964bf5357197e082908d37960a023fd340f70d077fd10338f",
+          "size": 1379328000
+        },
+        "embedded_ignition": {
+          "configuration": {
+            "files": [
+              {
+                "kind": "network",
+                "observations": {
+                  "connection": {
+                    "interface-name": "eno1",
+                    "type": "802-3-ethernet"
+                  },
+                  "ethernet": {
+                    "cloned-mac-address": "F8:14:DD:72:3E:CE",
+                    "mtu": "9000"
+                  },
+                  "ipv4": {
+                    "dns": "198.18.194.210",
+                    "dns-priority": "40",
+                    "ignore-auto-dns": "true",
+                    "ignore-auto-routes": "false",
+                    "method": "auto",
+                    "never-default": "false"
+                  },
+                  "ipv6": {
+                    "method": "disabled"
+                  }
+                },
+                "path": "/etc/assisted/network/host0/eno1.nmconnection",
+                "sha256": "bb751d2dde09dc46263c1d45d34c56c47fc7e255f492004db418464ed52e2d2f",
+                "size": 459
+              },
+              {
+                "kind": "network",
+                "observations": {
+                  "connection": {
+                    "interface-name": "eno2",
+                    "type": "802-3-ethernet"
+                  },
+                  "ethernet": {
+                    "cloned-mac-address": "F8:14:DD:72:3E:CF",
+                    "mtu": "9000"
+                  },
+                  "ipv4": {
+                    "ignore-auto-dns": "true",
+                    "ignore-auto-routes": "true",
+                    "method": "auto",
+                    "never-default": "true"
+                  },
+                  "ipv6": {
+                    "method": "disabled"
+                  }
+                },
+                "path": "/etc/assisted/network/host0/eno2.nmconnection",
+                "sha256": "76b07285e121e1ddf95234518a0379431e948b553b8b395cd8eb82c388afe2f0",
+                "size": 422
+              },
+              {
+                "kind": "network",
+                "path": "/etc/assisted/network/host0/mac_interface.ini",
+                "sha256": "564e2259ac00a968d1d944fefe62e7fe17aed6e532b0b5386dd2cfbac8887ef9",
+                "size": 45,
+                "unobserved": "inline_content_or_fields_unreadable"
+              },
+              {
+                "kind": "mac_addresses",
+                "observations": {
+                  "mac_addresses": [
+                    "f8:14:dd:72:3e:ce",
+                    "f8:14:dd:72:3e:cf"
+                  ]
+                },
+                "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+                "sha256": "01299fafe09f25b0a3433d368f089df33711b12b9ad702c3a45518a234392805",
+                "size": 36
+              },
+              {
+                "kind": "root_device_hints",
+                "observations": {
+                  "root_device_hints": {
+                    "deviceName": "/dev/sda"
+                  }
+                },
+                "path": "/etc/assisted/hostconfig/host-0/root-device-hints.yaml",
+                "sha256": "1fb9d3e631a2c6135eaa9f93799a32d74d12b7bbf13aeadc83b4a8ae54f178c0",
+                "size": 21
+              }
+            ],
+            "unobserved_fields": [
+              "role",
+              "hostname"
+            ]
+          },
+          "sha256": "d87be0b47522c0b830f0de37ba39b54f7299417e8a0135b41f17880d6e42bbc8",
+          "size": 130216,
+          "version": "3.2.0"
+        }
+      },
+      "lifetime": "caller_selected_volume",
+      "run_id": "d5f769b7657a45848205b6aad80f5c58",
+      "verified": true
+    },
+    {
+      "absent": true,
+      "callback": "DownloadArtifact",
+      "hook": "cleanup",
+      "index": 2,
+      "kind": "PodArtifact",
+      "path": "/tmp/ci-skills-dependency-2",
+      "status": "PASS"
+    },
+    {
+      "absent": true,
+      "callback": "InstallArtifact",
+      "hook": "cleanup",
+      "index": 2,
+      "kind": "PodArtifact",
+      "path": "/tmp/ci-skills-dependency-2",
+      "status": "PASS"
+    },
+    {
+      "absent": true,
+      "callback": "InstallArtifact",
+      "hook": "cleanup",
+      "index": 2,
+      "kind": "PodArtifact",
+      "path": "/tmp/ci-skills-dependency-2",
+      "status": "PASS"
+    },
+    {
+      "absent": true,
+      "callback": "ReadToolState",
+      "hook": "cleanup",
+      "index": 2,
+      "kind": "PodArtifact",
+      "path": "/tmp/ci-skills-dependency-2",
+      "status": "PASS"
+    },
+    {
+      "callback": "StageToolPod",
+      "hook": "cleanup",
+      "resources": [
+        {
+          "absent": true,
+          "kind": "Pod",
+          "name": "ci-skills-run-tool-pod-5e19cdd4b0877224",
+          "namespace": "node-iso",
+          "status": "PASS"
+        },
+        {
+          "absent": true,
+          "kind": "ConfigMap",
+          "name": "ci-skills-run-tool-pod-scripts-5e19cdd4b0877224",
+          "namespace": "node-iso",
+          "status": "PASS"
+        }
+      ],
+      "retained": [
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-record-1994681e08829b12",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-recovery-1994681e08829b12",
+          "namespace": "node-iso"
+        }
+      ]
+    },
+    {
+      "callback": "OpenRunScope",
+      "hook": "cleanup",
+      "resources": [],
+      "retained": [
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-record-1994681e08829b12",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-recovery-1994681e08829b12",
+          "namespace": "node-iso"
+        }
+      ]
+    },
+    {
+      "callback": "ResolveRunScopes",
+      "hook": "cleanup",
+      "resources": [],
+      "retained": [
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-record-1994681e08829b12",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-recovery-1994681e08829b12",
+          "namespace": "node-iso"
+        }
+      ]
+    }
+  ],
+  "run_id": "d5f769b7657a45848205b6aad80f5c58",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "76d63d896763af35aff6c17835086687e8ea87961de46e1492a7ad32cea4f64a",
+    "file_count": 241,
+    "functional_digest": "d16d950c841811abe7b6101f2422f4464fad539169c4f4b6446653edf1a0decb",
+    "revision": {
+      "source": "installer_record",
+      "value": "77ee3320fcad7c1c024f69278571cdba3e380e21",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 24
+  },
+  "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin@https://api.ww-cai-cisco-live.dcloud.local:6443",
+  "target_file": "path:5e5380df1eda",
+  "target_source": "env:CI_SKILLS_TARGET",
+  "tested_revision": "77ee3320fcad7c1c024f69278571cdba3e380e21"
+}
