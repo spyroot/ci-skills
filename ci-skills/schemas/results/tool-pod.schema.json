@@ -206,6 +206,11 @@
         "container": {
           "type": "string",
           "minLength": 1
+        },
+        "node_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Actual spec.nodeName observed from Kubernetes; absent in legacy records."
         }
       }
     },

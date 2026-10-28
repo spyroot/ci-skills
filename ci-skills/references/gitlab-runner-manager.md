@@ -4,7 +4,8 @@ This command runs a GitLab shell executor inside Kubernetes. Use it after
 `gitlab_runner.py create` returns a runner ID and writes
 its one-time token. The selected toolbox image must be pinned by digest and
 contain both `gitlab-runner` and `podman`. Supply the exact worker already
-verified by `image_build_readiness.py probe`.
+verified by `image_build_readiness.py probe`. `--tag` takes the same tags given
+to `gitlab_runner.py create --tag`; `--label` is accepted as an alias of `--tag`.
 
 ## Deploy
 
@@ -19,7 +20,7 @@ conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/gitlab_runner_manager.py" dep
   --project GROUP/PROJECT \
   --runner-id RUNNER_ID \
   --description DESCRIPTION \
-  --label JOB_TAG \
+  --tag JOB_TAG \
   --image REGISTRY/PROJECT/TOOLBOX@sha256:DIGEST \
   --token-file TOKEN_PATH \
   --node READY_NODE \
@@ -37,7 +38,7 @@ conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/gitlab_runner_manager.py" dep
   --project GROUP/PROJECT \
   --runner-id RUNNER_ID \
   --description DESCRIPTION \
-  --label JOB_TAG \
+  --tag JOB_TAG \
   --image REGISTRY/PROJECT/TOOLBOX@sha256:DIGEST \
   --token-file TOKEN_PATH \
   --node READY_NODE \

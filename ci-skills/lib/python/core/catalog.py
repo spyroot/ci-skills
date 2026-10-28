@@ -304,6 +304,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--timeout": "operation timeout in seconds",
             "--receipt-out": "write a sanitized operation receipt",
         },
+        "repeatable_options": ("--label",),
         "subcommands": {
             "create": {
                 "required_options": ["--spec", "--name", "--runner-root", "--label"],
@@ -1138,7 +1139,8 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--group": "exact group path or numeric ID; otherwise use gitlab.group",
             "--runner-id": "positive ID returned by gitlab_runner.py create",
             "--description": "exact description used to create the runner record",
-            "--label": "expected GitLab runner tag; repeat for multiple tags",
+            "--tag": "GitLab runner tag given to gitlab_runner.py create --tag; "
+            "repeat for multiple tags; --label is accepted as an alias",
             "--image": "digest-pinned toolbox image containing gitlab-runner and "
             "podman",
             "--token-file": "one-time token file written by gitlab_runner.py create",
@@ -1155,12 +1157,15 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--timeout": "operation timeout in seconds",
             "--receipt-out": "write a sanitized operation receipt",
         },
+        "repeatable_options": ("--tag",),
+        # --label was the option name before --tag matched gitlab_runner.py create.
+        "option_aliases": {"--tag": ("--label",)},
         "subcommands": {
             "deploy": {
                 "required_options": [
                     "--runner-id",
                     "--description",
-                    "--label",
+                    "--tag",
                     "--image",
                     "--token-file",
                     "--node",
@@ -1719,13 +1724,16 @@ def options_for(script: str) -> dict[str, str]:
     """Collect universal, capability, and command options.
 
     :param script: Command filename registered in the catalog.
-    :returns: Option names mapped to their help descriptions.
+    :returns: Option names mapped to their help descriptions, including each
+        accepted alias described as ``alias of <option>``.
     """
     entry = COMMANDS[script]
     merged = dict(UNIVERSAL_OPTIONS)
     for capability in entry["capabilities"]:
         merged.update(CAPABILITY_OPTIONS[capability])
     merged.update(entry["options"])
+    for option, aliases in entry.get("option_aliases", {}).items():
+        merged.update({alias: f"alias of {option}" for alias in aliases})
     return merged
 
 

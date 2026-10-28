@@ -242,7 +242,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
         :returns: Exact tags in caller order.
         :raises ValueError: A tag is blank or repeated.
         """
-        labels = tuple(getattr(self.args, "label", ()))
+        labels = tuple(getattr(self.args, "tag", ()))
         if self.args.action == "deploy" and not labels:
             raise ValueError("runner_label_required")
         if len(set(labels)) != len(labels):
@@ -364,7 +364,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
             self.target = bind_sources(self.target, revision=self.args.revision)
         self.args.runner_id = self.runner_id
         self.args.description = self.description
-        self.args.label = list(self.labels)
+        self.args.tag = list(self.labels)
         self._prepare_scope()
         if self.args.action == "delete":
             self.runner_token = NoRunnerToken()

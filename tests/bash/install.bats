@@ -60,6 +60,60 @@ make_install_fixture() {
   [ ! -e "$destination" ]
 }
 
+@test 'scope codex-home reads back the same destination as no location flag' {
+  make_install_fixture
+  home="${BATS_TEST_TMPDIR}/home"
+  run env -u CODEX_HOME HOME="$home" "$tool" --dry-run
+  [ "$status" -eq 0 ]
+  default_destination=$(jq -r .destination <<<"$output")
+  run env -u CODEX_HOME HOME="$home" "$tool" --scope codex-home --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .destination <<<"$output")" = "$default_destination" ]
+  [ "$default_destination" = "$(cd "$BATS_TEST_TMPDIR" && pwd -P)/home/.codex/skills/ci-skills" ]
+  [ ! -e "$home" ]
+}
+
+@test 'scope claude-user plans the Claude user skills directory without writing' {
+  make_install_fixture
+  home="${BATS_TEST_TMPDIR}/home"
+  run env HOME="$home" "$tool" --scope claude-user --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .destination <<<"$output")" = "$(cd "$BATS_TEST_TMPDIR" && pwd -P)/home/.claude/skills/ci-skills" ]
+  [ ! -e "$home" ]
+}
+
+@test 'scope claude-project plans the consumer Git root from a subdirectory without writing' {
+  make_install_fixture
+  mkdir -p nested/dir
+  cd nested/dir
+  run "$tool" --scope claude-project --dry-run
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .destination <<<"$output")" = "$(cd "$caller_root" && pwd -P)/.claude/skills/ci-skills" ]
+  [ ! -e "$caller_root/.claude" ]
+}
+
+@test 'scope claude-project outside a Git repository reports BLOCKED JSON without usage text' {
+  make_install_fixture
+  outside="${BATS_TEST_TMPDIR}/outside"
+  mkdir -p "$outside"
+  cd "$outside"
+  run env GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" "$tool" --scope claude-project --dry-run
+  [ "$status" -eq 2 ]
+  jq -e '.status == "BLOCKED" and .kind == "skill_install" and .scope == "claude-project"
+    and .reason == "agent_repository_unavailable" and (.safe_next_step | length > 0)' \
+    <<<"$output" >/dev/null
+  [[ "$output" != *'usage:'* ]]
+  [ ! -e "$outside/.claude" ]
+}
+
+@test 'scope cannot be combined with another location flag' {
+  make_install_fixture
+  run "$tool" --scope claude-user --destination "$destination" --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'not allowed with argument'* ]]
+  [ ! -e "$destination" ]
+}
+
 @test 'requested diagnostics record a correlated structured installer result' {
   make_install_fixture
   log_file="${BATS_TEST_TMPDIR}/installer.log"

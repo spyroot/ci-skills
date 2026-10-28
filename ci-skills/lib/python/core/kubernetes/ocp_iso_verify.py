@@ -12,13 +12,17 @@ import configparser
 import gzip
 import hashlib
 import io
+import re
 import zlib
 from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from typing import Final
 from urllib.parse import unquote_to_bytes
 
+import yaml
+
+from lib.python.core.binary_build import BinaryBuildPlanner, BuildConfigLoader
 from lib.python.core.cli_api import MAX_RESPONSE_BYTES, response_decoder
-from lib.python.core.json_types import JSONObject, JSONValue
+from lib.python.core.json_types import JSONObject, JSONValue, is_json_value
 from lib.python.core.kubernetes.artifact_storage_callbacks import (
     retain_verified_source,
 )
@@ -30,7 +34,8 @@ from lib.python.core.kubernetes.ocp_iso import (
     run_node_image_script,
 )
 from lib.python.core.kubernetes.tool_pod_models import ArtifactHandle
-from lib.python.core.runtime import sanitize
+from lib.python.core.read_tools import ReadToolError
+from lib.python.core.runtime import redact_tree, sanitize
 from lib.python.sys.status import VERIFIED
 
 _ASSISTED_ROOT: Final = "/etc/assisted/"
@@ -40,11 +45,31 @@ _HOST_CONFIG_FILES: Final = {
     "role": "role",
 }
 _FILE_KINDS: Final = (*_HOST_CONFIG_FILES.values(), "hostname", "network")
+_IP_FIELDS: Final = (
+    "method",
+    "gateway",
+    "dns",
+    "dns-search",
+    "dns-options",
+    "dns-priority",
+    "ignore-auto-dns",
+    "ignore-auto-routes",
+    "never-default",
+    "may-fail",
+    "route-metric",
+    "route-table",
+)
+# NetworkManager's keyfile format stores addresses, routes, and rules by index.
+_IP_INDEXED_FIELD: Final = re.compile(
+    r"(?:address[0-9]+|route[0-9]+(?:_options)?|routing-rule[0-9]+)"
+)
 _NETWORK_FIELDS: Final = {
     "connection": ("interface-name", "type"),
     "ethernet": ("mac-address", "cloned-mac-address", "mtu"),
     "802-3-ethernet": ("mac-address", "cloned-mac-address", "mtu"),
     "match": ("interface-name",),
+    "ipv4": _IP_FIELDS,
+    "ipv6": (*_IP_FIELDS, "addr-gen-mode", "ip6-privacy"),
 }
 
 
@@ -126,7 +151,7 @@ def _file_bytes(file: JSONObject) -> bytes:
 
 
 def _network_observations(content: str) -> JSONObject:
-    """Select native interface/MAC/MTU properties, never credential sections.
+    """Select native interface and IP configuration, never credential sections.
 
     :param content: Decoded native NetworkManager keyfile text.
     :returns: Only selected nonsecret properties through bounded shared redaction.
@@ -142,8 +167,9 @@ def _network_observations(content: str) -> JSONObject:
             continue
         values = {
             key: sanitize(parser.get(section, key))
-            for key in keys
-            if parser.has_option(section, key)
+            for key in parser.options(section)
+            if key in keys
+            or (section in ("ipv4", "ipv6") and _IP_INDEXED_FIELD.fullmatch(key))
         }
         if values:
             fields[section] = values
@@ -155,15 +181,24 @@ def _file_observations(kind: str, content: bytes) -> JSONObject:
 
     :param kind: Output kind selected from its native path.
     :param content: Complete inline bytes of that selected file.
-    :returns: Safe native observations; root-device hints remain digest-only.
+    :returns: Safe native observations. Root hints reuse the existing safe YAML
+        loader and JSON expansion bound; neither validates native build inputs.
     :raises UnicodeError: A selected text field is not UTF-8.
     :raises configparser.Error: A selected network keyfile cannot be parsed.
+    :raises yaml.YAMLError: Generated root-device hints cannot be decoded safely.
+    :raises ReadToolError: Decoded hints exceed the shared JSON expansion bound.
+    :raises EmbeddedObservationError: Decoded hints cannot be represented as an object.
+    :raises RecursionError: Decoded hints exceed the parser or traversal depth.
     """
-    if kind == "root_device_hints":
-        return {}
     text = content.decode("utf-8")
     if not text.strip():
         return {}
+    if kind == "root_device_hints":
+        value: object = yaml.load(text, Loader=BuildConfigLoader)
+        BinaryBuildPlanner.check_json_size(value)
+        if not is_json_value(value) or not isinstance(value, Mapping):
+            raise EmbeddedObservationError("root_device_hints_unreadable")
+        return {kind: redact_tree(value)} if value else {}
     if kind == "network":
         return _network_observations(text)
     if kind == "mac_addresses":
@@ -195,17 +230,18 @@ def _file_evidence(file: JSONObject, path: str, kind: str) -> JSONObject:
         UnicodeError,
         OSError,
         EOFError,
+        RecursionError,
+        ReadToolError,
         zlib.error,
         configparser.Error,
+        yaml.YAMLError,
     ):
         evidence["unobserved"] = "inline_content_or_fields_unreadable"
         return evidence
     if observations:
         evidence["observations"] = observations
     else:
-        evidence["unobserved"] = (
-            "digest_only" if kind == "root_device_hints" else "fields_absent"
-        )
+        evidence["unobserved"] = "fields_absent"
     return evidence
 
 

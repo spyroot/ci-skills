@@ -8,10 +8,18 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import shlex
+import time
+from collections.abc import Sequence
 from typing import Optional
 
-from lib.python.core.json_types import JSONObject
-from lib.python.core.kubernetes.kubernetes import KubernetesError
+from lib.python.core.cli_api import response_decoder
+from lib.python.core.json_types import (
+    JSONObject,
+    copy_json_object,
+    json_object,
+    json_string,
+)
+from lib.python.core.kubernetes.kubernetes import KubernetesError, PodMountFailure
 from lib.python.core.kubernetes.resources import ResourceSet, matches
 from lib.python.core.kubernetes.run_scope import run_owned
 from lib.python.core.kubernetes.tool_pod_models import (
@@ -19,6 +27,8 @@ from lib.python.core.kubernetes.tool_pod_models import (
     RemoveToolPodAction,
 )
 from lib.python.core.kubernetes.tool_pod_resources import (
+    FAILED_NODES_ANNOTATION,
+    TOOL_POD_MAX_ATTEMPTS,
     TOOL_POD_ROLE,
     TOOL_POD_SCRIPT_ROLE,
     tool_pod_document,
@@ -37,6 +47,70 @@ from lib.python.core.runtime import error_class, sanitize
 from lib.python.sys.status import APPLIED, NO_OP, PASS, VERIFIED
 
 
+def _failed_nodes(document: JSONObject) -> tuple[str, ...]:
+    """Recover bounded placement exclusions from an existing owned Pod.
+
+    :param document: Native Pod whose ownership is checked by the caller.
+    :returns: Ordered nodes excluded by previous classified mount attempts.
+    :raises KubernetesError: The internal attempt annotation is malformed.
+    """
+    annotations = json_object(
+        json_object(document.get("metadata", {})).get("annotations", {})
+    )
+    raw = annotations.get(FAILED_NODES_ANNOTATION)
+    if raw is None:
+        return ()
+    try:
+        value = response_decoder().decode(json_string(raw))
+        if (
+            not isinstance(value, list)
+            or len(value) >= TOOL_POD_MAX_ATTEMPTS
+            or any(not isinstance(node, str) or not node for node in value)
+            or len(set(value)) != len(value)
+        ):
+            raise ValueError("invalid_failed_nodes")
+        return tuple(value)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise KubernetesError("tool_pod_mount_attempt_annotation_invalid") from exc
+
+
+def _attempt_evidence(
+    number: int,
+    started: float,
+    pod: JSONObject,
+    classification: str,
+    events: Sequence[JSONObject] = (),
+) -> JSONObject:
+    """Select safe native attempt identity, classified events and elapsed seconds.
+
+    :param number: One-based bounded attempt number.
+    :param started: Monotonic observation start.
+    :param pod: Exact Pod observation for this attempt.
+    :param classification: Readiness or observed failure classification.
+    :param events: UID-correlated FailedMount events, if present.
+    :returns: Nonsecret evidence retained even when all attempts fail.
+    """
+    metadata = json_object(pod.get("metadata", {}))
+    spec = json_object(pod.get("spec", {}))
+    return {
+        "attempt": number,
+        "classification": classification,
+        "pod_uid": metadata.get("uid", ""),
+        "node_name": spec.get("nodeName", ""),
+        "duration": {"value": round(time.monotonic() - started, 6), "unit": "seconds"},
+        "events": [
+            {
+                "uid": json_object(event.get("metadata", {})).get("uid", ""),
+                "reason": event.get("reason", ""),
+                "message": sanitize(json_string(event.get("message", ""))),
+                "count": event.get("count", 1),
+                "last_timestamp": event.get("lastTimestamp", ""),
+            }
+            for event in events
+        ],
+    }
+
+
 class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
     """Resolve or create one run scope and stage its exact execution Pod."""
 
@@ -47,6 +121,24 @@ class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
         """
         super().__init__(action)
         self.resources: Optional[ResourceSet] = None
+
+    def _retain_identity_conflict(self) -> None:
+        """Preserve a replacement and its backing resources after an identity conflict."""
+        state = self.tool_state
+        scope = state.run_scope
+        state.retained_resources.update(
+            (
+                _resource("Pod", scope.name(TOOL_POD_ROLE), scope.namespace),
+                _resource(
+                    "ConfigMap", scope.name(TOOL_POD_SCRIPT_ROLE), scope.namespace
+                ),
+            )
+        )
+        if scope.owns_namespace:
+            state.retained_resources.add(_resource("Namespace", scope.namespace, ""))
+        reason = "resource_delete_identity_mismatch"
+        if reason not in state.cleanup_failures:
+            state.cleanup_failures.append(reason)
 
     def run(self) -> JSONObject:
         """Reuse a matching live Pod or create and read back a new one.
@@ -68,9 +160,9 @@ class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
         self.resources = resources
         script_name = scope.name(TOOL_POD_SCRIPT_ROLE)
         pod_name = scope.name(TOOL_POD_ROLE)
+        excluded_nodes: tuple[str, ...] = ()
         if reused:
             expected_script = tool_pod_script_configmap(scope)
-            expected_pod = tool_pod_document(scope, action)
             observed_script = self.kubernetes.read(
                 "ConfigMap", script_name, scope.namespace
             )
@@ -81,19 +173,113 @@ class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
             ):
                 raise KubernetesError("tool_pod_script_resource_mismatch")
             observed = self.kubernetes.read("Pod", pod_name, scope.namespace)
+            if observed is not None and resources.owns(observed):
+                excluded_nodes = _failed_nodes(observed)
+            expected_pod = tool_pod_document(
+                scope, action, excluded_nodes=excluded_nodes
+            )
             if (
                 observed is None
                 or not resources.owns(observed)
                 or not matches(expected_pod, observed)
             ):
                 raise KubernetesError("tool_pod_owned_resource_missing")
-            _pod_handle(observed, action)
             resource_action = NO_OP
         else:
             resources.apply(tool_pod_script_configmap(scope))
             evidence = resources.apply(tool_pod_document(scope, action))
             resource_action = str(evidence["action"])
-        ready = self.kubernetes.wait_pod_ready(pod_name, scope.namespace)
+        expected_pod = tool_pod_document(scope, action, excluded_nodes=excluded_nodes)
+        state.prepared_pod_document = copy_json_object(expected_pod)
+        attempts: list[JSONObject] = []
+        state.readback["pod_attempts"] = attempts
+        deadline = time.monotonic() + action.timeout
+        while True:
+            started = time.monotonic()
+            initial = self.kubernetes.read("Pod", pod_name, scope.namespace)
+            if initial is None:
+                raise KubernetesError("tool_pod_missing_before_wait")
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise KubernetesError("tool_pod_ready_timeout")
+                ready = (
+                    self.kubernetes.wait_pod_mount_ready(
+                        pod_name, scope.namespace, timeout=remaining
+                    )
+                    if action.mounts
+                    else self.kubernetes.wait_pod_ready(pod_name, scope.namespace)
+                )
+            except PodMountFailure as exc:
+                attempts.append(
+                    _attempt_evidence(
+                        len(excluded_nodes) + 1,
+                        started,
+                        exc.pod,
+                        "FailedMount",
+                        exc.events,
+                    )
+                )
+                if not resources.owns(exc.pod) or not matches(expected_pod, exc.pod):
+                    raise KubernetesError(
+                        "tool_pod_mount_failure_identity_mismatch"
+                    ) from exc
+                node = json_string(
+                    json_object(exc.pod.get("spec", {})).get("nodeName", "")
+                )
+                uid = json_string(json_object(exc.pod.get("metadata", {})).get("uid"))
+                current = self.kubernetes.read("Pod", pod_name, scope.namespace)
+                if (
+                    current is not None
+                    and json_object(current.get("metadata", {})).get("uid") != uid
+                ):
+                    self._retain_identity_conflict()
+                    raise KubernetesError("resource_delete_identity_mismatch") from exc
+                if (
+                    not node
+                    or node in excluded_nodes
+                    or current is None
+                    or json_object(current.get("metadata", {})).get("uid") != uid
+                    or not resources.owns(current)
+                    or not matches(expected_pod, current)
+                ):
+                    raise KubernetesError(
+                        "tool_pod_mount_failure_identity_mismatch"
+                    ) from exc
+                try:
+                    resources.delete("Pod", pod_name, expected_uid=uid)
+                except KubernetesError as deletion:
+                    if "resource_delete_identity_mismatch" in str(deletion):
+                        self._retain_identity_conflict()
+                    raise
+                excluded_nodes = (*excluded_nodes, node)
+                if len(excluded_nodes) >= TOOL_POD_MAX_ATTEMPTS:
+                    raise KubernetesError("tool_pod_mount_retry_exhausted") from exc
+                if time.monotonic() >= deadline:
+                    raise KubernetesError("tool_pod_ready_timeout") from exc
+                expected_pod = tool_pod_document(
+                    scope, action, excluded_nodes=excluded_nodes
+                )
+                state.prepared_pod_document = copy_json_object(expected_pod)
+                resources.apply(expected_pod)
+                resource_action, reused = APPLIED, False
+                continue
+            except KubernetesError as exc:
+                attempts.append(
+                    _attempt_evidence(
+                        len(excluded_nodes) + 1,
+                        started,
+                        initial,
+                        sanitize(str(exc)),
+                    )
+                )
+                raise
+            attempts.append(
+                _attempt_evidence(len(excluded_nodes) + 1, started, ready, "Ready")
+            )
+            break
+        if not resources.owns(ready) or not matches(expected_pod, ready):
+            raise KubernetesError("tool_pod_ready_resource_mismatch")
         handle = _pod_handle(ready, action)
         state.pod = handle
         state.readback.update(
@@ -116,6 +302,7 @@ class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
         """Remove created unretained objects and preserve retained identities.
 
         :returns: Verified removed and retained resource identities.
+        :raises KubernetesError: Cleanup encounters an identity conflict or cannot verify removal.
         """
         state = self.tool_state
         removed: list[JSONObject] = []
@@ -126,7 +313,12 @@ class StageToolPod(ToolPodK8SCallback[PrepareToolPodAction]):
                 for kind, name in reversed(self.resources.created)
                 if _resource(kind, name, self.resources.namespace) not in retained
             ]
-            self.resources.cleanup_owned(selected)
+            try:
+                self.resources.cleanup_owned(selected)
+            except KubernetesError as exc:
+                if "resource_delete_identity_mismatch" in str(exc):
+                    self._retain_identity_conflict()
+                raise
             removed.extend(
                 {
                     "kind": kind,
@@ -168,7 +360,8 @@ class VerifyTools(ToolPodK8SCallback[PrepareToolPodAction]):
         if current.uid != previous.uid:
             raise KubernetesError("tool_pod_uid_changed")
         if not matches(
-            tool_pod_document(self.tool_state.run_scope, self.action),
+            self.tool_state.prepared_pod_document
+            or tool_pod_document(self.tool_state.run_scope, self.action),
             observed,
         ):
             raise KubernetesError("tool_pod_resource_shape_changed")
