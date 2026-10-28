@@ -244,6 +244,7 @@ def _failure(
     reason: str,
     *,
     cleanup_errors: Optional[Sequence[Mapping[str, str]]] = None,
+    safe_next_step: Optional[str] = None,
 ) -> int:
     """Write a blocked result while preserving the command's output mode.
 
@@ -252,6 +253,8 @@ def _failure(
     :param source: Stage that failed.
     :param reason: Failure description, sanitized before rendering.
     :param cleanup_errors: Additional resource-cleanup failures, when present.
+    :param safe_next_step: Recovery step the caller can take, when one is known;
+        it names flags and keys, never a supplied value.
     :returns: Exit status 2 after writing the blocked result.
     """
     errors: list[Mapping[str, str]] = [
@@ -271,6 +274,8 @@ def _failure(
     }
     if cleanup_errors:
         data["cleanup"] = {"status": BLOCKED}
+    if safe_next_step:
+        data["safe_next_step"] = safe_next_step
     try:
         log_event(
             args,
@@ -291,6 +296,8 @@ def _failure(
     mode = output_mode(args)
     if mode == "human":
         print(f"BLOCKED: {errors[0]['reason']}", file=sys.stderr)
+        if safe_next_step:
+            print(f"next: {safe_next_step}", file=sys.stderr)
     else:
         try:
             sys.stdout.write(emit(data, mode))

@@ -28,6 +28,7 @@ CALLBACKS = import_script_module("lib.python.core.abstract.callback")
 PORTABLE = import_script_module("lib.python.core.portable")
 API = import_script_module("lib.python.core.gitlab.gitlab_api")
 MILESTONES = import_script_module("lib.python.core.gitlab.gitlab_milestones")
+SCHEMA = import_script_module("lib.python.core.schema")
 ISSUES = import_script_module("lib.python.core.gitlab.gitlab_issues")
 WIKIS = import_script_module("lib.python.core.gitlab.gitlab_wikis")
 RUNNERS = import_script_module("lib.python.core.gitlab.gitlab_runners")
@@ -692,7 +693,13 @@ def test_milestone_create_reads_back_numeric_id() -> None:
             ("GET", _list(base + "?title=release")): [[]],
             ("POST", base): [{"id": 5}],
             ("GET", base + "/5"): [
-                {"id": 5, "title": "release", "due_date": "2026-10-31"}
+                {
+                    "id": 5,
+                    "title": "release",
+                    "start_date": None,
+                    "due_date": "2026-10-31",
+                    "state": "active",
+                }
             ],
         }
     )
@@ -702,6 +709,9 @@ def test_milestone_create_reads_back_numeric_id() -> None:
         "id": 5,
         "verified": True,
         "title": "release",
+        "start_date": None,
+        "due_date": "2026-10-31",
+        "state": "active",
     }
     assert [call[0] for call in api.calls] == ["GET", "POST", "GET"]
 
@@ -728,6 +738,92 @@ def test_milestone_update_blocks_failed_readback() -> None:
     assert result["mutated"] is True
     assert result["id"] == 5
     assert result["errors"][0]["reason"] == "milestone_readback_mismatch"
+
+
+def test_milestone_prepare_maps_closed_state_to_the_close_event() -> None:
+    """Translate --state closed on update into GitLab's state_event close.
+
+    :returns: None; assertions in the body validate the regression.
+    """
+    prepared = MILESTONES.prepare(
+        SimpleNamespace(
+            action="update",
+            milestone_id=9,
+            title=None,
+            description_file=None,
+            start_date=None,
+            due_date=None,
+            state="closed",
+        )
+    )
+
+    assert prepared.body == {"state_event": "close"}
+    assert prepared.resource_id == 9
+
+
+def test_milestone_close_readback_reports_dates_and_state(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Report the dates and state read back after a milestone is closed.
+
+    :param monkeypatch: Pytest fixture binding access doubles and the API script.
+    :param capsys: Pytest fixture capturing the structured action report.
+    :returns: None; assertions in the body validate the regression.
+    """
+    plan = _plan("gitlab_milestone", "update", {"state_event": "close"}, resource_id=9)
+    _live_action_dependencies(monkeypatch, plan)
+    endpoint = "projects/42/milestones/9"
+    before = {
+        "id": 9,
+        "title": "release",
+        "start_date": "2026-10-20",
+        "due_date": "2026-11-10",
+        "state": "active",
+    }
+    api = FakeAPI(
+        {
+            ("GET", endpoint): [before, {**before, "state": "closed"}],
+            ("PUT", endpoint): [{"id": 9}],
+        }
+    )
+    monkeypatch.setattr(GITLAB_ACTION, "GlabAPIClient", lambda *, timeout: api)
+
+    result = MILESTONE.main(
+        [
+            "update",
+            "--milestone-id",
+            "9",
+            "--state",
+            "closed",
+            "--apply",
+            "--confirm-plan",
+            plan.digest,
+            "--json",
+        ]
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert result == 0
+    assert report["readback"] == {
+        "action": "APPLIED",
+        "id": 9,
+        "verified": True,
+        "title": "release",
+        "start_date": "2026-10-20",
+        "due_date": "2026-11-10",
+        "state": "closed",
+    }
+    assert [call[0] for call in api.calls] == ["GET", "PUT", "GET"]
+    record = {**report["readback"], "mutated": True}
+    SCHEMA.validate_specification(
+        _tag_output(plan, record), "results/gitlab-action.schema.json"
+    )
+    for field, invalid in (("state", "opened"), ("due_date", "2026-11-1")):
+        with pytest.raises(SCHEMA.SpecificationError):
+            SCHEMA.validate_specification(
+                _tag_output(plan, {**record, field: invalid}),
+                "results/gitlab-action.schema.json",
+            )
 
 
 def test_issue_reuses_exact_open_title_only_after_independent_get() -> None:
