@@ -51,7 +51,6 @@
         },
         "reference": {
           "type": "array",
-          "maxItems": 12,
           "items": {
             "$ref": "#/$defs/entry"
           }

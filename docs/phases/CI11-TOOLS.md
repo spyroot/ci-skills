@@ -266,7 +266,10 @@ what it actually does, because that name is all the node shows for it. `referenc
 entry names the reference, summarises it and points at the next node, the `reference.py` call that returns that
 reference's own sections as entries of the same kind, down to one section's text. The stored file under
 `references/` stays behind that node; the agent is handed the pointer, not the file, and follows it only when it
-decides it needs to. The graph therefore continues past the command node through its references.
+decides it needs to. A node's `reference` array is the union of the access entries its authorities select,
+`access`, `project binding`, `mcp` for GitLab and `toolbox specification` for Harbor, and the references of every
+tool the node offers, duplicates removed; it has no fixed count. The graph therefore continues past the command
+node through its references.
 
 ### Cross-integration combinations already fit the implementation
 
