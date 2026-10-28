@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-28T04:16:22.147100+00:00",
+  "captured_at": "2026-10-28T05:16:52.172753+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -18,7 +18,7 @@
   "origin": "https://gitlab.dcloud.run",
   "phase": "APPLY",
   "plan": {
-    "body_sha256": "a7f3ab178ad92ea8d790ced18a77c727e0a6a117729d41455dfb4523e38fe33b",
+    "body_sha256": "78a1ba029ea78f92688b8f1edc03ce3d77cc8527c53e1bff1dfade717c09aaab",
     "confirmation_ready": true,
     "fields": [
       "due_date",
@@ -27,30 +27,30 @@
     ],
     "one_time_sink_required": false,
     "operation": "create",
-    "plan_digest": "9f05531afc1f793a1d6f8ba763b18c76756bfda8c4e735a41b8415de46a950f1",
+    "plan_digest": "72adb914bb781a93eecf528f8b6b56a2ae18e257bee8164f6c39ac70188ba601",
     "project_ids": null,
     "resource_id": null,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "9f05531afc1f793a1d6f8ba763b18c76756bfda8c4e735a41b8415de46a950f1",
+  "plan_digest": "72adb914bb781a93eecf528f8b6b56a2ae18e257bee8164f6c39ac70188ba601",
   "readback": {
     "action": "APPLIED",
     "due_date": "2026-11-11",
-    "id": 121,
+    "id": 122,
     "start_date": "2026-10-28",
     "state": "active",
-    "title": "ci-skills-pr104-05a7feb-20261028T041613Z",
+    "title": "ci-skills-pr104-3e8ec4b-20261028T051643Z",
     "verified": true
   },
   "records": [
     {
       "action": "APPLIED",
       "due_date": "2026-11-11",
-      "id": 121,
+      "id": 122,
       "start_date": "2026-10-28",
       "state": "active",
-      "title": "ci-skills-pr104-05a7feb-20261028T041613Z",
+      "title": "ci-skills-pr104-3e8ec4b-20261028T051643Z",
       "verified": true
     }
   ],
@@ -62,12 +62,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "d3db9d3512ff1baf494f217ec36dc157b63deebb59afa800b515eda03b3564d0",
-    "file_count": 241,
-    "functional_digest": "15b5d7d676e29486b8ef81a478f6821fd7149387c84998fd79b5d74eec2916ae",
+    "digest": "366876391bc8df3befc70a1d1f21df596b9788bd7eb11f56ded776482d4e4268",
+    "file_count": 243,
+    "functional_digest": "dfc616773bacabbea867c270af6b70e2cbf8313ff01fa30ce40708830af75cd8",
     "revision": {
       "source": "installer_record",
-      "value": "05a7feb2ca49a7d61709add1a33f1994b54b3aaa",
+      "value": "3e8ec4b3ae7aaa290bff15ddbe97250ac37efa07",
       "verified": true
     }
   },
@@ -82,7 +82,7 @@
   },
   "target_file": "path:5e5380df1eda",
   "target_source": "env:CI_SKILLS_TARGET;argv:--project",
-  "tested_revision": "05a7feb2ca49a7d61709add1a33f1994b54b3aaa",
+  "tested_revision": "3e8ec4b3ae7aaa290bff15ddbe97250ac37efa07",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

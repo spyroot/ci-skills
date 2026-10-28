@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-28T04:16:32.407772+00:00",
+  "captured_at": "2026-10-28T05:16:59.716350+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -25,30 +25,30 @@
     ],
     "one_time_sink_required": false,
     "operation": "update",
-    "plan_digest": "786fb827d7edfe3ca0047c8ee47469110aec46baa0342a74c3d62f1277653539",
+    "plan_digest": "fbc99678a023970ca7d8dad4d79f4101ae2580563053d71222eae8151c20cf98",
     "project_ids": null,
-    "resource_id": 121,
+    "resource_id": 122,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "786fb827d7edfe3ca0047c8ee47469110aec46baa0342a74c3d62f1277653539",
+  "plan_digest": "fbc99678a023970ca7d8dad4d79f4101ae2580563053d71222eae8151c20cf98",
   "readback": {
     "action": "APPLIED",
     "due_date": "2026-11-11",
-    "id": 121,
+    "id": 122,
     "start_date": "2026-10-28",
     "state": "closed",
-    "title": "ci-skills-pr104-05a7feb-20261028T041613Z",
+    "title": "ci-skills-pr104-3e8ec4b-20261028T051643Z",
     "verified": true
   },
   "records": [
     {
       "action": "APPLIED",
       "due_date": "2026-11-11",
-      "id": 121,
+      "id": 122,
       "start_date": "2026-10-28",
       "state": "closed",
-      "title": "ci-skills-pr104-05a7feb-20261028T041613Z",
+      "title": "ci-skills-pr104-3e8ec4b-20261028T051643Z",
       "verified": true
     }
   ],
@@ -60,12 +60,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "d3db9d3512ff1baf494f217ec36dc157b63deebb59afa800b515eda03b3564d0",
-    "file_count": 241,
-    "functional_digest": "15b5d7d676e29486b8ef81a478f6821fd7149387c84998fd79b5d74eec2916ae",
+    "digest": "366876391bc8df3befc70a1d1f21df596b9788bd7eb11f56ded776482d4e4268",
+    "file_count": 243,
+    "functional_digest": "dfc616773bacabbea867c270af6b70e2cbf8313ff01fa30ce40708830af75cd8",
     "revision": {
       "source": "installer_record",
-      "value": "05a7feb2ca49a7d61709add1a33f1994b54b3aaa",
+      "value": "3e8ec4b3ae7aaa290bff15ddbe97250ac37efa07",
       "verified": true
     }
   },
@@ -80,7 +80,7 @@
   },
   "target_file": "path:5e5380df1eda",
   "target_source": "env:CI_SKILLS_TARGET;argv:--project",
-  "tested_revision": "05a7feb2ca49a7d61709add1a33f1994b54b3aaa",
+  "tested_revision": "3e8ec4b3ae7aaa290bff15ddbe97250ac37efa07",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,
