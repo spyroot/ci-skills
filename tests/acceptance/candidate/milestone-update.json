@@ -1,0 +1,90 @@
+{
+  "captured_at": "2026-10-28T04:16:32.407772+00:00",
+  "cleanup": {
+    "status": "NOT_APPLICABLE"
+  },
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:29f247d18d3c",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_milestone",
+  "mutated": true,
+  "operation": "update",
+  "origin": "https://gitlab.dcloud.run",
+  "phase": "APPLY",
+  "plan": {
+    "body_sha256": "39228e0dc338c2dff0089ec62caea034c51df56d5ca46bb6394bfc4dc0ae9be4",
+    "confirmation_ready": true,
+    "fields": [
+      "state_event"
+    ],
+    "one_time_sink_required": false,
+    "operation": "update",
+    "plan_digest": "786fb827d7edfe3ca0047c8ee47469110aec46baa0342a74c3d62f1277653539",
+    "project_ids": null,
+    "resource_id": 121,
+    "target_kind": "project",
+    "target_reference": "hott/test"
+  },
+  "plan_digest": "786fb827d7edfe3ca0047c8ee47469110aec46baa0342a74c3d62f1277653539",
+  "readback": {
+    "action": "APPLIED",
+    "due_date": "2026-11-11",
+    "id": 121,
+    "start_date": "2026-10-28",
+    "state": "closed",
+    "title": "ci-skills-pr104-05a7feb-20261028T041613Z",
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "APPLIED",
+      "due_date": "2026-11-11",
+      "id": 121,
+      "start_date": "2026-10-28",
+      "state": "closed",
+      "title": "ci-skills-pr104-05a7feb-20261028T041613Z",
+      "verified": true
+    }
+  ],
+  "result_action": "APPLIED",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "d3db9d3512ff1baf494f217ec36dc157b63deebb59afa800b515eda03b3564d0",
+    "file_count": 241,
+    "functional_digest": "15b5d7d676e29486b8ef81a478f6821fd7149387c84998fd79b5d74eec2916ae",
+    "revision": {
+      "source": "installer_record",
+      "value": "05a7feb2ca49a7d61709add1a33f1994b54b3aaa",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 1
+  },
+  "target": {
+    "kind": "project",
+    "reference": "hott/test"
+  },
+  "target_file": "path:5e5380df1eda",
+  "target_source": "env:CI_SKILLS_TARGET;argv:--project",
+  "tested_revision": "05a7feb2ca49a7d61709add1a33f1994b54b3aaa",
+  "verified_target": {
+    "full_path": "hott/test",
+    "id": 123,
+    "kind": "project",
+    "web_url": "https://gitlab.dcloud.run/hott/test"
+  }
+}
