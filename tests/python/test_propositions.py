@@ -395,6 +395,44 @@ def test_iso_proposition_offers_native_input_and_destination_guidance() -> None:
     assert "toolbox.py" not in selected["tools"]
 
 
+def test_toolbox_chain_nodes_offer_harbor_shapes_and_podman_in_pod() -> None:
+    """Offer both distilled provider references where the toolbox chain runs.
+
+    :returns: None; assertions check task references and node-local discovery.
+    """
+    expected = {
+        "Harbor API shapes": {
+            "summary": "Project, robot, retention, quota, registry, replication, webhook and artifact request shapes.",
+            "pointer": "get harbor-api-shapes",
+        },
+        "Podman inside a Pod": {
+            "summary": "Storage, containers.conf, build and push inputs that decide a nested Podman build.",
+            "pointer": "get podman-inside-a-pod",
+        },
+    }
+
+    root = CATALOG.proposition()
+    unrelated = CATALOG.proposition("gitlab_runner.py")
+    offering = [
+        CATALOG.proposition(node)
+        for node in (
+            "harbor",
+            "toolbox.py",
+            "harbor_push.py",
+            "harbor_pull.py",
+            "image_build_readiness.py",
+        )
+    ]
+    for payload in (root, unrelated, *offering):
+        _validate(payload)
+    for name, record in expected.items():
+        assert _registered_file(name).is_file()
+        for selected in offering:
+            assert _entries(selected)[name] == {"name": name, **record}
+        assert name not in _entries(root["harbor"])
+        assert name not in _entries(unrelated)
+
+
 def test_reference_cli_expands_nodes_without_fetching_optional_references(
     fake_bin: Path, call_journal: Path, tmp_path: Path
 ) -> None:
