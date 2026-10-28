@@ -6,12 +6,14 @@ same nested Podman. This reference lists the inputs that decide whether such a b
 it pushes, as the man pages state them at Podman v6.1.4 with the common v0.69.2 and storage v1.64.2 libraries
 that release pins. Values are examples; the comment on each key is its type, default and meaning.
 
-Configuration files live in the toolbox image or in a mounted ConfigMap. For `storage.conf` and `containers.conf`
-alike, one main file loads: the first that exists of `$XDG_CONFIG_HOME/containers/NAME.conf`
-(`$HOME/.config/containers/NAME.conf`), `/etc/containers/NAME.conf` and `/usr/share/containers/NAME.conf`, so a
-user file replaces the image's `/etc` file whole. Drop-ins under the matching `NAME.conf.d/` directories then load
-in file-name order and override it. `CONTAINERS_CONF` replaces the `containers.conf` set, `CONTAINERS_CONF_OVERRIDE`
-is loaded last, and `--module PATH` adds a file before any sub-command.
+Configuration files live in the toolbox image or in a mounted ConfigMap. Storage selects one `storage.conf`: the
+first that exists of `$XDG_CONFIG_HOME/containers/storage.conf` (`$HOME/.config/containers/storage.conf`),
+`/etc/containers/storage.conf` and `/usr/share/containers/storage.conf`; a user or `/etc` file replaces the lower
+file whole and inherits nothing from it, so a short override must repeat `driver`, `graphroot`, `runroot` and the
+overlay options it relies on. Drop-ins under `storage.conf.d/` (and the `rootful`/`rootless` variants the man page
+lists) then load in file-name order over that one file. `containers.conf` follows the same rule with its own
+paths and `containers.conf.d/`; `CONTAINERS_CONF` replaces that set, `CONTAINERS_CONF_OVERRIDE` is loaded last, and
+`--module PATH` adds a file before any sub-command.
 
 ## Storage configuration
 
@@ -256,8 +258,10 @@ A build by an unprivileged user inside the Pod needs these in place:
   `$XDG_RUNTIME_DIR/containers`, both owned by the build user.
 - A store the user can mount: the kernel overlay where it is permitted; otherwise `driver = "vfs"`, or
   `mount_program` with `fuse-overlayfs` and `/dev/fuse` in the container when its slower writes are acceptable.
-- cgroups: `cgroupfs` is unavailable rootless, and a Pod offers no systemd session, so `cgroups = "disabled"`
-  keeps nested containers in the Pod's cgroup.
+- cgroups: Podman's `--cgroup-manager` page says `cgroupfs` does not work rootless and container cgroups then go
+  unused; Buildah's page limits that to cgroup v1. On cgroup v2 with a cgroup subtree the Pod's user can write,
+  `cgroupfs` works; without such delegation, and with no systemd session in the Pod, `cgroups = "disabled"` keeps
+  nested containers in the Pod's cgroup.
 - Network for `RUN`: `pasta` from `helper_binaries_dir`, or `--network host` or `--network none`.
 - `--isolation chroot` runs `RUN` through the internal chroot-style wrapper instead of the OCI runtime;
   `--userns-*-map` values given by a rootless user are relative to its user namespace, not the node.
