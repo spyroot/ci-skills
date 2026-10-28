@@ -568,7 +568,7 @@ def _lifecycle_executor(
         selected.context = current
         selected.candidate_scope = current.run_scope
         selected.args.description = action.args.runner_description
-        selected.args.label = list(action.args.runner_label)
+        selected.args.tag = list(action.args.runner_label)
         selected.args.image = TOOLBOX_IMAGE
         selected.args.run_id = current.run_scope.run_id
         selected.args.namespace = current.run_scope.namespace

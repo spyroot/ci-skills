@@ -53,6 +53,8 @@ from lib.python.core.json_types import (
     json_string,
     json_strings,
 )
+from lib.python.core.kubernetes.artifact_storage_runtime import normalized_digest
+from lib.python.core.kubernetes.kubernetes import KubernetesError
 from lib.python.core.kubernetes.podman_evidence import (
     MARKER_PREFIX,
     parse_probe_markers,
@@ -1469,6 +1471,94 @@ def _check_chain_runner_readback(
     return [] if matching == 1 else [f"{name}:runner_get_readback_mismatch"]
 
 
+def _check_ocp_verify_readback(name: str, receipt: JSONObject) -> Sequence[str]:
+    """Bind native ISO verification to its resolved record and reader cleanup.
+
+    :param name: Receipt filename prefixed to each reported problem.
+    :param receipt: Schema-validated installed node-image verification report.
+    :returns: Execution, artifact, embedded-output, or cleanup evidence failures.
+    """
+    records = receipt.get("records")
+    records = records if isinstance(records, list) else []
+    forward = [
+        item
+        for item in records
+        if isinstance(item, Mapping) and item.get("hook") != "cleanup"
+    ]
+    cleanup_records = [
+        item
+        for item in records
+        if isinstance(item, Mapping) and item.get("hook") == "cleanup"
+    ]
+    resolved = _mapping(_callback_record(forward, "ResolveNodeArtifactRecord"))
+    verified = _mapping(_callback_record(forward, "VerifyArtifactReference"))
+    staged = _mapping(_callback_record(forward, "StageToolPod"))
+    readback = _mapping(receipt.get("readback"))
+    record = _mapping(resolved.get("record"))
+    expected = _mapping(record.get("artifact"))
+    observed = _mapping(verified.get("artifact"))
+    inspection = _mapping(verified.get("inspection"))
+    embedded = _mapping(inspection.get("embedded_ignition"))
+    summary = _mapping(receipt.get("summary"))
+    problems: MutableSequence[str] = []
+    if (
+        receipt.get("errors") != []
+        or summary.get("error_count") != 0
+        or summary.get("record_count") != len(records)
+        or any(row.get("verified") is not True for row in (resolved, verified, staged))
+        or resolved.get("present") is not True
+    ):
+        problems.append(f"{name}:execution_readback_unproven")
+    try:
+        content_matches = (
+            normalized_digest(json_string(observed["sha256"]))
+            == normalized_digest(json_string(expected["sha256"]))
+            and observed.get("size") == expected.get("size")
+            and observed.get("path") == expected.get("path")
+        )
+    except (KeyError, TypeError, KubernetesError):
+        content_matches = False
+    if (
+        not content_matches
+        or record != readback.get("artifact_record")
+        or resolved.get("run_id") != record.get("run_id")
+        or verified.get("run_id") != record.get("run_id")
+        or receipt.get("run_id") != record.get("run_id")
+        or verified.get("lifetime") != record.get("lifetime")
+        or receipt.get("artifact_lifetime") != record.get("lifetime")
+        or receipt.get("artifact") != expected
+        or observed != readback.get("artifact_live_readback")
+        or observed != inspection.get("artifact")
+        or observed.get("pod") != staged.get("pod")
+    ):
+        problems.append(f"{name}:artifact_readback_unproven")
+    if not embedded or embedded != readback.get("embedded_ignition"):
+        problems.append(f"{name}:embedded_readback_unproven")
+    cleanup = _mapping(receipt.get("cleanup"))
+    resources = cleanup.get("resources")
+    resources = resources if isinstance(resources, list) else []
+    stage_cleanup = _mapping(_callback_record(cleanup_records, "StageToolPod"))
+    removed = stage_cleanup.get("resources")
+    removed = removed if isinstance(removed, list) else []
+    pod = _mapping(staged.get("pod"))
+    identity = _object_identity({**pod, "kind": "Pod"})
+    if (
+        cleanup.get("status") != PASS
+        or cleanup.get("failures") != []
+        or (
+            record.get("lifetime") == "caller_selected_volume"
+            and (
+                staged.get("reused") is not False
+                or identity is None
+                or identity not in {_cleanup_identity(item) for item in resources}
+                or identity not in {_cleanup_identity(item) for item in removed}
+            )
+        )
+    ):
+        problems.append(f"{name}:cleanup_unproven")
+    return problems
+
+
 def _check_targeted_receipt(
     name: str,
     receipt: JSONObject,
@@ -1529,6 +1619,9 @@ def _check_targeted_receipt(
             if cleanup.get("status") != PASS or cleanup.get("failures") != []:
                 problems.append(f"{name}:cleanup_unproven")
             problems.extend(_check_chain_runner_readback(name, receipt, review))
+        elif kind == "ocp_node_onboard" and operation == "verify":
+            validate_specification(receipt, "results/ocp-node-onboard.schema.json")
+            problems.extend(_check_ocp_verify_readback(name, receipt))
         elif kind in GITLAB_RECEIPT_KINDS:
             context = _gitlab_context(
                 receipt

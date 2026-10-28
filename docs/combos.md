@@ -1,10 +1,12 @@
 # Combos: chains worth packing
 
-A combo is one installed command that walks a chain of atomic operations and returns one result with its own
+A delivered combo is one installed command that walks a chain of atomic operations and returns one result with its own
 read-back evidence. The agent runs the combo instead of hand-rolling the `glab`, `kubectl`, or `jq` calls behind it,
 and keeps its context for the task. This catalogue lists chains worth packing, in the format
 `step → step → step`, with the goal, the status of each step, and the evidence that proves the chain. It is an
-exploration list: an entry marked proposed is an idea to evaluate, not a commitment.
+exploration list: an entry marked proposed is an idea to evaluate, not a commitment. The
+[capability model](capability-model.md) explains root-to-command discovery; the owning phase or tool-belt plan holds
+each chain's delivery order.
 
 Status words: **exists** means an installed command with a live receipt in
 [`tests/acceptance/evidence`](../tests/acceptance/evidence/README.md) (case numbers in brackets); **planned** means
@@ -32,7 +34,7 @@ with runner manager deployment composed by CI13's `chain` (CI11 "Toolbox build, 
 read-back provide external live acceptance; job execution, separate verification and successful runner teardown
 are not combo steps.
 
-## 2. OpenShift node onboarding (planned)
+## 2. OpenShift node onboarding (implemented, partially verified)
 
 `prepare tool Pod → native node ISO → verify destination and contents → boot node → join → remove owned resources`
 
@@ -40,9 +42,12 @@ Goal: the caller supplies native OpenShift inputs and an in-cluster destination,
 from a generated ISO to a joined, Ready node. The user boots the host.
 
 [CI12](phases/CI12-NODE-ONBOARDING.md) owns the inputs, atomic callbacks, concrete examples and evidence.
-Its [delivery order](phases/CI12-NODE-ONBOARDING.md#pr-order) is CI12.0 reusable tool Pod and shared download/install,
-CI12.1 native ISO build/verify/remove, then CI12.2 join. The ISO stays at the caller-selected cluster destination;
-CSR handling and join are the sole mocked-live exception. These capabilities are not implemented on main.
+Its [delivery order](phases/CI12-NODE-ONBOARDING.md#pr-order) was CI12.0 reusable tool Pod and shared download/install,
+CI12.1 native ISO build/verify/remove, then CI12.2 join. `prepare_tool_pod.py prepare|remove` and
+`ocp_node_onboard.py build|verify|join|remove` are installed. Live receipts cover tool preparation and ISO build,
+inspection, destination read-back and removal; CSR handling and join remain the phase's mocked-live exception. The
+captured receipts do not prove a fresh run of the complete current package. The ISO stays at the caller-selected
+cluster destination.
 
 ## 3. Failed pipeline, root cause in one go
 
@@ -133,7 +138,7 @@ through the owner's selector and non-TTY exec from the Cilium checks, Pod record
 events from `event_trace.py`. Evidence rows: node inventory read, load read per node, operator state read,
 findings listed, all bound to one digest.
 
-## 11. Can a GitLab job use Podman on this cluster? (proposed)
+## 11. Can a GitLab job use Podman on this cluster? (partially implemented)
 
 `build toolbox → push to Harbor → create/configure runner`
 
