@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 from dataclasses import field as action_field
 from enum import StrEnum
 from pathlib import Path
-from typing import Optional, TypeVar
+from types import MappingProxyType
+from typing import Final, Optional, TypeVar
 
 from lib.python.access.sources import _token_source
 from lib.python.core.abstract.callback import LocalCallback
@@ -152,6 +153,32 @@ class ApiCheckAction(ApiProviderAction):
         super().validate()
 
 
+ENDPOINT_EXAMPLES: Final[Mapping[str, str]] = MappingProxyType(
+    {"github": "user/repos?per_page=100", "gitlab": "projects?membership=true"}
+)
+
+
+def _endpoint_usage(endpoint: str, provider: str) -> str:
+    """Describe the relative endpoint form a rejected value must take.
+
+    :param endpoint: Caller-selected endpoint that ``validate_endpoint`` rejected;
+        it is inspected, never echoed.
+    :param provider: Native provider name selecting the example endpoint.
+    :returns: Diagnostic naming the leading slash when that is the fault, otherwise
+        the other rejected forms, each with a provider-relative example.
+    """
+    example = ENDPOINT_EXAMPLES.get(provider, "user")
+    if endpoint.startswith("/"):
+        return (
+            "a relative GET endpoint without a leading slash is required, "
+            f"such as {example}"
+        )
+    return (
+        f"a relative GET endpoint is required, such as {example}; "
+        "no scheme, host, fragment or dot segments"
+    )
+
+
 @dataclass(frozen=True, init=False)
 class ApiReadAction(ApiProviderAction):
     """Read one required endpoint with optional response transformations.
@@ -243,7 +270,7 @@ class ApiReadAction(ApiProviderAction):
             validate_endpoint(self.endpoint)
         except APIError as exc:
             raise ReadToolError(
-                "a relative GET endpoint is required", ReadExit.USAGE
+                _endpoint_usage(self.endpoint, str(self.provider)), ReadExit.USAGE
             ) from exc
         if self.field is not None and not re.fullmatch(
             r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*", self.field
