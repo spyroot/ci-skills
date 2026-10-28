@@ -1036,3 +1036,50 @@ def test_generated_workflow_report_resolves_nested_result_schema_references(
     )
     assert captured["tested_revision"] == revision
     SCHEMA.validate_specification(captured, "results/toolbox-workflow.schema.json")
+
+
+@pytest.mark.parametrize(
+    ("kind", "argv", "destination", "expected"),
+    (
+        pytest.param(
+            "harbor_push",
+            ["push", "--tag", "unit"],
+            "tag",
+            "unit",
+            id="harbor-push-image-tag-stays-single",
+        ),
+        pytest.param(
+            "gitlab_runner_manager",
+            ["deploy", "--tag", "ci13", "--tag", "unit"],
+            "tag",
+            ["ci13", "unit"],
+            id="runner-manager-tag-repeats",
+        ),
+        pytest.param(
+            "create_selfhosted_runner",
+            ["create", "--label", "self-hosted", "--label", "linux"],
+            "label",
+            ["self-hosted", "linux"],
+            id="github-runner-label-repeats",
+        ),
+    ),
+)
+def test_workflow_parser_repeats_only_declared_options(
+    kind: str,
+    argv: list[str],
+    destination: str,
+    expected: Union[str, list[str]],
+) -> None:
+    """Repeat an option only where the catalogue declares it repeatable.
+
+    harbor_push uses --tag for one image tag; the runner manager uses it for a
+    list of GitLab runner tags; create_selfhosted_runner repeats GitHub --label.
+
+    :param kind: Workflow report kind whose parser is built.
+    :param argv: Command arguments.
+    :param destination: Parsed attribute holding the option value.
+    :param expected: Parsed value.
+    """
+    parsed = WORKFLOWS.workflow_parser(kind).parse_args(argv)
+
+    assert getattr(parsed, destination) == expected

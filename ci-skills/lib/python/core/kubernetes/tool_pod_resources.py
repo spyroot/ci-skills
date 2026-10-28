@@ -7,10 +7,16 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Final, Protocol
 
-from lib.python.core.json_types import JSONObject, copy_json_object
+from lib.python.core.json_types import (
+    JSONObject,
+    copy_json_object,
+    json_object,
+    json_objects,
+)
 from lib.python.core.kubernetes.run_scope import RunScope
 from lib.python.core.kubernetes.script_resources import immutable_script_configmap
 from lib.python.core.paths import SKILL_ROOT
@@ -26,6 +32,8 @@ TOOL_POD_SCRIPT_SOURCES: Final = {
 }
 SPEC_FINGERPRINT_LABEL: Final = "ci-skills.spyroot.dev/spec-fingerprint"
 SPEC_FINGERPRINT_ANNOTATION: Final = "ci-skills.spyroot.dev/spec-sha256"
+FAILED_NODES_ANNOTATION: Final = "ci-skills.spyroot.dev/failed-mount-nodes"
+TOOL_POD_MAX_ATTEMPTS: Final = 3
 
 
 class ToolPodMountSpec(Protocol):
@@ -85,6 +93,21 @@ class ToolPodResourceSpec(Protocol):
         :type: Mapping[str, str]
 
         Native Pod placement labels selected by the internal consumer.
+
+    .. attribute :: affinity
+        :type: JSONObject
+
+        Caller-selected native scheduling constraints and preferences.
+
+    .. attribute :: tolerations
+        :type: Sequence[JSONObject]
+
+        Caller-selected native tolerations in declaration order.
+
+    .. attribute :: preferred_node
+        :type: str
+
+        Optional producer node to prefer while preserving eligibility constraints.
     """
 
     image: str
@@ -92,6 +115,71 @@ class ToolPodResourceSpec(Protocol):
     fingerprint_label: str
     mounts: Sequence[ToolPodMountSpec]
     node_selector: Mapping[str, str]
+    affinity: JSONObject
+    tolerations: Sequence[JSONObject]
+    preferred_node: str
+
+
+def tool_pod_affinity(
+    spec: ToolPodResourceSpec, excluded_nodes: Sequence[str] = ()
+) -> JSONObject:
+    """Compose soft producer preference and failed-node exclusion with native inputs.
+
+    :param spec: Caller-owned native placement and optional producer preference.
+    :param excluded_nodes: Actual nodes observed in prior failed mount attempts.
+    :returns: Native affinity preserving every original required scheduling term.
+    """
+    affinity = copy_json_object(spec.affinity)
+    if not spec.preferred_node and not excluded_nodes:
+        return affinity
+    node_affinity = copy_json_object(json_object(affinity.get("nodeAffinity", {})))
+    if spec.preferred_node:
+        preferences = list(
+            json_objects(
+                node_affinity.get("preferredDuringSchedulingIgnoredDuringExecution", [])
+            )
+        )
+        preferences.append(
+            {
+                "weight": 100,
+                "preference": {
+                    "matchFields": [
+                        {
+                            "key": "metadata.name",
+                            "operator": "In",
+                            "values": [spec.preferred_node],
+                        }
+                    ]
+                },
+            }
+        )
+        node_affinity["preferredDuringSchedulingIgnoredDuringExecution"] = preferences
+    if excluded_nodes:
+        required_key = "requiredDuringSchedulingIgnoredDuringExecution"
+        required = copy_json_object(json_object(node_affinity.get(required_key, {})))
+        terms = json_objects(required.get("nodeSelectorTerms", [{}]))
+        constrained = []
+        for item in terms:
+            term = copy_json_object(item)
+            # An empty native term matches no nodes; adding a constraint must not widen it.
+            if (
+                term.get("matchExpressions")
+                or term.get("matchFields")
+                or required_key not in node_affinity
+            ):
+                term["matchFields"] = [
+                    *json_objects(term.get("matchFields", [])),
+                    {
+                        "key": "metadata.name",
+                        "operator": "NotIn",
+                        "values": list(excluded_nodes),
+                    },
+                ]
+            constrained.append(term)
+        required["nodeSelectorTerms"] = constrained
+        node_affinity[required_key] = required
+    affinity["nodeAffinity"] = node_affinity
+    return affinity
 
 
 def tool_pod_script_configmap(scope: RunScope) -> JSONObject:
@@ -109,11 +197,17 @@ def tool_pod_script_configmap(scope: RunScope) -> JSONObject:
     )
 
 
-def tool_pod_document(scope: RunScope, spec: ToolPodResourceSpec) -> JSONObject:
+def tool_pod_document(
+    scope: RunScope,
+    spec: ToolPodResourceSpec,
+    *,
+    excluded_nodes: Sequence[str] = (),
+) -> JSONObject:
     """Render the ci-skills-owned long-lived execution Pod.
 
     :param scope: Resolved run scope and ownership labels.
     :param spec: Validated image and specification fingerprint.
+    :param excluded_nodes: Nodes observed in classified prior mount failures.
     :returns: Native Pod document for Kubernetes validation.
     """
     volumes = [
@@ -162,6 +256,16 @@ def tool_pod_document(scope: RunScope, spec: ToolPodResourceSpec) -> JSONObject:
     }
     if spec.node_selector:
         pod_spec["nodeSelector"] = dict(spec.node_selector)
+    affinity = tool_pod_affinity(spec, excluded_nodes)
+    if affinity:
+        pod_spec["affinity"] = affinity
+    if spec.tolerations:
+        pod_spec["tolerations"] = [copy_json_object(item) for item in spec.tolerations]
+    annotations = {SPEC_FINGERPRINT_ANNOTATION: spec.fingerprint}
+    if excluded_nodes:
+        annotations[FAILED_NODES_ANNOTATION] = json.dumps(
+            list(excluded_nodes), separators=(",", ":")
+        )
     return {
         "apiVersion": "v1",
         "kind": "Pod",
@@ -172,7 +276,7 @@ def tool_pod_document(scope: RunScope, spec: ToolPodResourceSpec) -> JSONObject:
                 **dict(scope.labels),
                 SPEC_FINGERPRINT_LABEL: spec.fingerprint_label,
             },
-            "annotations": {SPEC_FINGERPRINT_ANNOTATION: spec.fingerprint},
+            "annotations": annotations,
         },
         "spec": pod_spec,
     }

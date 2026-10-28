@@ -88,6 +88,14 @@ class CommandDefinition(TypedDict):
 
         Command-specific options and help text.
 
+    .. attribute :: repeatable_options
+
+        Options that collect every occurrence into a list.
+
+    .. attribute :: option_aliases
+
+        Accepted alternative names for an option; each sets the same value.
+
     .. attribute :: examples
 
         Short descriptions and runnable commands for the selected capability.
@@ -137,6 +145,8 @@ class CommandDefinition(TypedDict):
     optional_requires: NotRequired[Sequence[str]]
     capabilities: Sequence[str]
     options: Mapping[str, str]
+    repeatable_options: NotRequired[Sequence[str]]
+    option_aliases: NotRequired[Mapping[str, Sequence[str]]]
     examples: NotRequired[Sequence[Mapping[str, str]]]
     references: NotRequired[Sequence[str]]
     returns: str

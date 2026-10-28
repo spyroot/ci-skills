@@ -80,6 +80,10 @@ def _matches(
             for key, value in expected.items()
         )
     if isinstance(expected, Sequence) and not isinstance(expected, str):
+        if native_pod and path == ("spec", "tolerations"):
+            if not isinstance(observed, Sequence) or isinstance(observed, str):
+                return False
+            return _tolerations_match(expected, observed, path)
         return (
             isinstance(observed, Sequence)
             and not isinstance(observed, str)
@@ -92,10 +96,41 @@ def _matches(
     return expected == observed
 
 
+def _tolerations_match(
+    expected: Sequence[JSONValue],
+    observed: Sequence[JSONValue],
+    path: tuple[str, ...],
+) -> bool:
+    """Match every requested toleration once, retaining admission-added entries.
+
+    :param expected: Requested native Pod tolerations.
+    :param observed: Tolerations read back after native admission.
+    :param path: Exact resource field path used by the shared matcher.
+    :returns: Whether every request has a distinct compatible observed entry.
+    """
+    assigned: dict[int, int] = {}
+
+    def assign(index: int, visited: set[int]) -> bool:
+        """Assign or reassign compatible entries without reusing observations."""
+        for candidate, value in enumerate(observed):
+            if candidate in visited or not _matches(
+                expected[index], value, (*path, "[]"), True
+            ):
+                continue
+            visited.add(candidate)
+            if candidate not in assigned or assign(assigned[candidate], visited):
+                assigned[candidate] = index
+                return True
+        return False
+
+    return all(assign(index, set()) for index in range(len(expected)))
+
+
 def matches(expected: JSONValue, observed: JSONValue) -> bool:
     """Compare requested fields with native independent read-back.
 
     Native v1 Pod mount and PVC ``readOnly`` fields default to false when omitted.
+    Native Pod tolerations retain each requested entry while permitting admission additions.
     Other requested booleans remain mandatory; an explicit different value fails.
 
     :param expected: Exact requested values owned by this operation.
@@ -150,6 +185,7 @@ class ResourceSet:
     :param evidence: Applied or no-op read-back records accumulated by the tracker.
     :ivar _mutations: Prior resource snapshots retained for rollback.
     :ivar _tracked: Resource keys already recorded in the mutation journal.
+    :ivar _delete_uids: Immutable identities retained across conditional delete and cleanup.
 
     .. attribute :: service
         :type: KubernetesService
@@ -186,6 +222,9 @@ class ResourceSet:
         default_factory=list, init=False, repr=False
     )
     _tracked: set[tuple[str, str]] = field(default_factory=set, init=False, repr=False)
+    _delete_uids: dict[tuple[str, str], str] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     def managed(
         self, document: MutableMapping[str, JSONValue]
@@ -271,6 +310,8 @@ class ResourceSet:
             uid = KubernetesObject(observed).metadata.required_text("uid")
         except TypeError as exc:
             raise KubernetesError("resource_readback_identity_missing") from exc
+        if current is None and (kind.casefold(), name) in self._delete_uids:
+            self._delete_uids[(kind.casefold(), name)] = uid
         evidence = {
             "kind": kind,
             "name": name,
@@ -281,23 +322,39 @@ class ResourceSet:
         self.evidence.append(evidence)
         return evidence
 
-    def delete(self, kind: str, name: str) -> bool:
+    def delete(
+        self, kind: str, name: str, *, expected_uid: Optional[str] = None
+    ) -> bool:
         """Delete only the selected operation-owned object and verify absence.
 
         :param kind: Native resource kind.
         :param name: Exact resource name.
+        :param expected_uid: Optional immutable identity bound to this and later cleanup deletes.
         :returns: Whether deletion was necessary.
         :raises KubernetesError: If ownership or provider deletion/read-back fails.
         :raises TargetError: If the bound kubeconfig changes before a provider command.
         :raises OSError: If a provider process cannot start or its output cannot be read
             during deletion or read-back.
         """  # noqa: DOC503 - Provider commands propagate target binding and I/O errors.
+        key = (kind.casefold(), name)
+        if expected_uid is not None:
+            if not expected_uid:
+                raise KubernetesError("resource_delete_identity_missing")
+            previous_uid = self._delete_uids.setdefault(key, expected_uid)
+            if previous_uid != expected_uid:
+                raise KubernetesError("resource_delete_identity_mismatch")
+        expected_uid = self._delete_uids.get(key)
         current = self.service.read(kind, name, self.namespace)
         if current is None:
             return False
         if not self.owns(current):
             raise KubernetesError("resource_not_owned_by_operation")
-        self.service.delete(kind, name, self.namespace)
+        if expected_uid is not None:
+            if KubernetesObject(current).metadata.required_text("uid") != expected_uid:
+                raise KubernetesError("resource_delete_identity_mismatch")
+            self.service.delete(kind, name, self.namespace, expected_uid=expected_uid)
+        else:
+            self.service.delete(kind, name, self.namespace)
         return True
 
     def cleanup_created(self) -> None:
@@ -354,7 +411,11 @@ class ResourceSet:
         for kind, name in resources:
             try:
                 self.delete(kind, name)
-            except Exception as exc:  # noqa: BLE001 - attempt every owned cleanup
+            except Exception as exc:
+                if "resource_delete_identity_mismatch" in str(exc):
+                    raise KubernetesError(
+                        "resource_cleanup_incomplete:" + str(exc)
+                    ) from exc
                 failures.append(str(exc))
         if failures:
             raise KubernetesError("resource_cleanup_incomplete:" + ",".join(failures))

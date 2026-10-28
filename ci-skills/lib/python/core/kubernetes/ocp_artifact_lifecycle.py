@@ -7,7 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.json_types import JSONObject
@@ -104,8 +104,9 @@ def verification_pod_inputs(
         namespace=reader_scope.namespace,
         timeout=timeout,
         retain=False,
-        mounts=(record.destination.tool_pod_mount(),),
+        mounts=(replace(record.destination.tool_pod_mount(), read_only=True),),
         node_selector=record.node_selector,
+        preferred_node=record.artifact.pod.node_name,
     )
     return ArtifactPodInputs(reader_scope, preparation, False)
 

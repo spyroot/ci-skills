@@ -88,11 +88,32 @@ class MemoryCluster:
         self.applied.append(key)
         return deepcopy(observed)
 
-    def delete(self, kind: str, name: str, namespace: str) -> None:
-        """Delete exactly one object or expose the configured provider refusal."""
+    def delete(
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        *,
+        expected_uid: Optional[str] = None,
+    ) -> None:
+        """Delete exactly one object or expose the configured provider refusal.
+
+        :param kind: Native resource kind.
+        :param name: Exact selected resource name.
+        :param namespace: Selected resource namespace.
+        :param expected_uid: Optional API precondition protecting replacements.
+        :raises KubernetesError: Deletion is refused or the current UID differs.
+        """
         if self.delete_fails:
             raise KUBERNETES.KubernetesError("unit_delete_denied")
         key = (kind.casefold(), namespace, name)
+        current = self.objects.get(key)
+        if (
+            expected_uid is not None
+            and current is not None
+            and current["metadata"]["uid"] != expected_uid
+        ):
+            raise KUBERNETES.KubernetesError("resource_delete_identity_mismatch")
         self.deleted.append(key)
         self.objects.pop(key, None)
 
@@ -127,6 +148,26 @@ class MemoryCluster:
         observed = self.read("Pod", name, namespace)
         assert observed is not None
         return observed
+
+    def wait_pod_mount_ready(
+        self,
+        name: str,
+        namespace: str,
+        *,
+        mount_failure_timeout: int = 60,
+        timeout: Optional[float] = None,
+    ) -> JSONObject:
+        """Reuse deterministic readiness for mounted Pods without a mount failure.
+
+        :param name: Exact run-owned Pod name.
+        :param namespace: Selected namespace.
+        :param mount_failure_timeout: Positive mount-failure observation bound.
+        :param timeout: Optional remaining readiness budget shared across attempts.
+        :returns: Stored native Pod ready for the existing fixture's operations.
+        """
+        assert mount_failure_timeout > 0
+        assert timeout is None or timeout > 0
+        return self.wait_pod_ready(name, namespace)
 
     def _preflight_output(self, arguments: Sequence[str]) -> str:
         """Return indexed native checks for the batched prerequisite operation."""
@@ -220,6 +261,464 @@ def _state(cluster: MemoryCluster) -> PODS.ToolPodState:
     state = PODS.ToolPodState()
     state.kubernetes = cluster
     return state
+
+
+@pytest.fixture
+def placement_specification(specification: PODS.ToolPodSpec) -> PODS.ToolPodSpec:
+    """Extend the existing fixture with native placement fields and OR terms.
+
+    :param specification: Existing dependency fixture used by the real lifecycle.
+    :returns: Native placement input whose hard constraints must survive retries.
+    """
+    document = specification.as_dict()
+    document.update(
+        {
+            "nodeSelector": {"storage": "iso"},
+            "affinity": {
+                "nodeAffinity": {
+                    "requiredDuringSchedulingIgnoredDuringExecution": {
+                        "nodeSelectorTerms": [
+                            {
+                                "matchExpressions": [
+                                    {"key": "zone", "operator": "In", "values": [zone]}
+                                ]
+                            }
+                            for zone in ("east", "west")
+                        ]
+                    }
+                }
+            },
+            "tolerations": [
+                {
+                    "key": "storage",
+                    "operator": "Equal",
+                    "value": "iso",
+                    "effect": "NoSchedule",
+                }
+            ],
+        }
+    )
+    return PODS.ToolPodSpec.from_document(document)
+
+
+def test_native_placement_and_observed_node_survive_prepare_and_reuse(
+    placement_specification: PODS.ToolPodSpec,
+) -> None:
+    """Submit exact caller placement and retain the independently observed node.
+
+    :param placement_specification: Existing tools with caller-selected placement.
+    """
+
+    class ScheduledCluster(MemoryCluster):
+        """Assign a node only in the provider response."""
+
+        def apply(self, document: JSONObject) -> JSONObject:
+            """Add scheduler output after storing the actual submitted resource.
+
+            :param document: Production-rendered resource.
+            :returns: Native provider response containing the assigned Pod node.
+            """
+            observed = super().apply(document)
+            if observed["kind"] == "Pod":
+                key = (
+                    "pod",
+                    observed["metadata"]["namespace"],
+                    observed["metadata"]["name"],
+                )
+                self.objects[key]["spec"]["nodeName"] = "scheduled-node"
+                observed = deepcopy(self.objects[key])
+            return observed
+
+    cluster = ScheduledCluster()
+    state = _state(cluster)
+    original = placement_specification.as_dict()
+    action = PODS.PrepareToolPodAction(placement_specification)
+    _run(state, _preparation(action))
+    pod = cluster.read("Pod", state.pod.name, state.pod.namespace)
+    for field in ("nodeSelector", "affinity", "tolerations"):
+        assert pod["spec"][field] == original[field]
+    assert state.pod.node_name == "scheduled-node"
+    assert state.readback["pod"]["node_name"] == "scheduled-node"
+    applied = tuple(cluster.applied)
+    repeated = _state(cluster)
+
+    _run(
+        repeated,
+        _preparation(
+            PODS.PrepareToolPodAction(
+                placement_specification, run_id=state.run_scope.run_id
+            )
+        ),
+    )
+
+    assert repeated.pod == state.pod
+    assert repeated.pod.node_name == "scheduled-node"
+    assert tuple(cluster.applied) == applied
+    assert placement_specification.as_dict() == original
+    assert cluster.deleted == []
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    ("mount", "late-mount", "stale-event", "forbidden", "ready", "ready-after-event"),
+)
+def test_pending_mount_detection_is_bounded_and_requires_current_pod_uid(
+    outcome: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Detect an assigned Pending Pod's mount failure without trusting stale events.
+
+    :param outcome: Current or stale event, terminal provider refusal, or ready Pod.
+    :param monkeypatch: Replace only provider reads and time with deterministic inputs.
+    """
+    service = KUBERNETES.KubernetesService(_target(), timeout=240)
+    elapsed = 0.0
+    reads: list[float] = []
+    event_calls: list[tuple[str, ...]] = []
+    pod = {
+        "metadata": {"uid": "current-uid", "name": "reader", "namespace": "storage"},
+        "spec": {"nodeName": "failed-node"},
+        "status": {
+            "phase": "Pending",
+            "containerStatuses": [
+                {"state": {"waiting": {"reason": "ContainerCreating"}}}
+            ],
+        },
+    }
+    if outcome == "ready":
+        pod["status"]["phase"] = "Running"
+        pod["status"]["conditions"] = [{"type": "Ready", "status": "True"}]
+    event = {
+        "reason": "FailedMount",
+        "message": "fixture mount stalled",
+        "involvedObject": {
+            "uid": "deleted-pod-uid" if outcome == "stale-event" else "current-uid"
+        },
+    }
+
+    def read_pod(kind: str, name: str, namespace: str, *, timeout: float) -> JSONObject:
+        """Observe only the selected Pod within the remaining deadline.
+
+        :param kind: Requested native object kind.
+        :param name: Selected reader Pod name.
+        :param namespace: Selected storage namespace.
+        :param timeout: Remaining provider command bound.
+        :returns: Assigned Pod still waiting for its storage mount.
+        """
+        assert (kind, name, namespace) == ("Pod", "reader", "storage")
+        assert 0 < timeout <= 240 - elapsed
+        reads.append(timeout)
+        assert len(reads) <= 49
+        observed = deepcopy(pod)
+        if outcome == "ready-after-event" and elapsed >= 15:
+            observed["status"]["phase"] = "Running"
+            observed["status"]["conditions"] = [{"type": "Ready", "status": "True"}]
+        return observed
+
+    def events(*args: str, timeout: float) -> JSONObject:
+        """Return events through the real service's UID correlation boundary.
+
+        :param *args: Native event query arguments.
+        :param timeout: Remaining operation bound.
+        :returns: One FailedMount event for the chosen identity.
+        :raises KubernetesError: The provider refuses the event query with HTTP 403.
+        """
+        assert 0 < timeout <= 240 - elapsed
+        assert "involvedObject.uid=current-uid,reason=FailedMount" in args
+        event_calls.append(args)
+        if outcome == "forbidden":
+            raise KUBERNETES.KubernetesError("403 Forbidden")
+        if outcome == "late-mount" and elapsed < 120:
+            return {"items": []}
+        return {"items": [deepcopy(event)]}
+
+    def advance(seconds: float) -> None:
+        """Advance fake time, with no real sleeping.
+
+        :param seconds: Positive delay limited to the remaining detection window.
+        """
+        nonlocal elapsed
+        assert 0 < seconds <= 240 - elapsed
+        elapsed += seconds
+
+    def forbidden_wait(*_args: object, **_kwargs: object) -> None:
+        """Reject an ordinary wait after this test's full deadline was consumed.
+
+        :param *_args: Unexpected positional native wait inputs.
+        :param **_kwargs: Unexpected keyword native wait inputs.
+        """
+        pytest.fail("mount detection exceeded its deadline through a second wait")
+
+    monkeypatch.setattr(service, "read", read_pod)
+    monkeypatch.setattr(service, "json", events)
+    monkeypatch.setattr(KUBERNETES.KubernetesService, "wait_pod_ready", forbidden_wait)
+    monkeypatch.setattr(KUBERNETES.time, "monotonic", lambda: elapsed)
+    monkeypatch.setattr(KUBERNETES.time, "sleep", advance)
+    if outcome in {"mount", "late-mount"}:
+        with pytest.raises(KUBERNETES.PodMountFailure) as failure:
+            service.wait_pod_mount_ready("reader", "storage")
+        assert failure.value.pod == pod
+        assert list(failure.value.events) == [event]
+        assert len(reads) == len(event_calls)
+        assert elapsed == (180 if outcome == "late-mount" else 60)
+    elif outcome == "stale-event":
+        with pytest.raises(KUBERNETES.KubernetesError, match="tool_pod_ready_timeout"):
+            service.wait_pod_mount_ready("reader", "storage")
+        assert 1 < len(reads) <= 49
+        assert len(event_calls) == len(reads)
+        assert elapsed == 240
+    elif outcome == "forbidden":
+        with pytest.raises(KUBERNETES.KubernetesError, match="403 Forbidden"):
+            service.wait_pod_mount_ready("reader", "storage")
+        assert len(reads) == len(event_calls) == 1
+        assert elapsed == 0
+    else:
+        observed = service.wait_pod_mount_ready("reader", "storage")
+        assert observed["status"]["conditions"] == [{"type": "Ready", "status": "True"}]
+        assert elapsed == (15 if outcome == "ready-after-event" else 0)
+        assert len(reads) == len(event_calls) + 1
+
+
+@pytest.mark.parametrize(
+    ("failed_attempts", "replace_on_delete", "owns_namespace"),
+    ((1, False, False), (3, False, False), (1, True, False), (1, True, True)),
+    ids=(
+        "recovery",
+        "exhaustion",
+        "replacement-race",
+        "replacement-race-owned-namespace",
+    ),
+)
+def test_mount_retry_preserves_constraints_and_cleans_only_owned_resources(
+    placement_specification: PODS.ToolPodSpec,
+    failed_attempts: int,
+    replace_on_delete: bool,
+    owns_namespace: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry on another node with unchanged scope, target, storage and hard affinity.
+
+    :param placement_specification: Caller-selected native constraints and tools.
+    :param failed_attempts: One recoverable failure or exhaustion of the three attempts.
+    :param replace_on_delete: Replace the validated Pod immediately before deletion.
+    :param owns_namespace: Create a namespace for the replacement-race cleanup case.
+    :param monkeypatch: Advance only fake time spent in provider readiness attempts.
+    """
+    submitted: list[JSONObject] = []
+    attempted_nodes: list[str] = []
+    budgets: list[float] = []
+    elapsed = 0.0
+    replaced = False
+
+    class MountFailureCluster(MemoryCluster):
+        """Model external scheduling and FailedMount outcomes only."""
+
+        def apply(self, document: JSONObject) -> JSONObject:
+            """Journal each Pod and let the provider scheduler assign a distinct node.
+
+            :param document: Resource submitted by the actual retry implementation.
+            :returns: Detached native response with an observed scheduler assignment.
+            """
+            observed = super().apply(document)
+            if observed["kind"] == "Pod":
+                submitted.append(deepcopy(document))
+                key = (
+                    "pod",
+                    observed["metadata"]["namespace"],
+                    observed["metadata"]["name"],
+                )
+                self.objects[key]["spec"]["nodeName"] = f"mount-node-{len(submitted)}"
+                observed = deepcopy(self.objects[key])
+            return observed
+
+        def delete(
+            self,
+            kind: str,
+            name: str,
+            namespace: str,
+            *,
+            expected_uid: Optional[str] = None,
+        ) -> None:
+            """Replace the validated Pod at the native delete boundary once.
+
+            :param kind: Kind selected for deletion or executor cleanup.
+            :param name: Exact selected resource name.
+            :param namespace: Original caller-selected namespace.
+            :param expected_uid: UID precondition supplied by the real lifecycle.
+            :raises KubernetesError: The native precondition protects the replacement.
+            """
+            nonlocal replaced
+            if replace_on_delete and kind.casefold() == "pod" and not replaced:
+                self.objects[("pod", namespace, name)]["metadata"]["uid"] = (
+                    "replacement-uid"
+                )
+                replaced = True
+            super().delete(kind, name, namespace, expected_uid=expected_uid)
+
+        def wait_pod_mount_ready(
+            self,
+            name: str,
+            namespace: str,
+            *,
+            mount_failure_timeout: int = 60,
+            timeout: Optional[float] = None,
+        ) -> JSONObject:
+            """Fail selected attempts with the matching native Pending Pod and event.
+
+            :param name: Exact run Pod selected by production.
+            :param namespace: Same selected namespace on every attempt.
+            :param mount_failure_timeout: Bounded mount observation interval.
+            :param timeout: Remaining shared readiness budget.
+            :returns: Native ready Pod after the configured failure count.
+            :raises KubernetesError: Selected mount attempts fail before tools execute.
+            """
+            assert mount_failure_timeout > 0
+            nonlocal elapsed
+            assert timeout is not None and 0 < timeout <= 300 - elapsed
+            budgets.append(timeout)
+            pod = self.read("Pod", name, namespace)
+            node = pod["spec"]["nodeName"]
+            attempted_nodes.append(node)
+            if len(attempted_nodes) <= failed_attempts:
+                pod["status"].update(
+                    {
+                        "phase": "Pending",
+                        "containerStatuses": [
+                            {
+                                "name": "ci-skills-pod",
+                                "state": {"waiting": {"reason": "ContainerCreating"}},
+                            }
+                        ],
+                    }
+                )
+                event = {
+                    "reason": "FailedMount",
+                    "message": f"fixture mount stalled on {node}",
+                    "involvedObject": {"uid": pod["metadata"]["uid"]},
+                }
+                elapsed += 61
+                raise KUBERNETES.PodMountFailure(pod, [event])
+            return super().wait_pod_mount_ready(
+                name,
+                namespace,
+                mount_failure_timeout=mount_failure_timeout,
+                timeout=timeout,
+            )
+
+    cluster = MountFailureCluster()
+    monkeypatch.setattr(KUBERNETES.time, "monotonic", lambda: elapsed)
+    cluster.apply({"kind": "Namespace", "metadata": {"name": "caller-storage"}})
+    cluster.apply(
+        {
+            "kind": "PersistentVolumeClaim",
+            "metadata": {"name": "caller-data", "namespace": "caller-storage"},
+        }
+    )
+    cluster.apply(
+        {
+            "kind": "ConfigMap",
+            "metadata": {"name": "neighbor", "namespace": "caller-storage"},
+        }
+    )
+    state = _state(cluster)
+    mount = PODS.ToolPodMount(
+        "caller-volume",
+        {"persistentVolumeClaim": {"claimName": "caller-data"}},
+        "/shared",
+    )
+    action = PODS.PrepareToolPodAction(
+        placement_specification,
+        run_id="mount-recovery-run",
+        namespace=None if owns_namespace else "caller-storage",
+        mounts=(mount,),
+        timeout=300,
+    )
+    callbacks = _preparation(action)
+    if replace_on_delete:
+        with pytest.raises(
+            KUBERNETES.KubernetesError, match="resource_delete_identity_mismatch"
+        ):
+            _run(state, callbacks)
+        assert replaced
+        assert not cluster.executed
+        pods = [
+            document
+            for (kind, _, _), document in cluster.objects.items()
+            if kind == "pod"
+        ]
+        assert len(pods) == 1
+        assert pods[0]["metadata"]["uid"] == "replacement-uid"
+        assert not any(kind == "pod" for kind, _, _ in cluster.deleted)
+        scope = state.run_scope
+        script_name = scope.name(POD_RESOURCES.TOOL_POD_SCRIPT_ROLE)
+        assert cluster.read("ConfigMap", script_name, scope.namespace) is not None
+        expected_retained = {
+            SCOPES.resource_identity(
+                "Pod", pods[0]["metadata"]["name"], scope.namespace
+            ),
+            SCOPES.resource_identity("ConfigMap", script_name, scope.namespace),
+        }
+        if owns_namespace:
+            assert cluster.read("Namespace", scope.namespace, "") is not None
+            expected_retained.add(
+                SCOPES.resource_identity("Namespace", scope.namespace, "")
+            )
+        assert state.retained_resources == expected_retained
+        assert state.failed
+    elif failed_attempts == 3:
+        with pytest.raises(
+            KUBERNETES.KubernetesError, match="tool_pod_mount_retry_exhausted"
+        ) as failure:
+            _run(state, callbacks)
+        diagnostic = str(failure.value) + json.dumps(state.readback)
+        for node in attempted_nodes:
+            assert node in diagnostic
+        assert "FailedMount" in diagnostic
+        assert not state.retained_resources
+        assert not cluster.executed
+        assert not any(kind == "pod" for kind, _, _ in cluster.objects)
+    else:
+        _run(state, callbacks)
+        assert state.pod.node_name == "mount-node-2"
+        assert state.readback["tools"][0]["verified"] is True
+    expected_attempts = 1 if replace_on_delete else 3 if failed_attempts == 3 else 2
+    assert len(submitted) == expected_attempts
+    assert len(attempted_nodes) == len(submitted)
+    assert budgets == [300 - 61 * index for index in range(len(submitted))]
+    assert cluster.target == _target()
+    assert state.run_scope.run_id == "mount-recovery-run"
+    assert state.run_scope.owns_namespace is owns_namespace
+    for index, document in enumerate(submitted):
+        assert document["metadata"]["namespace"] == state.run_scope.namespace
+        assert document["metadata"]["name"] == submitted[0]["metadata"]["name"]
+        assert document["spec"]["nodeSelector"] == {"storage": "iso"}
+        assert (
+            document["spec"]["tolerations"]
+            == placement_specification.as_dict()["tolerations"]
+        )
+        assert document["spec"]["volumes"] == submitted[0]["spec"]["volumes"]
+        assert document["spec"]["containers"] == submitted[0]["spec"]["containers"]
+        terms = document["spec"]["affinity"]["nodeAffinity"][
+            "requiredDuringSchedulingIgnoredDuringExecution"
+        ]["nodeSelectorTerms"]
+        assert len(terms) == 2
+        for term, zone in zip(terms, ("east", "west")):
+            assert term["matchExpressions"] == [
+                {"key": "zone", "operator": "In", "values": [zone]}
+            ]
+            if index:
+                assert any(
+                    expression["key"] == "metadata.name"
+                    and expression["operator"] == "NotIn"
+                    and set(expression["values"]) == set(attempted_nodes[:index])
+                    for expression in term["matchFields"]
+                )
+    assert cluster.read("Namespace", "caller-storage", "") is not None
+    assert (
+        cluster.read("PersistentVolumeClaim", "caller-data", "caller-storage")
+        is not None
+    )
+    assert cluster.read("ConfigMap", "neighbor", "caller-storage") is not None
+    assert all(kind in {"pod", "configmap"} for kind, _, _ in cluster.deleted)
 
 
 def _run(state: PODS.ToolPodState, callbacks: Sequence[AbstractCallback]) -> JSONObject:
@@ -953,6 +1452,45 @@ def test_render_preserves_caller_native_false_without_rewriting_volume_source(
         "mountPath": "/shared",
         "readOnly": False,
     }
+
+
+@pytest.mark.parametrize(
+    "case", ("admitted", "missing", "changed", "other-kind", "other-list")
+)
+def test_native_pod_tolerations_allow_admission_additions_without_losing_requested_fields(
+    case: str,
+) -> None:
+    """Accept native toleration additions while preserving each requested entry.
+
+    :param case: Admission additions, missing or changed input, or an unrelated list.
+    """
+    requested = [
+        {"key": "storage", "operator": "Equal", "value": "iso", "effect": "NoSchedule"},
+        {"key": "dedicated", "operator": "Exists", "effect": "NoExecute"},
+    ]
+    expected = {"apiVersion": "v1", "kind": "Pod", "spec": {"tolerations": requested}}
+    observed = deepcopy(expected)
+    observed["spec"]["tolerations"] = [
+        {
+            "key": "node.kubernetes.io/not-ready",
+            "operator": "Exists",
+            "effect": "NoExecute",
+            "tolerationSeconds": 300,
+        },
+        *reversed(deepcopy(requested)),
+    ]
+    if case == "missing":
+        observed["spec"]["tolerations"].pop()
+    elif case == "changed":
+        observed["spec"]["tolerations"][-1]["value"] = "different-storage"
+    elif case == "other-kind":
+        expected["kind"] = observed["kind"] = "ConfigMap"
+    elif case == "other-list":
+        volumes = [{"name": name, "emptyDir": {}} for name in ("first", "second")]
+        expected["spec"] = {"volumes": volumes}
+        observed["spec"] = {"volumes": list(reversed(deepcopy(volumes)))}
+
+    assert RESOURCES.matches(expected, observed) is (case == "admitted")
 
 
 @pytest.mark.parametrize(
