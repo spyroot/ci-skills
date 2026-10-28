@@ -75,7 +75,10 @@ RECOVERY = {
     "skill_manifest_missing": "Use a checkout containing ci-skills/SKILL.md.",
     "skill_symlink_unexpected": "Remove the symlink from the source skill tree and retry.",
     "source_revision_unverified": "Install from a clean checkout of the merged skill revision.",
-    "destination_exists": "Inspect the installed skill, then use --upgrade --apply --confirm-upgrade.",
+    "destination_exists": (
+        "Inspect the installed skill, then plan with --upgrade --dry-run and apply with "
+        "--upgrade --apply --confirm-upgrade FINGERPRINT --timeout DURATION."
+    ),
     "destination_symlink": "Choose a real skills directory; the installed skill cannot be a symlink.",
     "destination_not_directory": "Inspect the existing path; an installed skill must be a directory.",
     "incomplete_install_recover": "Run --recover --apply --confirm-recover, then retry installation.",
