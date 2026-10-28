@@ -90,6 +90,9 @@ def _pod_handle(document: JSONObject, expected: ToolPodResourceSpec) -> PodHandl
         metadata.get("uid"),
     )
     spec = document.get("spec")
+    node_name = spec.get("nodeName", "") if isinstance(spec, Mapping) else ""
+    if not isinstance(node_name, str):
+        raise KubernetesError("tool_pod_node_identity_invalid")
     containers = spec.get("containers") if isinstance(spec, Mapping) else None
     selected = (
         [
@@ -130,6 +133,7 @@ def _pod_handle(document: JSONObject, expected: ToolPodResourceSpec) -> PodHandl
         container=TOOL_POD_CONTAINER,
         image=expected.image,
         restart_count=restart_count,
+        node_name=node_name,
     )
 
 

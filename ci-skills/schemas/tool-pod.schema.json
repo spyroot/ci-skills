@@ -19,6 +19,24 @@
       "items": {
         "$ref": "https://github.com/spyroot/ci-skills/schemas/configuration/toolchain-dependencies.schema.json#/$defs/dependency"
       }
+    },
+    "nodeSelector": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Native Pod nodeSelector, combined with the consuming workflow selection."
+    },
+    "affinity": {
+      "type": "object",
+      "description": "Native Pod affinity passed to Kubernetes; mount recovery adds failed-node exclusions without removing caller constraints."
+    },
+    "tolerations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Native Pod tolerations passed unchanged to Kubernetes."
     }
   }
 }

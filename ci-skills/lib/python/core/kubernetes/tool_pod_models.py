@@ -22,6 +22,7 @@ from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
     copy_json_object,
+    json_object,
     json_objects,
     json_string,
 )
@@ -230,6 +231,7 @@ class PrepareToolPodAction(SkillAction):
     :param retain: Keep a successfully verified Pod until explicit removal.
     :param mounts: Native storage mounts selected by an internal consumer.
     :param node_selector: Native Pod placement labels selected by an internal consumer.
+    :param preferred_node: Optional observed producer node to prefer without requiring it.
 
     .. attribute :: spec
         :type: ToolPodSpec
@@ -265,6 +267,11 @@ class PrepareToolPodAction(SkillAction):
         :type: Mapping[str, str]
 
         Immutable native Pod placement labels selected by an internal consumer.
+
+    .. attribute :: preferred_node
+        :type: str
+
+        Observed producer node preferred by a later reader when still eligible.
     """
 
     spec: ToolPodSpec
@@ -277,6 +284,7 @@ class PrepareToolPodAction(SkillAction):
         default_factory=lambda: MappingProxyType({}),
         repr=False,
     )
+    preferred_node: str = ""
 
     def __post_init__(self) -> None:
         """Reject invalid bounds and correlation identities before provider access.
@@ -295,10 +303,39 @@ class PrepareToolPodAction(SkillAction):
             for key, value in self.node_selector.items()
         ):
             raise TypeError("tool_pod_node_selector_invalid")
+        declared = json_object(self.spec.document.get("nodeSelector", {}))
+        if any(not isinstance(value, str) for value in declared.values()):
+            raise TypeError("tool_pod_node_selector_invalid")
+        if any(
+            key in declared and declared[key] != value
+            for key, value in self.node_selector.items()
+        ):
+            raise ValueError("tool_pod_node_selector_conflict")
+        if not isinstance(self.preferred_node, str):
+            raise TypeError("tool_pod_preferred_node_invalid")
         object.__setattr__(
             self,
             "node_selector",
-            MappingProxyType(dict(self.node_selector)),
+            MappingProxyType({**declared, **self.node_selector}),
+        )
+
+    @property
+    def affinity(self) -> JSONObject:
+        """Expose an owned copy of the caller's native affinity.
+
+        :returns: Native affinity fields without scheduling reinterpretation.
+        """
+        return copy_json_object(json_object(self.spec.document.get("affinity", {})))
+
+    @property
+    def tolerations(self) -> tuple[JSONObject, ...]:
+        """Expose owned copies of the caller's native tolerations.
+
+        :returns: Native tolerations in declaration order.
+        """
+        return tuple(
+            copy_json_object(item)
+            for item in json_objects(self.spec.document.get("tolerations", []))
         )
 
     @property
@@ -336,6 +373,8 @@ class PrepareToolPodAction(SkillAction):
         }
         if self.node_selector:
             document["nodeSelector"] = dict(self.node_selector)
+        if self.preferred_node:
+            document["preferred_node"] = self.preferred_node
         return document
 
 
@@ -418,6 +457,7 @@ class PodHandle:
     :param container: Exact selected container name.
     :param image: Selected execution image.
     :param restart_count: Observed container restart count.
+    :param node_name: Observed native ``spec.nodeName``, absent in legacy records.
 
     .. attribute :: namespace
         :type: str
@@ -448,6 +488,11 @@ class PodHandle:
         :type: int
 
         Observed container restart count.
+
+    .. attribute :: node_name
+        :type: str
+
+        Observed native node identity, empty in legacy records.
     """
 
     namespace: str
@@ -456,13 +501,14 @@ class PodHandle:
     container: str
     image: str
     restart_count: int
+    node_name: str = field(default="", compare=False)
 
     def as_dict(self) -> JSONObject:
         """Render safe provider identity and restart evidence.
 
         :returns: JSON object suitable for reports and later callbacks.
         """
-        return {
+        document: JSONObject = {
             "namespace": self.namespace,
             "name": self.name,
             "uid": self.uid,
@@ -470,6 +516,9 @@ class PodHandle:
             "image": self.image,
             "restart_count": self.restart_count,
         }
+        if self.node_name:
+            document["node_name"] = self.node_name
+        return document
 
 
 @dataclass(frozen=True)
@@ -559,6 +608,11 @@ class ToolPodState(RunScopeState):
 
         Exact Pod paths preserved while an asynchronous native process may still
         consume them.
+
+    .. attribute :: prepared_pod_document
+        :type: Optional[JSONObject]
+
+        Exact prepared Pod shape including placement from bounded mount recovery.
     """
 
     pod: PodHandle = field(init=False)
@@ -568,6 +622,7 @@ class ToolPodState(RunScopeState):
     search_paths: MutableSequence[str] = field(default_factory=list)
     readback: MutableMapping[str, JSONValue] = field(default_factory=dict)
     retained_pod_files: MutableSet[str] = field(default_factory=set, repr=False)
+    prepared_pod_document: Optional[JSONObject] = field(default=None, repr=False)
 
     @property
     def result_records(self) -> MutableSequence[Mapping[str, object]]:
