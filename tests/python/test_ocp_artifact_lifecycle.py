@@ -80,6 +80,8 @@ def test_native_failure_removes_exact_partial_output_and_report(
         "done\n"
         'printf partial > "$directory/$output"\n'
         'printf native-report > "$directory/report.json"\n'
+        'printf "native provider diagnostic\\n"\n'
+        'printf "command terminated with exit code 17\\n" >&2\n'
         "exit 17\n",
         encoding="utf-8",
     )
@@ -97,8 +99,12 @@ def test_native_failure_removes_exact_partial_output_and_report(
     )
     callback.bind(state)
 
-    with pytest.raises(KUBERNETES.KubernetesError, match="native_failed:exit=17"):
+    with pytest.raises(
+        KUBERNETES.KubernetesError, match="native_failed:exit=17"
+    ) as error:
         callback.run()
+    assert "native provider diagnostic" in str(error.value)
+    assert "native provider diagnostic" in state.readback["node_image_failure"]["error"]
 
     assert output.read_bytes() == b"partial"
     assert report.read_bytes() == b"native-report"
