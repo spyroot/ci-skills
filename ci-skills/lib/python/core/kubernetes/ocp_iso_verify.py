@@ -753,7 +753,11 @@ class NativeInputComparator:
                     if isinstance(supplied_architecture, str)
                     else supplied_architecture
                 )
-                observed = [item.get("cpuArchitecture") for item in infraenv_specs]
+                observed = [
+                    item["cpuArchitecture"]
+                    for item in infraenv_specs
+                    if "cpuArchitecture" in item
+                ]
                 selected = next(
                     (
                         item

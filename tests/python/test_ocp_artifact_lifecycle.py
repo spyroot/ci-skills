@@ -882,6 +882,46 @@ def test_native_build_reports_unobservable_requested_values(
     assert "mismatched_fields" not in comparison
 
 
+@pytest.mark.parametrize("observed_architecture", (None, "aarch64"))
+def test_native_build_distinguishes_missing_from_mismatched_architecture(
+    observed_architecture: str | None,
+    tmp_path: Path,
+    native_output: tuple[JSONObject, JSONObject],
+    verify_native_output: Callable[[NATIVE.NativeNodeInput, JSONObject], JSONObject],
+) -> None:
+    """An absent InfraEnv field stays unverified; an observed wrong value fails.
+
+    :param observed_architecture: Missing field or explicitly different value.
+    :param tmp_path: Test-owned caller input directory.
+    :param native_output: Distinct caller values and generated native files.
+    :param verify_native_output: Production verifier with isolated ISO inspection.
+    """
+    expected, output = native_output
+    expected["cpuArchitecture"] = "amd64"
+    spec = (
+        {}
+        if observed_architecture is None
+        else {"cpuArchitecture": observed_architecture}
+    )
+    output["storage"]["files"].append(
+        _embedded_file(
+            "/etc/assisted/manifests/infraenv.yaml",
+            yaml.safe_dump({"kind": "InfraEnv", "spec": spec}),
+        )
+    )
+    node_input = _caller_input(tmp_path, expected)
+
+    if observed_architecture is not None:
+        with pytest.raises(KUBERNETES.KubernetesError, match="native_input_mismatch"):
+            verify_native_output(node_input, output)
+        return
+
+    comparison = verify_native_output(node_input, output)["native_input_comparison"]
+    assert comparison["status"] == "unverified"
+    assert "cpuArchitecture" in comparison["unverified_fields"]
+    assert "mismatched_fields" not in comparison
+
+
 def test_native_build_rejects_wrongly_typed_observed_value(
     tmp_path: Path,
     native_output: tuple[JSONObject, JSONObject],
