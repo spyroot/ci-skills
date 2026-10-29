@@ -565,14 +565,13 @@ class NativeInputComparator:
 
         This runs only after OpenShift has accepted the untouched input and created the
         ISO. It does not replace native validation or define an OpenShift schema.
+        Native extraction and YAML decoding errors propagate from called methods.
 
         :param node_input: Exact caller input retained by the build action.
         :param document: Actual Ignition object extracted from the generated ISO.
         :param artifact_sha256: Exact generated ISO digest binding the observation.
         :returns: Non-secret field coverage and input identity for this artifact.
-        :raises yaml.YAMLError: A caller or embedded native YAML document is unreadable.
         :raises TypeError: A provider-accepted YAML document has an unusable shape.
-        :raises EmbeddedObservationError: Required embedded bytes are unavailable.
         """
         files = cls._embedded_files(document)
         matched: list[str] = []
