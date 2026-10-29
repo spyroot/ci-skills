@@ -150,6 +150,30 @@
         },
         "artifact_record": {
           "type": "object",
+          "oneOf": [
+            {
+              "properties": {
+                "schema_version": {
+                  "const": "1.0"
+                }
+              },
+              "not": {
+                "required": [
+                  "native_input_comparison"
+                ]
+              }
+            },
+            {
+              "properties": {
+                "schema_version": {
+                  "const": "1.1"
+                }
+              },
+              "required": [
+                "native_input_comparison"
+              ]
+            }
+          ],
           "required": [
             "schema_version",
             "run_id",
@@ -160,7 +184,10 @@
           ],
           "properties": {
             "schema_version": {
-              "const": "1.0"
+              "enum": [
+                "1.0",
+                "1.1"
+              ]
             },
             "run_id": {
               "type": "string",
@@ -177,6 +204,9 @@
             },
             "lifetime": {
               "$ref": "#/$defs/lifetime"
+            },
+            "native_input_comparison": {
+              "$ref": "#/$defs/nativeInputComparison"
             }
           }
         }
@@ -445,6 +475,46 @@
         "pod",
         "caller_selected_volume"
       ]
+    },
+    "nativeInputComparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "artifact_sha256",
+        "input_identity",
+        "matched_fields",
+        "unverified_fields"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "matched",
+            "unverified"
+          ]
+        },
+        "artifact_sha256": {
+          "type": "string",
+          "pattern": "^(sha256:)?[0-9a-f]{64}$"
+        },
+        "input_identity": {
+          "type": "object"
+        },
+        "matched_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "unverified_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     },
     "artifact": {
       "type": "object",
