@@ -43,8 +43,8 @@ See the [native flag reference](ocp-node-image-flags.md) for argument ownership 
 
 ## Accepted node input shape
 
-Every key `oc adm node-image create` reads from `nodes-config.yaml`, from the installer's node-image types. The
-comment on each key is its rule. Values are examples; these are the keys documented for node-image.
+The keys documented for node-image that `oc adm node-image create` reads from `nodes-config.yaml`, from the
+installer's node-image types. The comment on each key is its rule. Values are examples.
 
 ```yaml
 cpuArchitecture: x86_64              # optional; architecture of the nodes being added
@@ -64,7 +64,7 @@ hosts:                               # required; at least one host
       minSizeGigabytes: 480          # integer; the device is at least this size
       wwn: "0x5000c500a1b2c3d4"      # exact; quote it
       rotational: false              # true = spinning disk, false = SSD or NVMe, omitted = either
-    networkConfig:                   # optional; one NMState document; every interface in it is also listed above
+    networkConfig:                   # optional; one NMState document; every NIC in it is also listed above
       interfaces: []
 ```
 
@@ -166,8 +166,8 @@ A host without `rootDeviceHints` gets no `root-device-hints.yaml`.
 
 ## Network cases
 
-Complete files for the cases the single-NIC DHCP example above does not cover. Every interface named in
-`networkConfig` is also listed under `interfaces` with its MAC.
+Complete files for the cases the single-NIC DHCP example above does not cover. Every ethernet interface with a
+`mac-address` in `networkConfig` is also listed under `interfaces`; bonds and other logical interfaces are not.
 
 Two NICs, DHCP management and a static jumbo-frame storage link:
 
@@ -281,8 +281,9 @@ hosts:
         macAddress: 02:00:00:10:00:32
 ```
 
-Source of the shape and rules: the installer's `pkg/types/agent`,
-`pkg/asset/agent/agentconfig` and `pkg/types/baremetal/validation` packages and `oc adm node-image create --help`
-at release 4.22.
+Source of the shape and rules: the installer's `pkg/types/agent`, `pkg/asset/agent/joiner`,
+`pkg/asset/agent/agentconfig`, `pkg/asset/agent/image` and `pkg/types/baremetal` packages, the `oc` client's
+`pkg/cli/admin/nodeimage` package and `oc adm node-image create --help`, all at release 4.22, and the
+[node-image procedure][native].
 
 [native]: https://docs.redhat.com/en/documentation/openshift_container_platform/4.22/html/nodes/working-with-nodes
