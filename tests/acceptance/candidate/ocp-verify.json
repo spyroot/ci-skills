@@ -1346,7 +1346,7 @@
     "record_count": 20
   },
   "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin@https://api.ww-cai-cisco-live.dcloud.local:6443",
-  "target_file": "/Users/spyroot/.ci-skills/target.toml",
+  "target_file": "path:5e5380df1eda",
   "target_source": "user",
   "tested_revision": "ca1eb994d9295f8dfa70c2c987ebc88f2a5f5dfb"
 }
