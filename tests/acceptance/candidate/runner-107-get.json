@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-29T19:32:15.994314+00:00",
+  "captured_at": "2026-10-29T21:31:00.726257+00:00",
   "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
   "credential_source": "file:path:29f247d18d3c",
   "errors": [],
@@ -22,13 +22,13 @@
     ],
     "one_time_sink_required": false,
     "operation": "get",
-    "plan_digest": "1ef2f326e2b0b29749cf3b666ef46815cdb799931ad4a6b6f64ee03c085c02e5",
+    "plan_digest": "e8b630f3e090e32175062f6b54da8cc9e2cdcd9b03b028263802198647627845",
     "project_ids": null,
     "resource_id": 107,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "1ef2f326e2b0b29749cf3b666ef46815cdb799931ad4a6b6f64ee03c085c02e5",
+  "plan_digest": "e8b630f3e090e32175062f6b54da8cc9e2cdcd9b03b028263802198647627845",
   "readback": {
     "record_count": 1,
     "truncated": false,
@@ -38,7 +38,7 @@
     {
       "access_level": "not_protected",
       "architecture": "amd64",
-      "contacted_at": "2026-10-29T19:32:06.140Z",
+      "contacted_at": "2026-10-29T21:30:46.142Z",
       "description": "go-golangci-toolbox-20261020",
       "id": 107,
       "is_shared": false,
@@ -65,12 +65,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "4c46840290e3b6765faebe43400b10cd088f82e64333912845e2332ed3b07d52",
+    "digest": "8a07c7184f7122a62b7dbf38eef03eeaedebf30951fba3f51e5a78c5bc6c4964",
     "file_count": 253,
-    "functional_digest": "66d27aeaee00ca554a111eb9b5507e62f9fb508189261c5f7f6d30bc5d76d487",
+    "functional_digest": "037fef311943e088497b9efd330eae358aa589a05d1a9fa47bbdfebb82c49d3f",
     "revision": {
       "source": "installer_record",
-      "value": "5b5d76e0ee00db4f465e1299abae8f786784419e",
+      "value": "ca1eb994d9295f8dfa70c2c987ebc88f2a5f5dfb",
       "verified": true
     }
   },
@@ -84,8 +84,8 @@
     "reference": "hott/test"
   },
   "target_file": "path:5e5380df1eda",
-  "target_source": "user;argv:--project",
-  "tested_revision": "5b5d76e0ee00db4f465e1299abae8f786784419e",
+  "target_source": "env:CI_SKILLS_TARGET;argv:--project",
+  "tested_revision": "ca1eb994d9295f8dfa70c2c987ebc88f2a5f5dfb",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

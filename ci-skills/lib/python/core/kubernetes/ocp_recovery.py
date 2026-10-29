@@ -27,6 +27,7 @@ from lib.python.core.kubernetes.artifact_storage_runtime import observe_artifact
 from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
 from lib.python.core.kubernetes.objects import KubernetesObject
 from lib.python.core.kubernetes.ocp_artifact_models import (
+    NativeComparisonStatus,
     OCPArtifactState,
     decode_pod_handle,
 )
@@ -474,6 +475,16 @@ class VerifyRecoveredNodeImage(K8SCallback[ResolveRunScopeAction]):
             )
         artifact = observe_artifact(state, state.recovery_record.build_path)
         inspection = inspect_verified_node_image(state, artifact)
+        comparison: JSONObject = {
+            "status": NativeComparisonStatus.UNVERIFIED,
+            "artifact_sha256": artifact.sha256,
+            "input_identity": {
+                "input_fingerprint": state.recovery_record.input_fingerprint
+            },
+            "matched_fields": [],
+            "unverified_fields": ["recovery_input_unavailable"],
+        }
+        state.readback["native_input_comparison"] = comparison
         state.build_artifact = artifact
         state.readback["node_image_source"] = artifact.as_dict()
         return {
@@ -482,6 +493,7 @@ class VerifyRecoveredNodeImage(K8SCallback[ResolveRunScopeAction]):
             "run_id": self.action.run_id,
             "artifact": artifact.as_dict(),
             "inspection": inspection,
+            "native_input_comparison": comparison,
             "final_delivery_recorded": False,
         }
 

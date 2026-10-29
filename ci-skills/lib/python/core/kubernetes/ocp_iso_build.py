@@ -190,7 +190,10 @@ class BuildNodeImage(NodeImageCallback):
             state.native_error = "node_image_native_status_mismatch"
             raise KubernetesError(state.native_error)
         if native_exit_code:
-            state.native_error = sanitize(result.stderr or result.stdout, 4096)
+            state.native_error = sanitize(
+                "\n".join(part for part in (result.stdout, result.stderr) if part),
+                4096,
+            )
             reason = state.native_error or "native_command_failed"
             state.readback["node_image_failure"] = {
                 "exit_code": native_exit_code,
