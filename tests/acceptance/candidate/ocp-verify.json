@@ -1,0 +1,1352 @@
+{
+  "access": {
+    "kubernetes": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    }
+  },
+  "artifact": {
+    "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+    "pod": {
+      "container": "ci-skills-pod",
+      "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+      "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+      "namespace": "node-iso",
+      "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+      "restart_count": 0,
+      "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+    },
+    "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+    "size": 1379328000
+  },
+  "artifact_lifetime": "pod",
+  "captured_at": "2026-10-29T20:59:04.292529+00:00",
+  "cleanup": {
+    "failures": [],
+    "resources": [],
+    "retained": [
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+        "namespace": "node-iso"
+      },
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+        "namespace": "node-iso"
+      },
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+        "namespace": "node-iso"
+      },
+      {
+        "kind": "pod",
+        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "namespace": "node-iso"
+      }
+    ],
+    "status": "PASS"
+  },
+  "errors": [],
+  "filters": {},
+  "kind": "ocp_node_onboard",
+  "operation": "verify",
+  "plan": {
+    "functional_digest": "d5e7197160377f444615f6651538cbd4f0225216382b235c471c54445e196d44",
+    "inputs": {
+      "artifact_record": {
+        "artifact": {
+          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "namespace": "node-iso",
+            "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+            "restart_count": 0,
+            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          },
+          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "size": 1379328000
+        },
+        "destination": {
+          "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/output",
+          "namespace": "node-iso",
+          "volumeSource": {
+            "emptyDir": {}
+          }
+        },
+        "lifetime": "pod",
+        "native_input_comparison": {
+          "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "input_identity": {
+            "files": [],
+            "mac_address": "02:3e:c1:16:4e:2f",
+            "route": "flags"
+          },
+          "matched_fields": [
+            "mac_address"
+          ],
+          "status": "matched",
+          "unverified_fields": []
+        },
+        "node_selector": {
+          "kubernetes.io/hostname": "ue-2.ww-cai-cisco-live.dcloud.local"
+        },
+        "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+        "schema_version": "1.1",
+        "storage": {
+          "access_route": "/dev/sda4[/ostree/deploy/rhcos/var/lib/kubelet/pods/f64f2f70-fb49-481c-8725-836e374c46c0/volumes/kubernetes.io~empty-dir/artifact-destination]",
+          "artifact_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "build_output": "destination",
+          "destination_fingerprint": "sha256:63bad41c0328f1d5f0530fe03488a4b2d5e636f65d05f66c79e3fe8e7125c46d",
+          "lifetime": "pod",
+          "mount_path": "/output",
+          "namespace": "node-iso",
+          "observed_mount_path": "/output",
+          "output_absent": true,
+          "protocol": "xfs",
+          "volume_source_types": [
+            "emptyDir"
+          ],
+          "writable": true
+        },
+        "tool_mounts": [
+          {
+            "mountPath": "/output",
+            "name": "artifact-destination",
+            "readOnly": false,
+            "volumeSource": {
+              "emptyDir": {}
+            }
+          },
+          {
+            "mountPath": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617",
+            "name": "node-image-work",
+            "readOnly": false,
+            "volumeSource": {
+              "emptyDir": {}
+            }
+          }
+        ],
+        "tool_spec": {
+          "dependencies": [
+            {
+              "commands": [
+                "coreos-installer"
+              ],
+              "name": "coreos-installer",
+              "probe": [
+                "coreos-installer",
+                "--version"
+              ]
+            },
+            {
+              "commands": [
+                "rsync"
+              ],
+              "name": "rsync",
+              "probe": [
+                "rsync",
+                "--version"
+              ],
+              "yum": [
+                "rsync"
+              ]
+            },
+            {
+              "commands": [
+                "oc"
+              ],
+              "linux": {
+                "destination": "/tmp/ci-skills-tools/bin",
+                "files": [
+                  "oc"
+                ],
+                "method": "archive",
+                "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+                "stripComponents": 0,
+                "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz"
+              },
+              "name": "oc",
+              "probe": [
+                "oc",
+                "version",
+                "--client",
+                "-o",
+                "json"
+              ]
+            }
+          ],
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "nodeSelector": {
+            "kubernetes.io/hostname": "ue-2.ww-cai-cisco-live.dcloud.local"
+          }
+        }
+      },
+      "artifact_record_present": true,
+      "recovery_record": {
+        "build_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "destination": {
+          "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/output",
+          "namespace": "node-iso",
+          "volumeSource": {
+            "emptyDir": {}
+          }
+        },
+        "input_fingerprint": "sha256:b09377aca007df1e4f4cf4fb5077d750d88b756a39b6f512df009c758cb996c6",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso",
+          "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+          "restart_count": 0,
+          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        },
+        "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+        "schema_version": "1.0",
+        "status_path": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:ff974d918c1fa32a989db535ed719eb1a7cfd3f50a2e7815c895fd7794e50cd2",
+        "tool_pod_fingerprint_label": "76lu3emmd6rsvge5wu2624m6wgt47u7vbixhqfoisx6xpfhfbtja"
+      },
+      "recovery_record_present": true
+    },
+    "kind": "ocp_node_onboard",
+    "operation": "verify",
+    "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+    "target": {
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    },
+    "timeout_seconds": 600
+  },
+  "plan_digest": "8a0089bdc78eee8ab402847a84dd1c9e9b067e245cbf75bc04cdc02bc6250c85",
+  "pod": {
+    "container": "ci-skills-pod",
+    "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+    "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+    "namespace": "node-iso",
+    "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+    "restart_count": 0,
+    "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+  },
+  "readback": {
+    "artifact_live_readback": {
+      "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "namespace": "node-iso",
+        "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+        "restart_count": 0,
+        "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+      },
+      "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+      "size": 1379328000
+    },
+    "artifact_record": {
+      "artifact": {
+        "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso",
+          "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+          "restart_count": 0,
+          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        },
+        "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "size": 1379328000
+      },
+      "destination": {
+        "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "buildOutput": "destination",
+        "mountPath": "/output",
+        "namespace": "node-iso",
+        "volumeSource": {
+          "emptyDir": {}
+        }
+      },
+      "lifetime": "pod",
+      "native_input_comparison": {
+        "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "input_identity": {
+          "files": [],
+          "mac_address": "02:3e:c1:16:4e:2f",
+          "route": "flags"
+        },
+        "matched_fields": [
+          "mac_address"
+        ],
+        "status": "matched",
+        "unverified_fields": []
+      },
+      "node_selector": {
+        "kubernetes.io/hostname": "ue-2.ww-cai-cisco-live.dcloud.local"
+      },
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "schema_version": "1.1",
+      "storage": {
+        "access_route": "/dev/sda4[/ostree/deploy/rhcos/var/lib/kubelet/pods/f64f2f70-fb49-481c-8725-836e374c46c0/volumes/kubernetes.io~empty-dir/artifact-destination]",
+        "artifact_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "build_output": "destination",
+        "destination_fingerprint": "sha256:63bad41c0328f1d5f0530fe03488a4b2d5e636f65d05f66c79e3fe8e7125c46d",
+        "lifetime": "pod",
+        "mount_path": "/output",
+        "namespace": "node-iso",
+        "observed_mount_path": "/output",
+        "output_absent": true,
+        "protocol": "xfs",
+        "volume_source_types": [
+          "emptyDir"
+        ],
+        "writable": true
+      },
+      "tool_mounts": [
+        {
+          "mountPath": "/output",
+          "name": "artifact-destination",
+          "readOnly": false,
+          "volumeSource": {
+            "emptyDir": {}
+          }
+        },
+        {
+          "mountPath": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617",
+          "name": "node-image-work",
+          "readOnly": false,
+          "volumeSource": {
+            "emptyDir": {}
+          }
+        }
+      ],
+      "tool_spec": {
+        "dependencies": [
+          {
+            "commands": [
+              "coreos-installer"
+            ],
+            "name": "coreos-installer",
+            "probe": [
+              "coreos-installer",
+              "--version"
+            ]
+          },
+          {
+            "commands": [
+              "rsync"
+            ],
+            "name": "rsync",
+            "probe": [
+              "rsync",
+              "--version"
+            ],
+            "yum": [
+              "rsync"
+            ]
+          },
+          {
+            "commands": [
+              "oc"
+            ],
+            "linux": {
+              "destination": "/tmp/ci-skills-tools/bin",
+              "files": [
+                "oc"
+              ],
+              "method": "archive",
+              "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+              "stripComponents": 0,
+              "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz"
+            },
+            "name": "oc",
+            "probe": [
+              "oc",
+              "version",
+              "--client",
+              "-o",
+              "json"
+            ]
+          }
+        ],
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "nodeSelector": {
+          "kubernetes.io/hostname": "ue-2.ww-cai-cisco-live.dcloud.local"
+        }
+      }
+    },
+    "embedded_ignition": {
+      "configuration": {
+        "files": [
+          {
+            "kind": "mac_addresses",
+            "observations": {
+              "mac_addresses": [
+                "02:3e:c1:16:4e:2f"
+              ]
+            },
+            "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+            "sha256": "4c8678387276ab70dd69e303d3c5c8ff3c33df0dbb02a60c780463619436f9e5",
+            "size": 18
+          }
+        ],
+        "unobserved_fields": [
+          "root_device_hints",
+          "role",
+          "hostname",
+          "network"
+        ]
+      },
+      "sha256": "8d1daa310e7688999e58e85ecd35f7e9be1103a7c0fbe370f6fce7d1be002727",
+      "size": 114930,
+      "version": "3.2.0"
+    },
+    "native_input_comparison": {
+      "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+      "artifact_unchanged": true,
+      "input_identity": {
+        "files": [],
+        "mac_address": "02:3e:c1:16:4e:2f",
+        "route": "flags"
+      },
+      "matched_fields": [
+        "mac_address"
+      ],
+      "status": "matched",
+      "unverified_fields": []
+    },
+    "owns_namespace": false,
+    "pod": {
+      "container": "ci-skills-pod",
+      "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+      "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+      "namespace": "node-iso",
+      "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+      "restart_count": 0,
+      "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+    },
+    "pod_attempts": [
+      {
+        "attempt": 1,
+        "classification": "Ready",
+        "duration": {
+          "unit": "seconds",
+          "value": 4.718029
+        },
+        "events": [],
+        "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+        "pod_uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+      }
+    ],
+    "recovery_record": {
+      "build_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+      "destination": {
+        "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "buildOutput": "destination",
+        "mountPath": "/output",
+        "namespace": "node-iso",
+        "volumeSource": {
+          "emptyDir": {}
+        }
+      },
+      "input_fingerprint": "sha256:b09377aca007df1e4f4cf4fb5077d750d88b756a39b6f512df009c758cb996c6",
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "namespace": "node-iso",
+        "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+        "restart_count": 0,
+        "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+      },
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "schema_version": "1.0",
+      "status_path": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617/private/node-image-status.json",
+      "tool_pod_fingerprint": "sha256:ff974d918c1fa32a989db535ed719eb1a7cfd3f50a2e7815c895fd7794e50cd2",
+      "tool_pod_fingerprint_label": "76lu3emmd6rsvge5wu2624m6wgt47u7vbixhqfoisx6xpfhfbtja"
+    },
+    "retained_resources": [
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+        "namespace": "node-iso"
+      },
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+        "namespace": "node-iso"
+      },
+      {
+        "kind": "configmap",
+        "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+        "namespace": "node-iso"
+      },
+      {
+        "kind": "pod",
+        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "namespace": "node-iso"
+      }
+    ],
+    "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+    "tools": [
+      {
+        "index": 0,
+        "name": "coreos-installer",
+        "observed": "coreos-installer 0.27.0\n",
+        "probe": [
+          "coreos-installer",
+          "--version"
+        ],
+        "verified": true
+      },
+      {
+        "index": 1,
+        "name": "rsync",
+        "observed": "rsync  version 3.5.1-g315819c5  protocol version 33\nCopyright (C) 1996-2026 by Andrew Tridgell, Wayne Davison, and others.\nWeb site: https://rsync.samba.org/\nCapabilities:\n    64-bit files, 64-bit inums, 64-bit timestamps, 64-bit long ints,\n    socketpairs, symlinks, symtimes, hardlinks, hardlink-specials,\n    hardlink-symlinks, IPv6, atimes, batchfiles, inplace, append, ACLs,\n    ACL-at, ACL-libacl-at, xattrs, optional secluded-args, iconv, prealloc,\n    stop-at, no crtimes, IDN\nOptimizations:\n    SIMD-roll, no asm-roll, openssl-crypto, no asm-MD5\nChecksum list:\n    xxh128 xxh3 xxh64 (xxhash) md5 md4 sha1 none\nCompress list:\n    zstd lz4 zlibx zlib none\nDaemon auth list:\n    sha512 sha256 sha1 md5 md4\n\nrsync comes with ABSOLUTELY NO WARRANTY.  This is free software, and you\nare welcome to redistribute it under certain conditions.  See the GNU\nGeneral Public Licence for details.\n",
+        "probe": [
+          "rsync",
+          "--version"
+        ],
+        "verified": true
+      },
+      {
+        "index": 2,
+        "name": "oc",
+        "observed": "{\n  \"clientVersion\": {\n    \"major\": \"\",\n    \"minor\": \"\",\n    \"gitVersion\": \"4.19.0-202602262001.p2.g24755b6.assembly.stream.el9-24755b6\",\n    \"gitCommit\": \"24755b6e82745a4dfa5a6db4b467564c237f244c\",\n    \"gitTreeState\": \"clean\",\n    \"buildDate\": \"2026-02-27T05:16:59Z\",\n    \"goVersion\": \"go1.23.10 (Red Hat 1.23.10-10.el9) X:strictfipsruntime\",\n    \"compiler\": \"gc\",\n    \"platform\": \"linux/amd64\"\n  },\n  \"kustomizeVersion\": \"v5.5.0\",\n  \"releaseClientVersion\": \"4.19.26\"\n}\n",
+        "probe": [
+          "oc",
+          "version",
+          "--client",
+          "-o",
+          "json"
+        ],
+        "verified": true
+      }
+    ]
+  },
+  "records": [
+    {
+      "callback": "K8SAuth",
+      "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
+      "identity": "kube:admin",
+      "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveRunScopes",
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "scopes": [
+        {
+          "namespace": "node-iso",
+          "owns_namespace": false,
+          "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617"
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveNodeArtifactRecord",
+      "present": true,
+      "record": {
+        "artifact": {
+          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "namespace": "node-iso",
+            "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+            "restart_count": 0,
+            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          },
+          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "size": 1379328000
+        },
+        "destination": {
+          "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/output",
+          "namespace": "node-iso",
+          "volumeSource": {
+            "emptyDir": {}
+          }
+        },
+        "lifetime": "pod",
+        "native_input_comparison": {
+          "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "input_identity": {
+            "files": [],
+            "mac_address": "02:3e:c1:16:4e:2f",
+            "route": "flags"
+          },
+          "matched_fields": [
+            "mac_address"
+          ],
+          "status": "matched",
+          "unverified_fields": []
+        },
+        "node_selector": {
+          "kubernetes.io/hostname": "ue-2.ww-cai-cisco-live.dcloud.local"
+        },
+        "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+        "schema_version": "1.1",
+        "storage": {
+          "access_route": "/dev/sda4[/ostree/deploy/rhcos/var/lib/kubelet/pods/f64f2f70-fb49-481c-8725-836e374c46c0/volumes/kubernetes.io~empty-dir/artifact-destination]",
+          "artifact_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "build_output": "destination",
+          "destination_fingerprint": "sha256:63bad41c0328f1d5f0530fe03488a4b2d5e636f65d05f66c79e3fe8e7125c46d",
+          "lifetime": "pod",
+          "mount_path": "/output",
+          "namespace": "node-iso",
+          "observed_mount_path": "/output",
+          "output_absent": true,
+          "protocol": "xfs",
+          "volume_source_types": [
+            "emptyDir"
+          ],
+          "writable": true
+        },
+        "tool_mounts": [
+          {
+            "mountPath": "/output",
+            "name": "artifact-destination",
+            "readOnly": false,
+            "volumeSource": {
+              "emptyDir": {}
+            }
+          },
+          {
+            "mountPath": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617",
+            "name": "node-image-work",
+            "readOnly": false,
+            "volumeSource": {
+              "emptyDir": {}
+            }
+          }
+        ],
+        "tool_spec": {
+          "dependencies": [
+            {
+              "commands": [
+                "coreos-installer"
+              ],
+              "name": "coreos-installer",
+              "probe": [
+                "coreos-installer",
+                "--version"
+              ]
+            },
+            {
+              "commands": [
+                "rsync"
+              ],
+              "name": "rsync",
+              "probe": [
+                "rsync",
+                "--version"
+              ],
+              "yum": [
+                "rsync"
+              ]
+            },
+            {
+              "commands": [
+                "oc"
+              ],
+              "linux": {
+                "destination": "/tmp/ci-skills-tools/bin",
+                "files": [
+                  "oc"
+                ],
+                "method": "archive",
+                "sha256": "be79bddaac8f2f59962c92063789fc726d8c8940cdb2dd04a708a1450a8277af",
+                "stripComponents": 0,
+                "url": "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.19.26/openshift-client-linux-amd64-rhel9-4.19.26.tar.gz"
+              },
+              "name": "oc",
+              "probe": [
+                "oc",
+                "version",
+                "--client",
+                "-o",
+                "json"
+              ]
+            }
+          ],
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "nodeSelector": {
+            "kubernetes.io/hostname": "ue-2.ww-cai-cisco-live.dcloud.local"
+          }
+        }
+      },
+      "resource": {
+        "kind": "ConfigMap",
+        "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+        "namespace": "node-iso",
+        "uid": "3ad97508-0bb8-4d79-946e-7af7c75bdd72"
+      },
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveNodeRecoveryRecord",
+      "present": true,
+      "recovery": {
+        "build_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "destination": {
+          "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "buildOutput": "destination",
+          "mountPath": "/output",
+          "namespace": "node-iso",
+          "volumeSource": {
+            "emptyDir": {}
+          }
+        },
+        "input_fingerprint": "sha256:b09377aca007df1e4f4cf4fb5077d750d88b756a39b6f512df009c758cb996c6",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso",
+          "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+          "restart_count": 0,
+          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        },
+        "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+        "schema_version": "1.0",
+        "status_path": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:ff974d918c1fa32a989db535ed719eb1a7cfd3f50a2e7815c895fd7794e50cd2",
+        "tool_pod_fingerprint_label": "76lu3emmd6rsvge5wu2624m6wgt47u7vbixhqfoisx6xpfhfbtja"
+      },
+      "resource": {
+        "kind": "configmap",
+        "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+        "namespace": "node-iso",
+        "uid": "534e5017-064d-44b1-8c82-77b01a2ab98a"
+      },
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ResolveRunScopes",
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "scopes": [
+        {
+          "namespace": "node-iso",
+          "owns_namespace": false,
+          "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617"
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "OpenRunScope",
+      "namespace": "node-iso",
+      "owns_namespace": false,
+      "reused": true,
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "StageToolPod",
+      "owns_namespace": false,
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "namespace": "node-iso",
+        "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+        "restart_count": 0,
+        "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+      },
+      "reused": true,
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "ReadToolState",
+      "environment": {
+        "package_manager": "dnf",
+        "pod_uid": "f64f2f70-fb49-481c-8725-836e374c46c0",
+        "restart_count": 0,
+        "runtime": "uid=0\ngid=0\nLinux 5.14.0-570.98.1.el9_6.x86_64 x86_64\nos=fedora\nos_version=44\n",
+        "search_paths": [
+          "/tmp/ci-skills-tools/bin",
+          "/tmp/ci-skills-tools/bin/bin"
+        ]
+      },
+      "tools": [
+        {
+          "commands": [
+            "coreos-installer"
+          ],
+          "index": 0,
+          "name": "coreos-installer",
+          "pod_uid": "f64f2f70-fb49-481c-8725-836e374c46c0",
+          "present": true,
+          "restart_count": 0,
+          "route": "present",
+          "writable": []
+        },
+        {
+          "commands": [
+            "rsync"
+          ],
+          "index": 1,
+          "name": "rsync",
+          "pod_uid": "f64f2f70-fb49-481c-8725-836e374c46c0",
+          "present": true,
+          "restart_count": 0,
+          "route": "present",
+          "writable": []
+        },
+        {
+          "commands": [
+            "oc"
+          ],
+          "index": 2,
+          "name": "oc",
+          "pod_uid": "f64f2f70-fb49-481c-8725-836e374c46c0",
+          "present": true,
+          "restart_count": 0,
+          "route": "present",
+          "writable": []
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "InstallArtifact",
+      "index": 0,
+      "name": "coreos-installer",
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "InstallArtifact",
+      "index": 1,
+      "name": "rsync",
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "DownloadArtifact",
+      "index": 2,
+      "name": "oc",
+      "verified": true
+    },
+    {
+      "action": "NO_OP",
+      "callback": "InstallArtifact",
+      "index": 2,
+      "name": "oc",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "callback": "VerifyTools",
+      "pod": {
+        "container": "ci-skills-pod",
+        "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "namespace": "node-iso",
+        "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+        "restart_count": 0,
+        "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+      },
+      "retained_resources": [
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "pod",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        }
+      ],
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "tools": [
+        {
+          "index": 0,
+          "name": "coreos-installer",
+          "observed": "coreos-installer 0.27.0\n",
+          "probe": [
+            "coreos-installer",
+            "--version"
+          ],
+          "verified": true
+        },
+        {
+          "index": 1,
+          "name": "rsync",
+          "observed": "rsync  version 3.5.1-g315819c5  protocol version 33\nCopyright (C) 1996-2026 by Andrew Tridgell, Wayne Davison, and others.\nWeb site: https://rsync.samba.org/\nCapabilities:\n    64-bit files, 64-bit inums, 64-bit timestamps, 64-bit long ints,\n    socketpairs, symlinks, symtimes, hardlinks, hardlink-specials,\n    hardlink-symlinks, IPv6, atimes, batchfiles, inplace, append, ACLs,\n    ACL-at, ACL-libacl-at, xattrs, optional secluded-args, iconv, prealloc,\n    stop-at, no crtimes, IDN\nOptimizations:\n    SIMD-roll, no asm-roll, openssl-crypto, no asm-MD5\nChecksum list:\n    xxh128 xxh3 xxh64 (xxhash) md5 md4 sha1 none\nCompress list:\n    zstd lz4 zlibx zlib none\nDaemon auth list:\n    sha512 sha256 sha1 md5 md4\n\nrsync comes with ABSOLUTELY NO WARRANTY.  This is free software, and you\nare welcome to redistribute it under certain conditions.  See the GNU\nGeneral Public Licence for details.\n",
+          "probe": [
+            "rsync",
+            "--version"
+          ],
+          "verified": true
+        },
+        {
+          "index": 2,
+          "name": "oc",
+          "observed": "{\n  \"clientVersion\": {\n    \"major\": \"\",\n    \"minor\": \"\",\n    \"gitVersion\": \"4.19.0-202602262001.p2.g24755b6.assembly.stream.el9-24755b6\",\n    \"gitCommit\": \"24755b6e82745a4dfa5a6db4b467564c237f244c\",\n    \"gitTreeState\": \"clean\",\n    \"buildDate\": \"2026-02-27T05:16:59Z\",\n    \"goVersion\": \"go1.23.10 (Red Hat 1.23.10-10.el9) X:strictfipsruntime\",\n    \"compiler\": \"gc\",\n    \"platform\": \"linux/amd64\"\n  },\n  \"kustomizeVersion\": \"v5.5.0\",\n  \"releaseClientVersion\": \"4.19.26\"\n}\n",
+          "probe": [
+            "oc",
+            "version",
+            "--client",
+            "-o",
+            "json"
+          ],
+          "verified": true
+        }
+      ],
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "artifact": {
+        "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso",
+          "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+          "restart_count": 0,
+          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        },
+        "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "size": 1379328000
+      },
+      "callback": "VerifyArtifactReference",
+      "inspection": {
+        "artifact": {
+          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "namespace": "node-iso",
+            "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+            "restart_count": 0,
+            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          },
+          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "size": 1379328000
+        },
+        "embedded_ignition": {
+          "configuration": {
+            "files": [
+              {
+                "kind": "mac_addresses",
+                "observations": {
+                  "mac_addresses": [
+                    "02:3e:c1:16:4e:2f"
+                  ]
+                },
+                "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+                "sha256": "4c8678387276ab70dd69e303d3c5c8ff3c33df0dbb02a60c780463619436f9e5",
+                "size": 18
+              }
+            ],
+            "unobserved_fields": [
+              "root_device_hints",
+              "role",
+              "hostname",
+              "network"
+            ]
+          },
+          "sha256": "8d1daa310e7688999e58e85ecd35f7e9be1103a7c0fbe370f6fce7d1be002727",
+          "size": 114930,
+          "version": "3.2.0"
+        }
+      },
+      "lifetime": "pod",
+      "native_input_comparison": {
+        "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "artifact_unchanged": true,
+        "input_identity": {
+          "files": [],
+          "mac_address": "02:3e:c1:16:4e:2f",
+          "route": "flags"
+        },
+        "matched_fields": [
+          "mac_address"
+        ],
+        "status": "matched",
+        "unverified_fields": []
+      },
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "artifact": {
+        "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso",
+          "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+          "restart_count": 0,
+          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        },
+        "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "size": 1379328000
+      },
+      "callback": "VerifyArtifactReference",
+      "hook": "cleanup",
+      "inspection": {
+        "artifact": {
+          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "namespace": "node-iso",
+            "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+            "restart_count": 0,
+            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          },
+          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "size": 1379328000
+        },
+        "embedded_ignition": {
+          "configuration": {
+            "files": [
+              {
+                "kind": "mac_addresses",
+                "observations": {
+                  "mac_addresses": [
+                    "02:3e:c1:16:4e:2f"
+                  ]
+                },
+                "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+                "sha256": "4c8678387276ab70dd69e303d3c5c8ff3c33df0dbb02a60c780463619436f9e5",
+                "size": 18
+              }
+            ],
+            "unobserved_fields": [
+              "root_device_hints",
+              "role",
+              "hostname",
+              "network"
+            ]
+          },
+          "sha256": "8d1daa310e7688999e58e85ecd35f7e9be1103a7c0fbe370f6fce7d1be002727",
+          "size": 114930,
+          "version": "3.2.0"
+        }
+      },
+      "lifetime": "pod",
+      "native_input_comparison": {
+        "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "artifact_unchanged": true,
+        "input_identity": {
+          "files": [],
+          "mac_address": "02:3e:c1:16:4e:2f",
+          "route": "flags"
+        },
+        "matched_fields": [
+          "mac_address"
+        ],
+        "status": "matched",
+        "unverified_fields": []
+      },
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "artifact": {
+        "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso",
+          "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+          "restart_count": 0,
+          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        },
+        "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "size": 1379328000
+      },
+      "callback": "VerifyTools",
+      "hook": "cleanup",
+      "inspection": {
+        "artifact": {
+          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "namespace": "node-iso",
+            "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+            "restart_count": 0,
+            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          },
+          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "size": 1379328000
+        },
+        "embedded_ignition": {
+          "configuration": {
+            "files": [
+              {
+                "kind": "mac_addresses",
+                "observations": {
+                  "mac_addresses": [
+                    "02:3e:c1:16:4e:2f"
+                  ]
+                },
+                "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+                "sha256": "4c8678387276ab70dd69e303d3c5c8ff3c33df0dbb02a60c780463619436f9e5",
+                "size": 18
+              }
+            ],
+            "unobserved_fields": [
+              "root_device_hints",
+              "role",
+              "hostname",
+              "network"
+            ]
+          },
+          "sha256": "8d1daa310e7688999e58e85ecd35f7e9be1103a7c0fbe370f6fce7d1be002727",
+          "size": 114930,
+          "version": "3.2.0"
+        }
+      },
+      "lifetime": "pod",
+      "native_input_comparison": {
+        "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "artifact_unchanged": true,
+        "input_identity": {
+          "files": [],
+          "mac_address": "02:3e:c1:16:4e:2f",
+          "route": "flags"
+        },
+        "matched_fields": [
+          "mac_address"
+        ],
+        "status": "matched",
+        "unverified_fields": []
+      },
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "verified": true
+    },
+    {
+      "action": "VERIFIED",
+      "artifact": {
+        "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "pod": {
+          "container": "ci-skills-pod",
+          "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso",
+          "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+          "restart_count": 0,
+          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        },
+        "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "size": 1379328000
+      },
+      "callback": "InstallArtifact",
+      "hook": "cleanup",
+      "inspection": {
+        "artifact": {
+          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "pod": {
+            "container": "ci-skills-pod",
+            "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
+            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "namespace": "node-iso",
+            "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
+            "restart_count": 0,
+            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          },
+          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "size": 1379328000
+        },
+        "embedded_ignition": {
+          "configuration": {
+            "files": [
+              {
+                "kind": "mac_addresses",
+                "observations": {
+                  "mac_addresses": [
+                    "02:3e:c1:16:4e:2f"
+                  ]
+                },
+                "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
+                "sha256": "4c8678387276ab70dd69e303d3c5c8ff3c33df0dbb02a60c780463619436f9e5",
+                "size": 18
+              }
+            ],
+            "unobserved_fields": [
+              "root_device_hints",
+              "role",
+              "hostname",
+              "network"
+            ]
+          },
+          "sha256": "8d1daa310e7688999e58e85ecd35f7e9be1103a7c0fbe370f6fce7d1be002727",
+          "size": 114930,
+          "version": "3.2.0"
+        }
+      },
+      "lifetime": "pod",
+      "native_input_comparison": {
+        "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "artifact_unchanged": true,
+        "input_identity": {
+          "files": [],
+          "mac_address": "02:3e:c1:16:4e:2f",
+          "route": "flags"
+        },
+        "matched_fields": [
+          "mac_address"
+        ],
+        "status": "matched",
+        "unverified_fields": []
+      },
+      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "verified": true
+    },
+    {
+      "callback": "StageToolPod",
+      "hook": "cleanup",
+      "resources": [],
+      "retained": [
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "pod",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        }
+      ]
+    },
+    {
+      "callback": "OpenRunScope",
+      "hook": "cleanup",
+      "resources": [],
+      "retained": [
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "pod",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        }
+      ]
+    },
+    {
+      "callback": "ResolveRunScopes",
+      "hook": "cleanup",
+      "resources": [],
+      "retained": [
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "configmap",
+          "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        },
+        {
+          "kind": "pod",
+          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "namespace": "node-iso"
+        }
+      ]
+    }
+  ],
+  "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "f18d8f7b515d206c1b498ab3419dc76fda2b49a5338c310dd964624cce2ca3a3",
+    "file_count": 253,
+    "functional_digest": "d5e7197160377f444615f6651538cbd4f0225216382b235c471c54445e196d44",
+    "revision": {
+      "source": "installer_record",
+      "value": "f79b9705dc04aa48e23d681c2b49565d4065358c",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "summary": {
+    "error_count": 0,
+    "record_count": 20
+  },
+  "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin@https://api.ww-cai-cisco-live.dcloud.local:6443",
+  "target_file": "/Users/spyroot/.ci-skills/target.toml",
+  "target_source": "user",
+  "tested_revision": "f79b9705dc04aa48e23d681c2b49565d4065358c"
+}
