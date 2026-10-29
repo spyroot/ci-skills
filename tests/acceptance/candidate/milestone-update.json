@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-10-29T20:59:53.683803+00:00",
+  "captured_at": "2026-10-29T21:31:26.049343+00:00",
   "cleanup": {
     "status": "NOT_APPLICABLE"
   },
@@ -25,30 +25,30 @@
     ],
     "one_time_sink_required": false,
     "operation": "update",
-    "plan_digest": "735d73e377e87919a99d94c684e21f107f1b85839c85d3a0b16e913752a3a400",
+    "plan_digest": "5872b11f0b5a2f6e5cee4fbca9a2cbe78abebc509ba089734f0b530fe90f3c7f",
     "project_ids": null,
-    "resource_id": 127,
+    "resource_id": 128,
     "target_kind": "project",
     "target_reference": "hott/test"
   },
-  "plan_digest": "735d73e377e87919a99d94c684e21f107f1b85839c85d3a0b16e913752a3a400",
+  "plan_digest": "5872b11f0b5a2f6e5cee4fbca9a2cbe78abebc509ba089734f0b530fe90f3c7f",
   "readback": {
     "action": "APPLIED",
     "due_date": null,
-    "id": 127,
+    "id": 128,
     "start_date": null,
     "state": "closed",
-    "title": "ci-skills-pr101-f79-smoke-20261029-205930",
+    "title": "ci-skills-pr101-ca1-smoke-20261029-213102",
     "verified": true
   },
   "records": [
     {
       "action": "APPLIED",
       "due_date": null,
-      "id": 127,
+      "id": 128,
       "start_date": null,
       "state": "closed",
-      "title": "ci-skills-pr101-f79-smoke-20261029-205930",
+      "title": "ci-skills-pr101-ca1-smoke-20261029-213102",
       "verified": true
     }
   ],
@@ -60,12 +60,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "f18d8f7b515d206c1b498ab3419dc76fda2b49a5338c310dd964624cce2ca3a3",
+    "digest": "8a07c7184f7122a62b7dbf38eef03eeaedebf30951fba3f51e5a78c5bc6c4964",
     "file_count": 253,
-    "functional_digest": "d5e7197160377f444615f6651538cbd4f0225216382b235c471c54445e196d44",
+    "functional_digest": "037fef311943e088497b9efd330eae358aa589a05d1a9fa47bbdfebb82c49d3f",
     "revision": {
       "source": "installer_record",
-      "value": "f79b9705dc04aa48e23d681c2b49565d4065358c",
+      "value": "ca1eb994d9295f8dfa70c2c987ebc88f2a5f5dfb",
       "verified": true
     }
   },
@@ -80,7 +80,7 @@
   },
   "target_file": "path:5e5380df1eda",
   "target_source": "env:CI_SKILLS_TARGET;argv:--project",
-  "tested_revision": "f79b9705dc04aa48e23d681c2b49565d4065358c",
+  "tested_revision": "ca1eb994d9295f8dfa70c2c987ebc88f2a5f5dfb",
   "verified_target": {
     "full_path": "hott/test",
     "id": 123,

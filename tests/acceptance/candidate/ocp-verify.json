@@ -7,43 +7,43 @@
     }
   },
   "artifact": {
-    "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+    "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
     "pod": {
       "container": "ci-skills-pod",
       "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-      "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+      "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
       "namespace": "node-iso",
       "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
       "restart_count": 0,
-      "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+      "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
     },
-    "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+    "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
     "size": 1379328000
   },
   "artifact_lifetime": "pod",
-  "captured_at": "2026-10-29T20:59:04.292529+00:00",
+  "captured_at": "2026-10-29T21:41:09.018513+00:00",
   "cleanup": {
     "failures": [],
     "resources": [],
     "retained": [
       {
         "kind": "configmap",
-        "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-node-artifact-record-79eebbcb4d0bbc7d",
         "namespace": "node-iso"
       },
       {
         "kind": "configmap",
-        "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-node-artifact-recovery-79eebbcb4d0bbc7d",
         "namespace": "node-iso"
       },
       {
         "kind": "configmap",
-        "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-tool-pod-scripts-79eebbcb4d0bbc7d",
         "namespace": "node-iso"
       },
       {
         "kind": "pod",
-        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
         "namespace": "node-iso"
       }
     ],
@@ -54,25 +54,25 @@
   "kind": "ocp_node_onboard",
   "operation": "verify",
   "plan": {
-    "functional_digest": "d5e7197160377f444615f6651538cbd4f0225216382b235c471c54445e196d44",
+    "functional_digest": "037fef311943e088497b9efd330eae358aa589a05d1a9fa47bbdfebb82c49d3f",
     "inputs": {
       "artifact_record": {
         "artifact": {
-          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "pod": {
             "container": "ci-skills-pod",
             "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
             "namespace": "node-iso",
             "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
             "restart_count": 0,
-            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+            "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
           },
-          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
           "size": 1379328000
         },
         "destination": {
-          "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "artifactPath": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "buildOutput": "destination",
           "mountPath": "/output",
           "namespace": "node-iso",
@@ -82,10 +82,10 @@
         },
         "lifetime": "pod",
         "native_input_comparison": {
-          "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "artifact_sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
           "input_identity": {
             "files": [],
-            "mac_address": "02:3e:c1:16:4e:2f",
+            "mac_address": "02:de:65:6a:10:1c",
             "route": "flags"
           },
           "matched_fields": [
@@ -97,13 +97,13 @@
         "node_selector": {
           "kubernetes.io/hostname": "ue-2.ww-cai-cisco-live.dcloud.local"
         },
-        "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+        "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
         "schema_version": "1.1",
         "storage": {
-          "access_route": "/dev/sda4[/ostree/deploy/rhcos/var/lib/kubelet/pods/f64f2f70-fb49-481c-8725-836e374c46c0/volumes/kubernetes.io~empty-dir/artifact-destination]",
-          "artifact_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "access_route": "/dev/sda4[/ostree/deploy/rhcos/var/lib/kubelet/pods/5f9f0bdf-a198-449c-9f15-2afc0c375c52/volumes/kubernetes.io~empty-dir/artifact-destination]",
+          "artifact_path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "build_output": "destination",
-          "destination_fingerprint": "sha256:63bad41c0328f1d5f0530fe03488a4b2d5e636f65d05f66c79e3fe8e7125c46d",
+          "destination_fingerprint": "sha256:b86adc6f1876f8d782b8510b49c450fc0e8ec6e7779b316468be9d0e107799e9",
           "lifetime": "pod",
           "mount_path": "/output",
           "namespace": "node-iso",
@@ -125,7 +125,7 @@
             }
           },
           {
-            "mountPath": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617",
+            "mountPath": "/ci-skills-work/a488501f1f5f4f61a8e60e3507e59a0a",
             "name": "node-image-work",
             "readOnly": false,
             "volumeSource": {
@@ -190,9 +190,9 @@
       },
       "artifact_record_present": true,
       "recovery_record": {
-        "build_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "build_path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
         "destination": {
-          "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "artifactPath": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "buildOutput": "destination",
           "mountPath": "/output",
           "namespace": "node-iso",
@@ -200,75 +200,75 @@
             "emptyDir": {}
           }
         },
-        "input_fingerprint": "sha256:b09377aca007df1e4f4cf4fb5077d750d88b756a39b6f512df009c758cb996c6",
+        "input_fingerprint": "sha256:90df0047c2ecce6de514d88524a4c8eed162b582e8188a8b4102e974f4bc8ca1",
         "pod": {
           "container": "ci-skills-pod",
           "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso",
           "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
           "restart_count": 0,
-          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
         },
-        "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+        "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
         "schema_version": "1.0",
-        "status_path": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617/private/node-image-status.json",
-        "tool_pod_fingerprint": "sha256:ff974d918c1fa32a989db535ed719eb1a7cfd3f50a2e7815c895fd7794e50cd2",
-        "tool_pod_fingerprint_label": "76lu3emmd6rsvge5wu2624m6wgt47u7vbixhqfoisx6xpfhfbtja"
+        "status_path": "/ci-skills-work/a488501f1f5f4f61a8e60e3507e59a0a/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:73508a5d6f0a55c5e1d5e8af43185a0c62b89e4d3ef640dfd860419ca439b489",
+        "tool_pod_fingerprint_label": "oniiuxlpbjk4lyov5cxuggc2brrlrhsnh33ebx6ymbazzjbzwseq"
       },
       "recovery_record_present": true
     },
     "kind": "ocp_node_onboard",
     "operation": "verify",
-    "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+    "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
     "target": {
       "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     },
     "timeout_seconds": 600
   },
-  "plan_digest": "8a0089bdc78eee8ab402847a84dd1c9e9b067e245cbf75bc04cdc02bc6250c85",
+  "plan_digest": "3a83be1a50ea525b9e0c85c28e5d0f5d00981382a3b71320654fea5631dccd5f",
   "pod": {
     "container": "ci-skills-pod",
     "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-    "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+    "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
     "namespace": "node-iso",
     "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
     "restart_count": 0,
-    "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+    "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
   },
   "readback": {
     "artifact_live_readback": {
-      "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+      "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
       "pod": {
         "container": "ci-skills-pod",
         "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
         "namespace": "node-iso",
         "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
         "restart_count": 0,
-        "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
       },
-      "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+      "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
       "size": 1379328000
     },
     "artifact_record": {
       "artifact": {
-        "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
         "pod": {
           "container": "ci-skills-pod",
           "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso",
           "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
           "restart_count": 0,
-          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
         },
-        "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
         "size": 1379328000
       },
       "destination": {
-        "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "artifactPath": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
         "buildOutput": "destination",
         "mountPath": "/output",
         "namespace": "node-iso",
@@ -278,10 +278,10 @@
       },
       "lifetime": "pod",
       "native_input_comparison": {
-        "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "artifact_sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
         "input_identity": {
           "files": [],
-          "mac_address": "02:3e:c1:16:4e:2f",
+          "mac_address": "02:de:65:6a:10:1c",
           "route": "flags"
         },
         "matched_fields": [
@@ -293,13 +293,13 @@
       "node_selector": {
         "kubernetes.io/hostname": "ue-2.ww-cai-cisco-live.dcloud.local"
       },
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "schema_version": "1.1",
       "storage": {
-        "access_route": "/dev/sda4[/ostree/deploy/rhcos/var/lib/kubelet/pods/f64f2f70-fb49-481c-8725-836e374c46c0/volumes/kubernetes.io~empty-dir/artifact-destination]",
-        "artifact_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "access_route": "/dev/sda4[/ostree/deploy/rhcos/var/lib/kubelet/pods/5f9f0bdf-a198-449c-9f15-2afc0c375c52/volumes/kubernetes.io~empty-dir/artifact-destination]",
+        "artifact_path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
         "build_output": "destination",
-        "destination_fingerprint": "sha256:63bad41c0328f1d5f0530fe03488a4b2d5e636f65d05f66c79e3fe8e7125c46d",
+        "destination_fingerprint": "sha256:b86adc6f1876f8d782b8510b49c450fc0e8ec6e7779b316468be9d0e107799e9",
         "lifetime": "pod",
         "mount_path": "/output",
         "namespace": "node-iso",
@@ -321,7 +321,7 @@
           }
         },
         {
-          "mountPath": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617",
+          "mountPath": "/ci-skills-work/a488501f1f5f4f61a8e60e3507e59a0a",
           "name": "node-image-work",
           "readOnly": false,
           "volumeSource": {
@@ -391,11 +391,11 @@
             "kind": "mac_addresses",
             "observations": {
               "mac_addresses": [
-                "02:3e:c1:16:4e:2f"
+                "02:de:65:6a:10:1c"
               ]
             },
             "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
-            "sha256": "4c8678387276ab70dd69e303d3c5c8ff3c33df0dbb02a60c780463619436f9e5",
+            "sha256": "ed1e53c8f6a35a65464b21674cce416c029a074b1a7529375337aec48fe1edcc",
             "size": 18
           }
         ],
@@ -406,16 +406,16 @@
           "network"
         ]
       },
-      "sha256": "8d1daa310e7688999e58e85ecd35f7e9be1103a7c0fbe370f6fce7d1be002727",
-      "size": 114930,
+      "sha256": "1606cfb21b69b2e1e61eba1bdb8e7761726d433a4b03ae1c98578972a8794c84",
+      "size": 114922,
       "version": "3.2.0"
     },
     "native_input_comparison": {
-      "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+      "artifact_sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
       "artifact_unchanged": true,
       "input_identity": {
         "files": [],
-        "mac_address": "02:3e:c1:16:4e:2f",
+        "mac_address": "02:de:65:6a:10:1c",
         "route": "flags"
       },
       "matched_fields": [
@@ -428,11 +428,11 @@
     "pod": {
       "container": "ci-skills-pod",
       "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-      "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+      "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
       "namespace": "node-iso",
       "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
       "restart_count": 0,
-      "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+      "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
     },
     "pod_attempts": [
       {
@@ -440,17 +440,17 @@
         "classification": "Ready",
         "duration": {
           "unit": "seconds",
-          "value": 4.718029
+          "value": 3.464863
         },
         "events": [],
         "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
-        "pod_uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        "pod_uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
       }
     ],
     "recovery_record": {
-      "build_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+      "build_path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
       "destination": {
-        "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "artifactPath": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
         "buildOutput": "destination",
         "mountPath": "/output",
         "namespace": "node-iso",
@@ -458,45 +458,45 @@
           "emptyDir": {}
         }
       },
-      "input_fingerprint": "sha256:b09377aca007df1e4f4cf4fb5077d750d88b756a39b6f512df009c758cb996c6",
+      "input_fingerprint": "sha256:90df0047c2ecce6de514d88524a4c8eed162b582e8188a8b4102e974f4bc8ca1",
       "pod": {
         "container": "ci-skills-pod",
         "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
         "namespace": "node-iso",
         "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
         "restart_count": 0,
-        "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
       },
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "schema_version": "1.0",
-      "status_path": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617/private/node-image-status.json",
-      "tool_pod_fingerprint": "sha256:ff974d918c1fa32a989db535ed719eb1a7cfd3f50a2e7815c895fd7794e50cd2",
-      "tool_pod_fingerprint_label": "76lu3emmd6rsvge5wu2624m6wgt47u7vbixhqfoisx6xpfhfbtja"
+      "status_path": "/ci-skills-work/a488501f1f5f4f61a8e60e3507e59a0a/private/node-image-status.json",
+      "tool_pod_fingerprint": "sha256:73508a5d6f0a55c5e1d5e8af43185a0c62b89e4d3ef640dfd860419ca439b489",
+      "tool_pod_fingerprint_label": "oniiuxlpbjk4lyov5cxuggc2brrlrhsnh33ebx6ymbazzjbzwseq"
     },
     "retained_resources": [
       {
         "kind": "configmap",
-        "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-node-artifact-record-79eebbcb4d0bbc7d",
         "namespace": "node-iso"
       },
       {
         "kind": "configmap",
-        "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-node-artifact-recovery-79eebbcb4d0bbc7d",
         "namespace": "node-iso"
       },
       {
         "kind": "configmap",
-        "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-tool-pod-scripts-79eebbcb4d0bbc7d",
         "namespace": "node-iso"
       },
       {
         "kind": "pod",
-        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
         "namespace": "node-iso"
       }
     ],
-    "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+    "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
     "tools": [
       {
         "index": 0,
@@ -543,12 +543,12 @@
     {
       "action": "VERIFIED",
       "callback": "ResolveRunScopes",
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "scopes": [
         {
           "namespace": "node-iso",
           "owns_namespace": false,
-          "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617"
+          "run_id": "a488501f1f5f4f61a8e60e3507e59a0a"
         }
       ],
       "verified": true
@@ -559,21 +559,21 @@
       "present": true,
       "record": {
         "artifact": {
-          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "pod": {
             "container": "ci-skills-pod",
             "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
             "namespace": "node-iso",
             "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
             "restart_count": 0,
-            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+            "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
           },
-          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
           "size": 1379328000
         },
         "destination": {
-          "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "artifactPath": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "buildOutput": "destination",
           "mountPath": "/output",
           "namespace": "node-iso",
@@ -583,10 +583,10 @@
         },
         "lifetime": "pod",
         "native_input_comparison": {
-          "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "artifact_sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
           "input_identity": {
             "files": [],
-            "mac_address": "02:3e:c1:16:4e:2f",
+            "mac_address": "02:de:65:6a:10:1c",
             "route": "flags"
           },
           "matched_fields": [
@@ -598,13 +598,13 @@
         "node_selector": {
           "kubernetes.io/hostname": "ue-2.ww-cai-cisco-live.dcloud.local"
         },
-        "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+        "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
         "schema_version": "1.1",
         "storage": {
-          "access_route": "/dev/sda4[/ostree/deploy/rhcos/var/lib/kubelet/pods/f64f2f70-fb49-481c-8725-836e374c46c0/volumes/kubernetes.io~empty-dir/artifact-destination]",
-          "artifact_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "access_route": "/dev/sda4[/ostree/deploy/rhcos/var/lib/kubelet/pods/5f9f0bdf-a198-449c-9f15-2afc0c375c52/volumes/kubernetes.io~empty-dir/artifact-destination]",
+          "artifact_path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "build_output": "destination",
-          "destination_fingerprint": "sha256:63bad41c0328f1d5f0530fe03488a4b2d5e636f65d05f66c79e3fe8e7125c46d",
+          "destination_fingerprint": "sha256:b86adc6f1876f8d782b8510b49c450fc0e8ec6e7779b316468be9d0e107799e9",
           "lifetime": "pod",
           "mount_path": "/output",
           "namespace": "node-iso",
@@ -626,7 +626,7 @@
             }
           },
           {
-            "mountPath": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617",
+            "mountPath": "/ci-skills-work/a488501f1f5f4f61a8e60e3507e59a0a",
             "name": "node-image-work",
             "readOnly": false,
             "volumeSource": {
@@ -691,11 +691,11 @@
       },
       "resource": {
         "kind": "ConfigMap",
-        "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-node-artifact-record-79eebbcb4d0bbc7d",
         "namespace": "node-iso",
-        "uid": "3ad97508-0bb8-4d79-946e-7af7c75bdd72"
+        "uid": "28042210-e3c0-482c-911a-abbfce446dbd"
       },
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "verified": true
     },
     {
@@ -703,9 +703,9 @@
       "callback": "ResolveNodeRecoveryRecord",
       "present": true,
       "recovery": {
-        "build_path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "build_path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
         "destination": {
-          "artifactPath": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "artifactPath": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "buildOutput": "destination",
           "mountPath": "/output",
           "namespace": "node-iso",
@@ -713,40 +713,40 @@
             "emptyDir": {}
           }
         },
-        "input_fingerprint": "sha256:b09377aca007df1e4f4cf4fb5077d750d88b756a39b6f512df009c758cb996c6",
+        "input_fingerprint": "sha256:90df0047c2ecce6de514d88524a4c8eed162b582e8188a8b4102e974f4bc8ca1",
         "pod": {
           "container": "ci-skills-pod",
           "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso",
           "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
           "restart_count": 0,
-          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
         },
-        "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+        "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
         "schema_version": "1.0",
-        "status_path": "/ci-skills-work/e4d78c1e40a6442c9150e2a0dfc8b617/private/node-image-status.json",
-        "tool_pod_fingerprint": "sha256:ff974d918c1fa32a989db535ed719eb1a7cfd3f50a2e7815c895fd7794e50cd2",
-        "tool_pod_fingerprint_label": "76lu3emmd6rsvge5wu2624m6wgt47u7vbixhqfoisx6xpfhfbtja"
+        "status_path": "/ci-skills-work/a488501f1f5f4f61a8e60e3507e59a0a/private/node-image-status.json",
+        "tool_pod_fingerprint": "sha256:73508a5d6f0a55c5e1d5e8af43185a0c62b89e4d3ef640dfd860419ca439b489",
+        "tool_pod_fingerprint_label": "oniiuxlpbjk4lyov5cxuggc2brrlrhsnh33ebx6ymbazzjbzwseq"
       },
       "resource": {
         "kind": "configmap",
-        "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-node-artifact-recovery-79eebbcb4d0bbc7d",
         "namespace": "node-iso",
-        "uid": "534e5017-064d-44b1-8c82-77b01a2ab98a"
+        "uid": "22e4072d-08c2-4e63-a83a-2b4b37f312e2"
       },
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "verified": true
     },
     {
       "action": "VERIFIED",
       "callback": "ResolveRunScopes",
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "scopes": [
         {
           "namespace": "node-iso",
           "owns_namespace": false,
-          "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617"
+          "run_id": "a488501f1f5f4f61a8e60e3507e59a0a"
         }
       ],
       "verified": true
@@ -757,7 +757,7 @@
       "namespace": "node-iso",
       "owns_namespace": false,
       "reused": true,
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "verified": true
     },
     {
@@ -767,14 +767,14 @@
       "pod": {
         "container": "ci-skills-pod",
         "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
         "namespace": "node-iso",
         "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
         "restart_count": 0,
-        "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
       },
       "reused": true,
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "verified": true
     },
     {
@@ -782,7 +782,7 @@
       "callback": "ReadToolState",
       "environment": {
         "package_manager": "dnf",
-        "pod_uid": "f64f2f70-fb49-481c-8725-836e374c46c0",
+        "pod_uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52",
         "restart_count": 0,
         "runtime": "uid=0\ngid=0\nLinux 5.14.0-570.98.1.el9_6.x86_64 x86_64\nos=fedora\nos_version=44\n",
         "search_paths": [
@@ -797,7 +797,7 @@
           ],
           "index": 0,
           "name": "coreos-installer",
-          "pod_uid": "f64f2f70-fb49-481c-8725-836e374c46c0",
+          "pod_uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52",
           "present": true,
           "restart_count": 0,
           "route": "present",
@@ -809,7 +809,7 @@
           ],
           "index": 1,
           "name": "rsync",
-          "pod_uid": "f64f2f70-fb49-481c-8725-836e374c46c0",
+          "pod_uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52",
           "present": true,
           "restart_count": 0,
           "route": "present",
@@ -821,7 +821,7 @@
           ],
           "index": 2,
           "name": "oc",
-          "pod_uid": "f64f2f70-fb49-481c-8725-836e374c46c0",
+          "pod_uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52",
           "present": true,
           "restart_count": 0,
           "route": "present",
@@ -864,35 +864,35 @@
       "pod": {
         "container": "ci-skills-pod",
         "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-        "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+        "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
         "namespace": "node-iso",
         "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
         "restart_count": 0,
-        "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+        "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
       },
       "retained_resources": [
         {
           "kind": "configmap",
-          "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-node-artifact-record-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "configmap",
-          "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-node-artifact-recovery-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "configmap",
-          "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-scripts-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "pod",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         }
       ],
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "tools": [
         {
           "index": 0,
@@ -933,33 +933,33 @@
     {
       "action": "VERIFIED",
       "artifact": {
-        "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
         "pod": {
           "container": "ci-skills-pod",
           "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso",
           "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
           "restart_count": 0,
-          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
         },
-        "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
         "size": 1379328000
       },
       "callback": "VerifyArtifactReference",
       "inspection": {
         "artifact": {
-          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "pod": {
             "container": "ci-skills-pod",
             "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
             "namespace": "node-iso",
             "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
             "restart_count": 0,
-            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+            "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
           },
-          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
           "size": 1379328000
         },
         "embedded_ignition": {
@@ -969,11 +969,11 @@
                 "kind": "mac_addresses",
                 "observations": {
                   "mac_addresses": [
-                    "02:3e:c1:16:4e:2f"
+                    "02:de:65:6a:10:1c"
                   ]
                 },
                 "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
-                "sha256": "4c8678387276ab70dd69e303d3c5c8ff3c33df0dbb02a60c780463619436f9e5",
+                "sha256": "ed1e53c8f6a35a65464b21674cce416c029a074b1a7529375337aec48fe1edcc",
                 "size": 18
               }
             ],
@@ -984,18 +984,18 @@
               "network"
             ]
           },
-          "sha256": "8d1daa310e7688999e58e85ecd35f7e9be1103a7c0fbe370f6fce7d1be002727",
-          "size": 114930,
+          "sha256": "1606cfb21b69b2e1e61eba1bdb8e7761726d433a4b03ae1c98578972a8794c84",
+          "size": 114922,
           "version": "3.2.0"
         }
       },
       "lifetime": "pod",
       "native_input_comparison": {
-        "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "artifact_sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
         "artifact_unchanged": true,
         "input_identity": {
           "files": [],
-          "mac_address": "02:3e:c1:16:4e:2f",
+          "mac_address": "02:de:65:6a:10:1c",
           "route": "flags"
         },
         "matched_fields": [
@@ -1004,40 +1004,40 @@
         "status": "matched",
         "unverified_fields": []
       },
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "verified": true
     },
     {
       "action": "VERIFIED",
       "artifact": {
-        "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
         "pod": {
           "container": "ci-skills-pod",
           "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso",
           "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
           "restart_count": 0,
-          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
         },
-        "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
         "size": 1379328000
       },
       "callback": "VerifyArtifactReference",
       "hook": "cleanup",
       "inspection": {
         "artifact": {
-          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "pod": {
             "container": "ci-skills-pod",
             "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
             "namespace": "node-iso",
             "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
             "restart_count": 0,
-            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+            "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
           },
-          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
           "size": 1379328000
         },
         "embedded_ignition": {
@@ -1047,11 +1047,11 @@
                 "kind": "mac_addresses",
                 "observations": {
                   "mac_addresses": [
-                    "02:3e:c1:16:4e:2f"
+                    "02:de:65:6a:10:1c"
                   ]
                 },
                 "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
-                "sha256": "4c8678387276ab70dd69e303d3c5c8ff3c33df0dbb02a60c780463619436f9e5",
+                "sha256": "ed1e53c8f6a35a65464b21674cce416c029a074b1a7529375337aec48fe1edcc",
                 "size": 18
               }
             ],
@@ -1062,18 +1062,18 @@
               "network"
             ]
           },
-          "sha256": "8d1daa310e7688999e58e85ecd35f7e9be1103a7c0fbe370f6fce7d1be002727",
-          "size": 114930,
+          "sha256": "1606cfb21b69b2e1e61eba1bdb8e7761726d433a4b03ae1c98578972a8794c84",
+          "size": 114922,
           "version": "3.2.0"
         }
       },
       "lifetime": "pod",
       "native_input_comparison": {
-        "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "artifact_sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
         "artifact_unchanged": true,
         "input_identity": {
           "files": [],
-          "mac_address": "02:3e:c1:16:4e:2f",
+          "mac_address": "02:de:65:6a:10:1c",
           "route": "flags"
         },
         "matched_fields": [
@@ -1082,40 +1082,40 @@
         "status": "matched",
         "unverified_fields": []
       },
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "verified": true
     },
     {
       "action": "VERIFIED",
       "artifact": {
-        "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
         "pod": {
           "container": "ci-skills-pod",
           "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso",
           "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
           "restart_count": 0,
-          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
         },
-        "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
         "size": 1379328000
       },
       "callback": "VerifyTools",
       "hook": "cleanup",
       "inspection": {
         "artifact": {
-          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "pod": {
             "container": "ci-skills-pod",
             "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
             "namespace": "node-iso",
             "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
             "restart_count": 0,
-            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+            "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
           },
-          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
           "size": 1379328000
         },
         "embedded_ignition": {
@@ -1125,11 +1125,11 @@
                 "kind": "mac_addresses",
                 "observations": {
                   "mac_addresses": [
-                    "02:3e:c1:16:4e:2f"
+                    "02:de:65:6a:10:1c"
                   ]
                 },
                 "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
-                "sha256": "4c8678387276ab70dd69e303d3c5c8ff3c33df0dbb02a60c780463619436f9e5",
+                "sha256": "ed1e53c8f6a35a65464b21674cce416c029a074b1a7529375337aec48fe1edcc",
                 "size": 18
               }
             ],
@@ -1140,18 +1140,18 @@
               "network"
             ]
           },
-          "sha256": "8d1daa310e7688999e58e85ecd35f7e9be1103a7c0fbe370f6fce7d1be002727",
-          "size": 114930,
+          "sha256": "1606cfb21b69b2e1e61eba1bdb8e7761726d433a4b03ae1c98578972a8794c84",
+          "size": 114922,
           "version": "3.2.0"
         }
       },
       "lifetime": "pod",
       "native_input_comparison": {
-        "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "artifact_sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
         "artifact_unchanged": true,
         "input_identity": {
           "files": [],
-          "mac_address": "02:3e:c1:16:4e:2f",
+          "mac_address": "02:de:65:6a:10:1c",
           "route": "flags"
         },
         "matched_fields": [
@@ -1160,40 +1160,40 @@
         "status": "matched",
         "unverified_fields": []
       },
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "verified": true
     },
     {
       "action": "VERIFIED",
       "artifact": {
-        "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+        "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
         "pod": {
           "container": "ci-skills-pod",
           "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso",
           "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
           "restart_count": 0,
-          "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+          "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
         },
-        "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
         "size": 1379328000
       },
       "callback": "InstallArtifact",
       "hook": "cleanup",
       "inspection": {
         "artifact": {
-          "path": "/output/pr101-smoke-3ec1164e2fe6f02d/node.iso",
+          "path": "/output/pr101-smoke-707a04c3e5cf64b2/node.iso",
           "pod": {
             "container": "ci-skills-pod",
             "image": "quay.io/coreos/coreos-installer@sha256:db8c1dc7aa5955613243c5cd73d2be58ae7b839873563dc44e0bf0a15e7fed71",
-            "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+            "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
             "namespace": "node-iso",
             "node_name": "ue-2.ww-cai-cisco-live.dcloud.local",
             "restart_count": 0,
-            "uid": "f64f2f70-fb49-481c-8725-836e374c46c0"
+            "uid": "5f9f0bdf-a198-449c-9f15-2afc0c375c52"
           },
-          "sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+          "sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
           "size": 1379328000
         },
         "embedded_ignition": {
@@ -1203,11 +1203,11 @@
                 "kind": "mac_addresses",
                 "observations": {
                   "mac_addresses": [
-                    "02:3e:c1:16:4e:2f"
+                    "02:de:65:6a:10:1c"
                   ]
                 },
                 "path": "/etc/assisted/hostconfig/host-0/mac_addresses",
-                "sha256": "4c8678387276ab70dd69e303d3c5c8ff3c33df0dbb02a60c780463619436f9e5",
+                "sha256": "ed1e53c8f6a35a65464b21674cce416c029a074b1a7529375337aec48fe1edcc",
                 "size": 18
               }
             ],
@@ -1218,18 +1218,18 @@
               "network"
             ]
           },
-          "sha256": "8d1daa310e7688999e58e85ecd35f7e9be1103a7c0fbe370f6fce7d1be002727",
-          "size": 114930,
+          "sha256": "1606cfb21b69b2e1e61eba1bdb8e7761726d433a4b03ae1c98578972a8794c84",
+          "size": 114922,
           "version": "3.2.0"
         }
       },
       "lifetime": "pod",
       "native_input_comparison": {
-        "artifact_sha256": "e11b43063c2d2cf25c4ab33cd52ed475c32a2defcb26d5cf61ba27cdb1cb9137",
+        "artifact_sha256": "b7c92c049c5e9a0e5b0a63969e69dbcede9571ed633fa9b3e669b7128da5bc5c",
         "artifact_unchanged": true,
         "input_identity": {
           "files": [],
-          "mac_address": "02:3e:c1:16:4e:2f",
+          "mac_address": "02:de:65:6a:10:1c",
           "route": "flags"
         },
         "matched_fields": [
@@ -1238,7 +1238,7 @@
         "status": "matched",
         "unverified_fields": []
       },
-      "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+      "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
       "verified": true
     },
     {
@@ -1248,22 +1248,22 @@
       "retained": [
         {
           "kind": "configmap",
-          "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-node-artifact-record-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "configmap",
-          "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-node-artifact-recovery-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "configmap",
-          "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-scripts-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "pod",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         }
       ]
@@ -1275,22 +1275,22 @@
       "retained": [
         {
           "kind": "configmap",
-          "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-node-artifact-record-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "configmap",
-          "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-node-artifact-recovery-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "configmap",
-          "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-scripts-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "pod",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         }
       ]
@@ -1302,28 +1302,28 @@
       "retained": [
         {
           "kind": "configmap",
-          "name": "ci-skills-run-node-artifact-record-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-node-artifact-record-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "configmap",
-          "name": "ci-skills-run-node-artifact-recovery-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-node-artifact-recovery-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "configmap",
-          "name": "ci-skills-run-tool-pod-scripts-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-scripts-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         },
         {
           "kind": "pod",
-          "name": "ci-skills-run-tool-pod-3df7c5d08a1d3d08",
+          "name": "ci-skills-run-tool-pod-79eebbcb4d0bbc7d",
           "namespace": "node-iso"
         }
       ]
     }
   ],
-  "run_id": "e4d78c1e40a6442c9150e2a0dfc8b617",
+  "run_id": "a488501f1f5f4f61a8e60e3507e59a0a",
   "schema_version": "1.0",
   "skill": {
     "algorithm": "sha256-tree-v1",
@@ -1331,12 +1331,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "f18d8f7b515d206c1b498ab3419dc76fda2b49a5338c310dd964624cce2ca3a3",
+    "digest": "8a07c7184f7122a62b7dbf38eef03eeaedebf30951fba3f51e5a78c5bc6c4964",
     "file_count": 253,
-    "functional_digest": "d5e7197160377f444615f6651538cbd4f0225216382b235c471c54445e196d44",
+    "functional_digest": "037fef311943e088497b9efd330eae358aa589a05d1a9fa47bbdfebb82c49d3f",
     "revision": {
       "source": "installer_record",
-      "value": "f79b9705dc04aa48e23d681c2b49565d4065358c",
+      "value": "ca1eb994d9295f8dfa70c2c987ebc88f2a5f5dfb",
       "verified": true
     }
   },
@@ -1348,5 +1348,5 @@
   "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin@https://api.ww-cai-cisco-live.dcloud.local:6443",
   "target_file": "/Users/spyroot/.ci-skills/target.toml",
   "target_source": "user",
-  "tested_revision": "f79b9705dc04aa48e23d681c2b49565d4065358c"
+  "tested_revision": "ca1eb994d9295f8dfa70c2c987ebc88f2a5f5dfb"
 }
