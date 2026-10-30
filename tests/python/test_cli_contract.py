@@ -316,6 +316,68 @@ def test_cli_execute_validation_errors_emit_machine_readable_envelope(
     assert "BLOCKED:" not in captured.err
 
 
+@pytest.mark.parametrize("script_name", ("ceph_cluster.py", "ci-binary-build"))
+def test_help_renders_root_required_options(script_name: str) -> None:
+    """Distinguish required catalog inputs from ordinary optional flags.
+
+    :param script_name: Command declaring required inputs at the catalog root.
+    :returns: None; assertions compare human help with the command contract.
+    """
+    result = run_script(script_name, "--help")
+    description = run_script(script_name, "--describe")
+    assert result.returncode == description.returncode == 0
+    required = parse_json_output(description)["required_options"]
+
+    assert required
+    assert f"Requires: {', '.join(required)}." in " ".join(result.stdout.split())
+
+
+@pytest.mark.parametrize("script_name", ("gitlab_job.py", "ci-api"))
+def test_help_uses_selected_verb_requirements(script_name: str) -> None:
+    """Show each verb's requirements without imposing the default on every verb.
+
+    :param script_name: Command with a root requirement and verb overrides.
+    :returns: None; assertions compare help with the selected verb contract.
+    """
+    result = run_script(script_name, "--help")
+    description = run_script(script_name, "--describe")
+    assert result.returncode == description.returncode == 0
+    contract = parse_json_output(description)
+    help_text = " ".join(result.stdout.split())
+
+    assert contract["required_options"]
+    assert f"Requires: {', '.join(contract['required_options'])}." not in help_text
+    for operation, fields in contract["subcommands"].items():
+        required = fields.get("required_options", [])
+        if required:
+            assert f"{operation} requires: {', '.join(required)}." in help_text
+        else:
+            assert f"{operation} requires:" not in help_text
+
+
+def test_help_preserves_subcommand_required_options() -> None:
+    """Keep operation prerequisites visible when the catalog root has none.
+
+    :returns: None; assertions compare each operation's requirements with help.
+    """
+    result = run_script("gitlab_runner.py", "--help")
+    description = run_script("gitlab_runner.py", "--describe")
+    assert result.returncode == description.returncode == 0
+    contract = parse_json_output(description)
+    help_text = " ".join(result.stdout.split())
+    requirements = {
+        operation: fields["required_options"]
+        for operation, fields in contract["subcommands"].items()
+        if fields.get("required_options")
+    }
+
+    assert not contract["required_options"]
+    assert "Requires:" not in help_text
+    assert requirements
+    for operation, required in requirements.items():
+        assert f"{operation} requires: {', '.join(required)}." in help_text
+
+
 @pytest.mark.parametrize(
     "script_name", ("gitlab_runner.py", "gitlab_repository.py", "gitlab_mr.py")
 )

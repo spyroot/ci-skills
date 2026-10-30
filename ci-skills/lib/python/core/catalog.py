@@ -1413,10 +1413,13 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
             "--output": "legacy output selection: json or text; default json",
         },
         "subcommands": {
-            "check": {"purpose": "Read the authenticated provider identity."},
+            "check": {
+                "purpose": "Read the authenticated provider identity.",
+                "required_options": ["--provider"],
+            },
             "get": {
                 "purpose": "Read one relative endpoint.",
-                "required_options": ["--endpoint"],
+                "required_options": ["--provider", "--endpoint"],
             },
         },
         "description": "Use the shared target and credential resolver, bounded GET retries and a 1 MiB response limit. Native provider data stays native; field and text selection reduce what the agent reads.",
