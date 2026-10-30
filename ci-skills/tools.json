@@ -161,11 +161,15 @@
       "side_effects": "none",
       "subcommands": {
         "check": {
-          "purpose": "Read the authenticated provider identity."
+          "purpose": "Read the authenticated provider identity.",
+          "required_options": [
+            "--provider"
+          ]
         },
         "get": {
           "purpose": "Read one relative endpoint.",
           "required_options": [
+            "--provider",
             "--endpoint"
           ]
         }

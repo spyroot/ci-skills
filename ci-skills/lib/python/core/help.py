@@ -144,9 +144,11 @@ class CommandHelp:
                         f"Providers: {', '.join(authorities)}. Configure access for "
                         "those required by the selected operation."
                     )
-                for operation, fields in json_object(
-                    self.document.get("subcommands", {})
-                ).items():
+                required = json_strings(self.document.get("required_options", []))
+                subcommands = json_object(self.document.get("subcommands", {}))
+                if required and not subcommands:
+                    formatter.add_text(f"Requires: {', '.join(required)}.")
+                for operation, fields in subcommands.items():
                     required = json_strings(
                         json_object(fields).get("required_options", [])
                     )
