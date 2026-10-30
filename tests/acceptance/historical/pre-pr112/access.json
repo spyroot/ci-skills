@@ -1,0 +1,43 @@
+{
+  "captured_at": "2026-10-29T21:30:47.162072+00:00",
+  "credential_digest": "sha256:b27033322a421fcdbf7c8a2f5347a34715a37b1798c3bda1cf1dd39e781909a3",
+  "credential_source": "file:path:29f247d18d3c",
+  "errors": [],
+  "execution_host": "mac.lan",
+  "identity": {
+    "id": 6,
+    "username": "spyroot",
+    "web_url": "https://gitlab.dcloud.run/spyroot"
+  },
+  "kind": "gitlab_access",
+  "observed_capability": [
+    "identity_read",
+    "target_read"
+  ],
+  "origin": "https://gitlab.dcloud.run",
+  "schema_version": "1.0",
+  "skill": {
+    "algorithm": "sha256-tree-v1",
+    "consuming_project": {
+      "commit": null,
+      "source": null
+    },
+    "digest": "8a07c7184f7122a62b7dbf38eef03eeaedebf30951fba3f51e5a78c5bc6c4964",
+    "file_count": 253,
+    "functional_digest": "037fef311943e088497b9efd330eae358aa589a05d1a9fa47bbdfebb82c49d3f",
+    "revision": {
+      "source": "installer_record",
+      "value": "ca1eb994d9295f8dfa70c2c987ebc88f2a5f5dfb",
+      "verified": true
+    }
+  },
+  "status": "PASS",
+  "target": {
+    "full_path": "hott/test",
+    "id": 123,
+    "kind": "project",
+    "web_url": "https://gitlab.dcloud.run/hott/test"
+  },
+  "target_file": "path:5e5380df1eda",
+  "target_source": "env:CI_SKILLS_TARGET"
+}
