@@ -35,6 +35,11 @@ RUN_SCOPE_PREFIX: Final = "ci-skills-run"
 RUN_ID_LABEL: Final = "ci-skills.spyroot.dev/run-id"
 DNS_LABEL_LIMIT: Final = 63
 RUN_ID_LIMIT: Final = 32
+NAMESPACE_TOKEN_LENGTH: Final = 20
+RESOURCE_TOKEN_LENGTH: Final = 16
+RESOURCE_NAME_SEPARATOR_COUNT: Final = 2
+MIN_NAME_COMPONENT_LENGTH: Final = 1
+RESOURCE_NAME_LIMIT_INVALID: Final = "run_scope_resource_name_limit_invalid"
 _RUN_ID = re.compile(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?")
 _DNS_LABEL = re.compile(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?")
 _KIND_TOKEN = re.compile(r"[^a-z0-9-]+")
@@ -64,7 +69,7 @@ def validate_namespace(value: str) -> str:
     return value
 
 
-def _dns_token(value: str, *, limit: int) -> str:
+def dns_token(value: str, *, limit: int) -> str:
     """Normalize a resource role as one bounded DNS label token.
 
     :param value: Resource role such as ``tool-pod``.
@@ -242,18 +247,29 @@ class RunScope:
         *,
         namespace: Optional[str] = None,
         run_id: Optional[str] = None,
+        namespace_prefix: Optional[str] = None,
     ) -> RunScope:
         """Create a fresh scope without provider access.
 
         :param namespace: Existing caller-selected namespace, when supplied.
         :param run_id: Caller-selected correlation identifier, when supplied.
+        :param namespace_prefix: Known consumer repository base; legacy callers omit it.
         :returns: Scope with an independently generated namespace when needed.
         """
         identifier = validate_run_id(run_id or uuid.uuid4().hex)
         if namespace:
             return cls(identifier, validate_namespace(namespace), False)
-        namespace_token = uuid.uuid4().hex[:20]
-        return cls(identifier, f"{RUN_SCOPE_PREFIX}-{namespace_token}", True)
+        prefix = RUN_SCOPE_PREFIX
+        if namespace_prefix:
+            prefix = dns_token(
+                namespace_prefix, limit=DNS_LABEL_LIMIT - NAMESPACE_TOKEN_LENGTH - 1
+            )
+            namespace_token = hashlib.sha256(identifier.encode("utf-8")).hexdigest()[
+                :NAMESPACE_TOKEN_LENGTH
+            ]
+        else:
+            namespace_token = uuid.uuid4().hex[:NAMESPACE_TOKEN_LENGTH]
+        return cls(identifier, f"{prefix}-{namespace_token}", True)
 
     @classmethod
     def find_all(cls, service: KubernetesService, run_id: str) -> tuple[RunScope, ...]:
@@ -367,16 +383,48 @@ class RunScope:
             raise KubernetesError("run_scope_not_found")
         return scope
 
-    def name(self, kind: str) -> str:
+    def name(self, kind: str, *, prefix: Optional[str] = None) -> str:
         """Derive one stable resource name within this run.
 
         :param kind: Resource role such as ``tool-pod``.
+        :param prefix: Known consumer repository base; legacy callers omit it.
         :returns: DNS-safe name unique to this run and role.
+        :raises ValueError: The selected resource role or prefix contains no valid token.
+        """  # noqa: DOC502 - Shared bounded-name validation propagates ValueError.
+        return self.bounded_name(kind, limit=DNS_LABEL_LIMIT, prefix=prefix)
+
+    def bounded_name(
+        self, kind: str, *, limit: int, prefix: Optional[str] = None
+    ) -> str:
+        """Derive a bounded resource name while retaining its full uniqueness suffix.
+
+        :param kind: Resource role identifying this workload within the run.
+        :param limit: Maximum name length reserved before consumer suffixes are appended.
+        :param prefix: Known consumer repository base, or the existing default prefix.
+        :returns: Bounded DNS-safe name retaining the entire run uniqueness suffix.
+        :raises ValueError: The budget cannot fit native name components or a token is invalid.
         """
-        suffix = hashlib.sha256(self.run_id.encode("utf-8")).hexdigest()[:16]
-        available = DNS_LABEL_LIMIT - len(RUN_SCOPE_PREFIX) - len(suffix) - 2
-        token = _dns_token(kind, limit=available)
-        return f"{RUN_SCOPE_PREFIX}-{token}-{suffix}"
+        minimum = (
+            RESOURCE_TOKEN_LENGTH
+            + RESOURCE_NAME_SEPARATOR_COUNT
+            + MIN_NAME_COMPONENT_LENGTH
+            + MIN_NAME_COMPONENT_LENGTH
+        )
+        if not minimum <= limit <= DNS_LABEL_LIMIT:
+            raise ValueError(RESOURCE_NAME_LIMIT_INVALID)
+        suffix = hashlib.sha256(self.run_id.encode("utf-8")).hexdigest()[
+            :RESOURCE_TOKEN_LENGTH
+        ]
+        base = dns_token(
+            prefix or RUN_SCOPE_PREFIX,
+            limit=limit
+            - len(suffix)
+            - RESOURCE_NAME_SEPARATOR_COUNT
+            - MIN_NAME_COMPONENT_LENGTH,
+        )
+        available = limit - len(base) - len(suffix) - RESOURCE_NAME_SEPARATOR_COUNT
+        token = dns_token(kind, limit=available)
+        return f"{base}-{token}-{suffix}"
 
     def resources(self, service: KubernetesService) -> ResourceSet:
         """Create a namespaced ownership tracker for this run.
@@ -694,7 +742,18 @@ class RemoveScope(K8SCallback[ResolveRunScopeAction]):
             if not run_owned(observed, self.action.run_id):
                 raise KubernetesError("run_scope_namespace_ownership_mismatch")
             resources = scope.cluster_resources(self.kubernetes)
-            if resources.delete("Namespace", scope.namespace):
+            planned_uids = {
+                observation.uid
+                for observation in state.runner_scopes.values()
+                if observation.namespace == scope.namespace
+                and observation.uid is not None
+            }
+            if len(planned_uids) > 1:
+                raise KubernetesError("run_scope_namespace_identity_ambiguous")
+            expected_uid = next(iter(planned_uids), None)
+            if resources.delete(
+                "Namespace", scope.namespace, expected_uid=expected_uid
+            ):
                 removed.append(
                     {
                         "kind": "Namespace",

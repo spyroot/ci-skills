@@ -93,7 +93,7 @@
       "then": {
         "properties": {"phase": {"const": "LIVE_PLAN"}, "mutated": {"const": false}, "records": {"maxItems": 0}, "errors": {"maxItems": 0}, "summary": {"properties": {"record_count": {"const": 0}, "error_count": {"const": 0}}}},
         "oneOf": [
-          {"properties": {"kind": {"const": "gitlab_runner"}, "operation": {"const": "assign"}, "readback": {"$ref": "#/$defs/planned_readback"}}},
+          {"properties": {"kind": {"const": "gitlab_runner"}, "operation": {"enum": ["assign", "create"]}, "readback": {"$ref": "#/$defs/planned_readback"}}},
           {"properties": {"kind": {"const": "gitlab_pipeline"}, "operation": {"const": "start"}, "readback": {"$ref": "#/$defs/pipeline_planned_readback"}}}
         ]
       }

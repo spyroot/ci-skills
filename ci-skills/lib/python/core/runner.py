@@ -19,6 +19,8 @@ RUNTIME_ROOT: Final = "/ci-skills/runner"
 
 
 REGISTRATION_SECRET_SUFFIX: Final = "-registration"
+REGISTRY_SECRET_SUFFIX: Final = "-registry"
+PULL_JOB_SUFFIX: Final = "-pull"
 
 
 @dataclass(frozen=True)

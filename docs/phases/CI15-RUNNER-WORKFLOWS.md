@@ -154,8 +154,12 @@ Selection and ownership are separate. Namespaces predating the original
 operation remain borrowed even when selected by a default. A namespace created
 by the operation remains operation-owned across updates and deletion; supplying
 its name later does not transfer ownership. Extend `RunScope`'s existing generator with the repository name component
-under CI15-IDENTITY-001; do not derive a namespace from runner names, tags or
-operation IDs. Report selection and ownership separately, including when the
+under CI15-IDENTITY-001. Use the repository for its human-readable component;
+runner names, tags and operation IDs do not replace that component. An opaque
+hash of operation identity may supply the uniqueness suffix. Generate the
+candidate once, retain the exact name through plan, apply and cleanup, and
+rediscover existing namespaces through live ownership labels. Report selection
+and ownership separately, including when the
 selection source is the repository, explicit input or existing
 run scope. Resolve retries through recorded identity and
 live ownership; ambiguous discovery blocks rather than guessing a name.
@@ -363,8 +367,10 @@ PR-003 and PR-004 have no runtime dependency; merge them in listed order.
 G-001 is the existing catalog, parser, schema and static validation route.
 PR-001 extends its focused checks for canonical flags and legacy aliases,
 mixed repeated aliases, repository-derived defaults, omission rules, invalid inputs, protection values,
-confirmation binding and schema conformance. Include a consumer repository named
-`payments` with the skill installed under `ci-skills`, explicit overrides,
+confirmation binding and schema conformance. Test setup generates a consumer
+repository name distinct from the installed skill root and retains the same
+names and observed UIDs through the operation and cleanup. Test bodies use
+shared constants or enums for contract strings. Include explicit overrides,
 missing/group-only repository selection, numeric-ID read-back, selector errors,
 normalization, uniqueness and existing-resource
 identity preservation. The new cases are not implemented yet.

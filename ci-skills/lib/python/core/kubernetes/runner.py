@@ -25,7 +25,9 @@ from lib.python.core.kubernetes.resources import (
 )
 from lib.python.core.kubernetes.run_scope import RUN_ID_LABEL
 from lib.python.core.runner import (
+    PULL_JOB_SUFFIX,
     REGISTRATION_SECRET_SUFFIX,
+    REGISTRY_SECRET_SUFFIX,
     RUNTIME_ROOT,
     RunnerAction,
     RunnerRuntime,
@@ -40,7 +42,6 @@ PULL_SECRET_TYPE: Final = "kubernetes.io/dockerconfigjson"
 PULL_SECRET_KEY: Final = ".dockerconfigjson"
 WORK_VOLUME: Final = "runner-work"
 RUNNER_CONTAINER: Final = "runner"
-REGISTRY_SECRET_SUFFIX: Final = "-registry"
 DOCTOR_COMMAND: Final = (DOCTOR_PATH,)
 
 
@@ -302,7 +303,7 @@ class PullImage(K8SCallback[RunnerAction]):
         image = published_image(self.state.published_image)
         resources = ResourceSet(self.kubernetes, action.namespace, action.operation)
         self.resources = resources
-        name = action.name + "-pull"
+        name = action.name + PULL_JOB_SUFFIX
         secret = name + REGISTRY_SECRET_SUFFIX
         resources.delete("Job", name)
         resources.apply(
@@ -338,7 +339,7 @@ class PullImage(K8SCallback[RunnerAction]):
         :raises KubernetesError: If owned temporary resources cannot be removed.
         """  # noqa: DOC502 - cleanup_owned propagates aggregate cleanup failures.
         if self.resources is not None:
-            name = self.action.name + "-pull"
+            name = self.action.name + PULL_JOB_SUFFIX
             self.resources.cleanup_owned(
                 (("Job", name), ("Secret", name + REGISTRY_SECRET_SUFFIX))
             )

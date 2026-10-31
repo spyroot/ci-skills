@@ -8,11 +8,12 @@ spyroot@gmail.com
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Generic
+from collections.abc import Callable
+from typing import Final, Generic
 
 from lib.python.core.abstract.skill_action import ActionT_co, SkillAction
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
-from lib.python.core.abstract.skill_result import SkillResult
+from lib.python.core.abstract.skill_result import SkillResult, require_result
 from lib.python.core.abstract.skill_state import SkillState, StateT
 
 
@@ -255,3 +256,96 @@ class LocalCallback(Callback[StateT, ActionT_co]):
         :returns: True because this plugin has no external configuration.
         """
         return True
+
+
+DEFERRED_CONFIGURATION_MISSING: Final = "deferred_component_configuration_missing"
+DEFERRED_COLLECTION_REQUIRED: Final = "deferred_component_collection_required"
+
+
+class DeferredCallback(LocalCallback[StateT, ActionT_co]):
+    """Bind an existing callback after upstream observations resolve its inputs.
+
+    .. attribute :: factory
+        :type: Callable[[StateT], AbstractCallback]
+
+        Factory receiving the same executor-owned state at collection time.
+
+    .. attribute :: child
+        :type: AbstractCallback | None
+
+        Callback constructed during collection, absent before that lifecycle step.
+    """
+
+    factory: Callable[[StateT], AbstractCallback]
+    child: AbstractCallback | None
+
+    def __init__(
+        self, action: ActionT_co, factory: Callable[[StateT], AbstractCallback]
+    ):
+        """Retain a callback factory until preceding observations complete.
+
+        :param action: Parent inputs retaining the current operation identity.
+        :param factory: Constructs one callback against the current shared state.
+        :raises TypeError: Parent inputs do not implement SkillAction.
+        """  # noqa: DOC502 - Shared callback initialization validates the action.
+        super().__init__(action)
+        self.factory = factory
+        self.child = None
+
+    def collect(self) -> SkillResult:
+        """Construct and bind the child to the same executor-owned state.
+
+        :returns: Child collection evidence.
+        :raises ValueError: Required provider configuration is unavailable.
+        """
+        child = self.factory(self.state)
+        child.bind(self.state)
+        require_result(child.read_config())
+        if not child.is_configured():
+            raise ValueError(DEFERRED_CONFIGURATION_MISSING)
+        self.child = child
+        return child.collect()
+
+    def run(self) -> SkillResult:
+        """Run the child after collection and retain its own result slot.
+
+        :returns: Child run evidence.
+        :raises ValueError: Collection did not construct a callback.
+        """
+        if self.child is None:
+            raise ValueError(DEFERRED_COLLECTION_REQUIRED)
+        result = require_result(self.child.run())
+        self.state.results[self.child] = result
+        return result
+
+    def update(self) -> SkillResult:
+        """Delegate the child's post-run lifecycle without copying its result.
+
+        :returns: Child update evidence.
+        :raises ValueError: Collection did not construct a callback.
+        """
+        if self.child is None:
+            raise ValueError(DEFERRED_COLLECTION_REQUIRED)
+        result = require_result(self.child.update())
+        self.state.results[self.child] = result
+        return result
+
+    def cleanup(self) -> SkillResult:
+        """Delegate cleanup for the exact child constructed during collection.
+
+        :returns: Child cleanup evidence, or no evidence before collection.
+        """
+        if self.child is None:
+            return {}
+        try:
+            return self.child.cleanup()
+        finally:
+            self.state.results.pop(self.child, None)
+
+    @property
+    def complete(self) -> bool:
+        """Retain the existing child's continuation contract.
+
+        :returns: Child completeness, false before collection.
+        """
+        return self.child is not None and self.child.complete

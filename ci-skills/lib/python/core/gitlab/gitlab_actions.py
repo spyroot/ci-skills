@@ -26,6 +26,7 @@ from lib.python.core.json_types import JSONObject, JSONValue, copy_json, is_json
 from lib.python.core.logging import log_event
 from lib.python.core.portable import write_portable_receipt
 from lib.python.core.report import emit, plan_digest
+from lib.python.core.runner_options import PROTECTION_VALUES, SingleValue
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import GitLabOperationTarget
 from lib.python.sys.status import BLOCKED, PASS, exit_code
@@ -223,6 +224,8 @@ class ActionPlan(SkillAction):
         :raises ValueError: If canonical JSON encoding rejects the body or plan.
         :raises RecursionError: If supplied containers are cyclic or excessively nested.
         """  # noqa: DOC503 - Shared canonical plan serialization propagates failures.
+        from lib.python.core.gitlab.gitlab_runners import pending_runner_identity
+
         result: MutableMapping[str, JSONValue] = {
             "operation": self.operation,
             "target_kind": self.target_kind,
@@ -240,6 +243,7 @@ class ActionPlan(SkillAction):
                         and self.project_ids is None
                     )
                     or (self.operation == "delete" and self.runner_snapshot is None)
+                    or pending_runner_identity(self)
                 )
             ),
             "fields": sorted(self.body),
@@ -751,7 +755,15 @@ def _runner_arguments(result: argparse.ArgumentParser) -> None:
         choices=("project", "group"),
         help="runner scope for create",
     )
-    result.add_argument("--description", help="server-visible runner recovery key")
+    result.add_argument(
+        "--description", action=SingleValue, help="server-visible runner recovery key"
+    )
+    result.add_argument(
+        "--protected",
+        choices=tuple(PROTECTION_VALUES),
+        action=SingleValue,
+        help="create: protected or unprotected runner refs; omission uses provider default",
+    )
     result.add_argument(
         "--limit",
         type=int,

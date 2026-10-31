@@ -21,17 +21,20 @@ from test_image_build_chain import (
     ABSTRACT_CALLBACKS,
     CALLBACKS,
     CALLER_NAMESPACE,
+    CALLER_NAMESPACE_UID,
     CHAIN,
+    CLUSTER_NAMESPACE,
     EXECUTOR,
+    NAMESPACE_KIND,
     NODE,
     PODMAN,
     READINESS,
     TOOLBOX_IMAGE,
+    ChainCluster,
     JournalCallback,
     _args,
     _lifecycle_executor,
     _prepared_action,
-    _read_nodes,
     _target,
 )
 
@@ -44,15 +47,19 @@ if TYPE_CHECKING:
 
 
 def _validator() -> Draft202012Validator:
-    """Use the shipped schema and its existing local provenance reference.
+    """Use the shipped schema and its local provenance and scope references.
 
     :returns: Result validator without any network resolution.
     """
     root = SKILL_ROOT / "schemas" / "results"
     schema = json.loads((root / "image-build-readiness.schema.json").read_text())
     tag_schema = json.loads((root / "gitlab-runner-tag.schema.json").read_text())
-    registry = Registry().with_resource(
-        tag_schema["$id"], Resource.from_contents(tag_schema)
+    scope_schema = json.loads((root / "runner-scope.schema.json").read_text())
+    registry = Registry().with_resources(
+        (
+            (tag_schema["$id"], Resource.from_contents(tag_schema)),
+            (scope_schema["$id"], Resource.from_contents(scope_schema)),
+        )
     )
     return Draft202012Validator(schema, registry=registry)
 
@@ -84,7 +91,12 @@ def _apply_report(
     status = command.execute()
     output = json.loads(capsys.readouterr().out)
     assert cleanup == ([] if outcome == "success" else ["manager", "scc", "runner"])
-    assert kubernetes.read("Namespace", CALLER_NAMESPACE, "") is not None
+    assert (
+        kubernetes.read(
+            NAMESPACE_KIND, action.state.run_scope.namespace, CLUSTER_NAMESPACE
+        )
+        is not None
+    )
     assert not action.state.token_path.exists()
     assert not action.state.token_directory.exists()
     _validator().validate(output)
@@ -244,7 +256,10 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         MODEL,
         "WorkflowAction",
         lambda *_a, **_k: SimpleNamespace(
-            spec=template.toolbox.spec, resolved_base=None, prepare=lambda: None
+            spec=template.toolbox.spec,
+            runner=template.toolbox.runner,
+            resolved_base=None,
+            prepare=lambda: None,
         ),
     )
     monkeypatch.setattr(
@@ -260,7 +275,7 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         :param state: Shared chain state receiving the observed worker identity.
         """
         state.selected_node = NODE
-        state.kubernetes = SimpleNamespace(json=_read_nodes)
+        state.kubernetes = ChainCluster()
 
     def workflow(action):
         assert not explicit, "dry-run entered provider callbacks"
@@ -294,8 +309,32 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
         assert [record["callback"] for record in output["records"]] == [
             "JournalCallback",
             "ResolveChainPlan",
+            "RunnerScopes",
         ]
         assert output["plan_digest"] == output["records"][1]["plan_digest"]
+        scope_record = output["records"][-1]
+        assert scope_record["verified"] is True
+        assert [
+            (
+                scope["purpose"],
+                scope["namespace"],
+                scope["uid"],
+                scope["ownership"],
+                scope["state"],
+                scope["retention"],
+            )
+            for scope in scope_record["scopes"]
+        ] == [
+            (
+                purpose,
+                CALLER_NAMESPACE,
+                CALLER_NAMESPACE_UID,
+                "borrowed",
+                "present",
+                "preserved",
+            )
+            for purpose in ("manager", "build")
+        ]
     assert "run_id" not in output
     assert not hasattr(command.action.state, "run_scope")
     assert not hasattr(command.action.state, "created_runner_id")

@@ -50,7 +50,27 @@
       "type": "object"
     },
     "records": {
-      "type": "array"
+      "type": "array",
+      "items": {
+        "type": "object",
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "callback"
+              ],
+              "properties": {
+                "callback": {
+                  "const": "RunnerScopes"
+                }
+              }
+            },
+            "then": {
+              "$ref": "runner-scope.schema.json#/$defs/record"
+            }
+          }
+        ]
+      }
     },
     "errors": {
       "type": "array",

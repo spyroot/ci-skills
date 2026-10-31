@@ -16,6 +16,7 @@ from lib.python.core.gitlab.runner_manager import (
     DeleteManagerRunner,
     workload_action,
 )
+from lib.python.core.gitlab.runner_manager.workload import ObserveManagerNamespace
 from lib.python.core.json_types import JSONObject, is_json_value
 from lib.python.core.kubernetes.run_scope import RemoveScope, ResolveRunScopeAction
 from lib.python.core.kubernetes.scc_access import RemoveSCCAccess
@@ -44,6 +45,7 @@ class CleanupChain(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
                     DeleteManagerRunner(workload_action(manager)),
                     RemoveSCCAccess(manager.scc_access()),
                     RemoveScope(ResolveRunScopeAction(state.run_scope.run_id)),
+                    ObserveManagerNamespace(workload_action(manager)),
                 )
                 for callback in cleanup_callbacks:
                     _attempt_cleanup_component(state, callback, records, failures)
