@@ -40,7 +40,11 @@ from lib.python.core.runner_identity import (
     resolve_name,
     resolve_repository,
 )
-from lib.python.core.runner_options import parse_protected, runner_tags
+from lib.python.core.runner_options import (
+    RUNNER_NAME_LIMIT,
+    parse_protected,
+    runner_tags,
+)
 from lib.python.core.runner_scope import ScopeObservation, ScopePurpose, ScopeSource
 from lib.python.core.target import (
     GitLabOperationTarget,
@@ -136,8 +140,10 @@ class ManagerWorkloadAction(SkillAction):
             name=(
                 self.workflow.resolved_runner_name.value
                 if self.workflow.resolved_runner_name
-                else scope.name(
-                    MANAGER_ROLE, prefix=self.workflow.repository_identity.name
+                else scope.bounded_name(
+                    MANAGER_ROLE,
+                    limit=RUNNER_NAME_LIMIT,
+                    prefix=self.workflow.repository_identity.name,
                 )
             ),
             source_root="",
@@ -184,8 +190,10 @@ class ManagerWorkloadAction(SkillAction):
         return {
             "runner": {
                 "namespace": namespace,
-                "name": candidate.name(
-                    MANAGER_ROLE, prefix=workflow.repository_identity.name
+                "name": candidate.bounded_name(
+                    MANAGER_ROLE,
+                    limit=RUNNER_NAME_LIMIT,
+                    prefix=workflow.repository_identity.name,
                 )
                 if candidate
                 else None,
@@ -220,20 +228,25 @@ class GitLabRunnerManagerAction(WorkflowAction):
 
         Absent, deferred, or privately bound registration token.
 
-    .. attribute :: gitlab_selection
-        :type: tuple[str, str]
+    .. attribute :: candidate_scope
+        :type: Optional[RunScope]
 
-        Effective project or group kind and reference selected from arguments and target.
+        Deploy scope prepared for the explicit or derived run ID, otherwise absent.
 
     .. attribute :: explicit_tags
         :type: tuple[str, ...]
 
         Caller-supplied tags before repository defaults or provider discovery.
 
-    .. attribute :: candidate_scope
-        :type: Optional[RunScope]
+    .. attribute :: observed_tags
+        :type: tuple[str, ...] | None
 
-        Deploy scope prepared for the explicit or derived run ID, otherwise absent.
+        Native tags after read-back; an empty tuple preserves an existing untagged runner.
+
+    .. attribute :: gitlab_selection
+        :type: tuple[str, str]
+
+        Effective project or group kind and reference selected from arguments and target.
 
     .. attribute :: podman_runtime
         :type: Optional[PodmanRuntimeSettings]
@@ -245,6 +258,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
     runner_token: RunnerTokenSelection = field(init=False, repr=False)
     candidate_scope: Optional[RunScope] = field(init=False, default=None)
     explicit_tags: tuple[str, ...] = field(init=False, default=())
+    observed_tags: tuple[str, ...] | None = field(init=False, default=None)
     gitlab_selection: tuple[str, str] = field(init=False)
     podman_runtime: Optional[PodmanRuntimeSettings] = field(
         init=False,
@@ -290,7 +304,9 @@ class GitLabRunnerManagerAction(WorkflowAction):
 
         :returns: Exact tags in caller order.
         :raises ValueError: A tag is blank or repeated.
-        """
+        """  # noqa: DOC502 - Shared tag validation propagates ValueError.
+        if self.observed_tags is not None:
+            return self.observed_tags
         labels = runner_tags(
             tuple(getattr(self.args, "tag", ())), self.repository_identity
         )
@@ -387,8 +403,10 @@ class GitLabRunnerManagerAction(WorkflowAction):
             )
             if self.repository_identity.name:
                 self.resolved_runner_name = ResolvedName(
-                    self.candidate_scope.name(
-                        MANAGER_ROLE, prefix=self.repository_identity.name
+                    self.candidate_scope.bounded_name(
+                        MANAGER_ROLE,
+                        limit=RUNNER_NAME_LIMIT,
+                        prefix=self.repository_identity.name,
                     ),
                     NameSource.REPOSITORY,
                 )

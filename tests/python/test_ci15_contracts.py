@@ -19,6 +19,7 @@ from uuid import uuid4
 import pytest
 import test_gitlab_runner_lifecycle as runner_tests
 import test_gitlab_runner_manager as manager_tests
+import test_image_build_chain as chain_tests
 from conftest import REPO_ROOT, SCRIPT_ROOT, import_script_module
 
 CLI_API = import_script_module("lib.python.core.cli_api")
@@ -34,6 +35,7 @@ TARGET = import_script_module("lib.python.core.target")
 WORKFLOWS = import_script_module("lib.python.core.toolbox_actions")
 STATUS = import_script_module("lib.python.sys.status")
 SCOPES = import_script_module("lib.python.core.runner_scope")
+K8S_RUNNER = import_script_module("lib.python.core.kubernetes.runner")
 
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
@@ -95,6 +97,12 @@ TAG_BLANK: Final = "  "
 TAG_COMMA: Final = ","
 MALFORMED_PROTECTION: Final = "yes"
 MANAGER_COMMAND: Final = "manager"
+CHAIN_COMMAND: Final = "chain"
+FIELD_METADATA: Final = "metadata"
+JOB_KIND: Final = "Job"
+SECRET_KIND: Final = "Secret"
+NAMESPACE_KIND: Final = "Namespace"
+EMPTY_DOCKER_CONFIG: Final = b"{}"
 FIELD_UID: Final = "uid"
 FIELD_RETENTION: Final = "retention"
 FIELD_CLEANUP: Final = "cleanup"
@@ -249,7 +257,11 @@ def repository_inputs(tmp_path: Path) -> Namespace:
     :returns: Names and native identity generated once for this test invocation.
     """
     name = uuid4().hex
+    long_name = NAME_SEPARATOR.join((name, name))
     return Namespace(
+        long_name=long_name,
+        long_repository=REPOSITORY_SEPARATOR.join((uuid4().hex, long_name)),
+        alternate_run_id=uuid4().hex,
         name=name,
         host=uuid4().hex + HOST_SUFFIX,
         repository=REPOSITORY_SEPARATOR.join((uuid4().hex, name)),
@@ -664,6 +676,105 @@ def test_repository_workload_names_are_normalized_with_suffix_capacity(
         len(resolved.value + RUNNER.REGISTRATION_SECRET_SUFFIX)
         <= RUN_SCOPE.DNS_LABEL_LIMIT
     )
+
+
+@pytest.mark.parametrize("consumer", (MANAGER_COMMAND, CHAIN_COMMAND))
+def test_long_repository_runner_keeps_bounded_names_and_scope_identity_through_cleanup(
+    monkeypatch: pytest.MonkeyPatch, repository_inputs: Namespace, consumer: str
+) -> None:
+    """Reserve native suffix capacity without dropping the run uniqueness token.
+
+    :param monkeypatch: Isolate manager target selection at its existing boundary.
+    :param repository_inputs: Long repository and scope identity generated once by setup.
+    :param consumer: Direct manager or chain-generated workload naming path.
+    """
+    selected = repository_inputs
+    if consumer == MANAGER_COMMAND:
+        args = manager_tests._args(dry_run=True)
+        args.project = selected.long_repository
+        args.description = None
+        args.tag = []
+        args.namespace = None
+        args.run_id = selected.run_id
+        manager = manager_tests.ACTION.GitLabRunnerManagerAction(args)
+        monkeypatch.setattr(
+            manager_tests.ACTION,
+            manager_tests.ACTION.resolve_target.__name__,
+            Mock(return_value=manager_tests._target()),
+        )
+        manager.prepare()
+        scope = manager.candidate_scope
+        planned_name = manager.workload().plan_document()[FIELD_RUNNER][FIELD_NAME]
+    else:
+        chain = chain_tests._prepared_action()
+        chain.gitlab_selection = (PROJECT_KIND, selected.long_repository)
+        chain.repository_identity = IDENTITY.resolve_repository(
+            selected.long_repository
+        )
+        chain.resolved_description = IDENTITY.resolve_name(
+            None, chain.repository_identity, argument=DESCRIPTION_ARGUMENT
+        )
+        chain.args.runner_description = chain.resolved_description.value
+        chain.args.runner_label = list(selected.labels)
+        chain.args.namespace = None
+        chain._prepare_scope()
+        scope = chain.manager_scope
+        planned_name = chain.plan(chain.args.node)[FIELD_RUNNER][FIELD_NAME]
+        manager = manager_tests._action()
+        manager.context = chain.state
+        manager.candidate_scope = scope
+        manager.repository_identity = chain.repository_identity
+        manager.resolved_runner_name = chain.resolved_runner_name
+    assert scope is not None
+    runner = manager.workload().runner(scope)
+    namespace = scope.namespace
+    _, _, token = scope.name(
+        manager_tests.ACTION.MANAGER_ROLE, prefix=selected.long_name
+    ).rpartition(NAME_SEPARATOR)
+    assert len(token) == RUN_SCOPE.RESOURCE_TOKEN_LENGTH
+    assert runner.name == planned_name
+    assert runner.name.endswith(NAME_SEPARATOR + token)
+    assert len(runner.name) <= OPTIONS.RUNNER_NAME_LIMIT
+    assert runner.name != replace(scope, run_id=selected.alternate_run_id).bounded_name(
+        manager_tests.ACTION.MANAGER_ROLE,
+        prefix=selected.long_name,
+        limit=OPTIONS.RUNNER_NAME_LIMIT,
+    )
+
+    cluster = manager_tests.ManagerCluster()
+    native_namespace = scope.cluster_resources(cluster).managed(
+        RUN_SCOPE.namespace_document(scope)
+    )
+    native_namespace[FIELD_METADATA][FIELD_UID] = selected.namespace_uid
+    namespace_key = (NAMESPACE_KIND.casefold(), EMPTY_TEXT, namespace)
+    cluster.objects[namespace_key] = native_namespace
+    state = manager.context
+    state.kubernetes = cluster
+    state.harbor = SimpleNamespace(dockerconfig=EMPTY_DOCKER_CONFIG)
+    state.published_image = manager_tests.IMAGE
+    pull = K8S_RUNNER.PullImage(runner)
+    pull.bind(state)
+    assert pull.run()[FIELD_VERIFIED] is True
+    job_name = runner.name + RUNNER.PULL_JOB_SUFFIX
+    secret_name = job_name + RUNNER.REGISTRY_SECRET_SUFFIX
+    job_key = (JOB_KIND.casefold(), namespace, job_name)
+    secret_key = (SECRET_KIND.casefold(), namespace, secret_name)
+    assert len(job_name) <= RUN_SCOPE.DNS_LABEL_LIMIT
+    assert (
+        len(runner.name + RUNNER.REGISTRATION_SECRET_SUFFIX)
+        <= RUN_SCOPE.DNS_LABEL_LIMIT
+    )
+    assert len(secret_name) <= manager_tests.SCC_ACCESS.KUBERNETES_NAME_LIMIT
+    assert cluster.objects[job_key][FIELD_METADATA][FIELD_NAME] == job_name
+    assert cluster.objects[secret_key][FIELD_METADATA][FIELD_NAME] == secret_name
+    runtime = RUNNER.RunnerRuntime((), (), (), (), {})
+    deployed = K8S_RUNNER.DeployRunner(runner)._document(runtime, manager_tests.IMAGE)
+    assert deployed[FIELD_METADATA][FIELD_NAME] == planned_name
+    pull.cleanup()
+    assert set(cluster.deleted) == {job_key, secret_key}
+    assert cluster.objects == {namespace_key: native_namespace}
+    assert scope.namespace == namespace
+    assert manager.workload().runner(scope).name == planned_name
 
 
 @pytest.mark.parametrize("case", (INVALID_NAME_EMPTY, INVALID_NAME_EXPLICIT))

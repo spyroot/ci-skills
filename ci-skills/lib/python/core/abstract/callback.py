@@ -276,6 +276,9 @@ class DeferredCallback(LocalCallback[StateT, ActionT_co]):
         Callback constructed during collection, absent before that lifecycle step.
     """
 
+    factory: Callable[[StateT], AbstractCallback]
+    child: AbstractCallback | None
+
     def __init__(
         self, action: ActionT_co, factory: Callable[[StateT], AbstractCallback]
     ):
@@ -287,7 +290,7 @@ class DeferredCallback(LocalCallback[StateT, ActionT_co]):
         """  # noqa: DOC502 - Shared callback initialization validates the action.
         super().__init__(action)
         self.factory = factory
-        self.child: AbstractCallback | None = None
+        self.child = None
 
     def collect(self) -> SkillResult:
         """Construct and bind the child to the same executor-owned state.

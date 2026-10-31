@@ -170,6 +170,8 @@ class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
         Prepared workflow receiving repository identity from the access receipt.
     """
 
+    workflow: GitLabRunnerManagerAction
+
     def __init__(self, workflow: GitLabRunnerManagerAction):
         """Resolve the target selector without reading credentials.
 
@@ -230,7 +232,7 @@ class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
         :returns: Existing safe GitLab access receipt.
         :raises ActionError: Access is blocked or lacks a numeric target ID.
         :raises ValueError: Authenticated repository defaults are inconsistent.
-        """  # noqa: DOC502 - Shared identity binding propagates validation failures.
+        """  # noqa: DOC502,DOC503 - Shared identity binding propagates validation failures.
         session = self.manager_state.configured_session
         api = GlabAPIClient()
         access = check_gitlab_operation_access(session, api_client=api)
@@ -364,7 +366,8 @@ class ObserveGitLabRunner(GitLabManagerComponent):
             )
             workflow.args.description = description
         if not workflow.explicit_tags:
-            workflow.args.tag = list(record["tag_list"])
+            workflow.observed_tags = tuple(record["tag_list"])
+            workflow.args.tag = list(workflow.observed_tags)
         self.manager_state.gitlab_runner = record
         scope, _ = workflow.scope_plan()
         return {
@@ -482,7 +485,7 @@ class VerifyGitLabRunnerOnline(GitLabManagerComponent):
         """  # noqa: DOC503 - Bounded provider reads propagate typed failures.
         workflow, service = self.workflow, self.gitlab
         deadline = time.monotonic() + workflow.args.timeout
-        expected_tags = workflow.labels or None
+        expected_tags = workflow.labels
         while True:
             record = read_runner_record(
                 service.api,

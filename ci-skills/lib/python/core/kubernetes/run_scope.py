@@ -37,6 +37,9 @@ DNS_LABEL_LIMIT: Final = 63
 RUN_ID_LIMIT: Final = 32
 NAMESPACE_TOKEN_LENGTH: Final = 20
 RESOURCE_TOKEN_LENGTH: Final = 16
+RESOURCE_NAME_SEPARATOR_COUNT: Final = 2
+MIN_NAME_COMPONENT_LENGTH: Final = 1
+RESOURCE_NAME_LIMIT_INVALID: Final = "run_scope_resource_name_limit_invalid"
 _RUN_ID = re.compile(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?")
 _DNS_LABEL = re.compile(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?")
 _KIND_TOKEN = re.compile(r"[^a-z0-9-]+")
@@ -386,14 +389,40 @@ class RunScope:
         :param kind: Resource role such as ``tool-pod``.
         :param prefix: Known consumer repository base; legacy callers omit it.
         :returns: DNS-safe name unique to this run and role.
+        :raises ValueError: The selected resource role or prefix contains no valid token.
+        """  # noqa: DOC502 - Shared bounded-name validation propagates ValueError.
+        return self.bounded_name(kind, limit=DNS_LABEL_LIMIT, prefix=prefix)
+
+    def bounded_name(
+        self, kind: str, *, limit: int, prefix: Optional[str] = None
+    ) -> str:
+        """Derive a bounded resource name while retaining its full uniqueness suffix.
+
+        :param kind: Resource role identifying this workload within the run.
+        :param limit: Maximum name length reserved before consumer suffixes are appended.
+        :param prefix: Known consumer repository base, or the existing default prefix.
+        :returns: Bounded DNS-safe name retaining the entire run uniqueness suffix.
+        :raises ValueError: The budget cannot fit native name components or a token is invalid.
         """
+        minimum = (
+            RESOURCE_TOKEN_LENGTH
+            + RESOURCE_NAME_SEPARATOR_COUNT
+            + MIN_NAME_COMPONENT_LENGTH
+            + MIN_NAME_COMPONENT_LENGTH
+        )
+        if not minimum <= limit <= DNS_LABEL_LIMIT:
+            raise ValueError(RESOURCE_NAME_LIMIT_INVALID)
         suffix = hashlib.sha256(self.run_id.encode("utf-8")).hexdigest()[
             :RESOURCE_TOKEN_LENGTH
         ]
         base = dns_token(
-            prefix or RUN_SCOPE_PREFIX, limit=DNS_LABEL_LIMIT - len(suffix) - 3
+            prefix or RUN_SCOPE_PREFIX,
+            limit=limit
+            - len(suffix)
+            - RESOURCE_NAME_SEPARATOR_COUNT
+            - MIN_NAME_COMPONENT_LENGTH,
         )
-        available = DNS_LABEL_LIMIT - len(base) - len(suffix) - 2
+        available = limit - len(base) - len(suffix) - RESOURCE_NAME_SEPARATOR_COUNT
         token = dns_token(kind, limit=available)
         return f"{base}-{token}-{suffix}"
 

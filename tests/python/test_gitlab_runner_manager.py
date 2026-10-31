@@ -18,6 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Final, Optional
+from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
@@ -48,10 +49,15 @@ NAMESPACE = "manager-unit-namespace"
 NAMESPACE_UID: Final = "manager-unit-namespace-uid"
 OBSERVED_PROTECTION: Final = "not_protected"
 TAG_ARGUMENT: Final = "--tag"
+APPLY_ARGUMENT: Final = "--apply"
+CONFIRM_ARGUMENT: Final = "--confirm-plan"
+FIELD_PLAN_DIGEST: Final = "plan_digest"
 FIELD_STATUS: Final = "status"
 FIELD_RECORDS: Final = "records"
 FIELD_CALLBACK: Final = "callback"
 FIELD_TAGS: Final = "tag_list"
+EXPECTED_TAGS_KEYWORD: Final = "expected_tags"
+RUNNER_READ_ATTRIBUTE: Final = "read_runner_record"
 RUNNER_ID = 73
 RUNNER_DESCRIPTION = "unit-manager-runner"
 RUNNER_LABELS = ("ci13", "unit")
@@ -974,6 +980,7 @@ class ManagerCluster(MemoryCluster):
         self.guard_checks: list[bool] = []
         self.events: list[str] = []
         self.runner_reads = 0
+        self.observed_runner_tags = RUNNER_LABELS
         self.token_path: Path
         self.caller_namespace = ""
 
@@ -1137,10 +1144,12 @@ def _manager_cli_harness(
             RUNNER_DESCRIPTION,
         )
         if expected_tags is not None:
-            assert tuple(expected_tags) == RUNNER_LABELS
+            assert tuple(expected_tags) == tuple(cluster.observed_runner_tags)
         assert expected_protection is None
         cluster.runner_reads += 1
-        return _runner_record(online=cluster.runner_online)
+        record = _runner_record(online=cluster.runner_online)
+        record[FIELD_TAGS] = list(cluster.observed_runner_tags)
+        return record
 
     @contextmanager
     def guard(origin: str, runner_id: int) -> Iterator[None]:
@@ -1309,19 +1318,43 @@ def test_manager_label_alias_plans_the_same_tags_as_tag(
     assert cluster.applied == cluster.deleted == []
 
 
+@pytest.mark.parametrize("empty_tags", (False, True))
 def test_manager_deploy_without_tags_preserves_observed_provider_tags(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    empty_tags: bool,
 ) -> None:
-    """Plan omitted tags from independent runner read-back without provider mutation.
+    """Preserve omitted native tags through planning and confirmed manager rollout.
 
     :param monkeypatch: Bind the existing isolated provider lifecycle harness.
     :param tmp_path: Test-owned token and lock directory.
     :param capsys: Capture the real command's machine-readable report.
+    :param empty_tags: Whether native runner read-back contains no tags.
     """
     cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    runner_read = Mock(wraps=CALLBACKS.read_runner_record)
+    monkeypatch.setattr(CALLBACKS, RUNNER_READ_ATTRIBUTE, runner_read)
+    observed_tags = () if empty_tags else tuple(uuid4().hex for _ in RUNNER_LABELS)
+    cluster.observed_runner_tags = observed_tags
     selected_run_id = uuid4().hex
+    original_fingerprint = ACTION.GitLabRunnerManagerAction.fingerprint
+    resolved_tags: list[tuple[str, ...]] = []
+    observed_actions: list[ACTION.GitLabRunnerManagerAction] = []
+
+    def fingerprint(action: ACTION.GitLabRunnerManagerAction) -> str:
+        """Retain the real post-observation labels before normal confirmation hashing.
+
+        :param action: Prepared action after independent provider tag observation.
+        :returns: Original confirmation digest without replacing its computation.
+        """
+        resolved_tags.append(action.labels)
+        observed_actions.append(action)
+        return original_fingerprint(action)
+
+    monkeypatch.setattr(
+        ACTION.GitLabRunnerManagerAction, original_fingerprint.__name__, fingerprint
+    )
     arguments = [
         value
         for value in _manager_cli_arguments(cluster, run_id=selected_run_id)
@@ -1338,9 +1371,39 @@ def test_manager_deploy_without_tags_preserves_observed_provider_tags(
         for item in result[FIELD_RECORDS]
         if item.get(FIELD_CALLBACK) == CALLBACKS.ObserveGitLabRunner.__name__
     ]
-    assert [item[FIELD_TAGS] for item in observations] == [list(RUNNER_LABELS)]
+    assert [item[FIELD_TAGS] for item in observations] == [list(observed_tags)]
+    assert resolved_tags == [observed_tags]
     assert cluster.runner_reads == len(observations)
     assert cluster.applied == cluster.deleted == []
+
+    code = SCRIPT.main(
+        [*arguments, APPLY_ARGUMENT, CONFIRM_ARGUMENT, result[FIELD_PLAN_DIGEST]]
+    )
+    applied = json.loads(capsys.readouterr().out)
+    assert code == STATUS.exit_code(STATUS.PASS)
+    assert applied[FIELD_STATUS] == STATUS.PASS
+    online = [
+        item
+        for item in applied[FIELD_RECORDS]
+        if item.get(FIELD_CALLBACK) == CALLBACKS.VerifyGitLabRunnerOnline.__name__
+    ]
+    assert [item[FIELD_TAGS] for item in online] == [list(observed_tags)]
+    assert runner_read.call_args.kwargs[EXPECTED_TAGS_KEYWORD] == observed_tags
+    assert resolved_tags == [observed_tags] * len((result, applied))
+    assert all(action.labels == observed_tags for action in observed_actions)
+    assert cluster.applied
+    provider_callbacks = {
+        CALLBACKS.ObserveGitLabRunner.__name__,
+        CALLBACKS.VerifyGitLabRunnerOnline.__name__,
+    }
+    assert cluster.runner_reads == len(
+        [
+            item
+            for report in (result, applied)
+            for item in report[FIELD_RECORDS]
+            if item.get(FIELD_CALLBACK) in provider_callbacks
+        ]
+    )
 
 
 def test_manager_parser_declares_tag_with_label_alias() -> None:

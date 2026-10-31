@@ -54,6 +54,8 @@ GET_VERB: Final = "get"
 SELECTOR_OPTION: Final = "-l"
 JSON_OPTIONS: Final = ("-o", "json")
 DEPLOYMENT_KIND: Final = "Deployment"
+DEPLOYMENT_RESOURCE: Final = "deployments"
+NAMESPACE_OPTION: Final = "--namespace"
 SPEC_FIELD: Final = "spec"
 TEMPLATE_FIELD: Final = "template"
 INIT_CONTAINERS_FIELD: Final = "initContainers"
@@ -151,24 +153,19 @@ def observe_namespace(
 class ObserveGitHubNamespace(K8SCallback["WorkflowAction"]):
     """Bind namespace UID and ownership before GitHub plan confirmation."""
 
-    def _legacy_repository_matches(self, namespace: str, name: str) -> bool:
-        """Verify legacy ownership against the Deployment's selected repository.
+    def _repository_matches(self, deployment: KubernetesObject) -> bool:
+        """Verify an owned Deployment identifies the selected provider repository.
 
-        :param namespace: Native namespace with legacy workload-name ownership.
-        :param name: Independently observed legacy workload name to verify.
+        :param deployment: Independently observed native Deployment.
         :returns: Whether one init container identifies the exact provider repository.
-        :raises KubernetesError: Deployment observation is malformed or unreadable.
-        """  # noqa: DOC502 - Native read and typed field readers propagate failures.
+        :raises KubernetesError: Deployment provider-identity fields are malformed.
+        """
         workflow = self.action
-        deployment = self.kubernetes.read(DEPLOYMENT_KIND, name, namespace)
-        if deployment is None or workflow.target.github is None:
+        if workflow.target.github is None:
             return False
         try:
             pod = (
-                KubernetesObject(deployment)
-                .object(SPEC_FIELD)
-                .object(TEMPLATE_FIELD)
-                .object(SPEC_FIELD)
+                deployment.object(SPEC_FIELD).object(TEMPLATE_FIELD).object(SPEC_FIELD)
             )
             for container in pod.objects(INIT_CONTAINERS_FIELD):
                 environment = container.objects(ENVIRONMENT_FIELD)
@@ -190,8 +187,54 @@ class ObserveGitHubNamespace(K8SCallback["WorkflowAction"]):
             raise KubernetesError(NAMESPACE_READBACK_INVALID) from exc
         return False
 
+    def _owned_runner_names(self, namespace: str, operation: str) -> tuple[str, ...]:
+        """Resolve native workload names from exact operation labels and provider identity.
+
+        :param namespace: Native namespace selected by its ownership labels.
+        :param operation: Exact observed operation label, independent of workload name.
+        :returns: Valid owned names matching the selected repository, host, and explicit override.
+        :raises KubernetesError: Native Deployment objects or ownership observations are malformed.
+        """  # noqa: DOC502 - Shared native access and ownership validation propagate errors.
+        resources = ResourceSet(self.kubernetes, namespace, operation)
+        try:
+            document = KubernetesObject(
+                json_object(
+                    self.kubernetes.json(
+                        GET_VERB,
+                        DEPLOYMENT_RESOURCE,
+                        NAMESPACE_OPTION,
+                        namespace,
+                        SELECTOR_OPTION,
+                        f"{MANAGER_LABEL}={MANAGER_VALUE},{OPERATION_LABEL}={operation}",
+                        *JSON_OPTIONS,
+                    )
+                )
+            )
+            names = []
+            for deployment in document.objects(ITEMS_FIELD):
+                if not resources.owns(
+                    deployment.document
+                ) or not self._repository_matches(deployment):
+                    continue
+                name = deployment.name
+                if (
+                    getattr(self.action.args, "name", None)
+                    and name != self.action.runner.name
+                ):
+                    continue
+                try:
+                    name = kubernetes_runner_name(
+                        ResolvedName(name, NameSource.EXPLICIT)
+                    ).value
+                except ValueError:
+                    continue
+                names.append(name)
+            return tuple(names)
+        except TypeError as exc:
+            raise KubernetesError(NAMESPACE_READBACK_INVALID) from exc
+
     def _select_namespace(self, explicit: bool) -> ScopeSource:
-        """Reuse an owned namespace while preserving legacy verified ownership.
+        """Reuse an owned namespace while preserving verified native workload identity.
 
         :param explicit: Whether the caller chose an exact existing namespace.
         :returns: Native observation source after binding current runner identity.
@@ -226,21 +269,16 @@ class ObserveGitHubNamespace(K8SCallback["WorkflowAction"]):
                     native = item.metadata.object(LABELS_FIELD).text(OPERATION_LABEL)
                     if native is None:
                         continue
-                    if getattr(workflow.args, "name", None) and native != name:
+                    observed = ResourceSet(self.kubernetes, "", native)
+                    if not observed.owns(item.document):
                         continue
-                    try:
-                        legacy_name = kubernetes_runner_name(
-                            ResolvedName(native, NameSource.EXPLICIT)
-                        ).value
-                    except ValueError:
+                    names = self._owned_runner_names(item.name, native)
+                    if len(names) > 1:
+                        raise KubernetesError(NAMESPACE_AMBIGUOUS)
+                    if not names:
                         continue
-                    legacy = ResourceSet(self.kubernetes, "", legacy_name)
-                    if not legacy.owns(
-                        item.document
-                    ) or not self._legacy_repository_matches(item.name, legacy_name):
-                        continue
-                    operation = legacy_name
-                    name = legacy_name
+                    operation = native
+                    name = names[0]
                 owned.append((item.name, operation, name))
             if len(owned) > 1:
                 raise KubernetesError(NAMESPACE_AMBIGUOUS)

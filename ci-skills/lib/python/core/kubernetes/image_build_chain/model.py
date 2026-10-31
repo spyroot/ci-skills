@@ -37,7 +37,11 @@ from lib.python.core.runner_identity import (
     resolve_name,
     resolve_repository,
 )
-from lib.python.core.runner_options import parse_protected, runner_tags
+from lib.python.core.runner_options import (
+    RUNNER_NAME_LIMIT,
+    parse_protected,
+    runner_tags,
+)
 from lib.python.core.runner_scope import ScopeObservation, ScopePurpose, ScopeSource
 from lib.python.core.target import (
     GitLabOperationTarget,
@@ -227,6 +231,11 @@ class ImageBuildChainAction(SkillAction):
 
         Reportable source that resolved the selected target.
 
+    .. attribute :: mode
+        :type: ProbeMode
+
+        Validated dry-run, live-plan, or confirmed-apply mode.
+
     .. attribute :: gitlab_selection
         :type: tuple[str, str]
 
@@ -251,11 +260,6 @@ class ImageBuildChainAction(SkillAction):
         :type: ResolvedName | None
 
         Planned or independently observed manager workload name.
-
-    .. attribute :: mode
-        :type: ProbeMode
-
-        Validated dry-run, live-plan, or confirmed-apply mode.
     """
 
     args: argparse.Namespace
@@ -412,8 +416,10 @@ class ImageBuildChainAction(SkillAction):
         )
         self.resolved_runner_name = (
             ResolvedName(
-                self.manager_scope.name(
-                    MANAGER_ROLE, prefix=self.repository_identity.name
+                self.manager_scope.bounded_name(
+                    MANAGER_ROLE,
+                    limit=RUNNER_NAME_LIMIT,
+                    prefix=self.repository_identity.name,
                 ),
                 NameSource.REPOSITORY
                 if self.repository_identity.name

@@ -40,6 +40,9 @@ if TYPE_CHECKING:
 NAMESPACE_KIND: Final = NAMESPACES.NAMESPACE_KIND
 CLUSTER_NAMESPACE: Final = ""
 CREATE_OPERATION: Final = RUNNERS.RUNNER_CREATE
+UPDATE_OPERATION: Final = "update"
+GITHUB_KIND: Final = "create_selfhosted_runner"
+UPDATE_IDENTITY_MISSING: Final = "runner_update_identity_missing"
 DELETE_OPERATION: Final = "delete"
 GET_OPERATION: Final = NAMESPACES.GET_VERB
 GET_METHOD: Final = "GET"
@@ -332,40 +335,47 @@ def test_gitlab_runner_protection_mismatch_fails_after_independent_reads(
 
 
 @pytest.mark.parametrize("repository_matches", (True, False))
-def test_github_workflow_binds_deferred_consumers_to_verified_legacy_identity(
+@pytest.mark.parametrize("hashed_operation", (False, True))
+def test_github_workflow_binds_deferred_consumers_to_verified_custom_identity(
     monkeypatch: pytest.MonkeyPatch,
     selected_scope: Namespace,
     repository_matches: bool,
+    hashed_operation: bool,
 ) -> None:
-    """Reuse a custom legacy name only after matching its native repository and host.
+    """Reuse a custom name only after matching its native repository and ownership.
 
     :param monkeypatch: Replace provider writes while retaining real workflow ordering.
     :param selected_scope: Generated selected, existing and alternate repository identities.
-    :param repository_matches: Whether the observed legacy Deployment belongs to this repo.
+    :param repository_matches: Whether the observed Deployment belongs to this repo.
+    :param hashed_operation: Native current ownership hash or legacy workload-name label.
     """
     selected = selected_scope
     cluster = MemoryCluster()
     action = _action(cluster, selected)
+    action.args.kind = GITHUB_KIND
+    action.args.name = selected.legacy_name
+    action.args.label = [selected.tag]
+    action.args.runner_root = RUNNER.RUNTIME_ROOT
+    action._workload()
+    native_operation = (
+        action.runner.operation if hashed_operation else selected.legacy_name
+    )
+    action.args.action = UPDATE_OPERATION
     action.args.namespace = None
     action.args.name = None
     action.args.apply = True
-    action.runner = replace(
-        action.runner,
-        namespace=selected.planned_namespace,
-        name=selected.repository_name,
-        ownership_id=selected.operation,
-    )
-    action.resolved_runner_name = IDENTITY.ResolvedName(
-        selected.repository_name, IDENTITY.NameSource.REPOSITORY
-    )
+    action._workload()
+    planned_namespace = action.runner.namespace
+    planned_operation = action.runner.operation
+    planned_name = action.runner.name
     action.spec = SimpleNamespace(
         image_repository=selected.repository,
         image_tag=selected.tag,
-        namespace=selected.planned_namespace,
+        namespace=planned_namespace,
     )
     native_namespace = _namespace(selected, owned=True)
     native_namespace[FIELD_METADATA][FIELD_LABELS][RESOURCES.OPERATION_LABEL] = (
-        selected.legacy_name
+        native_operation
     )
     cluster.objects[selected.namespace_key] = native_namespace
     deployment = {
@@ -402,7 +412,9 @@ def test_github_workflow_binds_deferred_consumers_to_verified_legacy_identity(
             selected.namespace,
             selected.legacy_name,
         )
-    ] = deployment
+    ] = RESOURCES.ResourceSet(cluster, selected.namespace, native_operation).managed(
+        deployment
+    )
     for callback_type in (
         GITHUB_COMMAND.K8SAuth,
         GITHUB_COMMAND.GitHubAuth,
@@ -438,13 +450,21 @@ def test_github_workflow_binds_deferred_consumers_to_verified_legacy_identity(
         monkeypatch.setattr(GITHUB_COMMAND, callback_type.__name__, capture)
     executor = GITHUB_COMMAND.workflow(action)
     assert captured == []
-    executor.run()
-    assert captured == [action.runner] * len(consumers)
+    if repository_matches:
+        executor.run()
+        assert captured == [action.runner] * len(consumers)
+    else:
+        with pytest.raises(KUBERNETES.KubernetesError, match=UPDATE_IDENTITY_MISSING):
+            executor.run()
+        assert captured == []
     assert action.runner.namespace == (
-        selected.namespace if repository_matches else selected.planned_namespace
+        selected.namespace if repository_matches else planned_namespace
     )
     assert action.runner.name == (
-        selected.legacy_name if repository_matches else selected.repository_name
+        selected.legacy_name if repository_matches else planned_name
+    )
+    assert action.runner.operation == (
+        native_operation if repository_matches else planned_operation
     )
     assert action.resolved_runner_name.source == (
         IDENTITY.NameSource.PROVIDER

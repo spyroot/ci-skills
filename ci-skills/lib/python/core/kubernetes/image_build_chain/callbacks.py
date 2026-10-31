@@ -38,6 +38,7 @@ from lib.python.core.kubernetes.run_scope import RunScope
 from lib.python.core.kubernetes.runner_scope import observe_namespace
 from lib.python.core.report import plan_digest
 from lib.python.core.runner_identity import NameSource, ResolvedName
+from lib.python.core.runner_options import RUNNER_NAME_LIMIT
 from lib.python.core.runner_scope import ScopePurpose, ScopeSource
 
 from .model import RUNNER_TOKEN_NAME, ImageBuildChainAction, ImageBuildChainState
@@ -177,8 +178,10 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
                 raise ValueError("run_scope_namespace_mismatch")
             action.manager_scope = observed
         preferred = ResolvedName(
-            action.manager_scope.name(
-                MANAGER_ROLE, prefix=action.repository_identity.name
+            action.manager_scope.bounded_name(
+                MANAGER_ROLE,
+                limit=RUNNER_NAME_LIMIT,
+                prefix=action.repository_identity.name,
             ),
             NameSource.REPOSITORY
             if action.repository_identity.name
