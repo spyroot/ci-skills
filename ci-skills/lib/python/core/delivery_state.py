@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from lib.python.access.harbor_credentials import RegistryCredential
     from lib.python.core.cli_api import ReadSession
     from lib.python.core.github.github import GitHubService
+    from lib.python.core.github.session import GitHubIdentitySession
     from lib.python.core.harbor.registry_mirror import HarborService
     from lib.python.core.kubernetes.kubernetes import KubernetesService
     from lib.python.core.runner import RunnerRuntime
@@ -61,6 +62,7 @@ class DeliveryState(ExecutionContext):
     :ivar kubernetes: Verified Kubernetes service assigned by K8SAuth.
     :ivar harbor: Private registry service assigned by HarborAuth.
     :ivar github: Verified GitHub service assigned by GitHubAuth.
+    :ivar github_identity: Private identity session before repository creation.
     :ivar build_result: Image identity assigned by BuildToolbox.
     :ivar source_image: Immutable publication input assigned by plan or build.
     :ivar published_image: Verified image assigned by plan or HarborPush.
@@ -108,6 +110,11 @@ class DeliveryState(ExecutionContext):
 
         Verified GitHub service assigned by GitHubAuth.
 
+    .. attribute :: github_identity
+        :type: GitHubIdentitySession
+
+        Shared github identity retained for this invocation.
+
     .. attribute :: build_result
         :type: ToolboxBuildResult
 
@@ -147,6 +154,7 @@ class DeliveryState(ExecutionContext):
     kubernetes: KubernetesService = field(init=False, repr=False)
     harbor: HarborService = field(init=False, repr=False)
     github: GitHubService = field(init=False, repr=False)
+    github_identity: GitHubIdentitySession = field(init=False, repr=False)
     build_result: ToolboxBuildResult = field(init=False, repr=False)
     source_image: str = field(init=False, repr=False)
     published_image: str = field(init=False, repr=False)

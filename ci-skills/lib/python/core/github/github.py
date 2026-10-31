@@ -10,6 +10,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass, field, replace
+from http import HTTPMethod
 from typing import Final, Optional
 
 from lib.python.access.credentials import bind_sources
@@ -21,8 +22,11 @@ from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import github_variables
 from lib.python.core.cli_api import APIError, CLIAPIClient, ReadSession
 from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
+from lib.python.core.github.session import (
+    GitHubIdentitySession,
+    GitHubRequestService,
+)
 from lib.python.core.json_types import (
-    JSONDocument,
     JSONObject,
     json_object,
     json_objects,
@@ -34,6 +38,9 @@ GITHUB_SERVICE_KEY: Final = SkillPluginType.GITHUB.value
 GITHUB_PAGE_SIZE: Final = 100
 RUNNER_POLL_SECONDS: Final = 2
 RUNNER_ONLINE: Final = "online"
+IDENTITY_ENDPOINT: Final = "user"
+IDENTITY_LOGIN: Final = "login"
+IDENTITY_MISSING: Final = "github_identity_missing"
 
 
 class GitHubAPIClient(CLIAPIClient):
@@ -69,7 +76,7 @@ class GitHubAPIClient(CLIAPIClient):
 
 
 @dataclass(frozen=True)
-class GitHubService:
+class GitHubService(GitHubRequestService):
     """GitHub service created after identity and repository read-back.
 
     :param host: Selected provider hostname.
@@ -123,26 +130,6 @@ class GitHubService:
     identity: str
     repository_id: int
     credential_source: str
-
-    def request(
-        self, method: str, endpoint: str, body: Optional[JSONObject] = None
-    ) -> JSONDocument:
-        """Call the shared transport against this bound GitHub service.
-
-        :param method: HTTP method required by the atom.
-        :param endpoint: Relative API endpoint.
-        :param body: JSON request fields; ``None`` sends no request body.
-        :returns: Decoded response object or array; empty DELETE returns an empty mapping.
-        :raises APIError: If endpoint or body validation fails, a provider failure
-            is terminal or exhausts GET retries, response bytes exceed the limit,
-            or the decoded result is not a JSON object or array.
-        :raises OSError: If the native CLI cannot start or private request-body
-            file creation, writing, or removal fails.
-        """  # noqa: DOC503 - The shared transport propagates native process and body-file errors.
-        response = self.api._request(self, method, endpoint, body)
-        if not isinstance(response, (Mapping, Sequence)) or isinstance(response, str):
-            raise APIError("github_response_invalid")
-        return response
 
     def runners(self) -> Sequence[JSONObject]:
         """Read all repository runner pages using the provider's total count.
@@ -218,18 +205,6 @@ class GitHubService:
         if self.runner(name) is not None:
             raise APIError("runner_delete_incomplete")
         return True
-
-    @property
-    def token(self) -> str:
-        """Return the bound native credential for an owned workload Secret.
-
-        :returns: Selected private credential, never reportable.
-        :raises TargetError: If source binding did not retain a credential.
-        """
-        selected = [value for value in self.environment.values() if value is not None]
-        if len(selected) != 1:
-            raise TargetError("github_credential_unresolved")
-        return selected[0]
 
 
 class GitHubCallback(Callback[DeliveryState, ActionT_co]):
@@ -313,6 +288,23 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
             environment[github_variables(github.host)[0]] = token
         return environment
 
+    def _identity_session(self) -> GitHubIdentitySession:
+        """Verify account access without assuming that a destination exists.
+
+        :returns: Private identity session reused by repository and runner workflows.
+        :raises APIError: Provider identity is missing or unusable.
+        :raises OSError: The shared native request cannot execute.
+        """
+        session = self.state.github_session
+        api = GitHubAPIClient(timeout=self.action.timeout)
+        user = api._request(session, HTTPMethod.GET, IDENTITY_ENDPOINT)
+        identity = user.get(IDENTITY_LOGIN) if isinstance(user, Mapping) else None
+        if not isinstance(identity, str) or not identity.strip():
+            raise APIError(IDENTITY_MISSING)
+        return GitHubIdentitySession(
+            session.host, session.environment, api, identity, session.credential_source
+        )
+
     def _service(self) -> GitHubService:
         """Verify user and repository fields before constructing a usable service.
 
@@ -322,13 +314,10 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
         :raises OSError: If a native provider command cannot be launched.
         """  # noqa: DOC503 - native credential and transport calls propagate OSError
         github = self.state.github_target
-        session = self.state.github_session
-        api = GitHubAPIClient(timeout=self.action.timeout)
-        user = api._request(session, "GET", "user")
-        identity = user.get("login") if isinstance(user, Mapping) else None
-        if not isinstance(identity, str) or not identity.strip():
-            raise APIError("github_identity_missing")
-        repository = api._request(session, "GET", f"repos/{github.repository}")
+        session = self._identity_session()
+        api = session.api
+        identity = session.identity
+        repository = session.request("GET", f"repos/{github.repository}")
         repository_id = (
             repository.get("id") if isinstance(repository, Mapping) else None
         )
@@ -394,6 +383,27 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
             "repository": service.repository,
             "repository_id": service.repository_id,
             "credential_source": service.credential_source,
+        }
+        self.state.access_evidence[GITHUB_SERVICE_KEY] = evidence
+        return evidence
+
+
+class GitHubIdentityAuth(GitHubAuth):
+    """Authenticate an account before an optional repository creation workflow."""
+
+    def run(self) -> JSONObject:
+        """Retain shared account access without invoking runner-only checks.
+
+        :returns: Redacted identity evidence for the selected GitHub provider.
+        :raises APIError: Authenticated identity cannot be read back.
+        :raises OSError: The shared native request cannot execute.
+        """  # noqa: DOC502 - Shared readers and transport propagate the documented failures.
+        session = self._identity_session()
+        self.state.github_identity = session
+        evidence: JSONObject = {
+            "host": session.host,
+            "identity": session.identity,
+            "credential_source": session.credential_source,
         }
         self.state.access_evidence[GITHUB_SERVICE_KEY] = evidence
         return evidence

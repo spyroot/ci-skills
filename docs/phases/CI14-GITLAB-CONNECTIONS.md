@@ -122,3 +122,49 @@ Provider references: [GitLab mirrors](https://docs.gitlab.com/api/remote_mirrors
 [GitHub repositories](https://docs.github.com/en/rest/repos/repos),
 [GitLab Agent installation](https://docs.gitlab.com/user/clusters/agent/install/) and
 [project CI access](https://docs.gitlab.com/user/clusters/agent/ci_cd_workflow/).
+
+### Proposed D1/D3 resolution for PR-001 — pending operator approval
+
+This section is a proposal, not an approved replacement for the open decisions.
+
+Use GitLab's native HTTPS password-authenticated push mirror. Bind the selected GitHub credential through the existing
+credential provider and private request-body transport. GitLab retains that credential for future pushes; never expose
+it in argv, plans, URLs, reports, errors or receipts. No new target key or credential source is introduced. SSH key
+provisioning is not part of PR-001.
+
+Mirror all branches and tags with `only_protected_branches=false` and `keep_divergent_refs=true`. Divergence preserves
+destination changes and fails verification. Native GitLab branch-deletion behavior still applies; preserving divergent
+refs does not promise that merged source-branch deletions will never propagate. Existing conflicting mirror policy is
+reported in the live plan and must not be silently relaxed. No force-push or unrelated mirror/repository mutation.
+
+The destination must exist unless `--create-if-absent` is confirmed. Optional creation produces an empty private
+repository under the explicitly selected owner. Never infer an owner mapping from the source namespace or change an
+existing repository's visibility. Validate owner type and creation permissions through provider read-back.
+
+`gitlab_mirror.py sync` accepts existing common modes/output/log controls and `--project`, `--destination`,
+`--create-if-absent`, `--live-plan`, `--apply`, `--confirm-plan`, `--timeout` and `--receipt-out`. Source and destination
+selectors default only from existing `gitlab.project` and `github.repository`; missing selectors or missing authority
+configuration produce structured blockers. Default/`--dry-run` is offline. `--live-plan` reads state without mutation.
+Apply requires the digest of that live plan, binding selected repositories, observed refs, mirror policy, optional
+creation and functional revision. An uncertain write is reconciled before any retry.
+
+Reuse `WorkflowExecutor`, provider sessions, shared transport/modes/reporting and constants. Extract GitHub identity
+session authentication before optional repository creation while preserving existing runner authentication behavior.
+Introduce shared Git ref reading through `run_command_bounded`: native `git ls-remote` reads only branch/tag object IDs,
+uses private credential environments and no prompts, and never clones or downloads repository objects. Verify all
+source refs against destination object IDs; retain destination-only refs. Read source stability and report digests/counts.
+A sync request or a finished mirror without matching refs cannot report PASS. Matching verified state is NO_OP without
+another sync request. Preserve intended repositories/mirrors and report partial ownership after uncertain mutation;
+clean private temporary request/ref-read resources on every exit.
+
+Normalized intent and result shapes are defined by the accompanying exact schema proposal. A new targeted receipt must
+be produced from installed candidate execution; its generated JSON diff requires separate exact-content approval.
+Register the new kind in the existing acceptance checker and existing required-result path after approval. Never run
+an aggregate status-publishing check against main as a substitute for this feature's own candidate proof.
+
+Required implementation paths in addition to the queue's current source scope are `tests/python/test_gitlab_mirror.py`,
+`tools/check_live_acceptance.py` and generated `ci-skills/tools.json`; these are acceptance/catalog consumers of the same
+capability, not separate feature scope. No Git hooks, repository CI redesign or new target keys are proposed.
+
+Provider semantics: [remote mirrors API](https://docs.gitlab.com/api/remote_mirrors/) and
+[push mirroring](https://docs.gitlab.com/user/project/repository/mirror/push/).

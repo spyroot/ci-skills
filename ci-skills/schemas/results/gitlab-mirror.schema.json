@@ -1,0 +1,528 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/ci-skills/schemas/results/gitlab-mirror.schema.json",
+  "title": "GitLab mirror workflow result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "status",
+    "captured_at",
+    "errors",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "kind": {
+      "const": "gitlab_mirror"
+    },
+    "status": {
+      "enum": [
+        "DRY_RUN",
+        "PLANNED",
+        "PASS",
+        "PARTIAL",
+        "BLOCKED"
+      ]
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "filters": {
+      "$ref": "../gitlab-mirror.schema.json"
+    },
+    "operation": {
+      "const": "sync"
+    },
+    "plan_digest": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "mutated": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "records": {
+      "type": "array",
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/record"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/error"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_count",
+        "error_count"
+      ],
+      "properties": {
+        "record_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "error_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "cleanup": {
+      "$ref": "toolbox-workflow.schema.json#/properties/cleanup"
+    },
+    "skill": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/skill"
+    },
+    "tested_revision": {
+      "$ref": "gitlab-runner-tag.schema.json#/properties/tested_revision"
+    },
+    "execution_host": {
+      "type": "string",
+      "minLength": 1
+    },
+    "safe_next_step": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PASS"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "skill",
+          "tested_revision"
+        ],
+        "properties": {
+          "plan_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "mutated": {
+            "type": "boolean"
+          },
+          "records": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "verified": {
+                  "const": true
+                },
+                "source": {
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "destination": {
+                  "properties": {
+                    "id": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "mirror": {
+                  "type": "object",
+                  "properties": {
+                    "auth_method": {
+                      "const": "password"
+                    },
+                    "keep_divergent_refs": {
+                      "const": true
+                    },
+                    "only_protected_branches": {
+                      "const": false
+                    },
+                    "enabled": {
+                      "const": true
+                    },
+                    "update_status": {
+                      "const": "finished"
+                    },
+                    "last_error_present": {
+                      "const": false
+                    },
+                    "last_successful_update_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "errors": {
+            "maxItems": 0
+          },
+          "cleanup": {
+            "properties": {
+              "status": {
+                "const": "PASS"
+              },
+              "failures": {
+                "maxItems": 0
+              }
+            }
+          },
+          "summary": {
+            "properties": {
+              "record_count": {
+                "const": 1
+              },
+              "error_count": {
+                "const": 0
+              }
+            }
+          },
+          "skill": {
+            "$ref": "gitlab-runner-tag.schema.json#/$defs/verified_skill"
+          },
+          "tested_revision": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "BLOCKED",
+              "PARTIAL"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "errors": {
+            "minItems": 1
+          },
+          "summary": {
+            "properties": {
+              "error_count": {
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "DRY_RUN"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "mutated": {
+            "const": false
+          },
+          "records": {
+            "maxItems": 0
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PLANNED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "plan_digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "mutated": {
+            "const": false
+          },
+          "records": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "action": {
+                  "const": "PLANNED"
+                },
+                "verified": {
+                  "const": false
+                }
+              }
+            }
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "not": {
+              "const": "BLOCKED"
+            }
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "target",
+          "filters",
+          "operation",
+          "plan_digest",
+          "mutated",
+          "records",
+          "cleanup"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "sha256"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "path",
+        "id"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      }
+    },
+    "mirror": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "enabled",
+        "auth_method",
+        "keep_divergent_refs",
+        "only_protected_branches",
+        "update_status",
+        "last_successful_update_at",
+        "last_error_present"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "auth_method": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keep_divergent_refs": {
+          "type": "boolean"
+        },
+        "only_protected_branches": {
+          "type": "boolean"
+        },
+        "update_status": {
+          "enum": [
+            "none",
+            "scheduled",
+            "started",
+            "finished",
+            "failed"
+          ]
+        },
+        "last_successful_update_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "last_error_present": {
+          "type": "boolean"
+        }
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callback",
+        "action",
+        "verified",
+        "source",
+        "destination",
+        "mirror",
+        "source_refs",
+        "destination_refs",
+        "created",
+        "verified_source_ref_count"
+      ],
+      "properties": {
+        "callback": {
+          "const": "gitlab_mirror"
+        },
+        "action": {
+          "enum": [
+            "APPLIED",
+            "NO_OP",
+            "VERIFIED",
+            "PLANNED"
+          ]
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/repository"
+        },
+        "destination": {
+          "$ref": "#/$defs/repository"
+        },
+        "mirror": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/mirror"
+            }
+          ]
+        },
+        "source_refs": {
+          "$ref": "#/$defs/refs"
+        },
+        "destination_refs": {
+          "$ref": "#/$defs/refs"
+        },
+        "created": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "repository",
+            "mirror"
+          ],
+          "properties": {
+            "repository": {
+              "type": "boolean"
+            },
+            "mirror": {
+              "type": "boolean"
+            }
+          }
+        },
+        "verified_source_ref_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "reason"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

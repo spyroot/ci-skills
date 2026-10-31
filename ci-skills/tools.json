@@ -670,6 +670,56 @@
       },
       "use_when": "A selected project or group milestone needs a requested change."
     },
+    "gitlab_mirror.py": {
+      "capabilities": [],
+      "execution_surface": "selected GitLab and GitHub APIs; bounded native Git ref reads",
+      "options": [
+        "--apply",
+        "--binding",
+        "--confirm-plan",
+        "--create-if-absent",
+        "--describe",
+        "--destination",
+        "--dry-run",
+        "--human",
+        "--json",
+        "--live-plan",
+        "--log-file",
+        "--log-format",
+        "--log-level",
+        "--output-dir",
+        "--project",
+        "--receipt-out",
+        "--revision",
+        "--run-id",
+        "--timeout",
+        "--yaml"
+      ],
+      "purpose": "Synchronize a selected GitLab project to GitHub with independent ref verification.",
+      "read_only": false,
+      "report_kind": "gitlab_mirror",
+      "required_options": [],
+      "required_tools": [
+        "glab",
+        "gh",
+        "git"
+      ],
+      "requires_authorities": [
+        "gitlab",
+        "github"
+      ],
+      "returns": "Plan or verified mirror state, repository identities, ref digests and redacted blockers.",
+      "side_effects": "Confirmed sync configures one native push mirror and requests synchronization. Only --create-if-absent permits creating the private GitHub destination. GitLab retains the selected GitHub credential for future pushes. Divergent refs are preserved and reported as failure; native mirror deletion behavior applies.",
+      "subcommands": {
+        "sync": {
+          "purpose": "Reconcile one native push mirror and verify source and destination refs.",
+          "read_back": "Read native mirror status and branch/tag object IDs independently on both providers.",
+          "required_options": [],
+          "result_schema": "schemas/results/gitlab-mirror.schema.json"
+        }
+      },
+      "use_when": "Configure or reconcile a native GitLab-to-GitHub push mirror."
+    },
     "gitlab_mr.py": {
       "capabilities": [],
       "execution_surface": "selected authority API",
