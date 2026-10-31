@@ -11,7 +11,7 @@ import signal
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Final, Optional
 
 import pytest
 import test_gitlab_runner_lifecycle as runner_lifecycle
@@ -32,6 +32,8 @@ MANAGER_ACTION = import_script_module("lib.python.core.gitlab.runner_manager.act
 PODMAN = import_script_module("lib.python.core.kubernetes.podman_probe")
 READINESS = import_script_module("lib.python.core.kubernetes.image_build_readiness")
 RUN_SCOPE = import_script_module("lib.python.core.kubernetes.run_scope")
+RUNNER = import_script_module("lib.python.core.runner")
+IDENTITY = import_script_module("lib.python.core.runner_identity")
 TARGET = import_script_module("lib.python.core.target")
 TOOLBOX_ACTIONS = import_script_module("lib.python.core.toolbox_actions")
 VERIFICATION = import_script_module(
@@ -56,6 +58,7 @@ if TYPE_CHECKING:
 RUN_ID = "ci13-unit-run"
 NODE = "worker-ci13"
 CALLER_NAMESPACE = "caller-builds"
+CALLER_NAMESPACE_UID: Final = "caller-builds-namespace-uid"
 RUNNER_ID = 73
 TOOLBOX_IMAGE = "harbor.example.test/toolbox/ci@sha256:" + "a" * 64
 
@@ -68,6 +71,32 @@ def _read_nodes(*args: str) -> JSONObject:
     """
     assert args == ("get", "nodes", "-o", "json")
     return {"items": [_node(NODE)]}
+
+
+class ChainCluster(runner_manager.ManagerCluster):
+    """Reuse manager storage with Ready-worker and borrowed-namespace observations."""
+
+    def __init__(self) -> None:
+        """Seed the caller's existing namespace with its observed immutable UID."""
+        super().__init__()
+        self.objects[("namespace", "", CALLER_NAMESPACE)] = {
+            "kind": "Namespace",
+            "metadata": {
+                "name": CALLER_NAMESPACE,
+                "uid": CALLER_NAMESPACE_UID,
+                "labels": {},
+            },
+        }
+
+    def json(self, *args: str) -> JSONObject:
+        """Read nodes or delegate exact ownership lookups to the shared transport.
+
+        :param args: Native Kubernetes observation requested by a real callback.
+        :returns: Ready NodeList or the shared manager's stored resource list.
+        """
+        if args == ("get", "nodes", "-o", "json"):
+            return _read_nodes(*args)
+        return super().json(*args)
 
 
 class JournalCallback(ABSTRACT_CALLBACK.LocalCallback):
@@ -240,6 +269,15 @@ def _prepared_action(
     action.gitlab_target = TARGET.GitLabOperationTarget(
         action.target.gitlab, action.target.source_file
     )
+    action.repository_identity = (
+        IDENTITY.RepositoryIdentity(None, IDENTITY.RepositorySource.UNKNOWN)
+        if group
+        else IDENTITY.resolve_repository(action.args.project)
+    )
+    action.resolved_description = IDENTITY.ResolvedName(
+        action.args.runner_description, IDENTITY.NameSource.EXPLICIT
+    )
+    action.manager_scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, False)
     action.toolbox = SimpleNamespace(
         resolved_base=None,
         repository="toolbox/ci",
@@ -250,6 +288,13 @@ def _prepared_action(
             image_tag="unit",
             namespace=CALLER_NAMESPACE,
             app="ci13-toolbox",
+        ),
+        runner=RUNNER.RunnerAction(
+            namespace=CALLER_NAMESPACE,
+            name="ci13-toolbox",
+            source_root="",
+            labels=(),
+            timeout=action.args.timeout,
         ),
     )
     action.mode = PODMAN.ProbeMode.APPLY if apply else PODMAN.ProbeMode.LIVE_PLAN
@@ -365,7 +410,7 @@ def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
     action = _prepared_action(apply=True)
     action.args.confirm_plan = confirmation
     action.state.selected_node = NODE
-    action.state.kubernetes = SimpleNamespace(json=_read_nodes)
+    action.state.kubernetes = ChainCluster()
     mutations: list[str] = []
     callbacks = ABSTRACT_CALLBACKS.Callbacks(
         [
@@ -485,20 +530,7 @@ def _lifecycle_executor(
     """
     action = _prepared_action(apply=True)
     state = action.state
-    kubernetes = runner_manager.ManagerCluster()
-    cluster_json = kubernetes.json
-
-    def read_cluster(*args: str) -> JSONObject:
-        """Serve worker discovery and retain the existing manager transport.
-
-        :param args: Kubernetes read issued by the real chain or manager callback.
-        :returns: Ready NodeList or the existing in-memory provider response.
-        """
-        if args == ("get", "nodes", "-o", "json"):
-            return _read_nodes(*args)
-        return cluster_json(*args)
-
-    monkeypatch.setattr(kubernetes, "json", read_cluster)
+    kubernetes = ChainCluster()
     state.kubernetes = kubernetes
     state.selected_node = NODE
     state.run_scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, owns_namespace)
@@ -513,6 +545,7 @@ def _lifecycle_executor(
         namespace = state.run_scope.cluster_resources(kubernetes).managed(
             RUN_SCOPE.namespace_document(state.run_scope)
         )
+    namespace["metadata"]["uid"] = CALLER_NAMESPACE_UID
     kubernetes.objects[("namespace", "", CALLER_NAMESPACE)] = namespace
     state.gitlab = SimpleNamespace(
         session=SimpleNamespace(
@@ -533,7 +566,13 @@ def _lifecycle_executor(
         credential={"token": "private-unit-value"},
     )
     state.runner_auth_plan = action._runner_auth_plan()
-    action.args.confirm_plan = action.fingerprint(NODE)
+    action.manager_scope = state.run_scope
+    action.mode = PODMAN.ProbeMode.LIVE_PLAN
+    planner = CALLBACKS.ResolveChainPlan(action)
+    planner.bind(state)
+    planner.run()
+    action.mode = PODMAN.ProbeMode.APPLY
+    action.args.confirm_plan = state.chain_plan_digest
     stages: list[str] = []
     cleanup: list[str] = []
 

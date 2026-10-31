@@ -17,7 +17,7 @@ from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
+from typing import Final, Optional
 
 import pytest
 from conftest import import_script_module
@@ -43,6 +43,8 @@ CHANGED_PRIVATE_TOKEN = "glrt-changed-unit"
 TOKEN_DIGEST = "sha256:" + hashlib.sha256(PRIVATE_TOKEN.encode()).hexdigest()
 RUN_ID = "manager-unit-run"
 NAMESPACE = "manager-unit-namespace"
+NAMESPACE_UID: Final = "manager-unit-namespace-uid"
+OBSERVED_PROTECTION: Final = "not_protected"
 RUNNER_ID = 73
 RUNNER_DESCRIPTION = "unit-manager-runner"
 RUNNER_LABELS = ("ci13", "unit")
@@ -128,6 +130,7 @@ def _runner_record(*, online: bool) -> CALLBACKS.RunnerRecord:
         "runner_type": "project_type",
         "tag_list": list(RUNNER_LABELS),
         "status": "online" if online else "offline",
+        "access_level": OBSERVED_PROTECTION,
         "online": online,
         "paused": False,
         "contacted_at": "2026-10-18T00:00:00Z" if online else None,
@@ -328,10 +331,8 @@ def test_fingerprint_binds_exact_target_runner_image_scope_and_token_digest(
     plan = captured[0]
     assert plan["operation"] == "deploy"
     assert plan["image"] == IMAGE
-    assert plan["run_scope"] == {
-        **action.candidate_scope.as_dict(),
-        "state": "selected",
-    }
+    assert plan["run_scope"] == action.candidate_scope.as_dict()
+    assert plan["protected"] is None
     assert plan["registration"] == action.runner_token.document()
     assert plan["gitlab"] == {
         "origin": "https://gitlab.example.test",
@@ -370,6 +371,7 @@ def test_observe_reads_exact_runner_scope_identity_and_tags(
         *,
         description: str,
         expected_tags: Sequence[str],
+        expected_protection: Optional[str] = None,
     ) -> CALLBACKS.RunnerRecord:
         """Record the manager's exact GitLab lookup.
 
@@ -380,6 +382,7 @@ def test_observe_reads_exact_runner_scope_identity_and_tags(
         :param runner_id: Expected exact runner ID.
         :param description: Expected runner description.
         :param expected_tags: Expected complete tag identity.
+        :param expected_protection: Omitted protection preserves the provider value.
         :returns: Verified offline runner record.
         """
         calls.append(
@@ -391,6 +394,7 @@ def test_observe_reads_exact_runner_scope_identity_and_tags(
                 runner_id,
                 description,
                 tuple(expected_tags),
+                expected_protection,
             )
         )
         return _runner_record(online=False)
@@ -410,12 +414,13 @@ def test_observe_reads_exact_runner_scope_identity_and_tags(
             RUNNER_ID,
             RUNNER_DESCRIPTION,
             RUNNER_LABELS,
+            None,
         )
     ]
     assert result == {
         "verified": True,
         "run_id": RUN_ID,
-        "scope": {**action.candidate_scope.as_dict(), "state": "selected"},
+        "scope": action.candidate_scope.as_dict(),
         **ACTION.runner_evidence(_runner_record(online=False)),
     }
 
@@ -783,17 +788,28 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
     state.resolved_run_id = RUN_ID
 
     class Kubernetes:
-        """Reject provider operations for the caller-owned namespace."""
+        """Read only the selected namespace and potential existing manager."""
 
-        def read(self, kind: str, name: str, namespace: str) -> None:
-            """Fail if caller-owned namespace cleanup performs a read.
+        def read(self, kind: str, name: str, namespace: str) -> Optional[dict]:
+            """Supply independent namespace evidence and absence of a manager.
 
-            :param kind: Unexpected native kind.
-            :param name: Unexpected object name.
-            :param namespace: Unexpected namespace.
-            :raises AssertionError: Always; no read is needed for preservation.
+            :param kind: Selected Namespace or candidate Deployment kind.
+            :param name: Exact selected namespace or existing manager name.
+            :param namespace: Cluster scope or selected manager namespace.
+            :returns: Borrowed namespace with a UID, or an absent Deployment.
+            :raises AssertionError: An unrelated object is read.
             """
-            raise AssertionError(f"unexpected read {kind}/{namespace}/{name}")
+            if kind == "Deployment":
+                assert (name, namespace) == (
+                    scope.name(ACTION.MANAGER_ROLE),
+                    NAMESPACE,
+                )
+                return None
+            assert (kind, name, namespace) == ("Namespace", NAMESPACE, "")
+            return {
+                "kind": "Namespace",
+                "metadata": {"name": NAMESPACE, "uid": NAMESPACE_UID, "labels": {}},
+            }
 
         def delete(self, kind: str, name: str, namespace: str) -> None:
             """Fail if caller-owned namespace cleanup performs a deletion.
@@ -877,6 +893,7 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
                 "VerifyGitLabRunnerPreserved",
                 "RemoveSCCAccess",
                 "RemoveScope",
+                "ObserveManagerNamespace",
             ),
         ),
     ],
@@ -947,12 +964,19 @@ class ManagerCluster(MemoryCluster):
         self.events.append("apply:" + document["kind"].casefold())
         return super().apply(document)
 
-    def delete(self, kind: str, name: str, namespace: str) -> None:
+    def delete(
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        *,
+        expected_uid: Optional[str] = None,
+    ) -> None:
         self.guard_checks.append(self.guard_held)
         self.events.append("delete:" + kind.casefold())
         if self.fault == "cleanup" and kind.casefold() == "job":
             raise KUBERNETES.KubernetesError("unit_cleanup_denied")
-        super().delete(kind, name, namespace)
+        super().delete(kind, name, namespace, expected_uid=expected_uid)
         if kind.casefold() == "deployment":
             self.runner_online = False
 
@@ -1085,6 +1109,7 @@ def _manager_cli_harness(
         *,
         description: str,
         expected_tags: Sequence[str],
+        expected_protection: Optional[str] = None,
     ) -> dict:
         assert (bound, target_kind, target_id, runner_id, description) == (
             session,
@@ -1094,6 +1119,7 @@ def _manager_cli_harness(
             RUNNER_DESCRIPTION,
         )
         assert tuple(expected_tags) == RUNNER_LABELS
+        assert expected_protection is None
         cluster.runner_reads += 1
         return _runner_record(online=cluster.runner_online)
 

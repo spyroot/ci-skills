@@ -12,7 +12,7 @@ import tempfile
 from collections.abc import Callable, Mapping
 from enum import StrEnum
 from pathlib import Path
-from typing import Optional
+from typing import Final, Optional
 
 from lib.python.core.abstract.callback import AbstractCallback, LocalCallback
 from lib.python.core.abstract.skill_result import require_result
@@ -24,12 +24,26 @@ from lib.python.core.gitlab.runner_manager import (
     GitLabRunnerManagerAction,
     retain_manager_resources,
 )
-from lib.python.core.json_types import JSONObject, JSONValue, copy_json
+from lib.python.core.gitlab.runner_manager.action import MANAGER_ROLE
+from lib.python.core.gitlab.runner_manager.workload import resolve_manager_name
+from lib.python.core.json_types import (
+    JSONObject,
+    JSONValue,
+    copy_json,
+    json_object,
+    json_objects,
+)
 from lib.python.core.kubernetes.kubernetes import DEFAULT_COMMAND_TIMEOUT
 from lib.python.core.kubernetes.podman_probe import ProbeMode, select_ready_worker
+from lib.python.core.kubernetes.run_scope import RunScope
+from lib.python.core.kubernetes.runner_scope import observe_namespace
 from lib.python.core.report import plan_digest
+from lib.python.core.runner_identity import NameSource, ResolvedName
+from lib.python.core.runner_scope import ScopePurpose, ScopeSource
 
 from .model import RUNNER_TOKEN_NAME, ImageBuildChainAction, ImageBuildChainState
+
+CHAIN_MANAGER_CHANGED: Final = "chain_manager_identity_changed_rerun_plan"
 
 
 class ProviderTransition(StrEnum):
@@ -214,6 +228,48 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
         nodes = state.kubernetes.json("get", "nodes", "-o", "json")
         selected = select_ready_worker(nodes, action.args.node)
         state.selected_node = selected.name
+        scopes = RunScope.find_all(state.kubernetes, action.manager_scope.run_id)
+        if len(scopes) > 1:
+            raise ValueError("run_scope_namespace_ambiguous")
+        if scopes:
+            observed = scopes[0]
+            if action.args.namespace and action.args.namespace != observed.namespace:
+                raise ValueError("run_scope_namespace_mismatch")
+            action.manager_scope = observed
+        preferred = ResolvedName(
+            action.manager_scope.name(
+                MANAGER_ROLE, prefix=action.repository_identity.name
+            ),
+            NameSource.REPOSITORY
+            if action.repository_identity.name
+            else NameSource.UNKNOWN,
+        )
+        action.resolved_runner_name = resolve_manager_name(
+            state.kubernetes, action.manager_scope, preferred
+        )
+        state.runner_scopes.clear()
+        observe_namespace(
+            state,
+            state.kubernetes,
+            namespace=action.manager_scope.namespace,
+            purpose=ScopePurpose.MANAGER,
+            source=ScopeSource.EXPLICIT
+            if action.args.namespace
+            else ScopeSource.EXISTING_RUN_SCOPE
+            if scopes
+            else ScopeSource.OPERATION_CREATED,
+            operation=action.manager_scope.run_id,
+            required=not action.manager_scope.owns_namespace,
+        )
+        if action.toolbox.spec is not None:
+            observe_namespace(
+                state,
+                state.kubernetes,
+                namespace=action.toolbox.spec.namespace,
+                purpose=ScopePurpose.BUILD,
+                source=ScopeSource.TOOLBOX_DEFAULT,
+                operation=action.toolbox.runner.operation,
+            )
         document = action.plan(state.selected_node)
         digest = plan_digest(document)
         state.chain_plan = document
@@ -227,6 +283,40 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
             "selection": "requested" if action.args.node is not None else "discovered",
             "node": selected.evidence(),
         }
+
+
+class ConfirmChainManager(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
+    """Recheck the confirmed manager identity after build and provider creation."""
+
+    def run(self) -> JSONObject:
+        """Reject a changed namespace UID, ownership, or workload name before deployment.
+
+        :returns: Verified stable manager selection.
+        :raises ValueError: Current selection differs from the confirmed outer plan.
+        """
+        state = self.state
+        planned = self.action.plan(state.selected_node)
+        expected = state.chain_plan
+        planned_runner = json_object(planned["runner"])
+        expected_runner = json_object(expected["runner"])
+        current_scopes = json_objects(planned_runner["scope_observations"])
+        expected_scopes = json_objects(expected_runner["scope_observations"])
+        current_manager_scopes = [
+            item for item in current_scopes if item["purpose"] == ScopePurpose.MANAGER
+        ]
+        expected_manager_scopes = [
+            item for item in expected_scopes if item["purpose"] == ScopePurpose.MANAGER
+        ]
+        manager = state.manager_action
+        scope = state.run_scope
+        if (
+            current_manager_scopes != expected_manager_scopes
+            or manager.workload().runner(scope).name != expected_runner["name"]
+            or scope.namespace != self.action.manager_scope.namespace
+            or scope.owns_namespace != self.action.manager_scope.owns_namespace
+        ):
+            raise ValueError(CHAIN_MANAGER_CHANGED)
+        return {"verified": True, "namespace": scope.namespace}
 
 
 class CreateRunnerRecord(DeferredComponent):
@@ -319,6 +409,7 @@ def _runner_args(action: ImageBuildChainAction, token_path: Path) -> argparse.Na
         project=args.project if action.runner_kind == "project" else None,
         group=args.group if action.runner_kind == "group" else None,
         description=args.runner_description,
+        protected=getattr(args, "protected", None),
         tag=list(args.runner_label),
         runner_id=None,
         job_id=None,
@@ -350,7 +441,7 @@ def _manager_args(
         node=state.selected_node,
         image=state.published_image,
         token_file=str(state.token_path),
-        run_id=None,
+        run_id=action.manager_scope.run_id,
         namespace=action.args.namespace,
         apply=True,
         dry_run=False,

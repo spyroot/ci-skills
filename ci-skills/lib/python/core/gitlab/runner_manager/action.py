@@ -27,10 +27,19 @@ from lib.python.core.kubernetes.run_scope import (
     RunScopeState,
     validate_run_id,
 )
+from lib.python.core.kubernetes.runner_scope import scope_key
 from lib.python.core.kubernetes.scc_access import SCCAccessAction
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import plan_digest
 from lib.python.core.runner import RunnerAction
+from lib.python.core.runner_identity import (
+    NameSource,
+    ResolvedName,
+    resolve_name,
+    resolve_repository,
+)
+from lib.python.core.runner_options import parse_protected, validate_runner_tags
+from lib.python.core.runner_scope import ScopeObservation, ScopePurpose, ScopeSource
 from lib.python.core.toolbox_actions import WorkflowAction
 
 from .token import (
@@ -42,6 +51,7 @@ from .token import (
 )
 
 MANAGER_ROLE: Final = "gitlab-runner-manager"
+PROTECTION_DEPLOY_ONLY: Final = "protected_only_valid_for_manager_deploy"
 
 
 def runner_evidence(record: RunnerRecord) -> JSONObject:
@@ -56,6 +66,7 @@ def runner_evidence(record: RunnerRecord) -> JSONObject:
         "runner_type": record["runner_type"],
         "tag_list": list(record["tag_list"]),
         "status": record["status"],
+        "access_level": record["access_level"],
         "online": record["online"],
         "paused": record["paused"],
         "contacted_at": record["contacted_at"],
@@ -115,7 +126,13 @@ class ManagerWorkloadAction(SkillAction):
         """
         return RunnerAction(
             namespace=scope.namespace,
-            name=scope.name(MANAGER_ROLE),
+            name=(
+                self.workflow.resolved_runner_name.value
+                if self.workflow.resolved_runner_name
+                else scope.name(
+                    MANAGER_ROLE, prefix=self.workflow.repository_identity.name
+                )
+            ),
             source_root="",
             labels=self.workflow.labels,
             timeout=self.workflow.args.timeout,
@@ -152,11 +169,19 @@ class ManagerWorkloadAction(SkillAction):
         workflow = self.workflow
         candidate = workflow.candidate_scope
         run_id = workflow.scope_id
-        namespace = getattr(workflow.args, "namespace", "") or None
+        namespace = (
+            candidate.namespace
+            if candidate
+            else getattr(workflow.args, "namespace", "") or None
+        )
         return {
             "runner": {
                 "namespace": namespace,
-                "name": candidate.name(MANAGER_ROLE) if candidate else None,
+                "name": candidate.name(
+                    MANAGER_ROLE, prefix=workflow.repository_identity.name
+                )
+                if candidate
+                else None,
                 "source_root": "",
                 "labels": list(workflow.labels),
                 "timeout": workflow.args.timeout,
@@ -242,13 +267,9 @@ class GitLabRunnerManagerAction(WorkflowAction):
         :returns: Exact tags in caller order.
         :raises ValueError: A tag is blank or repeated.
         """
-        labels = tuple(getattr(self.args, "tag", ()))
+        labels = validate_runner_tags(tuple(getattr(self.args, "tag", ())))
         if self.args.action == "deploy" and not labels:
             raise ValueError("runner_label_required")
-        if len(set(labels)) != len(labels):
-            raise ValueError("runner_labels_must_be_unique")
-        if any(not isinstance(label, str) or not label.strip() for label in labels):
-            raise ValueError("runner_label_must_be_nonempty")
         return labels
 
     @property
@@ -336,7 +357,15 @@ class GitLabRunnerManagerAction(WorkflowAction):
             self.candidate_scope = RunScope.new(
                 namespace=namespace,
                 run_id=selected_run_id,
+                namespace_prefix=self.repository_identity.name,
             )
+            if self.repository_identity.name:
+                self.resolved_runner_name = ResolvedName(
+                    self.candidate_scope.name(
+                        MANAGER_ROLE, prefix=self.repository_identity.name
+                    ),
+                    NameSource.REPOSITORY,
+                )
 
     def prepare(self) -> None:
         """Bind providers and typed manager inputs without mutating them.
@@ -348,6 +377,11 @@ class GitLabRunnerManagerAction(WorkflowAction):
         self._validate()
         if self.args.action not in {"deploy", "delete"}:
             raise ValueError("runner_manager_action_invalid")
+        if (
+            self.args.action == "delete"
+            and getattr(self.args, "protected", None) is not None
+        ):
+            raise ValueError(PROTECTION_DEPLOY_ONLY)
         self.context.args = self.args
         surfaces = (
             ("gitlab", "kubernetes", "harbor")
@@ -362,10 +396,37 @@ class GitLabRunnerManagerAction(WorkflowAction):
         )
         if not self.args.dry_run:
             self.target = bind_sources(self.target, revision=self.args.revision)
+        self.repository_identity = resolve_repository(
+            (
+                getattr(self.args, "project", None)
+                or (self.target.gitlab.project if self.target.gitlab else None)
+            )
+            if not getattr(self.args, "group", None)
+            else None
+        )
+        self.resolved_description = resolve_name(
+            getattr(self.args, "description", None),
+            self.repository_identity,
+            argument="--description",
+        )
         self.args.runner_id = self.runner_id
-        self.args.description = self.description
+        self.args.description = self.resolved_description.value
+        parse_protected(getattr(self.args, "protected", None))
         self.args.tag = list(self.labels)
         self._prepare_scope()
+        if self.candidate_scope is not None:
+            candidate = self.candidate_scope
+            source = (
+                ScopeSource.EXPLICIT
+                if getattr(self.args, "namespace", None)
+                else ScopeSource.OPERATION_CREATED
+            )
+            initial = ScopeObservation(
+                ScopePurpose.MANAGER, candidate.namespace, source
+            )
+            self.context.runner_scopes[
+                scope_key(initial.purpose, initial.namespace)
+            ] = initial
         if self.args.action == "delete":
             self.runner_token = NoRunnerToken()
             return
@@ -437,19 +498,15 @@ class GitLabRunnerManagerAction(WorkflowAction):
 
         :returns: Stable run-scope and workload plan documents.
         """
-        found = tuple(self.context.found_scopes)
-        if (
-            self.args.action == "delete"
-            and found
-            and hasattr(self.context, "run_scope")
-        ):
+        if hasattr(self.context, "run_scope"):
             scope = self.context.run_scope
             return scope.as_dict(), self.workload().document(scope)
         namespace = getattr(self.args, "namespace", "") or None
+        candidate = self.candidate_scope
         scope: JSONObject = {
             "run_id": self.scope_id,
-            "namespace": namespace,
-            "owns_namespace": namespace is None,
+            "namespace": candidate.namespace if candidate else namespace,
+            "owns_namespace": candidate.owns_namespace if candidate else False,
             "state": "selected",
         }
         return scope, self.workload().plan_document()
@@ -467,6 +524,8 @@ class GitLabRunnerManagerAction(WorkflowAction):
         scope_evidence, workload = self.scope_plan()
         return plan_digest(
             {
+                "repository": self.repository_identity.reference,
+                "protected": parse_protected(getattr(self.args, "protected", None)),
                 "kind": self.args.kind,
                 "operation": self.args.action,
                 "skill": copy_json(self.target.skill),
@@ -493,6 +552,10 @@ class GitLabRunnerManagerAction(WorkflowAction):
                 "image": getattr(self.args, "image", None),
                 "registration": self.runner_token.document(),
                 "run_scope": scope_evidence,
+                "scope_observations": [
+                    observation.document()
+                    for observation in self.context.runner_scopes.values()
+                ],
                 "workload": workload,
                 "authorization": self.scc_access().plan()
                 if self.args.action == "deploy"

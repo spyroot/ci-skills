@@ -26,6 +26,7 @@ from lib.python.core.kubernetes.podman_probe import (
     resolve_probe_mode,
 )
 from lib.python.core.report import emit_result, plan_digest, report
+from lib.python.core.runner_scope import scope_record
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import TargetError
 from lib.python.core.toolbox import ToolboxError
@@ -84,6 +85,18 @@ class ImageBuildChain:
                 type(child).__name__ if child is not None else type(callback).__name__
             )
             records.append({"callback": name, **dict(value)})
+        if self.action.state.runner_scopes and not self.args.dry_run:
+            manager = getattr(self.action.state, "manager_action", None)
+            records.append(
+                scope_record(
+                    self.action.repository_identity,
+                    manager.resolved_runner_name
+                    if manager is not None
+                    else self.action.resolved_runner_name,
+                    self.action.resolved_description,
+                    tuple(self.action.state.runner_scopes.values()),
+                )
+            )
         return records
 
     def execute(self) -> int:

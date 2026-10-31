@@ -26,6 +26,10 @@ from lib.python.core.github.runner import (
 from lib.python.core.harbor.registry_mirror import HarborAuth, HarborPush, PushAction
 from lib.python.core.kubernetes.kubernetes import K8SAuth
 from lib.python.core.kubernetes.runner import DeleteRunner, DeployRunner, PullImage
+from lib.python.core.kubernetes.runner_scope import (
+    DeleteGitHubNamespace,
+    ObserveGitHubNamespace,
+)
 from lib.python.core.toolbox_actions import (
     ConfirmWorkflow,
     EnsureNamespace,
@@ -54,12 +58,17 @@ def workflow(action: WorkflowAction) -> WorkflowExecutor[DeliveryState]:
     callbacks: AbstractCallbacks[DeliveryState, SkillAction] = [
         K8SAuth(action.target, action.args.timeout),
         GitHubAuth(action.target, action.args.timeout),
+        ObserveGitHubNamespace(action),
     ]
     if action.args.action == "delete":
         callbacks.append(ConfirmWorkflow(action))
         if action.args.apply:
             callbacks.extend(
-                (DeleteRunner(action.runner), DeleteGitHubRunner(action.runner))
+                (
+                    DeleteRunner(action.runner),
+                    DeleteGitHubRunner(action.runner),
+                    DeleteGitHubNamespace(action),
+                )
             )
     else:
         callbacks.extend(

@@ -40,6 +40,8 @@ from lib.python.core.runner import (
     RUNTIME_ROOT,
     RunnerRuntime,
 )
+from lib.python.core.runner_identity import NameSource, ResolvedName
+from lib.python.core.runner_options import parse_protected
 from lib.python.core.target import (
     GitLabOperationTarget,
     TargetError,
@@ -333,11 +335,30 @@ class ObserveGitLabRunner(GitLabManagerComponent):
             service.session.target_kind,
             service.target_id,
             workflow.runner_id,
-            description=workflow.description,
+            description=(
+                workflow.description
+                if workflow.resolved_description is not None
+                and workflow.resolved_description.source == NameSource.EXPLICIT
+                else None
+            ),
             expected_tags=expected_tags,
+            expected_protection=parse_protected(
+                getattr(workflow.args, "protected", None)
+            ),
         )
         if record["online"] is True and workflow.args.action == "deploy":
             self._require_owned_online_manager()
+        if (
+            workflow.resolved_description is None
+            or workflow.resolved_description.source != NameSource.EXPLICIT
+        ):
+            description = record["description"]
+            if description is None or not description.strip():
+                raise ActionError("runner_description_required")
+            workflow.resolved_description = ResolvedName(
+                description, NameSource.PROVIDER
+            )
+            workflow.args.description = description
         self.manager_state.gitlab_runner = record
         scope, _ = workflow.scope_plan()
         return {
@@ -465,6 +486,9 @@ class VerifyGitLabRunnerOnline(GitLabManagerComponent):
                 workflow.runner_id,
                 description=workflow.description,
                 expected_tags=expected_tags,
+                expected_protection=parse_protected(
+                    getattr(workflow.args, "protected", None)
+                ),
             )
             ready = (
                 record["online"] is True
@@ -508,6 +532,9 @@ class VerifyGitLabRunnerPreserved(GitLabManagerComponent):
             workflow.runner_id,
             description=workflow.description,
             expected_tags=workflow.labels or None,
+            expected_protection=parse_protected(
+                getattr(workflow.args, "protected", None)
+            ),
         )
         self.manager_state.gitlab_runner = record
         return {

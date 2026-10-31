@@ -21,11 +21,23 @@ from lib.python.core.gitlab.runner_manager import (
     GitLabRunnerManagerAction,
     GitLabRunnerManagerState,
 )
+from lib.python.core.gitlab.runner_manager.action import MANAGER_ROLE
 from lib.python.core.harbor.registry_mirror import HarborService
 from lib.python.core.json_types import JSONObject, copy_json
 from lib.python.core.kubernetes.podman_probe import PROBE_KIND, ProbeMode
+from lib.python.core.kubernetes.run_scope import RUN_ID_LIMIT, RunScope
+from lib.python.core.kubernetes.runner_scope import scope_key
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import plan_digest
+from lib.python.core.runner_identity import (
+    NameSource,
+    RepositoryIdentity,
+    ResolvedName,
+    resolve_name,
+    resolve_repository,
+)
+from lib.python.core.runner_options import parse_protected, validate_runner_tags
+from lib.python.core.runner_scope import ScopeObservation, ScopePurpose, ScopeSource
 from lib.python.core.target import GitLabOperationTarget, Target, TargetError
 from lib.python.core.toolbox_actions import WorkflowAction
 
@@ -209,6 +221,11 @@ class ImageBuildChainAction(SkillAction):
 
         Reportable source that resolved the selected target.
 
+    :ivar repository_identity: Consumer repository used for name defaults.
+    :ivar resolved_description: Exact selected runner description and provenance.
+    :ivar manager_scope: Concrete candidate or observed scope bound before mutation.
+    :ivar resolved_runner_name: Planned or independently observed manager name.
+
     .. attribute :: mode
         :type: ProbeMode
 
@@ -222,6 +239,10 @@ class ImageBuildChainAction(SkillAction):
     gitlab_target: GitLabOperationTarget = field(init=False, repr=False)
     target_source: str = field(init=False)
     mode: ProbeMode = field(init=False)
+    repository_identity: RepositoryIdentity = field(init=False)
+    resolved_description: ResolvedName = field(init=False)
+    manager_scope: RunScope = field(init=False)
+    resolved_runner_name: ResolvedName | None = field(init=False, default=None)
 
     @property
     def runner_kind(self) -> str:
@@ -242,15 +263,14 @@ class ImageBuildChainAction(SkillAction):
         """
         required = {
             "toolbox_spec": self.args.toolbox_spec,
-            "runner_description": self.args.runner_description,
         }
         missing = sorted(name for name, value in required.items() if not value)
         if missing:
             raise ValueError("chain_missing_inputs:" + ",".join(missing))
         if not self.args.runner_label:
             raise ValueError("chain_runner_label_required")
-        if len(set(self.args.runner_label)) != len(self.args.runner_label):
-            raise ValueError("chain_runner_labels_must_be_unique")
+        self.args.runner_label = list(validate_runner_tags(self.args.runner_label))
+        parse_protected(getattr(self.args, "protected", None))
         if not self.runner_kind:
             raise ValueError("chain_scope_required")
 
@@ -295,8 +315,53 @@ class ImageBuildChainAction(SkillAction):
         self.target = target
         self.target_source = target.source_kind or "target"
         self.gitlab_target = GitLabOperationTarget(target.gitlab, target.source_file)
+        self.repository_identity = resolve_repository(
+            self.args.project if self.runner_kind == "project" else None
+        )
+        self.resolved_description = resolve_name(
+            self.args.runner_description,
+            self.repository_identity,
+            argument="--description",
+        )
+        self.args.runner_description = self.resolved_description.value
         self.toolbox = WorkflowAction(self._toolbox_args(), context=self.state)
         self.toolbox.prepare()
+        scope_id = plan_digest(
+            {
+                "target": str(target.source_file),
+                "repository": self.repository_identity.reference,
+                "description": self.resolved_description.value,
+                "tags": list(self.args.runner_label),
+                "toolbox": self.toolbox.spec.fingerprint if self.toolbox.spec else None,
+                "namespace": self.args.namespace,
+            }
+        )[:RUN_ID_LIMIT]
+        self.manager_scope = RunScope.new(
+            namespace=self.args.namespace,
+            run_id=scope_id,
+            namespace_prefix=self.repository_identity.name,
+        )
+        self.resolved_runner_name = ResolvedName(
+            self.manager_scope.name(MANAGER_ROLE, prefix=self.repository_identity.name),
+            NameSource.REPOSITORY
+            if self.repository_identity.name
+            else NameSource.UNKNOWN,
+        )
+        scope = ScopeObservation(
+            ScopePurpose.MANAGER,
+            self.manager_scope.namespace,
+            ScopeSource.EXPLICIT
+            if self.args.namespace
+            else ScopeSource.OPERATION_CREATED,
+        )
+        self.state.runner_scopes[scope_key(scope.purpose, scope.namespace)] = scope
+        if self.toolbox.spec is not None:
+            build = ScopeObservation(
+                ScopePurpose.BUILD,
+                self.toolbox.spec.namespace,
+                ScopeSource.TOOLBOX_DEFAULT,
+            )
+            self.state.runner_scopes[scope_key(build.purpose, build.namespace)] = build
         self.state.args = self.args
         self.state.runner_auth_plan = self._runner_auth_plan()
 
@@ -317,6 +382,15 @@ class ImageBuildChainAction(SkillAction):
             target_file=str(self.gitlab_target.source_file),
             target_source=f"{self.target_source};argv:--{self.runner_kind}",
             body={
+                **(
+                    {
+                        "access_level": parse_protected(
+                            getattr(self.args, "protected", None)
+                        )
+                    }
+                    if getattr(self.args, "protected", None) is not None
+                    else {}
+                ),
                 "runner_type": f"{self.runner_kind}_type",
                 "description": self.args.runner_description,
                 "tag_list": ",".join(self.args.runner_label),
@@ -350,6 +424,20 @@ class ImageBuildChainAction(SkillAction):
                 "app": toolbox.app,
             },
             "runner": {
+                "name": (
+                    self.resolved_runner_name.value
+                    if self.resolved_runner_name is not None
+                    else self.manager_scope.name(
+                        MANAGER_ROLE, prefix=self.repository_identity.name
+                    )
+                ),
+                "name_source": (
+                    self.resolved_runner_name.source
+                    if self.resolved_runner_name is not None
+                    else NameSource.REPOSITORY
+                    if self.repository_identity.name
+                    else NameSource.UNKNOWN
+                ),
                 "scope": self.runner_kind,
                 "reference": self.args.group or self.args.project,
                 "description": self.args.runner_description,
@@ -362,7 +450,14 @@ class ImageBuildChainAction(SkillAction):
                     "memory_limit": self.args.memory_limit,
                     "storage_size": self.args.storage_size,
                 },
-                "run_scope": "generated_after_confirmation",
+                "run_scope": self.manager_scope.as_dict(),
+                "scope_observations": [
+                    scope.document() for scope in self.state.runner_scopes.values()
+                ],
+                "repository": self.repository_identity.reference,
+                "repository_source": self.repository_identity.source,
+                "description_source": self.resolved_description.source,
+                "protected": parse_protected(getattr(self.args, "protected", None)),
                 "token_sink": "ephemeral",
             },
         }

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import AuthAction
 from lib.python.core.json_types import JSONObject
+from lib.python.core.runner_scope import ScopeObservation
 
 if TYPE_CHECKING:
     from lib.python.access.harbor_credentials import RegistryCredential
@@ -66,6 +67,7 @@ class DeliveryState(ExecutionContext):
     :ivar published_image: Verified image assigned by plan or HarborPush.
     :ivar runner_runtime: Private registration inputs assigned by provider setup.
     :ivar deployment_result: Safe workload read-back assigned by DeployRunner.
+    :param runner_scopes: Namespace observations shared by runner callbacks.
     :param access_evidence: Safe provider identity records, populated by authentication.
 
     .. attribute :: kubernetes_target
@@ -153,3 +155,4 @@ class DeliveryState(ExecutionContext):
     runner_runtime: RunnerRuntime = field(init=False, repr=False)
     deployment_result: JSONObject = field(init=False, repr=False)
     access_evidence: MutableMapping[str, JSONObject] = field(default_factory=dict)
+    runner_scopes: MutableMapping[str, ScopeObservation] = field(default_factory=dict)

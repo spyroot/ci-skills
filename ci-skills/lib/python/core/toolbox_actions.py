@@ -42,9 +42,25 @@ from lib.python.core.json_types import (
 from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
 from lib.python.core.kubernetes.resources import ResourceSet
 from lib.python.core.kubernetes.runner import published_image
+from lib.python.core.kubernetes.runner_scope import observe_namespace, scope_key
 from lib.python.core.project_binding import resolve_target
 from lib.python.core.report import emit_result, plan_digest, report
 from lib.python.core.runner import RunnerAction
+from lib.python.core.runner_identity import (
+    RepositoryIdentity,
+    RepositorySource,
+    ResolvedName,
+    resolve_name,
+    resolve_repository,
+)
+from lib.python.core.runner_options import SingleValue
+from lib.python.core.runner_scope import (
+    ScopeObservation,
+    ScopePurpose,
+    ScopeRetention,
+    ScopeSource,
+    scope_record,
+)
 from lib.python.core.schema import SCHEMA_DIRECTORY, TOOLBOX_SCHEMA
 from lib.python.core.target import Target
 from lib.python.core.toolbox import (
@@ -60,6 +76,7 @@ DEFAULT_OPERATION_TIMEOUT: Final = 1800
 MUTATION_OPERATIONS: Final = ("create", "update", "delete")
 BUILD_TAG_PREFIX: Final = "ci-skills-build-"
 FINGERPRINT_TAG_LENGTH: Final = 24
+CLEANUP_IDENTITY_MISSING: Final = "runner_namespace_cleanup_identity_missing"
 
 
 def workflow_parser(kind: str) -> argparse.ArgumentParser:
@@ -93,7 +110,7 @@ def workflow_parser(kind: str) -> argparse.ArgumentParser:
                 *names, help=help_text, type=int, default=DEFAULT_OPERATION_TIMEOUT
             )
         else:
-            result.add_argument(*names, help=help_text)
+            result.add_argument(*names, help=help_text, action=SingleValue)
     return result
 
 
@@ -109,6 +126,9 @@ class WorkflowAction(SkillAction):
     :param context: Typed state shared by the declared ordered callbacks.
     :ivar target: Runtime target assigned by successful preparation.
     :ivar runner: Workload inputs assigned for every operation except direct push.
+    :ivar repository_identity: Consumer repository source used for name defaults.
+    :ivar resolved_runner_name: Caller or repository-derived workload name.
+    :ivar resolved_description: Caller or repository-derived provider description.
 
     .. attribute :: args
         :type: argparse.Namespace
@@ -153,6 +173,11 @@ class WorkflowAction(SkillAction):
 
     args: argparse.Namespace
     target: Target = field(init=False)
+    repository_identity: RepositoryIdentity = field(
+        init=False, default=RepositoryIdentity(None, RepositorySource.UNKNOWN)
+    )
+    resolved_runner_name: ResolvedName | None = field(init=False, default=None)
+    resolved_description: ResolvedName | None = field(init=False, default=None)
     runner: RunnerAction = field(init=False)
     spec: Optional[ToolboxSpec] = None
     resolved_base: Optional[str] = None
@@ -190,6 +215,14 @@ class WorkflowAction(SkillAction):
             self.spec.namespace if self.spec else ""
         )
         name = getattr(args, "name", "") or (self.spec.app if self.spec else "")
+        if args.kind == "create_selfhosted_runner":
+            self.repository_identity = resolve_repository(
+                self.target.github.repository if self.target.github else None
+            )
+            self.resolved_runner_name = resolve_name(
+                getattr(args, "name", None), self.repository_identity, argument="--name"
+            )
+            name = self.resolved_runner_name.value
         if not namespace or not name:
             raise ValueError("namespace_and_name_required")
         source_root = getattr(args, "runner_root", "") or ""
@@ -201,6 +234,21 @@ class WorkflowAction(SkillAction):
         ):
             raise ValueError("runner_root_and_labels_required")
         self.runner = RunnerAction(namespace, name, source_root, labels, args.timeout)
+        if args.kind == "create_selfhosted_runner":
+            source = (
+                ScopeSource.EXPLICIT
+                if getattr(args, "namespace", None)
+                else ScopeSource.TOOLBOX_DEFAULT
+            )
+            initial = ScopeObservation(ScopePurpose.RUNNER, namespace, source)
+            self.context.runner_scopes[scope_key(initial.purpose, namespace)] = initial
+            if self.spec is not None and self.spec.namespace != namespace:
+                build = ScopeObservation(
+                    ScopePurpose.BUILD, self.spec.namespace, ScopeSource.TOOLBOX_DEFAULT
+                )
+                self.context.runner_scopes[
+                    scope_key(build.purpose, build.namespace)
+                ] = build
 
     def prepare(self) -> None:
         """Validate inputs and bind the shared runtime target before composition.
@@ -242,6 +290,25 @@ class WorkflowAction(SkillAction):
             github["token_file"] = str(github["token_file"])
         return plan_digest(
             {
+                "identity": {
+                    "repository": self.repository_identity.reference,
+                    "source": self.repository_identity.source,
+                    "name": self.resolved_runner_name.value
+                    if self.resolved_runner_name
+                    else None,
+                    "name_source": self.resolved_runner_name.source
+                    if self.resolved_runner_name
+                    else None,
+                },
+                "scopes": [
+                    {
+                        "namespace": scope.namespace,
+                        "uid": scope.uid,
+                        "ownership": scope.ownership,
+                        "source": scope.source,
+                    }
+                    for scope in self.context.runner_scopes.values()
+                ],
                 "kind": self.args.kind,
                 "operation": self.args.action,
                 "skill": copy_json(self.target.skill),
@@ -311,6 +378,15 @@ class WorkflowAction(SkillAction):
             if not is_json_value(value):
                 raise TypeError("workflow_record_requires_json")
             records.append({"callback": type(callback).__name__, **json_object(value)})
+        if self.context.runner_scopes:
+            records.append(
+                scope_record(
+                    self.repository_identity,
+                    self.resolved_runner_name,
+                    self.resolved_description,
+                    tuple(self.context.runner_scopes.values()),
+                )
+            )
         return records
 
     def _execute(
@@ -461,9 +537,35 @@ class EnsureNamespace(K8SCallback[WorkflowAction]):
         :returns: Empty evidence after owned namespace cleanup verification.
         :raises KubernetesError: If a newly created namespace cannot be removed safely.
         """  # noqa: DOC502 - ResourceSet applies and verifies namespace lifecycle.
-        if self.state.failed:
-            for resources in reversed(self._created):
-                resources.cleanup_created()
+        for resources in reversed(self._created):
+            names = {name for _, name in resources.created}
+            temporary_build = any(
+                scope.namespace in names and scope.retention == ScopeRetention.TEMPORARY
+                for scope in self.state.runner_scopes.values()
+            ) and not any(
+                scope.namespace in names
+                and scope.purpose in (ScopePurpose.RUNNER, ScopePurpose.MANAGER)
+                for scope in self.state.runner_scopes.values()
+            )
+            if self.state.failed or temporary_build:
+                expected_uids = {
+                    (str(item["kind"]), str(item["name"])): str(item["uid"])
+                    for item in resources.evidence
+                    if item.get("uid")
+                }
+                if self.state.runner_scopes and any(
+                    identity not in expected_uids for identity in resources.created
+                ):
+                    raise KubernetesError(CLEANUP_IDENTITY_MISSING)
+                resources.cleanup_created(
+                    expected_uids=expected_uids if self.state.runner_scopes else None
+                )
+                for name in names:
+                    for purpose in (ScopePurpose.RUNNER, ScopePurpose.BUILD):
+                        key = scope_key(purpose, name)
+                        previous = self.state.runner_scopes.get(key)
+                        if previous is not None:
+                            self.state.runner_scopes[key] = previous.removed()
         return {}
 
     def run(self) -> JSONObject:
@@ -498,6 +600,17 @@ class EnsureNamespace(K8SCallback[WorkflowAction]):
                         "uid": json_object(observed["metadata"])["uid"],
                         "action": NO_OP,
                     }
+                )
+        for scope in tuple(self.state.runner_scopes.values()):
+            if scope.namespace in names:
+                observe_namespace(
+                    self.state,
+                    self.state.kubernetes,
+                    namespace=scope.namespace,
+                    purpose=scope.purpose,
+                    source=scope.source,
+                    operation=workflow.runner.operation,
+                    required=True,
                 )
         return {"verified": True, "namespaces": records}
 
