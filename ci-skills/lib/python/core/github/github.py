@@ -268,7 +268,7 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
         :param timeout: Positive per-request time bound in seconds.
         :param deadline: Optional shared operation budget; existing callers remain unbounded across requests.
         """
-        super().__init__(ProviderAuthAction(target, timeout, deadline))
+        super().__init__(ProviderAuthAction(target, timeout, deadline=deadline))
 
     def _environment(
         self, target: Target, reference: str

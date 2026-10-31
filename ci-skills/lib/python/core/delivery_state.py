@@ -49,7 +49,7 @@ class ProviderAuthAction(AuthAction):
     """
 
     timeout: int
-    deadline: Optional[RequestDeadline] = None
+    deadline: Optional[RequestDeadline] = field(default=None, kw_only=True)
 
 
 @dataclass

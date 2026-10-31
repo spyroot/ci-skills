@@ -318,7 +318,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "required_tools": ("glab", "gh", "git"),
         "returns": "Plan or verified mirror state, repository identities, ref digests and redacted blockers.",
         "execution_surface": "selected GitLab and GitHub APIs; bounded native Git ref reads",
-        "side_effects": "Confirmed sync configures one native push mirror and requests synchronization. Only --create-if- "
+        "side_effects": "Confirmed sync configures one native push mirror and requests synchronization. Only --create-if-"
         "absent permits creating the private GitHub destination. GitLab retains the selected GitHub "
         "credential for future pushes. Divergent refs are preserved and reported as failure; native mirror "
         "deletion behavior applies. Confirmed credential recovery deletes and recreates only the selected "
