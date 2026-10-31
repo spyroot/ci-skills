@@ -759,3 +759,89 @@ def test_constructed_target_fields_are_checked_when_execution_consumes_them(
         assert "host" in {finding.selector for finding in findings}
     else:
         assert findings == ()
+
+
+@pytest.mark.parametrize(
+    "wrapper",
+    (
+        "if {command}; then :; fi",
+        "if false; then :; elif {command}; then :; fi",
+        "while {command}; do break; done",
+        "until {command}; do break; done",
+        "! {command}",
+        "if ! {command}; then :; fi",
+    ),
+    ids=("if", "elif", "while", "until", "negated", "negated-if"),
+)
+@pytest.mark.parametrize("fixed_host", (False, True), ids=("runtime", "fixed-host"))
+def test_shell_control_prefixes_preserve_operational_selector_checks(
+    portability: ModuleType, wrapper: str, fixed_host: bool
+) -> None:
+    """Inspect supported conditional and negated commands through one runtime baseline.
+
+    :param portability: Shared scanner module under test.
+    :param wrapper: Supported shell control form surrounding the existing invocation.
+    :param fixed_host: Whether only the selected host becomes a fixed deployment value.
+    :returns: None; assertions preserve runtime inputs and reject the fixed host.
+    """
+    command = SHELL_SOURCE.splitlines()[2]
+    assert SHELL_SOURCE.count(command) == 1
+    source = SHELL_SOURCE.replace(command, wrapper.format(command=command), 1)
+    if fixed_host:
+        source = source.replace('"$GITLAB_HOST"', '"gitlab.delivery.corp"', 1)
+
+    findings = portability.scan_source("tests/smoke_control_flow.sh", source)
+
+    if fixed_host:
+        assert "host" in {finding.selector for finding in findings}
+    else:
+        assert findings == ()
+
+
+@pytest.mark.parametrize("form", ("statement", "expression"))
+@pytest.mark.parametrize(
+    "candidate_first", (False, True), ids=("candidate-second", "candidate-first")
+)
+@pytest.mark.parametrize("fixed_host", (False, True), ids=("runtime", "fixed-host"))
+def test_python_branch_merges_preserve_command_argument_selectors(
+    portability: ModuleType, form: str, candidate_first: bool, fixed_host: bool
+) -> None:
+    """Keep argv structure across either branch order without hiding a fixed target.
+
+    :param portability: Shared scanner module under test.
+    :param form: If statement with a retained default, or a conditional expression.
+    :param candidate_first: Whether the changed host is in the first or second branch.
+    :param fixed_host: Whether the single changed selector is fixed or runtime-derived.
+    :returns: None; assertions verify both possible command lists remain inspected.
+    """
+    start = PYTHON_SOURCE.index('["glab"')
+    end = PYTHON_SOURCE.index(", check=True", start)
+    runtime_argv = PYTHON_SOURCE[start:end]
+    candidate_argv = runtime_argv.replace(
+        "target.gitlab.host",
+        '"gitlab.delivery.corp"' if fixed_host else "target.alternate_gitlab.host",
+        1,
+    )
+    first, second = (
+        (candidate_argv, runtime_argv)
+        if candidate_first
+        else (runtime_argv, candidate_argv)
+    )
+    if form == "statement":
+        assignment = (
+            f"    command = {first}\n"
+            "    if target.override:\n"
+            f"        command = {second}\n"
+        )
+    else:
+        assignment = f"    command = {first} if target.override else {second}\n"
+    source = PYTHON_SOURCE.replace(runtime_argv, "command", 1)
+    signature = "def smoke(target, token_file):\n"
+    source = source.replace(signature, signature + assignment, 1)
+
+    findings = portability.scan_source("tests/python/test_branch_selection.py", source)
+
+    if fixed_host:
+        assert "host" in {finding.selector for finding in findings}
+    else:
+        assert findings == ()

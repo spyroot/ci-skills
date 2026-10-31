@@ -112,6 +112,26 @@ class Finding:
     :param line: One-based source line, or zero for unreadable files.
     :param rule: Stable failure category.
     :param selector: Host, repository, project, cluster, credential, or registry.
+
+    .. attribute :: source
+        :type: str
+
+        Repository-relative source path.
+
+    .. attribute :: line
+        :type: int
+
+        Source line, or zero for unreadable files.
+
+    .. attribute :: rule
+        :type: str
+
+        Stable failure category.
+
+    .. attribute :: selector
+        :type: str
+
+        Operational selector category.
     """
 
     source: str
@@ -138,6 +158,16 @@ class GateResult:
 
     :param checked_files: Sources actually inspected in the selected snapshot.
     :param findings: Classified source and portability failures.
+
+    .. attribute :: checked_files
+        :type: tuple[str, ...]
+
+        Selected source paths inspected by the gate.
+
+    .. attribute :: findings
+        :type: tuple[Finding, ...]
+
+        Redacted source and portability failures.
     """
 
     checked_files: tuple[str, ...]
@@ -187,12 +217,39 @@ class _Value:
     :param items: Positional arguments or array elements.
     :param fields: Mapping entries supplied by source syntax.
     :param targets: Locally written target documents attached to their file value.
+    :param choices: Correlated structured alternatives retained across branches.
+
+    .. attribute :: texts
+        :type: tuple[str, ...]
+
+        Literal templates retaining runtime markers.
+
+    .. attribute :: items
+        :type: tuple[_Value, ...]
+
+        Positional arguments or array elements.
+
+    .. attribute :: fields
+        :type: tuple[tuple[str, _Value], ...]
+
+        Named mapping or constructor values.
+
+    .. attribute :: targets
+        :type: tuple[_Selection, ...]
+
+        Target selectors attached to a locally written file.
+
+    .. attribute :: choices
+        :type: tuple[_Value, ...]
+
+        Whole structured alternatives with branch correlation preserved.
     """
 
     texts: tuple[str, ...] = (RUNTIME,)
     items: tuple[_Value, ...] = ()
     fields: tuple[tuple[str, _Value], ...] = ()
     targets: tuple[_Selection, ...] = ()
+    choices: tuple[_Value, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -202,6 +259,21 @@ class _Selection:
     :param selector: Portability category.
     :param value: Locally resolved literal or runtime alternatives.
     :param authority: Invocation or target-table context for synthetic fixtures.
+
+    .. attribute :: selector
+        :type: str
+
+        Operational selector category.
+
+    .. attribute :: value
+        :type: _Value
+
+        Resolved literal or runtime alternatives.
+
+    .. attribute :: authority
+        :type: str
+
+        Invocation or target-table context for synthetic fixtures.
     """
 
     selector: str
@@ -222,6 +294,67 @@ def _alternatives(values: Sequence[str]) -> tuple[str, ...]:
     return result
 
 
+def _value_choices(value: _Value) -> tuple[_Value, ...]:
+    """Expose a value's whole alternatives without separating correlated fields.
+
+    :param value: Scalar, structured value, or previously merged alternatives.
+    :returns: One or more complete possible values.
+    """
+    return value.choices or (value,)
+
+
+def _merge_values(values: Sequence[_Value]) -> _Value:
+    """Retain bounded branch alternatives without dropping executable structure.
+
+    :param values: Complete values produced by alternative control-flow paths.
+    :returns: Scalar alternatives or correlated structured alternatives.
+    :raises ValueError: Branch alternatives exceed the finite scanner budget.
+    """
+    choices = tuple(
+        dict.fromkeys(choice for value in values for choice in _value_choices(value))
+    )
+    if len(choices) > MAX_ALTERNATIVES:
+        raise ValueError("expression_budget_exceeded")
+    if len(choices) == 1:
+        return choices[0]
+    if any(value.items or value.fields or value.targets for value in choices):
+        return _Value(choices=choices)
+    return _Value(
+        _alternatives(tuple(text for value in choices for text in value.texts))
+    )
+
+
+def _value_groups(values: Sequence[_Value]) -> tuple[tuple[_Value, ...], ...]:
+    """Expand independent inputs within the same finite expression budget.
+
+    :param values: Arguments or mapping values containing whole alternatives.
+    :returns: Bounded groups with each structured branch kept intact.
+    :raises ValueError: Combining alternatives exceeds the scanner budget.
+    """
+    groups = tuple(_value_choices(value) for value in values)
+    count = 1
+    for group in groups:
+        count *= len(group)
+        if count > MAX_ALTERNATIVES:
+            raise ValueError("expression_budget_exceeded")
+    return tuple(product(*groups))
+
+
+def _field_value(value: _Value, key: str) -> _Value:
+    """Read a declared field from every retained structured alternative.
+
+    :param value: Object or mapping with possibly conditional fields.
+    :param key: Selected attribute or string mapping key.
+    :returns: Bounded values supplied by the alternative fields.
+    :raises ValueError: Field alternatives exceed the scanner budget.
+    """
+    return _merge_values(
+        tuple(
+            dict(choice.fields).get(key, _Value()) for choice in _value_choices(value)
+        )
+    )
+
+
 def _join(left: _Value, right: _Value, separator: str = "") -> _Value:
     """Combine adjacent literal and runtime string parts.
 
@@ -231,6 +364,10 @@ def _join(left: _Value, right: _Value, separator: str = "") -> _Value:
     :returns: Bounded combined alternatives.
     :raises ValueError: Constant expansion exceeds its budget.
     """
+    if left.choices or right.choices:
+        return _merge_values(
+            tuple(_join(a, b, separator) for a, b in _value_groups((left, right)))
+        )
     return _Value(
         _alternatives(
             tuple(a + separator + b for a, b in product(left.texts, right.texts))
@@ -425,7 +562,13 @@ def _target_selections(
 
 
 class _PythonScanner(ast.NodeVisitor):
-    """Follow bounded local expressions into operational Python call sites."""
+    """Follow bounded local expressions into operational Python call sites.
+
+    .. attribute :: visit_AsyncFunctionDef
+        :type: function
+
+        Alias using the same scope handling for asynchronous function bodies.
+    """
 
     def __init__(self, source: str) -> None:
         """Create isolated lexical state for one source file.
@@ -439,18 +582,23 @@ class _PythonScanner(ast.NodeVisitor):
     def value(self, node: ast.AST) -> _Value:
         """Resolve local literals while preserving runtime and fallback branches.
 
+        Delegated expression parsing can raise ValueError when its budget is exceeded.
+
         :param node: Expression to inspect without execution.
         :returns: Bounded symbolic value.
-        :raises ValueError: Expression alternatives exceed the scanner budget.
         """
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             return _Value((node.value,))
         if isinstance(node, ast.Name):
             return self.values.get(node.id, _Value())
         if isinstance(node, ast.Attribute):
-            return dict(self.value(node.value).fields).get(node.attr, _Value())
-        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
-            return dict(self.value(node.value).fields).get(node.slice.value, _Value())
+            return _field_value(self.value(node.value), node.attr)
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+        ):
+            return _field_value(self.value(node.value), node.slice.value)
         if isinstance(node, (ast.List, ast.Tuple)):
             return _Value(items=tuple(self.value(item) for item in node.elts))
         if isinstance(node, ast.Dict):
@@ -483,13 +631,7 @@ class _PythonScanner(ast.NodeVisitor):
                 if isinstance(node, ast.BoolOp)
                 else (node.body, node.orelse)
             )
-            return _Value(
-                _alternatives(
-                    tuple(
-                        text for branch in branches for text in self.value(branch).texts
-                    )
-                )
-            )
+            return _merge_values(tuple(self.value(branch) for branch in branches))
         if isinstance(node, ast.Call):
             name = ast.unparse(node.func).rsplit(".", 1)[-1]
             authorities = {
@@ -512,7 +654,7 @@ class _PythonScanner(ast.NodeVisitor):
             if name in {"str", "Path"} and node.args:
                 return self.value(node.args[0])
             if name in {"get", "getenv"} and len(node.args) > 1:
-                return _Value(_alternatives((RUNTIME, *self.value(node.args[1]).texts)))
+                return _merge_values((_Value(), self.value(node.args[1])))
             if name == "dict":
                 return _Value(
                     fields=tuple(
@@ -552,11 +694,13 @@ class _PythonScanner(ast.NodeVisitor):
             if isinstance(target, ast.Name):
                 self.values[target.id] = value
             elif ast.unparse(target) == "sys.argv":
-                self.findings.extend(
-                    _findings(
-                        self.source, node.lineno, _command_selections(value.items)
-                    )
-                )
+                for choice in _value_choices(value):
+                    for arguments in _value_groups(choice.items):
+                        self.findings.extend(
+                            _findings(
+                                self.source, node.lineno, _command_selections(arguments)
+                            )
+                        )
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
@@ -584,15 +728,7 @@ class _PythonScanner(ast.NodeVisitor):
         self.values = dict(original)
         for name in branches[0].keys() | branches[1].keys():
             values = [branch.get(name, _Value()) for branch in branches]
-            self.values[name] = (
-                values[0]
-                if values[0] == values[1]
-                else _Value(
-                    _alternatives(
-                        tuple(text for value in values for text in value.texts)
-                    )
-                )
-            )
+            self.values[name] = _merge_values(values)
 
     def visit_Call(self, node: ast.Call) -> None:
         """Inspect execution arguments and attach locally written target fixtures.
@@ -619,34 +755,47 @@ class _PythonScanner(ast.NodeVisitor):
                     self.values.get(variable, _Value()), targets=tuple(targets)
                 )
         if tail in PROCESS_CALLS and node.args:
-            first = self.value(node.args[0])
-            arguments = first.items or tuple(self.value(item) for item in node.args)
-            selections.extend(_command_selections(arguments))
-            if tail == "system" or (
-                not first.items
-                and any(
-                    item.arg == "shell"
-                    and isinstance(item.value, ast.Constant)
-                    and item.value.value is True
-                    for item in node.keywords
-                )
-            ):
-                for text in first.texts:
-                    self.findings.extend(
-                        _scan_shell(self.source, text, node.lineno - 1)
-                    )
-            for keyword in node.keywords:
-                if keyword.arg == "env":
-                    for key, value in self.value(keyword.value).fields:
-                        selections.extend(value.targets)
-                        if key in ENV_FIELDS:
-                            selector = _field_selector(ENV_FIELDS[key])
-                            if selector:
-                                selections.append(
+            arguments = tuple(self.value(item) for item in node.args)
+            environment = next(
+                (self.value(item.value) for item in node.keywords if item.arg == "env"),
+                _Value(),
+            )
+            inspected = 0
+            for call in _value_groups((*arguments, environment)):
+                first, branch_environment = call[0], call[-1]
+                for command in _value_groups(first.items or call[:-1]):
+                    fields = tuple(value for _, value in branch_environment.fields)
+                    for values in _value_groups(fields):
+                        inspected += 1
+                        if inspected > MAX_ALTERNATIVES:
+                            raise ValueError("expression_budget_exceeded")
+                        operation = list(_command_selections(command))
+                        for (key, _), value in zip(branch_environment.fields, values):
+                            operation.extend(value.targets)
+                            if key in ENV_FIELDS and (
+                                selector := _field_selector(ENV_FIELDS[key])
+                            ):
+                                operation.append(
                                     _Selection(
                                         selector, value, ENV_FIELDS[key].split(".")[0]
                                     )
                                 )
+                        self.findings.extend(
+                            _findings(self.source, node.lineno, operation)
+                        )
+                if tail == "system" or (
+                    not first.items
+                    and any(
+                        item.arg == "shell"
+                        and isinstance(item.value, ast.Constant)
+                        and item.value.value is True
+                        for item in node.keywords
+                    )
+                ):
+                    for text in first.texts:
+                        self.findings.extend(
+                            _scan_shell(self.source, text, node.lineno - 1)
+                        )
         elif name.startswith(("requests.", "httpx.", "urllib.request.")) and node.args:
             selections.append(_Selection("host", self.value(node.args[0])))
         self.findings.extend(_findings(self.source, node.lineno, selections))
@@ -809,6 +958,17 @@ def _scan_shell(
             else:
                 groups[-1].append(token)
         for group in groups:
+            while group and group[0] in {
+                "if",
+                "elif",
+                "while",
+                "until",
+                "!",
+                "then",
+                "do",
+                "else",
+            }:
+                group.pop(0)
             environment = []
             while group and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", group[0]):
                 variable, token = group.pop(0).split("=", 1)
@@ -871,6 +1031,8 @@ def scan_source(source: str, text: str) -> tuple[Finding, ...]:
     :param source: Repository-relative source path selecting its language.
     :param text: UTF-8 source contents from the selected snapshot.
     :returns: Redacted findings, including unsupported or invalid source syntax.
+    :raises ValueError: Internally for invalid or over-budget YAML; caught and
+        converted into a source finding.
     """
     try:
         if len(text.encode("utf-8")) > MAX_SOURCE_BYTES:
@@ -945,6 +1107,8 @@ class PortabilityGate:
 
         :param paths: Repository-relative paths from the existing NUL inventory.
         :returns: Checked sources and failures; missing or escaped sources fail closed.
+        :raises OSError: Internally for escaped source paths; caught and converted
+            into unreadable-source findings.
         """
         checked = []
         findings = []
