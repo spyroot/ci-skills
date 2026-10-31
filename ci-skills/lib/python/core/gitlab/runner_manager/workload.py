@@ -73,7 +73,7 @@ def preserve_manager_name(
     :param scope: Exact live scope selected by ownership lookup.
     :returns: None after retaining the observed or planned identity.
     :raises KubernetesError: Multiple owned workload names are present.
-    """
+    """  # noqa: DOC502 - Shared resolver propagates Kubernetes read-back failures.
     preferred = action.workflow.resolved_runner_name or ResolvedName(
         action.runner(scope).name, NameSource.UNKNOWN
     )
@@ -344,6 +344,7 @@ class ObserveManagerNamespace(K8SCallback[ManagerWorkloadAction]):
         """Retain actual namespace absence or borrowed-namespace preservation.
 
         :returns: Verified final scope observation.
+        :raises TypeError: Shared state is not the runner-manager state.
         :raises KubernetesError: A borrowed scope disappeared or owned cleanup is incomplete.
         """
         if not isinstance(self.state, GitLabRunnerManagerState):

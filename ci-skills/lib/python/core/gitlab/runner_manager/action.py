@@ -34,12 +34,19 @@ from lib.python.core.report import plan_digest
 from lib.python.core.runner import RunnerAction
 from lib.python.core.runner_identity import (
     NameSource,
+    RepositoryIdentity,
+    RepositorySource,
     ResolvedName,
     resolve_name,
     resolve_repository,
 )
-from lib.python.core.runner_options import parse_protected, validate_runner_tags
+from lib.python.core.runner_options import parse_protected, runner_tags
 from lib.python.core.runner_scope import ScopeObservation, ScopePurpose, ScopeSource
+from lib.python.core.target import (
+    GitLabOperationTarget,
+    TargetError,
+    select_gitlab_reference,
+)
 from lib.python.core.toolbox_actions import WorkflowAction
 
 from .token import (
@@ -213,6 +220,16 @@ class GitLabRunnerManagerAction(WorkflowAction):
 
         Absent, deferred, or privately bound registration token.
 
+    .. attribute :: gitlab_selection
+        :type: tuple[str, str]
+
+        Effective project or group kind and reference selected from arguments and target.
+
+    .. attribute :: explicit_tags
+        :type: tuple[str, ...]
+
+        Caller-supplied tags before repository defaults or provider discovery.
+
     .. attribute :: candidate_scope
         :type: Optional[RunScope]
 
@@ -227,6 +244,8 @@ class GitLabRunnerManagerAction(WorkflowAction):
     context: GitLabRunnerManagerState = field(default_factory=GitLabRunnerManagerState)
     runner_token: RunnerTokenSelection = field(init=False, repr=False)
     candidate_scope: Optional[RunScope] = field(init=False, default=None)
+    explicit_tags: tuple[str, ...] = field(init=False, default=())
+    gitlab_selection: tuple[str, str] = field(init=False)
     podman_runtime: Optional[PodmanRuntimeSettings] = field(
         init=False,
         default=None,
@@ -256,6 +275,11 @@ class GitLabRunnerManagerAction(WorkflowAction):
         :raises ValueError: The supplied description is absent or blank.
         """
         value = getattr(self.args, "description", "")
+        if (
+            self.resolved_description is not None
+            and self.resolved_description.source == NameSource.UNKNOWN
+        ):
+            return self.resolved_description.value
         if not isinstance(value, str) or not value.strip():
             raise ValueError("runner_description_required")
         return value.strip()
@@ -267,9 +291,9 @@ class GitLabRunnerManagerAction(WorkflowAction):
         :returns: Exact tags in caller order.
         :raises ValueError: A tag is blank or repeated.
         """
-        labels = validate_runner_tags(tuple(getattr(self.args, "tag", ())))
-        if self.args.action == "deploy" and not labels:
-            raise ValueError("runner_label_required")
+        labels = runner_tags(
+            tuple(getattr(self.args, "tag", ())), self.repository_identity
+        )
         return labels
 
     @property
@@ -352,6 +376,8 @@ class GitLabRunnerManagerAction(WorkflowAction):
         :raises ValueError: Namespace or run identifier syntax is invalid.
         """
         namespace = getattr(self.args, "namespace", "") or None
+        if not self.repository_identity.name and not namespace:
+            raise ValueError("repository_identity_required: provide --namespace")
         selected_run_id = self.scope_id
         if self.args.action == "deploy":
             self.candidate_scope = RunScope.new(
@@ -383,6 +409,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
         ):
             raise ValueError(PROTECTION_DEPLOY_ONLY)
         self.context.args = self.args
+        self.explicit_tags = tuple(getattr(self.args, "tag", ()))
         surfaces = (
             ("gitlab", "kubernetes", "harbor")
             if self.args.action == "deploy"
@@ -396,24 +423,37 @@ class GitLabRunnerManagerAction(WorkflowAction):
         )
         if not self.args.dry_run:
             self.target = bind_sources(self.target, revision=self.args.revision)
-        self.repository_identity = resolve_repository(
-            (
-                getattr(self.args, "project", None)
-                or (self.target.gitlab.project if self.target.gitlab else None)
-            )
-            if not getattr(self.args, "group", None)
-            else None
+        if self.target.gitlab is None or self.target.source_file is None:
+            raise TargetError("gitlab_target_unresolved")
+        self.gitlab_selection = select_gitlab_reference(
+            GitLabOperationTarget(self.target.gitlab, self.target.source_file),
+            project=getattr(self.args, "project", None),
+            group=getattr(self.args, "group", None),
+        )
+        target_kind, reference = self.gitlab_selection
+        self.repository_identity = (
+            resolve_repository(reference)
+            if target_kind == "project"
+            else RepositoryIdentity(None, RepositorySource.UNKNOWN)
         )
         self.resolved_description = resolve_name(
             getattr(self.args, "description", None),
             self.repository_identity,
             argument="--description",
+            pending=target_kind == "project",
         )
         self.args.runner_id = self.runner_id
-        self.args.description = self.resolved_description.value
+        self.args.description = self.resolved_description.value or None
         parse_protected(getattr(self.args, "protected", None))
         self.args.tag = list(self.labels)
-        self._prepare_scope()
+        if (
+            target_kind == "group"
+            and self.args.action == "deploy"
+            and not self.args.tag
+        ):
+            raise ValueError("repository_identity_required: provide --tag")
+        if self.repository_identity.name or getattr(self.args, "namespace", None):
+            self._prepare_scope()
         if self.candidate_scope is not None:
             candidate = self.candidate_scope
             source = (
@@ -452,6 +492,25 @@ class GitLabRunnerManagerAction(WorkflowAction):
             DeferredRunnerToken(path) if self.args.dry_run else read_runner_token(path)
         )
 
+    def bind_repository(self, access: JSONObject) -> None:
+        """Resolve pending project defaults through the existing access receipt.
+
+        :param access: Authenticated GitLab target observation.
+        :returns: None after binding exact names, tags, and candidate scope.
+        :raises ValueError: Provider identity is inconsistent or required defaults are absent.
+        """  # noqa: DOC502 - Shared identity and option validators propagate failures.
+        target_kind, reference = self.gitlab_selection
+        if not self.repository_identity.name and target_kind == "project":
+            self.repository_identity = RepositoryIdentity.from_access(access, reference)
+            self.resolved_description = resolve_name(
+                self.args.description,
+                self.repository_identity,
+                argument="--description",
+            )
+            self.args.description = self.resolved_description.value
+            self.args.tag = list(self.labels)
+            self._prepare_scope()
+
     def _session_evidence(self) -> JSONObject:
         """Render bound or deferred GitLab session identity.
 
@@ -464,10 +523,11 @@ class GitLabRunnerManagerAction(WorkflowAction):
                 "target_reference": session.target_reference,
                 "credential_digest": session.credential_digest,
             }
+        target_kind, reference = self.gitlab_selection
         return {
             "state": "deferred",
-            "project": getattr(self.args, "project", None),
-            "group": getattr(self.args, "group", None),
+            "target_kind": target_kind,
+            "target_reference": reference,
         }
 
     def _runner_evidence(self) -> JSONObject:

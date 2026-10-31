@@ -391,8 +391,7 @@
         "create": {
           "required_options": [
             "--spec",
-            "--runner-root",
-            "--label"
+            "--runner-root"
           ],
           "result_schema": "schemas/results/toolbox-workflow.schema.json"
         },
@@ -406,8 +405,7 @@
         "update": {
           "required_options": [
             "--spec",
-            "--runner-root",
-            "--label"
+            "--runner-root"
           ],
           "result_schema": "schemas/results/toolbox-workflow.schema.json"
         }
@@ -1031,7 +1029,6 @@
           "read_back": "Exact-node privileged Deployment and immutable Pod image, then the exact scoped GitLab runner online with contact evidence.",
           "required_options": [
             "--runner-id",
-            "--tag",
             "--image",
             "--token-file",
             "--node"
@@ -1260,8 +1257,7 @@
           "purpose": "Build and publish the toolbox, then configure a runner using that image.",
           "read_back": "Published toolbox digest and the configured runner deployment using that image.",
           "required_options": [
-            "--toolbox-spec",
-            "--tag"
+            "--toolbox-spec"
           ],
           "requires_authorities": [
             "kubernetes",

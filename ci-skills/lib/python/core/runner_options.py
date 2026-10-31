@@ -13,6 +13,17 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Final
 
+from lib.python.core.kubernetes.run_scope import (
+    DNS_LABEL_LIMIT,
+    dns_token,
+    validate_namespace,
+)
+from lib.python.core.runner import REGISTRATION_SECRET_SUFFIX
+from lib.python.core.runner_identity import NameSource, RepositoryIdentity, ResolvedName
+
+RUNNER_NAME_LIMIT: Final = DNS_LABEL_LIMIT - len(REGISTRATION_SECRET_SUFFIX)
+RUNNER_NAME_INVALID: Final = "runner_name_invalid"
+
 PROTECTED_INPUT: Final = "true"
 UNPROTECTED_INPUT: Final = "false"
 PROTECTION_INVALID: Final = "protected_must_be_true_or_false"
@@ -92,3 +103,33 @@ class SingleValue(argparse.Action):
         if current is not None and current != values:
             parser.error(SINGULAR_CONFLICT + self.option_strings[0])
         setattr(namespace, self.dest, values)
+
+
+def runner_tags(
+    values: Sequence[str], repository: RepositoryIdentity
+) -> tuple[str, ...]:
+    """Apply repository tags only when the caller omitted every explicit tag.
+
+    :param values: Ordered explicit tags or labels.
+    :param repository: Selected consumer repository, possibly pending authentication.
+    :returns: Validated explicit values, the repository leaf, or pending empty intent.
+    :raises ValueError: Supplied tag values are malformed.
+    """
+    return validate_runner_tags(
+        values or ((repository.name,) if repository.name else ())
+    )
+
+
+def kubernetes_runner_name(name: ResolvedName) -> ResolvedName:
+    """Normalize derived names and reject invalid explicit Kubernetes identities.
+
+    :param name: Explicit or repository-derived workload identity.
+    :returns: Bounded identity safe for ownership labels and suffixed Secrets.
+    :raises ValueError: An explicit name is invalid, or normalization yields no token.
+    """
+    if name.source == NameSource.EXPLICIT:
+        validate_namespace(name.value)
+        if len(name.value) > RUNNER_NAME_LIMIT:
+            raise ValueError(RUNNER_NAME_INVALID)
+        return name
+    return ResolvedName(dns_token(name.value, limit=RUNNER_NAME_LIMIT), name.source)

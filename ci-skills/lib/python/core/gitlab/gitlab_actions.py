@@ -224,6 +224,8 @@ class ActionPlan(SkillAction):
         :raises ValueError: If canonical JSON encoding rejects the body or plan.
         :raises RecursionError: If supplied containers are cyclic or excessively nested.
         """  # noqa: DOC503 - Shared canonical plan serialization propagates failures.
+        from lib.python.core.gitlab.gitlab_runners import pending_runner_identity
+
         result: MutableMapping[str, JSONValue] = {
             "operation": self.operation,
             "target_kind": self.target_kind,
@@ -241,6 +243,7 @@ class ActionPlan(SkillAction):
                         and self.project_ids is None
                     )
                     or (self.operation == "delete" and self.runner_snapshot is None)
+                    or pending_runner_identity(self)
                 )
             ),
             "fields": sorted(self.body),

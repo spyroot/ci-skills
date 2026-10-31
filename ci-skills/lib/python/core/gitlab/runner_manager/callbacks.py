@@ -45,7 +45,6 @@ from lib.python.core.runner_options import parse_protected
 from lib.python.core.target import (
     GitLabOperationTarget,
     TargetError,
-    select_gitlab_reference,
 )
 from lib.python.sys.status import PASS
 
@@ -163,7 +162,13 @@ class GitLabRunnerManagerCallback(Callback[GitLabRunnerManagerState, ActionT_co]
 
 
 class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
-    """Bind and independently verify one GitLab runner target."""
+    """Bind and independently verify one GitLab runner target.
+
+    .. attribute :: workflow
+        :type: GitLabRunnerManagerAction
+
+        Prepared workflow receiving repository identity from the access receipt.
+    """
 
     def __init__(self, workflow: GitLabRunnerManagerAction):
         """Resolve the target selector without reading credentials.
@@ -171,15 +176,12 @@ class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
         :param workflow: Prepared runner-manager inputs and target.
         :raises TargetError: Target source or project/group selection is invalid.
         """
+        self.workflow = workflow
         target = workflow.target
         if target.gitlab is None or target.source_file is None:
             raise TargetError("gitlab_target_unresolved")
         operation_target = GitLabOperationTarget(target.gitlab, target.source_file)
-        target_kind, reference = select_gitlab_reference(
-            operation_target,
-            project=getattr(workflow.args, "project", None),
-            group=getattr(workflow.args, "group", None),
-        )
+        target_kind, reference = workflow.gitlab_selection
         source = target.source_kind or "target"
         if getattr(workflow.args, target_kind, None):
             source = f"{source};argv:--{target_kind}"
@@ -227,7 +229,8 @@ class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
 
         :returns: Existing safe GitLab access receipt.
         :raises ActionError: Access is blocked or lacks a numeric target ID.
-        """
+        :raises ValueError: Authenticated repository defaults are inconsistent.
+        """  # noqa: DOC502 - Shared identity binding propagates validation failures.
         session = self.manager_state.configured_session
         api = GlabAPIClient()
         access = check_gitlab_operation_access(session, api_client=api)
@@ -235,6 +238,7 @@ class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
             raise ActionError("gitlab_access_blocked")
         target_id = json_integer(json_object(access["target"])["id"])
         self.manager_state.gitlab = GitLabService(api, session, target_id, access)
+        self.workflow.bind_repository(self.manager_state.gitlab.access)
         self.state.access_evidence[SkillPluginType.GITLAB.value] = access
         return access
 
@@ -328,7 +332,7 @@ class ObserveGitLabRunner(GitLabManagerComponent):
         :raises KubernetesError: Online manager ownership cannot be read.
         """  # noqa: DOC502,DOC503 - Provider readers propagate typed failures.
         workflow, service = self.workflow, self.gitlab
-        expected_tags = workflow.labels or None
+        expected_tags = workflow.explicit_tags or None
         record = read_runner_record(
             service.api,
             service.session,
@@ -359,6 +363,8 @@ class ObserveGitLabRunner(GitLabManagerComponent):
                 description, NameSource.PROVIDER
             )
             workflow.args.description = description
+        if not workflow.explicit_tags:
+            workflow.args.tag = list(record["tag_list"])
         self.manager_state.gitlab_runner = record
         scope, _ = workflow.scope_plan()
         return {

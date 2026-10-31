@@ -18,6 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Final, Optional
+from uuid import uuid4
 
 import pytest
 from conftest import import_script_module
@@ -37,6 +38,7 @@ KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 GITLAB_API = import_script_module("lib.python.core.gitlab.gitlab_api")
 RUNTIME = import_script_module("lib.python.core.runtime")
 SCHEMA = import_script_module("lib.python.core.schema")
+STATUS = import_script_module("lib.python.sys.status")
 
 PRIVATE_TOKEN = "glrt-private-unit-value"
 CHANGED_PRIVATE_TOKEN = "glrt-changed-unit"
@@ -45,6 +47,11 @@ RUN_ID = "manager-unit-run"
 NAMESPACE = "manager-unit-namespace"
 NAMESPACE_UID: Final = "manager-unit-namespace-uid"
 OBSERVED_PROTECTION: Final = "not_protected"
+TAG_ARGUMENT: Final = "--tag"
+FIELD_STATUS: Final = "status"
+FIELD_RECORDS: Final = "records"
+FIELD_CALLBACK: Final = "callback"
+FIELD_TAGS: Final = "tag_list"
 RUNNER_ID = 73
 RUNNER_DESCRIPTION = "unit-manager-runner"
 RUNNER_LABELS = ("ci13", "unit")
@@ -151,6 +158,17 @@ def _action(
     """
     selected = ACTION.GitLabRunnerManagerAction(_args(action, apply=apply))
     selected.target = _target()
+    selected.gitlab_selection = ACTION.select_gitlab_reference(
+        TARGET.GitLabOperationTarget(
+            selected.target.gitlab, selected.target.source_file
+        ),
+        project=selected.args.project,
+        group=selected.args.group,
+    )
+    selected.explicit_tags = tuple(selected.args.tag)
+    selected.resolved_description = ACTION.ResolvedName(
+        selected.args.description, ACTION.NameSource.EXPLICIT
+    )
     selected.candidate_scope = RUN_SCOPE.RunScope(RUN_ID, NAMESPACE, False)
     if action == "deploy":
         selected.podman_runtime = ACTION.PodmanRuntimeSettings(
@@ -1108,7 +1126,7 @@ def _manager_cli_harness(
         runner_id: int,
         *,
         description: str,
-        expected_tags: Sequence[str],
+        expected_tags: Optional[Sequence[str]],
         expected_protection: Optional[str] = None,
     ) -> dict:
         assert (bound, target_kind, target_id, runner_id, description) == (
@@ -1118,7 +1136,8 @@ def _manager_cli_harness(
             RUNNER_ID,
             RUNNER_DESCRIPTION,
         )
-        assert tuple(expected_tags) == RUNNER_LABELS
+        if expected_tags is not None:
+            assert tuple(expected_tags) == RUNNER_LABELS
         assert expected_protection is None
         cluster.runner_reads += 1
         return _runner_record(online=cluster.runner_online)
@@ -1290,25 +1309,37 @@ def test_manager_label_alias_plans_the_same_tags_as_tag(
     assert cluster.applied == cluster.deleted == []
 
 
-def test_manager_deploy_without_tag_is_refused(
+def test_manager_deploy_without_tags_preserves_observed_provider_tags(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Refuse deploy when neither --tag nor --label names a runner tag."""
+    """Plan omitted tags from independent runner read-back without provider mutation.
+
+    :param monkeypatch: Bind the existing isolated provider lifecycle harness.
+    :param tmp_path: Test-owned token and lock directory.
+    :param capsys: Capture the real command's machine-readable report.
+    """
     cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    selected_run_id = uuid4().hex
     arguments = [
         value
-        for value in _manager_cli_arguments(cluster)
-        if value not in {"--tag", *RUNNER_LABELS}
+        for value in _manager_cli_arguments(cluster, run_id=selected_run_id)
+        if value not in {TAG_ARGUMENT, *RUNNER_LABELS}
     ]
 
     code = SCRIPT.main(arguments)
 
     result = json.loads(capsys.readouterr().out)
-    assert code == 2
-    assert result["status"] == "BLOCKED"
-    assert "--tag" in json.dumps(result)
+    assert code == STATUS.exit_code(STATUS.PLANNED)
+    assert result[FIELD_STATUS] == STATUS.PLANNED
+    observations = [
+        item
+        for item in result[FIELD_RECORDS]
+        if item.get(FIELD_CALLBACK) == CALLBACKS.ObserveGitLabRunner.__name__
+    ]
+    assert [item[FIELD_TAGS] for item in observations] == [list(RUNNER_LABELS)]
+    assert cluster.runner_reads == len(observations)
     assert cluster.applied == cluster.deleted == []
 
 

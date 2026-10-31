@@ -72,27 +72,78 @@ creates a GitLab runner record, and deploys that same manager. Preserve these
 paths. Project/group are GitLab runner scopes, not new executors. The requested
 GitLab Kubernetes executor is not installed yet.
 
+### NOT_IMPLEMENTED: repository-derived default names
+
+**CI15-IDENTITY-001 — Derive repository-scoped names from the caller's repository.**
+`REPO` means the repository or project selected by the caller's operation context;
+it is not the CI-Skills installation directory or a new mandatory environment
+variable. Reuse the selected provider repository/project identity and existing
+project binding. When it is known, use its repository name for omitted
+repository-scoped runner names/descriptions, workload names, namespaces and
+repository-specific tags/labels. Do not substitute the literal `ci-skills`
+unless that is the selected repository's actual name.
+
+Resolve inputs in this order:
+
+1. Keep the working directory at the calling project root, as required by
+   [the installed skill](../../ci-skills/SKILL.md). The known caller `REPO`
+   supplies the operation's repository context; never discover it from the
+   installed skill directory.
+2. Reuse `core/project_binding.py:resolve_target` and the existing
+   [target-selection contract](../../ci-skills/references/access.md): explicit
+   `--target` or `--binding`, then `K8S_ADMIN_DIAGNOSTICS_BINDING` or
+   `CI_SKILLS_TARGET`, then the calling project's `.ci-skills/target.toml`, then
+   the user target. Conflicting selectors or an invalid selected source are
+   errors; do not merge sources or fall through after a selected-source error.
+3. Forward the known operation repository through the command's declared
+   interface. GitLab `--project` overrides `gitlab.project` in the selected
+   target. GitHub uses that target's `github.repository`; the current command
+   has no `--repo` option. Preserve the existing interface and expose any new
+   selector through the approved shared catalog/schema, never a private flag.
+4. For each object, use its explicit name input first, then its independently
+   verified existing identity on reuse/update/delete, then derive a new default
+   from the selected repository name. A numeric project ID requires provider
+   read-back of its name before deriving a name; offline intent must say when
+   that read-back remains pending.
+
+Derivation is unavailable only when no repository is selected in either the
+caller context or selected target, a group scope identifies no single
+repository, or a selected numeric ID still lacks its provider name. Request
+the missing declared repository selection or explicit object-name argument
+before planning that name or applying the operation. For a group-wide resource,
+accept an explicit name without inventing a repository. Invalid/conflicting
+inputs and failed provider reads report their actual errors; they never select
+a substitute identity. Do not silently fall back to a toolbox name/namespace
+or the CI-Skills installation name. Protection remains a separate caller
+choice; provider-assigned IDs and provider/system labels are not repository
+names.
+
+Use one shared resolver and the existing resource-specific validation and
+normalization. Preserve the generator's uniqueness and ownership guarantees;
+derive its human-readable name component from the repository. Do not infer
+ownership from a matching name. Plans and results report the selected repository,
+the resolved name and its source. Generated examples and toolbox inputs use the
+same resolved repository. A known `REPO=payments` must produce payments-derived
+names, including when CI-Skills is installed in a directory named `ci-skills`.
+
 ### PARTIALLY_IMPLEMENTED: namespace selection and ownership
 
 **CI15-NS-001 — Explicit and omitted namespace selection.** Both cases are
-supported. The namespace is independent of runner naming and tags; callers
-are not required to follow an invented namespace naming convention.
+supported. Explicit namespaces are independent of runner naming and tags; callers
+are not required to follow an invented namespace naming convention. Generated
+repository-scoped defaults follow CI15-IDENTITY-001.
 
-- **Explicit `--namespace NAME` on initial deployment**
-
-  Selection and lifecycle: Use that exact existing namespace. The caller controls its creation, reuse and cleanup.
-  Preserve it on success, failure and runner deletion. A missing selected namespace blocks before runner mutation.
-
-- **Omitted on GitHub create/update**
-
-  Selection and lifecycle: Use `ToolboxSpec.spec.build.namespace`; read it before creation. Reuse an existing
-  namespace, or plan creation of the absent default namespace.
-
-- **Omitted on GitLab manager deploy / CI13 chain**
-
-  Selection and lifecycle: Use the operation's existing scope identity to find one matching live `RunScope`; reuse
-  that scope. With no match, plan one namespace through the existing shared generator, using the known repository
-  name as its base under CI15-NAME-001. Multiple matches block.
+- **Explicit `--namespace NAME` on initial deployment:** Use that exact existing namespace. The caller
+  controls its creation, reuse and cleanup. Preserve it on success, failure and runner deletion. A missing
+  selected namespace blocks before runner mutation.
+- **Omitted on GitHub create/update:** Preserve a previously resolved scope. For a new runner, derive the
+  default from the selected repository under CI15-IDENTITY-001; if derivation lacks its required input,
+  request the explicit repository or namespace selection before proceeding. Read the selected namespace before
+  creation; reuse it when present or plan creation when absent.
+- **Omitted on GitLab manager deploy / CI13 chain:** Use the operation's existing scope identity to find one
+  matching live `RunScope`; reuse that scope. With no match, plan one namespace through the shared generator,
+  using the resolved repository name component under CI15-IDENTITY-001; request missing input before
+  generating it. Multiple matches block.
 
 GitHub delete still requires explicit `--namespace` and `--name`; it has no
 toolbox fallback. GitLab manager delete resolves existing resources by its
@@ -102,10 +153,15 @@ creates a namespace. Missing or ambiguous ownership blocks deletion.
 Selection and ownership are separate. Namespaces predating the original
 operation remain borrowed even when selected by a default. A namespace created
 by the operation remains operation-owned across updates and deletion; supplying
-its name later does not transfer ownership. Reuse `RunScope`'s existing generator;
-do not derive a new namespace convention from runner names, tags or operation
-IDs. Report the selection source: explicit input, toolbox default, existing
-run scope or operation-created. Resolve retries through recorded identity and
+its name later does not transfer ownership. Extend `RunScope`'s existing generator with the repository name component
+under CI15-IDENTITY-001. Use the repository for its human-readable component;
+runner names, tags and operation IDs do not replace that component. An opaque
+hash of operation identity may supply the uniqueness suffix. Generate the
+candidate once, retain the exact name through plan, apply and cleanup, and
+rediscover existing namespaces through live ownership labels. Report selection
+and ownership separately, including when the
+selection source is the repository, explicit input or existing
+run scope. Resolve retries through recorded identity and
 live ownership; ambiguous discovery blocks rather than guessing a name.
 
 Current implementation and remaining delta:
@@ -121,7 +177,9 @@ runner placement to the build namespace.
 Use `core/kubernetes/run_scope.py` and `ResourceSet` for shared resolution,
 ownership and UID-checked deletion. CI15 changes the GitHub explicit
 `--namespace` path from creating a missing namespace to reporting the missing
-caller prerequisite. Its omitted-input build-namespace fallback remains.
+caller prerequisite. For omitted runner namespaces, CI15 replaces the
+build-namespace fallback with the explicit resolution order in CI15-IDENTITY-001;
+a missing identity requires input instead of a substitute default.
 Independent toolbox builds and temporary tool-Pod workflows retain their own
 contracts; this decision governs runner placement.
 
@@ -133,35 +191,6 @@ borrowed namespaces. Failed operations clean only their own creations.
 Podman containers, volumes and storage inside a runner Pod have separate
 cleanup evidence; namespace deletion alone does not establish that cleanup.
 
-### NOT_IMPLEMENTED: repository-derived names
-
-**CI15-NAME-001 — Reuse the known repository identity.** When an operation
-runs in a known repository scope, derive its default resource names from that
-repository. For this repository the name is `ci-skills`; this example is not
-a hardcoded runtime value. Apply the rule to runner/workload names, runner
-descriptions and generated resource names wherever the resource belongs to
-that repository. Resolve the consumer repository, not the installed skill's
-source directory. Reuse selected provider identity or the invoking repository's
-Git identity; do not ask callers to repeat a value already known.
-
-Preserve explicit caller inputs and names read back for existing resources.
-An explicitly configured toolbox build namespace remains a selected value.
-For an omitted GitLab namespace with no matching live scope, pass the known
-repository name to the existing shared namespace generator as its base;
-retain its uniqueness and ownership mechanism. Do not derive namespace names
-from runner names or tags. If neither the selected provider nor the invoking Git repository resolves
-a repository name, require the existing explicit name/description argument.
-Report which argument is required; do not guess a directory or toolbox name. A provider-assigned
-numeric ID is read back, never invented from a name. GitHub labels and GitLab
-tags retain their separate selection semantics and accepted arguments.
-
-Use one shared resolver with explicit repository and override inputs. Record
-the identity source and resolved names in the existing plan/report boundary,
-and bind them to confirmation. Reuse discovered resource identities for update
-and delete; deriving a new default must not rename or recreate an existing
-resource. G-001/G-002 verify repository defaults, explicit overrides,
-explicit overrides when no repository name resolves and preservation of existing identities.
-
 ### PARTIALLY_IMPLEMENTED: consistent agent interface
 
 **CI15-ARGS-001 — One declared interface for each shared input.** Reuse
@@ -171,44 +200,22 @@ reports must agree on names, aliases, cardinality, requiredness and omission.
 
 The following PR-001 interface binding preserves existing accepted names:
 
-- **Runner namespace**
-
-  Canonical argument and compatibility: `--namespace NAME`; one value
-
-  Omission: Per-command create/update/deploy/chain and delete rules in CI15-NS-001
-
-- **GitHub runner/workload name**
-
-  Canonical argument and compatibility: Existing `--name NAME`; explicit input wins
-
-  Omission: Known repository name under CI15-NAME-001; otherwise require `--name`; delete uses its actual declared
-  identity
-
-- **GitLab runner description**
-
-  Canonical argument and compatibility: `--description TEXT`; add it to the chain and retain `--runner-description`
-  as its alias
-
-  Omission: Known repository name under CI15-NAME-001; otherwise required for create, manager deploy and chain
-
-- **GitLab runner tags**
-
-  Canonical argument and compatibility: Repeatable `--tag TAG`; manager retains `--label`; chain gains `--tag` and
-  retains `--runner-label`
-
-  Omission: Manager deploy and chain require tags; record creation keeps its existing optional-tag behavior
-
-- **GitHub runner labels**
-
-  Canonical argument and compatibility: Existing repeatable `--label LABEL`; remains a GitHub provider concept
-
-  Omission: Existing create/update requirement; do not invent labels
-
-- **GitLab runner protection**
-
-  Canonical argument and compatibility: Proposed `--protected true\|false`, defined below
-
-  Omission: CI15-PROTECTION-001
+- **Runner namespace:** `--namespace NAME`; one value. Omission: Per-command create/update/deploy/chain and
+  delete rules in CI15-NS-001.
+- **GitHub runner/workload name:** Existing `--name NAME`; do not apply its naming contract to namespaces.
+  Omission: CI15-IDENTITY-001; request missing repository/name input; delete still requires its declared
+  identity.
+- **GitLab runner description:** `--description TEXT`; add it to the chain and retain `--runner-description`
+  as its alias. Omission: CI15-IDENTITY-001; request missing repository/description input for create, manager
+  deploy and chain.
+- **GitLab runner tags:** Repeatable `--tag TAG`; manager retains `--label`; chain gains `--tag` and retains
+  `--runner-label`. Omission: Derive repository-specific defaults under CI15-IDENTITY-001; request explicit
+  tags when required and no repository is selected.
+- **GitHub runner labels:** Existing repeatable `--label LABEL`; remains a GitHub provider concept. Omission:
+  Derive repository-specific defaults under CI15-IDENTITY-001; request explicit labels when no repository is
+  selected.
+- **GitLab runner protection:** Proposed `--protected true|false`, defined below. Omission:
+  CI15-PROTECTION-001.
 
 GitLab manager `--label` is only a legacy alias for GitLab `--tag`; GitHub
 `--label` retains its separate provider meaning. Mixed repeatable GitLab
@@ -322,8 +329,8 @@ GitLab-hosted compute provides the toolbox.
 
 ### Open decisions
 
-CI15-NS-001, CI15-ARGS-001 and CI15-PROTECTION-001 record settled behavior.
-CI15-NAME-001 records the additional repository-derived naming requirement.
+CI15-NS-001, CI15-ARGS-001, CI15-PROTECTION-001 and CI15-IDENTITY-001
+record settled behavior.
 Do not reopen those choices because source code or older planning text differs.
 The exact interface binding proposed above and the corresponding JSON/schema
 artifacts still require exact-content approval; that is an artifact review,
@@ -342,35 +349,16 @@ design. No default for these unresolved choices is implied.
 Planning IDs are not forge PR numbers. Each PR is a coherent increment and
 merges after its listed dependencies and applicable evidence.
 
-- **PR-001 / W-001**
-
-  Outcome: Shared scope lifecycle, argument parity and GitLab protection choice
-
-  Dependency: Exact interface/schema artifacts for the three decisions
-
-- **PR-002 / W-002**
-
-  Outcome: Conda-capable Debian/Ubuntu toolbox and consuming-runner read-back
-
-  Dependency: PR-001 scope lifecycle
-
-- **PR-003 / W-003**
-
-  Outcome: GitHub ephemeral fleet using existing provider services
-
-  Dependency: PR-001/002; fleet decisions
-
-- **PR-004 / W-004**
-
-  Outcome: GitLab Kubernetes executor and job namespace ownership
-
-  Dependency: PR-001/002; executor decisions
-
-- **PR-005 / W-005**
-
-  Outcome: GitLab.com qualification and only demonstrated corrections
-
-  Dependency: PR-001/002/004; approved target
+- **PR-001 / W-001:** Shared scope lifecycle, repository-derived defaults, argument parity and GitLab
+  protection choice. Dependency: Exact interface/schema artifacts for the four decisions.
+- **PR-002 / W-002:** Conda-capable Debian/Ubuntu toolbox and consuming-runner read-back. Dependency: PR-001
+  scope lifecycle.
+- **PR-003 / W-003:** GitHub ephemeral fleet using existing provider services. Dependency: PR-001/002; fleet
+  decisions.
+- **PR-004 / W-004:** GitLab Kubernetes executor and job namespace ownership. Dependency: PR-001/002; executor
+  decisions.
+- **PR-005 / W-005:** GitLab.com qualification and only demonstrated corrections. Dependency: PR-001/002/004;
+  approved target.
 
 PR-003 and PR-004 have no runtime dependency; merge them in listed order.
 
@@ -378,8 +366,14 @@ PR-003 and PR-004 have no runtime dependency; merge them in listed order.
 
 G-001 is the existing catalog, parser, schema and static validation route.
 PR-001 extends its focused checks for canonical flags and legacy aliases,
-mixed repeated aliases, omission rules, invalid inputs, protection values,
-confirmation binding and schema conformance. The new cases are not implemented yet.
+mixed repeated aliases, repository-derived defaults, omission rules, invalid inputs, protection values,
+confirmation binding and schema conformance. Test setup generates a consumer
+repository name distinct from the installed skill root and retains the same
+names and observed UIDs through the operation and cleanup. Test bodies use
+shared constants or enums for contract strings. Include explicit overrides,
+missing/group-only repository selection, numeric-ID read-back, selector errors,
+normalization, uniqueness and existing-resource
+identity preservation. The new cases are not implemented yet.
 
 G-002 through G-006 are proposed acceptance checks, not enforced passes:
 
@@ -402,77 +396,28 @@ G-007 is the existing exact-head GitHub required result. Focused checks cover
 complex edge cases. Consumer jobs are separate acceptance actions, not
 workflow callbacks. Passing static checks alone does not satisfy live gates.
 
-- **R-001 Existing callers / CI11, CI13**
-
-  State: IMPLEMENTED / UNVERIFIED
-
-  Delivery: PR-001/W-001
-
-  Gate and gap: G-001/007; compatibility
-
-- **R-002 Namespace selection / CI15-NS-001**
-
-  State: PARTIALLY_IMPLEMENTED / UNVERIFIED
-
-  Delivery: PR-001/W-001; RunScope, ResourceSet, WorkflowAction
-
-  Gate and gap: G-002; explicit/omitted selection, UID and cleanup
-
-- **R-003 Podman cleanup / CI15**
-
-  State: PARTIALLY_IMPLEMENTED / UNVERIFIED
-
-  Delivery: PR-001/W-001
-
-  Gate and gap: G-002; retention
-
-- **R-004 Interface parity / CI15-ARGS-001**
-
-  State: PARTIALLY_IMPLEMENTED / UNVERIFIED
-
-  Delivery: PR-001/W-001; catalog, parsers, shared result schemas
-
-  Gate and gap: G-001/007; names, aliases, repetition and omission
-
-- **R-005 OS and Conda / CI15**
-
-  State: PARTIALLY_IMPLEMENTED / UNVERIFIED
-
-  Delivery: PR-002/W-002
-
-  Gate and gap: G-003; real job
-
-- **R-006 GitHub fleet / CI15**
-
-  State: NOT_IMPLEMENTED / UNVERIFIED
-
-  Delivery: PR-003/W-003
-
-  Gate and gap: G-004; one-job fleet
-
-- **R-007 K8s executor / CI15**
-
-  State: NOT_IMPLEMENTED / UNVERIFIED
-
-  Delivery: PR-004/W-004
-
-  Gate and gap: G-005; job cleanup
-
-- **R-008 GitLab.com / CI15**
-
-  State: PARTIALLY_IMPLEMENTED / UNVERIFIED
-
-  Delivery: PR-005/W-005
-
-  Gate and gap: G-006; SaaS job
-
-- **R-009 Runner protection / CI15-PROTECTION-001**
-
-  State: NOT_IMPLEMENTED / UNVERIFIED
-
-  Delivery: PR-001/W-001; gitlab_runners.py, chain, manager, shared read-back
-
-  Gate and gap: G-001/002/005/006; caller choice and observed access_level
+- **R-001 Existing callers / CI11, CI13:** IMPLEMENTED / UNVERIFIED. Delivery: PR-001/W-001. Gate and gap:
+  G-001/007; compatibility.
+- **R-002 Namespace selection / CI15-NS-001:** PARTIALLY_IMPLEMENTED / UNVERIFIED. Delivery: PR-001/W-001;
+  RunScope, ResourceSet, WorkflowAction. Gate and gap: G-002; explicit/omitted selection, UID and cleanup.
+- **R-003 Podman cleanup / CI15:** PARTIALLY_IMPLEMENTED / UNVERIFIED. Delivery: PR-001/W-001. Gate and gap:
+  G-002; retention.
+- **R-004 Interface parity / CI15-ARGS-001:** PARTIALLY_IMPLEMENTED / UNVERIFIED. Delivery: PR-001/W-001;
+  catalog, parsers, shared result schemas. Gate and gap: G-001/007; names, aliases, repetition and omission.
+- **R-005 OS and Conda / CI15:** PARTIALLY_IMPLEMENTED / UNVERIFIED. Delivery: PR-002/W-002. Gate and gap:
+  G-003; real job.
+- **R-006 GitHub fleet / CI15:** NOT_IMPLEMENTED / UNVERIFIED. Delivery: PR-003/W-003. Gate and gap: G-004;
+  one-job fleet.
+- **R-007 K8s executor / CI15:** NOT_IMPLEMENTED / UNVERIFIED. Delivery: PR-004/W-004. Gate and gap: G-005;
+  job cleanup.
+- **R-008 GitLab.com / CI15:** PARTIALLY_IMPLEMENTED / UNVERIFIED. Delivery: PR-005/W-005. Gate and gap:
+  G-006; SaaS job.
+- **R-009 Runner protection / CI15-PROTECTION-001:** NOT_IMPLEMENTED / UNVERIFIED. Delivery: PR-001/W-001;
+  gitlab_runners.py, chain, manager, shared read-back. Gate and gap: G-001/002/005/006; caller choice and
+  observed access_level.
+- **R-010 Repository-derived names / CI15-IDENTITY-001:** NOT_IMPLEMENTED / UNVERIFIED. Delivery:
+  PR-001/W-001; shared identity and scope resolver, catalog and parsers. Gate and gap: G-001/002; caller
+  repository, explicit overrides, missing-input handling and identity preservation.
 
 Earlier DCloud receipts do not prove this CI-Skills candidate or GitLab.com
 behavior. G-007 must pass for each actual PR head.

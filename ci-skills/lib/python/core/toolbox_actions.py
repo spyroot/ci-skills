@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Final, Optional
 
 from lib.python.access.credentials import bind_sources
+from lib.python.core.abstract.callback import DeferredCallback
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import (
@@ -41,6 +42,7 @@ from lib.python.core.json_types import (
 )
 from lib.python.core.kubernetes.kubernetes import K8SCallback, KubernetesError
 from lib.python.core.kubernetes.resources import ResourceSet
+from lib.python.core.kubernetes.run_scope import RUN_ID_LIMIT, RunScope
 from lib.python.core.kubernetes.runner import published_image
 from lib.python.core.kubernetes.runner_scope import observe_namespace, scope_key
 from lib.python.core.project_binding import resolve_target
@@ -53,7 +55,11 @@ from lib.python.core.runner_identity import (
     resolve_name,
     resolve_repository,
 )
-from lib.python.core.runner_options import SingleValue
+from lib.python.core.runner_options import (
+    SingleValue,
+    kubernetes_runner_name,
+    runner_tags,
+)
 from lib.python.core.runner_scope import (
     ScopeObservation,
     ScopePurpose,
@@ -209,6 +215,7 @@ class WorkflowAction(SkillAction):
         :raises ValueError: If the workload or provider registration inputs are missing.
         """
         args = self.args
+        ownership_id = None
         if args.kind == "harbor_push":
             return
         namespace = getattr(args, "namespace", "") or (
@@ -219,26 +226,57 @@ class WorkflowAction(SkillAction):
             self.repository_identity = resolve_repository(
                 self.target.github.repository if self.target.github else None
             )
-            self.resolved_runner_name = resolve_name(
-                getattr(args, "name", None), self.repository_identity, argument="--name"
+            self.resolved_runner_name = kubernetes_runner_name(
+                resolve_name(
+                    getattr(args, "name", None),
+                    self.repository_identity,
+                    argument="--name",
+                )
             )
+            if not self.repository_identity.name and not getattr(
+                args, "namespace", None
+            ):
+                raise ValueError("repository_identity_required: provide --namespace")
+            ownership_id = plan_digest(
+                {
+                    "host": self.target.github.host if self.target.github else None,
+                    "repository": self.repository_identity.reference,
+                    "name": self.resolved_runner_name.value,
+                }
+            )[:RUN_ID_LIMIT]
+            namespace = RunScope.new(
+                namespace=getattr(args, "namespace", None),
+                namespace_prefix=self.repository_identity.name,
+                run_id=ownership_id,
+            ).namespace
             name = self.resolved_runner_name.value
         if not namespace or not name:
             raise ValueError("namespace_and_name_required")
         source_root = getattr(args, "runner_root", "") or ""
-        labels = tuple(getattr(args, "label", []))
+        labels = (
+            runner_tags(tuple(getattr(args, "label", [])), self.repository_identity)
+            if args.kind == "create_selfhosted_runner"
+            else tuple(getattr(args, "label", []))
+        )
         if (
             args.kind == "create_selfhosted_runner"
             and args.action != "delete"
             and (not source_root or not labels)
         ):
             raise ValueError("runner_root_and_labels_required")
-        self.runner = RunnerAction(namespace, name, source_root, labels, args.timeout)
+        self.runner = RunnerAction(
+            namespace,
+            name,
+            source_root,
+            labels,
+            args.timeout,
+            ownership_id=ownership_id,
+        )
         if args.kind == "create_selfhosted_runner":
             source = (
                 ScopeSource.EXPLICIT
                 if getattr(args, "namespace", None)
-                else ScopeSource.TOOLBOX_DEFAULT
+                else ScopeSource.OPERATION_CREATED
             )
             initial = ScopeObservation(ScopePurpose.RUNNER, namespace, source)
             self.context.runner_scopes[scope_key(initial.purpose, namespace)] = initial
@@ -377,7 +415,11 @@ class WorkflowAction(SkillAction):
                 continue
             if not is_json_value(value):
                 raise TypeError("workflow_record_requires_json")
-            records.append({"callback": type(callback).__name__, **json_object(value)})
+            child = callback.child if isinstance(callback, DeferredCallback) else None
+            name = (
+                type(child).__name__ if child is not None else type(callback).__name__
+            )
+            records.append({"callback": name, **json_object(value)})
         if self.context.runner_scopes:
             records.append(
                 scope_record(
@@ -582,7 +624,9 @@ class EnsureNamespace(K8SCallback[WorkflowAction]):
         for name in sorted(names):
             observed = self.state.kubernetes.read("namespace", name, "")
             if observed is None:
-                resources = ResourceSet(self.state.kubernetes, "", workflow.runner.name)
+                resources = ResourceSet(
+                    self.state.kubernetes, "", workflow.runner.operation
+                )
                 self._created.append(resources)
                 records.append(
                     resources.apply(

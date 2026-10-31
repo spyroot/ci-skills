@@ -296,8 +296,8 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--spec": "toolbox JSON following schemas/toolbox.schema.json",
             "--name": "exact runner name; omission uses the known consumer repository, otherwise --name is required",
             "--runner-root": "runner runtime directory inside the toolbox image",
-            "--label": "GitHub runner label; repeatable",
-            "--namespace": "exact existing caller namespace; omission uses the toolbox build namespace",
+            "--label": "GitHub custom runner label; repeatable; omission uses the selected consumer repository; provider system labels are unchanged",
+            "--namespace": "exact existing caller namespace; omission reuses its unique owned namespace or plans a namespace from the selected consumer repository and an opaque hash",
             "--apply": "perform the confirmed operation",
             "--confirm-plan": "exact fingerprint from the preceding plan",
             "--timeout": "operation timeout in seconds",
@@ -306,11 +306,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "repeatable_options": ("--label",),
         "subcommands": {
             "create": {
-                "required_options": ["--spec", "--runner-root", "--label"],
+                "required_options": ["--spec", "--runner-root"],
                 "result_schema": "schemas/results/toolbox-workflow.schema.json",
             },
             "update": {
-                "required_options": ["--spec", "--runner-root", "--label"],
+                "required_options": ["--spec", "--runner-root"],
                 "result_schema": "schemas/results/toolbox-workflow.schema.json",
             },
             "delete": {
@@ -636,7 +636,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--project": "chain: GitLab project for a project runner",
             "--group": "chain: GitLab group for a group runner",
             "--description": "chain: runner description; omission uses the known consumer repository, otherwise required",
-            "--tag": "chain: GitLab runner tag; repeatable with legacy --runner-label",
+            "--tag": "chain: GitLab runner tag; repeatable with legacy --runner-label; omission uses the selected consumer repository",
             "--protected": "chain: true for ref_protected, false for not_protected; omission preserves provider default",
         },
         "repeatable_options": ("--tag",),
@@ -658,10 +658,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "chain": {
                 "purpose": "Build and publish the toolbox, then configure a runner using that image.",
                 "requires_authorities": ("kubernetes", "gitlab", "harbor"),
-                "required_options": (
-                    "--toolbox-spec",
-                    "--tag",
-                ),
+                "required_options": ("--toolbox-spec",),
                 "result_schema": "schemas/results/image-build-readiness.schema.json",
                 "mutates": True,
                 "side_effects": "Publishes the toolbox image and retains the runner record, manager and "
@@ -1112,11 +1109,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--protected": "create: true for ref_protected, false for not_protected; omission preserves provider default",
             "--limit": "maximum returned runner records for list (1-100, default 10)",
             "--filter": "repeatable runner state filter: protected, unprotected, online, offline, shared, dedicated, paused, active",
-            "--tag": "runner tag for create or tag; repeat for multiple tags",
+            "--tag": "runner tag for create or tag; repeat for multiple tags; create omission uses the selected consumer repository",
             "--token-out": "caller-selected 0600 file for the one-time runner token",
-            "--live-plan": "read group assignment or runner deletion identity and print an apply-ready plan without writes",
+            "--live-plan": "read pending repository defaults for project runner creation, group assignment or runner deletion identity and print an apply-ready plan without writes",
             "--apply": "perform the validated change",
-            "--confirm-plan": "SHA-256 fingerprint from the live plan for group assignment or delete, otherwise the dry-run plan",
+            "--confirm-plan": "SHA-256 fingerprint from the live plan for pending project-create defaults, group assignment or delete, otherwise the dry-run plan",
             "--timeout": "maximum seconds for each external request",
             **persistence_options(
                 GITLAB_MODE_POLICY,
@@ -1191,7 +1188,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--description": "exact runner description; deploy omission uses the known consumer repository, otherwise required",
             "--protected": "deploy: verify true as ref_protected or false as not_protected; omission preserves the existing value",
             "--tag": "GitLab runner tag given to gitlab_runner.py create --tag; "
-            "repeat for multiple tags; --label is accepted as an alias",
+            "repeat for multiple tags; --label is accepted as an alias; omission uses the selected consumer repository",
             "--image": "digest-pinned toolbox image containing gitlab-runner and "
             "podman",
             "--token-file": "one-time token file written by gitlab_runner.py create",
@@ -1214,7 +1211,6 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "deploy": {
                 "required_options": [
                     "--runner-id",
-                    "--tag",
                     "--image",
                     "--token-file",
                     "--node",

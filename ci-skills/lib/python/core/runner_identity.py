@@ -7,6 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Final
 from urllib.parse import urlsplit
 
 from lib.python.core.runtime import run_command
+from lib.python.sys.status import PASS
 
 GIT_COMMAND: Final = "git"
 GIT_REMOTE_ARGUMENTS: Final = ("config", "--get", "remote.origin.url")
@@ -22,6 +24,13 @@ GIT_SUFFIX: Final = ".git"
 MAX_REFERENCE_LENGTH: Final = 4096
 IDENTITY_REQUIRED: Final = "repository_identity_required: provide "
 INVALID_REFERENCE: Final = "repository_reference_invalid"
+ACCESS_STATUS: Final = "status"
+ACCESS_TARGET: Final = "target"
+TARGET_KIND: Final = "kind"
+TARGET_PROJECT: Final = "project"
+TARGET_PATH: Final = "full_path"
+TARGET_ID: Final = "id"
+MIN_TARGET_ID: Final = 1
 
 
 class RepositorySource(StrEnum):
@@ -51,6 +60,40 @@ class RepositoryIdentity:
 
     reference: str | None
     source: RepositorySource
+
+    @classmethod
+    def from_access(
+        cls, access: Mapping[str, object], reference: str
+    ) -> RepositoryIdentity:
+        """Resolve project identity from the existing verified access receipt.
+
+        :param access: Receipt retained by the authenticated GitLab service.
+        :param reference: Original project path or numeric selector.
+        :returns: Repository identity from the verified native project path.
+        :raises ValueError: Receipt status, target identity, or path is inconsistent.
+        """
+        target = access.get(ACCESS_TARGET)
+        if access.get(ACCESS_STATUS) != PASS or not isinstance(target, Mapping):
+            raise ValueError(INVALID_REFERENCE)
+        path = target.get(TARGET_PATH)
+        identifier = target.get(TARGET_ID)
+        if target.get(TARGET_KIND) != TARGET_PROJECT or not isinstance(path, str):
+            raise ValueError(INVALID_REFERENCE)
+        if (
+            isinstance(identifier, bool)
+            or not isinstance(identifier, int)
+            or identifier < MIN_TARGET_ID
+        ):
+            raise ValueError(INVALID_REFERENCE)
+        if reference.isdecimal():
+            if identifier != int(reference):
+                raise ValueError(INVALID_REFERENCE)
+        elif path != _repository_path(reference):
+            raise ValueError(INVALID_REFERENCE)
+        resolved = _repository_path(path)
+        if resolved is None:
+            raise ValueError(INVALID_REFERENCE)
+        return cls(resolved, RepositorySource.PROVIDER)
 
     @property
     def name(self) -> str | None:
@@ -129,14 +172,19 @@ def resolve_repository(
 
 
 def resolve_name(
-    explicit: str | None, repository: RepositoryIdentity, *, argument: str
+    explicit: str | None,
+    repository: RepositoryIdentity,
+    *,
+    argument: str,
+    pending: bool = False,
 ) -> ResolvedName:
     """Select an explicit name or the known repository name.
 
     :param explicit: Caller-supplied name override.
     :param repository: Repository identity already resolved by the boundary.
     :param argument: Existing CLI argument to supply when identity is unknown.
-    :returns: Exact name and explicit/repository provenance.
+    :param pending: Permit an unresolved offline intent awaiting provider authentication.
+    :returns: Exact name and explicit/repository provenance, or explicit unknown intent.
     :raises ValueError: Explicit input is blank, or neither input resolves a name.
     """
     if explicit is not None:
@@ -145,4 +193,6 @@ def resolve_name(
         return ResolvedName(explicit.strip(), NameSource.EXPLICIT)
     if repository.name:
         return ResolvedName(repository.name, NameSource.REPOSITORY)
+    if pending:
+        return ResolvedName("", NameSource.UNKNOWN)
     raise ValueError(IDENTITY_REQUIRED + argument)

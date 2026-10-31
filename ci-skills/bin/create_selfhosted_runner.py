@@ -13,6 +13,7 @@ from collections.abc import Sequence
 from typing import Optional
 
 import _bootstrap  # noqa: F401
+from lib.python.core.abstract.callback import DeferredCallback
 from lib.python.core.abstract.callbacks import AbstractCallbacks, Callbacks
 from lib.python.core.abstract.skill_action import SkillAction
 from lib.python.core.delivery_state import DeliveryState
@@ -65,8 +66,10 @@ def workflow(action: WorkflowAction) -> WorkflowExecutor[DeliveryState]:
         if action.args.apply:
             callbacks.extend(
                 (
-                    DeleteRunner(action.runner),
-                    DeleteGitHubRunner(action.runner),
+                    DeferredCallback(action, lambda state: DeleteRunner(action.runner)),
+                    DeferredCallback(
+                        action, lambda state: DeleteGitHubRunner(action.runner)
+                    ),
                     DeleteGitHubNamespace(action),
                 )
             )
@@ -91,10 +94,14 @@ def workflow(action: WorkflowAction) -> WorkflowExecutor[DeliveryState]:
                     EnsureNamespace(action),
                     HarborBuild(action),
                     HarborPush(PushAction(action.repository, spec.image_tag)),
-                    PullImage(action.runner),
-                    GitHubRunnerRuntime(action.runner),
-                    DeployRunner(action.runner),
-                    CreateGitHubRunner(action.runner),
+                    DeferredCallback(action, lambda state: PullImage(action.runner)),
+                    DeferredCallback(
+                        action, lambda state: GitHubRunnerRuntime(action.runner)
+                    ),
+                    DeferredCallback(action, lambda state: DeployRunner(action.runner)),
+                    DeferredCallback(
+                        action, lambda state: CreateGitHubRunner(action.runner)
+                    ),
                 )
             )
     return WorkflowExecutor(context=action.context, callbacks=Callbacks(callbacks))

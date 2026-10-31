@@ -32,13 +32,19 @@ from lib.python.core.report import plan_digest
 from lib.python.core.runner_identity import (
     NameSource,
     RepositoryIdentity,
+    RepositorySource,
     ResolvedName,
     resolve_name,
     resolve_repository,
 )
-from lib.python.core.runner_options import parse_protected, validate_runner_tags
+from lib.python.core.runner_options import parse_protected, runner_tags
 from lib.python.core.runner_scope import ScopeObservation, ScopePurpose, ScopeSource
-from lib.python.core.target import GitLabOperationTarget, Target, TargetError
+from lib.python.core.target import (
+    GitLabOperationTarget,
+    Target,
+    TargetError,
+    select_gitlab_reference,
+)
 from lib.python.core.toolbox_actions import WorkflowAction
 
 CHAIN_OPERATION: Final = "chain"
@@ -221,10 +227,30 @@ class ImageBuildChainAction(SkillAction):
 
         Reportable source that resolved the selected target.
 
-    :ivar repository_identity: Consumer repository used for name defaults.
-    :ivar resolved_description: Exact selected runner description and provenance.
-    :ivar manager_scope: Concrete candidate or observed scope bound before mutation.
-    :ivar resolved_runner_name: Planned or independently observed manager name.
+    .. attribute :: gitlab_selection
+        :type: tuple[str, str]
+
+        Effective provider kind and reference selected once from arguments and target.
+
+    .. attribute :: repository_identity
+        :type: RepositoryIdentity
+
+        Consumer repository used for name defaults.
+
+    .. attribute :: resolved_description
+        :type: ResolvedName
+
+        Exact selected runner description and provenance.
+
+    .. attribute :: manager_scope
+        :type: RunScope | None
+
+        Candidate scope, absent while native repository identity is unresolved.
+
+    .. attribute :: resolved_runner_name
+        :type: ResolvedName | None
+
+        Planned or independently observed manager workload name.
 
     .. attribute :: mode
         :type: ProbeMode
@@ -239,21 +265,31 @@ class ImageBuildChainAction(SkillAction):
     gitlab_target: GitLabOperationTarget = field(init=False, repr=False)
     target_source: str = field(init=False)
     mode: ProbeMode = field(init=False)
+    gitlab_selection: tuple[str, str] = field(init=False)
     repository_identity: RepositoryIdentity = field(init=False)
     resolved_description: ResolvedName = field(init=False)
-    manager_scope: RunScope = field(init=False)
+    manager_scope: RunScope | None = field(init=False)
     resolved_runner_name: ResolvedName | None = field(init=False, default=None)
 
     @property
     def runner_kind(self) -> str:
-        """Select the caller-requested GitLab runner scope.
+        """Read the effective GitLab runner scope after target selection.
 
-        :returns: ``project`` or ``group``.
-        :raises ValueError: Both or neither scope selectors were supplied.
-        """
-        if bool(self.args.project) == bool(self.args.group):
-            raise ValueError("chain_requires_exactly_one_project_or_group")
-        return "group" if self.args.group else "project"
+        :returns: Selected project or group kind.
+        :raises AttributeError: Preparation has not resolved provider selection.
+        """  # noqa: DOC502 - Accessing selection requires completed preparation.
+        kind, _ = self.gitlab_selection
+        return kind
+
+    @property
+    def runner_reference(self) -> str:
+        """Read the effective provider reference selected during preparation.
+
+        :returns: Exact project or group path or numeric selector.
+        :raises AttributeError: Preparation has not resolved provider selection.
+        """  # noqa: DOC502 - Accessing selection requires completed preparation.
+        _, reference = self.gitlab_selection
+        return reference
 
     def _validate_chain_inputs(self) -> None:
         """Reject missing or ambiguous chain selections before provider access.
@@ -267,12 +303,9 @@ class ImageBuildChainAction(SkillAction):
         missing = sorted(name for name, value in required.items() if not value)
         if missing:
             raise ValueError("chain_missing_inputs:" + ",".join(missing))
-        if not self.args.runner_label:
-            raise ValueError("chain_runner_label_required")
-        self.args.runner_label = list(validate_runner_tags(self.args.runner_label))
         parse_protected(getattr(self.args, "protected", None))
-        if not self.runner_kind:
-            raise ValueError("chain_scope_required")
+        if self.args.project is not None and self.args.group is not None:
+            raise ValueError("chain_requires_exactly_one_project_or_group")
 
     def _toolbox_args(self) -> argparse.Namespace:
         """Build the existing toolbox action inputs without a second confirmation.
@@ -315,46 +348,33 @@ class ImageBuildChainAction(SkillAction):
         self.target = target
         self.target_source = target.source_kind or "target"
         self.gitlab_target = GitLabOperationTarget(target.gitlab, target.source_file)
-        self.repository_identity = resolve_repository(
-            self.args.project if self.runner_kind == "project" else None
+        self.gitlab_selection = select_gitlab_reference(
+            self.gitlab_target, project=self.args.project, group=self.args.group
+        )
+        self.repository_identity = (
+            resolve_repository(self.runner_reference)
+            if self.runner_kind == "project"
+            else RepositoryIdentity(None, RepositorySource.UNKNOWN)
         )
         self.resolved_description = resolve_name(
             self.args.runner_description,
             self.repository_identity,
             argument="--description",
+            pending=self.runner_kind == "project",
         )
-        self.args.runner_description = self.resolved_description.value
+        self.args.runner_description = self.resolved_description.value or None
+        self.args.runner_label = list(
+            runner_tags(self.args.runner_label, self.repository_identity)
+        )
+        if self.runner_kind == "group" and (
+            not self.args.namespace or not self.args.runner_label
+        ):
+            raise ValueError(
+                "repository_identity_required: provide --namespace and --tag"
+            )
         self.toolbox = WorkflowAction(self._toolbox_args(), context=self.state)
         self.toolbox.prepare()
-        scope_id = plan_digest(
-            {
-                "target": str(target.source_file),
-                "repository": self.repository_identity.reference,
-                "description": self.resolved_description.value,
-                "tags": list(self.args.runner_label),
-                "toolbox": self.toolbox.spec.fingerprint if self.toolbox.spec else None,
-                "namespace": self.args.namespace,
-            }
-        )[:RUN_ID_LIMIT]
-        self.manager_scope = RunScope.new(
-            namespace=self.args.namespace,
-            run_id=scope_id,
-            namespace_prefix=self.repository_identity.name,
-        )
-        self.resolved_runner_name = ResolvedName(
-            self.manager_scope.name(MANAGER_ROLE, prefix=self.repository_identity.name),
-            NameSource.REPOSITORY
-            if self.repository_identity.name
-            else NameSource.UNKNOWN,
-        )
-        scope = ScopeObservation(
-            ScopePurpose.MANAGER,
-            self.manager_scope.namespace,
-            ScopeSource.EXPLICIT
-            if self.args.namespace
-            else ScopeSource.OPERATION_CREATED,
-        )
-        self.state.runner_scopes[scope_key(scope.purpose, scope.namespace)] = scope
+        self._prepare_scope()
         if self.toolbox.spec is not None:
             build = ScopeObservation(
                 ScopePurpose.BUILD,
@@ -365,14 +385,81 @@ class ImageBuildChainAction(SkillAction):
         self.state.args = self.args
         self.state.runner_auth_plan = self._runner_auth_plan()
 
+    def _prepare_scope(self) -> None:
+        """Bind one candidate from resolved inputs without inventing pending identity.
+
+        :returns: None after retaining a candidate and its initial scope observation.
+        :raises ValueError: Namespace or workload identity is invalid.
+        """  # noqa: DOC502 - Shared scope generation validates caller input.
+        scope_id = plan_digest(
+            {
+                "target": str(self.target.source_file),
+                "repository": self.repository_identity.reference,
+                "description": self.resolved_description.value,
+                "tags": list(self.args.runner_label),
+                "toolbox": self.toolbox.spec.fingerprint if self.toolbox.spec else None,
+                "namespace": self.args.namespace,
+            }
+        )[:RUN_ID_LIMIT]
+        self.manager_scope = (
+            RunScope.new(
+                namespace=self.args.namespace,
+                run_id=scope_id,
+                namespace_prefix=self.repository_identity.name,
+            )
+            if self.repository_identity.name or self.args.namespace
+            else None
+        )
+        self.resolved_runner_name = (
+            ResolvedName(
+                self.manager_scope.name(
+                    MANAGER_ROLE, prefix=self.repository_identity.name
+                ),
+                NameSource.REPOSITORY
+                if self.repository_identity.name
+                else NameSource.UNKNOWN,
+            )
+            if self.manager_scope is not None
+            else None
+        )
+        if self.manager_scope is not None:
+            scope = ScopeObservation(
+                ScopePurpose.MANAGER,
+                self.manager_scope.namespace,
+                ScopeSource.EXPLICIT
+                if self.args.namespace
+                else ScopeSource.OPERATION_CREATED,
+            )
+            self.state.runner_scopes[scope_key(scope.purpose, scope.namespace)] = scope
+
+    def bind_repository(self, access: JSONObject) -> None:
+        """Bind numeric project defaults from the existing authenticated receipt.
+
+        :param access: Verified GitLab project access evidence.
+        :returns: None after resolving repository-derived inputs and candidate scope.
+        :raises ValueError: Receipt identity is inconsistent or input defaults remain absent.
+        """  # noqa: DOC502 - Shared identity validators propagate input failures.
+        if self.runner_kind == "project" and not self.repository_identity.name:
+            self.repository_identity = RepositoryIdentity.from_access(
+                access, self.runner_reference
+            )
+            self.resolved_description = resolve_name(
+                self.args.runner_description,
+                self.repository_identity,
+                argument="--description",
+            )
+            self.args.runner_description = self.resolved_description.value
+            self.args.runner_label = list(
+                runner_tags(self.args.runner_label, self.repository_identity)
+            )
+            self._prepare_scope()
+
     def _runner_auth_plan(self) -> ActionPlan:
         """Create the stable runner-scope plan used only for access preflight.
 
         :returns: Nonmutating plan carrying the exact project or group selection.
         """
-        reference = (
-            self.args.group if self.runner_kind == "group" else self.args.project
-        )
+        reference = self.runner_reference
         return ActionPlan(
             kind="gitlab_runner",
             operation="create",
@@ -380,7 +467,11 @@ class ImageBuildChainAction(SkillAction):
             target_kind=self.runner_kind,
             target_reference=reference,
             target_file=str(self.gitlab_target.source_file),
-            target_source=f"{self.target_source};argv:--{self.runner_kind}",
+            target_source=(
+                f"{self.target_source};argv:--{self.runner_kind}"
+                if getattr(self.args, self.runner_kind, None) is not None
+                else self.target_source
+            ),
             body={
                 **(
                     {
@@ -427,9 +518,7 @@ class ImageBuildChainAction(SkillAction):
                 "name": (
                     self.resolved_runner_name.value
                     if self.resolved_runner_name is not None
-                    else self.manager_scope.name(
-                        MANAGER_ROLE, prefix=self.repository_identity.name
-                    )
+                    else None
                 ),
                 "name_source": (
                     self.resolved_runner_name.source
@@ -439,7 +528,7 @@ class ImageBuildChainAction(SkillAction):
                     else NameSource.UNKNOWN
                 ),
                 "scope": self.runner_kind,
-                "reference": self.args.group or self.args.project,
+                "reference": self.runner_reference,
                 "description": self.args.runner_description,
                 "labels": list(self.args.runner_label),
                 "node": selected_node,
@@ -450,7 +539,9 @@ class ImageBuildChainAction(SkillAction):
                     "memory_limit": self.args.memory_limit,
                     "storage_size": self.args.storage_size,
                 },
-                "run_scope": self.manager_scope.as_dict(),
+                "run_scope": self.manager_scope.as_dict()
+                if self.manager_scope is not None
+                else None,
                 "scope_observations": [
                     scope.document() for scope in self.state.runner_scopes.values()
                 ],

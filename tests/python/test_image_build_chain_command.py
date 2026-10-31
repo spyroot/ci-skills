@@ -23,7 +23,9 @@ from test_image_build_chain import (
     CALLER_NAMESPACE,
     CALLER_NAMESPACE_UID,
     CHAIN,
+    CLUSTER_NAMESPACE,
     EXECUTOR,
+    NAMESPACE_KIND,
     NODE,
     PODMAN,
     READINESS,
@@ -89,7 +91,12 @@ def _apply_report(
     status = command.execute()
     output = json.loads(capsys.readouterr().out)
     assert cleanup == ([] if outcome == "success" else ["manager", "scc", "runner"])
-    assert kubernetes.read("Namespace", CALLER_NAMESPACE, "") is not None
+    assert (
+        kubernetes.read(
+            NAMESPACE_KIND, action.state.run_scope.namespace, CLUSTER_NAMESPACE
+        )
+        is not None
+    )
     assert not action.state.token_path.exists()
     assert not action.state.token_directory.exists()
     _validator().validate(output)

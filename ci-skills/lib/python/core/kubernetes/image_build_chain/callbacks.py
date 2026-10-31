@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import argparse
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
-from typing import Final, Optional
+from typing import Final
 
-from lib.python.core.abstract.callback import AbstractCallback, LocalCallback
-from lib.python.core.abstract.skill_result import require_result
+from lib.python.core.abstract.callback import DeferredCallback, LocalCallback
 from lib.python.core.gitlab.gitlab_action import GitLabAuth, GitLabAuthAction
 from lib.python.core.gitlab.gitlab_actions import ActionPlan, make_plan
 from lib.python.core.gitlab.gitlab_runners import CreateRunner
@@ -72,82 +71,19 @@ class ProviderTransition(StrEnum):
     USE_RUNNER_GITLAB = "use_runner_gitlab"
 
 
-class DeferredComponent(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
-    """Delegate one late-bound component callback into the shared lifecycle."""
+class DeferredComponent(DeferredCallback[ImageBuildChainState, ImageBuildChainAction]):
+    """Keep chain-specific retention atop the shared deferred lifecycle."""
 
-    def __init__(
-        self,
-        action: ImageBuildChainAction,
-        factory: Callable[[ImageBuildChainState], AbstractCallback],
-    ):
-        """Retain a component factory until its upstream IDs exist.
+    def update(self) -> Mapping[str, object]:
+        """Retain manager resources after the shared child update succeeds.
 
-        :param action: Parent chain inputs.
-        :param factory: Constructs one existing callback against current state.
-        """
-        super().__init__(action)
-        self.factory = factory
-        self.child: Optional[AbstractCallback] = None
-
-    def collect(self) -> Mapping[str, JSONValue]:
-        """Construct and bind the existing callback to this exact state.
-
-        :returns: Child collection evidence.
-        :raises ValueError: The required provider configuration is unavailable.
-        """
-        child = self.factory(self.state)
-        child.bind(self.state)
-        require_result(child.read_config())
-        if not child.is_configured():
-            raise ValueError("deferred_component_configuration_missing")
-        self.child = child
-        return child.collect()
-
-    def run(self) -> Mapping[str, JSONValue]:
-        """Run the existing callback after collection.
-
-        :returns: Child run evidence.
-        :raises ValueError: Collection did not construct the callback.
-        """
-        if self.child is None:
-            raise ValueError("deferred_component_collection_required")
-        result = require_result(self.child.run())
-        self.state.results[self.child] = result
-        return result
-
-    def update(self) -> Mapping[str, JSONValue]:
-        """Delegate post-run state retention.
-
-        :returns: Child update evidence.
-        :raises ValueError: Collection did not construct the callback.
-        """
-        if self.child is None:
-            raise ValueError("deferred_component_collection_required")
-        result = require_result(self.child.update())
-        self.state.results[self.child] = result
+        :returns: Exact child post-run evidence.
+        :raises ValueError: Collection did not construct a callback.
+        """  # noqa: DOC502 - Shared deferred lifecycle validates collection order.
+        result = super().update()
         if isinstance(self.child, DeployManagerRunner):
             retain_manager_resources(self.state, self.state.manager_action)
         return result
-
-    def cleanup(self) -> Mapping[str, JSONValue]:
-        """Delegate component cleanup when construction reached collection.
-
-        :returns: Child cleanup evidence or an empty mapping.
-        """
-        if self.child is None:
-            return {}
-        try:
-            return self.child.cleanup()
-        finally:
-            self.state.results.pop(self.child, None)
-
-    @property
-    def complete(self) -> bool:
-        """Preserve the child callback's continuation contract.
-
-        :returns: Child completeness, or false before collection.
-        """
-        return self.child is not None and self.child.complete
 
 
 class ScopedGitLabAuth(DeferredComponent):
@@ -225,6 +161,10 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
         :raises ValueError: Live producers are missing or confirmation differs.
         """
         state, action = self.state, self.action
+        if not action.repository_identity.name and action.runner_kind == "project":
+            action.bind_repository(state.gitlab.access)
+        if action.manager_scope is None:
+            raise ValueError("repository_identity_required: provide --namespace")
         nodes = state.kubernetes.json("get", "nodes", "-o", "json")
         selected = select_ready_worker(nodes, action.args.node)
         state.selected_node = selected.name
@@ -406,8 +346,8 @@ def _runner_args(action: ImageBuildChainAction, token_path: Path) -> argparse.Na
     return argparse.Namespace(
         action="create",
         runner_type=action.runner_kind,
-        project=args.project if action.runner_kind == "project" else None,
-        group=args.group if action.runner_kind == "group" else None,
+        project=action.runner_reference if action.runner_kind == "project" else None,
+        group=action.runner_reference if action.runner_kind == "group" else None,
         description=args.runner_description,
         protected=getattr(args, "protected", None),
         tag=list(args.runner_label),
@@ -433,8 +373,8 @@ def _manager_args(
     values.update(
         kind="gitlab_runner_manager",
         action="deploy",
-        project=action.args.project if action.runner_kind == "project" else None,
-        group=action.args.group if action.runner_kind == "group" else None,
+        project=action.runner_reference if action.runner_kind == "project" else None,
+        group=action.runner_reference if action.runner_kind == "group" else None,
         runner_id=state.created_runner_id,
         description=action.args.runner_description,
         tag=list(action.args.runner_label),

@@ -11,14 +11,21 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Final
 
 from lib.python.core.delivery_state import DeliveryState
-from lib.python.core.json_types import JSONObject
+from lib.python.core.json_types import JSONObject, json_object
 from lib.python.core.kubernetes.kubernetes import (
     K8SCallback,
     KubernetesError,
     KubernetesService,
 )
 from lib.python.core.kubernetes.objects import KubernetesObject
-from lib.python.core.kubernetes.resources import ResourceSet
+from lib.python.core.kubernetes.resources import (
+    MANAGER_LABEL,
+    MANAGER_VALUE,
+    OPERATION_LABEL,
+    ResourceSet,
+)
+from lib.python.core.runner_identity import NameSource, ResolvedName
+from lib.python.core.runner_options import kubernetes_runner_name
 from lib.python.core.runner_scope import (
     NOT_REQUIRED,
     PENDING,
@@ -39,6 +46,22 @@ UID_FIELD: Final = "uid"
 LABELS_FIELD: Final = "labels"
 EXPLICIT_NAMESPACE_MISSING: Final = "selected_namespace_missing"
 NAMESPACE_UID_CHANGED: Final = "runner_namespace_uid_changed_rerun_plan"
+NAMESPACE_AMBIGUOUS: Final = "runner_namespace_ambiguous"
+ITEMS_FIELD: Final = "items"
+NAME_FIELD: Final = "name"
+NAMESPACE_RESOURCE: Final = "namespaces"
+GET_VERB: Final = "get"
+SELECTOR_OPTION: Final = "-l"
+JSON_OPTIONS: Final = ("-o", "json")
+DEPLOYMENT_KIND: Final = "Deployment"
+SPEC_FIELD: Final = "spec"
+TEMPLATE_FIELD: Final = "template"
+INIT_CONTAINERS_FIELD: Final = "initContainers"
+ENVIRONMENT_FIELD: Final = "env"
+ENV_VALUE_FIELD: Final = "value"
+RUNNER_REPOSITORY_ENV: Final = "RUNNER_REPOSITORY"
+RUNNER_HOST_ENV: Final = "RUNNER_HOST"
+NAMESPACE_READBACK_INVALID: Final = "runner_namespace_readback_invalid"
 
 
 def scope_key(purpose: ScopePurpose, namespace: str) -> str:
@@ -100,7 +123,7 @@ def observe_namespace(
             labels = metadata.object(LABELS_FIELD).document
             owned = bool(labels) and ResourceSet(service, "", operation).owns(observed)
         except TypeError as exc:
-            raise KubernetesError("runner_namespace_readback_invalid") from exc
+            raise KubernetesError(NAMESPACE_READBACK_INVALID) from exc
         if previous and previous.uid and previous.uid != uid:
             raise KubernetesError(NAMESPACE_UID_CHANGED)
         result = ScopeObservation(
@@ -128,6 +151,124 @@ def observe_namespace(
 class ObserveGitHubNamespace(K8SCallback["WorkflowAction"]):
     """Bind namespace UID and ownership before GitHub plan confirmation."""
 
+    def _legacy_repository_matches(self, namespace: str, name: str) -> bool:
+        """Verify legacy ownership against the Deployment's selected repository.
+
+        :param namespace: Native namespace with legacy workload-name ownership.
+        :param name: Independently observed legacy workload name to verify.
+        :returns: Whether one init container identifies the exact provider repository.
+        :raises KubernetesError: Deployment observation is malformed or unreadable.
+        """  # noqa: DOC502 - Native read and typed field readers propagate failures.
+        workflow = self.action
+        deployment = self.kubernetes.read(DEPLOYMENT_KIND, name, namespace)
+        if deployment is None or workflow.target.github is None:
+            return False
+        try:
+            pod = (
+                KubernetesObject(deployment)
+                .object(SPEC_FIELD)
+                .object(TEMPLATE_FIELD)
+                .object(SPEC_FIELD)
+            )
+            for container in pod.objects(INIT_CONTAINERS_FIELD):
+                environment = container.objects(ENVIRONMENT_FIELD)
+                repository = tuple(
+                    item.text(ENV_VALUE_FIELD)
+                    for item in environment
+                    if item.text(NAME_FIELD) == RUNNER_REPOSITORY_ENV
+                )
+                host = tuple(
+                    item.text(ENV_VALUE_FIELD)
+                    for item in environment
+                    if item.text(NAME_FIELD) == RUNNER_HOST_ENV
+                )
+                if repository == (workflow.repository_identity.reference,) and host == (
+                    workflow.target.github.host,
+                ):
+                    return True
+        except TypeError as exc:
+            raise KubernetesError(NAMESPACE_READBACK_INVALID) from exc
+        return False
+
+    def _select_namespace(self, explicit: bool) -> ScopeSource:
+        """Reuse an owned namespace while preserving legacy verified ownership.
+
+        :param explicit: Whether the caller chose an exact existing namespace.
+        :returns: Native observation source after binding current runner identity.
+        :raises KubernetesError: Discovery is ambiguous or native objects are malformed.
+        """  # noqa: DOC502 - Shared ownership and native read helpers propagate failures.
+        workflow = self.action
+        current = ResourceSet(self.kubernetes, "", workflow.runner.operation)
+        try:
+            if explicit:
+                item = self.kubernetes.read(
+                    NAMESPACE_KIND, workflow.runner.namespace, ""
+                )
+                objects = (KubernetesObject(item),) if item is not None else ()
+            else:
+                document = KubernetesObject(
+                    json_object(
+                        self.kubernetes.json(
+                            GET_VERB,
+                            NAMESPACE_RESOURCE,
+                            SELECTOR_OPTION,
+                            f"{MANAGER_LABEL}={MANAGER_VALUE}",
+                            *JSON_OPTIONS,
+                        )
+                    )
+                )
+                objects = document.objects(ITEMS_FIELD)
+            owned = []
+            for item in objects:
+                operation = workflow.runner.operation
+                name = workflow.runner.name
+                if not current.owns(item.document):
+                    native = item.metadata.object(LABELS_FIELD).text(OPERATION_LABEL)
+                    if native is None:
+                        continue
+                    if getattr(workflow.args, "name", None) and native != name:
+                        continue
+                    try:
+                        legacy_name = kubernetes_runner_name(
+                            ResolvedName(native, NameSource.EXPLICIT)
+                        ).value
+                    except ValueError:
+                        continue
+                    legacy = ResourceSet(self.kubernetes, "", legacy_name)
+                    if not legacy.owns(
+                        item.document
+                    ) or not self._legacy_repository_matches(item.name, legacy_name):
+                        continue
+                    operation = legacy_name
+                    name = legacy_name
+                owned.append((item.name, operation, name))
+            if len(owned) > 1:
+                raise KubernetesError(NAMESPACE_AMBIGUOUS)
+            if owned:
+                namespace, operation, name = owned[0]
+                workflow.runner = replace(
+                    workflow.runner,
+                    namespace=namespace,
+                    name=name,
+                    ownership_id=operation,
+                )
+                if not getattr(workflow.args, "name", None) and (
+                    workflow.resolved_runner_name is None
+                    or workflow.resolved_runner_name.value != name
+                ):
+                    workflow.resolved_runner_name = ResolvedName(
+                        name, NameSource.PROVIDER
+                    )
+                for key, previous in tuple(self.state.runner_scopes.items()):
+                    if previous.purpose == ScopePurpose.RUNNER:
+                        del self.state.runner_scopes[key]
+                return (
+                    ScopeSource.EXPLICIT if explicit else ScopeSource.EXISTING_RUN_SCOPE
+                )
+        except TypeError as exc:
+            raise KubernetesError(NAMESPACE_READBACK_INVALID) from exc
+        return ScopeSource.EXPLICIT if explicit else ScopeSource.OPERATION_CREATED
+
     def run(self) -> JSONObject:
         """Observe the actual selected runner namespace without mutation.
 
@@ -136,7 +277,7 @@ class ObserveGitHubNamespace(K8SCallback["WorkflowAction"]):
         """
         workflow: WorkflowAction = self.action
         explicit = bool(getattr(workflow.args, "namespace", None))
-        source = ScopeSource.EXPLICIT if explicit else ScopeSource.TOOLBOX_DEFAULT
+        source = self._select_namespace(explicit)
         deleting = workflow.args.action == "delete"
         scope = observe_namespace(
             self.state,
