@@ -46,6 +46,9 @@ SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
 runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
 
 from lib.python.core.cli_api import response_decoder
+from lib.python.core.gitlab.mirror.constants import KIND as MIRROR_KIND
+from lib.python.core.gitlab.mirror.constants import OPERATION as MIRROR_OPERATION
+from lib.python.core.gitlab.mirror.evidence import check_mirror_receipt
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -1619,6 +1622,10 @@ def _check_targeted_receipt(
             if cleanup.get("status") != PASS or cleanup.get("failures") != []:
                 problems.append(f"{name}:cleanup_unproven")
             problems.extend(_check_chain_runner_readback(name, receipt, review))
+        elif kind == MIRROR_KIND and operation == MIRROR_OPERATION:
+            problems.extend(
+                f"{name}:{problem}" for problem in check_mirror_receipt(receipt)
+            )
         elif kind == "ocp_node_onboard" and operation == "verify":
             validate_specification(receipt, "results/ocp-node-onboard.schema.json")
             problems.extend(_check_ocp_verify_readback(name, receipt))

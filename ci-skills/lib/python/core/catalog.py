@@ -284,6 +284,57 @@ TARGET_FILENAME = "target.toml"
 PROJECT_DIR = ".ci-skills"
 
 COMMANDS: Mapping[str, CommandDefinition] = {
+    "gitlab_mirror.py": {
+        "kind": "gitlab_mirror",
+        "purpose": "Synchronize a selected GitLab project to GitHub with independent ref verification.",
+        "use_when": "Configure or reconcile a native GitLab-to-GitHub push mirror.",
+        "requires": ("gitlab", "github"),
+        "capabilities": (),
+        "mutates": True,
+        "options": {
+            "--project": "GitLab source path or ID; defaults to the selected target project",
+            "--destination": "GitHub owner/repository; defaults to github.repository in the selected target",
+            "--create-if-absent": "allow creation of the missing destination as a private repository",
+            "--live-plan": "read source, destination and mirror state without mutation",
+            "--apply": "apply the confirmed live plan",
+            "--confirm-plan": "digest binding source, destination, refs, creation intent and functional code",
+            "--timeout": "positive operation timeout in seconds (default: 300)",
+            **persistence_options(
+                GITLAB_MODE_POLICY,
+                "write a sanitized live operation receipt",
+                live_plan=True,
+            ),
+        },
+        "subcommands": {
+            "sync": {
+                "purpose": "Reconcile one native push mirror and verify source and destination refs.",
+                "required_options": [],
+                "result_schema": "schemas/results/gitlab-mirror.schema.json",
+                "read_back": "Read native mirror status and branch/tag object IDs independently on both providers.",
+            },
+        },
+        "related": ("gitlab_access.py", "bin/ci-api"),
+        "references": (),
+        "required_tools": ("glab", "gh", "git"),
+        "returns": "Plan or verified mirror state, repository identities, ref digests and redacted blockers.",
+        "execution_surface": "selected GitLab and GitHub APIs; bounded native Git ref reads",
+        "side_effects": "Confirmed sync configures one native push mirror and requests synchronization. Only --create-if-"
+        "absent permits creating the private GitHub destination. GitLab retains the selected GitHub "
+        "credential for future pushes. Divergent refs are preserved and reported as failure; native mirror "
+        "deletion behavior applies. Confirmed credential recovery deletes and recreates only the selected "
+        "failed mirror configuration; its ID changes and interrupted replacement can leave that mirror "
+        "absent. Repository contents and unrelated mirrors are preserved.",
+        "examples": (
+            {
+                "description": "Inspect the selected mirror operation without mutation",
+                "command": "gitlab_mirror.py sync --live-plan --json",
+            },
+            {
+                "description": "Apply the exact inspected live plan",
+                "command": "gitlab_mirror.py sync --apply --confirm-plan DIGEST --json",
+            },
+        ),
+    },
     "create_selfhosted_runner.py": {
         "kind": "create_selfhosted_runner",
         "purpose": "Build, publish, deploy and register a toolbox-backed GitHub runner.",
@@ -2049,6 +2100,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 "create or change a GitLab wiki page": "gitlab_wiki.py",
                 "read or manage a GitLab runner": "gitlab_runner.py",
                 "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
+                "mirror GitLab to GitHub": "gitlab_mirror.py",
                 "a volume or claim is stuck": "storage_report.py",
                 "what the cluster said during an interval": "event_trace.py",
                 "connectivity or CNI health": "cilium_status.py",
