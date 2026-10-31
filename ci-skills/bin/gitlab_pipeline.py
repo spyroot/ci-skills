@@ -192,7 +192,10 @@ def _select_target(
     :raises TargetError: Selection is missing, invalid, or not project-scoped.
     """
     target, source = resolve_gitlab_target(
-        args.target, args.binding, dry_run=args.dry_run
+        args.target,
+        args.binding,
+        dry_run=args.dry_run,
+        gitlab_profile=getattr(args, "gitlab_profile", None),
     )
     target_kind, reference = select_gitlab_reference(target, project=args.project)
     if target_kind != "project":

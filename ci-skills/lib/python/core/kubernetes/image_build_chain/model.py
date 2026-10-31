@@ -287,13 +287,16 @@ class ImageBuildChainAction(SkillAction):
             self.args.binding,
             dry_run=mode == ProbeMode.DRY_RUN,
             required_surfaces=("gitlab", "kubernetes", "harbor"),
+            gitlab_profile=getattr(self.args, "gitlab_profile", None),
         )
         if mode != ProbeMode.DRY_RUN:
             target = bind_sources(target, revision=self.args.revision)
         if target.gitlab is None or target.source_file is None:
             raise TargetError("gitlab_target_unresolved")
         self.target = target
-        self.target_source = target.source_kind or "target"
+        self.target_source = target.gitlab.selection_source(
+            target.source_kind or "target"
+        )
         self.gitlab_target = GitLabOperationTarget(target.gitlab, target.source_file)
         self.toolbox = WorkflowAction(self._toolbox_args(), context=self.state)
         self.toolbox.prepare()
@@ -338,7 +341,7 @@ class ImageBuildChainAction(SkillAction):
             "kind": PROBE_KIND,
             "operation": CHAIN_OPERATION,
             "target_file": str(self.target.source_file),
-            "target_source": self.target.source_kind or "",
+            "target_source": self.target_source,
             "tested_revision": self.target.tested_revision,
             "skill": copy_json(self.target.skill),
             "toolbox": {

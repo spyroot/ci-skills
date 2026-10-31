@@ -21,7 +21,7 @@ import sys
 import tomllib
 from collections.abc import MutableSequence, MutableSet, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import jsonschema
 import pytest
@@ -40,6 +40,12 @@ SCHEMA = json.loads(
 )
 TEMPLATE = "target.toml.template"
 UNKNOWN_AUTHORITY = "unregistered_authority"
+PROFILE_EXAMPLE: Final[str] = (
+    '[gitlab."public.test"]\n'
+    'url = "https://public.example.test"\n'
+    'project = "consumer/public"\n'
+    'token_file = "public.token"\n'
+)
 # Commits in throwaway repositories must not depend on the caller's git config.
 IDENTITY = (
     "-c",
@@ -298,7 +304,7 @@ def test_commented_keys_belong_to_the_commented_table_and_active_keys_do_not() -
         pytest.param("## [harbor]\n## url = 1\n", "harbor.url", id="double-hash"),
         pytest.param('# [ "harbor" ]\n# url = 1\n', "harbor.url", id="quoted-spaced"),
         pytest.param("[gitlab]\n# 'evil' = 1\n", "gitlab.evil", id="single-quoted"),
-        pytest.param('[gitlab]\n# "a b" = 1\n', "gitlab.a b", id="spaced-quoted"),
+        pytest.param('[gitlab]\n# "a b" = 1\n', 'gitlab."a b"', id="spaced-quoted"),
         pytest.param(
             '[kubernetes]\nextra = [{ pod = "x" }]\n',
             "kubernetes.extra.pod",
@@ -875,3 +881,86 @@ def test_the_schema_rejects_an_invalid_record(change: str) -> None:
     change(record)
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(record, SCHEMA)
+
+
+@pytest.mark.parametrize("name", ("public.test", "smoke candidate"))
+def test_documented_named_profiles_keep_quoted_key_identity(
+    repo: Path, name: str
+) -> None:
+    """Accept named profile examples without splitting quoted dots or spaces.
+
+    :param repo: Existing isolated repository fixture with the real target template.
+    :param name: Exact immediate-child GitLab profile key used in the example.
+    :returns: None; assertions verify parser identity and the real gate result.
+    """
+    text = PROFILE_EXAMPLE.replace("public.test", name, 1)
+    uses = GATE_LIB.TargetDocument("profile.toml", text).uses()
+    quoted = json.dumps(name)
+    paths = {use.path for use in uses}
+
+    assert f"gitlab.{quoted}" in paths
+    assert f"gitlab.{quoted}.url" in paths
+    assert all(
+        ENDPOINTS.TARGET_CONTRACT.declares(use.path, table=use.is_table) for use in uses
+    )
+    assert ENDPOINTS.TARGET_CONTRACT.role(f"gitlab.{quoted}.token_file") is (
+        ENDPOINTS.Role.ACCESS
+    )
+    _append(repo / "README.md", f"\n```toml\n{text}```\n")
+
+    code, record = _gate(repo)
+
+    assert code == 0
+    assert record["status"] == "PASS", record["findings"]
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "rejected"),
+    (
+        (
+            'token_file = "public.token"\n',
+            'token_file = "public.token"\npassword = "fixture"\n',
+            'gitlab."public.test".password',
+        ),
+        (
+            'token_file = "public.token"\n',
+            'token_file = "public.token"\n[gitlab."public.test".extra]\n',
+            'gitlab."public.test".extra',
+        ),
+        (
+            'token_file = "public.token"\n',
+            '[gitlab."public.test".token_file]\n',
+            'gitlab."public.test".token_file',
+        ),
+        (
+            '[gitlab."public.test"]\n',
+            '[gitlab]\npassword = "fixture"\n[gitlab."public.test"]\n',
+            "gitlab.password",
+        ),
+    ),
+    ids=(
+        "unknown-profile-field",
+        "deeper-table",
+        "field-is-table",
+        "scalar-is-not-profile",
+    ),
+)
+def test_named_profile_gate_rejects_one_unknown_or_mistyped_declaration(
+    repo: Path, before: str, after: str, rejected: str
+) -> None:
+    """Keep dynamic profile names from weakening the allowed-field contract.
+
+    :param repo: Fresh repository fixture receiving an isolated baseline copy.
+    :param before: Single fragment of the immutable valid profile example.
+    :param after: Replacement breaking one field or table invariant.
+    :param rejected: Concrete undeclared path the gate must identify.
+    :returns: None; assertions verify the real gate reports the invalid declaration.
+    """
+    text = PROFILE_EXAMPLE.replace(before, after, 1)
+    _append(repo / "README.md", f"\n```toml\n{text}```\n")
+
+    code, record = _gate(repo)
+
+    assert code == 1
+    assert record["status"] == "FAIL"
+    assert ("undeclared", rejected) in _rules(record)

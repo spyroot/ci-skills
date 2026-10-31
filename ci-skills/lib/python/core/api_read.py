@@ -98,6 +98,7 @@ class ApiProviderAction(SkillAction):
     :param host: Explicit provider hostname, or ``None`` for target resolution.
     :param token_file: Token file override, or ``None`` for shared resolution.
     :param output: Selected JSON, YAML, or text representation.
+    :param gitlab_profile: Named target profile, valid only for the GitLab provider.
 
     .. attribute :: provider
         :type: GitProvider
@@ -118,12 +119,18 @@ class ApiProviderAction(SkillAction):
         :type: ApiOutput
 
         Selected JSON, YAML, or text representation.
+
+    .. attribute :: gitlab_profile
+        :type: Optional[str]
+
+        Exact named GitLab selection; absent for the flat table.
     """
 
     provider: GitProvider
     host: Optional[str] = None
     token_file: Optional[Path] = None
     output: ApiOutput = ApiOutput.JSON
+    gitlab_profile: Optional[str] = None
 
     @abstractmethod
     def validate(self) -> None:
@@ -133,6 +140,10 @@ class ApiProviderAction(SkillAction):
         """
         if not isinstance(self.provider, GitProvider):
             raise ReadToolError("invalid provider", ReadExit.USAGE)
+        if self.gitlab_profile is not None and self.provider != GitProvider.GITLAB:
+            raise ReadToolError(
+                "gitlab_profile_requires_gitlab_provider", ReadExit.USAGE
+            )
         if not isinstance(self.output, ApiOutput):
             raise ReadToolError("invalid output mode", ReadExit.USAGE)
 
@@ -228,6 +239,7 @@ class ApiReadAction(ApiProviderAction):
         lines: Optional[str] = None,
         paginate: bool = False,
         output: ApiOutput = ApiOutput.JSON,
+        gitlab_profile: Optional[str] = None,
     ):
         """Retain one immutable GET request with a required endpoint.
 
@@ -240,8 +252,9 @@ class ApiReadAction(ApiProviderAction):
         :param lines: Inclusive ``start:end`` range, or ``None`` for all text.
         :param paginate: Whether to collect array pages through the native CLI.
         :param output: Selected JSON, YAML, or text representation.
+        :param gitlab_profile: Exact named GitLab profile, or the flat default.
         """
-        super().__init__(provider, host, token_file, output)
+        super().__init__(provider, host, token_file, output, gitlab_profile)
         object.__setattr__(self, "endpoint", endpoint)
         object.__setattr__(self, "field", field)
         object.__setattr__(self, "decode_base64", decode_base64)
@@ -338,10 +351,18 @@ class ApiProviderSelection:
         try:
             path, _source = resolve_target_file(None)
         except TargetError as exc:
-            if os.getenv(SMOKE_ENV) or not str(exc).startswith("target_missing:"):
+            if (
+                action.gitlab_profile is not None
+                or os.getenv(SMOKE_ENV)
+                or not str(exc).startswith("target_missing:")
+            ):
                 raise
         else:
-            target = load_target(path, required_surfaces=(action.provider.value,))
+            target = load_target(
+                path,
+                required_surfaces=(action.provider.value,),
+                gitlab_profile=action.gitlab_profile,
+            )
             configured = (
                 target.github
                 if action.provider == GitProvider.GITHUB
@@ -349,6 +370,12 @@ class ApiProviderSelection:
             )
             if configured is None:
                 raise TargetError("provider_target_missing")
+            if (
+                action.gitlab_profile is not None
+                and host is not None
+                and host.lower() != configured.host
+            ):
+                raise TargetError("gitlab_profile_host_conflict")
             if host is None or host.lower() == configured.host:
                 host = configured.host
                 token_file = token_file or configured.token_file

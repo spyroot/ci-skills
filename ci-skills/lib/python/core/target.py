@@ -7,6 +7,7 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
+import json
 import tomllib
 from collections.abc import Mapping, MutableSequence
 from dataclasses import dataclass, field
@@ -126,6 +127,7 @@ class GitLabTarget:
     :param project: Project path, or ``None`` when no project is selected.
     :param group: Group path, or ``None`` when no group is selected.
     :param runner_id: Positive runner ID, or ``None`` when no runner is selected.
+    :param profile: Explicit named GitLab profile, or ``None`` for the flat table.
 
     .. attribute :: url
         :type: str
@@ -156,6 +158,11 @@ class GitLabTarget:
         :type: Optional[int]
 
         Positive runner ID, or ``None`` when no runner is selected.
+
+    .. attribute :: profile
+        :type: Optional[str]
+
+        Exact named GitLab selection; absent for the flat table.
     """
 
     url: str
@@ -164,6 +171,19 @@ class GitLabTarget:
     project: Optional[str] = None
     group: Optional[str] = None
     runner_id: Optional[int] = None
+    profile: Optional[str] = None
+
+    def selection_source(self, source: str) -> str:
+        """Bind a named profile to existing report and confirmation provenance.
+
+        :param source: File or binding selection provenance, kept unchanged by default.
+        :returns: The source with an explicit profile selector when one was selected.
+        """
+        return (
+            f"{source};argv:--gitlab-profile={json.dumps(self.profile)}"
+            if self.profile is not None
+            else source
+        )
 
 
 @dataclass(frozen=True)
@@ -416,6 +436,14 @@ class Target:
     target_reference: Optional[str] = None
     harbor: Optional[HarborTarget] = None
 
+    def selection_source(self, source: str) -> str:
+        """Include the selected GitLab profile in provider-selection provenance.
+
+        :param source: Existing file or binding provenance.
+        :returns: Profile-bound provenance when GitLab is selected, otherwise the input.
+        """
+        return self.gitlab.selection_source(source) if self.gitlab else source
+
     def require_github(self) -> GitHubTarget:
         """Select the concrete github settings required by a caller.
 
@@ -664,17 +692,44 @@ def _optional_reference(table: Mapping[str, object], key: str) -> Optional[str]:
 
 
 def _parse_gitlab(
-    value: object, skill_root: Path, *, target_directory: Path
+    value: object,
+    skill_root: Path,
+    *,
+    target_directory: Path,
+    profile: Optional[str] = None,
 ) -> GitLabTarget:
     """Parse GitLab settings and resolve their token beside the target file.
 
-    :param value: Parsed GitLab authority table.
+    :param value: Parsed GitLab authority table, including optional named profiles.
     :param skill_root: Installed skill directory excluded from file selections.
     :param target_directory: Directory containing the selected target file.
+    :param profile: Exact named profile, or ``None`` for the flat GitLab table.
     :returns: Validated GitLab settings with a canonical token path if supplied.
     :raises TargetError: If a GitLab setting or token path is invalid.
     """
-    gitlab = _table(value, "gitlab", TARGET_CONTRACT.names("gitlab"))
+    fields = TARGET_CONTRACT.names("gitlab")
+    if not isinstance(value, dict):
+        raise TargetError("gitlab must be a table")
+    profiles = set(value) - fields
+    invalid = {
+        name
+        for name in profiles
+        if not name.strip() or not isinstance(value[name], dict)
+    }
+    if invalid:
+        raise TargetError(
+            "gitlab contains unsupported fields: " + ", ".join(sorted(invalid))
+        )
+    if profile is None:
+        gitlab = {key: item for key, item in value.items() if key in fields}
+    else:
+        if not isinstance(profile, str) or not profile.strip():
+            raise TargetError("gitlab_profile_name_invalid")
+        if profile not in profiles:
+            raise TargetError("gitlab_profile_unknown")
+        gitlab = _table(
+            value[profile], TARGET_CONTRACT.dotted_path(("gitlab", profile)), fields
+        )
     url, host = _https_url(_string(gitlab, "url", "gitlab"), "gitlab.url")
     runner_id = gitlab.get("runner_id")
     if runner_id is not None and (
@@ -690,6 +745,7 @@ def _parse_gitlab(
         project=_optional_reference(gitlab, "project"),
         group=_optional_reference(gitlab, "group"),
         runner_id=runner_id,
+        profile=profile,
     )
 
 
@@ -710,12 +766,15 @@ def _read_target_data(source: Path, skill_root: Path) -> Mapping[str, object]:
     return data
 
 
-def load_gitlab_target(path: Union[str, Path]) -> GitLabOperationTarget:
+def load_gitlab_target(
+    path: Union[str, Path], *, gitlab_profile: Optional[str] = None
+) -> GitLabOperationTarget:
     """Load GitLab settings with relative tokens beside the selected target.
 
     Other declared authority tables are permitted but are not validated here.
 
     :param path: Selected TOML target file, including an optional home prefix.
+    :param gitlab_profile: Exact named profile; omission uses the flat GitLab table.
     :returns: GitLab settings and the canonical source-file path.
     :raises TargetError: If the target is unreadable, invalid, inside the skill,
         or contains invalid GitLab settings or an internal credential path.
@@ -724,7 +783,12 @@ def load_gitlab_target(path: Union[str, Path]) -> GitLabOperationTarget:
     skill_root = SKILL_ROOT
     data = _read_target_data(source, skill_root)
     _select_surfaces(data, ("gitlab",), ())
-    selected = _parse_gitlab(data["gitlab"], skill_root, target_directory=source.parent)
+    selected = _parse_gitlab(
+        data["gitlab"],
+        skill_root,
+        target_directory=source.parent,
+        profile=gitlab_profile,
+    )
     return GitLabOperationTarget(selected, source.resolve())
 
 
@@ -949,6 +1013,7 @@ def load_target(
     *,
     required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES,
     optional_surfaces: tuple[str, ...] = (),
+    gitlab_profile: Optional[str] = None,
 ) -> Target:
     """Load requested authorities with relative tokens beside the target file.
 
@@ -958,6 +1023,7 @@ def load_target(
     :param path: Selected TOML target file, including an optional home prefix.
     :param required_surfaces: Distinct declared authorities the command needs.
     :param optional_surfaces: Supported authorities selected only when configured.
+    :param gitlab_profile: Exact named profile; omission uses the flat GitLab table.
     :returns: Validated settings for the requested authorities.
     :raises TargetError: If the requested authorities or target data are invalid,
         unreadable, missing, or select a target or credential inside the skill.
@@ -971,6 +1037,8 @@ def load_target(
     skill_root = SKILL_ROOT
     data = _read_target_data(source, skill_root)
     selected = _select_surfaces(data, required_surfaces, optional_surfaces)
+    if gitlab_profile is not None and "gitlab" not in selected:
+        raise TargetError("gitlab_profile_requires_gitlab_authority")
 
     github_target = (
         _parse_github(data["github"], skill_root, target_directory=source.parent)
@@ -978,7 +1046,12 @@ def load_target(
         else None
     )
     gitlab_target = (
-        _parse_gitlab(data["gitlab"], skill_root, target_directory=source.parent)
+        _parse_gitlab(
+            data["gitlab"],
+            skill_root,
+            target_directory=source.parent,
+            profile=gitlab_profile,
+        )
         if "gitlab" in selected
         else None
     )

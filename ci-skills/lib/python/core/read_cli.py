@@ -28,7 +28,7 @@ from lib.python.core.api_read import (
     SelectAPI,
 )
 from lib.python.core.catalog import describe
-from lib.python.core.cli import MachineArgumentParser
+from lib.python.core.cli import MachineArgumentParser, add_gitlab_profile_argument
 from lib.python.core.cli_api import APIError
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.json_types import JSONValue, json_string
@@ -84,6 +84,7 @@ def build_api_parser() -> ReadArgumentParser:
     result.add_argument("action", nargs="?", choices=("check", "get"))
     result.add_argument("--provider", choices=tuple(GitProvider))
     result.add_argument("--host")
+    add_gitlab_profile_argument(result)
     result.add_argument("--token-file", type=Path)
     result.add_argument("--endpoint")
     result.add_argument("--field")
@@ -220,7 +221,13 @@ def _api_callbacks(
             raise ReadToolError(
                 "check does not accept response transforms", ReadExit.USAGE
             )
-        check = ApiCheckAction(provider, args.host, args.token_file, output)
+        check = ApiCheckAction(
+            provider,
+            args.host,
+            args.token_file,
+            output,
+            gitlab_profile=args.gitlab_profile,
+        )
         return Callbacks(
             (SelectAPI(check), PlanAPICheck(check))
             if args.dry_run
@@ -230,6 +237,7 @@ def _api_callbacks(
         raise ReadToolError("a relative GET endpoint is required", ReadExit.USAGE)
     read = ApiReadAction(
         provider=provider,
+        gitlab_profile=args.gitlab_profile,
         endpoint=args.endpoint,
         host=args.host,
         token_file=args.token_file,

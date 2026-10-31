@@ -55,6 +55,36 @@ This skill resolves; it does not provision. It creates no target file, mints no
 token and fetches no kubeconfig. Putting them there is the user's job, or
 an explicit step in the calling project's own instructions.
 
+## Named GitLab targets
+
+The target contract in `core/endpoints.py` also accepts `[gitlab.NAME]` tables.
+GitLab commands select one with `--gitlab-profile NAME`; omission keeps the flat
+`[gitlab]` default. The selected table must supply its own `url`; `project`,
+`group`, `runner_id`, and `token_file` retain their operation-specific rules.
+Missing fields never inherit from another profile or target file. An unknown,
+empty, or malformed selection blocks before provider access.
+
+```toml
+[gitlab]
+url = "https://gitlab.example.test"
+project = "team/default"
+
+[gitlab.public]
+url = "https://gitlab.public.example.test"
+project = "team/consumer"
+token_file = "public.token"
+```
+
+Profile names are exact immediate TOML keys. For `[gitlab."public.test"]`, pass
+`--gitlab-profile public.test`. Relative token paths stay relative to the selected
+target file. File and binding precedence is unchanged. Without `token_file`, the
+existing environment and exact-host native credential rules below still apply;
+other profiles' credentials are never borrowed. `ci-api --provider gitlab`
+accepts the same selector and rejects a conflicting `--host`. A profile selector
+on another provider, or on the Kubernetes-only build probe, is rejected.
+Reports and mutation confirmation bind the selected profile even when profiles
+share a host and project. Retained runner/resource identities stay unchanged.
+
 ## Effective credential sources
 
 - GitHub uses an explicit `github.token_file` from the target, then the

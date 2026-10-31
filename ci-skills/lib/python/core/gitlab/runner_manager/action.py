@@ -359,6 +359,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
             self.args.binding,
             dry_run=self.args.dry_run,
             required_surfaces=surfaces,
+            gitlab_profile=getattr(self.args, "gitlab_profile", None),
         )
         if not self.args.dry_run:
             self.target = bind_sources(self.target, revision=self.args.revision)
@@ -472,7 +473,9 @@ class GitLabRunnerManagerAction(WorkflowAction):
                 "skill": copy_json(self.target.skill),
                 "tested_revision": self.target.tested_revision,
                 "target_file": str(target_file),
-                "target_source": self.target.source_kind,
+                "target_source": self.target.gitlab.selection_source(
+                    self.target.source_kind or "target"
+                ),
                 "gitlab": {
                     "origin": self.target.gitlab.url,
                     "session": self._session_evidence(),

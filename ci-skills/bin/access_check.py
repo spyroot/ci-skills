@@ -23,6 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     """
     cli = parser(
         "Check every selected authority; dry run never counts as access.",
+        kind="access_check",
     )
     cli.add_argument(
         "--publication",
