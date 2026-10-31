@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import time
 from collections.abc import MutableMapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -28,7 +29,7 @@ from lib.python.core.action_modes import (
 )
 from lib.python.core.catalog import COMMANDS, UNIVERSAL_OPTIONS, describe
 from lib.python.core.cli import _failure, parser
-from lib.python.core.cli_api import APIError
+from lib.python.core.cli_api import APIError, RequestDeadline
 from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.git.mirroring import MirrorField
@@ -82,6 +83,7 @@ BOOLEAN_OPTIONS: Final = frozenset((APPLY_OPTION, CREATE_OPTION, LIVE_PLAN_OPTIO
 SURFACES: Final = (SkillPluginType.GITLAB.value, SkillPluginType.GITHUB.value)
 EMPTY: Final = ""
 ERROR_LIMIT: Final = 240
+NO_VERIFIED_REFS: Final = 0
 ACTION_REQUIRED: Final = "sync_required"
 PROJECT_REQUIRED: Final = "mirror_source_project_required"
 TARGET_REQUIRED: Final = "mirror_target_unresolved"
@@ -169,6 +171,7 @@ class MirrorAction(SkillAction):
     :param timeout: Positive operation bound accepted by the shared mode policy.
     :param confirmation: Caller-supplied live plan digest, absent outside apply.
     :param revision: Optional installed skill revision assertion.
+    :param deadline: One absolute bound covering resolution, provider calls and read-back.
 
     .. attribute :: target
         :type: Target
@@ -199,6 +202,11 @@ class MirrorAction(SkillAction):
         :type: Optional[str]
 
         Optional installed skill revision assertion.
+
+    .. attribute :: deadline
+        :type: RequestDeadline
+
+        Shared operation bound created before resolving the selected target.
     """
 
     target: Target
@@ -207,6 +215,7 @@ class MirrorAction(SkillAction):
     timeout: int
     confirmation: Optional[str]
     revision: Optional[str]
+    deadline: RequestDeadline
 
 
 @dataclass
@@ -275,7 +284,8 @@ class MirrorSourceAuth(Callback[MirrorState, MirrorAction]):
         if selected.source_file is None:
             raise TargetError(TARGET_REQUIRED)
         target = GitLabOperationTarget(selected.require_gitlab(), selected.source_file)
-        self.state.session = bind_gitlab_session(
+        self.state.session = self.action.deadline.call(
+            bind_gitlab_session,
             target,
             target_kind=Field.PROJECT.value,
             target_reference=self.action.intent.project,
@@ -303,7 +313,9 @@ class MirrorSourceAuth(Callback[MirrorState, MirrorAction]):
         session = self.state.session
         if session is None:
             raise TargetError(TARGET_REQUIRED)
-        client = GlabAPIClient(timeout=self.action.timeout)
+        client = GlabAPIClient(
+            timeout=self.action.timeout, deadline=self.action.deadline
+        )
         access = check_gitlab_operation_access(session, api_client=client)
         self.state.access_evidence[SkillPluginType.GITLAB.value] = access
         if access.get(Field.STATUS) != PASS:
@@ -349,7 +361,7 @@ class ObserveMirror(LocalCallback[MirrorState, MirrorAction]):
         if session is None:
             raise TargetError(TARGET_REQUIRED)
         github = self.state.github_identity
-        reader = GitRemoteReader(self.action.timeout)
+        reader = GitRemoteReader(self.action.timeout, deadline=self.action.deadline)
         source = GitLabPushMirrorService(self.state.gitlab, reader)
         destination = GitHubRepositoryService(github, reader)
         url = CLONE_URL_TEMPLATE.format(
@@ -363,6 +375,7 @@ class ObserveMirror(LocalCallback[MirrorState, MirrorAction]):
             github.identity,
             github.token,
             self.action.timeout,
+            deadline=self.action.deadline,
         )
         self.state.engine = engine
         credential_digest = plan_digest(
@@ -373,7 +386,8 @@ class ObserveMirror(LocalCallback[MirrorState, MirrorAction]):
                 ).hexdigest(),
             }
         )
-        plan = engine.plan(
+        plan = self.action.deadline.call(
+            engine.plan,
             self.action.intent,
             json_string(session.skill[Field.FUNCTIONAL_DIGEST]),
             credential_digest,
@@ -401,6 +415,8 @@ class ObserveMirror(LocalCallback[MirrorState, MirrorAction]):
             Field.SOURCE_REFS: ref_evidence(observed.source_refs),
             Field.DESTINATION_REFS: ref_evidence(observed.destination_refs),
             Field.CREATED: {Field.REPOSITORY: False, Field.MIRROR: False},
+            Field.REPLACEMENT_REQUIRED: plan.replacement_required,
+            Field.REPLACED_MIRROR_ID: plan.replaced_mirror_id,
             Field.VERIFIED_SOURCE_REF_COUNT: observed.destination_refs.matching_count(
                 observed.source_refs
             ),
@@ -429,9 +445,12 @@ class ApplyMirror(LocalCallback[MirrorState, MirrorAction]):
         engine = self.state.engine
         if plan is None or engine is None:
             raise APIError(PLAN_REQUIRED)
-        self.state.record = {}
-        result = engine.apply(plan, self.action.confirmation or EMPTY)
-        destination = engine.destination.repository(self.action.intent.destination)
+        result = self.action.deadline.call(
+            engine.apply, plan, self.action.confirmation or EMPTY
+        )
+        destination = self.action.deadline.call(
+            engine.destination.repository, self.action.intent.destination
+        )
         if destination is None:
             raise APIError(Failure.DESTINATION_MISSING)
         self.state.record = result.evidence(destination)
@@ -459,7 +478,7 @@ def workflow(action: MirrorAction, state: MirrorState) -> WorkflowExecutor[Mirro
         raise ValueError(LIVE_MODE_REQUIRED)
     callbacks: AbstractCallbacks[MirrorState, SkillAction] = [
         MirrorSourceAuth(action),
-        GitHubIdentityAuth(action.target, action.timeout),
+        GitHubIdentityAuth(action.target, action.timeout, deadline=action.deadline),
         ObserveMirror(action),
     ]
     if action.mode == ActionMode.APPLY:
@@ -531,7 +550,9 @@ class MirrorCommand:
         if mode == ActionMode.APPLY and not args.confirm_plan:
             raise APIError(Failure.UNCONFIRMED)
         args.dry_run = mode == ActionMode.OFFLINE
-        target = resolve_target(
+        deadline = RequestDeadline(time.monotonic() + args.timeout)
+        target = deadline.call(
+            resolve_target,
             args.target,
             args.binding,
             dry_run=args.dry_run,
@@ -551,8 +572,42 @@ class MirrorCommand:
         )
         intent = MirrorIntent.parse(project, destination, args.create_if_absent)
         return MirrorAction(
-            target, intent, mode, args.timeout, args.confirm_plan, args.revision
+            target,
+            intent,
+            mode,
+            args.timeout,
+            args.confirm_plan,
+            args.revision,
+            deadline,
         )
+
+    def preserve_partial(self) -> None:
+        """Retain known resource identities and ownership after an uncertain write.
+
+        :returns: None; the bounded state record remains explicitly unverified.
+        """
+        engine = self.state.engine
+        if engine is None or not self.state.record or engine.mutated is False:
+            return
+        record: dict[str, JSONValue] = dict(self.state.record)
+        record.update(
+            {
+                Field.ACTION: Outcome.APPLIED.value,
+                Field.VERIFIED: False,
+                Field.VERIFIED_SOURCE_REF_COUNT: NO_VERIFIED_REFS,
+                Field.CREATED: {
+                    Field.REPOSITORY: engine.created_repository,
+                    Field.MIRROR: engine.created_mirror,
+                },
+                Field.REPLACEMENT_REQUIRED: engine.replacement_required,
+                Field.REPLACED_MIRROR_ID: engine.replaced_mirror_id,
+            }
+        )
+        if engine.destination_repository is not None:
+            record[Field.DESTINATION] = engine.destination_repository.evidence()
+        if engine.current_mirror is not None:
+            record[Field.MIRROR] = engine.current_mirror.evidence()
+        self.state.record = record
 
     def output(
         self, action: MirrorAction, status: str
@@ -619,7 +674,8 @@ class MirrorCommand:
         errors: list[JSONObject] = []
         if action.mode != ActionMode.OFFLINE:
             try:
-                workflow(action, self.state).run()
+                executor = action.deadline.call(workflow, action, self.state)
+                action.deadline.call(executor.run)
                 status = PASS if action.mode == ActionMode.APPLY else PLANNED
                 verified = (
                     self.state.record.get(Field.VERIFIED) is True
@@ -637,6 +693,7 @@ class MirrorCommand:
                 engine = self.state.engine
                 mutated = engine.mutated if engine is not None else False
                 status = PARTIAL if mutated is not False else BLOCKED
+                self.preserve_partial()
                 errors.append(
                     {Field.SOURCE: KIND, Field.REASON: sanitize(str(exc), ERROR_LIMIT)}
                 )

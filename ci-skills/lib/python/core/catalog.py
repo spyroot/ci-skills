@@ -318,10 +318,12 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "required_tools": ("glab", "gh", "git"),
         "returns": "Plan or verified mirror state, repository identities, ref digests and redacted blockers.",
         "execution_surface": "selected GitLab and GitHub APIs; bounded native Git ref reads",
-        "side_effects": "Confirmed sync configures one native push mirror and requests synchronization. "
-        "Only --create-if-absent permits creating the private GitHub destination. "
-        "GitLab retains the selected GitHub credential for future pushes. "
-        "Divergent refs are preserved and reported as failure; native mirror deletion behavior applies.",
+        "side_effects": "Confirmed sync configures one native push mirror and requests synchronization. Only --create-if- "
+        "absent permits creating the private GitHub destination. GitLab retains the selected GitHub "
+        "credential for future pushes. Divergent refs are preserved and reported as failure; native mirror "
+        "deletion behavior applies. Confirmed credential recovery deletes and recreates only the selected "
+        "failed mirror configuration; its ID changes and interrupted replacement can leave that mirror "
+        "absent. Repository contents and unrelated mirrors are preserved.",
         "examples": (
             {
                 "description": "Inspect the selected mirror operation without mutation",
@@ -2098,6 +2100,7 @@ def manifest() -> MutableMapping[str, JSONValue]:
                 "create or change a GitLab wiki page": "gitlab_wiki.py",
                 "read or manage a GitLab runner": "gitlab_runner.py",
                 "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
+                "mirror GitLab to GitHub": "gitlab_mirror.py",
                 "a volume or claim is stuck": "storage_report.py",
                 "what the cluster said during an interval": "event_trace.py",
                 "connectivity or CNI health": "cilium_status.py",

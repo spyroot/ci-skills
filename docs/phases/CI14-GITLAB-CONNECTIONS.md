@@ -168,3 +168,16 @@ capability, not separate feature scope. No Git hooks, repository CI redesign or 
 
 Provider semantics: [remote mirrors API](https://docs.gitlab.com/api/remote_mirrors/) and
 [push mirroring](https://docs.gitlab.com/user/project/repository/mirror/push/).
+
+### Confirmed failed-mirror credential recovery
+
+The native remote-mirror update API does not accept the credential-bearing `url` field. Recovering a selected failed
+password mirror with a replacement credential therefore requires replacing that mirror configuration. The live plan
+must expose `replacement_required` and `replaced_mirror_id`, binding this decision and the exact selected mirror ID
+into confirmation. Only a native failed mirror is eligible; healthy verified state remains a write-free no-op.
+
+Confirmed recovery deletes only that selected failed mirror, independently proves its absence, creates its replacement
+with the selected credential and confirmed policy, and verifies the new native state and destination refs. The mirror
+ID changes. Repository contents and unrelated mirrors are preserved. An interruption may leave the selected mirror
+absent; partial output retains known old/new identities and ownership, and a new live plan is required before retry.
+No replacement occurs without the digest of a live plan that explicitly identifies this replacement.

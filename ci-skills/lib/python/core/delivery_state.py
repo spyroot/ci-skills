@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import MutableMapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import AuthAction
@@ -17,7 +17,7 @@ from lib.python.core.json_types import JSONObject
 
 if TYPE_CHECKING:
     from lib.python.access.harbor_credentials import RegistryCredential
-    from lib.python.core.cli_api import ReadSession
+    from lib.python.core.cli_api import ReadSession, RequestDeadline
     from lib.python.core.github.github import GitHubService
     from lib.python.core.github.session import GitHubIdentitySession
     from lib.python.core.harbor.registry_mirror import HarborService
@@ -33,6 +33,7 @@ class ProviderAuthAction(AuthAction):
 
     :param target: Runtime target already resolved by the calling workflow.
     :param timeout: Positive maximum seconds for each native provider request.
+    :param deadline: Optional shared absolute budget for the calling operation.
 
     AuthAction defines the inherited target field.
 
@@ -40,9 +41,15 @@ class ProviderAuthAction(AuthAction):
         :type: int
 
         Positive maximum seconds for each native provider request.
+
+    .. attribute :: deadline
+        :type: Optional[RequestDeadline]
+
+        Shared absolute operation budget when selected by the caller.
     """
 
     timeout: int
+    deadline: Optional[RequestDeadline] = None
 
 
 @dataclass

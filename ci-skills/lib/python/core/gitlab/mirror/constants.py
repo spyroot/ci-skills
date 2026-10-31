@@ -119,6 +119,14 @@ class Field(StrEnum):
 
         Native token ``repository``.
 
+    .. attribute :: REPLACEMENT_REQUIRED
+
+        Whether confirmation permits replacing the selected failed mirror.
+
+    .. attribute :: REPLACED_MIRROR_ID
+
+        Exact old native mirror ID, absent without confirmed replacement.
+
     .. attribute :: PLAN_DIGEST
 
         Native token ``plan_digest``.
@@ -192,6 +200,8 @@ class Field(StrEnum):
     VERIFIED_SOURCE_REF_COUNT = "verified_source_ref_count"
     CREATED = "created"
     REPOSITORY = "repository"
+    REPLACEMENT_REQUIRED = "replacement_required"
+    REPLACED_MIRROR_ID = "replaced_mirror_id"
     PLAN_DIGEST = "plan_digest"
     MUTATED = "mutated"
     RECORDS = "records"
@@ -242,6 +252,10 @@ class Failure(StrEnum):
 
         Native token ``mirror_destination_missing``.
 
+    .. attribute :: DESTINATION_CHANGED
+
+        Native mirror no longer points at the confirmed destination.
+
     .. attribute :: AMBIGUOUS
 
         Native token ``mirror_destination_ambiguous``.
@@ -278,6 +292,7 @@ class Failure(StrEnum):
     INVALID_INTENT = "mirror_intent_invalid"
     SOURCE_MISSING = "mirror_source_missing"
     DESTINATION_MISSING = "mirror_destination_missing"
+    DESTINATION_CHANGED = "mirror_destination_changed"
     AMBIGUOUS = "mirror_destination_ambiguous"
     STALE_PLAN = "mirror_plan_mismatch"
     UNCONFIRMED = "mirror_live_plan_confirmation_required"

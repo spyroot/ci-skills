@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from typing import Final, Optional
 from urllib.parse import urlsplit
 
-from lib.python.core.cli_api import APIError, CommandRunner
+from lib.python.core.cli_api import APIError, CommandRunner, RequestDeadline
 from lib.python.core.git.refs import RefSnapshot
 from lib.python.core.runtime import error_class, run_command_bounded
 
@@ -52,17 +52,21 @@ class GitRemoteReader:
         self,
         timeout: int,
         runner: CommandRunner = run_command_bounded,
+        *,
+        deadline: Optional[RequestDeadline] = None,
     ) -> None:
         """Retain replaceable process execution and its positive time bound.
 
         :param timeout: Maximum seconds for each native remote observation.
         :param runner: Existing bounded runner, replaceable in isolated tests.
+        :param deadline: Optional shared remaining operation budget.
         :raises ValueError: The supplied timeout is not positive.
         """
         if timeout <= 0:
             raise ValueError(INVALID_REMOTE)
         self.timeout = timeout
         self.runner = runner
+        self.deadline = deadline
 
     @staticmethod
     def _environment(
@@ -121,9 +125,15 @@ class GitRemoteReader:
         """  # noqa: DOC503 - Shared readers and transport propagate the documented failures.
         result = self.runner(
             [GIT_EXECUTABLE, *LS_REMOTE_ARGUMENTS, url],
-            timeout=self.timeout,
+            timeout=(
+                min(self.timeout, self.deadline.remaining())
+                if self.deadline is not None
+                else self.timeout
+            ),
             env=self._environment(url, username, token),
         )
         if result.returncode:
             raise APIError(error_class(result))
+        if self.deadline is not None:
+            self.deadline.remaining()
         return RefSnapshot.parse(result.stdout)

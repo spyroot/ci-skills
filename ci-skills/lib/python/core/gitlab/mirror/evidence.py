@@ -19,6 +19,7 @@ from lib.python.core.schema import validate_specification
 
 RESULT_SCHEMA: Final = "results/gitlab-mirror.schema.json"
 REFS_UNVERIFIED: Final = "mirror_refs_unverified"
+REPLACEMENT_UNVERIFIED: Final = "mirror_replacement_unverified"
 
 
 def check_ref_evidence(record: JSONObject) -> bool:
@@ -43,6 +44,24 @@ def check_ref_evidence(record: JSONObject) -> bool:
     )
 
 
+def check_replacement_evidence(record: JSONObject) -> bool:
+    """Require actual new configuration identity when a receipt claims replacement.
+
+    :param record: One schema-validated verified mirror result.
+    :returns: Whether selected old/new identities and creation ownership agree.
+    :raises TypeError: Required mirror or ownership evidence has an invalid shape.
+    """  # noqa: DOC502 - Shared JSON readers enforce the documented shapes.
+    old_id = record.get(Field.REPLACED_MIRROR_ID)
+    if record.get(Field.REPLACEMENT_REQUIRED) is not True:
+        return old_id is None
+    mirror = json_object(record.get(Field.MIRROR))
+    created = json_object(record.get(Field.CREATED))
+    return (
+        json_integer(old_id) != json_integer(mirror.get(Field.ID))
+        and created.get(Field.MIRROR) is True
+    )
+
+
 def check_mirror_receipt(receipt: JSONObject) -> Sequence[str]:
     """Apply the installed result schema and nonexpressible ref-count invariants.
 
@@ -54,8 +73,9 @@ def check_mirror_receipt(receipt: JSONObject) -> Sequence[str]:
     """  # noqa: DOC502 - Shared readers and transport propagate the documented failures.
     validate_specification(receipt, RESULT_SCHEMA)
     records = json_objects(receipt.get(Field.RECORDS))
-    return (
-        ()
-        if all(check_ref_evidence(record) for record in records)
-        else (REFS_UNVERIFIED,)
-    )
+    failures: list[str] = []
+    if not all(check_ref_evidence(record) for record in records):
+        failures.append(REFS_UNVERIFIED)
+    if not all(check_replacement_evidence(record) for record in records):
+        failures.append(REPLACEMENT_UNVERIFIED)
+    return failures

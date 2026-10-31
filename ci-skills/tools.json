@@ -709,7 +709,7 @@
         "github"
       ],
       "returns": "Plan or verified mirror state, repository identities, ref digests and redacted blockers.",
-      "side_effects": "Confirmed sync configures one native push mirror and requests synchronization. Only --create-if-absent permits creating the private GitHub destination. GitLab retains the selected GitHub credential for future pushes. Divergent refs are preserved and reported as failure; native mirror deletion behavior applies.",
+      "side_effects": "Confirmed sync configures one native push mirror and requests synchronization. Only --create-if-absent permits creating the private GitHub destination. GitLab retains the selected GitHub credential for future pushes. Divergent refs are preserved and reported as failure; native mirror deletion behavior applies. Confirmed credential recovery deletes and recreates only the selected failed mirror configuration; its ID changes and interrupted replacement can leave that mirror absent. Repository contents and unrelated mirrors are preserved.",
       "subcommands": {
         "sync": {
           "purpose": "Reconcile one native push mirror and verify source and destination refs.",
@@ -1706,6 +1706,7 @@
     "create or delete a GitHub runner": "create_selfhosted_runner.py",
     "deploy or remove a GitLab runner manager": "gitlab_runner_manager.py",
     "host Ceph or RBD kernel messages through an existing Pod": "ceph_kernel.py",
+    "mirror GitLab to GitHub": "gitlab_mirror.py",
     "open a GitLab bug": "gitlab_issue.py",
     "physical uplink MTU consistency across nodes": "k8s_verify_mtu_consistency.py",
     "plan an exact-commit binary BuildConfig": "bin/ci-binary-build",

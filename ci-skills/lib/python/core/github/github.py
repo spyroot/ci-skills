@@ -20,7 +20,7 @@ from lib.python.core.abstract.callback import Callback
 from lib.python.core.abstract.skill_action import ActionT_co
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
 from lib.python.core.catalog import github_variables
-from lib.python.core.cli_api import APIError, CLIAPIClient, ReadSession
+from lib.python.core.cli_api import APIError, CLIAPIClient, ReadSession, RequestDeadline
 from lib.python.core.delivery_state import DeliveryState, ProviderAuthAction
 from lib.python.core.github.session import (
     GitHubIdentitySession,
@@ -255,13 +255,20 @@ class GitHubCallback(Callback[DeliveryState, ActionT_co]):
 class GitHubAuth(GitHubCallback[ProviderAuthAction]):
     """Verify runtime identity and repository before dependent runner actions."""
 
-    def __init__(self, target: Target, timeout: int):
+    def __init__(
+        self,
+        target: Target,
+        timeout: int,
+        *,
+        deadline: Optional[RequestDeadline] = None,
+    ):
         """Construct the required target and request-bound inputs.
 
         :param target: Existing runtime target resolver result.
         :param timeout: Positive per-request time bound in seconds.
+        :param deadline: Optional shared operation budget; existing callers remain unbounded across requests.
         """
-        super().__init__(ProviderAuthAction(target, timeout))
+        super().__init__(ProviderAuthAction(target, timeout, deadline))
 
     def _environment(
         self, target: Target, reference: str
@@ -280,7 +287,11 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
             result = run_command_bounded(
                 ["gh", "auth", "token", "--hostname", github.host],
                 env=environment,
-                timeout=self.action.timeout,
+                timeout=(
+                    min(self.action.timeout, self.action.deadline.remaining())
+                    if self.action.deadline
+                    else self.action.timeout
+                ),
             )
             token = result.stdout.strip()
             if result.returncode or not token or any(char.isspace() for char in token):
@@ -296,7 +307,11 @@ class GitHubAuth(GitHubCallback[ProviderAuthAction]):
         :raises OSError: The shared native request cannot execute.
         """
         session = self.state.github_session
-        api = GitHubAPIClient(timeout=self.action.timeout)
+        api = (
+            GitHubAPIClient(timeout=self.action.timeout, deadline=self.action.deadline)
+            if self.action.deadline is not None
+            else GitHubAPIClient(timeout=self.action.timeout)
+        )
         user = api._request(session, HTTPMethod.GET, IDENTITY_ENDPOINT)
         identity = user.get(IDENTITY_LOGIN) if isinstance(user, Mapping) else None
         if not isinstance(identity, str) or not identity.strip():

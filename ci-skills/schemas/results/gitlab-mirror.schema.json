@@ -103,6 +103,9 @@
     "safe_next_step": {
       "type": "string",
       "minLength": 1
+    },
+    "report_files": {
+      "$ref": "gitlab-runner-tag.schema.json#/$defs/report_files"
     }
   },
   "allOf": [
@@ -445,7 +448,9 @@
         "source_refs",
         "destination_refs",
         "created",
-        "verified_source_ref_count"
+        "verified_source_ref_count",
+        "replacement_required",
+        "replaced_mirror_id"
       ],
       "properties": {
         "callback": {
@@ -503,6 +508,16 @@
         "verified_source_ref_count": {
           "type": "integer",
           "minimum": 0
+        },
+        "replacement_required": {
+          "type": "boolean"
+        },
+        "replaced_mirror_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
         }
       }
     },

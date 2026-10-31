@@ -24,9 +24,12 @@ from lib.python.core.git.mirroring import (
 )
 from lib.python.core.git.refs import RefSnapshot
 from lib.python.core.git.remote import GitRemoteReader
-from lib.python.core.gitlab.gitlab_api import create_guard
+from lib.python.core.gitlab.gitlab_api import CreateGuard, create_guard
 from lib.python.core.gitlab.gitlab_session import GitLabService
+from lib.python.core.gitlab.mirror.constants import PASSWORD_AUTH, Failure
+from lib.python.core.gitlab.mirror.reconciliation import requires_replacement
 from lib.python.core.json_types import (
+    JSONObject,
     json_integer,
     json_object,
     json_objects,
@@ -38,17 +41,18 @@ PROJECT_ENDPOINT: Final = "projects/{project}"
 MIRRORS_ENDPOINT: Final = "projects/{project}/remote_mirrors"
 MIRROR_ENDPOINT: Final = "projects/{project}/remote_mirrors/{mirror}"
 SYNC_ENDPOINT: Final = "projects/{project}/remote_mirrors/{mirror}/sync"
-PASSWORD_AUTH: Final = "password"
 GITLAB_GIT_USERNAME: Final = "oauth2"
 HTTPS_SCHEME: Final = "https"
 MIRROR_SCHEMES: Final = frozenset((HTTPS_SCHEME, "http", "ssh", "git"))
 PROJECT_SCOPE: Final = "project"
 MIRROR_RESOURCE: Final = "remote_mirror"
-PLAN_CHANGED: Final = "mirror_plan_mismatch"
+SYNC_METHOD: Final = "POST"
 INVALID_REPOSITORY: Final = "gitlab_source_repository_invalid"
 INVALID_MIRROR: Final = "gitlab_mirror_response_invalid"
 INVALID_COLLECTION: Final = "gitlab_mirror_collection_invalid"
 CONFIGURATION_UNVERIFIED: Final = "gitlab_mirror_configuration_unverified"
+DELETION_UNVERIFIED: Final = "gitlab_mirror_deletion_unverified"
+MIRROR_NOT_FOUND: Final = "provider_404"
 CREDENTIAL_UNAVAILABLE: Final = "gitlab_mirror_source_credential_unavailable"
 SINGLE_VALUE: Final = 1
 
@@ -218,74 +222,18 @@ class GitLabPushMirrorService(PushMirrorSource):
             raise APIError(INVALID_MIRROR)
         return observed
 
-    def configure(
-        self,
-        destination: GitRepository,
-        policy: MirrorPolicy,
-        username: str,
-        token: str,
-        observed: Optional[PushMirror],
+    def _read_configuration(
+        self, destination: GitRepository, policy: MirrorPolicy, identity: int
     ) -> PushMirror:
-        """Create or reconcile one confirmed mirror using private body transport.
+        """Independently verify the identity and policy of one configured mirror.
 
-        :param destination: Independently verified destination clone URL.
+        :param destination: Confirmed destination clone route without credentials.
         :param policy: Confirmed native ref-handling policy.
-        :param username: Authenticated destination login.
-        :param token: Selected destination credential; never a reportable value.
-        :param observed: Discovered matching mirror, absent only for creation.
-        :returns: Configuration independently read back after the write.
-        :raises APIError: Provider write, returned identity or read-back mismatches.
-        :raises OSError: Provider transport or temporary private-body cleanup fails.
-        """  # noqa: DOC503 - Shared readers and transport propagate the documented failures.
-        parsed = urlsplit(destination.clone_url)
-        secret_url = urlunsplit(
-            (
-                parsed.scheme,
-                f"{quote(username, safe='')}:{quote(token, safe='')}@{parsed.netloc}",
-                parsed.path,
-                "",
-                "",
-            )
-        )
-        body = {
-            MirrorField.URL: secret_url,
-            MirrorField.AUTH_METHOD: PASSWORD_AUTH,
-            MirrorField.ENABLED: True,
-            **policy.evidence(),
-        }
-        if observed is None:
-            with create_guard(
-                self.service.session.host,
-                PROJECT_SCOPE,
-                self.service.target_id,
-                MIRROR_RESOURCE,
-                destination.clone_url,
-            ) as guard:
-                matching = tuple(
-                    item
-                    for item in self.mirrors()
-                    if item.url.casefold() == destination.clone_url.casefold()
-                )
-                if matching:
-                    guard.clear()
-                    raise APIError(PLAN_CHANGED)
-                guard.reconcile_absent()
-                guard.mark_pending()
-                payload = self.service.api.post_json(
-                    self.service.session,
-                    MIRRORS_ENDPOINT.format(project=self.service.target_id),
-                    body,
-                )
-                identity = json_integer(json_object(payload).get(MirrorField.ID))
-                current = self.mirror(identity)
-                guard.clear()
-        else:
-            identity = observed.id
-            self.service.api.put_json(
-                self.service.session,
-                MIRROR_ENDPOINT.format(project=self.service.target_id, mirror=identity),
-                body,
-            )
+        :param identity: Positive mirror ID returned by creation or selected for update.
+        :returns: Exact mirror after native configuration read-back succeeds.
+        :raises APIError: Native read fails or configuration differs from confirmed intent.
+        :raises OSError: Native provider execution fails.
+        """  # noqa: DOC503 - Shared mirror reads propagate documented transport failures.
         current = self.mirror(identity)
         if (
             current.url.casefold() != destination.clone_url.casefold()
@@ -296,6 +244,152 @@ class GitLabPushMirrorService(PushMirrorSource):
             raise APIError(CONFIGURATION_UNVERIFIED)
         return current
 
+    @staticmethod
+    def _creation_body(
+        destination: GitRepository, policy: MirrorPolicy, username: str, token: str
+    ) -> JSONObject:
+        """Build private native creation inputs for one confirmed destination.
+
+        :param destination: Verified HTTPS clone route without credential material.
+        :param policy: Confirmed native ref-handling policy.
+        :param username: Authenticated destination account login.
+        :param token: Private selected credential, never reportable.
+        :returns: Native POST fields sent only through private request-body transport.
+        """
+        parsed = urlsplit(destination.clone_url)
+        secret_url = urlunsplit(
+            (
+                parsed.scheme,
+                f"{quote(username, safe='')}:{quote(token, safe='')}@{parsed.netloc}",
+                parsed.path,
+                "",
+                "",
+            )
+        )
+        return {
+            MirrorField.URL: secret_url,
+            MirrorField.AUTH_METHOD: PASSWORD_AUTH,
+            MirrorField.ENABLED: True,
+            **policy.evidence(),
+        }
+
+    def _create_configuration(
+        self,
+        destination: GitRepository,
+        policy: MirrorPolicy,
+        username: str,
+        token: str,
+    ) -> PushMirror:
+        """Create and verify the same native configuration for new and replacement mirrors.
+
+        :param destination: Explicitly confirmed destination repository.
+        :param policy: Confirmed native ref-handling policy.
+        :param username: Authenticated destination login.
+        :param token: Private pinned destination credential.
+        :returns: Newly created mirror after independent configuration read-back.
+        :raises APIError: Native creation or read-back fails.
+        :raises OSError: Private-body transport or native execution fails.
+        :raises TypeError: Native creation returns an invalid mirror identifier.
+        """  # noqa: DOC502 - Shared transport, identity readers and read-back retain their failures.
+        payload = self.service.api.post_json(
+            self.service.session,
+            MIRRORS_ENDPOINT.format(project=self.service.target_id),
+            self._creation_body(destination, policy, username, token),
+        )
+        identity = json_integer(json_object(payload).get(MirrorField.ID))
+        return self._read_configuration(destination, policy, identity)
+
+    def _delete_failed(
+        self, destination: GitRepository, observed: PushMirror, guard: CreateGuard
+    ) -> None:
+        """Delete only the confirmed failed configuration and prove exact-ID absence.
+
+        :param destination: Confirmed selected destination clone URL.
+        :param observed: Exact failed mirror bound into the accepted live plan.
+        :param guard: Selected-URL guard retained until replacement read-back;
+            an uncertain prior write is reconciled by read-back and requires replanning.
+        :returns: None after the selected mirror independently returns native not-found.
+        :raises APIError: ID, URL or native failure state changed, deletion fails,
+            or independent read-back cannot prove absence.
+        :raises OSError: Guard persistence or native provider execution fails.
+        """  # noqa: DOC503 - Shared guard and mirror transport preserve documented failures.
+        current = self.mirror(observed.id)
+        if (
+            current.id != observed.id
+            or current.url.casefold() != observed.url.casefold()
+            or current.url.casefold() != destination.clone_url.casefold()
+            or not requires_replacement(current)
+        ):
+            raise APIError(Failure.STALE_PLAN)
+        if guard.pending:
+            guard.clear()
+            raise APIError(Failure.STALE_PLAN)
+        guard.mark_pending()
+        endpoint = MIRROR_ENDPOINT.format(
+            project=self.service.target_id, mirror=observed.id
+        )
+        self.service.api.delete_json(self.service.session, endpoint)
+        try:
+            self.mirror(observed.id)
+        except APIError as exc:
+            if exc.reason == MIRROR_NOT_FOUND:
+                return
+            raise
+        raise APIError(DELETION_UNVERIFIED)
+
+    def configure(
+        self,
+        destination: GitRepository,
+        policy: MirrorPolicy,
+        username: str,
+        token: str,
+        observed: Optional[PushMirror],
+    ) -> PushMirror:
+        """Create, update policy or replace the exact confirmed failed mirror.
+
+        :param destination: Independently verified destination clone URL.
+        :param policy: Confirmed native ref-handling policy.
+        :param username: Authenticated destination login.
+        :param token: Selected destination credential; never a reportable value.
+        :param observed: Discovered matching mirror, absent only for creation;
+            replacement requires its re-observed native FAILED state.
+        :returns: Configuration independently read back after the write.
+        :raises APIError: Provider write, returned identity or read-back mismatches.
+        :raises OSError: Provider transport or temporary private-body cleanup fails.
+        """  # noqa: DOC503 - Shared readers and transport propagate the documented failures.
+        if observed is not None and not requires_replacement(observed):
+            self.service.api.put_json(
+                self.service.session,
+                MIRROR_ENDPOINT.format(
+                    project=self.service.target_id, mirror=observed.id
+                ),
+                {MirrorField.ENABLED: True, **policy.evidence()},
+            )
+            return self._read_configuration(destination, policy, observed.id)
+        with create_guard(
+            self.service.session.host,
+            PROJECT_SCOPE,
+            self.service.target_id,
+            MIRROR_RESOURCE,
+            destination.clone_url,
+        ) as guard:
+            if observed is None:
+                matching = tuple(
+                    item
+                    for item in self.mirrors()
+                    if item.url.casefold() == destination.clone_url.casefold()
+                )
+                if matching:
+                    guard.clear()
+                    raise APIError(Failure.STALE_PLAN)
+                guard.reconcile_absent()
+                guard.mark_pending()
+            else:
+                self._delete_failed(destination, observed, guard)
+            current = self._create_configuration(destination, policy, username, token)
+            guard.clear()
+            return current
+
     def sync(self, mirror_id: int) -> None:
         """Request a native update without reporting success before ref read-back.
 
@@ -304,8 +398,8 @@ class GitLabPushMirrorService(PushMirrorSource):
         :raises APIError: Native update request fails or its outcome is uncertain.
         :raises OSError: Native transport execution fails.
         """  # noqa: DOC502 - Shared readers and transport propagate the documented failures.
-        self.service.api.post_json(
+        self.service.api.request_no_content(
             self.service.session,
+            SYNC_METHOD,
             SYNC_ENDPOINT.format(project=self.service.target_id, mirror=mirror_id),
-            {},
         )
