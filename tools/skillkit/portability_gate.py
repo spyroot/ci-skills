@@ -96,6 +96,12 @@ SHELL_EXPANSION: Final = re.compile(
     r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::?([-+?=])(.*?))?\}"
     r"|\$([A-Za-z_][A-Za-z0-9_]*|[0-9@*?#])|\$\([^)]*\)"
 )
+TARGET_HEADER: Final = re.compile(
+    r"^\s*\[(?:"
+    + "|".join(re.escape(authority) for authority in TARGET_CONTRACT.authorities)
+    + r")(?:[.\]])",
+    re.MULTILINE,
+)
 
 
 @dataclass(frozen=True)
@@ -606,15 +612,7 @@ class _PythonScanner(ast.NodeVisitor):
             content = self.value(node.args[0])
             targets = []
             for text in content.texts:
-                if re.search(
-                    r"^\s*\[(?:gitlab|github|kubernetes|harbor)(?:[.\]])",
-                    text,
-                    re.MULTILINE,
-                ):
-                    try:
-                        targets.extend(_target_selections(tomllib.loads(text)))
-                    except tomllib.TOMLDecodeError:
-                        targets.append(_Selection("source", _Value()))
+                targets.extend(_target_document_selections(text))
             if targets:
                 variable = node.func.value.id
                 self.values[variable] = replace(
@@ -692,6 +690,20 @@ def _shell_file_key(token: str) -> str:
     return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", r"$\1", token.strip("'\""))
 
 
+def _target_document_selections(text: str) -> tuple[_Selection, ...]:
+    """Read generated target fields through the shared target contract.
+
+    :param text: Literal document content; no runtime expressions are executed.
+    :returns: Target selections, or a deferred failure for malformed target TOML.
+    """
+    if not TARGET_HEADER.search(text):
+        return ()
+    try:
+        return _target_selections(tomllib.loads(text))
+    except tomllib.TOMLDecodeError:
+        return (_Selection("source", _Value()),)
+
+
 def _shell_target_document(
     text: str, values: Mapping[str, _Value], *, expand: bool
 ) -> tuple[_Selection, ...]:
@@ -702,15 +714,8 @@ def _shell_target_document(
     :param expand: Whether the heredoc delimiter permits shell expansion.
     :returns: Target selections, or a deferred parse failure for a target document.
     """
-    if not re.search(
-        r"^\s*\[(?:gitlab|github|kubernetes|harbor)(?:[.\]])", text, re.MULTILINE
-    ):
-        return ()
-    try:
-        selections = _target_selections(tomllib.loads(text))
-    except tomllib.TOMLDecodeError:
-        return (_Selection("source", _Value()),)
-    if not expand:
+    selections = _target_document_selections(text)
+    if not expand or any(item.selector == "source" for item in selections):
         return selections
     return tuple(
         replace(selection, value=_shell_value(value, values))
