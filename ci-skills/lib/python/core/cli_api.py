@@ -24,7 +24,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import NoReturn, Optional, Protocol
+from typing import Final, NoReturn, Optional, ParamSpec, Protocol, TypeVar
 from urllib.parse import urlsplit
 
 from lib.python.core.json_types import (
@@ -45,6 +45,11 @@ MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 READ_ATTEMPTS = 3
 MAX_RETRY_AFTER_SECONDS = 30
 REQUEST_DEADLINE_EXCEEDED = "request_deadline_exceeded"
+HTTP_NO_CONTENT: Final = 204
+EMPTY_RESPONSE_BODY: Final = ""
+INVALID_NO_CONTENT_RESPONSE: Final = "invalid_no_content_response"
+OperationP = ParamSpec("OperationP")
+OperationResultT = TypeVar("OperationResultT")
 _RETRYABLE = frozenset(
     {"timeout", "transport", "rate_limited", "provider_408", "provider_5xx"}
 )
@@ -139,7 +144,7 @@ class APIError(RuntimeError):
 
 @dataclass(frozen=True)
 class RequestDeadline:
-    """Share an absolute read deadline without mutating a transport client.
+    """Share one absolute operation deadline across related provider calls.
 
     :param expires_at: Expiration in the supplied clock's monotonic time domain.
     :param monotonic: Clock used by every concurrent request sharing this deadline.
@@ -168,6 +173,26 @@ class RequestDeadline:
         if remaining <= 0:
             raise APIError(REQUEST_DEADLINE_EXCEEDED)
         return remaining
+
+    def call(
+        self,
+        operation: Callable[OperationP, OperationResultT],
+        *args: OperationP.args,
+        **kwargs: OperationP.kwargs,
+    ) -> OperationResultT:
+        """Check the shared budget before and after a typed operation.
+
+        :param operation: Bound operation whose result and argument types are preserved.
+        :param *args: Positional inputs forwarded unchanged to the operation.
+        :param **kwargs: Keyword inputs forwarded unchanged to the operation.
+        :returns: The operation result when both budget checks succeed.
+        :raises APIError: The budget is exhausted before execution or after its result.
+        :raises Exception: The selected operation fails; its original exception propagates.
+        """  # noqa: DOC502, DOC503 - Budget checks and the supplied operation propagate documented failures.
+        self.remaining()
+        result = operation(*args, **kwargs)
+        self.remaining()
+        return result
 
 
 def _reject_constant(_value: str) -> NoReturn:
@@ -439,6 +464,7 @@ class CLIAPIClient:
         sleep: Callable[[float], None] = time.sleep,
         max_response_bytes: int = MAX_RESPONSE_BYTES,
         max_retry_after: int = MAX_RETRY_AFTER_SECONDS,
+        deadline: Optional[RequestDeadline] = None,
     ):
         """Bind the provider transport to a command runner and timeout.
 
@@ -447,6 +473,7 @@ class CLIAPIClient:
         :param sleep: Delay function used for bounded retries.
         :param max_response_bytes: Maximum response size retained for a request.
         :param max_retry_after: Maximum accepted Retry-After delay in seconds.
+        :param deadline: Shared operation bound for every request unless explicitly overridden.
         :raises ValueError: If a timeout or response bound is invalid.
         """
         if timeout <= 0 or max_response_bytes <= 0 or max_retry_after < 0:
@@ -456,6 +483,7 @@ class CLIAPIClient:
         self.timeout = timeout
         self.max_response_bytes = max_response_bytes
         self.max_retry_after = max_retry_after
+        self.deadline = deadline
 
     def get_text(
         self, session: APISession, endpoint: str, *, paginate: bool = False
@@ -573,6 +601,33 @@ class CLIAPIClient:
         """  # noqa: DOC502 - Shared transport and request helpers propagate failures.
         return self._request(session, "DELETE", endpoint)
 
+    def request_no_content(
+        self,
+        session: APISession,
+        method: str,
+        endpoint: str,
+        body: Optional[JSONObject] = None,
+        *,
+        deadline: Optional[RequestDeadline] = None,
+    ) -> None:
+        """Require an exact native HTTP 204 response with an empty body.
+
+        :param session: Exact-host provider session with private credential overrides.
+        :param method: HTTP operation required by the provider's no-content contract.
+        :param endpoint: Validated provider-relative API route.
+        :param body: Private JSON request fields, absent for a body-free request.
+        :param deadline: Request-specific shared bound, otherwise the client-bound deadline.
+        :returns: None after the provider confirms HTTP 204 with no response body.
+        :raises APIError: Transport fails, the deadline expires, or status/body differ.
+        :raises OSError: Native execution or temporary private request-body I/O fails.
+        """  # noqa: DOC503 - Shared transport preserves classified provider and I/O failures.
+        response = self._exchange(session, method, endpoint, body, deadline=deadline)
+        if (
+            _status_code(response.headers) != HTTP_NO_CONTENT
+            or response.text != EMPTY_RESPONSE_BODY
+        ):
+            raise APIError(INVALID_NO_CONTENT_RESPONSE)
+
     def _request(
         self,
         session: APISession,
@@ -616,11 +671,14 @@ class CLIAPIClient:
         :param body: Request fields; ``None`` omits the input file.
         :param raw: Whether to retain stdout verbatim without included headers.
         :param paginate: Whether the native client should collect all pages.
-        :param deadline: Optional absolute deadline shared by related reads.
+        :param deadline: Explicit absolute deadline, otherwise the client-bound deadline.
         :returns: Successful response headers and text within the configured byte bound.
         :raises APIError: If the endpoint, body, transport, or response size is invalid.
         :raises OSError: If private-body file I/O or the native command runner fails.
         """  # noqa: DOC502 - Shared transport and request helpers propagate failures.
+        deadline = deadline if deadline is not None else self.deadline
+        if deadline is not None:
+            deadline.remaining()
         selected = validate_endpoint(endpoint)
         argv = self.argv(session.host, method, selected)
         if raw:
@@ -629,9 +687,12 @@ class CLIAPIClient:
             argv.extend(self.pagination_arguments())
         with self._body_arguments(body) as arguments:
             argv.extend(arguments)
-            return self._read_response(
+            response = self._read_response(
                 session, method, selected, argv, raw=raw, deadline=deadline
             )
+        if deadline is not None:
+            deadline.remaining()
+        return response
 
     @staticmethod
     @contextmanager

@@ -3,7 +3,9 @@
   "schemaVersion": "1.0",
   "maxReceiptAgeDays": 30,
   "requiredOperations": [
-    {"kind": "access_check", "operation": null, "action": null}
+    {"kind": "access_check", "operation": null, "action": null},
+    {"kind": "gitlab_mirror", "operation": "sync", "action": "APPLIED"},
+    {"kind": "gitlab_mirror", "operation": "sync", "action": "NO_OP"}
   ],
   "receiptDirectories": [
     "tests/acceptance/receipts",

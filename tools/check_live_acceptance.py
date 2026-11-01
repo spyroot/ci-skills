@@ -34,6 +34,7 @@ import tarfile
 from collections.abc import Callable, Mapping, MutableMapping, MutableSequence, Sequence
 from datetime import UTC, datetime
 from functools import lru_cache
+from http import HTTPStatus
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -46,6 +47,12 @@ SKILL_ROOT: Final = Path(__file__).resolve().parents[1] / "ci-skills"
 runpy.run_path(str(SKILL_ROOT / "bin" / "_bootstrap.py"))
 
 from lib.python.core.cli_api import response_decoder
+from lib.python.core.gitlab.mirror.constants import KIND as MIRROR_KIND
+from lib.python.core.gitlab.mirror.constants import OPERATION as MIRROR_OPERATION
+from lib.python.core.gitlab.mirror.evidence import (
+    check_mirror_pair,
+    check_mirror_receipt,
+)
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -62,6 +69,8 @@ from lib.python.core.kubernetes.podman_evidence import (
 from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.schema import SpecificationError, validate_specification
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, exit_code
+
+MIRROR_SMOKE_CLEANUP_KIND: Final = "gitlab_mirror_smoke_cleanup"
 
 OperationKey: TypeAlias = tuple[str, Optional[str], Optional[str]]
 ReceiptPairKey: TypeAlias = tuple[str, str, str, str, str, int, str]
@@ -212,9 +221,13 @@ IMAGE_BUILD_READINESS_KEY: Final[OperationKey] = (
     "probe",
     None,
 )
+MIRROR_OPERATIONS: Final[frozenset[OperationKey]] = frozenset(
+    (MIRROR_KIND, MIRROR_OPERATION, action) for action in ("APPLIED", "NO_OP")
+)
 REQUIRED_CAPABILITY_OPERATIONS: Final = frozenset(
     {
         IMAGE_BUILD_READINESS_KEY,
+        *MIRROR_OPERATIONS,
         ("image_build_readiness", "chain", None),
         ("gitlab_repository", "commit", "APPLIED"),
         ("gitlab_merge_request", "create", "APPLIED"),
@@ -227,6 +240,33 @@ SUPPORTED_REQUIRED_OPERATIONS: Final[frozenset[OperationKey]] = (
     | {(RECEIPT_KIND, None, None)}
 )
 IMAGE_BUILD_READINESS_SCHEMA: Final = "results/image-build-readiness.schema.json"
+
+
+def _operation_key(receipt: JSONObject) -> Optional[OperationKey]:
+    """Normalize the existing envelope and mirror record action conventions.
+
+    :param receipt: Selected receipt whose shape will be independently validated.
+    :returns: Comparable operation key, or None for malformed key fields.
+    """
+    kind = receipt.get("kind")
+    operation = receipt.get("operation")
+    action = receipt.get("result_action")
+    if kind == MIRROR_KIND:
+        records = receipt.get("records")
+        if (
+            not isinstance(records, list)
+            or len(records) != 1
+            or not isinstance(records[0], dict)
+        ):
+            return None
+        action = records[0].get("action")
+    if (
+        not isinstance(kind, str)
+        or not (operation is None or isinstance(operation, str))
+        or not (action is None or isinstance(action, str))
+    ):
+        return None
+    return kind, operation, action
 
 
 class AcceptanceError(RuntimeError):
@@ -1107,6 +1147,89 @@ def _runner_delete_readback_verified(receipt: JSONObject, required: JSONObject) 
     )
 
 
+def _smoke_cleanup_matches_execution(
+    receipt: JSONObject,
+    cleanup: JSONObject,
+    now: datetime,
+    max_age_days: int,
+) -> bool:
+    """Bind independent smoke cleanup to its execution identity and time window.
+
+    :param receipt: Original execution whose objects the smoke caller removes.
+    :param cleanup: Independently observed cleanup supplement.
+    :param now: Reference time for future-date and age checks.
+    :param max_age_days: Existing maximum accepted receipt age.
+    :returns: Whether cleanup belongs to this execution and follows it within the window.
+    :raises TypeError: Datetime comparisons reject mixed timezone awareness.
+    """
+    captured = _parse_time(cleanup.get("captured_at"))
+    executed = _parse_time(receipt.get("captured_at"))
+    revision = _mapping(_mapping(receipt.get("skill")).get("revision"))
+    return (
+        cleanup.get("status") == PASS
+        and cleanup.get("execution_host") == receipt.get("execution_host")
+        and cleanup.get("skill_digest") == _mapping(receipt.get("skill")).get("digest")
+        and revision.get("verified") is True
+        and isinstance(revision.get("value"), str)
+        and bool(revision["value"])
+        and cleanup.get("tested_revision") == revision["value"]
+        and captured is not None
+        and executed is not None
+        and executed <= captured <= now
+        and (now - captured).days <= max_age_days
+    )
+
+
+def _mirror_smoke_cleanup_verified(
+    applied: JSONObject,
+    noop: JSONObject,
+    now: datetime,
+    max_age_days: int,
+) -> bool:
+    """Require exact run-owned mirror and destination removal with repeat absence.
+
+    :param applied: Original creation receipt retaining its before-state and ownership.
+    :param noop: Subsequent execution with the caller's independent cleanup supplement.
+    :param now: Reference time for cleanup freshness checks.
+    :param max_age_days: Existing maximum accepted receipt age.
+    :returns: Whether only the created objects were removed and the source was retained.
+    :raises TypeError: Datetime comparisons reject mixed timezone awareness.
+    """
+    cleanup = _mapping(noop.get("smoke_cleanup"))
+    records = applied.get("records")
+    if not isinstance(records, list) or len(records) != 1:
+        return False
+    record = _mapping(records[0])
+    created = _mapping(record.get("created"))
+    before = _mapping(cleanup.get("before"))
+    deletion = _mapping(cleanup.get("delete"))
+    if (
+        cleanup.get("kind") != MIRROR_SMOKE_CLEANUP_KIND
+        or not _smoke_cleanup_matches_execution(noop, cleanup, now, max_age_days)
+        or created.get("repository") is not True
+        or created.get("mirror") is not True
+        or _mapping(record.get("before")).get("mirror") is not None
+        or record.get("replacement_required") is not False
+        or before.get("source") != record.get("source")
+        or before.get("destination") != record.get("destination")
+        or before.get("mirror_id") != _mapping(record.get("mirror")).get("id")
+        or deletion.get("mirror_http_status") != HTTPStatus.NO_CONTENT
+        or deletion.get("destination_http_status") != HTTPStatus.NO_CONTENT
+        or _mapping(cleanup.get("repeat")).get("mutated") is not False
+    ):
+        return False
+    return all(
+        observed.get("source") == record.get("source")
+        and observed.get("mirror_absent") is True
+        and observed.get("destination_http_status") == HTTPStatus.NOT_FOUND
+        and observed.get("destination_id_http_status") == HTTPStatus.NOT_FOUND
+        for observed in (
+            _mapping(cleanup.get("after")),
+            _mapping(cleanup.get("repeat")),
+        )
+    )
+
+
 def _runner_smoke_cleanup_verified(
     receipt: JSONObject,
     required: JSONObject,
@@ -1125,32 +1248,19 @@ def _runner_smoke_cleanup_verified(
     cleanup = receipt.get("smoke_cleanup")
     if not isinstance(cleanup, dict):
         return False
-    captured = _parse_time(cleanup.get("captured_at"))
-    created = _parse_time(receipt.get("captured_at"))
     runner_id = _mapping(receipt.get("readback")).get("id")
     before = cleanup.get("before")
     deletion = cleanup.get("delete")
     after = cleanup.get("after")
-    revision = _mapping(_mapping(receipt.get("skill")).get("revision"))
     if (
         cleanup.get("schema_version") != SCHEMA_VERSION
         or cleanup.get("kind") != "gitlab_runner_smoke_cleanup"
-        or cleanup.get("status") != "PASS"
-        or cleanup.get("execution_host") != receipt.get("execution_host")
+        or not _smoke_cleanup_matches_execution(receipt, cleanup, now, max_age_days)
         or cleanup.get("origin") != receipt.get("origin")
         or cleanup.get("credential_source") != receipt.get("credential_source")
-        or cleanup.get("skill_digest") != _mapping(receipt.get("skill")).get("digest")
-        or revision.get("verified") is not True
-        or not isinstance(revision.get("value"), str)
-        or not revision["value"]
-        or cleanup.get("tested_revision") != revision["value"]
         or type(runner_id) is not int
         or runner_id <= 0
         or cleanup.get("runner_id") != runner_id
-        or captured is None
-        or created is None
-        or not created <= captured <= now
-        or (now - captured).days > max_age_days
         or not isinstance(before, dict)
         or before.get("id") != runner_id
         or not isinstance(deletion, dict)
@@ -1316,19 +1426,13 @@ class AcceptanceReview:
                 if receipt != self.setup[name]:
                     self.problems.append(f"{name}:setup_receipt_mismatch")
                 continue
-            kind = receipt.get("kind")
-            operation = receipt.get("operation")
-            result_action = receipt.get("result_action")
-            if (
-                not isinstance(kind, str)
-                or not (operation is None or isinstance(operation, str))
-                or not (result_action is None or isinstance(result_action, str))
-            ):
+            operation_key = _operation_key(receipt)
+            if operation_key is None:
                 self.problems.append(f"{name}:receipt_not_declared")
                 continue
-            operation_key = (kind, operation, result_action)
+            kind, operation, result_action = operation_key
             if (
-                kind == "image_build_readiness"
+                kind in {"image_build_readiness", MIRROR_KIND}
                 and operation_key in REQUIRED_CAPABILITY_OPERATIONS
             ):
                 try:
@@ -1418,6 +1522,57 @@ class AcceptanceReview:
                     f"{applied_name}:{noop_name}:repeat_readback_mismatch"
                 )
 
+    def mirror_receipts(self) -> None:
+        """Require an ordered, compatible applied/no-op pair in either mode.
+
+        Only receipts that passed their individual validators can satisfy this
+        transition. Confirmation digests may differ as observed state changes.
+        """
+        selected = [
+            self.receipts[name]
+            for name in self.accepted
+            if name in self.receipts and self.receipts[name].get("kind") == MIRROR_KIND
+        ]
+        if not selected:
+            return
+        prefix = f"{MIRROR_KIND}:{MIRROR_OPERATION}:"
+        actions = {
+            action: [
+                receipt
+                for receipt in selected
+                if _operation_key(receipt) == (MIRROR_KIND, MIRROR_OPERATION, action)
+            ]
+            for action in ("APPLIED", "NO_OP")
+        }
+        if len(selected) != 2 or any(len(items) != 1 for items in actions.values()):
+            self.problems.append(prefix + "repeat_readback_missing")
+            return
+        applied, noop = actions["APPLIED"][0], actions["NO_OP"][0]
+        record = _mapping(applied["records"][0])
+        if _mapping(record.get("created")).get("repository") is not True:
+            self.problems.append(prefix + "create_if_absent_unproven")
+        if not _mirror_smoke_cleanup_verified(
+            applied, noop, self.now, self.max_age_days
+        ):
+            self.problems.append(prefix + "smoke_cleanup_unverified")
+        applied_time = _parse_time(applied.get("captured_at"))
+        noop_time = _parse_time(noop.get("captured_at"))
+        if applied_time is None or noop_time is None or applied_time >= noop_time:
+            self.problems.append(prefix + "repeat_readback_order_invalid")
+        try:
+            self.problems.extend(
+                prefix + reason for reason in check_mirror_pair(applied, noop)
+            )
+        except (
+            KeyError,
+            OSError,
+            SchemaError,
+            SpecificationError,
+            TypeError,
+            ValueError,
+        ):
+            self.problems.append(prefix + "mirror_pair_invalid_shape")
+
     def required_coverage(self, required_operations: Sequence[OperationKey]) -> None:
         """Require policy coverage from receipts that passed their full validators.
 
@@ -1431,15 +1586,9 @@ class AcceptanceReview:
         accepted_operations: set[OperationKey] = set()
         for name in self.accepted:
             receipt = self.receipts.get(name, self.setup.get(name, {}))
-            kind = receipt.get("kind")
-            operation = receipt.get("operation")
-            action = receipt.get("result_action")
-            if (
-                isinstance(kind, str)
-                and (operation is None or isinstance(operation, str))
-                and (action is None or isinstance(action, str))
-            ):
-                accepted_operations.add((kind, operation, action))
+            key = _operation_key(receipt)
+            if key is not None:
+                accepted_operations.add(key)
         for kind, operation, action in sorted(
             set(required_operations) - accepted_operations,
             key=lambda entry: tuple(str(value) for value in entry),
@@ -1674,6 +1823,10 @@ def _check_targeted_receipt(
             if cleanup.get("status") != PASS or cleanup.get("failures") != []:
                 problems.append(f"{name}:cleanup_unproven")
             problems.extend(_check_chain_runner_readback(name, receipt, review))
+        elif kind == MIRROR_KIND and operation == MIRROR_OPERATION:
+            problems.extend(
+                f"{name}:{problem}" for problem in check_mirror_receipt(receipt)
+            )
         elif kind == "ocp_node_onboard" and operation == "verify":
             validate_specification(receipt, "results/ocp-node-onboard.schema.json")
             problems.extend(_check_ocp_verify_readback(name, receipt))
@@ -1769,6 +1922,7 @@ def evaluate(
             review.problems.extend(problems)
             if not problems:
                 review.accepted.append(name)
+    review.mirror_receipts()
     if required_operations is not None:
         review.required_coverage(required_operations)
     result = review.result()

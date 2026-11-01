@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/gitlab-mirror.schema.json",
+  "title": "Normalized GitLab mirror intent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "project",
+    "destination",
+    "create_if_absent"
+  ],
+  "properties": {
+    "operation": {
+      "const": "sync"
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1
+    },
+    "destination": {
+      "type": "string",
+      "pattern": "^[^/\\s]+/[^/\\s]+$"
+    },
+    "create_if_absent": {
+      "type": "boolean"
+    }
+  }
+}

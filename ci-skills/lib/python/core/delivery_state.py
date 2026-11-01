@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import MutableMapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from lib.python.core.abstract.context import ExecutionContext
 from lib.python.core.abstract.skill_action import AuthAction
@@ -18,8 +18,9 @@ from lib.python.core.runner_scope import ScopeObservation
 
 if TYPE_CHECKING:
     from lib.python.access.harbor_credentials import RegistryCredential
-    from lib.python.core.cli_api import ReadSession
+    from lib.python.core.cli_api import ReadSession, RequestDeadline
     from lib.python.core.github.github import GitHubService
+    from lib.python.core.github.session import GitHubIdentitySession
     from lib.python.core.harbor.registry_mirror import HarborService
     from lib.python.core.kubernetes.kubernetes import KubernetesService
     from lib.python.core.runner import RunnerRuntime
@@ -33,6 +34,7 @@ class ProviderAuthAction(AuthAction):
 
     :param target: Runtime target already resolved by the calling workflow.
     :param timeout: Positive maximum seconds for each native provider request.
+    :param deadline: Optional shared absolute budget for the calling operation.
 
     AuthAction defines the inherited target field.
 
@@ -40,9 +42,15 @@ class ProviderAuthAction(AuthAction):
         :type: int
 
         Positive maximum seconds for each native provider request.
+
+    .. attribute :: deadline
+        :type: Optional[RequestDeadline]
+
+        Shared absolute operation budget when selected by the caller.
     """
 
     timeout: int
+    deadline: Optional[RequestDeadline] = field(default=None, kw_only=True)
 
 
 @dataclass
@@ -62,6 +70,7 @@ class DeliveryState(ExecutionContext):
     :ivar kubernetes: Verified Kubernetes service assigned by K8SAuth.
     :ivar harbor: Private registry service assigned by HarborAuth.
     :ivar github: Verified GitHub service assigned by GitHubAuth.
+    :ivar github_identity: Private identity session before repository creation.
     :ivar build_result: Image identity assigned by BuildToolbox.
     :ivar source_image: Immutable publication input assigned by plan or build.
     :ivar published_image: Verified image assigned by plan or HarborPush.
@@ -110,6 +119,11 @@ class DeliveryState(ExecutionContext):
 
         Verified GitHub service assigned by GitHubAuth.
 
+    .. attribute :: github_identity
+        :type: GitHubIdentitySession
+
+        Shared github identity retained for this invocation.
+
     .. attribute :: build_result
         :type: ToolboxBuildResult
 
@@ -149,6 +163,7 @@ class DeliveryState(ExecutionContext):
     kubernetes: KubernetesService = field(init=False, repr=False)
     harbor: HarborService = field(init=False, repr=False)
     github: GitHubService = field(init=False, repr=False)
+    github_identity: GitHubIdentitySession = field(init=False, repr=False)
     build_result: ToolboxBuildResult = field(init=False, repr=False)
     source_image: str = field(init=False, repr=False)
     published_image: str = field(init=False, repr=False)
