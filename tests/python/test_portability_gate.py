@@ -845,3 +845,35 @@ def test_python_branch_merges_preserve_command_argument_selectors(
         assert "host" in {finding.selector for finding in findings}
     else:
         assert findings == ()
+
+
+@pytest.mark.parametrize(
+    "declaration", ("export", "readonly", "local", "declare", "typeset")
+)
+@pytest.mark.parametrize("fixed_host", (False, True), ids=("runtime", "fixed-host"))
+def test_shell_declaration_assignments_preserve_selected_host_values(
+    portability: ModuleType, declaration: str, fixed_host: bool
+) -> None:
+    """Inspect scalar declaration assignments before native commands consume them.
+
+    :param portability: Shared scanner module under test.
+    :param declaration: Supported scalar shell declaration or export keyword.
+    :param fixed_host: Whether only the assigned runtime host becomes a fixed target.
+    :returns: None; assertions preserve runtime aliases and reject fixed host aliases.
+    """
+    command = SHELL_SOURCE.splitlines()[2]
+    assignment = f'{declaration} GITLAB_HOST="$RUNTIME_GITLAB_HOST"\n'
+    source = SHELL_SOURCE.replace(command, assignment + command, 1)
+    lines = source.splitlines()
+    source = "\n".join(
+        (lines[0], "smoke() {", *("  " + line for line in lines[1:]), "}", "smoke", "")
+    )
+    if fixed_host:
+        source = source.replace('"$RUNTIME_GITLAB_HOST"', '"gitlab.delivery.corp"', 1)
+
+    findings = portability.scan_source("tests/smoke_declarations.sh", source)
+
+    if fixed_host:
+        assert "host" in {finding.selector for finding in findings}
+    else:
+        assert findings == ()

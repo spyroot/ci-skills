@@ -38,6 +38,14 @@ NATIVE_COMMANDS: Final = frozenset(
 COMMAND_WRAPPERS: Final = frozenset(
     {"run", "env", "sudo", "timeout", "conda", "python", "python3", "bash", "sh"}
 )
+SHELL_DECLARATIONS: Final = {
+    "export": frozenset("n"),
+    "readonly": frozenset(),
+    "local": frozenset("rx"),
+    "declare": frozenset("grx"),
+    "typeset": frozenset("grx"),
+}
+SHELL_BINDING: Final = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:=(.*))?", re.DOTALL)
 PROCESS_CALLS: Final = frozenset(
     {
         "run",
@@ -873,6 +881,37 @@ def _shell_target_document(
     )
 
 
+def _declaration_assignments(tokens: Sequence[str]) -> list[str]:
+    """Normalize supported scalar declarations into ordinary assignment tokens.
+
+    :param tokens: One shell command after control prefixes are removed.
+    :returns: Its scalar assignments, or the unchanged non-declaration command.
+    :raises ValueError: Declaration flags or argument syntax cannot be modeled.
+    """
+    if not tokens or tokens[0] not in SHELL_DECLARATIONS:
+        return list(tokens)
+    allowed = SHELL_DECLARATIONS[tokens[0]]
+    remaining = list(tokens[1:])
+    while remaining and remaining[0].startswith(("-", "+")):
+        option = remaining.pop(0)
+        if option == "--":
+            break
+        if (
+            not option.startswith("-")
+            or len(option) == 1
+            or not set(option[1:]).issubset(allowed)
+        ):
+            raise ValueError("unsupported_shell_declaration")
+    assignments = []
+    for token in remaining:
+        binding = SHELL_BINDING.fullmatch(token)
+        if binding is None:
+            raise ValueError("unsupported_shell_declaration")
+        if binding[2] is not None:
+            assignments.append(token)
+    return assignments
+
+
 def _scan_shell(
     source: str,
     text: str,
@@ -969,9 +1008,15 @@ def _scan_shell(
                 "else",
             }:
                 group.pop(0)
+            group = _declaration_assignments(group)
             environment = []
-            while group and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", group[0]):
-                variable, token = group.pop(0).split("=", 1)
+            while (
+                group
+                and (binding := SHELL_BINDING.fullmatch(group[0]))
+                and binding[2] is not None
+            ):
+                variable, token = binding[1], binding[2]
+                group.pop(0)
                 value = _shell_value(token, values)
                 value = replace(
                     value, targets=files.get(_shell_file_key(token), value.targets)
