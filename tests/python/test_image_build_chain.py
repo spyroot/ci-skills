@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import signal
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Final, Optional
+from uuid import uuid4
 
 import pytest
 import test_gitlab_runner_lifecycle as runner_lifecycle
@@ -32,7 +34,11 @@ MANAGER_ACTION = import_script_module("lib.python.core.gitlab.runner_manager.act
 PODMAN = import_script_module("lib.python.core.kubernetes.podman_probe")
 READINESS = import_script_module("lib.python.core.kubernetes.image_build_readiness")
 RUN_SCOPE = import_script_module("lib.python.core.kubernetes.run_scope")
+RUNNER = import_script_module("lib.python.core.runner")
+SCOPES = import_script_module("lib.python.core.runner_scope")
+IDENTITY = import_script_module("lib.python.core.runner_identity")
 TARGET = import_script_module("lib.python.core.target")
+STATUS = import_script_module("lib.python.sys.status")
 TOOLBOX_ACTIONS = import_script_module("lib.python.core.toolbox_actions")
 VERIFICATION = import_script_module(
     "lib.python.core.kubernetes.image_build_chain.verification"
@@ -56,6 +62,26 @@ if TYPE_CHECKING:
 RUN_ID = "ci13-unit-run"
 NODE = "worker-ci13"
 CALLER_NAMESPACE = "caller-builds"
+CALLER_NAMESPACE_UID: Final = "caller-builds-namespace-uid"
+DRIFT_UNCHANGED: Final = "unchanged"
+DRIFT_UID: Final = "uid"
+DRIFT_OWNERSHIP: Final = "ownership"
+DRIFT_NAME: Final = "name"
+MANAGER_DRIFT_CASES: Final = (DRIFT_UNCHANGED, DRIFT_UID, DRIFT_OWNERSHIP, DRIFT_NAME)
+OUTCOME_SUCCESS: Final = "success"
+STAGE_MANAGER: Final = "manager"
+STAGE_MANAGER_DEPLOY: Final = "manager-deploy"
+STAGE_SCC: Final = "scc"
+STAGE_RUNNER: Final = "runner"
+FIELD_STATUS: Final = "status"
+FIELD_METADATA: Final = "metadata"
+FIELD_UID: Final = "uid"
+FIELD_DESCRIPTION: Final = "description"
+FIELD_KIND: Final = "kind"
+FIELD_NAME: Final = "name"
+FIELD_LABELS: Final = "labels"
+NAMESPACE_KIND: Final = "Namespace"
+CLUSTER_NAMESPACE: Final = ""
 RUNNER_ID = 73
 TOOLBOX_IMAGE = "harbor.example.test/toolbox/ci@sha256:" + "a" * 64
 
@@ -68,6 +94,32 @@ def _read_nodes(*args: str) -> JSONObject:
     """
     assert args == ("get", "nodes", "-o", "json")
     return {"items": [_node(NODE)]}
+
+
+class ChainCluster(runner_manager.ManagerCluster):
+    """Reuse manager storage with Ready-worker and borrowed-namespace observations."""
+
+    def __init__(self) -> None:
+        """Seed the caller's existing namespace with its observed immutable UID."""
+        super().__init__()
+        self.objects[("namespace", "", CALLER_NAMESPACE)] = {
+            "kind": "Namespace",
+            "metadata": {
+                "name": CALLER_NAMESPACE,
+                "uid": CALLER_NAMESPACE_UID,
+                "labels": {},
+            },
+        }
+
+    def json(self, *args: str) -> JSONObject:
+        """Read nodes or delegate exact ownership lookups to the shared transport.
+
+        :param args: Native Kubernetes observation requested by a real callback.
+        :returns: Ready NodeList or the shared manager's stored resource list.
+        """
+        if args == ("get", "nodes", "-o", "json"):
+            return _read_nodes(*args)
+        return super().json(*args)
 
 
 class JournalCallback(ABSTRACT_CALLBACK.LocalCallback):
@@ -240,6 +292,18 @@ def _prepared_action(
     action.gitlab_target = TARGET.GitLabOperationTarget(
         action.target.gitlab, action.target.source_file
     )
+    action.gitlab_selection = TARGET.select_gitlab_reference(
+        action.gitlab_target, project=action.args.project, group=action.args.group
+    )
+    action.repository_identity = (
+        IDENTITY.RepositoryIdentity(None, IDENTITY.RepositorySource.UNKNOWN)
+        if group
+        else IDENTITY.resolve_repository(action.args.project)
+    )
+    action.resolved_description = IDENTITY.ResolvedName(
+        action.args.runner_description, IDENTITY.NameSource.EXPLICIT
+    )
+    action.manager_scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, False)
     action.toolbox = SimpleNamespace(
         resolved_base=None,
         repository="toolbox/ci",
@@ -250,6 +314,13 @@ def _prepared_action(
             image_tag="unit",
             namespace=CALLER_NAMESPACE,
             app="ci13-toolbox",
+        ),
+        runner=RUNNER.RunnerAction(
+            namespace=CALLER_NAMESPACE,
+            name="ci13-toolbox",
+            source_root="",
+            labels=(),
+            timeout=action.args.timeout,
         ),
     )
     action.mode = PODMAN.ProbeMode.APPLY if apply else PODMAN.ProbeMode.LIVE_PLAN
@@ -365,7 +436,7 @@ def test_chain_confirmation_mismatch_prevents_every_mutating_stage(
     action = _prepared_action(apply=True)
     action.args.confirm_plan = confirmation
     action.state.selected_node = NODE
-    action.state.kubernetes = SimpleNamespace(json=_read_nodes)
+    action.state.kubernetes = ChainCluster()
     mutations: list[str] = []
     callbacks = ABSTRACT_CALLBACKS.Callbacks(
         [
@@ -484,36 +555,41 @@ def _lifecycle_executor(
     :returns: Action, real executor, stage journal, cleanup journal, and fake Kubernetes.
     """
     action = _prepared_action(apply=True)
+    selected_namespace = uuid4().hex
+    selected_namespace_uid = uuid4().hex
+    selected_run_id = uuid4().hex
+    action.args.namespace = selected_namespace
+    action.args.runner_description = uuid4().hex
+    action.args.runner_label = [uuid4().hex, uuid4().hex]
+    action.resolved_description = IDENTITY.ResolvedName(
+        action.args.runner_description, IDENTITY.NameSource.EXPLICIT
+    )
+    action.toolbox.spec.namespace = selected_namespace
+    action.toolbox.runner = replace(
+        action.toolbox.runner, namespace=selected_namespace, name=uuid4().hex
+    )
     state = action.state
-    kubernetes = runner_manager.ManagerCluster()
-    cluster_json = kubernetes.json
-
-    def read_cluster(*args: str) -> JSONObject:
-        """Serve worker discovery and retain the existing manager transport.
-
-        :param args: Kubernetes read issued by the real chain or manager callback.
-        :returns: Ready NodeList or the existing in-memory provider response.
-        """
-        if args == ("get", "nodes", "-o", "json"):
-            return _read_nodes(*args)
-        return cluster_json(*args)
-
-    monkeypatch.setattr(kubernetes, "json", read_cluster)
+    kubernetes = ChainCluster()
     state.kubernetes = kubernetes
     state.selected_node = NODE
-    state.run_scope = RUN_SCOPE.RunScope(RUN_ID, CALLER_NAMESPACE, owns_namespace)
+    state.run_scope = RUN_SCOPE.RunScope(
+        selected_run_id, selected_namespace, owns_namespace
+    )
     if owns_namespace:
         state.found_scopes = (state.run_scope,)
-        state.resolved_run_id = RUN_ID
+        state.resolved_run_id = selected_run_id
     namespace: JSONObject = {
-        "kind": "Namespace",
-        "metadata": {"name": CALLER_NAMESPACE, "labels": {}},
+        FIELD_KIND: NAMESPACE_KIND,
+        FIELD_METADATA: {FIELD_NAME: selected_namespace, FIELD_LABELS: {}},
     }
     if owns_namespace:
         namespace = state.run_scope.cluster_resources(kubernetes).managed(
             RUN_SCOPE.namespace_document(state.run_scope)
         )
-    kubernetes.objects[("namespace", "", CALLER_NAMESPACE)] = namespace
+    namespace[FIELD_METADATA][FIELD_UID] = selected_namespace_uid
+    kubernetes.objects[
+        (NAMESPACE_KIND.casefold(), CLUSTER_NAMESPACE, selected_namespace)
+    ] = namespace
     state.gitlab = SimpleNamespace(
         session=SimpleNamespace(
             origin="https://gitlab.example.test", target_kind="project"
@@ -533,7 +609,13 @@ def _lifecycle_executor(
         credential={"token": "private-unit-value"},
     )
     state.runner_auth_plan = action._runner_auth_plan()
-    action.args.confirm_plan = action.fingerprint(NODE)
+    action.manager_scope = state.run_scope
+    action.mode = PODMAN.ProbeMode.LIVE_PLAN
+    planner = CALLBACKS.ResolveChainPlan(action)
+    planner.bind(state)
+    planner.run()
+    action.mode = PODMAN.ProbeMode.APPLY
+    action.args.confirm_plan = state.chain_plan_digest
     stages: list[str] = []
     cleanup: list[str] = []
 
@@ -543,7 +625,7 @@ def _lifecycle_executor(
         :param current: Shared state retaining selected placement and scope.
         """
         assert current.selected_node == NODE
-        assert current.run_scope.namespace == CALLER_NAMESPACE
+        assert current.run_scope.namespace == selected_namespace
 
     def publish(current: ImageBuildChainState) -> None:
         """Retain the immutable image from the Harbor provider boundary.
@@ -559,16 +641,21 @@ def _lifecycle_executor(
         """
         assert current.published_image == TOOLBOX_IMAGE
         current.created_runner_id = RUNNER_ID
-        current.runner_create_plan = _runner_plan()
-        current.token_directory = tmp_path / "runner-token"
+        current.runner_create_plan = replace(
+            _runner_plan(), body={FIELD_DESCRIPTION: action.args.runner_description}
+        )
+        current.token_directory = tmp_path / uuid4().hex
         current.token_directory.mkdir()
-        current.token_path = current.token_directory / "token"
+        current.token_path = current.token_directory / uuid4().hex
         current.token_path.write_text("private-unit-value\n", encoding="utf-8")
         selected = runner_manager._action(apply=True)
         selected.context = current
         selected.candidate_scope = current.run_scope
+        selected.repository_identity = action.repository_identity
+        selected.resolved_runner_name = action.resolved_runner_name
         selected.args.description = action.args.runner_description
         selected.args.tag = list(action.args.runner_label)
+        selected.explicit_tags = tuple(selected.args.tag)
         selected.args.image = TOOLBOX_IMAGE
         selected.args.run_id = current.run_scope.run_id
         selected.args.namespace = current.run_scope.namespace
@@ -577,7 +664,11 @@ def _lifecycle_executor(
             selected.scc_access(), current.run_scope
         )
         kubernetes.objects[
-            ("rolebinding", CALLER_NAMESPACE, str(binding["metadata"]["name"]))
+            (
+                "rolebinding",
+                selected_namespace,
+                str(binding[FIELD_METADATA][FIELD_NAME]),
+            )
         ] = binding
 
     rollout = kubernetes.wait_rollout
@@ -766,10 +857,96 @@ def test_chain_retains_delivery_and_cleans_failures_timeouts_and_signals(
             if item.get("callback") == "RemoveScope"
         )
         assert scope_cleanup["preserved_scopes"] == [state.run_scope.as_dict()]
-    assert kubernetes.read("Namespace", CALLER_NAMESPACE, "") is not None
+    assert (
+        kubernetes.read(NAMESPACE_KIND, state.run_scope.namespace, CLUSTER_NAMESPACE)
+        is not None
+    )
     assert not state.token_path.exists()
     assert not state.token_directory.exists()
     assert {number: signal.getsignal(number) for number in previous} == previous
+
+
+@pytest.mark.parametrize("drift", MANAGER_DRIFT_CASES)
+def test_chain_manager_confirmation_rejects_drift_before_deploy_and_cleans_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift: str,
+) -> None:
+    """Bind the final manager guard to the confirmed plan after provider creation.
+
+    :param tmp_path: Private token and resource-lock directory for the lifecycle.
+    :param monkeypatch: Isolate provider calls and inject drift at the final guard.
+    :param drift: Stable input or namespace UID, ownership, or workload name drift.
+    """
+    action, executor, stages, cleanup, kubernetes = _lifecycle_executor(
+        tmp_path, monkeypatch, OUTCOME_SUCCESS
+    )
+    original_guard = CALLBACKS.ConfirmChainManager.run
+    selected_namespace = action.manager_scope.namespace
+    original_namespace = kubernetes.read(
+        NAMESPACE_KIND, selected_namespace, CLUSTER_NAMESPACE
+    )
+    assert original_namespace is not None
+    selected_uid = original_namespace[FIELD_METADATA][FIELD_UID]
+    replacement_uid = uuid4().hex
+    changed_manager_name = uuid4().hex
+    guard_entries: list[str] = []
+
+    def observe_drift(callback: CALLBACKS.ConfirmChainManager) -> JSONObject:
+        """Change one bound value at the final observation boundary.
+
+        :param callback: Real guard retaining the shared chain execution state.
+        :returns: Original guard result for the unchanged confirmed selection.
+        """
+        state = callback.state
+        guard_entries.append(drift)
+        key, observation = next(
+            (key, value)
+            for key, value in state.runner_scopes.items()
+            if value.purpose == SCOPES.ScopePurpose.MANAGER
+        )
+        if drift == DRIFT_UID:
+            namespace = kubernetes.objects[
+                (NAMESPACE_KIND.casefold(), CLUSTER_NAMESPACE, selected_namespace)
+            ]
+            namespace[FIELD_METADATA][FIELD_UID] = replacement_uid
+            state.runner_scopes[key] = replace(observation, uid=replacement_uid)
+        elif drift == DRIFT_OWNERSHIP:
+            state.runner_scopes[key] = replace(
+                observation,
+                ownership=SCOPES.ScopeOwnership.OPERATION_OWNED,
+                retention=SCOPES.ScopeRetention.RETAINED,
+            )
+        elif drift == DRIFT_NAME:
+            state.manager_action.resolved_runner_name = IDENTITY.ResolvedName(
+                changed_manager_name, IDENTITY.NameSource.PROVIDER
+            )
+        return original_guard(callback)
+
+    monkeypatch.setattr(
+        CALLBACKS.ConfirmChainManager, original_guard.__name__, observe_drift
+    )
+    if drift == DRIFT_UNCHANGED:
+        executor.run()
+        assert stages.count(STAGE_MANAGER_DEPLOY) == len(guard_entries)
+        assert cleanup == []
+    else:
+        with pytest.raises(ValueError, match=CALLBACKS.CHAIN_MANAGER_CHANGED):
+            executor.run()
+        assert STAGE_MANAGER in stages
+        assert STAGE_MANAGER_DEPLOY not in stages
+        assert kubernetes.applied == []
+        assert cleanup == [STAGE_MANAGER, STAGE_SCC, STAGE_RUNNER]
+    assert guard_entries == [drift]
+    assert action.state.chain_cleanup[FIELD_STATUS] == STATUS.PASS
+    assert kubernetes.deleted == []
+    namespace = kubernetes.read(NAMESPACE_KIND, selected_namespace, CLUSTER_NAMESPACE)
+    assert namespace is not None
+    assert namespace[FIELD_METADATA][FIELD_UID] == (
+        replacement_uid if drift == DRIFT_UID else selected_uid
+    )
+    assert not action.state.token_path.exists()
+    assert not action.state.token_directory.exists()
 
 
 @pytest.mark.parametrize(

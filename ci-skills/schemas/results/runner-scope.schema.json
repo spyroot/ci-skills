@@ -1,0 +1,361 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/runner-scope.schema.json",
+  "title": "Runner workflow scope observation, version 1",
+  "description": "Additive typed callback contract; existing callback records remain accepted. New runner outputs emit this record and behavior tests enforce coverage.",
+  "$ref": "#/$defs/scope",
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose",
+        "namespace",
+        "uid",
+        "source",
+        "ownership",
+        "state",
+        "retention",
+        "cleanup"
+      ],
+      "properties": {
+        "purpose": {
+          "enum": [
+            "build",
+            "runner",
+            "manager",
+            "job",
+            "probe"
+          ]
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$"
+        },
+        "uid": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source": {
+          "enum": [
+            "explicit",
+            "toolbox_default",
+            "existing_run_scope",
+            "operation_created"
+          ]
+        },
+        "ownership": {
+          "enum": [
+            "borrowed",
+            "operation_owned",
+            "unknown"
+          ]
+        },
+        "state": {
+          "enum": [
+            "planned",
+            "present",
+            "absent",
+            "unknown"
+          ]
+        },
+        "retention": {
+          "enum": [
+            "temporary",
+            "retained",
+            "preserved",
+            "unknown"
+          ]
+        },
+        "cleanup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "remaining"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "PENDING",
+                "PASS",
+                "BLOCKED",
+                "NOT_REQUIRED"
+              ]
+            },
+            "remaining": {
+              "type": "array",
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "present"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "uid": {
+                "type": "string",
+                "minLength": 1
+              },
+              "ownership": {
+                "enum": [
+                  "borrowed",
+                  "operation_owned"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "planned"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "uid": {
+                "type": "null"
+              },
+              "cleanup": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "PENDING",
+                      "NOT_REQUIRED"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "cleanup": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "PASS",
+                      "NOT_REQUIRED"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            },
+            "required": [
+              "cleanup"
+            ]
+          },
+          "then": {
+            "properties": {
+              "cleanup": {
+                "properties": {
+                  "remaining": {
+                    "maxItems": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "ownership": {
+                "const": "borrowed"
+              }
+            },
+            "required": [
+              "ownership"
+            ]
+          },
+          "then": {
+            "properties": {
+              "retention": {
+                "enum": [
+                  "preserved",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "source",
+        "runner_name",
+        "name_source",
+        "runner_description",
+        "description_source"
+      ],
+      "properties": {
+        "repository": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "source": {
+          "enum": [
+            "provider",
+            "git",
+            "unknown"
+          ]
+        },
+        "runner_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "name_source": {
+          "enum": [
+            "explicit",
+            "repository",
+            "toolbox_app",
+            "provider",
+            "unknown"
+          ]
+        },
+        "runner_description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "description_source": {
+          "enum": [
+            "explicit",
+            "repository",
+            "provider",
+            "unknown"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "source": {
+                "const": "unknown"
+              }
+            },
+            "required": [
+              "source"
+            ]
+          },
+          "then": {
+            "properties": {
+              "repository": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callback",
+        "verified",
+        "identity",
+        "scopes"
+      ],
+      "properties": {
+        "callback": {
+          "const": "RunnerScopes"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "identity": {
+          "$ref": "#/$defs/identity"
+        },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/scope"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verified": {
+                "const": true
+              }
+            },
+            "required": [
+              "verified"
+            ]
+          },
+          "then": {
+            "properties": {
+              "scopes": {
+                "items": {
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "present",
+                        "absent"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

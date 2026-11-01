@@ -357,12 +357,15 @@ class ResourceSet:
             self.service.delete(kind, name, self.namespace)
         return True
 
-    def cleanup_created(self) -> None:
+    def cleanup_created(
+        self, *, expected_uids: Optional[Mapping[tuple[str, str], str]] = None
+    ) -> None:
         """Delete newly created objects in reverse order, preserving prior resources.
 
+        :param expected_uids: Optional native kind/name identities bound by creation read-back.
         :raises KubernetesError: If any owned resource cannot be removed.
         """  # noqa: DOC502 - cleanup_owned propagates unverified deletion failures.
-        self.cleanup_owned(reversed(self.created))
+        self.cleanup_owned(reversed(self.created), expected_uids=expected_uids)
         created = {(kind.casefold(), name) for kind, name in self.created}
         self._mutations = [
             item
@@ -401,16 +404,28 @@ class ResourceSet:
         self._mutations.clear()
         self._tracked.clear()
 
-    def cleanup_owned(self, resources: Iterable[tuple[str, str]]) -> None:
+    def cleanup_owned(
+        self,
+        resources: Iterable[tuple[str, str]],
+        *,
+        expected_uids: Optional[Mapping[tuple[str, str], str]] = None,
+    ) -> None:
         """Delete selected operation-owned resources while attempting every item.
 
         :param resources: Resource kind and exact name pairs in deletion order.
+        :param expected_uids: Optional immutable identities required by the selected cleanup.
         :raises KubernetesError: If any owned resource cannot be removed.
         """
         failures = []
         for kind, name in resources:
             try:
-                self.delete(kind, name)
+                self.delete(
+                    kind,
+                    name,
+                    expected_uid=expected_uids.get((kind, name))
+                    if expected_uids
+                    else None,
+                )
             except Exception as exc:
                 if "resource_delete_identity_mismatch" in str(exc):
                     raise KubernetesError(

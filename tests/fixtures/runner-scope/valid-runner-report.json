@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "kind": "create_selfhosted_runner",
+  "captured_at": "2000-01-01T00:00:00Z",
+  "target": "example-owner/example-repository",
+  "filters": {},
+  "records": [
+    {
+      "callback": "RunnerScopes",
+      "verified": false,
+      "identity": {
+        "repository": "example-owner/example-repository",
+        "source": "provider",
+        "runner_name": "example-repository",
+        "name_source": "repository",
+        "runner_description": null,
+        "description_source": "unknown"
+      },
+      "scopes": [
+        {
+          "purpose": "runner",
+          "namespace": "example-repository-planned",
+          "uid": null,
+          "source": "operation_created",
+          "ownership": "operation_owned",
+          "state": "planned",
+          "retention": "retained",
+          "cleanup": {
+            "status": "PENDING",
+            "remaining": []
+          }
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "status": "DRY_RUN",
+  "summary": {
+    "record_count": 1,
+    "error_count": 0
+  },
+  "operation": "create",
+  "plan_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+}

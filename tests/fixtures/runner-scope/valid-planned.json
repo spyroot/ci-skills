@@ -1,0 +1,13 @@
+{
+  "purpose": "runner",
+  "namespace": "example-repository-planned",
+  "uid": null,
+  "source": "operation_created",
+  "ownership": "operation_owned",
+  "state": "planned",
+  "retention": "retained",
+  "cleanup": {
+    "status": "PENDING",
+    "remaining": []
+  }
+}

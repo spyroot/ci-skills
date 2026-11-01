@@ -17,7 +17,9 @@ from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Optional
+from typing import Final, Optional
+from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 from conftest import import_script_module
@@ -37,12 +39,25 @@ KUBERNETES = import_script_module("lib.python.core.kubernetes.kubernetes")
 GITLAB_API = import_script_module("lib.python.core.gitlab.gitlab_api")
 RUNTIME = import_script_module("lib.python.core.runtime")
 SCHEMA = import_script_module("lib.python.core.schema")
+STATUS = import_script_module("lib.python.sys.status")
 
 PRIVATE_TOKEN = "glrt-private-unit-value"
 CHANGED_PRIVATE_TOKEN = "glrt-changed-unit"
 TOKEN_DIGEST = "sha256:" + hashlib.sha256(PRIVATE_TOKEN.encode()).hexdigest()
 RUN_ID = "manager-unit-run"
 NAMESPACE = "manager-unit-namespace"
+NAMESPACE_UID: Final = "manager-unit-namespace-uid"
+OBSERVED_PROTECTION: Final = "not_protected"
+TAG_ARGUMENT: Final = "--tag"
+APPLY_ARGUMENT: Final = "--apply"
+CONFIRM_ARGUMENT: Final = "--confirm-plan"
+FIELD_PLAN_DIGEST: Final = "plan_digest"
+FIELD_STATUS: Final = "status"
+FIELD_RECORDS: Final = "records"
+FIELD_CALLBACK: Final = "callback"
+FIELD_TAGS: Final = "tag_list"
+EXPECTED_TAGS_KEYWORD: Final = "expected_tags"
+RUNNER_READ_ATTRIBUTE: Final = "read_runner_record"
 RUNNER_ID = 73
 RUNNER_DESCRIPTION = "unit-manager-runner"
 RUNNER_LABELS = ("ci13", "unit")
@@ -131,6 +146,7 @@ def _runner_record(*, online: bool) -> CALLBACKS.RunnerRecord:
         "runner_type": "project_type",
         "tag_list": list(RUNNER_LABELS),
         "status": "online" if online else "offline",
+        "access_level": OBSERVED_PROTECTION,
         "online": online,
         "paused": False,
         "contacted_at": "2026-10-18T00:00:00Z" if online else None,
@@ -151,6 +167,17 @@ def _action(
     """
     selected = ACTION.GitLabRunnerManagerAction(_args(action, apply=apply))
     selected.target = _target()
+    selected.gitlab_selection = ACTION.select_gitlab_reference(
+        TARGET.GitLabOperationTarget(
+            selected.target.gitlab, selected.target.source_file
+        ),
+        project=selected.args.project,
+        group=selected.args.group,
+    )
+    selected.explicit_tags = tuple(selected.args.tag)
+    selected.resolved_description = ACTION.ResolvedName(
+        selected.args.description, ACTION.NameSource.EXPLICIT
+    )
     selected.candidate_scope = RUN_SCOPE.RunScope(RUN_ID, NAMESPACE, False)
     if action == "deploy":
         selected.podman_runtime = ACTION.PodmanRuntimeSettings(
@@ -280,11 +307,23 @@ def test_manager_workload_binds_scope_node_resources_and_ownership() -> None:
     """
     action = _action()
     document = action.workload().document(action.candidate_scope)
+    name = action.candidate_scope.bounded_name(
+        ACTION.MANAGER_ROLE,
+        limit=ACTION.RUNNER_NAME_LIMIT,
+        prefix=action.repository_identity.name,
+    )
+    assert len(name) <= ACTION.RUNNER_NAME_LIMIT
+    assert RUN_SCOPE.validate_namespace(name) == name
+    assert name != replace(action.candidate_scope, run_id=uuid4().hex).bounded_name(
+        ACTION.MANAGER_ROLE,
+        limit=ACTION.RUNNER_NAME_LIMIT,
+        prefix=action.repository_identity.name,
+    )
 
     assert document == {
         "runner": {
             "namespace": NAMESPACE,
-            "name": action.candidate_scope.name(ACTION.MANAGER_ROLE),
+            "name": name,
             "source_root": "",
             "labels": list(RUNNER_LABELS),
             "timeout": 30,
@@ -340,10 +379,8 @@ def test_fingerprint_binds_exact_target_runner_image_scope_and_token_digest(
     plan = captured[0]
     assert plan["operation"] == "deploy"
     assert plan["image"] == IMAGE
-    assert plan["run_scope"] == {
-        **action.candidate_scope.as_dict(),
-        "state": "selected",
-    }
+    assert plan["run_scope"] == action.candidate_scope.as_dict()
+    assert plan["protected"] is None
     assert plan["registration"] == action.runner_token.document()
     assert plan["gitlab"] == {
         "origin": "https://gitlab.example.test",
@@ -382,6 +419,7 @@ def test_observe_reads_exact_runner_scope_identity_and_tags(
         *,
         description: str,
         expected_tags: Sequence[str],
+        expected_protection: Optional[str] = None,
     ) -> CALLBACKS.RunnerRecord:
         """Record the manager's exact GitLab lookup.
 
@@ -392,6 +430,7 @@ def test_observe_reads_exact_runner_scope_identity_and_tags(
         :param runner_id: Expected exact runner ID.
         :param description: Expected runner description.
         :param expected_tags: Expected complete tag identity.
+        :param expected_protection: Omitted protection preserves the provider value.
         :returns: Verified offline runner record.
         """
         calls.append(
@@ -403,6 +442,7 @@ def test_observe_reads_exact_runner_scope_identity_and_tags(
                 runner_id,
                 description,
                 tuple(expected_tags),
+                expected_protection,
             )
         )
         return _runner_record(online=False)
@@ -422,12 +462,13 @@ def test_observe_reads_exact_runner_scope_identity_and_tags(
             RUNNER_ID,
             RUNNER_DESCRIPTION,
             RUNNER_LABELS,
+            None,
         )
     ]
     assert result == {
         "verified": True,
         "run_id": RUN_ID,
-        "scope": {**action.candidate_scope.as_dict(), "state": "selected"},
+        "scope": action.candidate_scope.as_dict(),
         **ACTION.runner_evidence(_runner_record(online=False)),
     }
 
@@ -793,19 +834,38 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
     scope = RUN_SCOPE.RunScope(RUN_ID, NAMESPACE, False)
     state.found_scopes = (scope,)
     state.resolved_run_id = RUN_ID
+    expected_deployments = {
+        scope.name(ACTION.MANAGER_ROLE),
+        scope.bounded_name(
+            ACTION.MANAGER_ROLE,
+            limit=ACTION.RUNNER_NAME_LIMIT,
+            prefix=action.repository_identity.name,
+        ),
+    }
+    observed_deployments: list[str] = []
 
     class Kubernetes:
-        """Reject provider operations for the caller-owned namespace."""
+        """Read only the selected namespace and potential existing manager."""
 
-        def read(self, kind: str, name: str, namespace: str) -> None:
-            """Fail if caller-owned namespace cleanup performs a read.
+        def read(self, kind: str, name: str, namespace: str) -> Optional[dict]:
+            """Supply independent namespace evidence and absence of a manager.
 
-            :param kind: Unexpected native kind.
-            :param name: Unexpected object name.
-            :param namespace: Unexpected namespace.
-            :raises AssertionError: Always; no read is needed for preservation.
+            :param kind: Selected Namespace or candidate Deployment kind.
+            :param name: Exact selected namespace or existing manager name.
+            :param namespace: Cluster scope or selected manager namespace.
+            :returns: Borrowed namespace with a UID, or an absent Deployment.
+            :raises AssertionError: An unrelated object is read.
             """
-            raise AssertionError(f"unexpected read {kind}/{namespace}/{name}")
+            if kind == "Deployment":
+                assert namespace == NAMESPACE
+                assert name in expected_deployments
+                observed_deployments.append(name)
+                return None
+            assert (kind, name, namespace) == ("Namespace", NAMESPACE, "")
+            return {
+                "kind": "Namespace",
+                "metadata": {"name": NAMESPACE, "uid": NAMESPACE_UID, "labels": {}},
+            }
 
         def delete(self, kind: str, name: str, namespace: str) -> None:
             """Fail if caller-owned namespace cleanup performs a deletion.
@@ -827,6 +887,8 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
     result = remove.run()
 
     assert selected == {"verified": True, **scope.as_dict()}
+    assert set(observed_deployments) == expected_deployments
+    assert len(observed_deployments) == len(expected_deployments)
     assert state.run_scope == scope
     assert result == {
         "action": "NO_OP",
@@ -889,6 +951,7 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
                 "VerifyGitLabRunnerPreserved",
                 "RemoveSCCAccess",
                 "RemoveScope",
+                "ObserveManagerNamespace",
             ),
         ),
     ],
@@ -951,6 +1014,7 @@ class ManagerCluster(MemoryCluster):
         self.guard_checks: list[bool] = []
         self.events: list[str] = []
         self.runner_reads = 0
+        self.observed_runner_tags = RUNNER_LABELS
         self.token_path: Path
         self.caller_namespace = ""
 
@@ -959,12 +1023,19 @@ class ManagerCluster(MemoryCluster):
         self.events.append("apply:" + document["kind"].casefold())
         return super().apply(document)
 
-    def delete(self, kind: str, name: str, namespace: str) -> None:
+    def delete(
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        *,
+        expected_uid: Optional[str] = None,
+    ) -> None:
         self.guard_checks.append(self.guard_held)
         self.events.append("delete:" + kind.casefold())
         if self.fault == "cleanup" and kind.casefold() == "job":
             raise KUBERNETES.KubernetesError("unit_cleanup_denied")
-        super().delete(kind, name, namespace)
+        super().delete(kind, name, namespace, expected_uid=expected_uid)
         if kind.casefold() == "deployment":
             self.runner_online = False
 
@@ -1096,7 +1167,8 @@ def _manager_cli_harness(
         runner_id: int,
         *,
         description: str,
-        expected_tags: Sequence[str],
+        expected_tags: Optional[Sequence[str]],
+        expected_protection: Optional[str] = None,
     ) -> dict:
         assert (bound, target_kind, target_id, runner_id, description) == (
             session,
@@ -1105,9 +1177,13 @@ def _manager_cli_harness(
             RUNNER_ID,
             RUNNER_DESCRIPTION,
         )
-        assert tuple(expected_tags) == RUNNER_LABELS
+        if expected_tags is not None:
+            assert tuple(expected_tags) == tuple(cluster.observed_runner_tags)
+        assert expected_protection is None
         cluster.runner_reads += 1
-        return _runner_record(online=cluster.runner_online)
+        record = _runner_record(online=cluster.runner_online)
+        record[FIELD_TAGS] = list(cluster.observed_runner_tags)
+        return record
 
     @contextmanager
     def guard(origin: str, runner_id: int) -> Iterator[None]:
@@ -1276,26 +1352,92 @@ def test_manager_label_alias_plans_the_same_tags_as_tag(
     assert cluster.applied == cluster.deleted == []
 
 
-def test_manager_deploy_without_tag_is_refused(
+@pytest.mark.parametrize("empty_tags", (False, True))
+def test_manager_deploy_without_tags_preserves_observed_provider_tags(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    empty_tags: bool,
 ) -> None:
-    """Refuse deploy when neither --tag nor --label names a runner tag."""
+    """Preserve omitted native tags through planning and confirmed manager rollout.
+
+    :param monkeypatch: Bind the existing isolated provider lifecycle harness.
+    :param tmp_path: Test-owned token and lock directory.
+    :param capsys: Capture the real command's machine-readable report.
+    :param empty_tags: Whether native runner read-back contains no tags.
+    """
     cluster = _manager_cli_harness(monkeypatch, tmp_path)
+    runner_read = Mock(wraps=CALLBACKS.read_runner_record)
+    monkeypatch.setattr(CALLBACKS, RUNNER_READ_ATTRIBUTE, runner_read)
+    observed_tags = () if empty_tags else tuple(uuid4().hex for _ in RUNNER_LABELS)
+    cluster.observed_runner_tags = observed_tags
+    selected_run_id = uuid4().hex
+    original_fingerprint = ACTION.GitLabRunnerManagerAction.fingerprint
+    resolved_tags: list[tuple[str, ...]] = []
+    observed_actions: list[ACTION.GitLabRunnerManagerAction] = []
+
+    def fingerprint(action: ACTION.GitLabRunnerManagerAction) -> str:
+        """Retain the real post-observation labels before normal confirmation hashing.
+
+        :param action: Prepared action after independent provider tag observation.
+        :returns: Original confirmation digest without replacing its computation.
+        """
+        resolved_tags.append(action.labels)
+        observed_actions.append(action)
+        return original_fingerprint(action)
+
+    monkeypatch.setattr(
+        ACTION.GitLabRunnerManagerAction, original_fingerprint.__name__, fingerprint
+    )
     arguments = [
         value
-        for value in _manager_cli_arguments(cluster)
-        if value not in {"--tag", *RUNNER_LABELS}
+        for value in _manager_cli_arguments(cluster, run_id=selected_run_id)
+        if value not in {TAG_ARGUMENT, *RUNNER_LABELS}
     ]
 
     code = SCRIPT.main(arguments)
 
     result = json.loads(capsys.readouterr().out)
-    assert code == 2
-    assert result["status"] == "BLOCKED"
-    assert "--tag" in json.dumps(result)
+    assert code == STATUS.exit_code(STATUS.PLANNED)
+    assert result[FIELD_STATUS] == STATUS.PLANNED
+    observations = [
+        item
+        for item in result[FIELD_RECORDS]
+        if item.get(FIELD_CALLBACK) == CALLBACKS.ObserveGitLabRunner.__name__
+    ]
+    assert [item[FIELD_TAGS] for item in observations] == [list(observed_tags)]
+    assert resolved_tags == [observed_tags]
+    assert cluster.runner_reads == len(observations)
     assert cluster.applied == cluster.deleted == []
+
+    code = SCRIPT.main(
+        [*arguments, APPLY_ARGUMENT, CONFIRM_ARGUMENT, result[FIELD_PLAN_DIGEST]]
+    )
+    applied = json.loads(capsys.readouterr().out)
+    assert code == STATUS.exit_code(STATUS.PASS)
+    assert applied[FIELD_STATUS] == STATUS.PASS
+    online = [
+        item
+        for item in applied[FIELD_RECORDS]
+        if item.get(FIELD_CALLBACK) == CALLBACKS.VerifyGitLabRunnerOnline.__name__
+    ]
+    assert [item[FIELD_TAGS] for item in online] == [list(observed_tags)]
+    assert runner_read.call_args.kwargs[EXPECTED_TAGS_KEYWORD] == observed_tags
+    assert resolved_tags == [observed_tags] * len((result, applied))
+    assert all(action.labels == observed_tags for action in observed_actions)
+    assert cluster.applied
+    provider_callbacks = {
+        CALLBACKS.ObserveGitLabRunner.__name__,
+        CALLBACKS.VerifyGitLabRunnerOnline.__name__,
+    }
+    assert cluster.runner_reads == len(
+        [
+            item
+            for report in (result, applied)
+            for item in report[FIELD_RECORDS]
+            if item.get(FIELD_CALLBACK) in provider_callbacks
+        ]
+    )
 
 
 def test_manager_parser_declares_tag_with_label_alias() -> None:
@@ -1341,7 +1483,10 @@ def test_manager_main_repeat_keeps_identity_plan_and_deployment_no_op(
         for item in repeated["records"]
         if item["callback"] == "OpenManagerRunScope"
     )
-    assert repeated["plan_digest"] == first["plan_digest"]
+    assert repeated["plan_digest"] != first["plan_digest"]
+    code, stable_plan = _manager_cli_report(cluster, capsys, run_id=run_id)
+    assert (code, stable_plan["status"]) == (0, "PLANNED")
+    assert stable_plan["plan_digest"] == repeated["plan_digest"]
     assert repeat_deploy["action"] == "NO_OP"
     assert repeat_deploy["namespace"] == first_deploy["namespace"]
     assert repeat_scope["run_id"] == first_scope["run_id"]

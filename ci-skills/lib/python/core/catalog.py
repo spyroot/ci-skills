@@ -349,11 +349,10 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "mutates": True,
         "options": {
             "--spec": "toolbox JSON following schemas/toolbox.schema.json",
-            "--name": "exact runner name",
+            "--name": "exact runner name; omission uses the known consumer repository, otherwise --name is required",
             "--runner-root": "runner runtime directory inside the toolbox image",
-            "--label": "GitHub runner label; repeatable",
-            "--namespace": "runner namespace; defaults to the selected toolbox build "
-            "namespace",
+            "--label": "GitHub custom runner label; repeatable; omission uses the selected consumer repository; provider system labels are unchanged",
+            "--namespace": "exact existing caller namespace; omission reuses its unique owned namespace or plans a namespace from the selected consumer repository and an opaque hash",
             "--apply": "perform the confirmed operation",
             "--confirm-plan": "exact fingerprint from the preceding plan",
             "--timeout": "operation timeout in seconds",
@@ -362,11 +361,11 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "repeatable_options": ("--label",),
         "subcommands": {
             "create": {
-                "required_options": ["--spec", "--name", "--runner-root", "--label"],
+                "required_options": ["--spec", "--runner-root"],
                 "result_schema": "schemas/results/toolbox-workflow.schema.json",
             },
             "update": {
-                "required_options": ["--spec", "--name", "--runner-root", "--label"],
+                "required_options": ["--spec", "--runner-root"],
                 "result_schema": "schemas/results/toolbox-workflow.schema.json",
             },
             "delete": {
@@ -675,7 +674,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
         "capabilities": ("node_scoped", "namespaced"),
         "mutates": True,
         "options": {
-            "--namespace": "existing namespace; default creates a run namespace retained by a successful chain",
+            "--namespace": "existing caller namespace; chain omission reuses its live scope or plans a repository-based owned namespace",
             "--probe-image": "digest-pinned image providing Podman; default is Linux amd64",
             "--inner-image": "digest-pinned inner test image; default is Linux amd64",
             "--timeout": "maximum probe duration in seconds",
@@ -691,8 +690,14 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--toolbox-spec": "chain: existing toolbox specification with gitlab-runner, git and podman",
             "--project": "chain: GitLab project for a project runner",
             "--group": "chain: GitLab group for a group runner",
-            "--runner-description": "chain: unique description for the runner record",
-            "--runner-label": "chain: runner tag; repeatable",
+            "--description": "chain: runner description; omission uses the known consumer repository, otherwise required",
+            "--tag": "chain: GitLab runner tag; repeatable with legacy --runner-label; omission uses the selected consumer repository",
+            "--protected": "chain: true for ref_protected, false for not_protected; omission preserves provider default",
+        },
+        "repeatable_options": ("--tag",),
+        "option_aliases": {
+            "--description": ("--runner-description",),
+            "--tag": ("--runner-label",),
         },
         "subcommands": {
             "probe": {
@@ -708,11 +713,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "chain": {
                 "purpose": "Build and publish the toolbox, then configure a runner using that image.",
                 "requires_authorities": ("kubernetes", "gitlab", "harbor"),
-                "required_options": (
-                    "--toolbox-spec",
-                    "--runner-description",
-                    "--runner-label",
-                ),
+                "required_options": ("--toolbox-spec",),
                 "result_schema": "schemas/results/image-build-readiness.schema.json",
                 "mutates": True,
                 "side_effects": "Publishes the toolbox image and retains the runner record, manager and "
@@ -1159,14 +1160,15 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "--runner-id": "numeric runner ID, required for assign, tag, and delete",
             "--job-id": "project job ID whose related runner get should inspect",
             "--runner-type": "project or group scope for creation",
-            "--description": "runner description and server-visible recovery key",
+            "--description": "runner description and recovery key; create omission uses the known repository, otherwise required",
+            "--protected": "create: true for ref_protected, false for not_protected; omission preserves provider default",
             "--limit": "maximum returned runner records for list (1-100, default 10)",
             "--filter": "repeatable runner state filter: protected, unprotected, online, offline, shared, dedicated, paused, active",
-            "--tag": "runner tag for create or tag; repeat for multiple tags",
+            "--tag": "runner tag for create or tag; repeat for multiple tags; create omission uses the selected consumer repository",
             "--token-out": "caller-selected 0600 file for the one-time runner token",
-            "--live-plan": "read group assignment or runner deletion identity and print an apply-ready plan without writes",
+            "--live-plan": "read pending repository defaults for project runner creation, group assignment or runner deletion identity and print an apply-ready plan without writes",
             "--apply": "perform the validated change",
-            "--confirm-plan": "SHA-256 fingerprint from the live plan for group assignment or delete, otherwise the dry-run plan",
+            "--confirm-plan": "SHA-256 fingerprint from the live plan for pending project-create defaults, group assignment or delete, otherwise the dry-run plan",
             "--timeout": "maximum seconds for each external request",
             **persistence_options(
                 GITLAB_MODE_POLICY,
@@ -1199,7 +1201,7 @@ COMMANDS: Mapping[str, CommandDefinition] = {
                 "read_back": "Read scoped runner membership after assignment.",
             },
             "create": {
-                "required_options": ["--runner-type", "--description", "--token-out"],
+                "required_options": ["--runner-type", "--token-out"],
                 "result_schema": GITLAB_ACTION_SCHEMA,
                 "purpose": "Create a runner record and save its one-time token.",
                 "mutates": True,
@@ -1238,14 +1240,14 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "gitlab.project",
             "--group": "exact group path or numeric ID; otherwise use gitlab.group",
             "--runner-id": "positive ID returned by gitlab_runner.py create",
-            "--description": "exact description used to create the runner record",
+            "--description": "exact runner description; deploy omission uses the known consumer repository, otherwise required",
+            "--protected": "deploy: verify true as ref_protected or false as not_protected; omission preserves the existing value",
             "--tag": "GitLab runner tag given to gitlab_runner.py create --tag; "
-            "repeat for multiple tags; --label is accepted as an alias",
+            "repeat for multiple tags; --label is accepted as an alias; omission uses the selected consumer repository",
             "--image": "digest-pinned toolbox image containing gitlab-runner and "
             "podman",
             "--token-file": "one-time token file written by gitlab_runner.py create",
-            "--namespace": "existing namespace to retain; omit for one run-owned "
-            "namespace",
+            "--namespace": "existing caller namespace to preserve; omission reuses its live scope or plans a repository-based owned namespace",
             "--node": "exact worker already verified by image_build_readiness.py",
             "--cpu-request": "runner CPU request; repeat the proven probe value",
             "--cpu-limit": "runner CPU limit; repeat the proven probe value",
@@ -1264,8 +1266,6 @@ COMMANDS: Mapping[str, CommandDefinition] = {
             "deploy": {
                 "required_options": [
                     "--runner-id",
-                    "--description",
-                    "--tag",
                     "--image",
                     "--token-file",
                     "--node",

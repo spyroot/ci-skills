@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-01T07:48:41.904370+00:00",
+  "captured_at": "2026-11-01T08:45:54.448459+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -15,7 +15,7 @@
   "kind": "gitlab_mirror",
   "mutated": true,
   "operation": "sync",
-  "plan_digest": "044be4fc0cd73646408125eb492b24043dee185d08ab3bd50653e61b01934500",
+  "plan_digest": "64653ab6adeec6265e6e62420b1d4712d428539ee2513ba31b442cfe82b4cedd",
   "records": [
     {
       "action": "APPLIED",
@@ -47,7 +47,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1441597088,
+        "id": 1441633602,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -57,10 +57,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 13,
+        "id": 15,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-01T07:48:36.747Z",
+        "last_successful_update_at": "2026-11-01T08:45:50.678Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -86,12 +86,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "3655bc03471f421a09541f9ae1c798ce0da71221e94b13fc913a10ec264ca33c",
-    "file_count": 269,
-    "functional_digest": "10377e250d2767ce43474ded3d89f0fb51a22387949352109e1e36659ae5f7db",
+    "digest": "4bc39d01a5db9c4f61642119f998d9811718739571b4fa2e865c2f17b5880622",
+    "file_count": 274,
+    "functional_digest": "17aa9701e833ed382f756d5267c26c76ee8fd2ffe5b17ce0b589accb9e33e2a9",
     "revision": {
       "source": "installer_record",
-      "value": "1f2b6f5c8a0e651c31f41d7c4ef7a54ee56967a1",
+      "value": "bcf7d598647d1f96f481f6e65265b039d09f1c21",
       "verified": true
     }
   },
@@ -102,5 +102,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "user",
-  "tested_revision": "1f2b6f5c8a0e651c31f41d7c4ef7a54ee56967a1"
+  "tested_revision": "bcf7d598647d1f96f481f6e65265b039d09f1c21"
 }

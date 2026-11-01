@@ -393,9 +393,7 @@
         "create": {
           "required_options": [
             "--spec",
-            "--name",
-            "--runner-root",
-            "--label"
+            "--runner-root"
           ],
           "result_schema": "schemas/results/toolbox-workflow.schema.json"
         },
@@ -409,9 +407,7 @@
         "update": {
           "required_options": [
             "--spec",
-            "--name",
-            "--runner-root",
-            "--label"
+            "--runner-root"
           ],
           "result_schema": "schemas/results/toolbox-workflow.schema.json"
         }
@@ -938,6 +934,7 @@
         "--log-level",
         "--output-dir",
         "--project",
+        "--protected",
         "--receipt-out",
         "--revision",
         "--run-id",
@@ -975,7 +972,6 @@
           "read_back": "Read the new runner record and scoped listing.",
           "required_options": [
             "--runner-type",
-            "--description",
             "--token-out"
           ],
           "result_schema": "schemas/results/gitlab-action.schema.json",
@@ -1049,6 +1045,7 @@
         "--node",
         "--output-dir",
         "--project",
+        "--protected",
         "--receipt-out",
         "--revision",
         "--run-id",
@@ -1094,8 +1091,6 @@
           "read_back": "Exact-node privileged Deployment and immutable Pod image, then the exact scoped GitLab runner online with contact evidence.",
           "required_options": [
             "--runner-id",
-            "--description",
-            "--tag",
             "--image",
             "--token-file",
             "--node"
@@ -1277,6 +1272,7 @@
         "--cpu-limit",
         "--cpu-request",
         "--describe",
+        "--description",
         "--dry-run",
         "--gitlab-profile",
         "--group",
@@ -1294,12 +1290,14 @@
         "--output-dir",
         "--probe-image",
         "--project",
+        "--protected",
         "--receipt-out",
         "--revision",
         "--run-id",
         "--runner-description",
         "--runner-label",
         "--storage-size",
+        "--tag",
         "--timeout",
         "--toolbox-spec",
         "--yaml"
@@ -1323,9 +1321,7 @@
           "purpose": "Build and publish the toolbox, then configure a runner using that image.",
           "read_back": "Published toolbox digest and the configured runner deployment using that image.",
           "required_options": [
-            "--toolbox-spec",
-            "--runner-description",
-            "--runner-label"
+            "--toolbox-spec"
           ],
           "requires_authorities": [
             "kubernetes",

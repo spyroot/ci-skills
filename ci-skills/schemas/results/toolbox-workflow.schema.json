@@ -55,9 +55,30 @@
             "type": "boolean"
           },
           "action": {
-            "enum": ["APPLIED", "NO_OP", "VERIFIED"]
+            "enum": [
+              "APPLIED",
+              "NO_OP",
+              "VERIFIED"
+            ]
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "callback"
+              ],
+              "properties": {
+                "callback": {
+                  "const": "RunnerScopes"
+                }
+              }
+            },
+            "then": {
+              "$ref": "runner-scope.schema.json#/$defs/record"
+            }
+          }
+        ]
       }
     },
     "errors": {

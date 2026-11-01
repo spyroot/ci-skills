@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import argparse
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
-from typing import Optional
+from typing import Final
 
-from lib.python.core.abstract.callback import AbstractCallback, LocalCallback
-from lib.python.core.abstract.skill_result import require_result
+from lib.python.core.abstract.callback import DeferredCallback, LocalCallback
 from lib.python.core.gitlab.gitlab_action import GitLabAuth, GitLabAuthAction
 from lib.python.core.gitlab.gitlab_actions import ActionPlan, make_plan
 from lib.python.core.gitlab.gitlab_runners import CreateRunner
@@ -24,12 +23,27 @@ from lib.python.core.gitlab.runner_manager import (
     GitLabRunnerManagerAction,
     retain_manager_resources,
 )
-from lib.python.core.json_types import JSONObject, JSONValue, copy_json
+from lib.python.core.gitlab.runner_manager.action import MANAGER_ROLE
+from lib.python.core.gitlab.runner_manager.workload import resolve_manager_name
+from lib.python.core.json_types import (
+    JSONObject,
+    JSONValue,
+    copy_json,
+    json_object,
+    json_objects,
+)
 from lib.python.core.kubernetes.kubernetes import DEFAULT_COMMAND_TIMEOUT
 from lib.python.core.kubernetes.podman_probe import ProbeMode, select_ready_worker
+from lib.python.core.kubernetes.run_scope import RunScope
+from lib.python.core.kubernetes.runner_scope import observe_namespace
 from lib.python.core.report import plan_digest
+from lib.python.core.runner_identity import NameSource, ResolvedName
+from lib.python.core.runner_options import RUNNER_NAME_LIMIT
+from lib.python.core.runner_scope import ScopePurpose, ScopeSource
 
 from .model import RUNNER_TOKEN_NAME, ImageBuildChainAction, ImageBuildChainState
+
+CHAIN_MANAGER_CHANGED: Final = "chain_manager_identity_changed_rerun_plan"
 
 
 class ProviderTransition(StrEnum):
@@ -58,82 +72,19 @@ class ProviderTransition(StrEnum):
     USE_RUNNER_GITLAB = "use_runner_gitlab"
 
 
-class DeferredComponent(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
-    """Delegate one late-bound component callback into the shared lifecycle."""
+class DeferredComponent(DeferredCallback[ImageBuildChainState, ImageBuildChainAction]):
+    """Keep chain-specific retention atop the shared deferred lifecycle."""
 
-    def __init__(
-        self,
-        action: ImageBuildChainAction,
-        factory: Callable[[ImageBuildChainState], AbstractCallback],
-    ):
-        """Retain a component factory until its upstream IDs exist.
+    def update(self) -> Mapping[str, object]:
+        """Retain manager resources after the shared child update succeeds.
 
-        :param action: Parent chain inputs.
-        :param factory: Constructs one existing callback against current state.
-        """
-        super().__init__(action)
-        self.factory = factory
-        self.child: Optional[AbstractCallback] = None
-
-    def collect(self) -> Mapping[str, JSONValue]:
-        """Construct and bind the existing callback to this exact state.
-
-        :returns: Child collection evidence.
-        :raises ValueError: The required provider configuration is unavailable.
-        """
-        child = self.factory(self.state)
-        child.bind(self.state)
-        require_result(child.read_config())
-        if not child.is_configured():
-            raise ValueError("deferred_component_configuration_missing")
-        self.child = child
-        return child.collect()
-
-    def run(self) -> Mapping[str, JSONValue]:
-        """Run the existing callback after collection.
-
-        :returns: Child run evidence.
-        :raises ValueError: Collection did not construct the callback.
-        """
-        if self.child is None:
-            raise ValueError("deferred_component_collection_required")
-        result = require_result(self.child.run())
-        self.state.results[self.child] = result
-        return result
-
-    def update(self) -> Mapping[str, JSONValue]:
-        """Delegate post-run state retention.
-
-        :returns: Child update evidence.
-        :raises ValueError: Collection did not construct the callback.
-        """
-        if self.child is None:
-            raise ValueError("deferred_component_collection_required")
-        result = require_result(self.child.update())
-        self.state.results[self.child] = result
+        :returns: Exact child post-run evidence.
+        :raises ValueError: Collection did not construct a callback.
+        """  # noqa: DOC502 - Shared deferred lifecycle validates collection order.
+        result = super().update()
         if isinstance(self.child, DeployManagerRunner):
             retain_manager_resources(self.state, self.state.manager_action)
         return result
-
-    def cleanup(self) -> Mapping[str, JSONValue]:
-        """Delegate component cleanup when construction reached collection.
-
-        :returns: Child cleanup evidence or an empty mapping.
-        """
-        if self.child is None:
-            return {}
-        try:
-            return self.child.cleanup()
-        finally:
-            self.state.results.pop(self.child, None)
-
-    @property
-    def complete(self) -> bool:
-        """Preserve the child callback's continuation contract.
-
-        :returns: Child completeness, or false before collection.
-        """
-        return self.child is not None and self.child.complete
 
 
 class ScopedGitLabAuth(DeferredComponent):
@@ -211,9 +162,57 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
         :raises ValueError: Live producers are missing or confirmation differs.
         """
         state, action = self.state, self.action
+        if not action.repository_identity.name and action.runner_kind == "project":
+            action.bind_repository(state.gitlab.access)
+        if action.manager_scope is None:
+            raise ValueError("repository_identity_required: provide --namespace")
         nodes = state.kubernetes.json("get", "nodes", "-o", "json")
         selected = select_ready_worker(nodes, action.args.node)
         state.selected_node = selected.name
+        scopes = RunScope.find_all(state.kubernetes, action.manager_scope.run_id)
+        if len(scopes) > 1:
+            raise ValueError("run_scope_namespace_ambiguous")
+        if scopes:
+            observed = scopes[0]
+            if action.args.namespace and action.args.namespace != observed.namespace:
+                raise ValueError("run_scope_namespace_mismatch")
+            action.manager_scope = observed
+        preferred = ResolvedName(
+            action.manager_scope.bounded_name(
+                MANAGER_ROLE,
+                limit=RUNNER_NAME_LIMIT,
+                prefix=action.repository_identity.name,
+            ),
+            NameSource.REPOSITORY
+            if action.repository_identity.name
+            else NameSource.UNKNOWN,
+        )
+        action.resolved_runner_name = resolve_manager_name(
+            state.kubernetes, action.manager_scope, preferred
+        )
+        state.runner_scopes.clear()
+        observe_namespace(
+            state,
+            state.kubernetes,
+            namespace=action.manager_scope.namespace,
+            purpose=ScopePurpose.MANAGER,
+            source=ScopeSource.EXPLICIT
+            if action.args.namespace
+            else ScopeSource.EXISTING_RUN_SCOPE
+            if scopes
+            else ScopeSource.OPERATION_CREATED,
+            operation=action.manager_scope.run_id,
+            required=not action.manager_scope.owns_namespace,
+        )
+        if action.toolbox.spec is not None:
+            observe_namespace(
+                state,
+                state.kubernetes,
+                namespace=action.toolbox.spec.namespace,
+                purpose=ScopePurpose.BUILD,
+                source=ScopeSource.TOOLBOX_DEFAULT,
+                operation=action.toolbox.runner.operation,
+            )
         document = action.plan(state.selected_node)
         digest = plan_digest(document)
         state.chain_plan = document
@@ -227,6 +226,40 @@ class ResolveChainPlan(LocalCallback[ImageBuildChainState, ImageBuildChainAction
             "selection": "requested" if action.args.node is not None else "discovered",
             "node": selected.evidence(),
         }
+
+
+class ConfirmChainManager(LocalCallback[ImageBuildChainState, ImageBuildChainAction]):
+    """Recheck the confirmed manager identity after build and provider creation."""
+
+    def run(self) -> JSONObject:
+        """Reject a changed namespace UID, ownership, or workload name before deployment.
+
+        :returns: Verified stable manager selection.
+        :raises ValueError: Current selection differs from the confirmed outer plan.
+        """
+        state = self.state
+        planned = self.action.plan(state.selected_node)
+        expected = state.chain_plan
+        planned_runner = json_object(planned["runner"])
+        expected_runner = json_object(expected["runner"])
+        current_scopes = json_objects(planned_runner["scope_observations"])
+        expected_scopes = json_objects(expected_runner["scope_observations"])
+        current_manager_scopes = [
+            item for item in current_scopes if item["purpose"] == ScopePurpose.MANAGER
+        ]
+        expected_manager_scopes = [
+            item for item in expected_scopes if item["purpose"] == ScopePurpose.MANAGER
+        ]
+        manager = state.manager_action
+        scope = state.run_scope
+        if (
+            current_manager_scopes != expected_manager_scopes
+            or manager.workload().runner(scope).name != expected_runner["name"]
+            or scope.namespace != self.action.manager_scope.namespace
+            or scope.owns_namespace != self.action.manager_scope.owns_namespace
+        ):
+            raise ValueError(CHAIN_MANAGER_CHANGED)
+        return {"verified": True, "namespace": scope.namespace}
 
 
 class CreateRunnerRecord(DeferredComponent):
@@ -316,9 +349,10 @@ def _runner_args(action: ImageBuildChainAction, token_path: Path) -> argparse.Na
     return argparse.Namespace(
         action="create",
         runner_type=action.runner_kind,
-        project=args.project if action.runner_kind == "project" else None,
-        group=args.group if action.runner_kind == "group" else None,
+        project=action.runner_reference if action.runner_kind == "project" else None,
+        group=action.runner_reference if action.runner_kind == "group" else None,
         description=args.runner_description,
+        protected=getattr(args, "protected", None),
         tag=list(args.runner_label),
         runner_id=None,
         job_id=None,
@@ -342,15 +376,15 @@ def _manager_args(
     values.update(
         kind="gitlab_runner_manager",
         action="deploy",
-        project=action.args.project if action.runner_kind == "project" else None,
-        group=action.args.group if action.runner_kind == "group" else None,
+        project=action.runner_reference if action.runner_kind == "project" else None,
+        group=action.runner_reference if action.runner_kind == "group" else None,
         runner_id=state.created_runner_id,
         description=action.args.runner_description,
         tag=list(action.args.runner_label),
         node=state.selected_node,
         image=state.published_image,
         token_file=str(state.token_path),
-        run_id=None,
+        run_id=action.manager_scope.run_id,
         namespace=action.args.namespace,
         apply=True,
         dry_run=False,

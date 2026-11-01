@@ -16,7 +16,7 @@ authority. The public-service row uses named profile `[gitlab.com]`, selected wi
 
 | Pair / purpose | GitHub allocation | GitLab allocation | State |
 | --- | --- | --- | --- |
-| `test-self-runner` / self-hosted runners | `spyroot/test-self-runner` | dcloud `hott/test-self-runner` | Planned |
+| `test-self-runner` / self-hosted runners | `spyroot/test-self-runner` | dcloud `hott/test-self-runner` | Allocated |
 | `test-k8s-agent` / project Agent access | `spyroot/test-k8s-agent` | dcloud `hott/test-k8s-agent` | Planned |
 | `test-mirror-push` / GitLab → GitHub | `spyroot/test-mirror-push` | dcloud `hott/test-mirror-push` | Qualified |
 | `test-self-runner` / public GitLab | Reuse runner repository above | GitLab.com `spyroot/test-self-runner` | Planned |
@@ -107,7 +107,7 @@ All listed allocations are authorized for live smoke and behavioral testing with
 
 ## Mirror qualification read-back — 2026-11-01
 
-Candidate `1f2b6f5` created private GitHub repository `1441597088` and GitLab mirror `13` for retained GitLab project
+Candidate `bcf7d59` created private GitHub repository `1441633602` and GitLab mirror `15` for retained GitLab project
 `261`, `hott/test-mirror-push`. Both branch and tag refs matched; a confirmed repeat returned NO_OP without mutation.
 Cleanup removed only those two run-created IDs, proved both absent by independent native reads, and repeated once
 without another deletion. The source and its `main`/`smoke-seed` refs remain present; source CI stays disabled.
@@ -115,4 +115,23 @@ No consumer Actions job or GitLab pipeline was dispatched. Original receipts are
 `tests/acceptance/candidate/`; the NO_OP copy includes separately captured cleanup observations.
 
 The earlier `6f9f1da` qualification remains unchanged under `tests/acceptance/historical/pre-mirror-owned-id/`.
-The renewed run verifies the immutable creation-ID correction; it does not allocate another retained repository.
+The `1f2b6f5` qualification remains in the merged CI-14 history. The prior `ae47632` originals remain unchanged under
+`tests/acceptance/historical/pre-ci15-build-retention/`. The renewed `bcf7d59` run verifies the corrected runner
+candidate with the same retained source and creation-ID checks; it does not allocate another retained repository.
+
+## Runner baseline support allocation
+
+The runner smoke's runtime ToolboxSpec defines build namespace and app `test-self-runner-toolbox`, and Harbor
+repository `test-self-runner-toolbox` under the runtime-selected project. Build this one image with checksum-pinned
+GitHub runner/CLI archives and runtime root `/opt/actions-runner`; retain its namespace, BuildConfig and immutable
+image for later phases. Reuse the existing GitLab shell-runner toolbox. Each provider's single consumer job has a
+two-minute limit and manual-only routing; configuration pushes must not execute a job.
+
+The GitHub rename retained repository ID `1344617680` and its existing history. The private dcloud project is `262`.
+These repositories are retained across phases; only run-owned runner registrations and workloads are disposable.
+
+The retained support namespace UID is `7ae80f69-fa57-4cc4-8be7-c80ac05ccbec`; its BuildConfig UID is
+`7e695883-88eb-4ffd-af61-b81856556a84`. The verified image is
+`sha256:567b6f13bb9d658bf8a917b395f728515c428c1d799a39a84900dc2c4a6c34b1`.
+The namespace was allocated by this smoke run for retention across phases. Reuse this image digest; the initial
+image lacked libicu and is not qualified. The one corrected build passed after exact-image dependency reproduction.

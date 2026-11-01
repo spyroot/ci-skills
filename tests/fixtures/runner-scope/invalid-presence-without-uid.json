@@ -1,0 +1,13 @@
+{
+  "purpose": "runner",
+  "namespace": "example-repository",
+  "uid": null,
+  "source": "explicit",
+  "ownership": "borrowed",
+  "state": "present",
+  "retention": "preserved",
+  "cleanup": {
+    "status": "NOT_REQUIRED",
+    "remaining": []
+  }
+}

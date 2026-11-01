@@ -779,6 +779,7 @@ def test_registry_copy_uses_digest_only_native_references_with_registry_ports(
             (
                 "K8SAuth",
                 "GitHubAuth",
+                "ObserveGitHubNamespace",
                 "HarborAuth",
                 "ConfirmWorkflow",
             ),

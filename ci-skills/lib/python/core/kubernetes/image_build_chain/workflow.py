@@ -34,6 +34,7 @@ from lib.python.core.toolbox_actions import (
 )
 
 from .callbacks import (
+    ConfirmChainManager,
     CreateRunnerRecord,
     DeferredComponent,
     PrepareRunnerManager,
@@ -103,6 +104,7 @@ def workflow(action: ImageBuildChainAction) -> WorkflowExecutor[ImageBuildChainS
                 DeferredComponent(
                     action, lambda state: ObserveGitLabRunner(state.manager_action)
                 ),
+                ConfirmChainManager(action),
                 DeferredComponent(
                     action,
                     lambda state: OpenManagerRunScope(

@@ -198,6 +198,9 @@ class GitLabAuth(GitlabCallback[GitLabAuthAction]):
         :raises GitLabAPIError: Snapshot reads fail at the selected provider.
         """  # noqa: DOC502 - Snapshot readers propagate provider and validation errors.
         plan = self.state.plan
+        from lib.python.core.gitlab.gitlab_runners import resolve_runner_identity
+
+        plan = resolve_runner_identity(plan, service.access)
         if not _requires_snapshot(plan):
             return plan
         if plan.operation == "assign":
@@ -292,7 +295,10 @@ class GitLabOperation(GitlabCallback[ActionPlan]):
             project_ids=self.action.project_ids,
             runner_snapshot=self.action.runner_snapshot,
         )
-        if declared != self.action:
+        from lib.python.core.gitlab.gitlab_runners import resolve_runner_identity
+
+        expected = resolve_runner_identity(self.action, self.gitlab.access)
+        if declared != expected:
             raise ActionError("callback_plan_mismatch")
         self.state.phase = "READ" if _runner_read(self.plan) else "APPLY"
         if self.state.phase == "APPLY":
@@ -484,7 +490,12 @@ class GitLabWorkflow:
         self.target: GitLabOperationTarget = target
         self.state.plan = make_plan(args.kind, args, target, source)
         plan = self.state.plan
-        if self.mode == "live-plan" and not _requires_snapshot(plan):
+        from lib.python.core.gitlab.gitlab_runners import pending_runner_identity
+
+        pending_identity = pending_runner_identity(plan)
+        if self.mode == "live-plan" and not (
+            _requires_snapshot(plan) or pending_identity
+        ):
             raise ActionError("live_plan_requires_group_assignment_or_runner_delete")
         if self.mode == "offline":
             self.state.report = _result(
@@ -492,7 +503,7 @@ class GitLabWorkflow:
             )
         if self.mode == "apply":
             self.state.phase = "ACCESS"
-            if _requires_snapshot(plan):
+            if _requires_snapshot(plan) or pending_identity:
                 if not args.confirm_plan:
                     raise ActionError("confirm_plan_mismatch_rerun_live_plan")
             elif not args.confirm_plan or args.confirm_plan != plan.digest:
@@ -527,6 +538,8 @@ class GitLabWorkflow:
         snapshot = (
             {"runner_snapshot": plan.runner_snapshot}
             if plan.operation == "delete"
+            else {"project_ids": [state.gitlab.target_id]}
+            if plan.kind == "gitlab_runner" and plan.operation == "create"
             else {"project_ids": list(plan.project_ids or ())}
         )
         state.report = _result(

@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from argparse import Namespace
 from collections.abc import Mapping, MutableMapping, MutableSequence, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final, Optional, TypedDict
 
@@ -41,6 +41,18 @@ from lib.python.core.json_types import (
     JSONValue,
     copy_json_object,
     json_strings,
+)
+from lib.python.core.runner_identity import (
+    RepositoryIdentity,
+    RepositorySource,
+    resolve_name,
+    resolve_repository,
+)
+from lib.python.core.runner_options import (
+    PROTECTION_READBACK_MISMATCH,
+    parse_protected,
+    runner_tags,
+    validate_runner_tags,
 )
 from lib.python.core.target import GitLabOperationTarget
 
@@ -236,9 +248,14 @@ def prepare(
     :returns: Named request fields, optional runner ID, and optional one-time token sink.
     :raises ActionError: If the action or its arguments are invalid.
     """  # noqa: DOC502 - input errors propagate from the selected preparation helper
+    if args.action != "create" and getattr(args, "protected", None) is not None:
+        raise ActionError("protected_only_valid_for_runner_create")
     if args.action in {"get", "list", "delete"}:
         return _prepare_runner_read(args, target_kind)
-    return _prepare_runner_mutation(args, target, target_kind)
+    try:
+        return _prepare_runner_mutation(args, target, target_kind)
+    except ValueError as exc:
+        raise ActionError(str(exc)) from exc
 
 
 def _prepare_runner_read(args: Namespace, target_kind: str) -> PreparedOperation:
@@ -328,11 +345,33 @@ def _prepare_runner_mutation(
         return PreparedOperation({"tag_list": tags}, resource_id=identifier)
     if args.action != "create":
         raise ActionError("unsupported_runner_action")
+    repository = (
+        resolve_repository(
+            (getattr(args, "project", None) or target.gitlab.project)
+            if target_kind == "project"
+            else None
+        )
+        if target_kind == "project"
+        else RepositoryIdentity(None, RepositorySource.UNKNOWN)
+    )
     body: MutableMapping[str, JSONValue] = {
         "runner_type": f"{target_kind}_type",
-        "description": _required_text(args.description, "description"),
+        "description": (
+            _required_text(args.description, "description")
+            if args.description is not None
+            else resolve_name(
+                None,
+                repository,
+                argument="--description",
+                pending=target_kind == "project",
+            ).value
+            or None
+        ),
     }
-    tags = _requested_tags(args.tag)
+    protection = parse_protected(getattr(args, "protected", None))
+    if protection is not None:
+        body["access_level"] = protection
+    tags = runner_tags(args.tag, repository)
     if tags:
         body["tag_list"] = ",".join(tags)
     if args.runner_id is not None:
@@ -343,6 +382,55 @@ def _prepare_runner_mutation(
     return PreparedOperation(body, token_out=token_out)
 
 
+RUNNER_DESCRIPTION_FIELD: Final = "description"
+RUNNER_TAGS_FIELD: Final = "tag_list"
+RUNNER_KIND: Final = "gitlab_runner"
+RUNNER_CREATE: Final = "create"
+PROJECT_KIND: Final = "project"
+
+
+def pending_runner_identity(plan: ActionPlan) -> bool:
+    """Identify numeric project-create defaults awaiting native repository resolution.
+
+    :param plan: Nonmutating prepared provider operation.
+    :returns: Whether a numeric project selector leaves description or tags pending.
+    """
+    return (
+        plan.kind == RUNNER_KIND
+        and plan.operation == RUNNER_CREATE
+        and plan.target_kind == PROJECT_KIND
+        and plan.target_reference.isdecimal()
+        and (
+            plan.body.get(RUNNER_DESCRIPTION_FIELD) is None
+            or RUNNER_TAGS_FIELD not in plan.body
+        )
+    )
+
+
+def resolve_runner_identity(plan: ActionPlan, access: JSONObject) -> ActionPlan:
+    """Resolve exactly pending create defaults from the existing access receipt.
+
+    :param plan: Original operation retaining all explicit provider inputs.
+    :param access: Native project identity verified by existing authentication.
+    :returns: Plan with only omitted repository defaults resolved.
+    :raises ActionError: Verified native identity or derived inputs are inconsistent.
+    """
+    if not pending_runner_identity(plan):
+        return plan
+    try:
+        repository = RepositoryIdentity.from_access(access, plan.target_reference)
+        body = dict(plan.body)
+        if body.get(RUNNER_DESCRIPTION_FIELD) is None:
+            body[RUNNER_DESCRIPTION_FIELD] = resolve_name(
+                None, repository, argument="--description"
+            ).value
+        if RUNNER_TAGS_FIELD not in body:
+            body[RUNNER_TAGS_FIELD] = ",".join(runner_tags((), repository))
+        return replace(plan, body=body)
+    except ValueError as exc:
+        raise ActionError(str(exc)) from exc
+
+
 def _requested_tags(values: Sequence[str]) -> Sequence[str]:
     """Validate caller tags for both record creation and later additions.
 
@@ -350,12 +438,10 @@ def _requested_tags(values: Sequence[str]) -> Sequence[str]:
     :returns: Distinct, nonempty tag names in caller order.
     :raises ActionError: If a tag is empty, contains a comma, or is repeated.
     """
-    tags = [_required_text(value, "tag") for value in values]
-    if any("," in tag for tag in tags):
-        raise ActionError("tag_must_not_contain_comma")
-    if len(set(tags)) != len(tags):
-        raise ActionError("duplicate_tag")
-    return tags
+    try:
+        return list(validate_runner_tags(values))
+    except ValueError as exc:
+        raise ActionError(str(exc)) from exc
 
 
 def _observed_tags(value: JSONValue) -> Sequence[str]:
@@ -930,6 +1016,7 @@ def _runner_readback(
     runner_id: int,
     description: Optional[str] = None,
     expected_tags: Optional[Sequence[str]] = None,
+    expected_protection: Optional[str] = None,
 ) -> JSONObject:
     """Read one runner and its selected-scope membership from GitLab.
 
@@ -939,6 +1026,7 @@ def _runner_readback(
     :param runner_id: Runner ID to verify.
     :param description: Optional expected creation key.
     :param expected_tags: Optional exact tag set for creation.
+    :param expected_protection: Explicit native protection setting to verify.
     :returns: Provider runner record with a validated ``tag_list``.
     :raises ActionError: If identity, scope, or tags do not match.
     :raises GitLabAPIError: Runner identity or selected-scope membership cannot be read.
@@ -963,6 +1051,11 @@ def _runner_readback(
     observed_tags = _observed_tags(observed.get("tag_list"))
     if expected_tags is not None and set(observed_tags) != set(expected_tags):
         raise ActionError("runner_tag_readback_mismatch")
+    if (
+        expected_protection is not None
+        and observed.get("access_level") != expected_protection
+    ):
+        raise ActionError(PROTECTION_READBACK_MISMATCH)
     return observed
 
 
@@ -975,6 +1068,7 @@ def read_runner_record(
     *,
     description: Optional[str] = None,
     expected_tags: Optional[Sequence[str]] = None,
+    expected_protection: Optional[str] = None,
 ) -> RunnerRecord:
     """Read one runner through its selected project or group membership.
 
@@ -985,6 +1079,7 @@ def read_runner_record(
     :param runner_id: Positive runner ID selected by the caller.
     :param description: Optional exact runner description.
     :param expected_tags: Optional exact runner tag set.
+    :param expected_protection: Explicit native ref protection to verify, or absence.
     :returns: Typed public runner fields after global and scoped read-back.
     :raises ActionError: The scope, identity, type, description, or tags differ.
     :raises GitLabAPIError: GitLab runner or membership reads fail.
@@ -1002,6 +1097,7 @@ def read_runner_record(
             selected_runner,
             description,
             expected_tags,
+            expected_protection,
         )
     )
     if record["runner_type"] != f"{target_kind}_type":
@@ -1527,6 +1623,9 @@ class CreateRunner(GitLabOperation):
                 runner_id,
                 self.description,
                 expected_tags,
+                _required_text(self.plan.body["access_level"], "access_level")
+                if "access_level" in self.plan.body
+                else None,
             )
         except (ActionError, GitLabAPIError) as exc:
             return self._recover(sink, guard, runner_id, str(exc))
@@ -1536,6 +1635,7 @@ class CreateRunner(GitLabOperation):
             "id": runner_id,
             "verified": True,
             "after_tags": observed["tag_list"],
+            "access_level": observed.get("access_level"),
             "sink_persisted": True,
             "mutated": True,
             "cleanup": {
