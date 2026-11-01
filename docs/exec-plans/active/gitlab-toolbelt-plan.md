@@ -17,12 +17,13 @@ review checkpoint. Code, tests, manifest, result shape, and user instructions la
 
 ## SKILL and Agent invocation and target contract
 
-The agent routes and first calls are in [SKILL.md](../ci-skills/SKILL.md); its generated `tools.json` is the
+The agent routes and first calls are in [SKILL.md](../../../ci-skills/SKILL.md); its generated `tools.json` is the
 command catalog. The catalog and parser must accept the same subcommands and options; `--describe` and `--help`
 work without credentials. Agents call installed executables directly; no MCP server or separate provider
 deployment is implied.
 
-Target precedence is defined in the [README](../README.md#target-selection). The access block supports a GitLab-only
+Target precedence is defined in the [README](../../../README.md#target-selection). The access block supports a
+GitLab-only
 target profile and permits `gitlab.project`, `gitlab.group`, and `gitlab.runner_id` in the selected file. The
 three-authority diagnostic loader still requires all three tables. Explicit `--project`, `--group`, or `--runner-id`
 overrides its matching target field. A missing or conflicting identifier blocks. Neither the Git remote nor the `glab`
@@ -63,11 +64,11 @@ can be attempted; a 401 or 403 is terminal.
 ## Delivery blocks
 
 Blocks 1 to 6 are delivered. Each has a sanitized live receipt under
-[`tests/acceptance/receipts`](../tests/acceptance/receipts), recorded from the
+[`tests/acceptance/receipts`](../../../tests/acceptance/receipts), recorded from the
 installed skill against the user's selected GitLab target, and the
-[evidence index](../tests/acceptance/evidence/README.md) lists every case.
+[evidence index](../../../tests/acceptance/evidence/README.md) lists every case.
 Block 7 pairs runner creation with manager deployment and a real test job. The
-[runner-manager evidence](../tests/acceptance/evidence/runner-manager/README.md)
+[runner-manager evidence](../../../tests/acceptance/evidence/runner-manager/README.md)
 records the online runner, exact job linkage, and cleanup.
 
 | Block | Agent action | Proof before merge | Receipts |
@@ -262,7 +263,8 @@ numeric target IDs, effective source and user ID, plan digest, apply result,
 independent GET, repeated no-op, and cleanup. The repository acceptance checker,
 `tools/check_live_acceptance.py`, requires the operation receipts alongside
 the diagnostic receipt, compares each receipt's functional checksum with its
-own calculation for the candidate, and blocks on an empty or incomplete set. Mocked unit tests alone cannot accept stages
+own calculation for the candidate, and blocks on an empty or incomplete set. Mocked unit tests alone cannot accept
+stages
 2–6. No production resource is changed merely to satisfy smoke.
 
 ## Live acceptance inputs

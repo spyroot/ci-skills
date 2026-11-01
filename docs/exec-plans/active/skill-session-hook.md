@@ -8,7 +8,7 @@
 
 ## Authority
 
-This is the hook delivery within [CI11-TOOLS](phases/CI11-TOOLS.md), positioned after
+This is the hook delivery within [CI11-TOOLS](../../phases/CI11-TOOLS.md), positioned after
 installer/callback polish and before runner/pipeline delivery. It expands the existing
 hook design; it does not replace the CI11 catalogue or introduce another delivery plan.
 
@@ -29,7 +29,7 @@ The existing advisory boundary remains: the command performs the operation; the 
 provides prerequisite or result context without repeating API calls, rewriting commands
 or retrying mutations.
 
-The [project binding](../standards-binding.yaml) at `56a579c2d86addb7bae0591f8fc1750561b168d7`
+The [project binding](../../../standards-binding.yaml) at `56a579c2d86addb7bae0591f8fc1750561b168d7`
 continues to select the mandatory Standards contracts. This document uses the requested
 [System Architecture format][architecture] and [Work Classification vocabulary][classification]
 from Standards revision `cae52b2d50bf056b92dd65037d3f2f55301806dc`. Those documents are outside
@@ -134,8 +134,8 @@ not inside GitHub. GitHub evaluates submitted evidence through the existing chec
 ### Current state and intended outcome
 
 - **IMPLEMENTED: installation and discovery infrastructure.** Reuse
-  [the installer](../tools/install_ci_skills.py), its plan/fingerprint/recovery paths,
-  [catalogue](../ci-skills/lib/python/core/catalog.py), target resolution,
+  [the installer](../../../tools/install_ci_skills.py), its plan/fingerprint/recovery paths,
+  [catalogue](../../../ci-skills/lib/python/core/catalog.py), target resolution,
   strict JSON decoding and installed schema loading.
   Classification: grounding GROUNDED; implementation IMPLEMENTED; verification
   UNVERIFIED for this phase's combined journey. Evidence: A3 and the assessed source
@@ -254,7 +254,7 @@ own concrete consumer benefit and specification; merely adding an enum is insuff
 
 #### Six worked journeys, not a closed specification
 
-The examples use the assessed source snapshot and [existing combo catalogue](combos.md).
+The examples use the assessed source snapshot and [existing combo catalogue](../../combos.md).
 Entrypoints below identify capabilities, not complete copy/paste mutation commands:
 callers still supply their selected inputs and existing plan/apply confirmation.
 Expected hints illustrate meaning, not fixed strings or a requirement to recover a
@@ -562,7 +562,7 @@ python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
 ```
 
 For existing installations, retain the documented `--upgrade` and
-`--confirm-upgrade` path in the [installer reference](../README.md#installer-reference).
+`--confirm-upgrade` path in the [installer reference](../../../README.md#installer-reference).
 Run from the consumer Git repository: `tools/agent_profile.py` uses that repository
 for the bundled `glab-stack` skill and requires `glab`. The existing installer handles
 the declared dependency profile; its plan must identify missing prerequisites before apply.
@@ -644,7 +644,7 @@ The following is the single requirement traceability map for this delivery.
 All rows are grounded in the Authority and assessed main snapshot above; implementation
 is NOT_IMPLEMENTED and verification is UNVERIFIED for the hook-specific deliverables.
 
-Existing check locations are in [`validate.yml`](../.github/workflows/validate.yml).
+Existing check locations are in [`validate.yml`](../../../.github/workflows/validate.yml).
 Dotted names below mean `job.step`, not additional jobs:
 
 - G1: `validate.static` and `validate.unit` already run static checks and discover
@@ -654,7 +654,7 @@ Dotted names below mean `job.step`, not additional jobs:
   `test_agent_profile.py` and `test_installed_package.py`. Extend their existing
   installer/schema coverage; the hook cases are proposed.
 - G3: `validate.live_acceptance` is the existing committed-receipt evaluation
-  and publication step. It invokes [`check_live_acceptance.py`](../tools/check_live_acceptance.py)
+  and publication step. It invokes [`check_live_acceptance.py`](../../../tools/check_live_acceptance.py)
   and publishes `live-acceptance` after success. It accepts existing provider receipt
   kinds, not hook-event/advice documents; it does not run live provider operations.
 - G4: `required-result` aggregates existing required jobs and publishes

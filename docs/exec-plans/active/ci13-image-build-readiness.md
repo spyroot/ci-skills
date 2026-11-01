@@ -31,7 +31,8 @@ external live acceptance.
 - [ ] Milestone 1, proof: live `probe` from the installed candidate on one node with every row present and the
       Pod exited 0, plus an interrupted run with the same absence read-back, attached to the pull request. The
       command must reuse or prepare and clean its own SCC permission; an external grant is not accepted as proof.
-- [ ] Milestone 2, code: the `chain` verb composing toolbox build, Harbor publication and runner configuration.
+- [x] CI13-R1: Milestone 2 code is present at `ff1fdc8`: the `chain` verb composes toolbox build, Harbor
+      publication and runner configuration through `core/kubernetes/image_build_chain/workflow.py`.
 - [ ] Milestone 2, proof: existing chain build/publication/deployment results and external consumer proof.
 - [x] Open question 1 (command surface and default digests) answered by the owner.
 - [x] Open question 2 (gate wiring for this command's receipts) answered by the owner.
@@ -41,11 +42,17 @@ external live acceptance.
 
 ## Surprises & Discoveries
 
-None yet. Record here anything the node, the podman image or the admission controller does differently from the
-assumptions in the phase document, with the observation that showed it; the first expected entries are the exact
-admission message for a refused privileged Pod and the backing filesystem the emptyDir lands on.
+CI13-R1: the phase's unmerged chain label predates the implementation now present in
+`ci-skills/lib/python/core/kubernetes/image_build_chain/workflow.py`, its command/model/schema and
+`tests/python/test_image_build_chain.py`. The current workflow ends at `DeployManagerRunner`. Older combined-chain
+receipts include superseded probe/consumer callbacks and do not prescribe the current composition.
+The [probe evidence](../../../tests/acceptance/evidence/podman-readiness-final/README.md) explicitly records that
+its interruption attempt sent no signal, so interruption proof remains open.
 
 ## Decision Log
+
+- DEC-CI13-R1: record the chain code as delivered at `ff1fdc8` while retaining current-chain and interruption
+  acceptance as open. Preserve the original external-consumer boundary and the unchanged phase requirements.
 
 - 2026-10-15, the owner's direction: "we need to see can we do podman", for a caller who needs to run docker in
   Kubernetes through GitLab; a useful combo. Recorded as chain 11 of the catalogue.
@@ -77,7 +84,9 @@ admission message for a refused privileged Pod and the backing filesystem the em
 ## Outcomes & Retrospective
 
 PR81 merged the standalone probe with [live proof](../../phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence).
-Interruption proof remains unestablished. Milestone 2's toolbox-backed runner chain remains unmerged and unverified.
+Interruption proof remains unestablished. Milestone 2's toolbox-backed runner chain is implemented at `ff1fdc8`;
+current-chain/external-consumer acceptance remains open. Historical standalone runner-manager proof explicitly
+does not establish the combined CI13 command. The plan remains active.
 
 ## Context and Orientation
 
@@ -111,6 +120,9 @@ constraint is the OpenShift `privileged` security context constraint. The instal
 run-scoped service account can use it and creates a temporary RoleBinding only when that permission is absent.
 
 ## Plan of Work
+
+CI13-R1 reconciliation: the implementation scope below is delivered code, retained to explain the original
+milestones. The unchecked proof items in Progress are the remaining work; do not implement these callbacks again.
 
 Milestone 1 adds `ci-skills/lib/python/core/action_modes.py` (the shared mode validator with its per-adapter
 read and receipt policy, consumed by `ci-skills/lib/python/core/gitlab/gitlab_action.py` in the same change),
@@ -162,12 +174,11 @@ installed-skill invocations by the consumer agent, not the product combo.
 ## Concrete Steps
 
 `<NODE>`, `<digest>`, `<RECEIPT>` and `<EVIDENCE>` below stand for the agent's own arguments and for values the
-previous step returned; by project rule no example value is written here. Work in a worktree cut from main. For
-milestone 1, implement the shared validator first and switch the GitLab adapter to it, then the modules in the
-order the phase diagram lists them so each callback's state field exists before its consumer. After each module
-run `./bless.sh --all` from the repository root and expect every line to end in `ok`; after the catalogue
-declaration run the render tool and expect `tools.json` regenerated and `python tools/render_manifest.py --check`
-to exit 0. Run `python ci-skills/bin/image_build_readiness.py --describe` and expect the command contract with the
+previous step returned; by project rule no example value is written here. Work in a worktree cut from main.
+The shared validator, adapters and chain modules already exist. Run the current static and focused checks through
+the existing validation route, including `python tools/render_manifest.py --check`, and expect exit 0. Then use
+the installed candidate for the outstanding proof rather than recreating the implementation.
+Run `python ci-skills/bin/image_build_readiness.py --describe` and expect the command contract with the
 `probe` verb and no credentials read. Run `python ci-skills/bin/image_build_readiness.py probe --node <NODE>
 --dry-run --json` and expect `DRY_RUN` in phase `OFFLINE_PLAN` with the plan digest, both image digests, the name
 pattern and no API call; run the same with `--live-plan` and expect `PLANNED` in phase `LIVE_PLAN` with the
@@ -239,7 +250,7 @@ code, the run identifier, the absence read-back.
 `evidence_dir` (optional), the resource bounds (`cpu`, `memory`, `storage`, with defaults), and the shared mode
 flags `dry_run`, `live_plan`, `apply`, `confirm_plan`. `ReadinessState(DeliveryState)`: `node`, `run_scope`,
 `job`, `log`, `exit_code`, `rows`, `verdict`. CI12.0 owns `RunScope` and `OpenRunScope`; their interface is
-recorded in [CI12's ExecPlan](ci12-node-onboarding.md#interfaces-and-dependencies).
+recorded in [CI12's ExecPlan](../completed/ci12-node-onboarding.md#interfaces-and-dependencies).
 The shared validator: `resolve_mode(args, policy) -> Mode` in `core/action_modes.py`, where `policy` names the
 adapter's read operations and its receipt rule, returning one of `describe`, `offline`, `live-plan`, `read`,
 `apply`, and raising the shared reasons. `ReadinessWorkflow`: `prepare()`, `callbacks() ->
@@ -249,3 +260,6 @@ Callbacks[ReadinessState]`, `execute() -> int`, mirroring `GitLabWorkflow`; `Con
 Dependencies: the existing `K8SAuth`, `ResourceSet`, the temporary Job pattern, the service's `command`, `json`,
 `apply`, `delete` and `wait_job` calls, the report renderer, the portable receipt writer and the provenance
 checksum; the podman image and the inner image by digest; no new third-party dependency on the agent's machine.
+
+Revision DEC-CI13-R1: reconciled chain source delivery against `ff1fdc8`, retained original proof requirements
+and removed obsolete instructions to implement already-delivered modules. Only moved-document paths in the phase are repaired.

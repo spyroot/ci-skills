@@ -10,7 +10,8 @@ each chain's delivery order.
 
 Status words: **exists** means an installed command with a live receipt in
 [`tests/acceptance/evidence`](../tests/acceptance/evidence/README.md) (case numbers in brackets); **planned** means
-specified in [CI11](phases/CI11-TOOLS.md), the [GitLab tool belt plan](gitlab-toolbelt-plan.md), or the owning
+specified in [CI11](phases/CI11-TOOLS.md), the
+[GitLab tool belt plan](exec-plans/active/gitlab-toolbelt-plan.md), or the owning
 [CI12](phases/CI12-NODE-ONBOARDING.md) / [CI13](phases/CI13-IMAGE-BUILD-READINESS.md) phase; **missing** means no
 command yet. Those plans own delivery; this list points at them and adds chains they do not name yet.
 A chain is proven only by one live run whose rows link,

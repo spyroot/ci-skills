@@ -32,7 +32,7 @@ by this revision; they are not alternate implementation paths. This document pla
   approval and the node join being the one part of the chain that cannot be tested live (it needs a real host to
   join), so CSR handling and joining are mocked in GitHub tests without a required live pending-request read,
   and on adding no new gate and no separate plan; all recorded with their dates in the
-  [ExecPlan's Decision Log](../exec-plans/active/ci12-node-onboarding.md#decision-log); the catalogue does not yet
+  [ExecPlan's Decision Log](../exec-plans/completed/ci12-node-onboarding.md#decision-log); the catalogue does not yet
   carry them, so the Decision Log is the cited authority for `R-CI12-004` and `R-CI12-008`;
 - the project motivation in [`README.md`](../../README.md#motivation): one combo instead of many hand-rolled
   calls, less context, the same result in one go;
@@ -43,7 +43,8 @@ by this revision; they are not alternate implementation paths. This document pla
   confirmed plan names the namespace, the ClusterRoleBinding, the pull-secret copy and the NodePort) and
   `ocp_csr.py` (`core/ocp_csr.py`), which already plan the machine comparison, the ISO verbs and certificate
   approval as single commands; none of the three modules exists at main `e5fb154`;
-- the six-row evidence model in [`docs/gitlab-toolbelt-plan.md`](../gitlab-toolbelt-plan.md) block 7, which
+- the six-row evidence model in
+  [`docs/exec-plans/active/gitlab-toolbelt-plan.md`](../exec-plans/active/gitlab-toolbelt-plan.md) block 7, which
   defines how a chain is proven, and the owner's rule that only a live-tested head merges;
 - the [contribution guide](../contribution_guide.md), sections 2 (one atomic callback), 3 (compose a thin
   workflow; for a domain other than the toolbox, reuse that domain's action adapter) and 4 (declare the command in
@@ -103,7 +104,7 @@ by this revision; they are not alternate implementation paths. This document pla
         gateIds: [G-CI12-STATIC, G-CI12-LIVE]
         evidence: [tests/acceptance/evidence/ocp-node-image-final/yaml/02-build.json, tests/acceptance/evidence/ocp-node-image-final/mac/02-build.json, tests/acceptance/evidence/ocp-node-image/storage/callback-proof.json]
       - id: R-CI12-004
-        authority: [docs/exec-plans/active/ci12-node-onboarding.md]
+        authority: [docs/exec-plans/completed/ci12-node-onboarding.md]
         phaseId: CI12
         classification:
           grounding: GROUNDED
@@ -155,7 +156,7 @@ by this revision; they are not alternate implementation paths. This document pla
         gateIds: [G-CI12-STATIC, G-CI12-LIVE, G-CI12-GATE]
         evidence: [tests/acceptance/evidence/ocp-node-image-final/03-proposition.json, tests/acceptance/evidence/ocp-node-image-final/06-help.txt, https://github.com/spyroot/ci-skills/actions/runs/39133469190]
       - id: R-CI12-008
-        authority: [docs/exec-plans/active/ci12-node-onboarding.md, docs/combos.md]
+        authority: [docs/exec-plans/completed/ci12-node-onboarding.md, docs/combos.md]
         phaseId: CI12
         classification:
           grounding: GROUNDED
@@ -513,7 +514,7 @@ return WorkflowExecutor(context=state, callbacks=Callbacks(callbacks)).run()
 
 The removal chain is `K8SAuth → ResolveRunScopes → RemoveToolPod → RemoveScope`: the tool callback removes
 its Pod and ConfigMap; shared scope removal handles only owned namespaces. The
-[shared scope interface](../exec-plans/active/ci12-node-onboarding.md#interfaces-and-dependencies) defines
+[shared scope interface](../exec-plans/completed/ci12-node-onboarding.md#interfaces-and-dependencies) defines
 lookup, ambiguity and recovery behavior for both preparation and later consumers.
 
 Configuration checks during binding concern Kubernetes only. Downloads are not performed by `read_config()` or

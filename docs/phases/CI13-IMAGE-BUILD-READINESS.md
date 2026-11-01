@@ -25,7 +25,8 @@ This document plans from:
   not yet carry the first, so the Decision Log is the cited authority for `R-CI13-005`;
 - the project motivation in [`README.md`](../../README.md#motivation): one combo instead of many hand-rolled
   calls, less context, the same result in one go;
-- the six-row evidence model in [`docs/gitlab-toolbelt-plan.md`](../gitlab-toolbelt-plan.md) block 7, which
+- the six-row evidence model in
+  [`docs/exec-plans/active/gitlab-toolbelt-plan.md`](../exec-plans/active/gitlab-toolbelt-plan.md) block 7, which
   defines how a chain is proven through runner registration and an external test job, and the owner's rule that
   only a live-tested head merges;
 - the [contribution guide](../contribution_guide.md), sections 2 (one atomic callback), 3 (compose a thin
