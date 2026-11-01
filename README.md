@@ -620,6 +620,11 @@ workflow/YAML and Markdown checks, schemas, diff hygiene, secrets, and Ruff lint
 exercise Python mocks, edge cases, and package behavior on the current runner. These test suites run on GitHub;
 GitHub does not need private GitLab or Kubernetes access.
 
+The registered `gates/gate-ci-skills-portability.py` checks selected executable tests and smoke sources for fixed
+deployment selectors, including locally consumed target files. Runtime inputs and the operation's own synthetic
+fixtures are allowed; arbitrary helper calls are outside its bounded analysis. Its JSON/YAML report is defined by
+`schemas/ci_skills_portability.schema.json` and identifies source locations without exposing selected values.
+
 Live functional checks install the candidate skill and execute its affected commands against real configured targets.
 Verify results through read-back and clean up created test resources. Dry-run and mocked results do not replace this
 proof. Fix observed code defects in the shared implementation, reinstall, and repeat the affected live check; added
@@ -644,7 +649,10 @@ result contract, read-back, cleanup and freshness window in
 Pull requests, pushes and scheduled checks use targeted mode with `tests/acceptance/candidate`. This checks the
 committed proof for the affected capability. It does not run live actions or require another Podman probe.
 The scheduled check re-evaluates that evidence's identity and freshness; it does not trigger new live work.
-A targeted PASS certifies only the listed receipts.
+The policy's `requiredOperations` lists operation keys that both modes must cover with accepted receipts.
+An empty, malformed or unsupported requirement blocks the check; selecting a smaller receipt directory cannot
+omit a required operation. The current baseline requires access proof. Add each capability's required operations
+when its validator and live evidence are integrated; access proof does not certify those later capabilities.
 
 The complete operation set remains available explicitly:
 

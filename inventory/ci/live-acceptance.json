@@ -2,6 +2,9 @@
   "$schema": "../../schemas/live-acceptance-policy.schema.json",
   "schemaVersion": "1.0",
   "maxReceiptAgeDays": 30,
+  "requiredOperations": [
+    {"kind": "access_check", "operation": null, "action": null}
+  ],
   "receiptDirectories": [
     "tests/acceptance/receipts",
     "tests/acceptance/runner-tag",

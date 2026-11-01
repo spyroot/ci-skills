@@ -3,6 +3,7 @@
 setup() {
   tool="${BATS_TEST_DIRNAME}/../bin/ci-binary-build"
   repo="${BATS_TEST_TMPDIR}/source"
+  fixture_context="fixture-${BATS_TEST_NUMBER}"
   mkdir -p "$repo" "${BATS_TEST_TMPDIR}/mock"
   git -C "$repo" init -q
   git -C "$repo" config user.name Fixture
@@ -61,7 +62,7 @@ MOCK
   export CI_TEST_OC_MARKER="${BATS_TEST_TMPDIR}/oc-called"
   run "$tool" --spec "$spec" --source-repo "$repo" \
     --source-commit "$commit" --commit-label example.invalid/source-commit \
-    --context fixture --timeout 10s --apply --confirm-build wrong
+    --context "$fixture_context" --timeout 10s --apply --confirm-build wrong
   [ "$status" -eq 64 ]
   [ ! -e "$CI_TEST_OC_MARKER" ]
 }

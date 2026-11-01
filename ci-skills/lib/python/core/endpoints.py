@@ -3,8 +3,8 @@
 A target file answers, per authority, which endpoint ci-skills points at (a
 host, a project, a cluster) and where the access to it lives (a token file or a
 kubeconfig). `~/.ci-skills/target.toml` is the default; a project's
-`.ci-skills/target.toml` (selected by `catalog.TARGET_PROTOCOL`) overrides the
-same keys with project-specific values. Everything else a command needs --
+`.ci-skills/target.toml` (selected by `catalog.TARGET_PROTOCOL`) selects its
+complete configuration without merging another file. Everything else a command needs --
 pods, nodes, namespaces, pipelines, milestones, merge requests -- it reads from
 the live system at run time.
 
@@ -22,10 +22,15 @@ spyroot@gmail.com
 
 from __future__ import annotations
 
-from collections.abc import Iterator, MutableMapping, MutableSequence
+import json
+import re
+import tomllib
+from collections.abc import Iterator, MutableMapping, MutableSequence, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Optional, Union
+from typing import Final, Optional, Union
+
+BARE_TOML_KEY: Final = re.compile(r"[A-Za-z0-9_-]+\Z")
 
 
 class Role(StrEnum):
@@ -92,6 +97,7 @@ class Table:
     :param name: Table segment in a dotted target path.
     :param fields: Keys accepted directly under the table.
     :param tables: Nested tables accepted directly under the table.
+    :param named_profiles: Whether one named child may repeat this table's fields.
 
     .. attribute :: name
         :type: str
@@ -107,11 +113,17 @@ class Table:
         :type: tuple[Table, ...]
 
         Nested tables accepted directly under the table.
+
+    .. attribute :: named_profiles
+        :type: bool
+
+        Whether one named child may repeat the declared fields.
     """
 
     name: str
     fields: tuple[Field, ...] = ()
     tables: tuple[Table, ...] = ()
+    named_profiles: bool = False
 
     def names(self) -> frozenset[str]:
         """List keys accepted directly beneath this target table.
@@ -158,6 +170,61 @@ class TargetContract:
         """
         return tuple(table.name for table in self._authorities)
 
+    @staticmethod
+    def quote_key(name: str) -> str:
+        """Preserve exact TOML keys, including quoted dots and spaces.
+
+        :param name: One exact table or field key.
+        :returns: Bare or JSON-quoted TOML key spelling.
+        """
+        return name if BARE_TOML_KEY.fullmatch(name) else json.dumps(name)
+
+    @staticmethod
+    def path_parts(path: str) -> tuple[str, ...]:
+        """Parse dotted TOML paths without splitting quoted profile names.
+
+        :param path: One dotted TOML table or field path.
+        :returns: Exact key segments, or an empty tuple for malformed syntax.
+        """
+        try:
+            value = tomllib.loads(f"[{path}]")
+        except tomllib.TOMLDecodeError:
+            return ()
+        parts: MutableSequence[str] = []
+        while isinstance(value, dict) and len(value) == 1:
+            key, value = next(iter(value.items()))
+            parts.append(key)
+        return tuple(parts)
+
+    @classmethod
+    def dotted_path(cls, parts: Sequence[str]) -> str:
+        """Render an unambiguous path for exact TOML keys.
+
+        :param parts: Exact table and field key segments.
+        :returns: Dot-separated path with quoting only where needed.
+        """
+        return ".".join(cls.quote_key(part) for part in parts)
+
+    def canonical_path(self, path: str) -> str:
+        """Resolve a named profile path to its shared authority declaration.
+
+        :param path: Concrete dotted table or field path.
+        :returns: Declared authority path for a valid profile, otherwise the input.
+        """
+        if path in self._paths:
+            return path
+        parts = self.path_parts(path)
+        authority = self._paths.get(parts[0]) if parts else None
+        if (
+            isinstance(authority, Table)
+            and authority.named_profiles
+            and len(parts) in {2, 3}
+            and parts[1] not in authority.names()
+            and parts[1].strip()
+        ):
+            return self.dotted_path((parts[0], *parts[2:]))
+        return self.dotted_path(parts) if parts else path
+
     def names(self, path: str) -> frozenset[str]:
         """Return direct keys accepted beneath a declared target table.
 
@@ -165,18 +232,20 @@ class TargetContract:
         :returns: Field and immediate nested-table names.
         :raises KeyError: ``path`` does not identify a declared table.
         """
-        table = self._paths.get(path)
+        table = self._paths.get(self.canonical_path(path))
         if not isinstance(table, Table):
             raise KeyError(f"no table {path!r} in the target contract")
         return table.names()
 
-    def declares(self, path: str) -> bool:
+    def declares(self, path: str, *, table: Optional[bool] = None) -> bool:
         """Check whether a dotted path is declared by the target contract.
 
         :param path: Dotted field or table path.
-        :returns: Whether the path exists in this contract.
+        :param table: Optional expected table shape; false requires a field.
+        :returns: Whether the path and optional shape exist in this contract.
         """
-        return path in self._paths
+        item = self._paths.get(self.canonical_path(path))
+        return item is not None and (table is None or isinstance(item, Table) == table)
 
     def role(self, path: str) -> Optional[Role]:
         """Read the role assigned to a target field.
@@ -184,7 +253,7 @@ class TargetContract:
         :param path: Dotted field or table path.
         :returns: Field role, or ``None`` for a table or undeclared path.
         """
-        item = self._paths.get(path)
+        item = self._paths.get(self.canonical_path(path))
         return item.role if isinstance(item, Field) else None
 
     def paths(self) -> tuple[str, ...]:
@@ -230,6 +299,7 @@ TARGET_CONTRACT = TargetContract(
             + Field.of(Role.ACCESS, "token_file")
             # Readable from the runners API.
             + Field.of(Role.VALUE, "runner_id"),
+            named_profiles=True,
         ),
         Table(
             "harbor",

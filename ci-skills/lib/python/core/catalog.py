@@ -51,6 +51,10 @@ from lib.python.core.json_types import (
 SCHEMA_VERSION = "1.0"
 SKILL_NAME = "ci-skills"
 GITLAB_ACTION_SCHEMA: Final = "schemas/results/gitlab-action.schema.json"
+GITLAB_PROFILE_OPTION: Final = "--gitlab-profile"
+GITLAB_PROFILE_HELP: Final = (
+    "select one complete [gitlab.NAME] profile; omission uses [gitlab]"
+)
 
 # Every API command accepts these. Node diagnostics share the target protocol.
 UNIVERSAL_OPTIONS: dict[str, str] = {
@@ -1403,7 +1407,8 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
         "options": {
             **READ_OPTIONS,
             "--provider": "native provider: github or gitlab",
-            "--host": "provider host override; otherwise use the resolved target",
+            "--host": "provider host override; must match an explicit GitLab profile",
+            GITLAB_PROFILE_OPTION: GITLAB_PROFILE_HELP,
             "--token-file": "existing token-file reference; otherwise use shared credential resolution",
             "--endpoint": "relative GET endpoint; required by get",
             "--field": "select one dotted JSON object field",
@@ -1820,6 +1825,20 @@ def missing_required_options(script: str, args: Namespace) -> list[str]:
     return missing
 
 
+def supports_gitlab_profile(script: str) -> bool:
+    """Identify commands whose declared authority set includes GitLab.
+
+    :param script: Registered API command filename.
+    :returns: Whether any supported operation selects GitLab configuration.
+    """
+    entry = COMMANDS[script]
+    authorities = (*entry["requires"], *entry.get("optional_requires", ()))
+    return "gitlab" in authorities or any(
+        "gitlab" in command.get("requires_authorities", ())
+        for command in entry.get("subcommands", {}).values()
+    )
+
+
 def options_for(script: str) -> dict[str, str]:
     """Collect universal, capability, and command options.
 
@@ -1829,6 +1848,8 @@ def options_for(script: str) -> dict[str, str]:
     """
     entry = COMMANDS[script]
     merged = dict(UNIVERSAL_OPTIONS)
+    if supports_gitlab_profile(script):
+        merged[GITLAB_PROFILE_OPTION] = GITLAB_PROFILE_HELP
     for capability in entry["capabilities"]:
         merged.update(CAPABILITY_OPTIONS[capability])
     merged.update(entry["options"])
