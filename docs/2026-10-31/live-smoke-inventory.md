@@ -107,9 +107,12 @@ All listed allocations are authorized for live smoke and behavioral testing with
 
 ## Mirror qualification read-back — 2026-11-01
 
-Candidate `6f9f1da` created private GitHub repository `1441440188` and GitLab mirror `12` for retained GitLab project
+Candidate `1f2b6f5` created private GitHub repository `1441597088` and GitLab mirror `13` for retained GitLab project
 `261`, `hott/test-mirror-push`. Both branch and tag refs matched; a confirmed repeat returned NO_OP without mutation.
 Cleanup removed only those two run-created IDs, proved both absent by independent native reads, and repeated once
 without another deletion. The source and its `main`/`smoke-seed` refs remain present; source CI stays disabled.
 No consumer Actions job or GitLab pipeline was dispatched. Original receipts are selected in
 `tests/acceptance/candidate/`; the NO_OP copy includes separately captured cleanup observations.
+
+The earlier `6f9f1da` qualification remains unchanged under `tests/acceptance/historical/pre-mirror-owned-id/`.
+The renewed run verifies the immutable creation-ID correction; it does not allocate another retained repository.
