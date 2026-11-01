@@ -11,8 +11,8 @@ native IDs and the verification date before another phase reuses the asset.
 ## Reusable pairs
 
 The name in the first column must match on GitHub and GitLab. `dcloud` means the operator-selected `[gitlab]`
-authority. The public-service row uses the proposed named profile `[gitlab.com]`, selected with
-`--gitlab-profile com` once that interface is implemented. Provider URLs and credentials remain runtime inputs.
+authority. The public-service row uses named profile `[gitlab.com]`, selected with
+`--gitlab-profile com`. Provider URLs and credentials remain runtime inputs.
 
 | Pair / purpose | GitHub allocation | GitLab allocation | State |
 | --- | --- | --- | --- |
@@ -28,8 +28,12 @@ Prepare each pair only when its scenario is ready:
 - Rename `spyroot/builder_phase1_live_linux_20260824` to `spyroot/test-k8s-agent`.
   Preserve GitHub node ID `R_kgDOUCnwrQ` and record its numeric repository ID during preflight.
 - Create the three private dcloud projects and the empty private GitLab.com project listed above.
-- Create the private GitHub `test-mirror-push` repository through CI-14's create-if-absent scenario;
-  retain it afterward and verify subsequent reuse/no-op behavior.
+- Create the private GitHub `test-mirror-push` repository through CI-14's create-if-absent scenario,
+  verify ref synchronization and subsequent reuse/no-op behavior, then remove only that run-created repository ID.
+  The operator approved this disposable destination on 2026-11-01; retain its GitLab source. Remove the run-created
+  GitLab mirror configuration first, verify both objects absent, and repeat cleanup once without another deletion.
+  Stop if either object was already present or its identity differs. This permits one bounded qualification when
+  candidate evidence requires renewal; it does not authorize automatic reruns or another repository name.
 
 The rename candidates were inspected during planning on 2026-10-31: README-only content, no registered
 runners, workflows or webhooks. Recheck those facts immediately before renaming. If their usage or identity
@@ -96,6 +100,6 @@ All listed allocations are authorized for live smoke and behavioral testing with
 | --- | --- | --- | --- |
 | Stable paired names | Reusable pairs above | ID/name preflight and inventory read-back | Allocations planned |
 | Preserve working fixtures | Protected assets above | Before/after identity read-back | Required |
-| Runtime selection | Target resolver; named profiles planned | Host/profile isolation | Profile extension pending |
+| Runtime selection | Target resolver and named profiles | Host/profile isolation | Implemented in PR #129 |
 | Bounded execution | Dispatcher and job limits | Dispatch IDs, limits and pacing | Approved; execution unclaimed |
 | Owned cleanup | Resource lifecycle handling | ID/UID match, absence and repeated cleanup | Required for every run |

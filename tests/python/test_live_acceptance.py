@@ -18,6 +18,7 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Optional
 
@@ -33,6 +34,7 @@ from test_gitlab_actions import _plan, _tag_output
 from test_gitlab_mirror import (
     MIRROR_APPLIED_FILE,
     MIRROR_NO_OP_FILE,
+    OTHER_OID,
     _mirror_pair_baseline,
 )
 
@@ -51,6 +53,7 @@ MIRROR_REQUIRED_OPERATIONS: Final = (
     ("gitlab_mirror", "sync", "NO_OP"),
 )
 MIRROR_PAIR_PREFIX: Final[str] = "gitlab_mirror:sync:"
+MIRROR_CLEANUP_REASON: Final[str] = "smoke_cleanup_unverified"
 
 
 if TYPE_CHECKING:
@@ -474,6 +477,33 @@ def _mirror_receipts(
         for key in ("digest", "functional_digest"):
             receipt["skill"][key] = access["skill"][key]
         receipt["skill"]["revision"].update(access["skill"]["revision"])
+    applied_record = receipts[MIRROR_APPLIED_FILE]["records"][0]
+    noop = receipts[MIRROR_NO_OP_FILE]
+    after = {
+        "source": deepcopy(applied_record["source"]),
+        "mirror_absent": True,
+        "destination_http_status": HTTPStatus.NOT_FOUND,
+        "destination_id_http_status": HTTPStatus.NOT_FOUND,
+    }
+    noop["smoke_cleanup"] = {
+        "kind": "gitlab_mirror_smoke_cleanup",
+        "status": "PASS",
+        "captured_at": (captured + timedelta(seconds=len(receipts))).isoformat(),
+        "execution_host": noop["execution_host"],
+        "skill_digest": noop["skill"]["digest"],
+        "tested_revision": noop["tested_revision"],
+        "before": {
+            "source": deepcopy(applied_record["source"]),
+            "destination": deepcopy(applied_record["destination"]),
+            "mirror_id": applied_record["mirror"]["id"],
+        },
+        "delete": {
+            "mirror_http_status": HTTPStatus.NO_CONTENT,
+            "destination_http_status": HTTPStatus.NO_CONTENT,
+        },
+        "after": deepcopy(after),
+        "repeat": {**deepcopy(after), "mutated": False},
+    }
     return receipts
 
 
@@ -2147,6 +2177,14 @@ def test_mirror_pair_satisfies_required_behavior_in_both_acceptance_modes(
         ("missing-applied", "repeat_readback_missing", MIRROR_APPLIED_FILE),
         ("missing-noop", "repeat_readback_missing", MIRROR_NO_OP_FILE),
         ("creation-not-proven", "create_if_absent_unproven", None),
+        ("missing-cleanup", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-wrong-id", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-delete-failed", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-source-changed", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-repeat-mutated", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-wrong-revision", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-before-noop", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-future", MIRROR_CLEANUP_REASON, None),
         ("wrong-action", "repeat_readback_missing", None),
         ("native-id", "mirror_pair_identity_mismatch", None),
         ("before-refs", "mirror_pair_continuity_unverified", None),
@@ -2185,6 +2223,24 @@ def test_mirror_acceptance_cannot_substitute_missing_or_contradictory_pair_evide
         )
         applied_record["created"]["repository"] = False
         assert not ACCEPTANCE.check_mirror_pair(receipts[MIRROR_APPLIED_FILE], noop)
+    elif failure == "missing-cleanup":
+        del noop["smoke_cleanup"]
+    elif failure == "cleanup-wrong-id":
+        noop["smoke_cleanup"]["before"]["destination"]["id"] += 1
+    elif failure == "cleanup-delete-failed":
+        noop["smoke_cleanup"]["delete"]["destination_http_status"] = HTTPStatus.OK
+    elif failure == "cleanup-source-changed":
+        noop["smoke_cleanup"]["after"]["source"]["id"] += 1
+    elif failure == "cleanup-repeat-mutated":
+        noop["smoke_cleanup"]["repeat"]["mutated"] = True
+    elif failure == "cleanup-wrong-revision":
+        noop["smoke_cleanup"]["tested_revision"] = OTHER_OID
+    elif failure == "cleanup-before-noop":
+        noop["smoke_cleanup"]["captured_at"] = (
+            datetime.fromisoformat(noop["captured_at"]) - timedelta(seconds=1)
+        ).isoformat()
+    elif failure == "cleanup-future":
+        noop["smoke_cleanup"]["captured_at"] = (NOW + timedelta(days=1)).isoformat()
     elif failure == "wrong-action":
         noop["records"][0]["action"] = "APPLIED"
     elif failure == "native-id":

@@ -110,6 +110,98 @@
     },
     "report_files": {
       "$ref": "gitlab-runner-tag.schema.json#/$defs/report_files"
+    },
+    "smoke_cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "captured_at",
+        "execution_host",
+        "skill_digest",
+        "tested_revision",
+        "before",
+        "delete",
+        "after",
+        "repeat"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "execution_host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "skill_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "tested_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "before": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "destination",
+            "mirror_id"
+          ],
+          "properties": {
+            "source": {
+              "$ref": "#/$defs/repository"
+            },
+            "destination": {
+              "$ref": "#/$defs/repository"
+            },
+            "mirror_id": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "delete": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mirror_http_status",
+            "destination_http_status"
+          ],
+          "properties": {
+            "mirror_http_status": {
+              "type": "integer"
+            },
+            "destination_http_status": {
+              "type": "integer"
+            }
+          }
+        },
+        "after": {
+          "$ref": "#/$defs/smoke_cleanup_observation"
+        },
+        "repeat": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/smoke_cleanup_observation"
+            },
+            {
+              "required": [
+                "mutated"
+              ]
+            }
+          ]
+        }
+      }
     }
   },
   "allOf": [
@@ -582,6 +674,33 @@
         "reason": {
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "smoke_cleanup_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "mirror_absent",
+        "destination_http_status",
+        "destination_id_http_status"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/repository"
+        },
+        "mirror_absent": {
+          "type": "boolean"
+        },
+        "destination_http_status": {
+          "type": "integer"
+        },
+        "destination_id_http_status": {
+          "type": "integer"
+        },
+        "mutated": {
+          "type": "boolean"
         }
       }
     }

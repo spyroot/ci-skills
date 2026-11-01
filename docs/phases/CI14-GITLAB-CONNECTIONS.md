@@ -161,6 +161,11 @@ requires connected APPLIED and NO_OP receipts from the same installed candidate,
 consistent native identities, and proof that APPLIED created the destination; ordinary empty-repository sync remains
 valid. Verification polls at 30-second intervals, capped by the remaining operation deadline.
 
+The qualification caller records independent `smoke_cleanup` observations in a copy of the NO_OP receipt after
+removing the run-created mirror configuration and disposable GitHub destination. The existing mirror result schema
+defines this optional supplement; acceptance requires its exact IDs, candidate identity, deletion outcomes, retained
+GitLab source, independent absence, and repeated no-op cleanup. Preserve original command outputs unchanged.
+
 Normalized intent and result shapes are defined by the accompanying exact schema proposal. A new targeted receipt must
 be produced from installed candidate execution; its generated JSON diff requires separate exact-content approval.
 Register the new kind in the existing acceptance checker and existing required-result path after approval. Never run
