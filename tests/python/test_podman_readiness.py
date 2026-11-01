@@ -1615,8 +1615,10 @@ def test_offline_plan_contacts_no_provider_and_uses_only_requested_output(
     monkeypatch.setattr(
         READINESS,
         "resolve_target",
-        lambda _target, _binding, *, dry_run, required_surfaces: _target_file_result(
-            tmp_path, dry_run, required_surfaces
+        lambda _target, _binding, *, dry_run, required_surfaces, gitlab_profile=None: (
+            _target_file_result(
+                tmp_path, dry_run, required_surfaces, gitlab_profile=gitlab_profile
+            )
         ),
     )
     monkeypatch.setattr(
@@ -1680,17 +1682,23 @@ def test_offline_probe_rejects_receipt_without_persisting_it(
 
 
 def _target_file_result(
-    tmp_path: Path, dry_run: bool, required_surfaces: Sequence[str]
+    tmp_path: Path,
+    dry_run: bool,
+    required_surfaces: Sequence[str],
+    *,
+    gitlab_profile: Optional[str] = None,
 ) -> Target:
     """Validate dry-run resolution inputs and return a Kubernetes-only target.
 
     :param tmp_path: Directory used by the synthetic target.
     :param dry_run: Resolver mode selected by the command.
     :param required_surfaces: Exact provider set requested by the command.
+    :param gitlab_profile: GitLab selection, which this Kubernetes-only path omits.
     :returns: Kubernetes-only target.
     """
     assert dry_run is True
     assert tuple(required_surfaces) == ("kubernetes",)
+    assert gitlab_profile is None
     return _target(tmp_path)
 
 

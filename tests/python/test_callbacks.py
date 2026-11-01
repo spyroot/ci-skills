@@ -1773,6 +1773,7 @@ def test_api_callbacks_build_one_concrete_operation_order(
     args = Namespace(
         action=action,
         provider="github",
+        gitlab_profile=None,
         endpoint="repos/unit/repo" if action == "get" else None,
         field=None,
         lines=None,
@@ -1813,6 +1814,7 @@ def test_api_check_rejects_transforms_before_action_construction(
     args = Namespace(
         action="check",
         provider="github",
+        gitlab_profile=None,
         endpoint=None,
         field="login",
         lines=None,

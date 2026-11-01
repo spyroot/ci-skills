@@ -8,10 +8,11 @@ spyroot@gmail.com
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import pytest
 from conftest import SKILL_ROOT, import_script_module
@@ -44,6 +45,7 @@ MODEL = import_script_module("lib.python.core.kubernetes.image_build_chain.model
 if TYPE_CHECKING:
     from lib.python.core.json_types import JSONObject
     from lib.python.core.kubernetes.image_build_chain import ImageBuildChainState
+    from lib.python.core.target import Target
 
 
 def _validator() -> Draft202012Validator:
@@ -219,28 +221,50 @@ def test_chain_schema_rejects_pass_without_complete_runner_delivery(
 @pytest.mark.parametrize(
     "explicit", (False, True), ids=("default-live-plan", "explicit-dry-run")
 )
+@pytest.mark.parametrize(
+    "gitlab_profile", (None, "public"), ids=("default-profile", "named-profile")
+)
 def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     explicit: bool,
+    gitlab_profile: Optional[str],
 ) -> None:
     """Plan live by default and keep explicit dry-run outside provider setup.
 
     :param monkeypatch: Fixture replacing configuration and forbidden live boundaries.
     :param capsys: Actual JSON emitter capture.
     :param explicit: Whether the caller supplies the explicit dry-run flag.
+    :param gitlab_profile: Default or named profile used in either planning mode.
     :returns: None after checking mode-specific planning and absence of mutation.
     """
     args = _args()
     args.live_plan = False
     args.dry_run = explicit
+    args.gitlab_profile = gitlab_profile
     template = _prepared_action()
     resolutions = []
     bindings = []
     reads = []
 
-    def resolve(_target, _binding, *, dry_run, required_surfaces):
-        resolutions.append((dry_run, required_surfaces))
+    def resolve(
+        _target: Optional[str],
+        _binding: Optional[str],
+        *,
+        dry_run: bool,
+        required_surfaces: Sequence[str],
+        gitlab_profile: Optional[str],
+    ) -> Target:
+        """Record exact mode, surfaces, and profile before returning a target.
+
+        :param _target: Unused explicit target path.
+        :param _binding: Unused explicit binding path.
+        :param dry_run: Offline or live planning mode selected by the command.
+        :param required_surfaces: Providers required by the image-build chain.
+        :param gitlab_profile: Profile forwarded by the shared chain model.
+        :returns: Finite target fixture without resolving external credentials.
+        """
+        resolutions.append((dry_run, tuple(required_surfaces), gitlab_profile))
         return _target_fixture
 
     _target_fixture = _target()
@@ -299,7 +323,9 @@ def test_chain_default_plans_live_and_explicit_dry_run_stays_offline(
     assert output["confirmable"] is not explicit
     assert output["errors"] == []
     assert "cleanup" not in output
-    assert resolutions == [(explicit, ("gitlab", "kubernetes", "harbor"))]
+    assert resolutions == [
+        (explicit, ("gitlab", "kubernetes", "harbor"), gitlab_profile)
+    ]
     assert bindings == ([] if explicit else [_target_fixture])
     assert reads == ([] if explicit else ["live-preflight"])
     if explicit:

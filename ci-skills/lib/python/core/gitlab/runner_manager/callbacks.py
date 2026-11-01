@@ -184,7 +184,7 @@ class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
             raise TargetError("gitlab_target_unresolved")
         operation_target = GitLabOperationTarget(target.gitlab, target.source_file)
         target_kind, reference = workflow.gitlab_selection
-        source = target.source_kind or "target"
+        source = target.gitlab.selection_source(target.source_kind or "target")
         if getattr(workflow.args, target_kind, None):
             source = f"{source};argv:--{target_kind}"
         super().__init__(

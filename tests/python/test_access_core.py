@@ -100,22 +100,25 @@ def _load_target(
     *,
     required_surfaces: Optional[tuple[str, ...]] = None,
     optional_surfaces: tuple[str, ...] = (),
+    gitlab_profile: Optional[str] = None,
 ) -> Target:
     """Load the nonsecret target with optional surface filtering.
 
     :param path: Fixture target TOML path.
     :param required_surfaces: Provider surfaces to retain during loading.
     :param optional_surfaces: Configured provider surfaces selected when present.
+    :param gitlab_profile: Selected named GitLab profile, or the legacy default.
     :returns: Parsed target used by access checks.
     """
     if required_surfaces is None:
         return import_script_module("lib.python.core.target").load_target(
-            path, optional_surfaces=optional_surfaces
+            path, optional_surfaces=optional_surfaces, gitlab_profile=gitlab_profile
         )
     return import_script_module("lib.python.core.target").load_target(
         path,
         required_surfaces=required_surfaces,
         optional_surfaces=optional_surfaces,
+        gitlab_profile=gitlab_profile,
     )
 
 
@@ -599,11 +602,12 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
     monkeypatch.setattr(
         cli,
         "resolve_project_target",
-        lambda _target, _binding, *, dry_run, required_surfaces, optional_surfaces: (
+        lambda _target, _binding, *, dry_run, required_surfaces, optional_surfaces, gitlab_profile=None: (
             _load_target(
                 target_file,
                 required_surfaces=required_surfaces,
                 optional_surfaces=optional_surfaces,
+                gitlab_profile=gitlab_profile,
             )
         ),
     )

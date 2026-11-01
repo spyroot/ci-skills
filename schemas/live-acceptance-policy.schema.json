@@ -2,12 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/spyroot/ci-skills/blob/main/schemas/live-acceptance-policy.schema.json",
   "title": "Live acceptance receipt policy",
-  "description": "Receipt directories, freshness window, and scheduled re-evaluation for committed live-acceptance receipts.",
+  "description": "Required operation coverage, receipt directories, freshness, and scheduled re-evaluation for committed live-acceptance receipts.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schemaVersion",
     "maxReceiptAgeDays",
+    "requiredOperations",
     "receiptDirectories",
     "historicalDirectory",
     "scheduledCheck",
@@ -17,6 +18,13 @@
     "$schema": {"type": "string", "minLength": 1},
     "schemaVersion": {"const": "1.0"},
     "maxReceiptAgeDays": {"type": "integer", "minimum": 1},
+    "requiredOperations": {
+      "description": "Nonempty operation coverage enforced in targeted and aggregate mode; each key must have an implemented receipt validator.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/requiredOperation"}
+    },
     "receiptDirectories": {
       "type": "array",
       "minItems": 1,
@@ -39,6 +47,19 @@
     "rerunProcedure": {"type": "string", "minLength": 1, "pattern": "\\S"}
   },
   "$defs": {
+    "requiredOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "operation", "action"],
+      "properties": {
+        "kind": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "operation": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "action": {"enum": ["APPLIED", "NO_OP", null]}
+      }
+    },
     "relativePath": {
       "type": "string",
       "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$",

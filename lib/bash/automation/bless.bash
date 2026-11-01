@@ -16,7 +16,7 @@ source "${BASH_SOURCE[0]%/*}/../core/source_graph.bash"
 # the repository root, the index snapshot and the staged-path list
 # (NUL-separated, relative paths). It returns 0 when it passes or has nothing
 # to check, 1 when it fails, and CI_EXIT_BLOCKED when a tool it needs is missing.
-BLESS_CHECKS='whitespace json schemas yaml markdown bash_syntax shell shfmt actionlint gitleaks python endpoints source_cycle runtime_sync'
+BLESS_CHECKS='whitespace json schemas yaml markdown bash_syntax shell shfmt actionlint gitleaks python endpoints portability source_cycle runtime_sync'
 BLESS_FAILED=1
 # yamllint settings, inline as in the standards repository's bless.sh.
 BLESS_YAML_CONFIG='{extends: default, rules: {document-start: disable, line-length: {max: 120}, truthy: disable}}'
@@ -356,6 +356,20 @@ bless_check_endpoints() {
   else
     "$python" "$gate" --root "$root" || return "$BLESS_FAILED"
   fi
+}
+
+# Summary: Inspect executable smoke and test selections in the selected snapshot.
+# Arguments: $1 root; $2 snapshot; $3 NUL path list; $4 interpreter; $5 scope.
+# Stdout: redacted portability findings.
+# Stderr: unavailable gate or source diagnostics.
+# Returns: 0 on success or 1 for an unavailable or failing gate.
+bless_check_portability() {
+  local snap=$2 list=$3 python=$4 gate=$2/gates/gate-ci-skills-portability.py
+  if [[ ! -f $gate ]]; then
+    printf 'Portability gate is missing from the selected snapshot.\n' >&2
+    return "$BLESS_FAILED"
+  fi
+  "$python" "$gate" --root "$snap" --paths-file "$list" || return "$BLESS_FAILED"
 }
 
 # Summary: Reject a source cycle in Bash files in the selected Git view.

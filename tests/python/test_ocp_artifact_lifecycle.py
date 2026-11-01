@@ -720,6 +720,105 @@ def _caller_input(tmp_path: Path, document: JSONObject) -> NATIVE.NativeNodeInpu
     return NATIVE.NativeNodeInput.read(spec=path)
 
 
+@pytest.mark.parametrize("observed_hostname", ("2026-10-30", "worker-01"))
+def test_native_comparison_preserves_unquoted_date_hostname(
+    observed_hostname: str, tmp_path: Path
+) -> None:
+    """A native date-shaped hostname stays text and still detects a wrong name.
+
+    :param observed_hostname: Matching native text or a genuinely different hostname.
+    :param tmp_path: Private directory containing the untouched caller YAML.
+    """
+    mac = "02:00:00:10:00:01"
+    path = tmp_path / "nodes-config.yaml"
+    path.write_text(
+        f"hosts:\n- hostname: 2026-10-30\n  interfaces:\n  - macAddress: {mac}\n",
+        encoding="utf-8",
+    )
+    node_input = NATIVE.NativeNodeInput.read(spec=path)
+    output = {
+        "storage": {
+            "files": [
+                _embedded_file("/etc/assisted/hostconfig/node/mac_addresses", mac),
+                _embedded_file(f"/etc/assisted/hostnames/{mac}", observed_hostname),
+            ]
+        }
+    }
+
+    comparison = ISO_VERIFY.NativeInputComparator.compare(node_input, output, "a" * 64)
+
+    assert comparison["unverified_fields"] == []
+    if observed_hostname == "2026-10-30":
+        assert comparison["status"] == "matched"
+        assert comparison["matched_fields"] == [
+            "hosts[0].interfaces[0].macAddress",
+            "hosts[0].hostname",
+        ]
+        assert "mismatched_fields" not in comparison
+    else:
+        assert comparison["status"] == "mismatch"
+        assert comparison["mismatched_fields"] == ["hosts[0].hostname"]
+
+
+@pytest.mark.parametrize(
+    ("caller_name", "embedded_name", "observed_dhcp"),
+    (
+        ("off", "'off'", "true"),
+        ("'off'", "off", "true"),
+        ("off", "'off'", "false"),
+        ("off", "'off'", "'true'"),
+    ),
+    ids=("caller-off", "embedded-off", "boolean-mismatch", "boolean-string-mismatch"),
+)
+def test_native_comparison_preserves_off_interface_and_boolean_types(
+    caller_name: str, embedded_name: str, observed_dhcp: str, tmp_path: Path
+) -> None:
+    """Native interface names stay text while true DHCP remains a typed boolean.
+
+    :param caller_name: Quoted or unquoted YAML spelling of the caller's interface.
+    :param embedded_name: Opposite spelling in the native NMState output.
+    :param observed_dhcp: Matching boolean, wrong boolean, or wrongly typed text.
+    :param tmp_path: Private directory holding the exact caller network file.
+    """
+    mac = "02:00:00:10:00:01"
+    path = tmp_path / "network-config.yaml"
+    path.write_text(
+        f"interfaces:\n- name: {caller_name}\n  ipv4:\n    dhcp: true\n",
+        encoding="utf-8",
+    )
+    node_input = NATIVE.NativeNodeInput.read(mac_address=mac, network_config=path)
+    output = {
+        "storage": {
+            "files": [
+                _embedded_file(
+                    "/etc/assisted/manifests/nmstateconfig.yaml",
+                    "spec:\n"
+                    "  interfaces:\n"
+                    f"  - name: {embedded_name}\n"
+                    f"    macAddress: {mac}\n"
+                    "  config:\n"
+                    "    interfaces:\n"
+                    f"    - name: {embedded_name}\n"
+                    "      ipv4:\n"
+                    f"        dhcp: {observed_dhcp}\n",
+                )
+            ]
+        }
+    }
+
+    comparison = ISO_VERIFY.NativeInputComparator.compare(node_input, output, "a" * 64)
+
+    assert comparison["unverified_fields"] == []
+    if observed_dhcp == "true":
+        assert comparison["status"] == "matched"
+        assert comparison["matched_fields"] == ["mac_address", "network_config"]
+        assert "mismatched_fields" not in comparison
+    else:
+        assert comparison["status"] == "mismatch"
+        assert comparison["matched_fields"] == ["mac_address"]
+        assert comparison["mismatched_fields"] == ["network_config"]
+
+
 @pytest.mark.parametrize("route", ("mac", "yaml"))
 def test_native_build_verifies_supplied_values_for_the_correct_host(
     route: str,

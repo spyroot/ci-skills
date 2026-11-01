@@ -221,6 +221,11 @@ REQUIRED_CAPABILITY_OPERATIONS: Final = frozenset(
         ("gitlab_merge_request", "update", "APPLIED"),
     }
 )
+SUPPORTED_REQUIRED_OPERATIONS: Final[frozenset[OperationKey]] = (
+    REQUIRED_GITLAB_OPERATIONS
+    | REQUIRED_CAPABILITY_OPERATIONS
+    | {(RECEIPT_KIND, None, None)}
+)
 IMAGE_BUILD_READINESS_SCHEMA: Final = "results/image-build-readiness.schema.json"
 
 
@@ -233,6 +238,7 @@ class AcceptancePolicy(TypedDict):
 
     :param max_receipt_age_days: Whole days after which a receipt is stale.
     :param receipt_directories: Repository-relative directories holding receipts.
+    :param required_operations: Validated operation keys required in every mode.
     :param historical_directory: Repository-relative directory never evaluated.
     :param scheduled_workflow: Workflow that re-evaluates receipts on a schedule.
     :param scheduled_cron: Cron expression declared for that workflow.
@@ -247,6 +253,11 @@ class AcceptancePolicy(TypedDict):
         :type: Sequence[str]
 
         Repository-relative directories holding receipts.
+
+    .. attribute :: required_operations
+        :type: Sequence[OperationKey]
+
+        Validated operation keys required in both targeted and aggregate mode.
 
     .. attribute :: historical_directory
         :type: str
@@ -271,6 +282,7 @@ class AcceptancePolicy(TypedDict):
 
     max_receipt_age_days: int
     receipt_directories: Sequence[str]
+    required_operations: Sequence[OperationKey]
     historical_directory: str
     scheduled_workflow: str
     scheduled_cron: str
@@ -281,14 +293,16 @@ def load_policy(path: Path, schema_path: Path) -> AcceptancePolicy:
     """Read the tracked live-acceptance policy and validate it against its schema.
 
     The JSON Schema owns every field rule; this loader adds only the relation the
-    schema cannot express, that the historical directory is never evaluated.
+    schema cannot express: historical receipts are excluded and required operations
+    must have an implemented validator.
 
     :param path: Policy file selected by the caller or the repository default.
     :param schema_path: Schema file that defines the policy document.
     :returns: Validated freshness window, receipt directories, and schedule.
     :raises AcceptanceError: If the policy or schema is missing or unreadable (each
         failure names its own file), the schema is invalid, the policy violates the
-        schema, or the historical directory is also a receipt directory.
+        schema, the historical directory is also a receipt directory, or a required
+        operation has no implemented validator.
     """
     if not path.is_file():
         raise AcceptanceError(f"policy_missing:{path}")
@@ -314,10 +328,21 @@ def load_policy(path: Path, schema_path: Path) -> AcceptancePolicy:
     historical = str(document["historicalDirectory"])
     if historical in receipt_directories:
         raise AcceptanceError("policy_invalid:historicalDirectory")
+    required_operations: tuple[OperationKey, ...] = tuple(
+        (
+            str(entry["kind"]),
+            str(entry["operation"]) if entry["operation"] is not None else None,
+            str(entry["action"]) if entry["action"] is not None else None,
+        )
+        for entry in document["requiredOperations"]
+    )
+    if any(key not in SUPPORTED_REQUIRED_OPERATIONS for key in required_operations):
+        raise AcceptanceError("policy_invalid:requiredOperations")
     scheduled = document["scheduledCheck"]
     return {
         "max_receipt_age_days": int(document["maxReceiptAgeDays"]),
         "receipt_directories": receipt_directories,
+        "required_operations": required_operations,
         "historical_directory": historical,
         "scheduled_workflow": str(scheduled["workflow"]),
         "scheduled_cron": str(scheduled["cron"]),
@@ -1393,6 +1418,36 @@ class AcceptanceReview:
                     f"{applied_name}:{noop_name}:repeat_readback_mismatch"
                 )
 
+    def required_coverage(self, required_operations: Sequence[OperationKey]) -> None:
+        """Require policy coverage from receipts that passed their full validators.
+
+        :param required_operations: Nonempty validated operation keys from policy.
+        """
+        if not required_operations or any(
+            key not in SUPPORTED_REQUIRED_OPERATIONS for key in required_operations
+        ):
+            self.problems.append("policy_invalid:requiredOperations")
+            return
+        accepted_operations: set[OperationKey] = set()
+        for name in self.accepted:
+            receipt = self.receipts.get(name, self.setup.get(name, {}))
+            kind = receipt.get("kind")
+            operation = receipt.get("operation")
+            action = receipt.get("result_action")
+            if (
+                isinstance(kind, str)
+                and (operation is None or isinstance(operation, str))
+                and (action is None or isinstance(action, str))
+            ):
+                accepted_operations.add((kind, operation, action))
+        for kind, operation, action in sorted(
+            set(required_operations) - accepted_operations,
+            key=lambda entry: tuple(str(value) for value in entry),
+        ):
+            self.problems.append(
+                f"coverage_missing:{kind}:{operation or 'check'}:{action or 'check'}"
+            )
+
     def result(self) -> AcceptanceResult:
         """Serialize the accumulated acceptance outcome without changing receipts.
 
@@ -1677,6 +1732,7 @@ def evaluate(
     *,
     max_age_days: int,
     aggregate: bool = True,
+    required_operations: Optional[Sequence[OperationKey]] = None,
 ) -> AcceptanceResult:
     """Compare action receipts with the initial authenticated runtime setup.
 
@@ -1685,7 +1741,9 @@ def evaluate(
     :param skill_root: Candidate skill tree used for digest comparison.
     :param now: Reference time for freshness, or None to read the current UTC time.
     :param max_age_days: Declared maximum receipt age from the acceptance policy.
-    :param aggregate: Require the full operation set; False checks selected receipts only.
+    :param aggregate: Require the full operation set in addition to policy coverage.
+    :param required_operations: Policy keys required in either mode; None preserves
+        legacy programmatic evaluation without policy. The CLI always supplies them.
     :returns: Acceptance status, accepted receipts, and stable problem reasons.
     :raises ImportError: If the shared provenance module cannot be loaded.
     :raises OSError: If a candidate source file cannot be read for its digest.
@@ -1711,6 +1769,8 @@ def evaluate(
             review.problems.extend(problems)
             if not problems:
                 review.accepted.append(name)
+    if required_operations is not None:
+        review.required_coverage(required_operations)
     result = review.result()
     result["mode"] = "aggregate" if aggregate else "targeted"
     revisions = {
@@ -1750,7 +1810,7 @@ def main() -> int:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="require all declared operation coverage (default); --no-aggregate "
-        "checks only the explicit --receipts directory",
+        "checks the explicit --receipts directory; both require policy coverage",
     )
     cli.add_argument(
         "--policy",
@@ -1818,6 +1878,7 @@ def main() -> int:
                 skill_path,
                 max_age_days=policy["max_receipt_age_days"],
                 aggregate=args.aggregate,
+                required_operations=policy["required_operations"],
             )
     except (AcceptanceError, OSError, ValueError, TypeError) as exc:
         data = {

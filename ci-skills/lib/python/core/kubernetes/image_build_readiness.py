@@ -233,6 +233,7 @@ class ImageBuildReadiness:
             self.args.binding,
             dry_run=mode == ProbeMode.DRY_RUN,
             required_surfaces=("kubernetes",),
+            gitlab_profile=getattr(self.args, "gitlab_profile", None),
         )
         if mode != ProbeMode.DRY_RUN:
             target = bind_sources(target, revision=self.args.revision)

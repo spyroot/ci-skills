@@ -69,12 +69,14 @@ def _args(
     *,
     apply: bool = False,
     dry_run: bool = False,
+    gitlab_profile: Optional[str] = None,
 ) -> Namespace:
     """Build complete manager arguments without invoking a public parser.
 
     :param action: Manager ``deploy`` or ``delete`` action.
     :param apply: Whether mutation callbacks should be composed.
     :param dry_run: Whether preparation must defer credential reads.
+    :param gitlab_profile: Default or explicitly selected named GitLab profile.
     :returns: Namespace containing the manager fields used by production code.
     """
     return Namespace(
@@ -84,6 +86,7 @@ def _args(
         confirm_plan="unit-confirmation" if apply else None,
         description=RUNNER_DESCRIPTION,
         dry_run=dry_run,
+        gitlab_profile=gitlab_profile,
         group=None,
         image=IMAGE if action == "deploy" else None,
         kind="gitlab_runner_manager",
@@ -235,16 +238,23 @@ def test_token_binding_hashes_shared_reader_value_without_exposing_it(
     assert PRIVATE_TOKEN not in json.dumps(bound.document())
 
 
+@pytest.mark.parametrize(
+    "gitlab_profile", (None, "public"), ids=("default-profile", "named-profile")
+)
 def test_offline_prepare_defers_provider_and_runner_token_reads(
     monkeypatch: pytest.MonkeyPatch,
+    gitlab_profile: Optional[str],
 ) -> None:
     """Prepare an offline plan without binding providers or reading the token.
 
     :param monkeypatch: Pytest patch helper for provider and token boundaries.
+    :param gitlab_profile: Profile forwarded without binding live credentials.
     :returns: None; assertions prove offline preparation is noncredentialed.
     """
-    action = ACTION.GitLabRunnerManagerAction(_args(dry_run=True))
-    calls: list[tuple[bool, tuple[str, ...]]] = []
+    action = ACTION.GitLabRunnerManagerAction(
+        _args(dry_run=True, gitlab_profile=gitlab_profile)
+    )
+    calls: list[tuple[bool, tuple[str, ...], Optional[str]]] = []
 
     def resolve_target(
         target: str,
@@ -252,6 +262,7 @@ def test_offline_prepare_defers_provider_and_runner_token_reads(
         *,
         dry_run: bool,
         required_surfaces: Sequence[str],
+        gitlab_profile: Optional[str],
     ) -> TARGET.Target:
         """Record offline target selection without touching a provider.
 
@@ -259,11 +270,12 @@ def test_offline_prepare_defers_provider_and_runner_token_reads(
         :param binding: Optional project binding path.
         :param dry_run: Expected offline selection mode.
         :param required_surfaces: Provider declarations required by deploy.
+        :param gitlab_profile: Exact profile received from the manager arguments.
         :returns: Finite unit target.
         """
         assert target == "/unit/target.toml"
         assert binding is None
-        calls.append((dry_run, tuple(required_surfaces)))
+        calls.append((dry_run, tuple(required_surfaces), gitlab_profile))
         return _target()
 
     def unexpected(*args: object, **kwargs: object) -> None:
@@ -282,7 +294,7 @@ def test_offline_prepare_defers_provider_and_runner_token_reads(
 
     action.prepare()
 
-    assert calls == [(True, ("gitlab", "kubernetes", "harbor"))]
+    assert calls == [(True, ("gitlab", "kubernetes", "harbor"), gitlab_profile)]
     assert isinstance(action.runner_token, TOKEN.DeferredRunnerToken)
     assert action.runner_token.path == Path("/unit/runner.token")
     assert action.candidate_scope == RUN_SCOPE.RunScope(RUN_ID, NAMESPACE, False)

@@ -482,7 +482,10 @@ class GitLabWorkflow:
         self.mode = _workflow_mode(args)
         self.state.failure_source = "gitlab_action"
         target, source = resolve_gitlab_target(
-            args.target, args.binding, dry_run=self.mode == "offline"
+            args.target,
+            args.binding,
+            dry_run=self.mode == "offline",
+            gitlab_profile=getattr(args, "gitlab_profile", None),
         )
         self.target: GitLabOperationTarget = target
         self.state.plan = make_plan(args.kind, args, target, source)

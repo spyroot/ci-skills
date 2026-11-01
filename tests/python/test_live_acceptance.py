@@ -1315,6 +1315,47 @@ def test_committed_policy_matches_its_schema_and_repository_layout() -> None:
         ("maxReceiptAgeDays", 0, "policy_invalid:maxReceiptAgeDays", True),
         ("maxReceiptAgeDays", True, "policy_invalid:maxReceiptAgeDays", True),
         ("maxReceiptAgeDays", 30.5, "policy_invalid:maxReceiptAgeDays", True),
+        ("requiredOperations", [], "policy_invalid:requiredOperations", True),
+        (
+            "requiredOperations",
+            [
+                {"kind": "access_check", "operation": None, "action": None},
+                {"kind": "access_check", "operation": None, "action": None},
+            ],
+            "policy_invalid:requiredOperations",
+            True,
+        ),
+        (
+            "requiredOperations",
+            [{"kind": "unimplemented", "operation": None, "action": None}],
+            "policy_invalid:requiredOperations",
+            False,
+        ),
+        (
+            "requiredOperations",
+            [{"kind": "access_check", "operation": "unimplemented", "action": None}],
+            "policy_invalid:requiredOperations",
+            False,
+        ),
+        (
+            "requiredOperations",
+            [{"kind": "access_check", "operation": None}],
+            "policy_invalid:requiredOperations",
+            True,
+        ),
+        (
+            "requiredOperations",
+            [
+                {
+                    "kind": "access_check",
+                    "operation": None,
+                    "action": None,
+                    "extra": True,
+                }
+            ],
+            "policy_invalid:requiredOperations",
+            True,
+        ),
         ("receiptDirectories", [], "policy_invalid:receiptDirectories", True),
         ("receiptDirectories", ["a", "a"], "policy_invalid:receiptDirectories", True),
         ("receiptDirectories", ["../x"], "policy_invalid:receiptDirectories", True),
@@ -1854,3 +1895,182 @@ def test_targeted_gitlab_actions_and_aggregate_require_delivery_readback(
     missing = _evaluate(setup, complete)
     assert missing["status"] == "BLOCKED"
     assert f"{kind}:{operation}:APPLIED:receipt_missing" in missing["problems"]
+
+
+@pytest.fixture(scope="module")
+def policy_coverage_baseline() -> str:
+    """Reuse complete receipts as an immutable baseline for coverage cases.
+
+    :returns: JSON text that each case decodes into its own mutable copy.
+    """
+    return json.dumps(_complete_receipts(_access_setup()), sort_keys=True)
+
+
+@pytest.mark.parametrize("aggregate", (False, True), ids=("targeted", "aggregate"))
+def test_policy_coverage_accepts_validated_behavior_in_both_modes(
+    policy_coverage_baseline: str, aggregate: bool
+) -> None:
+    """Keep full validated behavior acceptable with required policy coverage.
+
+    :param policy_coverage_baseline: Immutable complete-receipt fixture.
+    :param aggregate: Targeted or full historical coverage evaluation.
+    :returns: None; assertions prove adding policy requirements preserves success.
+    """
+    receipts = json.loads(policy_coverage_baseline)
+    setup = {name: receipts[name] for name in ("access.json", "gitlab-access.json")}
+    required = (("access_check", None, None), ("image_build_readiness", "probe", None))
+
+    result = ACCEPTANCE.evaluate(
+        setup,
+        receipts,
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=aggregate,
+        required_operations=required,
+    )
+
+    assert result["status"] == "PASS", result["problems"]
+    assert set(result["accepted"]) == set(receipts)
+    assert json.dumps(receipts, sort_keys=True) == policy_coverage_baseline
+
+
+@pytest.mark.parametrize("aggregate", (False, True), ids=("targeted", "aggregate"))
+@pytest.mark.parametrize(
+    ("failure", "receipt_problem"),
+    (
+        ("missing", None),
+        ("functional-digest", "podman-probe.json:functional_digest_mismatch"),
+        ("failed-status", "podman-probe.json:status_not_pass"),
+        ("cleanup", "podman-probe.json:cleanup_unproven"),
+    ),
+)
+def test_rejected_behavior_receipt_cannot_satisfy_policy_coverage(
+    policy_coverage_baseline: str,
+    aggregate: bool,
+    failure: str,
+    receipt_problem: Optional[str],
+) -> None:
+    """Reject one receipt invariant without counting its declared operation key.
+
+    :param policy_coverage_baseline: Immutable valid baseline decoded per case.
+    :param aggregate: Targeted or full historical coverage evaluation.
+    :param failure: Single evidence invariant removed or invalidated.
+    :param receipt_problem: Expected rejection reason when a receipt is present.
+    :returns: None; assertions prove coverage counts only fully accepted receipts.
+    """
+    receipts = json.loads(policy_coverage_baseline)
+    setup = {name: receipts[name] for name in ("access.json", "gitlab-access.json")}
+    if failure == "missing":
+        del receipts["podman-probe.json"]
+    elif failure == "functional-digest":
+        receipts["podman-probe.json"]["skill"]["functional_digest"] = "b" * 64
+    elif failure == "failed-status":
+        receipts["podman-probe.json"]["status"] = "BLOCKED"
+    else:
+        receipts["podman-probe.json"]["cleanup"]["resources"] = []
+
+    result = ACCEPTANCE.evaluate(
+        setup,
+        receipts,
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=aggregate,
+        required_operations=(("image_build_readiness", "probe", None),),
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert "podman-probe.json" not in result["accepted"]
+    assert "coverage_missing:image_build_readiness:probe:check" in result["problems"]
+    if receipt_problem is not None:
+        assert receipt_problem in result["problems"]
+
+
+def test_access_only_receipts_do_not_prove_required_behavior() -> None:
+    """Keep a valid access receipt distinct from an operation's behavioral proof.
+
+    :returns: None; assertions verify an access-only targeted selection is blocked.
+    """
+    receipt = _access_setup()["access.json"]
+
+    result = ACCEPTANCE.evaluate(
+        {},
+        {"access.json": receipt},
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=False,
+        required_operations=(
+            ("access_check", None, None),
+            ("image_build_readiness", "probe", None),
+        ),
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert result["accepted"] == ["access.json"]
+    assert result["problems"] == ["coverage_missing:image_build_readiness:probe:check"]
+
+
+@pytest.mark.parametrize(
+    "behavior_present", (True, False), ids=("complete", "access-only")
+)
+def test_cli_no_aggregate_cannot_bypass_required_behavior(
+    policy_coverage_baseline: str,
+    behavior_present: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Enforce the selected policy through the real targeted CLI adapter.
+
+    :param policy_coverage_baseline: Shared complete baseline copied for this run.
+    :param behavior_present: Whether the single required behavioral proof is present.
+    :param tmp_path: Isolated policy, schema, and receipt directory.
+    :param monkeypatch: Fixture selecting CLI arguments without external commands.
+    :param capsys: Fixture capturing the CLI JSON result.
+    :returns: None; assertions verify targeted mode cannot weaken policy coverage.
+    """
+    policy = _write_policy(tmp_path, MAX_AGE_DAYS)
+    document = json.loads(policy.read_text(encoding="utf-8"))
+    document["requiredOperations"] = [
+        {"kind": "access_check", "operation": None, "action": None},
+        {"kind": "image_build_readiness", "operation": "probe", "action": None},
+    ]
+    policy.write_text(json.dumps(document), encoding="utf-8")
+    receipts = json.loads(policy_coverage_baseline)
+    directory = tmp_path / "selected"
+    directory.mkdir()
+    names = (
+        ("access.json", "podman-probe.json") if behavior_present else ("access.json",)
+    )
+    for name in names:
+        receipt = receipts[name]
+        receipt["captured_at"] = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+        (directory / name).write_text(json.dumps(receipt), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "check_live_acceptance.py",
+            "--root",
+            str(tmp_path),
+            "--skill",
+            str(SKILL_ROOT),
+            "--no-aggregate",
+            "--receipts",
+            str(directory),
+            "--json",
+        ],
+    )
+
+    code = ACCEPTANCE.main()
+    result = json.loads(capsys.readouterr().out)
+
+    assert code == (0 if behavior_present else 2)
+    assert result["mode"] == "targeted"
+    assert result["status"] == ("PASS" if behavior_present else "BLOCKED")
+    assert "access.json" in result["accepted"]
+    assert (
+        "coverage_missing:image_build_readiness:probe:check" in result["problems"]
+    ) is not behavior_present

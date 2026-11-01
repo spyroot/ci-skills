@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/ci_skills_portability.schema.json",
+  "title": "Executable smoke and test portability result",
+  "description": "Redacted results from the portability check over the existing blessing snapshot and selected paths.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "status", "checked_files", "findings"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "kind": {"const": "ci_skills_portability"},
+    "status": {"enum": ["PASS", "FAIL"]},
+    "checked_files": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "line", "rule", "selector"],
+        "properties": {
+          "source": {"type": "string", "minLength": 1},
+          "line": {"type": "integer", "minimum": 0},
+          "rule": {
+            "enum": ["fixed_selector", "source_budget_exceeded", "source_parse_error", "source_unreadable", "path_invalid"]
+          },
+          "selector": {"enum": ["host", "repository", "project", "cluster", "credential", "registry", "source"]}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}},
+      "then": {"properties": {"findings": {"maxItems": 0}}},
+      "else": {"properties": {"findings": {"minItems": 1}}}
+    }
+  ]
+}

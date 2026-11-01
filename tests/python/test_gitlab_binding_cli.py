@@ -38,7 +38,8 @@ def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     bound = project / "bound-target.toml"
     bound.write_text(
-        '[gitlab]\nurl = "https://bound.example.test"\nproject = "team/bound"\n',
+        '[gitlab]\nurl = "https://bound.example.test"\nproject = "team/bound"\n'
+        '[gitlab.com]\nurl = "https://bound.example.test"\nproject = "team/profile"\n',
         encoding="utf-8",
     )
     binding = project / "binding.toml"
@@ -55,11 +56,12 @@ def _selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return binding
 
 
-def _invoke(kind: str, selector: Sequence[str]) -> int:
+def _invoke(kind: str, selector: Sequence[str], *, project: str = "team/bound") -> int:
     """Call one GitLab entrypoint with the selected binding arguments.
 
     :param kind: Action, access, pipeline, or job command to invoke.
-    :param selector: Explicit ``--binding`` tokens or empty env-selector case.
+    :param selector: Explicit binding and profile options for the selected case.
+    :param project: Project path used to build the synthetic job URL.
     :returns: Command exit code.
     """
     if kind == "action":
@@ -71,7 +73,7 @@ def _invoke(kind: str, selector: Sequence[str]) -> int:
     args = JOB.build_parser().parse_args(
         [
             "--job-url",
-            "https://bound.example.test/team/bound/-/jobs/123",
+            f"https://bound.example.test/{project}/-/jobs/123",
             "--dry-run",
             "--json",
             *selector,
@@ -82,9 +84,11 @@ def _invoke(kind: str, selector: Sequence[str]) -> int:
 
 @pytest.mark.parametrize("kind", ("action", "access", "pipeline", "job"))
 @pytest.mark.parametrize("selection", ("explicit", "environment"))
+@pytest.mark.parametrize("named_profile", (False, True), ids=("default", "named"))
 def test_gitlab_entrypoint_uses_selected_binding_over_project_target(
     kind: str,
     selection: str,
+    named_profile: bool,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -93,6 +97,7 @@ def test_gitlab_entrypoint_uses_selected_binding_over_project_target(
 
     :param kind: GitLab entrypoint whose dry-run selection is checked.
     :param selection: Explicit flag or environment binding tier.
+    :param named_profile: Whether to select the named table inside the bound target.
     :param tmp_path: Scratch project with ambient and bound targets.
     :param monkeypatch: Pytest fixture setting cwd and selected binding.
     :param capsys: Pytest fixture capturing the machine report.
@@ -109,27 +114,31 @@ def test_gitlab_entrypoint_uses_selected_binding_over_project_target(
         source = "env:K8S_ADMIN_DIAGNOSTICS_BINDING"
         monkeypatch.setenv("K8S_ADMIN_DIAGNOSTICS_BINDING", str(binding))
 
-    code = _invoke(kind, selector)
+    project = "team/profile" if named_profile else "team/bound"
+    if named_profile:
+        selector.extend(["--gitlab-profile", "com"])
+    code = _invoke(kind, selector, project=project)
     evidence = json.loads(capsys.readouterr().out)
 
     assert code == 0
     assert evidence["status"] == "DRY_RUN"
-    assert evidence["target_source"] == (
-        f"{source} -> binding:{binding.resolve()}"
-        if kind != "action"
-        else f"{source} -> binding:{binding.resolve()};target:gitlab.project"
-    )
+    expected_source = f"{source} -> binding:{binding.resolve()}"
+    if named_profile:
+        expected_source += ';argv:--gitlab-profile="com"'
+    if kind == "action":
+        expected_source += ";target:gitlab.project"
+    assert evidence["target_source"] == expected_source
     if kind in {"action", "access"}:
-        assert evidence["target"]["reference"] == "team/bound"
+        assert evidence["target"]["reference"] == project
         assert evidence["target_file"] == str(
             (binding.parent / "bound-target.toml").resolve()
         )
     elif kind == "pipeline":
         assert evidence["target"] == "https://bound.example.test"
-        assert evidence["filters"]["project"] == "team/bound"
+        assert evidence["filters"]["project"] == project
     else:
         assert evidence["target"] == "https://bound.example.test"
-        assert evidence["access"]["target"]["reference"] == "team/bound"
+        assert evidence["access"]["target"]["reference"] == project
 
 
 def test_missing_binding_blocks_without_falling_back_to_project_target(
