@@ -366,7 +366,7 @@ class NativeInputComparator:
         :raises TypeError: A nonempty document is not an object.
         """
         result: list[Mapping[str, object]] = []
-        for document in yaml.safe_load_all(content):
+        for document in yaml.load_all(content, Loader=BuildConfigLoader):
             if document is None:
                 continue
             if not isinstance(document, Mapping):
