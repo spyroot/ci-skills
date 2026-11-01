@@ -154,7 +154,8 @@ repository where you run the installer.
 When `glab` is missing, it installs the declared package with Homebrew on macOS or `apt-get`, `dnf`, or `yum` on Linux.
 If Homebrew is missing, the installer points to its installation instructions. The package's
 [SKILL.md](ci-skills/SKILL.md) routes agent requests to its tools.
-Agent lifecycle hooks are not installed yet; their short [delivery design](docs/skill-session-hook.md) explains how
+Agent lifecycle hooks are not installed yet; their short
+[delivery design](docs/exec-plans/active/skill-session-hook.md) explains how
 Codex and Claude can show CI Skills activity when an agent calls an installed command.
 
 The repository's [`toolchain-dependencies.json`](toolchain-dependencies.json) declares the `agent` profile and package

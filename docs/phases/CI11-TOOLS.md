@@ -1335,7 +1335,7 @@ that no source script performs; it is built to the sentence and nothing more.
   `get-rhcos-iso.sh:67`; `gitlab_util.sh:1586-1607` even POSTs a preview
   pipeline); here the offline default run is `DRY_RUN` (no API call) and the
   source's live read-only plan becomes `--live-plan` with status `PLANNED`
-  (`docs/gitlab-toolbelt-plan.md`, "One result contract").
+  (`docs/exec-plans/active/gitlab-toolbelt-plan.md`, "One result contract").
 - Status and exit codes collapse to the one table: the source's `READY` maps
   to `PASS`, `WOULD_CHANGE` to `DRY_RUN` or `PLANNED`, source 1 to `PARTIAL`
   or `BLOCKED`, every failure class to `BLOCKED` with the class kept as
@@ -1605,7 +1605,7 @@ status mapping is in the cross-cutting adaptations above.
   `automation/lib/debugger/gitlab_env_state.bash`, `scripts/ci/{cluster-access,deployment-gate,k8s-test,static-gate}.sh`
   (the source repo's CI contracts and adapters).
 - The source README's policies (secrets never on argv, exact-title match,
-  read-back as the evidence) are already this skill's: `docs/gitlab-toolbelt-plan.md`.
+  read-back as the evidence) are already this skill's: `docs/exec-plans/active/gitlab-toolbelt-plan.md`.
 
 ### Source rows: toolbox and Harbor (inventory of 2026-10-06)
 
