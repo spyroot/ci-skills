@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-11-01T03:06:13.539204+00:00",
+  "captured_at": "2026-11-01T08:02:38.592862+00:00",
   "cleanup": {
     "failures": [],
     "status": "PASS"
@@ -15,7 +15,7 @@
   "kind": "gitlab_mirror",
   "mutated": true,
   "operation": "sync",
-  "plan_digest": "d83addda6647b4f7cc55aa86856b27ba95bae362492f31bc3468e81eefec1a4c",
+  "plan_digest": "06e20a6178b031fcf128c23805695e05784111c54fdd279f5445128c2cc8fd15",
   "records": [
     {
       "action": "APPLIED",
@@ -47,7 +47,7 @@
       },
       "destination": {
         "host": "github.com",
-        "id": 1441440188,
+        "id": 1441606051,
         "path": "spyroot/test-mirror-push"
       },
       "destination_refs": {
@@ -57,10 +57,10 @@
       "mirror": {
         "auth_method": "password",
         "enabled": true,
-        "id": 12,
+        "id": 14,
         "keep_divergent_refs": true,
         "last_error_present": false,
-        "last_successful_update_at": "2026-11-01T03:06:09.892Z",
+        "last_successful_update_at": "2026-11-01T08:02:34.943Z",
         "only_protected_branches": false,
         "update_status": "finished"
       },
@@ -86,12 +86,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "04c4186223dc48a08fcac30ae4da5a7d5ab07a95422ade340f596fa7574bccba",
-    "file_count": 269,
-    "functional_digest": "8f8f497e686df39bca5da91aca55f6c9feacfeb517a1e2a4151131605de6c4b6",
+    "digest": "1888e2fdb1bb164c9b50b5f51519793417748f3f359dcf39c729fa869b4416cb",
+    "file_count": 274,
+    "functional_digest": "c811040c02fbe8e8992f597ae39402f06031e1ba6e62461daa06cb86306cc6de",
     "revision": {
       "source": "installer_record",
-      "value": "6f9f1da8c13cf0a8cd70e68671234e39d45e360d",
+      "value": "ae47632f2576707f9b830061f0e402afeb71b03f",
       "verified": true
     }
   },
@@ -102,5 +102,5 @@
   },
   "target": "https://gitlab.dcloud.run",
   "target_source": "user",
-  "tested_revision": "6f9f1da8c13cf0a8cd70e68671234e39d45e360d"
+  "tested_revision": "ae47632f2576707f9b830061f0e402afeb71b03f"
 }

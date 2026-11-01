@@ -141,7 +141,11 @@ def test_chain_emits_schema_valid_runner_delivery_or_classified_failure(
             if record["callback"] == "DeployManagerRunner"
         )
         assert proof["verified"] is True
-        assert proof["namespace"] == CALLER_NAMESPACE
+        assert (
+            proof["namespace"]
+            == output["namespace"]
+            == output["plan"]["runner"]["run_scope"]["namespace"]
+        )
         assert proof["image"] == TOOLBOX_IMAGE
         assert proof["pods"]
         assert proof["resources"]

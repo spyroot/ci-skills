@@ -1,6 +1,6 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-11-01T07:25:36.680539+00:00",
+  "captured_at": "2026-11-01T08:04:36.244076+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
@@ -22,7 +22,7 @@
       "namespace": "openshift-storage",
       "osd_count": 12,
       "pod_count": 15,
-      "readback_sha256": "f06e414099f86d0b6762b003a72ebf802dcc68ae4180272531fb4bdb3b8dc1dd",
+      "readback_sha256": "04e1ab5eef56162d65f077f61273c7452615e2e70e985495f77883216267c16e",
       "record_count": 15,
       "status": "PASS"
     },
@@ -35,7 +35,7 @@
       "ciliumnode_count": 10,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "03302ee3239da61a05d7df8bc241da9e381b71dc2f0bdad1fcd49bca09a68c20",
+      "readback_sha256": "6d889baf89a27d8b005807967edea6a6089e818d06954dca5c06825ad664564b",
       "record_count": 10,
       "status": "PASS"
     },
@@ -43,8 +43,8 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "7095527d7b2b24fb9561e12926699662408f558516284092becc81ec2dfdf89f",
-      "record_count": 919,
+      "readback_sha256": "5e806b4d2a2772686618326fe96de47d4eca60f1a57f5db325fe2bcdcd33402c",
+      "record_count": 1559,
       "status": "PASS"
     },
     "gitlab_job": {
@@ -58,7 +58,7 @@
         "trace_line_count": 59
       },
       "job_url": "https://gitlab.dcloud.run/hott/test/-/jobs/59277",
-      "readback_sha256": "7c70d50136a26e532837fe997dd56a41fd6c4fa25575059b6aaa3f13612c0adc",
+      "readback_sha256": "89737bfc7260fa3f8784ce8a9913884eb1434f774fc4cfd62a09e06184b2c9ed",
       "record_count": 1,
       "status": "PASS"
     },
@@ -66,19 +66,19 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "3547baf18eebbb2b80e1b2620c06643b9db1986654b434b8780eb8d060867549",
+      "readback_sha256": "36e39805cecb3a5351a5c66ea8d543fe886acd27e7c66c24f3cd752902fc2a2f",
       "record_count": 74,
       "resource_counts": {
-        "attachments": 37,
+        "attachments": 40,
         "csidrivers": 5,
         "csinodes": 10,
         "daemonsets": 42,
         "deployments": 211,
         "nodes": 10,
-        "pods": 722,
+        "pods": 728,
         "pvcs": 69,
         "pvs": 74,
-        "replicasets": 480,
+        "replicasets": 481,
         "statefulsets": 15,
         "storageclasses": 9
       },
@@ -94,12 +94,12 @@
       "commit": null,
       "source": null
     },
-    "digest": "e9cc2dc87458e7c9de53f4ad9bf95311a4f7b02558b56a3e3797ae3ea99dbf46",
-    "file_count": 253,
-    "functional_digest": "fe104dc56a5cd6f277fb5e3f782ca805052e78c1a5e3410b080ff0264fdddf6f",
+    "digest": "1888e2fdb1bb164c9b50b5f51519793417748f3f359dcf39c729fa869b4416cb",
+    "file_count": 274,
+    "functional_digest": "c811040c02fbe8e8992f597ae39402f06031e1ba6e62461daa06cb86306cc6de",
     "revision": {
       "source": "installer_record",
-      "value": "f0a3530b2e47234abd43bf2806153702a2f56a0f",
+      "value": "ae47632f2576707f9b830061f0e402afeb71b03f",
       "verified": true
     }
   },
@@ -118,7 +118,7 @@
       ],
       "reason": null,
       "status": "PASS",
-      "target": "github.com/spyroot/ci-skills"
+      "target": "github.com/spyroot/test-self-runner"
     },
     "gitlab": {
       "credential_source": "file:path:29f247d18d3c",
@@ -172,16 +172,16 @@
       "target": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin -> https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "target_file": "path:9ca8ac571f03",
-  "target_selection": "env:CI_SKILLS_TARGET -> file:path:9ca8ac571f03",
+  "target_file": "path:052ae1c8f2b9",
+  "target_selection": "env:CI_SKILLS_TARGET -> file:path:052ae1c8f2b9",
   "target_source": "env:CI_SKILLS_TARGET",
   "targets": {
-    "github": "github.com/spyroot/ci-skills",
+    "github": "github.com/spyroot/test-self-runner",
     "gitlab": "https://gitlab.dcloud.run",
     "kubernetes": {
       "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "f0a3530b2e47234abd43bf2806153702a2f56a0f"
+  "tested_revision": "ae47632f2576707f9b830061f0e402afeb71b03f"
 }
