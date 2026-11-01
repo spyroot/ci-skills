@@ -18,6 +18,7 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Optional
 
@@ -30,6 +31,12 @@ from conftest import (
 )
 from jsonschema import Draft202012Validator
 from test_gitlab_actions import _plan, _tag_output
+from test_gitlab_mirror import (
+    MIRROR_APPLIED_FILE,
+    MIRROR_NO_OP_FILE,
+    OTHER_OID,
+    _mirror_pair_baseline,
+)
 
 ACCEPTANCE: Final = load_module(
     "proposed_check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
@@ -41,6 +48,12 @@ POLICY_FILE: Final = REPO_ROOT / ACCEPTANCE.POLICY_FILE
 POLICY_SCHEMA: Final = REPO_ROOT / ACCEPTANCE.POLICY_SCHEMA_FILE
 POLICY: Final = ACCEPTANCE.load_policy(POLICY_FILE, POLICY_SCHEMA)
 MAX_AGE_DAYS: Final = POLICY["max_receipt_age_days"]
+MIRROR_REQUIRED_OPERATIONS: Final = (
+    ("gitlab_mirror", "sync", "APPLIED"),
+    ("gitlab_mirror", "sync", "NO_OP"),
+)
+MIRROR_PAIR_PREFIX: Final[str] = "gitlab_mirror:sync:"
+MIRROR_CLEANUP_REASON: Final[str] = "smoke_cleanup_unverified"
 
 
 if TYPE_CHECKING:
@@ -445,6 +458,55 @@ def _consumer_action_receipt(
     return PORTABLE.portable(receipt)
 
 
+def _mirror_receipts(
+    setup: Mapping[str, JSONObject],
+) -> MutableMapping[str, JSONObject]:
+    """Bind the shared real-engine pair to this acceptance fixture's candidate.
+
+    :param setup: Existing access evidence supplying candidate identity.
+    :returns: Independent receipt copies; native mirror observations remain unchanged.
+    """
+    receipts = json.loads(_mirror_pair_baseline())
+    access = setup["access.json"]
+    captured = NOW - timedelta(days=1)
+    for offset, name in enumerate((MIRROR_APPLIED_FILE, MIRROR_NO_OP_FILE)):
+        receipt = receipts[name]
+        receipt["captured_at"] = (captured + timedelta(seconds=offset)).isoformat()
+        receipt["execution_host"] = access["execution_host"]
+        receipt["tested_revision"] = access["tested_revision"]
+        for key in ("digest", "functional_digest"):
+            receipt["skill"][key] = access["skill"][key]
+        receipt["skill"]["revision"].update(access["skill"]["revision"])
+    applied_record = receipts[MIRROR_APPLIED_FILE]["records"][0]
+    noop = receipts[MIRROR_NO_OP_FILE]
+    after = {
+        "source": deepcopy(applied_record["source"]),
+        "mirror_absent": True,
+        "destination_http_status": HTTPStatus.NOT_FOUND,
+        "destination_id_http_status": HTTPStatus.NOT_FOUND,
+    }
+    noop["smoke_cleanup"] = {
+        "kind": "gitlab_mirror_smoke_cleanup",
+        "status": "PASS",
+        "captured_at": (captured + timedelta(seconds=len(receipts))).isoformat(),
+        "execution_host": noop["execution_host"],
+        "skill_digest": noop["skill"]["digest"],
+        "tested_revision": noop["tested_revision"],
+        "before": {
+            "source": deepcopy(applied_record["source"]),
+            "destination": deepcopy(applied_record["destination"]),
+            "mirror_id": applied_record["mirror"]["id"],
+        },
+        "delete": {
+            "mirror_http_status": HTTPStatus.NO_CONTENT,
+            "destination_http_status": HTTPStatus.NO_CONTENT,
+        },
+        "after": deepcopy(after),
+        "repeat": {**deepcopy(after), "mutated": False},
+    }
+    return receipts
+
+
 def _complete_receipts(
     setup: Mapping[str, JSONObject],
 ) -> MutableMapping[str, JSONObject]:
@@ -467,6 +529,7 @@ def _complete_receipts(
         receipts[name] = receipt
     receipts["podman-probe.json"] = _podman_receipt(setup)
     receipts.update(_candidate_delivery_receipts(setup))
+    receipts.update(_mirror_receipts(setup))
     for kind, operation in (
         ("gitlab_repository", "commit"),
         ("gitlab_merge_request", "create"),
@@ -2074,3 +2137,142 @@ def test_cli_no_aggregate_cannot_bypass_required_behavior(
     assert (
         "coverage_missing:image_build_readiness:probe:check" in result["problems"]
     ) is not behavior_present
+
+
+@pytest.mark.parametrize("aggregate", (False, True), ids=("targeted", "aggregate"))
+def test_mirror_pair_satisfies_required_behavior_in_both_acceptance_modes(
+    policy_coverage_baseline: str, aggregate: bool
+) -> None:
+    """Accept the actual applied-to-no-op transition with two distinct plan digests.
+
+    :param policy_coverage_baseline: Immutable full evidence set including the real-engine pair.
+    :param aggregate: Targeted or complete historical acceptance mode.
+    :returns: None; both pair actions are recognized from their sole validated records.
+    """
+    receipts = json.loads(policy_coverage_baseline)
+    setup = {name: receipts[name] for name in ("access.json", "gitlab-access.json")}
+
+    result = ACCEPTANCE.evaluate(
+        setup,
+        receipts,
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=aggregate,
+        required_operations=MIRROR_REQUIRED_OPERATIONS,
+    )
+
+    assert result["status"] == "PASS", result["problems"]
+    assert {MIRROR_APPLIED_FILE, MIRROR_NO_OP_FILE} <= set(result["accepted"])
+    assert (
+        receipts[MIRROR_APPLIED_FILE]["plan_digest"]
+        != receipts[MIRROR_NO_OP_FILE]["plan_digest"]
+    )
+
+
+@pytest.mark.parametrize("aggregate", (False, True), ids=("targeted", "aggregate"))
+@pytest.mark.parametrize(
+    ("failure", "reason", "rejected"),
+    (
+        ("missing-applied", "repeat_readback_missing", MIRROR_APPLIED_FILE),
+        ("missing-noop", "repeat_readback_missing", MIRROR_NO_OP_FILE),
+        ("creation-not-proven", "create_if_absent_unproven", None),
+        ("missing-cleanup", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-wrong-id", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-delete-failed", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-source-changed", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-repeat-mutated", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-wrong-revision", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-before-noop", MIRROR_CLEANUP_REASON, None),
+        ("cleanup-future", MIRROR_CLEANUP_REASON, None),
+        ("wrong-action", "repeat_readback_missing", None),
+        ("native-id", "mirror_pair_identity_mismatch", None),
+        ("before-refs", "mirror_pair_continuity_unverified", None),
+        ("same-capture-time", "repeat_readback_order_invalid", None),
+        ("rejected-receipt", "repeat_readback_missing", MIRROR_NO_OP_FILE),
+        ("access-only", "coverage_missing:gitlab_mirror:sync:APPLIED", None),
+    ),
+)
+def test_mirror_acceptance_cannot_substitute_missing_or_contradictory_pair_evidence(
+    policy_coverage_baseline: str,
+    aggregate: bool,
+    failure: str,
+    reason: str,
+    rejected: Optional[str],
+) -> None:
+    """Change one evidence invariant per copied lifecycle and require rejection.
+
+    :param policy_coverage_baseline: Shared immutable complete receipt baseline.
+    :param aggregate: Mode whose mirror-pair enforcement must remain mandatory.
+    :param failure: Single missing proof or contradictory observation for this case.
+    :param reason: Stable pair or coverage reason expected from the acceptance gate.
+    :param rejected: Missing or individually rejected receipt that cannot count as accepted.
+    :returns: None; access, wrong actions, and incompatible pairs cannot close delivery.
+    """
+    receipts = json.loads(policy_coverage_baseline)
+    setup = {name: receipts[name] for name in ("access.json", "gitlab-access.json")}
+    noop = receipts[MIRROR_NO_OP_FILE]
+    if failure == "missing-applied":
+        del receipts[MIRROR_APPLIED_FILE]
+    elif failure == "missing-noop":
+        del receipts[MIRROR_NO_OP_FILE]
+    elif failure == "creation-not-proven":
+        applied_record = receipts[MIRROR_APPLIED_FILE]["records"][0]
+        applied_record["before"]["destination"] = deepcopy(
+            applied_record["destination"]
+        )
+        applied_record["created"]["repository"] = False
+        assert not ACCEPTANCE.check_mirror_pair(receipts[MIRROR_APPLIED_FILE], noop)
+    elif failure == "missing-cleanup":
+        del noop["smoke_cleanup"]
+    elif failure == "cleanup-wrong-id":
+        noop["smoke_cleanup"]["before"]["destination"]["id"] += 1
+    elif failure == "cleanup-delete-failed":
+        noop["smoke_cleanup"]["delete"]["destination_http_status"] = HTTPStatus.OK
+    elif failure == "cleanup-source-changed":
+        noop["smoke_cleanup"]["after"]["source"]["id"] += 1
+    elif failure == "cleanup-repeat-mutated":
+        noop["smoke_cleanup"]["repeat"]["mutated"] = True
+    elif failure == "cleanup-wrong-revision":
+        noop["smoke_cleanup"]["tested_revision"] = OTHER_OID
+    elif failure == "cleanup-before-noop":
+        noop["smoke_cleanup"]["captured_at"] = (
+            datetime.fromisoformat(noop["captured_at"]) - timedelta(seconds=1)
+        ).isoformat()
+    elif failure == "cleanup-future":
+        noop["smoke_cleanup"]["captured_at"] = (NOW + timedelta(days=1)).isoformat()
+    elif failure == "wrong-action":
+        noop["records"][0]["action"] = "APPLIED"
+    elif failure == "native-id":
+        noop["records"][0]["mirror"]["id"] += 1
+    elif failure == "before-refs":
+        noop["records"][0]["before"]["destination_refs"]["sha256"] = "b" * 64
+    elif failure == "same-capture-time":
+        noop["captured_at"] = receipts[MIRROR_APPLIED_FILE]["captured_at"]
+    elif failure == "rejected-receipt":
+        noop["skill"]["functional_digest"] = "b" * 64
+    else:
+        receipts = setup
+
+    result = ACCEPTANCE.evaluate(
+        setup,
+        receipts,
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=aggregate,
+        required_operations=MIRROR_REQUIRED_OPERATIONS,
+    )
+
+    assert result["status"] == "BLOCKED"
+    expected = (
+        reason
+        if reason.startswith("coverage_missing:")
+        else MIRROR_PAIR_PREFIX + reason
+    )
+    assert expected in result["problems"]
+    if rejected is not None:
+        assert rejected not in result["accepted"]
+    if failure == "rejected-receipt":
+        assert f"{MIRROR_NO_OP_FILE}:functional_digest_mismatch" in result["problems"]
+        assert "coverage_missing:gitlab_mirror:sync:NO_OP" in result["problems"]
