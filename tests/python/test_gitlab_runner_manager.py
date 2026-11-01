@@ -295,11 +295,23 @@ def test_manager_workload_binds_scope_node_resources_and_ownership() -> None:
     """
     action = _action()
     document = action.workload().document(action.candidate_scope)
+    name = action.candidate_scope.bounded_name(
+        ACTION.MANAGER_ROLE,
+        limit=ACTION.RUNNER_NAME_LIMIT,
+        prefix=action.repository_identity.name,
+    )
+    assert len(name) <= ACTION.RUNNER_NAME_LIMIT
+    assert RUN_SCOPE.validate_namespace(name) == name
+    assert name != replace(action.candidate_scope, run_id=uuid4().hex).bounded_name(
+        ACTION.MANAGER_ROLE,
+        limit=ACTION.RUNNER_NAME_LIMIT,
+        prefix=action.repository_identity.name,
+    )
 
     assert document == {
         "runner": {
             "namespace": NAMESPACE,
-            "name": action.candidate_scope.name(ACTION.MANAGER_ROLE),
+            "name": name,
             "source_root": "",
             "labels": list(RUNNER_LABELS),
             "timeout": 30,
@@ -810,6 +822,15 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
     scope = RUN_SCOPE.RunScope(RUN_ID, NAMESPACE, False)
     state.found_scopes = (scope,)
     state.resolved_run_id = RUN_ID
+    expected_deployments = {
+        scope.name(ACTION.MANAGER_ROLE),
+        scope.bounded_name(
+            ACTION.MANAGER_ROLE,
+            limit=ACTION.RUNNER_NAME_LIMIT,
+            prefix=action.repository_identity.name,
+        ),
+    }
+    observed_deployments: list[str] = []
 
     class Kubernetes:
         """Read only the selected namespace and potential existing manager."""
@@ -824,10 +845,9 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
             :raises AssertionError: An unrelated object is read.
             """
             if kind == "Deployment":
-                assert (name, namespace) == (
-                    scope.name(ACTION.MANAGER_ROLE),
-                    NAMESPACE,
-                )
+                assert namespace == NAMESPACE
+                assert name in expected_deployments
+                observed_deployments.append(name)
                 return None
             assert (kind, name, namespace) == ("Namespace", NAMESPACE, "")
             return {
@@ -855,6 +875,8 @@ def test_delete_scope_preserves_caller_namespace_without_provider_mutation() -> 
     result = remove.run()
 
     assert selected == {"verified": True, **scope.as_dict()}
+    assert set(observed_deployments) == expected_deployments
+    assert len(observed_deployments) == len(expected_deployments)
     assert state.run_scope == scope
     assert result == {
         "action": "NO_OP",
@@ -1449,7 +1471,10 @@ def test_manager_main_repeat_keeps_identity_plan_and_deployment_no_op(
         for item in repeated["records"]
         if item["callback"] == "OpenManagerRunScope"
     )
-    assert repeated["plan_digest"] == first["plan_digest"]
+    assert repeated["plan_digest"] != first["plan_digest"]
+    code, stable_plan = _manager_cli_report(cluster, capsys, run_id=run_id)
+    assert (code, stable_plan["status"]) == (0, "PLANNED")
+    assert stable_plan["plan_digest"] == repeated["plan_digest"]
     assert repeat_deploy["action"] == "NO_OP"
     assert repeat_deploy["namespace"] == first_deploy["namespace"]
     assert repeat_scope["run_id"] == first_scope["run_id"]

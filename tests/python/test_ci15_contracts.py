@@ -69,6 +69,7 @@ FIELD_MUTATED: Final = "mutated"
 FIELD_ERRORS: Final = "errors"
 FIELD_REASON: Final = "reason"
 PROJECT_ARGUMENT: Final = "--project"
+RUNNER_TYPE_ARGUMENT: Final = "--runner-type"
 TOKEN_OUT_ARGUMENT: Final = "--token-out"
 LIVE_PLAN_ARGUMENT: Final = "--live-plan"
 APPLY_ARGUMENT: Final = "--apply"
@@ -500,6 +501,8 @@ def test_numeric_runner_create_live_plan_refuses_renamed_repository_confirmation
     operation_target = TARGET.GitLabOperationTarget(target.gitlab, target.source_file)
     arguments = [
         CREATE_ACTION,
+        RUNNER_TYPE_ARGUMENT,
+        PROJECT_KIND,
         PROJECT_ARGUMENT,
         str(selected.project_id),
         TOKEN_OUT_ARGUMENT,
