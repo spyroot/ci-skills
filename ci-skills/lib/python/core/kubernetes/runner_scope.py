@@ -112,9 +112,7 @@ def observe_namespace(
                 namespace,
                 source,
                 ownership=ScopeOwnership.OPERATION_OWNED,
-                retention=ScopeRetention.TEMPORARY
-                if purpose == ScopePurpose.BUILD
-                else ScopeRetention.RETAINED,
+                retention=ScopeRetention.RETAINED,
                 cleanup_status=PENDING,
             )
         )
@@ -137,13 +135,7 @@ def observe_namespace(
             if owned
             else ScopeOwnership.BORROWED,
             state=ScopeState.PRESENT,
-            retention=(
-                ScopeRetention.TEMPORARY
-                if purpose == ScopePurpose.BUILD
-                else ScopeRetention.RETAINED
-            )
-            if owned
-            else ScopeRetention.PRESERVED,
+            retention=ScopeRetention.RETAINED if owned else ScopeRetention.PRESERVED,
             cleanup_status=NOT_REQUIRED,
         )
     state.runner_scopes[key] = result

@@ -62,6 +62,10 @@ RUNNER_RESOURCE: Final = "runners/{runner_id}"
 DELETE_IDENTITY_CHANGED: Final = "resource_delete_identity_mismatch"
 HOST_SUFFIX: Final = ".invalid"
 REPOSITORY_SEPARATOR: Final = "/"
+CONFIG_MAP_KIND: Final = "ConfigMap"
+FIELD_DATA: Final = "data"
+FIELD_APP: Final = "app"
+FIELD_ACTION: Final = "action"
 
 
 @pytest.fixture
@@ -473,3 +477,99 @@ def test_github_workflow_binds_deferred_consumers_to_verified_custom_identity(
     )
     assert cluster.objects[selected.namespace_key] == native_namespace
     assert cluster.applied == cluster.deleted == []
+
+
+@pytest.mark.parametrize("preexisting", (False, True), ids=("created", "borrowed"))
+def test_successful_build_namespace_cleanup_preserves_interleaved_consumer(
+    selected_scope: Namespace, preexisting: bool
+) -> None:
+    """Keep a configured build namespace usable by a second application.
+
+    :param selected_scope: Shared baseline identity fields copied for each workflow.
+    :param preexisting: Single initial-state change: namespace already present or absent.
+    """
+    baseline = tuple(vars(selected_scope).items())
+    selected = Namespace(**dict(baseline))
+    cluster = MemoryCluster()
+    if preexisting:
+        cluster.objects[selected.namespace_key] = _namespace(selected, owned=False)
+    workflows = []
+    temporary_resources = []
+    temporary_documents = []
+    for app in (selected.operation, selected.legacy_name):
+        inputs = Namespace(**dict(baseline))
+        inputs.operation = app
+        action = _action(cluster, inputs)
+        action.args.kind = GITHUB_KIND
+        action.args.namespace = None
+        action.args.label = [selected.tag]
+        action.args.runner_root = RUNNER.RUNTIME_ROOT
+        action.spec = SimpleNamespace(app=app, namespace=selected.namespace)
+        action._workload()
+        namespace = WORKFLOWS.EnsureNamespace(action)
+        namespace.bind(action.context)
+        assert namespace.run()[FIELD_VERIFIED] is True
+        resources = RESOURCES.ResourceSet(
+            cluster, selected.namespace, action.runner.operation
+        )
+        document = {
+            FIELD_API_VERSION: API_VERSION,
+            FIELD_KIND: CONFIG_MAP_KIND,
+            FIELD_METADATA: {FIELD_NAME: app},
+            FIELD_DATA: {FIELD_APP: app},
+        }
+        resources.apply(document)
+        workflows.append((action, namespace))
+        temporary_resources.append(resources)
+        temporary_documents.append(document)
+    (first, first_namespace), (second, second_namespace) = workflows
+    first_resources, second_resources = temporary_resources
+    first_key = (CONFIG_MAP_KIND.casefold(), selected.namespace, selected.operation)
+    second_before = cluster.read(
+        CONFIG_MAP_KIND, selected.legacy_name, selected.namespace
+    )
+    namespace_before = cluster.read(
+        NAMESPACE_KIND, selected.namespace, CLUSTER_NAMESPACE
+    )
+    assert namespace_before is not None
+    assert second_before is not None
+    assert first.runner.operation != second.runner.operation
+    assert first.spec.namespace == second.spec.namespace == selected.namespace
+    build_key = NAMESPACES.scope_key(SCOPES.ScopePurpose.BUILD, selected.namespace)
+    first_build = first.context.runner_scopes[build_key]
+    second_build = second.context.runner_scopes[build_key]
+    assert second_build.ownership == SCOPES.ScopeOwnership.BORROWED
+    assert second_build.retention == SCOPES.ScopeRetention.PRESERVED
+    assert first.context.failed is False
+    first_resources.cleanup_created()
+    assert first_key not in cluster.objects
+    assert cluster.deleted == [first_key]
+    remaining = dict(cluster.objects)
+
+    first_namespace.cleanup()
+
+    assert (
+        cluster.read(NAMESPACE_KIND, selected.namespace, CLUSTER_NAMESPACE)
+        == namespace_before
+    ), first_build.document()
+    assert cluster.objects == remaining
+    assert cluster.deleted == [first_key]
+    assert second_namespace.run()[FIELD_VERIFIED] is True
+    assert (
+        cluster.read(CONFIG_MAP_KIND, selected.legacy_name, selected.namespace)
+        == second_before
+    )
+    reused = second_resources.apply(temporary_documents[-1])
+    assert reused[FIELD_ACTION] == STATUS.NO_OP
+    assert reused[FIELD_UID] == second_before[FIELD_METADATA][FIELD_UID]
+    assert first_build.ownership == (
+        SCOPES.ScopeOwnership.BORROWED
+        if preexisting
+        else SCOPES.ScopeOwnership.OPERATION_OWNED
+    )
+    assert first_build.retention == (
+        SCOPES.ScopeRetention.PRESERVED
+        if preexisting
+        else SCOPES.ScopeRetention.RETAINED
+    )
+    assert tuple(vars(selected_scope).items()) == baseline

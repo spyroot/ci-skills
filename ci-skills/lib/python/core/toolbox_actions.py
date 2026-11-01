@@ -63,7 +63,6 @@ from lib.python.core.runner_options import (
 from lib.python.core.runner_scope import (
     ScopeObservation,
     ScopePurpose,
-    ScopeRetention,
     ScopeSource,
     scope_record,
 )
@@ -581,15 +580,7 @@ class EnsureNamespace(K8SCallback[WorkflowAction]):
         """  # noqa: DOC502 - ResourceSet applies and verifies namespace lifecycle.
         for resources in reversed(self._created):
             names = {name for _, name in resources.created}
-            temporary_build = any(
-                scope.namespace in names and scope.retention == ScopeRetention.TEMPORARY
-                for scope in self.state.runner_scopes.values()
-            ) and not any(
-                scope.namespace in names
-                and scope.purpose in (ScopePurpose.RUNNER, ScopePurpose.MANAGER)
-                for scope in self.state.runner_scopes.values()
-            )
-            if self.state.failed or temporary_build:
+            if self.state.failed:
                 expected_uids = {
                     (str(item["kind"]), str(item["name"])): str(item["uid"])
                     for item in resources.evidence
