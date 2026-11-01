@@ -1,11 +1,12 @@
 {
   "blocking_live_checks": [],
-  "captured_at": "2026-10-31T23:27:36.089550+00:00",
+  "captured_at": "2026-11-01T03:09:00.370068+00:00",
   "consuming_project": {
     "commit": null,
     "source": null
   },
   "credential_sources": {
+    "github": "gh-credential-store:github.com",
     "gitlab": "file:path:29f247d18d3c",
     "kubernetes": "target:kubernetes.kubeconfigs"
   },
@@ -21,7 +22,7 @@
       "namespace": "openshift-storage",
       "osd_count": 12,
       "pod_count": 15,
-      "readback_sha256": "03960913864c1a219f93073fd0c5a7b8e363bf558d1033e2d5d7ff2b44a3ce44",
+      "readback_sha256": "6f754a9ded11eddc5d7d09b87edf94fc8fa157ae296afafe1e9ec2de810c5576",
       "record_count": 15,
       "status": "PASS"
     },
@@ -34,7 +35,7 @@
       "ciliumnode_count": 10,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "e3478d66fb3dae9ea06cd009fab1bcb8a9a793be2b40401b4e4506be14a8d5bc",
+      "readback_sha256": "a8d7858cb6b99385cdfe4cdc300a715278d8b59233694ead4f2bd6622d70f754",
       "record_count": 10,
       "status": "PASS"
     },
@@ -42,8 +43,8 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "8a9f00d189c425470ad543ce73c05c368398bbde43be5e238c20b3a3b371cba3",
-      "record_count": 884,
+      "readback_sha256": "93118ea9fc4e51cc287652f52ec952798d291803a7582e19dba8b881a2ea3265",
+      "record_count": 1886,
       "status": "PASS"
     },
     "gitlab_job": {
@@ -57,7 +58,7 @@
         "trace_line_count": 59
       },
       "job_url": "https://gitlab.dcloud.run/hott/test/-/jobs/59277",
-      "readback_sha256": "c44fc6bdd8480ca07c4b551b4e62d2e1387f1b854cbf03f25aaac7c7b83ad61e",
+      "readback_sha256": "d7583c6e8286a2cb41832b9b43caa1dd8aad1efc3fc3b521bf1164c144e171b8",
       "record_count": 1,
       "status": "PASS"
     },
@@ -65,16 +66,16 @@
       "access_proven": true,
       "error_count": 0,
       "errors": [],
-      "readback_sha256": "6f03a73ff3cc024426046cb30eb4787316ccbe675a8904def13cd9aec6bbb598",
+      "readback_sha256": "1949ce93aa516a2cd204c3e23e842e8edc334e21b64680b1c7a038534224cf79",
       "record_count": 74,
       "resource_counts": {
-        "attachments": 37,
+        "attachments": 38,
         "csidrivers": 5,
         "csinodes": 10,
         "daemonsets": 42,
         "deployments": 211,
         "nodes": 10,
-        "pods": 722,
+        "pods": 725,
         "pvcs": 69,
         "pvs": 74,
         "replicasets": 480,
@@ -93,17 +94,32 @@
       "commit": null,
       "source": null
     },
-    "digest": "c69064249e4ed477f0c92dfcba222b00c32f4fb747ddd2f899eecca6bf5b37ed",
-    "file_count": 253,
-    "functional_digest": "e87ae11d944f43b287aa61dc65ffb20ae6ab9afb67794e375b98c593f46b119b",
+    "digest": "04c4186223dc48a08fcac30ae4da5a7d5ab07a95422ade340f596fa7574bccba",
+    "file_count": 269,
+    "functional_digest": "8f8f497e686df39bca5da91aca55f6c9feacfeb517a1e2a4151131605de6c4b6",
     "revision": {
       "source": "installer_record",
-      "value": "ab47e35da074578b286c545c8be6f9edeb48cb66",
+      "value": "6f9f1da8c13cf0a8cd70e68671234e39d45e360d",
       "verified": true
     }
   },
   "status": "PASS",
   "surfaces": {
+    "github": {
+      "credential_source": "gh-credential-store:github.com",
+      "details": null,
+      "identity": "spyroot",
+      "name": "github",
+      "next_step": null,
+      "observed_capability": [
+        "authenticated_host",
+        "identity_read",
+        "repository_read"
+      ],
+      "reason": null,
+      "status": "PASS",
+      "target": "github.com/spyroot/test-mirror-push"
+    },
     "gitlab": {
       "credential_source": "file:path:29f247d18d3c",
       "details": null,
@@ -157,14 +173,15 @@
     }
   },
   "target_file": "path:5e5380df1eda",
-  "target_selection": "env:CI_SKILLS_TARGET -> file:path:5e5380df1eda",
-  "target_source": "env:CI_SKILLS_TARGET",
+  "target_selection": "user:path:5e5380df1eda",
+  "target_source": "user",
   "targets": {
+    "github": "github.com/spyroot/test-mirror-push",
     "gitlab": "https://gitlab.dcloud.run",
     "kubernetes": {
       "context": "default/api-ww-cai-cisco-live-dcloud-local:6443/kube:admin",
       "server": "https://api.ww-cai-cisco-live.dcloud.local:6443"
     }
   },
-  "tested_revision": "ab47e35da074578b286c545c8be6f9edeb48cb66"
+  "tested_revision": "6f9f1da8c13cf0a8cd70e68671234e39d45e360d"
 }

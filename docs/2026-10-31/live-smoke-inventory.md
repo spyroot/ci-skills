@@ -18,7 +18,7 @@ authority. The public-service row uses named profile `[gitlab.com]`, selected wi
 | --- | --- | --- | --- |
 | `test-self-runner` / self-hosted runners | `spyroot/test-self-runner` | dcloud `hott/test-self-runner` | Planned |
 | `test-k8s-agent` / project Agent access | `spyroot/test-k8s-agent` | dcloud `hott/test-k8s-agent` | Planned |
-| `test-mirror-push` / GitLab → GitHub | `spyroot/test-mirror-push` | dcloud `hott/test-mirror-push` | Planned |
+| `test-mirror-push` / GitLab → GitHub | `spyroot/test-mirror-push` | dcloud `hott/test-mirror-push` | Qualified |
 | `test-self-runner` / public GitLab | Reuse runner repository above | GitLab.com `spyroot/test-self-runner` | Planned |
 
 Prepare each pair only when its scenario is ready:
@@ -40,7 +40,8 @@ runners, workflows or webhooks. Recheck those facts immediately before renaming.
 has changed, stop that allocation and reconcile it; do not choose another repository automatically.
 
 After allocation, names and purposes are locked across phases. Record both the old and new name for a rename.
-Missing repositories, changed IDs or unexpected names must stop preparation, not trigger silent recreation.
+Missing retained repositories, changed IDs or unexpected names must stop preparation, not trigger silent recreation.
+The disposable mirror destination is expected absent only after its recorded cleanup.
 Reserve `test-mirror-pull` for later work; do not allocate it for CI-14/CI-15 closure.
 
 ## Protected existing assets
@@ -103,3 +104,12 @@ All listed allocations are authorized for live smoke and behavioral testing with
 | Runtime selection | Target resolver and named profiles | Host/profile isolation | Implemented in PR #129 |
 | Bounded execution | Dispatcher and job limits | Dispatch IDs, limits and pacing | Approved; execution unclaimed |
 | Owned cleanup | Resource lifecycle handling | ID/UID match, absence and repeated cleanup | Required for every run |
+
+## Mirror qualification read-back — 2026-11-01
+
+Candidate `6f9f1da` created private GitHub repository `1441440188` and GitLab mirror `12` for retained GitLab project
+`261`, `hott/test-mirror-push`. Both branch and tag refs matched; a confirmed repeat returned NO_OP without mutation.
+Cleanup removed only those two run-created IDs, proved both absent by independent native reads, and repeated once
+without another deletion. The source and its `main`/`smoke-seed` refs remain present; source CI stays disabled.
+No consumer Actions job or GitLab pipeline was dispatched. Original receipts are selected in
+`tests/acceptance/candidate/`; the NO_OP copy includes separately captured cleanup observations.
