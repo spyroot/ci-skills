@@ -8,7 +8,10 @@ Statuses below describe the recorded delivery; they do not certify a new candida
 
 Each row maps a phase to its ExecPlan, source reconciliation and original gate authority.
 Code was inspected at `ff1fdc8b2fee89486f63f6534be20c784bf119b4`; source presence is distinct from execution proof.
-Phase numbers identify topics, not an implementation dependency order.
+These links organize interface topics; their list order is not an implementation dependency. The
+[capability model](../capability-model.md#architecture-and-dependency-direction) traces the actual command path.
+The [CI11-TOOLS plan](../phases/CI11-TOOLS.md) distinguishes installed commands from remaining delivery; the generated
+[`tools.json`](../../ci-skills/tools.json) is the installed command contract.
 
 | Source phase | ExecPlan | Code present → remaining work | Gates |
 | --- | --- | --- | --- |
