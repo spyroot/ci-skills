@@ -178,7 +178,7 @@ class GitLabManagerAuth(GitLabRunnerManagerCallback[GitLabManagerAuthAction]):
             project=getattr(workflow.args, "project", None),
             group=getattr(workflow.args, "group", None),
         )
-        source = target.source_kind or "target"
+        source = target.gitlab.selection_source(target.source_kind or "target")
         if getattr(workflow.args, target_kind, None):
             source = f"{source};argv:--{target_kind}"
         super().__init__(

@@ -166,6 +166,7 @@ class KeyUse:
     :param path: Dotted target table or key path.
     :param source: Template or Markdown file containing the use.
     :param line: Source line number, or zero when parsed TOML has no line match.
+    :param is_table: Whether the use declares a table rather than a field.
 
     .. attribute :: path
         :type: str
@@ -181,11 +182,17 @@ class KeyUse:
         :type: int
 
         Source line number, or zero when parsed TOML has no line match.
+
+    .. attribute :: is_table
+        :type: bool
+
+        Whether the use declares a table rather than a field.
     """
 
     path: str
     source: str
     line: int
+    is_table: bool = False
 
 
 @dataclass(frozen=True)
@@ -277,9 +284,10 @@ class TargetDocument:
         """Normalize dotted table or key spelling to a contract path.
 
         :param path: TOML path with optional spaces and quoted segments.
-        :returns: Dot-joined path with segment whitespace and quotes removed.
+        :returns: Canonical dotted path retaining quotes needed for exact keys.
         """
-        return ".".join(part.strip().strip("\"'") for part in path.split("."))
+        parts = TargetContract.path_parts(path)
+        return TargetContract.dotted_path(parts) if parts else path
 
     def parsed(self) -> ParsedTarget:
         """Parse active TOML while retaining a syntax error for gate findings.
@@ -317,30 +325,40 @@ class TargetDocument:
                 shown = self._join(header.group("path"))
                 if not header.group("hash"):
                     active = shown
-                found.setdefault(shown, KeyUse(shown, self.source, number))
+                found.setdefault(
+                    shown, KeyUse(shown, self.source, number, is_table=True)
+                )
                 continue
             key = self._KEY.match(line)
             if key:
-                name = (
-                    key.group("dq") or key.group("sq") or self._join(key.group("bare"))
-                )
+                if key.group("dq") is not None:
+                    name = self._join(f'"{key.group("dq")}"')
+                elif key.group("sq") is not None:
+                    name = self._join(f"'{key.group('sq')}'")
+                else:
+                    name = self._join(key.group("bare"))
                 table = active if not key.group("hash") else shown
                 path = f"{table}.{name}" if table else name
                 found.setdefault(path, KeyUse(path, self.source, number))
         # Inline tables, dotted keys and arrays of tables in active TOML are
         # invisible or ambiguous to a line scan; the parsed document names them.
-        for path in self._parsed_paths(self.parsed().document):
-            found.setdefault(path, KeyUse(path, self.source, 0))
+        for path, is_table in self._parsed_paths(self.parsed().document):
+            previous = found.get(path)
+            found[path] = KeyUse(
+                path, self.source, previous.line if previous else 0, is_table=is_table
+            )
         return tuple(found.values())
 
     @classmethod
-    def _parsed_paths(cls, value: TOMLValue, prefix: str = "") -> Iterator[str]:
+    def _parsed_paths(
+        cls, value: TOMLValue, prefix: str = ""
+    ) -> Iterator[tuple[str, bool]]:
         """Walk parsed TOML objects, including arrays and inline tables.
 
         :param value: Parsed TOML mapping, array, or scalar at this level.
         :param prefix: Dotted parent path prepended to each nested key.
-        :yields: Each dotted path named by parsed table or field keys.
-        :ytype: str
+        :yields: Each dotted path and whether it identifies a table.
+        :ytype: tuple[str, bool]
         :raises RecursionError: If supplied containers exceed recursive path-walk limits.
         """  # noqa: DOC502 - Recursive calls can exceed container nesting limits.
         if isinstance(value, Sequence) and not isinstance(value, str):
@@ -350,8 +368,8 @@ class TargetDocument:
         if not isinstance(value, Mapping):
             return
         for name, item in value.items():
-            path = f"{prefix}{name}"
-            yield path
+            path = f"{prefix}{TargetContract.quote_key(name)}"
+            yield path, isinstance(item, Mapping)
             yield from cls._parsed_paths(item, f"{path}.")
 
 
@@ -741,7 +759,7 @@ class EndpointGate:
         :raises RecursionError: If TOML nesting exceeds parsing or path-walk limits.
         """  # noqa: DOC502 - TargetDocument.uses propagates recursion failures.
         for use in document.uses():
-            if not self.contract.declares(use.path):
+            if not self.contract.declares(use.path, table=use.is_table):
                 yield Finding(
                     Rule.UNDECLARED,
                     use.path,
@@ -775,9 +793,15 @@ class EndpointGate:
                 "cannot read the template at the base revision",
             )
             return
-        before = {use.path for use in TargetDocument(self.TEMPLATE, before_text).uses()}
+        before = {
+            self.contract.canonical_path(use.path)
+            for use in TargetDocument(self.TEMPLATE, before_text).uses()
+        }
         for use in template.uses():
-            if self.contract.role(use.path) is Role.VALUE and use.path not in before:
+            if (
+                self.contract.role(use.path) is Role.VALUE
+                and self.contract.canonical_path(use.path) not in before
+            ):
                 yield Finding(
                     Rule.VALUE_INTRODUCED,
                     use.path,

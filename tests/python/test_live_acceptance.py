@@ -30,6 +30,11 @@ from conftest import (
 )
 from jsonschema import Draft202012Validator
 from test_gitlab_actions import _plan, _tag_output
+from test_gitlab_mirror import (
+    MIRROR_APPLIED_FILE,
+    MIRROR_NO_OP_FILE,
+    _mirror_pair_baseline,
+)
 
 ACCEPTANCE: Final = load_module(
     "proposed_check_live_acceptance", REPO_ROOT / "tools" / "check_live_acceptance.py"
@@ -41,6 +46,11 @@ POLICY_FILE: Final = REPO_ROOT / ACCEPTANCE.POLICY_FILE
 POLICY_SCHEMA: Final = REPO_ROOT / ACCEPTANCE.POLICY_SCHEMA_FILE
 POLICY: Final = ACCEPTANCE.load_policy(POLICY_FILE, POLICY_SCHEMA)
 MAX_AGE_DAYS: Final = POLICY["max_receipt_age_days"]
+MIRROR_REQUIRED_OPERATIONS: Final = (
+    ("gitlab_mirror", "sync", "APPLIED"),
+    ("gitlab_mirror", "sync", "NO_OP"),
+)
+MIRROR_PAIR_PREFIX: Final[str] = "gitlab_mirror:sync:"
 
 
 if TYPE_CHECKING:
@@ -445,6 +455,28 @@ def _consumer_action_receipt(
     return PORTABLE.portable(receipt)
 
 
+def _mirror_receipts(
+    setup: Mapping[str, JSONObject],
+) -> MutableMapping[str, JSONObject]:
+    """Bind the shared real-engine pair to this acceptance fixture's candidate.
+
+    :param setup: Existing access evidence supplying candidate identity.
+    :returns: Independent receipt copies; native mirror observations remain unchanged.
+    """
+    receipts = json.loads(_mirror_pair_baseline())
+    access = setup["access.json"]
+    captured = NOW - timedelta(days=1)
+    for offset, name in enumerate((MIRROR_APPLIED_FILE, MIRROR_NO_OP_FILE)):
+        receipt = receipts[name]
+        receipt["captured_at"] = (captured + timedelta(seconds=offset)).isoformat()
+        receipt["execution_host"] = access["execution_host"]
+        receipt["tested_revision"] = access["tested_revision"]
+        for key in ("digest", "functional_digest"):
+            receipt["skill"][key] = access["skill"][key]
+        receipt["skill"]["revision"].update(access["skill"]["revision"])
+    return receipts
+
+
 def _complete_receipts(
     setup: Mapping[str, JSONObject],
 ) -> MutableMapping[str, JSONObject]:
@@ -467,6 +499,7 @@ def _complete_receipts(
         receipts[name] = receipt
     receipts["podman-probe.json"] = _podman_receipt(setup)
     receipts.update(_candidate_delivery_receipts(setup))
+    receipts.update(_mirror_receipts(setup))
     for kind, operation in (
         ("gitlab_repository", "commit"),
         ("gitlab_merge_request", "create"),
@@ -1315,6 +1348,47 @@ def test_committed_policy_matches_its_schema_and_repository_layout() -> None:
         ("maxReceiptAgeDays", 0, "policy_invalid:maxReceiptAgeDays", True),
         ("maxReceiptAgeDays", True, "policy_invalid:maxReceiptAgeDays", True),
         ("maxReceiptAgeDays", 30.5, "policy_invalid:maxReceiptAgeDays", True),
+        ("requiredOperations", [], "policy_invalid:requiredOperations", True),
+        (
+            "requiredOperations",
+            [
+                {"kind": "access_check", "operation": None, "action": None},
+                {"kind": "access_check", "operation": None, "action": None},
+            ],
+            "policy_invalid:requiredOperations",
+            True,
+        ),
+        (
+            "requiredOperations",
+            [{"kind": "unimplemented", "operation": None, "action": None}],
+            "policy_invalid:requiredOperations",
+            False,
+        ),
+        (
+            "requiredOperations",
+            [{"kind": "access_check", "operation": "unimplemented", "action": None}],
+            "policy_invalid:requiredOperations",
+            False,
+        ),
+        (
+            "requiredOperations",
+            [{"kind": "access_check", "operation": None}],
+            "policy_invalid:requiredOperations",
+            True,
+        ),
+        (
+            "requiredOperations",
+            [
+                {
+                    "kind": "access_check",
+                    "operation": None,
+                    "action": None,
+                    "extra": True,
+                }
+            ],
+            "policy_invalid:requiredOperations",
+            True,
+        ),
         ("receiptDirectories", [], "policy_invalid:receiptDirectories", True),
         ("receiptDirectories", ["a", "a"], "policy_invalid:receiptDirectories", True),
         ("receiptDirectories", ["../x"], "policy_invalid:receiptDirectories", True),
@@ -1854,3 +1928,295 @@ def test_targeted_gitlab_actions_and_aggregate_require_delivery_readback(
     missing = _evaluate(setup, complete)
     assert missing["status"] == "BLOCKED"
     assert f"{kind}:{operation}:APPLIED:receipt_missing" in missing["problems"]
+
+
+@pytest.fixture(scope="module")
+def policy_coverage_baseline() -> str:
+    """Reuse complete receipts as an immutable baseline for coverage cases.
+
+    :returns: JSON text that each case decodes into its own mutable copy.
+    """
+    return json.dumps(_complete_receipts(_access_setup()), sort_keys=True)
+
+
+@pytest.mark.parametrize("aggregate", (False, True), ids=("targeted", "aggregate"))
+def test_policy_coverage_accepts_validated_behavior_in_both_modes(
+    policy_coverage_baseline: str, aggregate: bool
+) -> None:
+    """Keep full validated behavior acceptable with required policy coverage.
+
+    :param policy_coverage_baseline: Immutable complete-receipt fixture.
+    :param aggregate: Targeted or full historical coverage evaluation.
+    :returns: None; assertions prove adding policy requirements preserves success.
+    """
+    receipts = json.loads(policy_coverage_baseline)
+    setup = {name: receipts[name] for name in ("access.json", "gitlab-access.json")}
+    required = (("access_check", None, None), ("image_build_readiness", "probe", None))
+
+    result = ACCEPTANCE.evaluate(
+        setup,
+        receipts,
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=aggregate,
+        required_operations=required,
+    )
+
+    assert result["status"] == "PASS", result["problems"]
+    assert set(result["accepted"]) == set(receipts)
+    assert json.dumps(receipts, sort_keys=True) == policy_coverage_baseline
+
+
+@pytest.mark.parametrize("aggregate", (False, True), ids=("targeted", "aggregate"))
+@pytest.mark.parametrize(
+    ("failure", "receipt_problem"),
+    (
+        ("missing", None),
+        ("functional-digest", "podman-probe.json:functional_digest_mismatch"),
+        ("failed-status", "podman-probe.json:status_not_pass"),
+        ("cleanup", "podman-probe.json:cleanup_unproven"),
+    ),
+)
+def test_rejected_behavior_receipt_cannot_satisfy_policy_coverage(
+    policy_coverage_baseline: str,
+    aggregate: bool,
+    failure: str,
+    receipt_problem: Optional[str],
+) -> None:
+    """Reject one receipt invariant without counting its declared operation key.
+
+    :param policy_coverage_baseline: Immutable valid baseline decoded per case.
+    :param aggregate: Targeted or full historical coverage evaluation.
+    :param failure: Single evidence invariant removed or invalidated.
+    :param receipt_problem: Expected rejection reason when a receipt is present.
+    :returns: None; assertions prove coverage counts only fully accepted receipts.
+    """
+    receipts = json.loads(policy_coverage_baseline)
+    setup = {name: receipts[name] for name in ("access.json", "gitlab-access.json")}
+    if failure == "missing":
+        del receipts["podman-probe.json"]
+    elif failure == "functional-digest":
+        receipts["podman-probe.json"]["skill"]["functional_digest"] = "b" * 64
+    elif failure == "failed-status":
+        receipts["podman-probe.json"]["status"] = "BLOCKED"
+    else:
+        receipts["podman-probe.json"]["cleanup"]["resources"] = []
+
+    result = ACCEPTANCE.evaluate(
+        setup,
+        receipts,
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=aggregate,
+        required_operations=(("image_build_readiness", "probe", None),),
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert "podman-probe.json" not in result["accepted"]
+    assert "coverage_missing:image_build_readiness:probe:check" in result["problems"]
+    if receipt_problem is not None:
+        assert receipt_problem in result["problems"]
+
+
+def test_access_only_receipts_do_not_prove_required_behavior() -> None:
+    """Keep a valid access receipt distinct from an operation's behavioral proof.
+
+    :returns: None; assertions verify an access-only targeted selection is blocked.
+    """
+    receipt = _access_setup()["access.json"]
+
+    result = ACCEPTANCE.evaluate(
+        {},
+        {"access.json": receipt},
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=False,
+        required_operations=(
+            ("access_check", None, None),
+            ("image_build_readiness", "probe", None),
+        ),
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert result["accepted"] == ["access.json"]
+    assert result["problems"] == ["coverage_missing:image_build_readiness:probe:check"]
+
+
+@pytest.mark.parametrize(
+    "behavior_present", (True, False), ids=("complete", "access-only")
+)
+def test_cli_no_aggregate_cannot_bypass_required_behavior(
+    policy_coverage_baseline: str,
+    behavior_present: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Enforce the selected policy through the real targeted CLI adapter.
+
+    :param policy_coverage_baseline: Shared complete baseline copied for this run.
+    :param behavior_present: Whether the single required behavioral proof is present.
+    :param tmp_path: Isolated policy, schema, and receipt directory.
+    :param monkeypatch: Fixture selecting CLI arguments without external commands.
+    :param capsys: Fixture capturing the CLI JSON result.
+    :returns: None; assertions verify targeted mode cannot weaken policy coverage.
+    """
+    policy = _write_policy(tmp_path, MAX_AGE_DAYS)
+    document = json.loads(policy.read_text(encoding="utf-8"))
+    document["requiredOperations"] = [
+        {"kind": "access_check", "operation": None, "action": None},
+        {"kind": "image_build_readiness", "operation": "probe", "action": None},
+    ]
+    policy.write_text(json.dumps(document), encoding="utf-8")
+    receipts = json.loads(policy_coverage_baseline)
+    directory = tmp_path / "selected"
+    directory.mkdir()
+    names = (
+        ("access.json", "podman-probe.json") if behavior_present else ("access.json",)
+    )
+    for name in names:
+        receipt = receipts[name]
+        receipt["captured_at"] = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+        (directory / name).write_text(json.dumps(receipt), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "check_live_acceptance.py",
+            "--root",
+            str(tmp_path),
+            "--skill",
+            str(SKILL_ROOT),
+            "--no-aggregate",
+            "--receipts",
+            str(directory),
+            "--json",
+        ],
+    )
+
+    code = ACCEPTANCE.main()
+    result = json.loads(capsys.readouterr().out)
+
+    assert code == (0 if behavior_present else 2)
+    assert result["mode"] == "targeted"
+    assert result["status"] == ("PASS" if behavior_present else "BLOCKED")
+    assert "access.json" in result["accepted"]
+    assert (
+        "coverage_missing:image_build_readiness:probe:check" in result["problems"]
+    ) is not behavior_present
+
+
+@pytest.mark.parametrize("aggregate", (False, True), ids=("targeted", "aggregate"))
+def test_mirror_pair_satisfies_required_behavior_in_both_acceptance_modes(
+    policy_coverage_baseline: str, aggregate: bool
+) -> None:
+    """Accept the actual applied-to-no-op transition with two distinct plan digests.
+
+    :param policy_coverage_baseline: Immutable full evidence set including the real-engine pair.
+    :param aggregate: Targeted or complete historical acceptance mode.
+    :returns: None; both pair actions are recognized from their sole validated records.
+    """
+    receipts = json.loads(policy_coverage_baseline)
+    setup = {name: receipts[name] for name in ("access.json", "gitlab-access.json")}
+
+    result = ACCEPTANCE.evaluate(
+        setup,
+        receipts,
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=aggregate,
+        required_operations=MIRROR_REQUIRED_OPERATIONS,
+    )
+
+    assert result["status"] == "PASS", result["problems"]
+    assert {MIRROR_APPLIED_FILE, MIRROR_NO_OP_FILE} <= set(result["accepted"])
+    assert (
+        receipts[MIRROR_APPLIED_FILE]["plan_digest"]
+        != receipts[MIRROR_NO_OP_FILE]["plan_digest"]
+    )
+
+
+@pytest.mark.parametrize("aggregate", (False, True), ids=("targeted", "aggregate"))
+@pytest.mark.parametrize(
+    ("failure", "reason", "rejected"),
+    (
+        ("missing-applied", "repeat_readback_missing", MIRROR_APPLIED_FILE),
+        ("missing-noop", "repeat_readback_missing", MIRROR_NO_OP_FILE),
+        ("creation-not-proven", "create_if_absent_unproven", None),
+        ("wrong-action", "repeat_readback_missing", None),
+        ("native-id", "mirror_pair_identity_mismatch", None),
+        ("before-refs", "mirror_pair_continuity_unverified", None),
+        ("same-capture-time", "repeat_readback_order_invalid", None),
+        ("rejected-receipt", "repeat_readback_missing", MIRROR_NO_OP_FILE),
+        ("access-only", "coverage_missing:gitlab_mirror:sync:APPLIED", None),
+    ),
+)
+def test_mirror_acceptance_cannot_substitute_missing_or_contradictory_pair_evidence(
+    policy_coverage_baseline: str,
+    aggregate: bool,
+    failure: str,
+    reason: str,
+    rejected: Optional[str],
+) -> None:
+    """Change one evidence invariant per copied lifecycle and require rejection.
+
+    :param policy_coverage_baseline: Shared immutable complete receipt baseline.
+    :param aggregate: Mode whose mirror-pair enforcement must remain mandatory.
+    :param failure: Single missing proof or contradictory observation for this case.
+    :param reason: Stable pair or coverage reason expected from the acceptance gate.
+    :param rejected: Missing or individually rejected receipt that cannot count as accepted.
+    :returns: None; access, wrong actions, and incompatible pairs cannot close delivery.
+    """
+    receipts = json.loads(policy_coverage_baseline)
+    setup = {name: receipts[name] for name in ("access.json", "gitlab-access.json")}
+    noop = receipts[MIRROR_NO_OP_FILE]
+    if failure == "missing-applied":
+        del receipts[MIRROR_APPLIED_FILE]
+    elif failure == "missing-noop":
+        del receipts[MIRROR_NO_OP_FILE]
+    elif failure == "creation-not-proven":
+        applied_record = receipts[MIRROR_APPLIED_FILE]["records"][0]
+        applied_record["before"]["destination"] = deepcopy(
+            applied_record["destination"]
+        )
+        applied_record["created"]["repository"] = False
+        assert not ACCEPTANCE.check_mirror_pair(receipts[MIRROR_APPLIED_FILE], noop)
+    elif failure == "wrong-action":
+        noop["records"][0]["action"] = "APPLIED"
+    elif failure == "native-id":
+        noop["records"][0]["mirror"]["id"] += 1
+    elif failure == "before-refs":
+        noop["records"][0]["before"]["destination_refs"]["sha256"] = "b" * 64
+    elif failure == "same-capture-time":
+        noop["captured_at"] = receipts[MIRROR_APPLIED_FILE]["captured_at"]
+    elif failure == "rejected-receipt":
+        noop["skill"]["functional_digest"] = "b" * 64
+    else:
+        receipts = setup
+
+    result = ACCEPTANCE.evaluate(
+        setup,
+        receipts,
+        SKILL_ROOT,
+        NOW,
+        max_age_days=MAX_AGE_DAYS,
+        aggregate=aggregate,
+        required_operations=MIRROR_REQUIRED_OPERATIONS,
+    )
+
+    assert result["status"] == "BLOCKED"
+    expected = (
+        reason
+        if reason.startswith("coverage_missing:")
+        else MIRROR_PAIR_PREFIX + reason
+    )
+    assert expected in result["problems"]
+    if rejected is not None:
+        assert rejected not in result["accepted"]
+    if failure == "rejected-receipt":
+        assert f"{MIRROR_NO_OP_FILE}:functional_digest_mismatch" in result["problems"]
+        assert "coverage_missing:gitlab_mirror:sync:NO_OP" in result["problems"]

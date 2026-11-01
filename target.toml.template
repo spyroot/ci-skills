@@ -65,6 +65,15 @@ url = "https://gitlab.example.com"
 # apply and read-back establish whether that action is authorized.
 # token_file = "/home/user/.ci-skills/credentials/gitlab.token"
 
+# Optional named GitLab targets. --gitlab-profile public selects this table;
+# omission continues to use [gitlab]. Each selected table supplies its own URL
+# and operation-specific selectors. No fields inherit from another table/file.
+# Profile names are exact TOML keys; quote names containing dots or spaces.
+# [gitlab.public]
+# url = "https://gitlab.example.test"
+# project = "group/project"
+# token_file = "public.token"
+
 [kubernetes]
 # The context name and the API server it must resolve to. The server is
 # compared against the kubeconfig, so a context that silently points somewhere

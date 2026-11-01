@@ -17,6 +17,7 @@ from lib.python.core.cli_api import APIError, RequestDeadline
 from lib.python.core.git.mirroring import (
     GitRepository,
     MirrorDestination,
+    MirrorField,
     MirrorPolicy,
     MirrorStatus,
     PushMirror,
@@ -36,6 +37,15 @@ from lib.python.core.gitlab.mirror.constants import (
 from lib.python.core.gitlab.mirror.reconciliation import requires_replacement
 from lib.python.core.json_types import JSONObject
 from lib.python.core.report import plan_digest
+
+
+def ref_evidence(snapshot: RefSnapshot) -> JSONObject:
+    """Summarize complete refs without copying an unbounded provider listing.
+
+    :param snapshot: Validated native branch and tag object observations.
+    :returns: Complete ref count and deterministic content fingerprint.
+    """
+    return {Field.COUNT: len(snapshot.refs), Field.SHA256: snapshot.digest}
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +149,29 @@ class MirrorObservation:
     mirror: Optional[PushMirror]
     source_refs: RefSnapshot
     destination_refs: RefSnapshot
+
+    def evidence(self, destination_host: str, destination_path: str) -> JSONObject:
+        """Serialize native observations without inventing an absent destination ID.
+
+        :param destination_host: Selected authority when the destination is absent.
+        :param destination_path: Selected repository when the destination is absent.
+        :returns: Bounded identities, native mirror state and complete ref fingerprints.
+        """
+        return {
+            Field.SOURCE: self.source.evidence(),
+            Field.DESTINATION: (
+                self.destination.evidence()
+                if self.destination is not None
+                else {
+                    MirrorField.ID: None,
+                    MirrorField.HOST: destination_host,
+                    MirrorField.PATH: destination_path,
+                }
+            ),
+            Field.MIRROR: self.mirror.evidence() if self.mirror is not None else None,
+            Field.SOURCE_REFS: ref_evidence(self.source_refs),
+            Field.DESTINATION_REFS: ref_evidence(self.destination_refs),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,23 +330,23 @@ class MirrorExecution:
         :param destination: Final independently verified destination identity.
         :returns: Safe source/mirror/destination evidence and complete ref fingerprints.
         """
+        final = MirrorObservation(
+            self.plan.observation.source,
+            destination,
+            self.mirror,
+            self.source_refs,
+            self.destination_refs,
+        )
         return {
             Field.CALLBACK: KIND,
             Field.ACTION: self.action.value,
             Field.VERIFIED: True,
             Field.REPLACEMENT_REQUIRED: self.plan.replacement_required,
             Field.REPLACED_MIRROR_ID: self.plan.replaced_mirror_id,
-            Field.SOURCE: self.plan.observation.source.evidence(),
-            Field.DESTINATION: destination.evidence(),
-            Field.MIRROR: self.mirror.evidence(),
-            Field.SOURCE_REFS: {
-                Field.COUNT: len(self.source_refs.refs),
-                Field.SHA256: self.source_refs.digest,
-            },
-            Field.DESTINATION_REFS: {
-                Field.COUNT: len(self.destination_refs.refs),
-                Field.SHA256: self.destination_refs.digest,
-            },
+            **final.evidence(destination.host, self.plan.intent.destination),
+            Field.BEFORE: self.plan.observation.evidence(
+                destination.host, self.plan.intent.destination
+            ),
             Field.VERIFIED_SOURCE_REF_COUNT: self.destination_refs.matching_count(
                 self.source_refs
             ),

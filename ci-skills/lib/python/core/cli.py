@@ -26,10 +26,13 @@ from lib.python.core.catalog import (
     COMMAND_BY_KIND,
     COMMANDS,
     DEFAULT_AUTHORITIES,
+    GITLAB_PROFILE_HELP,
+    GITLAB_PROFILE_OPTION,
     PROJECT_DIR,
     TARGET_FILENAME,
     describe,
     missing_required_options,
+    supports_gitlab_profile,
 )
 from lib.python.core.help import CommandHelp, CommandHelpFormatter
 from lib.python.core.json_types import JSONObject, JSONValue, copy_json_object
@@ -173,6 +176,15 @@ class MachineArgumentParser(TrackedArgumentParser):
         self.exit(2)
 
 
+def add_gitlab_profile_argument(result: argparse.ArgumentParser) -> None:
+    """Expose the shared explicit GitLab profile selector.
+
+    :param result: Parser for a command that supports GitLab configuration.
+    :returns: None after adding the catalogue-declared selector.
+    """
+    result.add_argument(GITLAB_PROFILE_OPTION, metavar="NAME", help=GITLAB_PROFILE_HELP)
+
+
 def parser(
     description: str, *, output_dir: bool = True, kind: Optional[str] = None
 ) -> argparse.ArgumentParser:
@@ -206,6 +218,12 @@ def parser(
         metavar="PATH",
         help="explicit project binding for target and ordered kubeconfig sources",
     )
+    if (
+        kind is not None
+        and kind in COMMAND_BY_KIND
+        and supports_gitlab_profile(COMMAND_BY_KIND[kind])
+    ):
+        add_gitlab_profile_argument(result)
     modes = result.add_mutually_exclusive_group()
     modes.add_argument("--json", action="store_true", help="print versioned JSON")
     modes.add_argument("--yaml", action="store_true", help="print versioned YAML")
@@ -410,6 +428,7 @@ def _diagnostic_target(args: argparse.Namespace, script: Optional[str]) -> Targe
         dry_run=args.dry_run,
         required_surfaces=required,
         optional_surfaces=optional,
+        gitlab_profile=getattr(args, "gitlab_profile", None),
     )
     if not args.dry_run:
         target = bind_sources(target, revision=getattr(args, "revision", None))

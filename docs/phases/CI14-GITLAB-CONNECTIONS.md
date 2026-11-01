@@ -155,7 +155,11 @@ uses private credential environments and no prompts, and never clones or downloa
 source refs against destination object IDs; retain destination-only refs. Read source stability and report digests/counts.
 A sync request or a finished mirror without matching refs cannot report PASS. Matching verified state is NO_OP without
 another sync request. Preserve intended repositories/mirrors and report partial ownership after uncertain mutation;
-clean private temporary request/ref-read resources on every exit.
+clean private temporary request/ref-read resources on every exit. The result schema's `before` observation retains the
+fresh identities and refs checked before apply, including a null destination ID when absent. Behavioral qualification
+requires connected APPLIED and NO_OP receipts from the same installed candidate, with nonempty complete refs,
+consistent native identities, and proof that APPLIED created the destination; ordinary empty-repository sync remains
+valid. Verification polls at 30-second intervals, capped by the remaining operation deadline.
 
 Normalized intent and result shapes are defined by the accompanying exact schema proposal. A new targeted receipt must
 be produced from installed candidate execution; its generated JSON diff requires separate exact-content approval.

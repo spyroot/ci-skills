@@ -494,7 +494,10 @@ class PipelineStartWorkflow(GitLabWorkflow):
         except ValueError as exc:
             raise ActionError(str(exc)) from exc
         target, source = resolve_gitlab_target(
-            args.target, args.binding, dry_run=self.mode == ActionMode.OFFLINE
+            args.target,
+            args.binding,
+            dry_run=self.mode == ActionMode.OFFLINE,
+            gitlab_profile=getattr(args, "gitlab_profile", None),
         )
         self.target = target
         self.state.plan = prepare_start_plan(args, target, source)

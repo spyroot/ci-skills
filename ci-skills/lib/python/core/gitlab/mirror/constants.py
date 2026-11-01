@@ -14,7 +14,7 @@ KIND: Final = "gitlab_mirror"
 COMMAND: Final = "gitlab_mirror.py"
 OPERATION: Final = "sync"
 PASSWORD_AUTH: Final = "password"
-POLL_SECONDS: Final = 2
+POLL_SECONDS: Final = 30
 DEFAULT_POLICY: Final = MirrorPolicy(True, False)
 DESTINATION_PATTERN: Final = r"^[^/\s]+/[^/\s]+$"
 CLONE_URL_TEMPLATE: Final = "https://{host}/{repository}.git"
@@ -46,6 +46,10 @@ class Field(StrEnum):
     .. attribute :: SOURCE
 
         Native token ``source``.
+
+    .. attribute :: BEFORE
+
+        Fresh resource and ref observations consumed by the confirmed operation.
 
     .. attribute :: SOURCE_REFS
 
@@ -171,6 +175,10 @@ class Field(StrEnum):
 
         Native token ``tested_revision``.
 
+    .. attribute :: TARGET_SOURCE
+
+        Selected target and optional named-profile provenance.
+
     .. attribute :: REASON
 
         Native token ``reason``.
@@ -182,6 +190,7 @@ class Field(StrEnum):
     CREATE_IF_ABSENT = "create_if_absent"
     INTENT = "intent"
     SOURCE = "source"
+    BEFORE = "before"
     SOURCE_REFS = "source_refs"
     DESTINATION_REFS = "destination_refs"
     MIRROR = "mirror"
@@ -213,6 +222,7 @@ class Field(StrEnum):
     REVISION = "revision"
     VALUE = "value"
     TESTED_REVISION = "tested_revision"
+    TARGET_SOURCE = "target_source"
     REASON = "reason"
 
 

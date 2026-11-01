@@ -36,6 +36,10 @@
       "type": "string",
       "minLength": 1
     },
+    "target_source": {
+      "type": "string",
+      "minLength": 1
+    },
     "filters": {
       "$ref": "../gitlab-mirror.schema.json"
     },
@@ -123,7 +127,8 @@
       "then": {
         "required": [
           "skill",
-          "tested_revision"
+          "tested_revision",
+          "target_source"
         ],
         "properties": {
           "plan_digest": {
@@ -136,6 +141,9 @@
           "records": {
             "minItems": 1,
             "items": {
+              "required": [
+                "before"
+              ],
               "properties": {
                 "verified": {
                   "const": true
@@ -435,6 +443,41 @@
         }
       }
     },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "destination",
+        "mirror",
+        "source_refs",
+        "destination_refs"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/repository"
+        },
+        "destination": {
+          "$ref": "#/$defs/repository"
+        },
+        "mirror": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/mirror"
+            }
+          ]
+        },
+        "source_refs": {
+          "$ref": "#/$defs/refs"
+        },
+        "destination_refs": {
+          "$ref": "#/$defs/refs"
+        }
+      }
+    },
     "record": {
       "type": "object",
       "additionalProperties": false,
@@ -466,6 +509,9 @@
         },
         "verified": {
           "type": "boolean"
+        },
+        "before": {
+          "$ref": "#/$defs/observation"
         },
         "source": {
           "$ref": "#/$defs/repository"

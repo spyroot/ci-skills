@@ -21,15 +21,28 @@ setup() {
   list="${BATS_TEST_TMPDIR}/staged"
 }
 
+# Summary: Populate complete static-check support in the isolated test repository.
+# Stdout: none.
+# Stderr: Copy or index-staging diagnostics.
+# Returns: 0 after the mandatory adapter and its imports are present in the index.
 copy_bless_fixture() {
   mkdir -p "$fixture/.githooks" "$fixture/lib/bash/automation" \
-    "$fixture/lib/bash/core" "$fixture/ci-skills/lib/bash/core"
-  cp "$repo_root/Makefile" "$repo_root/bless.sh" "$fixture/"
+    "$fixture/lib/bash/core" "$fixture/ci-skills/lib/bash/core" \
+    "$fixture/gates" "$fixture/tools/skillkit" "$fixture/ci-skills/lib/python/core"
+  cp "$repo_root/Makefile" "$repo_root/bless.sh" "$repo_root/pyproject.toml" "$fixture/"
   cp "$repo_root/.githooks/pre-commit" "$fixture/.githooks/"
   cp "$repo_root/lib/bash/automation/bless.bash" "$fixture/lib/bash/automation/"
   cp "$repo_root/lib/bash/core/"*.bash "$fixture/lib/bash/core/"
   cp "$repo_root/ci-skills/lib/bash/core/runtime.bash" \
     "$fixture/ci-skills/lib/bash/core/runtime.bash"
+  cp "$repo_root/gates/gate-ci-skills-portability.py" "$fixture/gates/"
+  cp "$repo_root/tools/skillkit/__init__.py" \
+    "$repo_root/tools/skillkit/portability_gate.py" "$fixture/tools/skillkit/"
+  cp "$repo_root/ci-skills/lib/python/core/endpoints.py" \
+    "$fixture/ci-skills/lib/python/core/"
+  git -C "$fixture" add -- gates/gate-ci-skills-portability.py \
+    tools/skillkit/__init__.py tools/skillkit/portability_gate.py \
+    ci-skills/lib/python/core/endpoints.py pyproject.toml
 }
 
 staged() {
@@ -109,7 +122,7 @@ staged() {
 }
 
 @test 'the shared registry includes every required static linter' {
-  for check in bash_syntax shell shfmt actionlint gitleaks python json markdown; do
+  for check in bash_syntax shell shfmt actionlint gitleaks python json markdown portability; do
     [[ " $BLESS_CHECKS " == *" $check "* ]]
   done
 }
@@ -371,4 +384,79 @@ EOF
   run bless_check_json "$fixture" "${BATS_TEST_TMPDIR}/index" "$list" ''
   [ "$status" -eq 0 ]
   [[ "$output" != *'jq: error'* ]]
+}
+
+@test 'portability checks each selected staged snapshot rather than the working copy' {
+  copy_bless_fixture
+  python=$(bless_python "$fixture")
+  good_source='import os
+import subprocess
+subprocess.run(["glab", "api", "--hostname", os.environ["GITLAB_HOST"], "user"], check=True)
+'
+  bad_source=${good_source/os.environ\[\"GITLAB_HOST\"\]/\"gitlab.delivery.corp\"}
+  [ "$bad_source" != "$good_source" ]
+
+  for selection in staged-bad staged-good; do
+    case_root="${BATS_TEST_TMPDIR}/${selection}"
+    cp -R "$fixture" "$case_root"
+    mkdir -p "$case_root/tests"
+    case_list="${BATS_TEST_TMPDIR}/${selection}.paths"
+    snapshot="${BATS_TEST_TMPDIR}/${selection}.snapshot"
+    if [[ $selection == staged-bad ]]; then
+      index_source=$bad_source
+      working_source=$good_source
+      index_status=1
+      working_status=0
+    else
+      index_source=$good_source
+      working_source=$bad_source
+      index_status=0
+      working_status=1
+    fi
+    printf '%s' "$index_source" >"$case_root/tests/smoke_live.py"
+    git -C "$case_root" add --all
+    git -C "$case_root" checkout-index --all --prefix="$snapshot/"
+    printf '%s' "$working_source" >"$case_root/tests/smoke_live.py"
+    printf 'tests/smoke_live.py\0' >"$case_list"
+
+    run bless_check_portability "$case_root" "$snapshot" "$case_list" "$python" staged
+    [ "$status" -eq "$index_status" ]
+    run bless_check_portability "$case_root" "$case_root" "$case_list" "$python" all
+    [ "$status" -eq "$working_status" ]
+  done
+}
+
+@test 'portability never ignores a missing adapter import failure or unreadable selection' {
+  copy_bless_fixture
+  python=$(bless_python "$fixture")
+  mkdir -p "$fixture/tests"
+  printf 'import subprocess\nsubprocess.run(["glab", "api", "user"], check=True)\n' \
+    >"$fixture/tests/smoke_live.py"
+
+  for failure in missing-adapter invalid-adapter missing-library missing-source missing-inventory; do
+    case_root="${BATS_TEST_TMPDIR}/${failure}"
+    cp -R "$fixture" "$case_root"
+    case_list="${BATS_TEST_TMPDIR}/${failure}.paths"
+    printf 'tests/smoke_live.py\0' >"$case_list"
+    case $failure in
+    missing-adapter)
+      rm "$case_root/gates/gate-ci-skills-portability.py"
+      ;;
+    invalid-adapter)
+      printf 'def broken(\n' >"$case_root/gates/gate-ci-skills-portability.py"
+      ;;
+    missing-library)
+      rm "$case_root/tools/skillkit/portability_gate.py"
+      ;;
+    missing-source)
+      rm "$case_root/tests/smoke_live.py"
+      ;;
+    missing-inventory)
+      rm "$case_list"
+      ;;
+    esac
+
+    run bless_check_portability "$case_root" "$case_root" "$case_list" "$python" all
+    [ "$status" -ne 0 ]
+  done
 }

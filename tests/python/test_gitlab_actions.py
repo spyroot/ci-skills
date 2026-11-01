@@ -180,12 +180,16 @@ def _plan(
 
 
 def _live_action_dependencies(
-    monkeypatch: pytest.MonkeyPatch, plan: ActionPlan
+    monkeypatch: pytest.MonkeyPatch,
+    plan: ActionPlan,
+    *,
+    expected_profile: Optional[str] = None,
 ) -> tuple[BoundGitLabSession, JSONObject]:
     """Bind a selected plan to deterministic access doubles.
 
     :param monkeypatch: Pytest fixture replacing target, bind, API, and access.
     :param plan: Action plan whose origin and scope seed the session.
+    :param expected_profile: Exact default or named profile required at resolution.
     :returns: Bound fixture session and passing access receipt.
     """
     session = _bound_session(
@@ -196,11 +200,27 @@ def _live_action_dependencies(
         "identity": {"username": "unit"},
         "target": {"kind": plan.target_kind, "id": 42},
     }
-    monkeypatch.setattr(
-        GITLAB_ACTION,
-        "resolve_gitlab_target",
-        lambda _target, _binding, *, dry_run: (object(), "unit"),
-    )
+
+    def resolve(
+        _target: Optional[str],
+        _binding: Optional[str],
+        *,
+        dry_run: bool,
+        gitlab_profile: Optional[str],
+    ) -> tuple[object, str]:
+        """Require exact profile forwarding before returning a fixture target.
+
+        :param _target: Unused explicit target path.
+        :param _binding: Unused explicit project-binding path.
+        :param dry_run: Live action resolution must remain credential-aware.
+        :param gitlab_profile: Profile forwarded by the action CLI.
+        :returns: Fixture target and nonsecret source marker.
+        """
+        assert dry_run is False
+        assert gitlab_profile == expected_profile
+        return object(), "unit"
+
+    monkeypatch.setattr(GITLAB_ACTION, "resolve_gitlab_target", resolve)
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
         GITLAB_ACTION, "bind_gitlab_session", lambda *_args, **_kwargs: session
@@ -298,12 +318,16 @@ class FakeAPI:
         ("gitlab_milestone", ["create"], "create"),
     ),
 )
+@pytest.mark.parametrize(
+    "gitlab_profile", (None, "public"), ids=("default-profile", "named-profile")
+)
 def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     kind: str,
     arguments: Sequence[str],
     operation: str,
+    gitlab_profile: Optional[str],
 ) -> None:
     """Apply non-runner callbacks without a runner-only live-plan gate.
 
@@ -312,11 +336,12 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
     :param kind: Issue, wiki, or milestone command selected by the case.
     :param arguments: CLI subcommand arguments for that kind.
     :param operation: Operation expected in the final report.
+    :param gitlab_profile: Default or named profile forwarded by every action CLI.
 
     :returns: None; assertions in the body validate the regression.
     """
     plan = _plan(kind, operation, {"title": "unit"})
-    _live_action_dependencies(monkeypatch, plan)
+    _live_action_dependencies(monkeypatch, plan, expected_profile=gitlab_profile)
     invoked: MutableSequence[str] = []
 
     def complete(*_args: str) -> JSONObject:
@@ -335,7 +360,14 @@ def test_nonrunner_apply_invokes_selected_operation_without_runner_live_plan(
         monkeypatch.setattr(GITLAB_ACTION, "apply_plan", complete)
 
     result = ENTRYPOINTS[kind].main(
-        [*arguments, "--apply", "--confirm-plan", plan.digest, "--json"]
+        [
+            *arguments,
+            *(["--gitlab-profile", gitlab_profile] if gitlab_profile else []),
+            "--apply",
+            "--confirm-plan",
+            plan.digest,
+            "--json",
+        ]
     )
     report = json.loads(capsys.readouterr().out)
 
@@ -1601,7 +1633,7 @@ def test_apply_cli_malformed_provider_response_emits_structured_blocked(
     monkeypatch.setattr(
         GITLAB_ACTION,
         "resolve_gitlab_target",
-        lambda _target, _binding, *, dry_run: (object(), "test"),
+        lambda _target, _binding, *, dry_run, gitlab_profile: (object(), "test"),
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(
@@ -1662,7 +1694,7 @@ def test_action_access_failure_preserves_the_failed_subcheck(
     monkeypatch.setattr(
         GITLAB_ACTION,
         "resolve_gitlab_target",
-        lambda _target, _binding, *, dry_run: (object(), "test"),
+        lambda _target, _binding, *, dry_run, gitlab_profile: (object(), "test"),
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     session = _bound_session(plan)
@@ -1727,7 +1759,7 @@ def test_failed_apply_writes_plan_bound_receipt_with_unknown_mutation(
     monkeypatch.setattr(
         GITLAB_ACTION,
         "resolve_gitlab_target",
-        lambda _target, _binding, *, dry_run: (object(), "test"),
+        lambda _target, _binding, *, dry_run, gitlab_profile: (object(), "test"),
     )
     monkeypatch.setattr(GITLAB_ACTION, "make_plan", lambda *_args: plan)
     monkeypatch.setattr(

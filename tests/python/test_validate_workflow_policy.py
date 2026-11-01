@@ -13,6 +13,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -48,11 +49,33 @@ def _workflow_text() -> str:
 
 
 def test_validate_workflow_runs_required_static_policy_gates() -> None:
-    """The validation workflow calls the shared static entrypoint."""
-    text = _workflow_text()
+    """Keep the shared registry unconditional and visible to required aggregation.
 
-    assert 'scripts/ci/static.sh --base "$base_sha"' in text
+    :returns: None; assertions verify required workflow wiring and failure propagation.
+    """
+    text = _workflow_text()
+    workflow = yaml.safe_load(text)
+    validate = workflow["jobs"]["validate"]
+    matching = [
+        step
+        for step in validate["steps"]
+        if 'scripts/ci/static.sh --base "$base_sha"' in str(step.get("run", ""))
+    ]
+
+    assert len(matching) == 1
+    step = matching[0]
+    assert step["id"] == "static"
+    assert "if" not in step
+    assert step.get("continue-on-error") in (None, False)
+    assert "|| true" not in str(step["run"])
     assert "git diff --check" in text
+    assert "validate" in workflow["jobs"]["required-result"]["needs"]
+    evidence = next(
+        item
+        for item in validate["steps"]
+        if "ci_required_result.py emit" in str(item.get("run", ""))
+    )
+    assert "steps.static.outcome" in evidence["env"]["STEP_RESULTS"]
 
 
 def test_validate_workflow_runs_installed_package_smoke() -> None:
@@ -124,6 +147,9 @@ LIVE_SHA: Final = "a" * 40
 LIVE_DIGEST: Final = "b" * 64
 LIVE_TESTED_REVISION: Final = "c" * 40
 LIVE_REPORT_URL: Final = "https://github.example.test/unit/repo/actions/runs/19"
+LIVE_REPOSITORY: Final = "/".join(
+    urlsplit(LIVE_REPORT_URL).path.strip("/").split("/")[:2]
+)
 FAKE_PUBLICATION_TOOLS: Final = r"""
 import json
 import os
@@ -222,7 +248,7 @@ def _run_live_publication(
         "HOME": str(tmp_path),
         "GH_TOKEN": "offline-test-token",
         "GITHUB_API_URL": "https://api.github.example.test",
-        "GITHUB_REPOSITORY": "unit/repo",
+        "GITHUB_REPOSITORY": LIVE_REPOSITORY,
         "CI_SOURCE_SHA": LIVE_SHA,
         "LIVE_ENVIRONMENT": step.get("env", {}).get("LIVE_ENVIRONMENT", ""),
         "REPORT_URL": LIVE_REPORT_URL,
@@ -420,7 +446,7 @@ def _run_required_result(
         "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
         "HOME": str(tmp_path),
         "GH_TOKEN": "offline-test-token",
-        "GITHUB_REPOSITORY": "unit/repo",
+        "GITHUB_REPOSITORY": LIVE_REPOSITORY,
         "GITHUB_RUN_ID": LIVE_REPORT_URL.rsplit("/", 1)[1],
         "CI_SOURCE_SHA": LIVE_SHA,
         "CI_RUNNER_IMAGE": f"unit/image@sha256:{LIVE_DIGEST}",

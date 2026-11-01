@@ -32,8 +32,6 @@ from lib.python.core.cli import _failure, parser
 from lib.python.core.cli_api import APIError, RequestDeadline
 from lib.python.core.delivery_state import DeliveryState
 from lib.python.core.executor import WorkflowExecutor
-from lib.python.core.git.mirroring import MirrorField
-from lib.python.core.git.refs import RefSnapshot
 from lib.python.core.git.remote import GitRemoteReader
 from lib.python.core.github.github import GitHubIdentityAuth
 from lib.python.core.github.repository import GitHubRepositoryService
@@ -289,7 +287,9 @@ class MirrorSourceAuth(Callback[MirrorState, MirrorAction]):
             target,
             target_kind=Field.PROJECT.value,
             target_reference=self.action.intent.project,
-            target_source=selected.source_kind or EnvelopeField.TARGET.value,
+            target_source=selected.selection_source(
+                selected.source_kind or EnvelopeField.TARGET.value
+            ),
             revision=self.action.revision,
         )
         return {}
@@ -336,15 +336,6 @@ class MirrorSourceAuth(Callback[MirrorState, MirrorAction]):
         return {}
 
 
-def ref_evidence(snapshot: RefSnapshot) -> JSONObject:
-    """Summarize complete refs without copying an unbounded provider listing.
-
-    :param snapshot: Validated native branch and tag object observations.
-    :returns: Complete ref count and deterministic content fingerprint.
-    """
-    return {Field.COUNT: len(snapshot.refs), Field.SHA256: snapshot.digest}
-
-
 class ObserveMirror(LocalCallback[MirrorState, MirrorAction]):
     """Observe both providers through the shared mirror engine without writes."""
 
@@ -384,6 +375,7 @@ class ObserveMirror(LocalCallback[MirrorState, MirrorAction]):
                 SkillPluginType.GITHUB.value: hashlib.sha256(
                     github.token.encode()
                 ).hexdigest(),
+                Field.TARGET_SOURCE: session.target_source,
             }
         )
         plan = self.action.deadline.call(
@@ -394,26 +386,11 @@ class ObserveMirror(LocalCallback[MirrorState, MirrorAction]):
         )
         self.state.plan = plan
         observed = plan.observation
-        destination_identity = (
-            observed.destination.evidence()
-            if observed.destination is not None
-            else {
-                MirrorField.ID: None,
-                MirrorField.HOST: github.host,
-                MirrorField.PATH: self.action.intent.destination,
-            }
-        )
         self.state.record = {
             Field.CALLBACK: KIND,
             Field.ACTION: Outcome.PLANNED.value,
             Field.VERIFIED: False,
-            Field.SOURCE: observed.source.evidence(),
-            Field.DESTINATION: destination_identity,
-            Field.MIRROR: (
-                observed.mirror.evidence() if observed.mirror is not None else None
-            ),
-            Field.SOURCE_REFS: ref_evidence(observed.source_refs),
-            Field.DESTINATION_REFS: ref_evidence(observed.destination_refs),
+            **observed.evidence(github.host, self.action.intent.destination),
             Field.CREATED: {Field.REPOSITORY: False, Field.MIRROR: False},
             Field.REPLACEMENT_REQUIRED: plan.replacement_required,
             Field.REPLACED_MIRROR_ID: plan.replaced_mirror_id,
@@ -557,6 +534,7 @@ class MirrorCommand:
             args.binding,
             dry_run=args.dry_run,
             required_surfaces=SURFACES,
+            gitlab_profile=args.gitlab_profile,
         )
         selected = target.require_gitlab()
         source = args.project if args.project is not None else selected.project
@@ -648,6 +626,7 @@ class MirrorCommand:
                 json_object(session.skill[Field.REVISION])[Field.VALUE]
             )
             output[EnvelopeField.EXECUTION_HOST] = session.execution_host
+            output[Field.TARGET_SOURCE] = session.target_source
         return output
 
     def execute(self) -> int:

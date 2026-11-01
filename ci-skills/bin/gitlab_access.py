@@ -114,7 +114,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         if args.dry_run:
             target, target_source = resolve_gitlab_target(
-                args.target, args.binding, dry_run=True
+                args.target,
+                args.binding,
+                dry_run=True,
+                gitlab_profile=getattr(args, "gitlab_profile", None),
             )
             target_kind, reference = select_gitlab_reference(
                 target, project=args.project, group=args.group
@@ -132,6 +135,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 project=args.project,
                 group=args.group,
                 revision=args.revision,
+                gitlab_profile=args.gitlab_profile,
             )
             source = "access"
         if args.receipt_out:
