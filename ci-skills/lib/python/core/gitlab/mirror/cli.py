@@ -430,6 +430,11 @@ class ApplyMirror(LocalCallback[MirrorState, MirrorAction]):
         )
         if destination is None:
             raise APIError(Failure.DESTINATION_MISSING)
+        if (
+            engine.destination_repository is None
+            or destination.id != engine.destination_repository.id
+        ):
+            raise APIError(Failure.DESTINATION_CHANGED)
         self.state.record = result.evidence(destination)
         return self.state.record
 
@@ -568,21 +573,31 @@ class MirrorCommand:
         if engine is None or not self.state.record or engine.mutated is False:
             return
         record: dict[str, JSONValue] = dict(self.state.record)
+        created_repository = engine.created_repository
+        if engine.destination_repository is not None:
+            record[Field.DESTINATION] = engine.destination_repository.evidence()
+        elif (
+            isinstance(engine.destination, GitHubRepositoryService)
+            and engine.destination.created_repository_id is not None
+        ):
+            record[Field.DESTINATION] = {
+                **json_object(record[Field.DESTINATION]),
+                Field.ID: engine.destination.created_repository_id,
+            }
+            created_repository = True
         record.update(
             {
                 Field.ACTION: Outcome.APPLIED.value,
                 Field.VERIFIED: False,
                 Field.VERIFIED_SOURCE_REF_COUNT: NO_VERIFIED_REFS,
                 Field.CREATED: {
-                    Field.REPOSITORY: engine.created_repository,
+                    Field.REPOSITORY: created_repository,
                     Field.MIRROR: engine.created_mirror,
                 },
                 Field.REPLACEMENT_REQUIRED: engine.replacement_required,
                 Field.REPLACED_MIRROR_ID: engine.replaced_mirror_id,
             }
         )
-        if engine.destination_repository is not None:
-            record[Field.DESTINATION] = engine.destination_repository.evidence()
         if engine.current_mirror is not None:
             record[Field.MIRROR] = engine.current_mirror.evidence()
         self.state.record = record

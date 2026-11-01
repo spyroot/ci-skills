@@ -174,6 +174,12 @@ EXPECTED_REPLACEMENT_ENDPOINT: Final[str] = (
 EXPECTED_GITHUB_REPOSITORY_ENDPOINT: Final[str] = f"repos/{DESTINATION_PATH}"
 EXPECTED_GITHUB_OWNER_ENDPOINT: Final[str] = f"users/{DESTINATION_OWNER}"
 EXPECTED_GITHUB_CREATE_ENDPOINT: Final[str] = "user/repos"
+CREATION_ID_BASELINE: Final[tuple[tuple[str, int], ...]] = (
+    ("post", DESTINATION_ID),
+    ("first-read", DESTINATION_ID),
+    ("visibility-read", DESTINATION_ID),
+    ("final-read", DESTINATION_ID),
+)
 EXPECTED_SECRET_URL: Final[str] = (
     f"https://{USERNAME}:{TOKEN}@{DESTINATION_HOST}/{DESTINATION_PATH}.git"
 )
@@ -1279,13 +1285,34 @@ def test_native_mirror_sync_requires_exact_http_204(
     assert requests.body_paths == []
 
 
-def test_github_private_creation_uses_independent_repository_and_visibility_reads() -> (
-    None
-):
-    """Create only the selected private destination and trust subsequent provider reads.
+@pytest.mark.parametrize(
+    "changed",
+    (None, "post", "first-read", "visibility-read", "final-read"),
+    ids=(
+        "matching-identities",
+        "post-id",
+        "first-read-id",
+        "visibility-read-id",
+        "final-read-id",
+    ),
+)
+def test_github_private_creation_uses_independent_repository_and_visibility_reads(
+    changed: Optional[str],
+    target_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Bind creation and final certification to the exact native POST identity.
 
-    :returns: None; POST response identity cannot substitute for independent read-back.
+    :param changed: One native identity changed in a copy of the immutable baseline.
+    :param target_file: Existing nonsecret selected-target fixture.
+    :param monkeypatch: Replace only target resolution and the outer workflow adapter.
+    :param capsys: Capture the actual success or partial command report.
+    :returns: None; mismatches preserve only the actual created ID as unverified evidence.
     """
+    identities = dict(CREATION_ID_BASELINE)
+    if changed is not None:
+        identities[changed] = SOURCE_ID
     fields = GITHUB_REPOSITORY.RepositoryField
     repository: JSONObject = {
         fields.ID: DESTINATION_ID,
@@ -1293,43 +1320,43 @@ def test_github_private_creation_uses_independent_repository_and_visibility_read
         fields.CLONE_URL: DESTINATION_CLONE_URL,
         fields.PRIVATE: True,
     }
-    requests = _NativeRequests(
-        (
+    exchanges = (
+        *(
             _Exchange(
                 HTTPMethod.GET,
                 EXPECTED_GITHUB_REPOSITORY_ENDPOINT,
                 _response({}, HTTPStatus.NOT_FOUND),
                 returncode=NATIVE_FAILURE,
+            )
+            for _ in range(POLL_OBSERVATION_COUNT)
+        ),
+        _Exchange(
+            HTTPMethod.GET,
+            EXPECTED_GITHUB_OWNER_ENDPOINT,
+            _response(
+                {fields.LOGIN: DESTINATION_OWNER, fields.TYPE: EXPECTED_USER_OWNER}
             ),
-            _Exchange(
-                HTTPMethod.GET,
-                EXPECTED_GITHUB_OWNER_ENDPOINT,
-                _response(
-                    {fields.LOGIN: DESTINATION_OWNER, fields.TYPE: EXPECTED_USER_OWNER}
-                ),
-            ),
-            _Exchange(
-                HTTPMethod.POST,
-                EXPECTED_GITHUB_CREATE_ENDPOINT,
-                _response({fields.ID: SOURCE_ID}, HTTPStatus.CREATED),
-                body={
-                    fields.NAME: DESTINATION_NAME,
-                    fields.PRIVATE: True,
-                    fields.AUTO_INIT: False,
-                },
-            ),
+        ),
+        _Exchange(
+            HTTPMethod.POST,
+            EXPECTED_GITHUB_CREATE_ENDPOINT,
+            _response({fields.ID: identities["post"]}, HTTPStatus.CREATED),
+            body={
+                fields.NAME: DESTINATION_NAME,
+                fields.PRIVATE: True,
+                fields.AUTO_INIT: False,
+            },
+        ),
+        *(
             _Exchange(
                 HTTPMethod.GET,
                 EXPECTED_GITHUB_REPOSITORY_ENDPOINT,
-                _response(repository),
-            ),
-            _Exchange(
-                HTTPMethod.GET,
-                EXPECTED_GITHUB_REPOSITORY_ENDPOINT,
-                _response(repository),
-            ),
-        )
+                _response({**repository, fields.ID: identities[stage]}),
+            )
+            for stage in ("first-read", "visibility-read", "final-read")
+        ),
     )
+    requests = _NativeRequests(exchanges)
     session = GITHUB_SESSION.GitHubIdentitySession(
         DESTINATION_HOST,
         {GITHUB_TOKEN_VARIABLE: TOKEN},
@@ -1340,17 +1367,93 @@ def test_github_private_creation_uses_independent_repository_and_visibility_read
     reader = create_autospec(REMOTE.GitRemoteReader, instance=True)
     reader.read.return_value = REFS.RefSnapshot.parse(REMOTE_OUTPUT)
     destination = GITHUB_REPOSITORY.GitHubRepositoryService(session, reader)
+    engine, source, _ = _engine(None, REFS.RefSnapshot(()))
+    engine.destination = destination
+    intent = WORKFLOW.MirrorIntent(SOURCE_PATH, DESTINATION_PATH, True)
+    plan = engine.plan(intent, FUNCTIONAL_DIGEST, CREDENTIAL_DIGEST)
+    baseline_record = json.loads(_mirror_pair_baseline())[MIRROR_APPLIED_FILE][
+        FIELD.RECORDS
+    ][0]
+    bound_session = replace(
+        _native_source(Mock(), target_file).service.session,
+        skill=json.loads(_mirror_pair_baseline())[MIRROR_APPLIED_FILE][FIELD.SKILL],
+    )
 
-    assert destination.repository(DESTINATION_PATH) is None
-    observed = destination.create(DESTINATION_PATH)
+    def workflow(action: CLI.MirrorAction, state: CLI.MirrorState) -> Mock:
+        """Run the real apply callback with native HTTP and typed source fixtures.
 
-    assert observed == DESTINATION_REPOSITORY
-    assert destination.refs(observed).refs == REFS.RefSnapshot.parse(REMOTE_OUTPUT).refs
-    reader.read.assert_called_once_with(DESTINATION_CLONE_URL, DESTINATION_OWNER, TOKEN)
-    assert requests.calls[-POLL_OBSERVATION_COUNT:] == [
-        (HTTPMethod.GET, EXPECTED_GITHUB_REPOSITORY_ENDPOINT),
-        (HTTPMethod.GET, EXPECTED_GITHUB_REPOSITORY_ENDPOINT),
-    ]
+        :param action: Actual confirmed command inputs.
+        :param state: Actual command-owned plan, record, and mutation state.
+        :returns: Adapter whose execution retains the real callback and reporting path.
+        """
+
+        def run() -> None:
+            """Apply once and let the command classify native identity failures.
+
+            :returns: None after successful independently verified application.
+            :raises API.APIError: A native identity does not match the created object.
+            """
+            state.session = bound_session
+            state.engine = engine
+            state.plan = plan
+            state.record = {
+                **baseline_record,
+                **plan.observation.evidence(DESTINATION_HOST, DESTINATION_PATH),
+                FIELD.ACTION: PLANNED_STATUS,
+                FIELD.VERIFIED: False,
+                FIELD.CREATED: {FIELD.REPOSITORY: False, FIELD.MIRROR: False},
+                FIELD.VERIFIED_SOURCE_REF_COUNT: NATIVE_SUCCESS,
+            }
+            callback = CLI.ApplyMirror(action)
+            callback.bind(state)
+            callback.run()
+
+        executor = Mock(spec=CLI.WorkflowExecutor)
+        executor.run.side_effect = run
+        return executor
+
+    monkeypatch.setattr(
+        CLI, "resolve_target", Mock(return_value=_selected_target(target_file))
+    )
+    monkeypatch.setattr(CLI, "workflow", workflow)
+    code = CLI.main(
+        [
+            *COMMAND_SELECTION,
+            CLI.CREATE_OPTION,
+            CLI.APPLY_OPTION,
+            CONFIRM_OPTION,
+            plan.digest,
+            JSON_OPTION,
+        ]
+    )
+    result = json.loads(capsys.readouterr().out)
+    SCHEMA.validate_specification(result, EVIDENCE.RESULT_SCHEMA)
+    (record,) = result[FIELD.RECORDS]
+    assert record[FIELD.DESTINATION][FIELD.ID] == identities["post"]
+    assert record[FIELD.CREATED][FIELD.REPOSITORY] is True
+    assert dict(CREATION_ID_BASELINE) == {
+        stage: DESTINATION_ID for stage, _ in CREATION_ID_BASELINE
+    }
+    if changed is None:
+        assert (code, result[FIELD.STATUS]) == (NATIVE_SUCCESS, "PASS")
+        assert record[FIELD.VERIFIED] is True
+        assert record[FIELD.CREATED][FIELD.MIRROR] is True
+        reader.read.assert_called_once_with(
+            DESTINATION_CLONE_URL, DESTINATION_OWNER, TOKEN
+        )
+        assert requests.calls == [
+            (exchange.method, exchange.endpoint) for exchange in exchanges
+        ]
+    else:
+        assert (code, result[FIELD.STATUS]) == (COMMAND_FAILURE, PARTIAL_STATUS)
+        assert record[FIELD.VERIFIED] is False
+        assert record[FIELD.VERIFIED_SOURCE_REF_COUNT] == NATIVE_SUCCESS
+        assert result[FIELD.ERRORS]
+        assert destination.created_repository_id == identities["post"]
+        if changed != "final-read":
+            source.configure.assert_not_called()
+            source.sync.assert_not_called()
+            reader.read.assert_not_called()
     assert all(not path.exists() for path in requests.body_paths)
 
 

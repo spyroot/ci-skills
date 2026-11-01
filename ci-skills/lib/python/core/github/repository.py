@@ -82,7 +82,10 @@ class RepositoryField(StrEnum):
 
 
 class GitHubRepositoryService(MirrorDestination):
-    """Use identity-only authentication without requiring runner permissions."""
+    """Use identity-only authentication without requiring runner permissions.
+
+    :ivar created_repository_id: Positive create-response ID retained for partial recovery.
+    """
 
     def __init__(self, session: GitHubIdentitySession, reader: GitRemoteReader) -> None:
         """Retain private provider and native-ref read boundaries.
@@ -92,6 +95,7 @@ class GitHubRepositoryService(MirrorDestination):
         """
         self.session = session
         self.reader = reader
+        self.created_repository_id: Optional[int] = None
 
     def repository(self, reference: str) -> Optional[GitRepository]:
         """Read the exact selected repository without inventing a destination.
@@ -137,6 +141,7 @@ class GitHubRepositoryService(MirrorDestination):
         :raises APIError: Owner cannot be used, creation fails or read-back mismatches.
         :raises OSError: Provider request I/O fails.
         """  # noqa: DOC503 - Shared readers and transport propagate the documented failures.
+        self.created_repository_id = None
         owner, name = reference.split(PATH_SEPARATOR)
         payload = json_object(
             self.session.request(
@@ -158,17 +163,23 @@ class GitHubRepositoryService(MirrorDestination):
             and login.casefold() != self.session.identity.casefold()
         ):
             raise APIError(INVALID_OWNER)
-        self.session.request(
-            HTTPMethod.POST,
-            endpoints[owner_type],
-            {
-                RepositoryField.NAME: name,
-                RepositoryField.PRIVATE: SOURCE_PRIVATE,
-                RepositoryField.AUTO_INIT: NO_AUTO_INIT,
-            },
+        created = json_object(
+            self.session.request(
+                HTTPMethod.POST,
+                endpoints[owner_type],
+                {
+                    RepositoryField.NAME: name,
+                    RepositoryField.PRIVATE: SOURCE_PRIVATE,
+                    RepositoryField.AUTO_INIT: NO_AUTO_INIT,
+                },
+            )
         )
+        created_id = json_integer(created.get(RepositoryField.ID))
+        if created_id <= 0:
+            raise APIError(CREATE_UNVERIFIED)
+        self.created_repository_id = created_id
         observed = self.repository(reference)
-        if observed is None:
+        if observed is None or observed.id != created_id:
             raise APIError(CREATE_UNVERIFIED)
         visibility = json_object(
             self.session.request(
@@ -178,7 +189,10 @@ class GitHubRepositoryService(MirrorDestination):
                 ),
             )
         )
-        if visibility.get(RepositoryField.PRIVATE) is not SOURCE_PRIVATE:
+        if (
+            json_integer(visibility.get(RepositoryField.ID)) != created_id
+            or visibility.get(RepositoryField.PRIVATE) is not SOURCE_PRIVATE
+        ):
             raise APIError(CREATE_UNVERIFIED)
         return observed
 
