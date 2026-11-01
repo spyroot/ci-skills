@@ -107,7 +107,7 @@ All listed allocations are authorized for live smoke and behavioral testing with
 
 ## Mirror qualification read-back — 2026-11-01
 
-Candidate `ae47632` created private GitHub repository `1441606051` and GitLab mirror `14` for retained GitLab project
+Candidate `bcf7d59` created private GitHub repository `1441633602` and GitLab mirror `15` for retained GitLab project
 `261`, `hott/test-mirror-push`. Both branch and tag refs matched; a confirmed repeat returned NO_OP without mutation.
 Cleanup removed only those two run-created IDs, proved both absent by independent native reads, and repeated once
 without another deletion. The source and its `main`/`smoke-seed` refs remain present; source CI stays disabled.
@@ -115,8 +115,9 @@ No consumer Actions job or GitLab pipeline was dispatched. Original receipts are
 `tests/acceptance/candidate/`; the NO_OP copy includes separately captured cleanup observations.
 
 The earlier `6f9f1da` qualification remains unchanged under `tests/acceptance/historical/pre-mirror-owned-id/`.
-The `1f2b6f5` qualification remains in the merged CI-14 history. The renewed `ae47632` run verifies the runner candidate
-with the same retained source and creation-ID checks; it does not allocate another retained repository.
+The `1f2b6f5` qualification remains in the merged CI-14 history. The prior `ae47632` originals remain unchanged under
+`tests/acceptance/historical/pre-ci15-build-retention/`. The renewed `bcf7d59` run verifies the corrected runner
+candidate with the same retained source and creation-ID checks; it does not allocate another retained repository.
 
 ## Runner baseline support allocation
 
@@ -128,3 +129,9 @@ two-minute limit and manual-only routing; configuration pushes must not execute 
 
 The GitHub rename retained repository ID `1344617680` and its existing history. The private dcloud project is `262`.
 These repositories are retained across phases; only run-owned runner registrations and workloads are disposable.
+
+The retained support namespace UID is `7ae80f69-fa57-4cc4-8be7-c80ac05ccbec`; its BuildConfig UID is
+`7e695883-88eb-4ffd-af61-b81856556a84`. The verified image is
+`sha256:567b6f13bb9d658bf8a917b395f728515c428c1d799a39a84900dc2c4a6c34b1`.
+The namespace was allocated by this smoke run for retention across phases. Reuse this image digest; the initial
+image lacked libicu and is not qualified. The one corrected build passed after exact-image dependency reproduction.
