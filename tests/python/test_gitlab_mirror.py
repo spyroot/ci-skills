@@ -160,6 +160,8 @@ INVALID_NO_CONTENT_REASON: Final[str] = "invalid_no_content_response"
 DESTINATION_CHANGED_REASON: Final[str] = "mirror_destination_changed"
 UNCONFIRMED_REASON: Final[str] = "mirror_live_plan_confirmation_required"
 TRANSPORT_REASON: Final[str] = "transport"
+AUTHORIZATION_REASON: Final[str] = "authorization"
+VERIFICATION_TIMEOUT_REASON: Final[str] = "mirror_verification_timeout"
 ALTERNATE_DESTINATION_URL: Final[str] = (
     f"https://{DESTINATION_HOST}/unit/replaced-destination.git"
 )
@@ -788,7 +790,7 @@ def test_sync_polling_uses_thirty_second_waits_and_one_absolute_deadline() -> No
         CREDENTIAL_DIGEST,
     )
 
-    with pytest.raises(API.APIError, match=API.REQUEST_DEADLINE_EXCEEDED):
+    with pytest.raises(API.APIError, match=VERIFICATION_TIMEOUT_REASON):
         engine.apply(plan, confirmation=plan.digest)
 
     assert waits == [MINIMUM_POLL_SECONDS] * (
@@ -1503,9 +1505,21 @@ def test_native_mirror_creation_decodes_private_state_and_reads_configuration_ba
     assert all(not path.exists() for path in requests.body_paths)
 
 
-def test_engine_rejects_same_mirror_id_redirected_to_a_different_destination() -> None:
+@pytest.mark.parametrize(
+    "mirror_url",
+    (
+        DESTINATION_CLONE_URL.replace(DESTINATION_HOST, SOURCE_HOST),
+        DESTINATION_CLONE_URL.replace(f"/{DESTINATION_OWNER}/", "/other-owner/"),
+        ALTERNATE_DESTINATION_URL,
+    ),
+    ids=("different-host", "different-owner", "different-repository"),
+)
+def test_engine_rejects_same_mirror_id_redirected_to_a_different_destination(
+    mirror_url: str,
+) -> None:
     """Refuse changed native destination identity even when expected refs now match.
 
+    :param mirror_url: One changed host, owner or repository in the baseline clone URL.
     :returns: None; matching object IDs cannot hide a different remote mirror URL.
     """
     snapshot = REFS.RefSnapshot.parse(REMOTE_OUTPUT)
@@ -1515,7 +1529,7 @@ def test_engine_rejects_same_mirror_id_redirected_to_a_different_destination() -
     )
     source.mirror.return_value = replace(
         FINISHED_MIRROR,
-        url=ALTERNATE_DESTINATION_URL,
+        url=mirror_url,
         last_successful_update_at=ADVANCED_SUCCESS_TIMESTAMP,
     )
     plan = engine.plan(
@@ -1566,7 +1580,7 @@ def test_provider_read_exhausting_deadline_prevents_followup_reads_or_success() 
     source.refs.reset_mock()
     destination.refs.reset_mock()
 
-    with pytest.raises(API.APIError, match=API.REQUEST_DEADLINE_EXCEEDED):
+    with pytest.raises(API.APIError, match=VERIFICATION_TIMEOUT_REASON):
         engine.apply(plan, confirmation=plan.digest)
 
     source.mirror.assert_called_once_with(MIRROR_ID)
@@ -1794,3 +1808,260 @@ def test_same_host_profile_alias_binds_provenance_and_confirmation_digest(
     assert plans[0].functional_digest == plans[1].functional_digest
     assert plans[0].credential_digest != plans[1].credential_digest
     assert plans[0].digest != plans[1].digest
+
+
+@pytest.mark.parametrize(
+    "mirror_url",
+    (
+        DESTINATION_CLONE_URL.removesuffix(".git"),
+        DESTINATION_CLONE_URL + "/",
+        DESTINATION_CLONE_URL.removesuffix(".git") + "/",
+    ),
+    ids=("omitted-suffix", "trailing-slash", "omitted-suffix-and-slash"),
+)
+def test_equivalent_https_mirror_url_reuses_verified_configuration_without_writes(
+    mirror_url: str,
+) -> None:
+    """Recognize the same HTTPS repository without creating a redundant mirror.
+
+    :param mirror_url: Equivalent clone spelling in the native mirror observation.
+    :returns: None after real planning and apply preserve the native mirror ID.
+    """
+    baseline = FINISHED_MIRROR
+    snapshot = REFS.RefSnapshot.parse(REMOTE_OUTPUT)
+    engine, source, destination = _engine(replace(baseline, url=mirror_url), snapshot)
+    plan = engine.plan(
+        WORKFLOW.MirrorIntent(SOURCE_PATH, DESTINATION_PATH),
+        FUNCTIONAL_DIGEST,
+        CREDENTIAL_DIGEST,
+    )
+
+    source.mirrors.return_value = (baseline,)
+    result = engine.apply(plan, confirmation=plan.digest)
+
+    assert result.action.value == NO_OP_ACTION
+    assert result.mirror.id == baseline.id
+    assert result.created_mirror is False
+    assert engine.mutated is False
+    source.configure.assert_not_called()
+    source.sync.assert_not_called()
+    destination.create.assert_not_called()
+    assert FINISHED_MIRROR == baseline
+
+
+@pytest.mark.parametrize("replacement", (False, True), ids=("create", "replace"))
+def test_native_mirror_readback_failure_retains_created_post_id(
+    tmp_path: Path,
+    target_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    replacement: bool,
+) -> None:
+    """Report the native POST identity without inventing an unread mirror configuration.
+
+    :param tmp_path: Test-owned shared guard directory.
+    :param target_file: Nonsecret provider-session reference.
+    :param monkeypatch: Redirect the existing creation guard's local filesystem root.
+    :param capsys: Capture the actual command failure report for installed-schema validation.
+    :param replacement: Replace the selected failed mirror or create its first record.
+    :returns: None; the partial report retains only known native creation ownership.
+    """
+    fields = MIRRORING.MirrorField
+    failed = replace(
+        FINISHED_MIRROR,
+        update_status=MIRRORING.MirrorStatus.FAILED,
+        last_error_present=True,
+    )
+    identity = REPLACEMENT_MIRROR_ID if replacement else MIRROR_ID
+    endpoint = (
+        EXPECTED_REPLACEMENT_ENDPOINT if replacement else EXPECTED_MIRROR_ENDPOINT
+    )
+    body: JSONObject = {
+        fields.URL: EXPECTED_SECRET_URL,
+        fields.AUTH_METHOD: PASSWORD_AUTH,
+        fields.ENABLED: True,
+        fields.KEEP_DIVERGENT: True,
+        fields.ONLY_PROTECTED: False,
+    }
+    before = (
+        (
+            _Exchange(
+                HTTPMethod.GET,
+                EXPECTED_MIRROR_ENDPOINT,
+                _response(_native_mirror_payload(failed)),
+            ),
+            _Exchange(HTTPMethod.DELETE, EXPECTED_MIRROR_ENDPOINT, NO_CONTENT_RESPONSE),
+            _Exchange(
+                HTTPMethod.GET,
+                EXPECTED_MIRROR_ENDPOINT,
+                _response({}, HTTPStatus.NOT_FOUND),
+                returncode=NATIVE_FAILURE,
+            ),
+        )
+        if replacement
+        else (_Exchange(HTTPMethod.GET, EXPECTED_MIRRORS_ENDPOINT, json.dumps([])),)
+    )
+    exchanges = (
+        *(
+            _Exchange(
+                HTTPMethod.GET,
+                EXPECTED_MIRRORS_ENDPOINT,
+                json.dumps([_native_mirror_payload(failed)] if replacement else []),
+            )
+            for _ in range(POLL_OBSERVATION_COUNT)
+        ),
+        *before,
+        _Exchange(
+            HTTPMethod.POST,
+            EXPECTED_MIRRORS_ENDPOINT,
+            _response({fields.ID: identity}, HTTPStatus.CREATED),
+            body=body,
+        ),
+        _Exchange(
+            HTTPMethod.GET,
+            endpoint,
+            _response({}, HTTPStatus.FORBIDDEN),
+            returncode=NATIVE_FAILURE,
+        ),
+    )
+    requests = _NativeRequests(exchanges)
+    monkeypatch.setattr(GITLAB_API, "_lock_root", lambda: tmp_path / PROJECT_SCOPE)
+    source = _native_source(requests, target_file)
+    snapshot = REFS.RefSnapshot.parse(REMOTE_OUTPUT)
+    source.reader.read.return_value = snapshot
+    monkeypatch.setattr(source, "repository", Mock(return_value=SOURCE_REPOSITORY))
+    sync = Mock(wraps=source.sync)
+    monkeypatch.setattr(source, "sync", sync)
+    engine, _, _ = _engine(failed if replacement else None, snapshot)
+    engine.source = source
+    intent = WORKFLOW.MirrorIntent(SOURCE_PATH, DESTINATION_PATH)
+    plan = engine.plan(intent, FUNCTIONAL_DIGEST, CREDENTIAL_DIGEST)
+    baseline = json.loads(_mirror_pair_baseline())[MIRROR_APPLIED_FILE]
+    bound_session = replace(source.service.session, skill=baseline[FIELD.SKILL])
+
+    def workflow(action: CLI.MirrorAction, state: CLI.MirrorState) -> Mock:
+        """Bind the real native mirror engine to the command's actual apply callback.
+
+        :param action: Confirmed inputs parsed by the installed command interface.
+        :param state: Actual command-owned plan and partial-report state.
+        :returns: Outer adapter retaining the real apply and partial-report behavior.
+        """
+
+        def run() -> None:
+            """Apply once and let the command retain an uncertain native creation.
+
+            :returns: None only if independent configuration read-back succeeds.
+            :raises API.APIError: The scripted independent read returns terminal denial.
+            """
+            observed = plan.observation.evidence(DESTINATION_HOST, DESTINATION_PATH)
+            state.session = bound_session
+            state.engine = engine
+            state.plan = plan
+            state.record = {
+                **baseline[FIELD.RECORDS][0],
+                **observed,
+                BEFORE_FIELD: observed,
+                FIELD.ACTION: PLANNED_STATUS,
+                FIELD.VERIFIED: False,
+                FIELD.CREATED: {FIELD.REPOSITORY: False, FIELD.MIRROR: False},
+                FIELD.VERIFIED_SOURCE_REF_COUNT: NATIVE_SUCCESS,
+                FIELD.REPLACEMENT_REQUIRED: plan.replacement_required,
+                FIELD.REPLACED_MIRROR_ID: plan.replaced_mirror_id,
+            }
+            callback = CLI.ApplyMirror(action)
+            callback.bind(state)
+            callback.run()
+
+        executor = Mock(spec=CLI.WorkflowExecutor)
+        executor.run.side_effect = run
+        return executor
+
+    monkeypatch.setattr(
+        CLI, "resolve_target", Mock(return_value=_selected_target(target_file))
+    )
+    monkeypatch.setattr(CLI, "workflow", workflow)
+
+    code = CLI.main(
+        [
+            *COMMAND_SELECTION,
+            CLI.APPLY_OPTION,
+            CONFIRM_OPTION,
+            plan.digest,
+            JSON_OPTION,
+        ]
+    )
+    result = JSON_TYPES.json_object(
+        API.response_decoder().decode(capsys.readouterr().out)
+    )
+
+    SCHEMA.validate_specification(result, EVIDENCE.RESULT_SCHEMA)
+    assert (code, result[FIELD.STATUS]) == (COMMAND_FAILURE, PARTIAL_STATUS)
+    (record,) = JSON_TYPES.json_objects(result[FIELD.RECORDS])
+    assert record[FIELD.VERIFIED] is False
+    assert record[FIELD.CREATED] == {FIELD.REPOSITORY: False, FIELD.MIRROR: True}
+    assert record["created_mirror_id"] == identity
+    assert record[FIELD.MIRROR] is None
+    assert record[FIELD.REPLACEMENT_REQUIRED] is replacement
+    assert record[FIELD.REPLACED_MIRROR_ID] == (MIRROR_ID if replacement else None)
+    assert record[BEFORE_FIELD] == plan.observation.evidence(
+        DESTINATION_HOST, DESTINATION_PATH
+    )
+    assert record[FIELD.VERIFIED_SOURCE_REF_COUNT] == NATIVE_SUCCESS
+    assert result[FIELD.ERRORS] == [
+        {FIELD.SOURCE: CLI.KIND, FIELD.REASON: AUTHORIZATION_REASON}
+    ]
+    assert source.created_mirror_id == identity
+    sync.assert_not_called()
+    assert requests.calls == [
+        (exchange.method, exchange.endpoint) for exchange in exchanges
+    ]
+    assert all(not path.exists() for path in requests.body_paths)
+    assert TOKEN not in json.dumps(result)
+
+
+def test_completed_native_sync_with_unmatched_refs_keeps_domain_timeout_reason() -> (
+    None
+):
+    """Bound a completed-but-unreplicated mirror without reporting generic transport failure.
+
+    :returns: None; fake time proves one absolute deadline and no successful ref proof.
+    """
+    engine, source, destination = _engine(FINISHED_MIRROR, REFS.RefSnapshot(()))
+    baseline = FINISHED_MIRROR
+    source.mirror.return_value = replace(
+        baseline, last_successful_update_at=ADVANCED_SUCCESS_TIMESTAMP
+    )
+    clock = Mock(return_value=FIXED_CLOCK_SECONDS)
+    waits: list[float] = []
+
+    def advance(seconds: float) -> None:
+        """Advance fixture time by exactly the workflow's requested wait.
+
+        :param seconds: Bounded delay requested by mirror verification.
+        :returns: None after recording the finite requested polling budget.
+        """
+        waits.append(seconds)
+        clock.return_value += seconds
+
+    engine.deadline = API.RequestDeadline(POLL_BUDGET_SECONDS, clock)
+    engine.sleep = advance
+    plan = engine.plan(
+        WORKFLOW.MirrorIntent(SOURCE_PATH, DESTINATION_PATH),
+        FUNCTIONAL_DIGEST,
+        CREDENTIAL_DIGEST,
+    )
+
+    with pytest.raises(API.APIError, match=VERIFICATION_TIMEOUT_REASON):
+        engine.apply(plan, confirmation=plan.digest)
+
+    assert waits == [MINIMUM_POLL_SECONDS] * (
+        POLL_BUDGET_SECONDS // MINIMUM_POLL_SECONDS
+    )
+    assert sum(waits) == POLL_BUDGET_SECONDS
+    assert source.mirror.call_count == len(waits)
+    assert engine.current_mirror.last_successful_update_at == ADVANCED_SUCCESS_TIMESTAMP
+    assert destination.refs.return_value == REFS.RefSnapshot(())
+    source.sync.assert_called_once_with(MIRROR_ID)
+    source.configure.assert_not_called()
+    destination.create.assert_not_called()
+    assert FINISHED_MIRROR == baseline
