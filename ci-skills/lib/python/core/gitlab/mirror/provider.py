@@ -23,7 +23,7 @@ from lib.python.core.git.mirroring import (
     PushMirrorSource,
 )
 from lib.python.core.git.refs import RefSnapshot
-from lib.python.core.git.remote import GitRemoteReader
+from lib.python.core.git.remote import GitRemoteReader, repository_url_key
 from lib.python.core.gitlab.gitlab_api import CreateGuard, create_guard
 from lib.python.core.gitlab.gitlab_session import GitLabService
 from lib.python.core.gitlab.mirror.constants import PASSWORD_AUTH, Failure
@@ -79,7 +79,11 @@ class SourceField(StrEnum):
 
 
 class GitLabPushMirrorService(PushMirrorSource):
-    """Use one existing verified GitLab session for the selected source project."""
+    """Use one existing verified GitLab session for the selected source project.
+
+    :ivar created_mirror_id: Native POST identity retained even when independent
+        configuration read-back fails; never proof of verified configuration.
+    """
 
     def __init__(self, service: GitLabService, reader: GitRemoteReader) -> None:
         """Retain verified source access and shared native ref execution.
@@ -89,6 +93,7 @@ class GitLabPushMirrorService(PushMirrorSource):
         """
         self.service = service
         self.reader = reader
+        self.created_mirror_id: Optional[int] = None
 
     def repository(self, reference: str) -> Optional[GitRepository]:
         """Read the selected source ID and native HTTPS clone route.
@@ -236,7 +241,7 @@ class GitLabPushMirrorService(PushMirrorSource):
         """  # noqa: DOC503 - Shared mirror reads propagate documented transport failures.
         current = self.mirror(identity)
         if (
-            current.url.casefold() != destination.clone_url.casefold()
+            repository_url_key(current.url) != repository_url_key(destination.clone_url)
             or not current.enabled
             or current.policy != policy
             or current.auth_method != PASSWORD_AUTH
@@ -297,6 +302,9 @@ class GitLabPushMirrorService(PushMirrorSource):
             self._creation_body(destination, policy, username, token),
         )
         identity = json_integer(json_object(payload).get(MirrorField.ID))
+        if identity <= 0:
+            raise APIError(INVALID_MIRROR)
+        self.created_mirror_id = identity
         return self._read_configuration(destination, policy, identity)
 
     def _delete_failed(
@@ -316,8 +324,9 @@ class GitLabPushMirrorService(PushMirrorSource):
         current = self.mirror(observed.id)
         if (
             current.id != observed.id
-            or current.url.casefold() != observed.url.casefold()
-            or current.url.casefold() != destination.clone_url.casefold()
+            or repository_url_key(current.url) != repository_url_key(observed.url)
+            or repository_url_key(current.url)
+            != repository_url_key(destination.clone_url)
             or not requires_replacement(current)
         ):
             raise APIError(Failure.STALE_PLAN)
@@ -357,6 +366,7 @@ class GitLabPushMirrorService(PushMirrorSource):
         :raises APIError: Provider write, returned identity or read-back mismatches.
         :raises OSError: Provider transport or temporary private-body cleanup fails.
         """  # noqa: DOC503 - Shared readers and transport propagate the documented failures.
+        self.created_mirror_id = None
         if observed is not None and not requires_replacement(observed):
             self.service.api.put_json(
                 self.service.session,
@@ -377,7 +387,8 @@ class GitLabPushMirrorService(PushMirrorSource):
                 matching = tuple(
                     item
                     for item in self.mirrors()
-                    if item.url.casefold() == destination.clone_url.casefold()
+                    if repository_url_key(item.url)
+                    == repository_url_key(destination.clone_url)
                 )
                 if matching:
                     guard.clear()

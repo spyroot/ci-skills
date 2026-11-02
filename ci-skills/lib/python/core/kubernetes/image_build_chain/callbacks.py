@@ -329,6 +329,7 @@ class PrepareRunnerManager(LocalCallback[ImageBuildChainState, ImageBuildChainAc
         args = _manager_args(self.action, state)
         manager = GitLabRunnerManagerAction(args, context=state)
         manager.prepare()
+        manager.bind_repository(state.gitlab.access)
         state.manager_action = manager
         return {
             "verified": True,

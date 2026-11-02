@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Mapping
 from typing import Final, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from lib.python.core.cli_api import APIError, CommandRunner, RequestDeadline
 from lib.python.core.git.refs import RefSnapshot
@@ -43,6 +43,24 @@ TRACE_VARIABLES: Final = (
 INVALID_REMOTE: Final = "git_remote_invalid"
 INVALID_CREDENTIAL: Final = "git_remote_credential_invalid"
 EXTRA_HEADER_TEMPLATE: Final = "http.{url}.extraheader"
+
+
+def repository_url_key(url: str) -> str:
+    """Compare HTTPS repository routes independently of optional clone suffixes.
+
+    :param url: Repository route already validated by its provider boundary.
+    :returns: Case-insensitive route with an optional HTTPS ``.git`` suffix and
+        trailing slash removed; other transports retain their existing comparison.
+    :raises ValueError: The URL cannot be parsed by the standard URL parser.
+    """  # noqa: DOC502 - Standard URL parsing propagates malformed-route errors.
+    normalized = url.casefold()
+    parsed = urlsplit(normalized)
+    if parsed.scheme != HTTPS_SCHEME:
+        return normalized
+    path = parsed.path.rstrip("/").removesuffix(".git")
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment)
+    )
 
 
 class GitRemoteReader:

@@ -13,7 +13,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional, Self
 
-from lib.python.core.cli_api import APIError, RequestDeadline
+from lib.python.core.cli_api import (
+    REQUEST_DEADLINE_EXCEEDED,
+    APIError,
+    RequestDeadline,
+)
 from lib.python.core.git.mirroring import (
     GitRepository,
     MirrorDestination,
@@ -24,6 +28,7 @@ from lib.python.core.git.mirroring import (
     PushMirrorSource,
 )
 from lib.python.core.git.refs import RefSnapshot
+from lib.python.core.git.remote import repository_url_key
 from lib.python.core.gitlab.mirror.constants import (
     DESTINATION_PATTERN,
     KIND,
@@ -438,7 +443,7 @@ class MirrorEngine:
         matches = tuple(
             mirror
             for mirror in self.deadline.call(self.source.mirrors)
-            if mirror.url.casefold() == url.casefold()
+            if repository_url_key(mirror.url) == repository_url_key(url)
         )
         if len(matches) > 1:
             raise APIError(Failure.AMBIGUOUS)
@@ -592,25 +597,32 @@ class MirrorEngine:
         :raises APIError: Native failure, changed source or incomplete proof at the deadline.
         :raises OSError: Provider or native Git read fails.
         """
-        while True:
-            observed = self.deadline.call(self.source.mirror, mirror_id)
-            self.current_mirror = observed
-            if observed.url.casefold() != destination.clone_url.casefold():
-                raise APIError(Failure.DESTINATION_CHANGED)
-            if observed.update_status == MirrorStatus.FAILED:
-                raise APIError(Failure.NATIVE_FAILURE)
-            if (
-                self._successful(observed)
-                and observed.last_successful_update_at != previous_success
-            ):
-                destination_refs = self.deadline.call(
-                    self.destination.refs, destination
-                )
-                source_refs = self.deadline.call(self.source.refs, source)
-                if source_refs.digest != expected.digest:
-                    raise APIError(Failure.SOURCE_CHANGED)
-                if destination_refs.matches(source_refs):
-                    self.deadline.remaining()
-                    return observed, source_refs, destination_refs
-            remaining = self.deadline.remaining()
-            self.sleep(min(POLL_SECONDS, remaining))
+        try:
+            while True:
+                observed = self.deadline.call(self.source.mirror, mirror_id)
+                self.current_mirror = observed
+                if repository_url_key(observed.url) != repository_url_key(
+                    destination.clone_url
+                ):
+                    raise APIError(Failure.DESTINATION_CHANGED)
+                if observed.update_status == MirrorStatus.FAILED:
+                    raise APIError(Failure.NATIVE_FAILURE)
+                if (
+                    self._successful(observed)
+                    and observed.last_successful_update_at != previous_success
+                ):
+                    destination_refs = self.deadline.call(
+                        self.destination.refs, destination
+                    )
+                    source_refs = self.deadline.call(self.source.refs, source)
+                    if source_refs.digest != expected.digest:
+                        raise APIError(Failure.SOURCE_CHANGED)
+                    if destination_refs.matches(source_refs):
+                        self.deadline.remaining()
+                        return observed, source_refs, destination_refs
+                remaining = self.deadline.remaining()
+                self.sleep(min(POLL_SECONDS, remaining))
+        except APIError as exc:
+            if exc.reason == REQUEST_DEADLINE_EXCEEDED:
+                raise APIError(Failure.TIMEOUT) from exc
+            raise
