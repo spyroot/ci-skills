@@ -1836,6 +1836,7 @@ def test_equivalent_https_mirror_url_reuses_verified_configuration_without_write
         CREDENTIAL_DIGEST,
     )
 
+    source.mirrors.return_value = (baseline,)
     result = engine.apply(plan, confirmation=plan.digest)
 
     assert result.action.value == NO_OP_ACTION

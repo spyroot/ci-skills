@@ -259,7 +259,7 @@ class MirrorPlan:
                 if mirror is None
                 else {
                     Field.ID: mirror.id,
-                    Field.URL: mirror.url,
+                    Field.URL: repository_url_key(mirror.url),
                     Field.ENABLED: mirror.enabled,
                     Field.POLICY: mirror.policy.evidence(),
                     Field.AUTH_METHOD: mirror.auth_method,
