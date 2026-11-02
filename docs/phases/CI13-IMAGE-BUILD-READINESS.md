@@ -7,7 +7,8 @@
 ## Authority
 
 The installed `probe` and reusable SCC preparation merged in [PR81](https://github.com/spyroot/ci-skills/pull/81)
-at main `788b9e9`. The `chain` delivery remains unmerged; live interruption proof is not established.
+at main `788b9e9`. The `chain` implementation is present at `ff1fdc8`; live interruption and current-chain
+consumer proof remain open in the [active ExecPlan](../exec-plans/active/ci13-image-build-readiness.md).
 
 CI13 is the approved Podman/readiness delivery, separate from the native OCP delivery in
 [CI12](CI12-NODE-ONBOARDING.md). CI12.0 owns the reusable tool preparation and run scope; this phase consumes
@@ -239,7 +240,8 @@ an evidence directory, the log and the rows.
 
 ### Current State and Intended Outcome
 
-PARTIALLY_IMPLEMENTED: the probe is merged in PR81 at main `788b9e9`; the chain remains unmerged.
+PARTIALLY_IMPLEMENTED: the probe is merged in PR81 at main `788b9e9`; chain code is present at `ff1fdc8`.
+The phase remains active for its outstanding acceptance, not duplicate chain implementation.
 The following tree, CI topology and baseline observations retain the original planning snapshot at `352128d`:
 
     ci-skills/
@@ -618,8 +620,10 @@ the agent names; evidence is the result's rows with the Pod's terminated exit co
 identifier, the permission source, and the namespace, run-owned RoleBinding and Job absent afterwards. External
 authorization setup is not capability proof. A second run interrupted during the Job proves cleanup on interrupt
 by the same absence read-back. Each receipt is sanitized with the portable writer and carries the functional
-checksum of the installed candidate; PR81 registered its captured receipt in the existing gate. The chain's evidence
-(existing build/publication/deployment results) waits for PR-CI13-2. Online/runtime proof, consumer-job execution
+checksum of the installed candidate; PR81 registered its captured receipt in the existing gate. Historical chain
+build/publication/deployment results are recorded at `92713cc` and `ffeebba`;
+the [active ExecPlan](../exec-plans/active/ci13-image-build-readiness.md#progress) distinguishes those results
+from current-candidate full-chain acceptance. Online/runtime proof, consumer-job execution
 and disposal of test resources are external acceptance steps.
 
 ## End-to-End Test

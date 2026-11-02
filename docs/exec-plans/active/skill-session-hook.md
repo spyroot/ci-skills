@@ -6,7 +6,73 @@
 - planningStage: PROPOSED
 - workClass: EXTENSION
 
-## Authority
+This living ExecPlan follows [docs/PLANS.md](../../PLANS.md). Keep Progress, Surprises & Discoveries,
+Decision Log, and Outcomes & Retrospective current; the native hook integration remains proposed.
+
+## Purpose / Big Picture
+
+Agents currently inspect help, configuration and large outputs repeatedly to establish
+what to call and whether it worked. CI Skills already reduces that work through atomic
+operations, short combos, structured results and reference pointers.
+
+Hooks add context at the point the agent calls an installed capability. The intended
+benefit is fewer repeated inspections: identify the relevant configuration gap before
+the call, or point directly to the result and its existing reference after the call.
+The acceptance evidence must show this useful information in both supported clients.
+
+The current installer copies the skill but registers no lifecycle adapter. The current
+hook document is a configuration sketch without implementation or live evidence.
+This phase closes that integration gap using existing command and installation contracts.
+
+### Consumer
+
+The consumer is a user running an installed CI Skills command through a local Codex or
+Claude session. The user installs the skill, configures only the providers they use in
+`~/.ci-skills/target.toml`, and asks their agent to perform a CI task.
+
+For example, a user with only GitLab configured asks the agent to check GitLab access.
+The agent discovers the command and its input/reference pointers, then invokes the
+installed `gitlab_access.py check --json`. Before execution, the hook can identify missing
+GitLab configuration. After execution, it can summarize the actual command result.
+Neither step requires Harbor, Kubernetes or GitHub configuration.
+
+A user who has only Kubernetes follows the same path with a Kubernetes capability.
+A combo that needs another provider continues to report that missing requirement through
+the existing command/executor interface. Hook advice does not replace that check.
+
+The user receives the original command output plus a short agent-context hint, where
+supported by the host. A hook's UI label is not proof of command success. Installation
+and update steps are specified under Concrete Steps; the live journey is below.
+
+## Progress
+
+- [x] H1–H6: proposed behavior, shared interfaces, registration boundary and acceptance paths are recorded.
+- [ ] H-01/H-W1: implement shared processing, schemas, Codex adapter and installer registration after installer polish.
+- [ ] H-02/H-W2: implement Claude registration/adapter and parity using the shared H-01 interfaces.
+- [ ] H1–H6: collect both-client activation/advice evidence and the existing exact-candidate required checks.
+
+## Surprises & Discoveries
+
+The assessed installer and catalogue exist, but native hook processing/registration and both-client activation
+proof remain absent from this delivery. The runner-manager evidence proves a real standalone Podman consumer;
+it does not establish the planned full sixth journey or activate either host hook.
+
+## Decision Log
+
+DEC-HOOKS-01: preserve the existing advisory boundary: the command owns provider operations and the hook
+adds prerequisite/result context without extra provider calls or mutation retries. Status: ACCEPTED.
+Rationale: A1–A3 require useful installed context while retaining the command's existing operation contract.
+Governing references: Authority and H1–H6 below.
+
+## Outcomes & Retrospective
+
+The design is recorded; native installed lifecycle integration remains NOT_IMPLEMENTED and UNVERIFIED.
+Next: implement H-01 through the existing installer and shared catalogue/target/schema facilities, then H-02
+and both-client evidence. Proposed interfaces and examples are not installed functionality.
+
+## Context and Orientation
+
+### Authority
 
 This is the hook delivery within [CI11-TOOLS](../../phases/CI11-TOOLS.md), positioned after
 installer/callback polish and before runner/pipeline delivery. It expands the existing
@@ -29,53 +95,17 @@ The existing advisory boundary remains: the command performs the operation; the 
 provides prerequisite or result context without repeating API calls, rewriting commands
 or retrying mutations.
 
-The [project binding](../../../standards-binding.yaml) at `56a579c2d86addb7bae0591f8fc1750561b168d7`
-continues to select the mandatory Standards contracts. This document uses the requested
-[System Architecture format][architecture] and [Work Classification vocabulary][classification]
-from Standards revision `cae52b2d50bf056b92dd65037d3f2f55301806dc`. Those documents are outside
-the current project pin. Applying their format does not claim that the binding has been
-updated or that the architecture checker has passed.
+The [project binding](../../../standards-binding.yaml) pins mandatory Standards revision
+`5bd31f103621dcd7e49ec6e6af55583de7056d7d`, including [System Architecture][architecture].
+The original design used [Work Classification vocabulary][classification] from revision
+`cae52b2d50bf056b92dd65037d3f2f55301806dc`. Applying the format does not claim that an
+architecture checker has passed.
 
 The implementation snapshot assessed below is main `e5fb154410027e4222c60a6b7772c105200f4002`.
 Requirement IDs H1–H6 in Gates belong to this CI11 delivery. Planning PR IDs in PR Order
 are dependencies, not GitHub PR numbers or approvals.
 
-## Consumer
-
-The consumer is a user running an installed CI Skills command through a local Codex or
-Claude session. The user installs the skill, configures only the providers they use in
-`~/.ci-skills/target.toml`, and asks their agent to perform a CI task.
-
-For example, a user with only GitLab configured asks the agent to check GitLab access.
-The agent discovers the command and its input/reference pointers, then invokes the
-installed `gitlab_access.py check --json`. Before execution, the hook can identify missing
-GitLab configuration. After execution, it can summarize the actual command result.
-Neither step requires Harbor, Kubernetes or GitHub configuration.
-
-A user who has only Kubernetes follows the same path with a Kubernetes capability.
-A combo that needs another provider continues to report that missing requirement through
-the existing command/executor interface. Hook advice does not replace that check.
-
-The user receives the original command output plus a short agent-context hint, where
-supported by the host. A hook's UI label is not proof of command success. Installation
-and update steps are specified under Implementation Plan; the live journey is below.
-
-## Motivation
-
-Agents currently inspect help, configuration and large outputs repeatedly to establish
-what to call and whether it worked. CI Skills already reduces that work through atomic
-operations, short combos, structured results and reference pointers.
-
-Hooks add context at the point the agent calls an installed capability. The intended
-benefit is fewer repeated inspections: identify the relevant configuration gap before
-the call, or point directly to the result and its existing reference after the call.
-The acceptance evidence must show this useful information in both supported clients.
-
-The current installer copies the skill but registers no lifecycle adapter. The current
-hook document is a configuration sketch without implementation or live evidence.
-This phase closes that integration gap using existing command and installation contracts.
-
-## Diagram
+### Diagram
 
 The labels distinguish host control flow from event/result data. Only the installed
 command owns provider operations.
@@ -129,8 +159,6 @@ Installed client run → command receipts above + host activation artifact → P
 The live command runs through the installed user path on the approved test bench,
 not inside GitHub. GitHub evaluates submitted evidence through the existing checks.
 
-## Implementation Plan
-
 ### Current state and intended outcome
 
 - **IMPLEMENTED: installation and discovery infrastructure.** Reuse
@@ -146,6 +174,8 @@ not inside GitHub. GitHub evaluates submitted evidence through the existing chec
   verification UNVERIFIED; planningStage PROPOSED. Evidence: A1 and the assessed source.
   This phase adds those bounded responsibilities. No both-client acceptance evidence
   exists for this delivery; examples cannot establish host activation.
+
+## Plan of Work
 
 ### Behavioral specification
 
@@ -312,14 +342,198 @@ observed failure; it never claims the illustrated success.
 
 6. **Build a GitLab runner and prove it with a real job — planned full chain.**
    Toolbox build → Harbor push → runner record/manager configuration → start/watch
-   pipeline → read job/runner identity and tool results → cleanup. The aggregate and
-   pipeline mutation verbs remain planned in CI11/toolbelt block 7; this hook phase
-   does not deliver or advertise them as installed. Once delivered through the normal
+   pipeline → read job/runner identity and tool results → cleanup. The aggregate
+   remains planned in CI11/toolbelt block 7. Standalone pipeline start/watch and the
+   manager/Podman consumer path have [recorded proof][manager-proof]; this hook phase
+   does not establish their complete combined chain. Once delivered through the normal
    catalogue/result contract, the same handler consumes their evidence without a
    sixth special case. Required proof belongs to that capability: linked image digest,
    online runner, pipeline/job IDs, actual job runner ID, successful checks and cleanup.
    Expected hint for a record-only result: "Runner record verified; online/job execution
    not demonstrated." A `never_contacted` record never becomes a working runner claim.
+
+### Open decisions and scope boundary
+
+- Automatic registration in this phase covers the two standard destinations mapped above.
+  Custom `--skills-dir` installation remains supported for package copying. Report
+  registration as not selected for other destinations, without failing the package install
+  or editing guessed settings. A general custom host/settings selector is not in this phase.
+- The architecture format is selected by the current project binding. Formal checker
+  enforcement remains distinct from format use; no checker result is claimed here.
+  The classification vocabulary reference remains identified above.
+
+Git pre-commit hooks and repository validation policy are outside this phase.
+
+### PR Order
+
+The phase is delivery position 2 within CI11: installer/callback polish supplies the
+portable installation and shared execution behavior; runner/pipeline work consumes the
+completed installed-agent path later. No capability must wait for an unrelated provider.
+
+- **H-01 / H-W1:** shared `core/hooks/` models, recognition and lifecycle; schemas,
+  entrypoint, Codex adapter and installer registration. Depends on the preceding portable
+  installer polish and existing catalogue/target/schema facilities. Delivers usable
+  Codex integration and H1–H5 evidence.
+- **H-02 / H-W2:** Claude adapter and registration, combined examples and client parity.
+  Depends on H-01's shared processing and installer seam. Delivers usable Claude
+  integration and H1–H6 evidence across both clients.
+
+Host adapters may be developed in parallel after agreeing the shared interfaces.
+Merge H-01 before H-02 consumes them. Each PR includes its own schema, tests, documentation
+and live proof; neither is an unusable library-only increment. No provider capability,
+general shell parser, background service or settings framework is part of these PRs.
+
+## Concrete Steps
+
+| Variable Name | Type | Default / Required | Source / Scope | Description & Invariants |
+| --- | --- | --- | --- | --- |
+| `CI_SKILLS_TARGET` | string | Optional | [Resolver][target] | Explicit environment before project/home defaults |
+| `CI_SKILLS_CHECKOUT` | string | Required in install example | Caller | Installer path; no installed dependency |
+| `HOME` | string | Inherited | User environment | Existing standard client destinations in examples |
+| `PYTHONPATH` | string | Not required | Caller | Installed commands work without source-tree injection |
+| `CI_SOURCE_SHA` | string | Required | [CI][workflow] | Exact PR head or workflow source commit |
+
+| Pipeline / Job Name | Type / Trigger | Stage / Order | File Path | Required Inputs & Artifacts |
+| --- | --- | --- | --- | --- |
+| `validate` | PR/push/manual/scheduled | Parallel | [CI][workflow] | Static/unit/schema/provider evidence |
+| `gate-ci-skills-endpoints` | Same | Parallel | [CI][workflow] | Candidate endpoint evidence |
+| `test-install` | Same | Parallel | [CI][workflow] | Installer/installed-package evidence |
+| `required-result` | Same | After three jobs | [CI][workflow] | Exact-candidate evidence |
+
+| Gate ID | Gate Type / Class | Pass Condition | Fail-Closed Condition | Producer / Owner |
+| --- | --- | --- | --- | --- |
+| G1 | Static/unit; hooks proposed | Event/advice and command boundary | Missing/failed cases | [Gates](#gates) |
+| G2 | Install; hooks proposed | Registration/package lifecycle | Missing/failed cases | [Gates](#gates) |
+| G3 | Provider receipts | Candidate checksum matches | Invalid/failed/foreign proof | [Receipt][acceptance] |
+| G4 | Required result | All required evidence passes | Missing/failed/invalid proof | [Result][aggregate] |
+| R1 | Proposed client review | Both clients; linked proof | Missing proof/boundary violation | [Gates](#gates) |
+
+The tables retain existing workflow/check identities. Hook-specific assertions and client review remain
+proposed, as recorded in Gates. No additional CI job or gate is introduced.
+
+### Schemas and protocol boundaries
+
+The requested schemas validate CI Skills-owned normalized data, not a new policy.
+Both are proposed Draft 2020-12 documents with stable unique `$id` values and
+`schema_version: "1.0"`. Their exact JSON accompanies implementation review.
+
+- **`schemas/hooks/event.schema.json`:** requires `schema_version`, `kind`,
+  `host`, `event`, `call_id`, `cwd`, `tool_name` and `tool_input`.
+  Completed calls add `tool_result`; failure calls add `error`.
+  The host decoder validates the normalized event before shared inspection.
+- **`schemas/hooks/advice.schema.json`:** requires `schema_version`, `kind`,
+  `outcome`, `summary`, `findings` and `references`.
+  Collections can be empty; the shared library validates advice before host encoding.
+
+The event kind is `agent_hook_event`; `host` selects `codex` or `claude` and `event`
+selects `pre`, `post` or `failure`. The host decoder maps its supported native events
+to those variants and preserves native `tool_use_id` as `call_id`. `call_id`, `cwd` and
+`tool_name` are nonempty strings; `tool_input` is an object.
+A `pre` event carries no result. A `post` event carries the available JSON tool value;
+a failure event carries a diagnostic string. These are transport data, not proof.
+
+The advice kind is `agent_hook_advice`. Outcomes are `NO_OP`, `CONFIGURATION`, `RESULT`,
+`UNAVAILABLE` or `INVALID_INPUT`. They classify the hook's observation, not the provider's
+success. `summary` is a string; `findings` is a sequence of sanitized messages and
+`references` uses existing summary/pointer shapes. A `NO_OP` has empty summary/collections
+and encodes to `{}` for the host.
+
+For example, this is normalized advice, not native hook stdout:
+
+```json
+{
+  "schema_version": "1.0",
+  "kind": "agent_hook_advice",
+  "outcome": "CONFIGURATION",
+  "summary": "This command requires GitLab configuration.",
+  "findings": ["The selected target has no GitLab configuration."],
+  "references": [
+    {"summary": "Configure access", "pointer": "references/access.md"}
+  ]
+}
+```
+
+Use event variants rather than making every field nullable. Wrong types, missing variant
+fields, duplicate JSON keys and unsupported owned-document versions use the existing
+strict decoding/schema error path. A valid unrelated event yields concrete no-op advice.
+
+Native event field names and host output envelopes are defined by
+[Codex hooks][codex-hooks] and [Claude hooks][claude-hooks].
+Decode only the supported projection and tolerate unrelated upstream fields.
+CI Skills does not add its `schema_version` to native host output or invent a
+complete replacement schema for either client's settings.
+
+Command results keep their existing contracts: registered schemas where present,
+or the common versioned report envelope described above. Advice carries existing pointers
+rather than copies and invents none. `core/schema.py` already discovers installed
+`*.schema.json` files and
+registers their `$id` values for offline references. Extend installed-package and
+catalogue parity coverage; add no parallel registry or schema-only delivery PR.
+
+### Installation, update and user use
+
+The existing installer remains the single entrypoint. It must include hook registration
+in its dry-run plan, confirmation fingerprint, apply result and read-back. Extend its
+current `PreparedInstall`, `_prepare_install()` and `_apply_confirmed()` paths by delegating
+host settings work to `tools/agent_hooks.py`.
+
+These are the existing invocation forms; hook registration is the proposed behavior
+of the delivery, not functionality available today:
+
+```bash
+# Select a supported Python 3.11+ environment first.
+CI_SKILLS_CHECKOUT="/path/to/cloned/ci-skills"
+cd /path/to/consumer-git-repository
+
+python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" --dry-run --json
+python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
+  --apply --confirm-install "<plan fingerprint>" --timeout 600s --json
+
+# Claude destination: obtain and apply its own plan fingerprint.
+python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
+  --skills-dir "$HOME/.claude/skills" --dry-run --json
+python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
+  --skills-dir "$HOME/.claude/skills" \
+  --apply --confirm-install "<Claude plan fingerprint>" --timeout 600s --json
+```
+
+For existing installations, retain the documented `--upgrade` and
+`--confirm-upgrade` path in the [installer reference](../../../README.md#installer-reference).
+Run from the consumer Git repository: `tools/agent_profile.py` uses that repository
+for the bundled `glab-stack` skill and requires `glab`. The existing installer handles
+the declared dependency profile; its plan must identify missing prerequisites before apply.
+A direct skill download through a client's separate installer does not run this repository
+installer and therefore does not register these hooks.
+Use the repository install/upgrade path for this phase's complete experience.
+
+The installer records and uses the actual selected interpreter and installed skill path;
+a clean machine must not depend on this repository's development environment name,
+shell aliases, `PYTHONPATH` or checkout location.
+
+Host selection for this delivery uses a documented canonical-destination mapping in
+`tools/agent_hooks.py`: the existing default `skills_directory()` selects Codex and
+its corresponding `config.toml`; the exact standard `~/.claude/skills` destination
+selects Claude and `~/.claude/settings.json`. The installer plan names the selected
+host and settings file explicitly before confirmation. `--skills-dir` remains a
+storage option; arbitrary destinations are not interpreted as client identities.
+
+Codex supports inline TOML hooks and requires review/trust of non-managed hooks.
+Do not add a second `hooks.json` representation alongside the selected inline entries.
+The user completes the host's own trust/reload step, then starts a fresh session.
+See [Codex configuration][codex-config]; installation alone does not prove activation.
+
+The normalized pre/post handling is shared. Claude additionally has a failure event;
+the implementation must use only the events supported by each client.
+The earlier `SessionStart`/`reloadSkills` observation is not an automatic updater:
+this phase installs no updater and runs no provider work at session start.
+See the [Claude hook reference][claude-hooks].
+
+Inside either client, ask the agent to use the installed CI Skills access command.
+The agent can inspect its help/schema and invoke it with JSON output. It receives the
+actual command result and compact hook context. Users do not manually construct native
+hook-event JSON. Diagnostics use the shared logging options when requested.
+
+## Validation and Acceptance
 
 ### Behavioral acceptance
 
@@ -336,6 +550,130 @@ both the real command result and the host-visible advice. The planned sixth chai
 future acceptance example, not a runnable live case now. Reuse functional command proof
 when its checksum is unchanged; collect new host-activation/advice evidence where behavior
 changed. No extra provider calls are needed just to generate a hook summary.
+
+### Gates
+
+The following is the single requirement traceability map for this delivery.
+[Behavioral acceptance](#behavioral-acceptance) defines the shared event-driven cases.
+All rows are grounded in the Authority and assessed main snapshot above; implementation
+is NOT_IMPLEMENTED and verification is UNVERIFIED for the hook-specific deliverables.
+
+Existing check locations are in [`validate.yml`](../../../.github/workflows/validate.yml).
+Dotted names below mean `job.step`, not additional jobs:
+
+- G1: `validate.static` and `validate.unit` already run static checks and discover
+  `tests/python` except explicitly routed suites. Add `test_agent_hooks.py` here;
+  its assertions do not exist yet.
+- G2: `test-install.tests` already runs `test_installer.py`,
+  `test_agent_profile.py` and `test_installed_package.py`. Extend their existing
+  installer/schema coverage; the hook cases are proposed.
+- G3: `validate.live_acceptance` is the existing committed-receipt evaluation
+  and publication step. It invokes [`check_live_acceptance.py`](../../../tools/check_live_acceptance.py)
+  and publishes `live-acceptance` after success. It accepts existing provider receipt
+  kinds, not hook-event/advice documents; it does not run live provider operations.
+- G4: `required-result` aggregates existing required jobs and publishes
+  `ci-skills/required`. This phase does not alter that enforcement.
+- R1: implementation review checks boundaries and linked client activation artifacts.
+  Neither G3 nor a new automated gate certifies host activation.
+
+The locations above are observed in the assessed source, not execution results from this
+planning task. Architecture format review is distinct from a passing bound architecture
+checker. All hook-specific outcomes below remain UNVERIFIED.
+
+- **H1 — installed recognition/advice.** Authority A1/A2; wiring `core/hooks` and
+  `bin/agent_hook.py`. Depends on installer polish; delivered in H-01/H-W1 and H-02/H-W2.
+  G1 covers generic catalogue-driven behavior; R1 requires actual host context.
+  Gap: implementation and host proof.
+- **H2 — shared inspection and command boundary.** Authority A1/A3; wiring the existing
+  target/catalogue into shared lifecycle inspection. H-01/H-W1 supplies it.
+  G1 proves operation/mode-specific provider selection and isolation of call identities.
+  Gap: implementation and regression cases.
+- **H3 — schemas and strict decoding.** Authority A2/A3; wiring two normalized schemas
+  through the existing registry, declared result schemas and common report reader.
+  H-01/H-W1 supplies it. G1/G2 cover both result paths, valid variants, invalid
+  types/version/duplicates and offline references.
+  Gap: schemas and assertions.
+- **H4 — installation and client registration.** Authority A1/A2; wiring installer
+  plan/apply/read-back to host settings. Depends on installer polish; both PRs/waves.
+  G2/R1 prove clean install, repeat no-op, settings preservation, upgrade and recovery.
+  Gap: implementation and installation evidence for the standard destinations.
+- **H5 — optional providers and honest output handling.** Authority A1/A3; wiring
+  selected configuration and unavailable/failure handling. Depends on H1–H4; both PRs/waves.
+  G1 covers report interpretation and failure handling; G3/R1 prove the selected target
+  and observed advice.
+  Gap: per-client evidence.
+- **H6 — candidate evidence and activation.** Authority A1/A3; wiring provider reports
+  and linked client artifacts to the candidate. Depends on H1–H5; both PRs/waves.
+  G3/G4 enforce accepted provider proof/hash; R1 checks hook activation and cleanup.
+  Gap: final-candidate evidence.
+
+These requirements extend evidence within existing checks and review. They add no job
+or merge gate. No hook-only JSON is placed in G3's configured receipt directories.
+Passing a mocked test does not demonstrate client activation.
+
+### Live Smoke Evidence
+
+After implementation and QA fixes, install the candidate as a user would, outside the
+source checkout. For each supported client record its actual version, installed
+interpreter/path, registration read-back and activation observation.
+
+Run the installed `gitlab_access.py check --json` against the selected test target,
+then a supported Kubernetes-only example using a target with only Kubernetes configured.
+Capture actual command reports and the corresponding bounded hook context. Use the
+Behavioral acceptance cases and installed journeys above to establish scope isolation,
+plan/result interpretation and the difference between advice and authentication. Planned
+provider workflows do not become implementation prerequisites for this hook phase.
+
+Keep reports tied to the existing functional checksum over `bin/`, `lib/` and
+`schemas/`; preserve the package checksum separately. Link bounded client activation
+and hook-context artifacts from the PR evidence.
+G3 evaluates the existing provider receipts only; review establishes the client-side
+observations. Do not insert an unknown hook report kind into its receipt directories
+or claim it parses session transcripts.
+Do not rerun live proof for wording-only edits outside the functional checksum.
+
+A hook-only event does not establish live provider behavior. The installed command's
+real response and independent read-back supply that proof.
+
+### End-to-End Test
+
+1. Use a clean consumer Git repository and supported Python 3.11+ runtime on a machine
+   that does not rely on the developer's environment. Run the cloned installer from
+   that consumer repository; the installed package must then work without the clone.
+2. Plan installation for one client, review the paths/settings changes, apply its
+   fingerprint, and read back the installed package and hook entries.
+3. Complete the client's normal activation step and ask its agent to discover and run
+   the installed access command. Observe the command result and compact hook context.
+4. Confirm that configuration advice concerns only the providers selected by that
+   command; prove successful authentication from the actual live command report.
+5. Exercise unrelated, missing-configuration and command-failure cases. Preserve the
+   command's real result and never turn a missing report into success.
+6. Repeat installation without duplicate hooks; verify upgrade/recovery behavior through
+   the existing installer test path. Repeat the user journey in the other client.
+7. Link the resulting reports and trace artifacts to H1–H6 and the merge candidate.
+   Close the phase only when both integrations and existing required checks have evidence.
+
+## Idempotence and Recovery
+
+Preserve unrelated settings and hooks; back up an existing
+settings file before its first write, plan exact changes, and read back the installed
+entries. A repeat install must not append duplicates. Upgrade and interrupted-write
+recovery must leave the report accurate about both skill and registration state.
+
+Hook removal must remove only the exact entries installed by this integration and
+preserve other settings. Include the removal procedure in the delivered user docs;
+do not invent a general agent-settings manager or uninstall unrelated components.
+
+The read-only access journey
+creates no provider resources; restore any test-owned configuration/settings after the
+test without deleting user configuration or other hooks.
+
+## Artifacts and Notes
+
+The assessed source snapshot and baseline design references remain under Authority. No native hook
+activation artifact is recorded; link actual per-client artifacts to H1–H6 as implementation proceeds.
+
+## Interfaces and Dependencies
 
 ### Library placement and dependency direction
 
@@ -475,229 +813,7 @@ sanitized logging. It dispatches supported events before validating their normal
 variants. No permission grants, denials, command replacements or exit code 2 are emitted.
 It does not crawl transcripts, follow arbitrary report paths or repeat provider GETs.
 
-### Schemas and protocol boundaries
-
-The requested schemas validate CI Skills-owned normalized data, not a new policy.
-Both are proposed Draft 2020-12 documents with stable unique `$id` values and
-`schema_version: "1.0"`. Their exact JSON accompanies implementation review.
-
-- **`schemas/hooks/event.schema.json`:** requires `schema_version`, `kind`,
-  `host`, `event`, `call_id`, `cwd`, `tool_name` and `tool_input`.
-  Completed calls add `tool_result`; failure calls add `error`.
-  The host decoder validates the normalized event before shared inspection.
-- **`schemas/hooks/advice.schema.json`:** requires `schema_version`, `kind`,
-  `outcome`, `summary`, `findings` and `references`.
-  Collections can be empty; the shared library validates advice before host encoding.
-
-The event kind is `agent_hook_event`; `host` selects `codex` or `claude` and `event`
-selects `pre`, `post` or `failure`. The host decoder maps its supported native events
-to those variants and preserves native `tool_use_id` as `call_id`. `call_id`, `cwd` and
-`tool_name` are nonempty strings; `tool_input` is an object.
-A `pre` event carries no result. A `post` event carries the available JSON tool value;
-a failure event carries a diagnostic string. These are transport data, not proof.
-
-The advice kind is `agent_hook_advice`. Outcomes are `NO_OP`, `CONFIGURATION`, `RESULT`,
-`UNAVAILABLE` or `INVALID_INPUT`. They classify the hook's observation, not the provider's
-success. `summary` is a string; `findings` is a sequence of sanitized messages and
-`references` uses existing summary/pointer shapes. A `NO_OP` has empty summary/collections
-and encodes to `{}` for the host.
-
-For example, this is normalized advice, not native hook stdout:
-
-```json
-{
-  "schema_version": "1.0",
-  "kind": "agent_hook_advice",
-  "outcome": "CONFIGURATION",
-  "summary": "This command requires GitLab configuration.",
-  "findings": ["The selected target has no GitLab configuration."],
-  "references": [
-    {"summary": "Configure access", "pointer": "references/access.md"}
-  ]
-}
-```
-
-Use event variants rather than making every field nullable. Wrong types, missing variant
-fields, duplicate JSON keys and unsupported owned-document versions use the existing
-strict decoding/schema error path. A valid unrelated event yields concrete no-op advice.
-
-Native event field names and host output envelopes are defined by
-[Codex hooks][codex-hooks] and [Claude hooks][claude-hooks].
-Decode only the supported projection and tolerate unrelated upstream fields.
-CI Skills does not add its `schema_version` to native host output or invent a
-complete replacement schema for either client's settings.
-
-Command results keep their existing contracts: registered schemas where present,
-or the common versioned report envelope described above. Advice carries existing pointers
-rather than copies and invents none. `core/schema.py` already discovers installed
-`*.schema.json` files and
-registers their `$id` values for offline references. Extend installed-package and
-catalogue parity coverage; add no parallel registry or schema-only delivery PR.
-
-### Installation, update and user use
-
-The existing installer remains the single entrypoint. It must include hook registration
-in its dry-run plan, confirmation fingerprint, apply result and read-back. Extend its
-current `PreparedInstall`, `_prepare_install()` and `_apply_confirmed()` paths by delegating
-host settings work to `tools/agent_hooks.py`.
-
-These are the existing invocation forms; hook registration is the proposed behavior
-of the delivery, not functionality available today:
-
-```bash
-# Select a supported Python 3.11+ environment first.
-CI_SKILLS_CHECKOUT="/path/to/cloned/ci-skills"
-cd /path/to/consumer-git-repository
-
-python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" --dry-run --json
-python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
-  --apply --confirm-install "<plan fingerprint>" --timeout 600s --json
-
-# Claude destination: obtain and apply its own plan fingerprint.
-python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
-  --skills-dir "$HOME/.claude/skills" --dry-run --json
-python "$CI_SKILLS_CHECKOUT/tools/install_ci_skills.py" \
-  --skills-dir "$HOME/.claude/skills" \
-  --apply --confirm-install "<Claude plan fingerprint>" --timeout 600s --json
-```
-
-For existing installations, retain the documented `--upgrade` and
-`--confirm-upgrade` path in the [installer reference](../../../README.md#installer-reference).
-Run from the consumer Git repository: `tools/agent_profile.py` uses that repository
-for the bundled `glab-stack` skill and requires `glab`. The existing installer handles
-the declared dependency profile; its plan must identify missing prerequisites before apply.
-A direct skill download through a client's separate installer does not run this repository
-installer and therefore does not register these hooks.
-Use the repository install/upgrade path for this phase's complete experience.
-
-The installer records and uses the actual selected interpreter and installed skill path;
-a clean machine must not depend on this repository's development environment name,
-shell aliases, `PYTHONPATH` or checkout location.
-
-Host selection for this delivery uses a documented canonical-destination mapping in
-`tools/agent_hooks.py`: the existing default `skills_directory()` selects Codex and
-its corresponding `config.toml`; the exact standard `~/.claude/skills` destination
-selects Claude and `~/.claude/settings.json`. The installer plan names the selected
-host and settings file explicitly before confirmation. `--skills-dir` remains a
-storage option; arbitrary destinations are not interpreted as client identities.
-
-Preserve unrelated settings and hooks; back up an existing
-settings file before its first write, plan exact changes, and read back the installed
-entries. A repeat install must not append duplicates. Upgrade and interrupted-write
-recovery must leave the report accurate about both skill and registration state.
-
-Codex supports inline TOML hooks and requires review/trust of non-managed hooks.
-Do not add a second `hooks.json` representation alongside the selected inline entries.
-The user completes the host's own trust/reload step, then starts a fresh session.
-See [Codex configuration][codex-config]; installation alone does not prove activation.
-
-The normalized pre/post handling is shared. Claude additionally has a failure event;
-the implementation must use only the events supported by each client.
-The earlier `SessionStart`/`reloadSkills` observation is not an automatic updater:
-this phase installs no updater and runs no provider work at session start.
-See the [Claude hook reference][claude-hooks].
-
-Inside either client, ask the agent to use the installed CI Skills access command.
-The agent can inspect its help/schema and invoke it with JSON output. It receives the
-actual command result and compact hook context. Users do not manually construct native
-hook-event JSON. Diagnostics use the shared logging options when requested.
-
-### Open decisions and scope boundary
-
-- Automatic registration in this phase covers the two standard destinations mapped above.
-  Custom `--skills-dir` installation remains supported for package copying. Report
-  registration as not selected for other destinations, without failing the package install
-  or editing guessed settings. A general custom host/settings selector is not in this phase.
-- The architecture format is used under the requested phase design. Formal checker
-  enforcement needs a separately reviewed Standards binding update: the current pin
-  contains neither architecture nor classification schemas. This is not a reason to
-  stop grounded design or to add a replacement checker.
-- Hook removal must remove only the exact entries installed by this integration and
-  preserve other settings. Include the removal procedure in the delivered user docs;
-  do not invent a general agent-settings manager or uninstall unrelated components.
-
-Git pre-commit hooks and repository validation policy are outside this phase.
-
-## PR Order
-
-The phase is delivery position 2 within CI11: installer/callback polish supplies the
-portable installation and shared execution behavior; runner/pipeline work consumes the
-completed installed-agent path later. No capability must wait for an unrelated provider.
-
-- **H-01 / H-W1:** shared `core/hooks/` models, recognition and lifecycle; schemas,
-  entrypoint, Codex adapter and installer registration. Depends on the preceding portable
-  installer polish and existing catalogue/target/schema facilities. Delivers usable
-  Codex integration and H1–H5 evidence.
-- **H-02 / H-W2:** Claude adapter and registration, combined examples and client parity.
-  Depends on H-01's shared processing and installer seam. Delivers usable Claude
-  integration and H1–H6 evidence across both clients.
-
-Host adapters may be developed in parallel after agreeing the shared interfaces.
-Merge H-01 before H-02 consumes them. Each PR includes its own schema, tests, documentation
-and live proof; neither is an unusable library-only increment. No provider capability,
-general shell parser, background service or settings framework is part of these PRs.
-
-## Gates
-
-The following is the single requirement traceability map for this delivery.
-[Behavioral acceptance](#behavioral-acceptance) defines the shared event-driven cases.
-All rows are grounded in the Authority and assessed main snapshot above; implementation
-is NOT_IMPLEMENTED and verification is UNVERIFIED for the hook-specific deliverables.
-
-Existing check locations are in [`validate.yml`](../../../.github/workflows/validate.yml).
-Dotted names below mean `job.step`, not additional jobs:
-
-- G1: `validate.static` and `validate.unit` already run static checks and discover
-  `tests/python` except explicitly routed suites. Add `test_agent_hooks.py` here;
-  its assertions do not exist yet.
-- G2: `test-install.tests` already runs `test_installer.py`,
-  `test_agent_profile.py` and `test_installed_package.py`. Extend their existing
-  installer/schema coverage; the hook cases are proposed.
-- G3: `validate.live_acceptance` is the existing committed-receipt evaluation
-  and publication step. It invokes [`check_live_acceptance.py`](../../../tools/check_live_acceptance.py)
-  and publishes `live-acceptance` after success. It accepts existing provider receipt
-  kinds, not hook-event/advice documents; it does not run live provider operations.
-- G4: `required-result` aggregates existing required jobs and publishes
-  `ci-skills/required`. This phase does not alter that enforcement.
-- R1: implementation review checks boundaries and linked client activation artifacts.
-  Neither G3 nor a new automated gate certifies host activation.
-
-The locations above are observed in the assessed source, not execution results from this
-planning task. Architecture format review is distinct from a passing bound architecture
-checker. All hook-specific outcomes below remain UNVERIFIED.
-
-- **H1 — installed recognition/advice.** Authority A1/A2; wiring `core/hooks` and
-  `bin/agent_hook.py`. Depends on installer polish; delivered in H-01/H-W1 and H-02/H-W2.
-  G1 covers generic catalogue-driven behavior; R1 requires actual host context.
-  Gap: implementation and host proof.
-- **H2 — shared inspection and command boundary.** Authority A1/A3; wiring the existing
-  target/catalogue into shared lifecycle inspection. H-01/H-W1 supplies it.
-  G1 proves operation/mode-specific provider selection and isolation of call identities.
-  Gap: implementation and regression cases.
-- **H3 — schemas and strict decoding.** Authority A2/A3; wiring two normalized schemas
-  through the existing registry, declared result schemas and common report reader.
-  H-01/H-W1 supplies it. G1/G2 cover both result paths, valid variants, invalid
-  types/version/duplicates and offline references.
-  Gap: schemas and assertions.
-- **H4 — installation and client registration.** Authority A1/A2; wiring installer
-  plan/apply/read-back to host settings. Depends on installer polish; both PRs/waves.
-  G2/R1 prove clean install, repeat no-op, settings preservation, upgrade and recovery.
-  Gap: implementation and installation evidence for the standard destinations.
-- **H5 — optional providers and honest output handling.** Authority A1/A3; wiring
-  selected configuration and unavailable/failure handling. Depends on H1–H4; both PRs/waves.
-  G1 covers report interpretation and failure handling; G3/R1 prove the selected target
-  and observed advice.
-  Gap: per-client evidence.
-- **H6 — candidate evidence and activation.** Authority A1/A3; wiring provider reports
-  and linked client artifacts to the candidate. Depends on H1–H5; both PRs/waves.
-  G3/G4 enforce accepted provider proof/hash; R1 checks hook activation and cleanup.
-  Gap: final-candidate evidence.
-
-These requirements extend evidence within existing checks and review. They add no job
-or merge gate. No hook-only JSON is placed in G3's configured receipt directories.
-Passing a mocked test does not demonstrate client activation.
-
-## Integration
+### Integration
 
 The installed package is the shared artifact for both clients. Installer registration
 points to it; client adapters translate events into the same typed advice operation.
@@ -709,51 +825,10 @@ Installation must not add a command option that supplies provider passwords or b
 target resolution. A registration file contains paths and hook configuration, not
 a copied runtime target or credential values.
 
-## Live Smoke Evidence
+Revision DEC-HOOKS-01: moved the proposed design into the shared ExecPlan skeleton, retained its advisory
+contract, and separated recorded standalone runner proof from the unimplemented native hook delivery.
 
-After implementation and QA fixes, install the candidate as a user would, outside the
-source checkout. For each supported client record its actual version, installed
-interpreter/path, registration read-back and activation observation.
-
-Run the installed `gitlab_access.py check --json` against the selected test target,
-then a supported Kubernetes-only example using a target with only Kubernetes configured.
-Capture actual command reports and the corresponding bounded hook context. Use the
-Behavioral acceptance cases and installed journeys above to establish scope isolation,
-plan/result interpretation and the difference between advice and authentication. Planned
-provider workflows do not become implementation prerequisites for this hook phase.
-
-Keep reports tied to the existing functional checksum over `bin/`, `lib/` and
-`schemas/`; preserve the package checksum separately. Link bounded client activation
-and hook-context artifacts from the PR evidence.
-G3 evaluates the existing provider receipts only; review establishes the client-side
-observations. Do not insert an unknown hook report kind into its receipt directories
-or claim it parses session transcripts.
-Do not rerun live proof for wording-only edits outside the functional checksum.
-
-A hook-only event does not establish live provider behavior. The installed command's
-real response and independent read-back supply that proof. The read-only access journey
-creates no provider resources; restore any test-owned configuration/settings after the
-test without deleting user configuration or other hooks.
-
-## End-to-End Test
-
-1. Use a clean consumer Git repository and supported Python 3.11+ runtime on a machine
-   that does not rely on the developer's environment. Run the cloned installer from
-   that consumer repository; the installed package must then work without the clone.
-2. Plan installation for one client, review the paths/settings changes, apply its
-   fingerprint, and read back the installed package and hook entries.
-3. Complete the client's normal activation step and ask its agent to discover and run
-   the installed access command. Observe the command result and compact hook context.
-4. Confirm that configuration advice concerns only the providers selected by that
-   command; prove successful authentication from the actual live command report.
-5. Exercise unrelated, missing-configuration and command-failure cases. Preserve the
-   command's real result and never turn a missing report into success.
-6. Repeat installation without duplicate hooks; verify upgrade/recovery behavior through
-   the existing installer test path. Repeat the user journey in the other client.
-7. Link the resulting reports and trace artifacts to H1–H6 and the merge candidate.
-   Close the phase only when both integrations and existing required checks have evidence.
-
-[architecture]: https://github.com/spyroot/standards/blob/cae52b2d/docs/agents/contracts/system-architecture.md
+[architecture]: https://github.com/spyroot/standards/blob/5bd31f103621dcd7e49ec6e6af55583de7056d7d/docs/agents/contracts/system-architecture.md
 [classification]: https://github.com/spyroot/standards/blob/cae52b2d/docs/agents/contracts/work-classification.md
 [codex-hooks]: https://learn.chatgpt.com/docs/hooks
 [codex-config]: https://learn.chatgpt.com/docs/config-file/config-advanced
@@ -761,3 +836,9 @@ test without deleting user configuration or other hooks.
 
 [baseline-hooks]: https://github.com/spyroot/ci-skills/blob/e5fb154/docs/skill-session-hook.md
 [baseline-ci11]: https://github.com/spyroot/ci-skills/blob/e5fb154/docs/phases/CI11-TOOLS.md
+[manager-proof]: ../../../tests/acceptance/evidence/runner-manager/README.md
+
+[workflow]: ../../../.github/workflows/validate.yml
+[target]: ../../../ci-skills/lib/python/core/project_binding.py
+[aggregate]: ../../../tools/ci_required_result.py
+[acceptance]: ../../../tools/check_live_acceptance.py

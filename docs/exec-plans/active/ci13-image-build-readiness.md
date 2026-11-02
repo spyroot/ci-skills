@@ -1,12 +1,12 @@
 # Prove Podman readiness and deliver a toolbox-backed GitLab runner
 
-This ExecPlan is maintained in accordance with the shared standards' execution plan format (`docs/PLANS.md` at
-standards revision `cae52b2`). Its Progress, Surprises & Discoveries, Decision Log and Outcomes & Retrospective
+This ExecPlan follows the repository's [docs/PLANS.md](../../PLANS.md) format. Its Progress, Surprises & Discoveries,
+Decision Log and Outcomes & Retrospective
 sections are kept current as work proceeds. The phase document is
 [`docs/phases/CI13-IMAGE-BUILD-READINESS.md`](../../phases/CI13-IMAGE-BUILD-READINESS.md); this plan turns its two
 pull requests into milestones a reader can carry out and observe. All paths are relative to the repository root.
-The command surface and gate wiring remain open questions in the phase document. The operator resolved the
-privileged-constraint behavior: the installed command must establish its own run-scoped prerequisite, so an
+The Progress section records the resolved command-surface and gate-wiring choices. The approved
+privileged-constraint behavior remains: the installed command must establish its own run-scoped prerequisite, so an
 external cluster grant cannot make an incomplete capability pass.
 
 ## Purpose / Big Picture
@@ -28,12 +28,16 @@ external live acceptance.
 - [x] Milestone 1, gates: unit tests; the new schema listed in the validate metaschema step per the existing
       pairing rule (the local selector is open question 3).
 - [x] Standalone probe and owned SCC cleanup passed in [PR81](https://github.com/spyroot/ci-skills/pull/81).
-- [ ] Milestone 1, proof: live `probe` from the installed candidate on one node with every row present and the
-      Pod exited 0, plus an interrupted run with the same absence read-back, attached to the pull request. The
-      command must reuse or prepare and clean its own SCC permission; an external grant is not accepted as proof.
+- [x] Milestone 1 successful probe: [recorded final evidence][probe-final] shows all marker rows, exit 0 and
+      owned permission/resource cleanup.
+- [ ] Milestone 1 interruption: genuinely interrupt the installed command while its Job runs, then prove
+      Job/namespace/run-owned permission absence. The recorded attempt sent no signal and does not satisfy this.
 - [x] CI13-R1: Milestone 2 code is present at `ff1fdc8`: the `chain` verb composes toolbox build, Harbor
       publication and runner configuration through `core/kubernetes/image_build_chain/workflow.py`.
-- [ ] Milestone 2, proof: existing chain build/publication/deployment results and external consumer proof.
+- [x] Historical chain `92713cc`: verified build/publication/deployment and independent online runner read-back
+      are captured in [chain receipt][chain-927] and [runner read-back][runner-927].
+- [ ] Milestone 2 remaining proof: one current-candidate full-chain invocation with a linked external consumer
+      job and owned cleanup. The separate `bcf7d598` manager job is not proof of the whole chain command.
 - [x] Open question 1 (command surface and default digests) answered by the owner.
 - [x] Open question 2 (gate wiring for this command's receipts) answered by the owner.
 - [x] Open question 4 answered: reuse existing permission or create, verify and clean one run-owned RoleBinding.
@@ -45,7 +49,8 @@ external live acceptance.
 CI13-R1: the phase's unmerged chain label predates the implementation now present in
 `ci-skills/lib/python/core/kubernetes/image_build_chain/workflow.py`, its command/model/schema and
 `tests/python/test_image_build_chain.py`. The current workflow ends at `DeployManagerRunner`. Older combined-chain
-receipts include superseded probe/consumer callbacks and do not prescribe the current composition.
+receipt `92871b2` includes superseded probe/consumer callbacks and does not prescribe the current composition.
+The later `92713cc` and `ffeebba` receipts end at deployment; their narrow historical results remain evidence.
 The [probe evidence](../../../tests/acceptance/evidence/podman-readiness-final/README.md) explicitly records that
 its interruption attempt sent no signal, so interruption proof remains open.
 
@@ -54,29 +59,29 @@ its interruption attempt sent no signal, so interruption proof remains open.
 - DEC-CI13-R1: record the chain code as delivered at `ff1fdc8` while retaining current-chain and interruption
   acceptance as open. Preserve the original external-consumer boundary and the unchanged phase requirements.
 
-- 2026-10-15, the owner's direction: "we need to see can we do podman", for a caller who needs to run docker in
+- DEC-CI13-02: the owner's direction: "we need to see can we do podman", for a caller who needs to run docker in
   Kubernetes through GitLab; a useful combo. Recorded as chain 11 of the catalogue.
-- 2026-10-15, the owner's direction: every temporary name (namespace, Job, labels) is derived from a random run
+- DEC-CI13-03: the owner's direction: every temporary name (namespace, Job, labels) is derived from a random run
   identifier generated per run and removed in cleanup; the evidence directory is the calling agent's argument; no
   environment specific is written into the repository. This entry is the cited authority for `R-CI13-005` until
   the catalogue carries it.
-- 2026-10-15, the owner's direction: a combo is proven by one live run from the installed candidate whose evidence
+- DEC-CI13-04: the owner's direction: a combo is proven by one live run from the installed candidate whose evidence
   rows are bound to one functional checksum; mocked runs do not count as proof; only the live-tested head merges.
-- 2026-10-15, the owner's direction: requirements, the user-facing command surface, install or usage steps and
+- DEC-CI13-05: the owner's direction: requirements, the user-facing command surface, install or usage steps and
   gate behaviour are the owner's to approve; a review finding on any of them becomes an open question in the
   phase document, not a decision. The spec shows how the agent invokes the command and the JSON it reads.
-- 2026-10-15, the owner's direction: this combo is specified as its own phase, CI13, separate from CI12.
-- 2026-10-18, the owner's direction: live proof must use only the installed command; external OpenShift setup is
+- DEC-CI13-06: the owner's direction: this combo is specified as its own phase, CI13, separate from CI12.
+- DEC-CI13-07: the owner's direction: live proof must use only the installed command; external OpenShift setup is
   diagnostic evidence and cannot make an incomplete capability pass. The command reuses existing SCC permission
   or creates, verifies and cleans one run-owned RoleBinding to the exact SCC ClusterRole.
-- 2026-10-19, the owner's correction: the production combo is build toolbox, push it to Harbor and configure a
+- DEC-CI13-08: the owner's correction: the production combo is build toolbox, push it to Harbor and configure a
   runner using it. The runner remains available after success. Probe and consumer-job execution are external
   acceptance; the combo ends at the existing runner deployment without a separate verification stage, pipeline
   execution, required job results or automatic runner teardown.
-- 2026-10-15, mechanism: the Pod's terminated exit code read from the API is the probe's result; every marker line
+- DEC-CI13-09: mechanism: the Pod's terminated exit code read from the API is the probe's result; every marker line
   is a row and a missing marker is a row; a tag without a digest is refused; node selection without an argument
   is the first Ready worker by name order, named in the result.
-- 2026-10-15, mechanism, from the CI12 reviews: the run identifier is generated after confirmation and is not part
+- DEC-CI13-10: mechanism, from the CI12 reviews: the run identifier is generated after confirmation and is not part
   of the plan digest, which binds the caller's inputs and the resolved target; the live plan runs the reads only,
   with no confirm callback; the mode rules are one shared validator in `core/action_modes.py` rather than a fourth
   copy, and the GitLab adapter switches to it in the same pull request.
@@ -85,7 +90,8 @@ its interruption attempt sent no signal, so interruption proof remains open.
 
 PR81 merged the standalone probe with [live proof](../../phases/CI13-IMAGE-BUILD-READINESS.md#live-smoke-evidence).
 Interruption proof remains unestablished. Milestone 2's toolbox-backed runner chain is implemented at `ff1fdc8`;
-current-chain/external-consumer acceptance remains open. Historical standalone runner-manager proof explicitly
+Historical `92713cc` records build/publication/deployment proof; current-chain/external-consumer acceptance
+remains open. Historical standalone runner-manager proof explicitly
 does not establish the combined CI13 command. The plan remains active.
 
 ## Context and Orientation
@@ -262,4 +268,12 @@ Dependencies: the existing `K8SAuth`, `ResourceSet`, the temporary Job pattern, 
 checksum; the podman image and the inner image by digest; no new third-party dependency on the agent's machine.
 
 Revision DEC-CI13-R1: reconciled chain source delivery against `ff1fdc8`, retained original proof requirements
-and removed obsolete instructions to implement already-delivered modules. Only moved-document paths in the phase are repaired.
+and removed obsolete instructions to implement already-delivered modules. Only moved-document paths in the phase are
+repaired.
+
+Revision DEC-CI13-R2: separated completed successful-probe and historical chain evidence from the still-open
+interruption and current-chain consumer proof; retained the existing command boundary and phase requirements.
+
+[probe-final]: ../../../tests/acceptance/evidence/podman-readiness-final/README.md
+[chain-927]: ../../../tests/acceptance/evidence/image-build-chain/92713cc/chain-receipt.json
+[runner-927]: ../../../tests/acceptance/evidence/image-build-chain/92713cc/runner-readback.json

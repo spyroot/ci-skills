@@ -2,7 +2,9 @@
 
 Follow the requested outcome to its execution plan, phase or design, then the gates and evidence owned there.
 Statuses below describe the recorded delivery; they do not certify a new candidate or live environment.
-[PLANS.md](../PLANS.md) defines the ExecPlan standard and skeleton.
+[PLANS.md](../PLANS.md) defines the common ExecPlan standard and skeleton. An active phase may contain completed
+deliveries; resume only unchecked Progress items and the stated next action. A completed record closes only its
+explicit scope, including any documented acceptance exception.
 
 ## Phase map
 
@@ -20,17 +22,24 @@ The [CI11-TOOLS plan](../phases/CI11-TOOLS.md) distinguishes installed commands 
 | [CI07][ci07] | [Active][exec-ci07] | Selected schemas → full record coverage | [Validation][ci07-gates] |
 | [CI08][ci08] | [Active][exec-ci08] | Local navigation → routing metadata | [Routing][ci08-gates] |
 | [CI09][ci09] | [Active][exec-ci09] | Local reading → connections/pinned lifecycle | [References][ci09-gates] |
-| [CI11][ci11] | [Active][exec-ci11] | H1/H2 and ports → remaining C1–C9 | [Tools][ci11-gates] |
-| [CI12][ci12] | [Completed][exec-ci12] | Three deliveries; CSR/join proof mocked | [Onboarding][ci12-gates] |
-| [CI13][ci13] | [Active][exec-ci13] | Probe/chain code → interruption/chain proof | [Readiness][ci13-gates] |
-| [CI14][ci14] | [Active][exec-ci14] | Mirror → Agent decisions/delivery | [Connections][ci14-gates] |
-| [CI15][ci15] | [Active][exec-ci15] | PR-001 code → proof and PR-002–005 | [Runners][ci15-gates] |
+| [CI11][ci11] | [Active][exec-ci11] | Help/ports/runner proof → C1–C9 and native hooks | [Tools][ci11-gates] |
+| [CI12][ci12] | [Completed][exec-ci12] | Tool Pod/ISO proved; accepted CSR/join mock boundary | [Onboarding][ci12-gates] |
+| [CI13][ci13] | [Active][exec-ci13] | Probe/historical chain proof → interruption/current-chain job | [Readiness][ci13-gates] |
+| [CI14][ci14] | [Active][exec-ci14] | Qualified mirror → approved Helm Agent delivery | [Connections][ci14-gates] |
+| [CI15][ci15] | [Active][exec-ci15] | Qualified baseline → remaining naming/Conda/ARC/executors | [Runners][ci15-gates] |
 
-The ExecPlans retain each phase's existing decisions and requirement boundaries; phase edits only repair moved paths.
-Historical phase labels can lag
-code; the [debt tracker](../exec-plans/tech-debt-tracker.md) points to those discrepancies without changing the phases.
+The ExecPlans retain each phase's existing decisions and requirement boundaries. Source-phase status prose is
+reconciled without changing normative requirements.
+Historical structured phase snapshots can lag code; current delivery status is recorded in each ExecPlan Progress
+section; the [debt tracker](../exec-plans/tech-debt-tracker.md) points to those discrepancies without changing the
+phases.
 [CI12 live evidence][ci12-evidence] retains its accepted mocked-join boundary;
 [CI13 evidence][ci13-evidence] retains outstanding interruption and chain proof.
+
+The active [CI14 evidence][mirror-proof] and [CI15 evidence][baseline] record the completed PRs and actual
+consumer job IDs/cleanup. Both whole phases remain active; no CI14/CI15 phase is filed under completed. Conda bootstrap
+remains approved unfinished CI15 work, not a new
+development-machine prerequisite.
 
 Completed records live in [completed/](../exec-plans/completed/); unfinished plans live in
 [active/](../exec-plans/active/).
@@ -39,7 +48,7 @@ Completed records live in [completed/](../exec-plans/completed/); unfinished pla
 
 | Outcome | Active plan | Gate authority |
 | --- | --- | --- |
-| GitLab operations | [Toolbelt][exec-toolbelt]; block 7 still marked planned | [Proof per block][toolbelt-gates] |
+| GitLab operations | [Toolbelt][exec-toolbelt]; standalone runner proof delivered | [Proof per block][toolbelt-gates] |
 | Lifecycle integration | [Hooks][exec-hooks]; implementation/proof pending | [G1–G4 and R1][hooks-gates] |
 
 The [architecture index](../architecture/index.md) points to the existing design;
@@ -117,3 +126,18 @@ The [portability gate][portability] and [endpoint gate][endpoints] retain their 
 [live-policy]: ../../inventory/ci/live-acceptance.json
 [live-check]: ../../tools/check_live_acceptance.py
 [verification]: ../contribution_guide.md#5-verify-the-installed-behavior
+
+## Publication reconciliation
+
+PR #135 already published all phase plans in the map. PRs #126/#128/#129 published the naming specification,
+shared smoke allocations and profile/evidence foundation. The active plans above add the actual merged
+runner/mirror qualification and the active CI14/CI15 plans retain the previously approved remaining interfaces.
+
+Older CI03/CI04/CI05/CI06/CI10 files were published and later removed in commits `eb072f39`, `cee308e5` and
+`059fcc6a`; they are not lost unpublished work. Local older variants reference superseded source layouts and gate
+routes and must not replace the current implementation by a wholesale branch merge. The debt tracker retains
+the historical reference gaps. This reconciliation preserves those removals and publishes current remaining
+scope through the active ExecPlans.
+
+[baseline]: ../exec-plans/active/ci15-runner-workflows.md#artifacts-and-notes
+[mirror-proof]: ../exec-plans/active/ci14-gitlab-connections.md#artifacts-and-notes

@@ -1,7 +1,9 @@
 # Finish the GitLab Agent connection after the delivered mirror workflow
 
 This living ExecPlan follows [docs/PLANS.md](../../PLANS.md) and derives only from [CI14][phase].
-Reconciliation baseline: `ff1fdc8b2fee89486f63f6534be20c784bf119b4`; only moved-document paths in the phase are repaired.
+Source baseline: `16255b1c51bb867d7cf4b83ef4ec9d3141211c3a`. The mirror delivery is complete; this phase remains active
+for the Agent workflow. Progress and [recorded evidence][baseline] distinguish completed mirror work from the
+undelivered Agent.
 
 ## Purpose / Big Picture
 
@@ -12,8 +14,12 @@ the remaining implementation is the Agent workflow after its original design dec
 ## Progress
 
 - [x] CI14-R1: mirror command, reusable services, schemas and tests exist at the baseline.
-- [x] Mirror APPLIED/NO_OP receipts exist and both operation requirements are registered in live acceptance.
-- [ ] Resolve the original D2 Agent installer, credentials, permissions and ownership decisions.
+- [x] PR #125 merged as `c25d9b3`; installed mirror creation, matching refs, NO_OP and exact-owned cleanup passed.
+- [x] PR #129 delivered named GitLab profiles, portability and explicit mirror evidence requirements.
+- [x] DEC-CI14-02: retain the approved official pinned Helm chart, existing provider services, owned-token handling
+  and selected-project access requirement.
+- [ ] Resolve the exact chart pin and remaining Agent interface/ownership details within those settled choices.
+- [ ] Reconcile mirror follow-ups [#130](https://github.com/spyroot/ci-skills/issues/130) before new capability work.
 - [ ] Deliver PR-002/W-002 Agent registration, installation, connection and selected-project access read-back.
 - [ ] Complete the original Agent gates and qualify the affected candidate; retain mirror regression coverage.
 
@@ -28,13 +34,22 @@ No `gitlab_agent.py`, `core/gitlab/cluster_agent/` or `core/kubernetes/gitlab_ag
 ## Decision Log
 
 DEC-CI14-01: credit the delivered mirror slice and preserve its current command contract. The older proposed D1/D3
-text is a reconciliation discrepancy, not an instruction to reopen or overwrite working behavior. D2 remains the
-original prerequisite for the undelivered Agent slice. No new target keys, permission defaults or gate are introduced.
+text is a reconciliation discrepancy, not an instruction to reopen or overwrite working behavior. The remaining D2
+details are prerequisites for the Agent slice; the implementation mechanism is settled below.
+No new target keys, permission defaults or gate are introduced.
+
+DEC-CI14-02: the approved closure scope selects the official pinned Helm chart, existing provider sessions,
+run-owned token handling and a consumer job using the selected project's Agent. Reuse the locked
+[smoke allocations][assets] and runtime Harbor, GitLab, GitHub and Kubernetes configuration. The exact chart pin,
+installation inputs and schema/flag details still need a concrete delta before implementation; do not reopen
+the selected installer or create a new provider.
 
 ## Outcomes & Retrospective
 
-PR-001's mirror capability is source-delivered, with committed qualification records. CI14 remains active because
-PR-002's Agent capability and proof are absent. This documentation change performs no provider operation.
+PR-001's mirror capability is merged and qualified; [the recorded evidence][baseline] retains its tested revision,
+required CI and cleanup evidence. CI14 remains active because PR-002's Agent capability and project-through-Agent
+proof are absent. Next: reconcile #130, then prepare the exact Agent chart/interface delta without reimplementing
+the mirror command or repeating its completed smoke.
 
 ## Context and Orientation
 
@@ -56,9 +71,10 @@ policy rather than changing a receipt's tested revision or treating this documen
 
 ### CI14-M2: resolve D2 and deliver the Agent workflow
 
-Before implementation, resolve the original installer mechanism, credential delivery, permission model and
-ownership of new resources. Record the exact selected command flags and input/result fields under D3 for this
-slice; those choices are not supplied by the mirror interface. Then introduce the phase's
+Use the approved official Helm chart and pin its exact version. Reuse existing provider services and keep newly
+created tokens tied to their native Agent identity. Preserve pre-existing installations and credentials. Resolve
+only the remaining installation inputs, permission/ownership details and exact flags/result fields under D3;
+the mirror interface does not supply an Agent schema. Then introduce the phase's
 `ci-skills/bin/gitlab_agent.py`, reusable `core/gitlab/cluster_agent/` services and
 `core/kubernetes/gitlab_agent.py` callbacks. Discover the requested project, cluster, registrations/installations
 and KAS prerequisites. KAS is the GitLab service through which the cluster Agent connects. Plan and apply the
@@ -118,15 +134,26 @@ An uncertain apply is reconciled against provider state before retry. Preserve p
 
 ## Artifacts and Notes
 
-Mirror evidence: [APPLIED][mirror-applied] and [NO_OP][mirror-noop]; registration: [live-acceptance policy][policy].
+[PR #125](https://github.com/spyroot/ci-skills/pull/125) merged as `c25d9b3` after
+[required workflow 41286903984](https://github.com/spyroot/ci-skills/actions/runs/41286903984) and its exact-head
+live-acceptance deployment passed. Installed source `1f2b6f5` proved optional creation, equal branch/tag refs,
+NO_OP and deletion of only GitHub repository `1441597088` and mirror `13`, with independent repeated absence.
+The retained source and refs remained.
+
+The later installed `bcf7d598` also qualified the unchanged mirror path: repository `1441633602` and mirror `15`
+were created, verified, reused without mutation and removed by exact IDs. Selected originals are
+[APPLIED][mirror-applied] and [NO_OP][mirror-noop]; the [policy][policy] registers both operation requirements.
+Foundation [PR #129](https://github.com/spyroot/ci-skills/pull/129) delivered named profiles and required coverage.
+These completed subtasks do not establish Agent registration, connection or project-through-Agent access.
 These records retain their captured revision. The missing Agent slice has no live receipt. The
 [plan map](../../plans/index.md) links both outcomes to CI14 and the existing repository checks.
 
 ## Interfaces and Dependencies
 
 Reuse the current target, provider sessions, `WorkflowExecutor`, resource ownership, catalog and report envelope.
-The phase names the Agent modules but leaves installer/credential/permission decisions open; no arbitrary
-installation mechanism or new configuration field is chosen here. Exact schemas and flags precede implementation
+The phase names the Agent modules; DEC-CI14-02 settles the installer mechanism. Remaining credential, permission
+and ownership details must reuse the selected runtime target and the existing confirmation/reporting boundary. Exact
+schemas and flags precede implementation
 through that original decision boundary.
 
 Revision DEC-CI14-01: derived the remaining Agent delivery from the unchanged phase while crediting mirror code
@@ -141,3 +168,9 @@ and its recorded receipts, avoiding a duplicate mirror implementation.
 [workflow]: ../../../.github/workflows/validate.yml
 [smoke]: ../../../inventory/ci/smoke-tests.yaml
 [aggregate]: ../../../tools/ci_required_result.py
+
+Revision DEC-CI14-02: recorded merged mirror qualification and the previously approved Agent mechanism so a
+restart resumes the undelivered slice rather than reopening settled choices.
+
+[baseline]: #artifacts-and-notes
+[assets]: ../../2026-10-31/live-smoke-inventory.md
