@@ -1854,15 +1854,17 @@ def test_native_mirror_readback_failure_retains_created_post_id(
     tmp_path: Path,
     target_file: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
     replacement: bool,
 ) -> None:
-    """Retain only known creation ownership when independent configuration read fails.
+    """Report the native POST identity without inventing an unread mirror configuration.
 
     :param tmp_path: Test-owned shared guard directory.
     :param target_file: Nonsecret provider-session reference.
     :param monkeypatch: Redirect the existing creation guard's local filesystem root.
+    :param capsys: Capture the actual command failure report for installed-schema validation.
     :param replacement: Replace the selected failed mirror or create its first record.
-    :returns: None; the real POST ID survives terminal GET failure without retry.
+    :returns: None; the partial report retains only known native creation ownership.
     """
     fields = MIRRORING.MirrorField
     failed = replace(
@@ -1900,6 +1902,14 @@ def test_native_mirror_readback_failure_retains_created_post_id(
         else (_Exchange(HTTPMethod.GET, EXPECTED_MIRRORS_ENDPOINT, json.dumps([])),)
     )
     exchanges = (
+        *(
+            _Exchange(
+                HTTPMethod.GET,
+                EXPECTED_MIRRORS_ENDPOINT,
+                json.dumps([_native_mirror_payload(failed)] if replacement else []),
+            )
+            for _ in range(POLL_OBSERVATION_COUNT)
+        ),
         *before,
         _Exchange(
             HTTPMethod.POST,
@@ -1917,21 +1927,96 @@ def test_native_mirror_readback_failure_retains_created_post_id(
     requests = _NativeRequests(exchanges)
     monkeypatch.setattr(GITLAB_API, "_lock_root", lambda: tmp_path / PROJECT_SCOPE)
     source = _native_source(requests, target_file)
+    snapshot = REFS.RefSnapshot.parse(REMOTE_OUTPUT)
+    source.reader.read.return_value = snapshot
+    monkeypatch.setattr(source, "repository", Mock(return_value=SOURCE_REPOSITORY))
+    sync = Mock(wraps=source.sync)
+    monkeypatch.setattr(source, "sync", sync)
+    engine, _, _ = _engine(failed if replacement else None, snapshot)
+    engine.source = source
+    intent = WORKFLOW.MirrorIntent(SOURCE_PATH, DESTINATION_PATH)
+    plan = engine.plan(intent, FUNCTIONAL_DIGEST, CREDENTIAL_DIGEST)
+    baseline = json.loads(_mirror_pair_baseline())[MIRROR_APPLIED_FILE]
+    bound_session = replace(source.service.session, skill=baseline[FIELD.SKILL])
 
-    with pytest.raises(API.APIError, match=AUTHORIZATION_REASON):
-        source.configure(
-            DESTINATION_REPOSITORY,
-            DESIRED_POLICY,
-            USERNAME,
-            TOKEN,
-            failed if replacement else None,
-        )
+    def workflow(action: CLI.MirrorAction, state: CLI.MirrorState) -> Mock:
+        """Bind the real native mirror engine to the command's actual apply callback.
 
+        :param action: Confirmed inputs parsed by the installed command interface.
+        :param state: Actual command-owned plan and partial-report state.
+        :returns: Outer adapter retaining the real apply and partial-report behavior.
+        """
+
+        def run() -> None:
+            """Apply once and let the command retain an uncertain native creation.
+
+            :returns: None only if independent configuration read-back succeeds.
+            :raises API.APIError: The scripted independent read returns terminal denial.
+            """
+            observed = plan.observation.evidence(DESTINATION_HOST, DESTINATION_PATH)
+            state.session = bound_session
+            state.engine = engine
+            state.plan = plan
+            state.record = {
+                **baseline[FIELD.RECORDS][0],
+                **observed,
+                BEFORE_FIELD: observed,
+                FIELD.ACTION: PLANNED_STATUS,
+                FIELD.VERIFIED: False,
+                FIELD.CREATED: {FIELD.REPOSITORY: False, FIELD.MIRROR: False},
+                FIELD.VERIFIED_SOURCE_REF_COUNT: NATIVE_SUCCESS,
+                FIELD.REPLACEMENT_REQUIRED: plan.replacement_required,
+                FIELD.REPLACED_MIRROR_ID: plan.replaced_mirror_id,
+            }
+            callback = CLI.ApplyMirror(action)
+            callback.bind(state)
+            callback.run()
+
+        executor = Mock(spec=CLI.WorkflowExecutor)
+        executor.run.side_effect = run
+        return executor
+
+    monkeypatch.setattr(
+        CLI, "resolve_target", Mock(return_value=_selected_target(target_file))
+    )
+    monkeypatch.setattr(CLI, "workflow", workflow)
+
+    code = CLI.main(
+        [
+            *COMMAND_SELECTION,
+            CLI.APPLY_OPTION,
+            CONFIRM_OPTION,
+            plan.digest,
+            JSON_OPTION,
+        ]
+    )
+    result = JSON_TYPES.json_object(
+        API.response_decoder().decode(capsys.readouterr().out)
+    )
+
+    SCHEMA.validate_specification(result, EVIDENCE.RESULT_SCHEMA)
+    assert (code, result[FIELD.STATUS]) == (COMMAND_FAILURE, PARTIAL_STATUS)
+    (record,) = JSON_TYPES.json_objects(result[FIELD.RECORDS])
+    assert record[FIELD.VERIFIED] is False
+    assert record[FIELD.CREATED] == {FIELD.REPOSITORY: False, FIELD.MIRROR: True}
+    assert record["created_mirror_id"] == identity
+    assert record[FIELD.MIRROR] is None
+    assert record[FIELD.REPLACEMENT_REQUIRED] is replacement
+    assert record[FIELD.REPLACED_MIRROR_ID] == (MIRROR_ID if replacement else None)
+    assert record[BEFORE_FIELD] == plan.observation.evidence(
+        DESTINATION_HOST, DESTINATION_PATH
+    )
+    assert record[FIELD.VERIFIED_SOURCE_REF_COUNT] == NATIVE_SUCCESS
+    assert result[FIELD.ERRORS] == [
+        {FIELD.SOURCE: CLI.KIND, FIELD.REASON: AUTHORIZATION_REASON}
+    ]
     assert source.created_mirror_id == identity
+    sync.assert_not_called()
     assert requests.calls == [
         (exchange.method, exchange.endpoint) for exchange in exchanges
     ]
     assert all(not path.exists() for path in requests.body_paths)
+    assert TOKEN not in json.dumps(result)
 
 
 def test_completed_native_sync_with_unmatched_refs_keeps_domain_timeout_reason() -> (

@@ -656,6 +656,11 @@
             "null"
           ],
           "minimum": 1
+        },
+        "created_mirror_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Native POST identity retained for recovery; does not establish verified configuration or synchronization."
         }
       }
     },
