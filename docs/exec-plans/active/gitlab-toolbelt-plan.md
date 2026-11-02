@@ -1,6 +1,9 @@
 # GitLab operations tool belt: delivery plan
 
-## Outcome and boundary
+This living ExecPlan follows [docs/PLANS.md](../../PLANS.md). Keep Progress, Surprises & Discoveries,
+Decision Log, and Outcomes & Retrospective current as the remaining combined proof proceeds.
+
+## Purpose / Big Picture
 
 This delivery extends `ci-skills` with project-neutral GitLab commands. Its diagnostic commands remain read-only, while
 each operation is marked mutating in the generated manifest.  The GitLab target resolution, effective credential
@@ -15,53 +18,44 @@ project-specific default hosts, groups, token aliases, and unrelated deployment 
 This is the delivery plan, not a live acceptance receipt. Each stage below is an independently runnable block and
 review checkpoint. Code, tests, manifest, result shape, and user instructions land with the capability.
 
-## SKILL and Agent invocation and target contract
+## Progress
 
-The agent routes and first calls are in [SKILL.md](../../../ci-skills/SKILL.md); its generated `tools.json` is the
-command catalog. The catalog and parser must accept the same subcommands and options; `--describe` and `--help`
-work without credentials. Agents call installed executables directly; no MCP server or separate provider
-deployment is implied.
+- [x] Blocks 1–6: installed access, milestone, issue, wiki, assignment and runner-record receipts are linked below.
+- [x] Block 7: installed manager deployment, identical-deploy NO_OP, linked real Podman consumer and cleanup
+  are recorded in the [runner-manager evidence](../../../tests/acceptance/evidence/runner-manager/README.md).
+- [ ] Establish the six linked rows for the complete toolbox/Harbor/runner/job chain; the standalone manager proof
+  does not establish that combined chain.
+- [ ] Close or explicitly record paused, locked, run-untagged and maximum-timeout configuration gaps.
 
-Target precedence is defined in the [README](../../../README.md#target-selection). The access block supports a
-GitLab-only
-target profile and permits `gitlab.project`, `gitlab.group`, and `gitlab.runner_id` in the selected file. The
-three-authority diagnostic loader still requires all three tables. Explicit `--project`, `--group`, or `--runner-id`
-overrides its matching target field. A missing or conflicting identifier blocks. Neither the Git remote nor the `glab`
-profile supplies a target fallback. The access check resolves a project/group to a numeric ID; all later API paths use
-that ID, never a context-sensitive placeholder. Live results name the resolved origin, numeric IDs, and target source.
+## Surprises & Discoveries
 
-The GitLab-only check reuses effective-source precedence: declared token
-file, named token environment variable, then the exact-host `glab` store.
-The chosen token is loaded once into a controlled child environment; a store
-credential that cannot be pinned noninteractively blocks. The live result
-records the source reference and credential digest, never the value.
-`GET /user` records the numeric identity; `GET /projects/:id` or group
-read-back verifies the exact target. Apply binds one effective credential,
-reads back the user and numeric target, then uses that session for the action.
-The offline plan does not bind a user ID or credential digest. The existing
-instance-admin and `runners/all` checks remain in the diagnostics route.
-The operation gate does not precheck each action's API permission; an action
-can still return an authorization error. Runner assignment reads the selected
-runner when applied.
+The manager proof includes pipeline 3956 and job 60694 on runner 99, plus same-identity deploy NO_OP and
+independent cleanup. Its evidence explicitly leaves the complete CI13 chain unproven. Current
+`ci-skills/lib/python/core/gitlab/gitlab_runners.py` compares requested tags and selected protection in
+`_finish_created()` through `_runner_readback()`; the catalog exposes `--protected`.
 
-Mutating commands default to offline `--dry-run`: no GitLab API call, no file
-write, and no access claim. The plan prints a SHA-256 fingerprint of the
-selected target and desired input. `--apply --confirm-plan DIGEST --timeout
-DURATION` must match that fingerprint, then re-resolve the credential and
-target and read back the authenticated identity immediately before a write.
-An unverified revision is reported but is not a security binding. Apply
-rejects changed input or target. A verified no-op sends no write request.
+## Decision Log
 
-The GitLab transport writes POST/PUT JSON to a mode-0600 temporary file passed
-as `glab api --input PATH`. It pins `--hostname` and clears conflicting token
-variables. The child runs in the caller's working directory. Capture is
-bounded to 8 MiB while the child runs; failures expose a classified reason
-instead of raw provider output. Safe reads retry a bounded number of times for
-transient failures and honor a bounded `Retry-After`. Writes are sent once.
-An uncertain write is reconciled by resource read-back before another create
-can be attempted; a 401 or 403 is terminal.
+DEC-TOOLBELT-01: retain the independently runnable blocks and existing result/acceptance owners. Credit the
+linked manager/consumer evidence without treating it as proof of the larger six-step chain.
+Governing references: the delivery blocks and runner-manager evidence below.
 
-## Delivery blocks
+## Outcomes & Retrospective
+
+Blocks 1–6 and the standalone block-7 manager/consumer path are delivered within their recorded receipt scope.
+Next: establish the remaining linked six-step proof and record the remaining configuration gaps. This plan stays
+active until those remaining outcomes have evidence; historical receipts are not new-candidate executions.
+
+## Context and Orientation
+
+`ci-skills/bin/gitlab_access.py`, `gitlab_milestone.py`, `gitlab_issue.py`, `gitlab_wiki.py`,
+`gitlab_runner.py` and `gitlab_runner_manager.py` are installed entrypoints. Reusable GitLab behavior lives in
+`ci-skills/lib/python/core/gitlab/`; `ci-skills/lib/python/core/catalog.py` owns command declarations.
+`tests/acceptance/receipts` and `tests/acceptance/evidence` hold the linked historical proof.
+
+## Plan of Work
+
+### Delivery blocks
 
 Blocks 1 to 6 are delivered. Each has a sanitized live receipt under
 [`tests/acceptance/receipts`](../../../tests/acceptance/receipts), recorded from the
@@ -149,22 +143,13 @@ is required on plan and apply to bind the destination in the plan digest. Apply
 reserves an exclusive mode-0600 destination, posts once, writes the one-time
 token, and reads
 back runner ID, description, and scope membership. The token is not reported.
-Tags and configuration are not compared. If a known newly created runner fails
+Requested tags and explicit `--protected` access level are compared. If a known newly created runner fails
 token persistence or read-back, the command attempts to delete that record and
 reports cleanup evidence. An uncertain POST or unresolved runner ID blocks
 further creation until independent reconciliation. The result records
 `sink_persisted`, not manager readiness. Registration and an online job are
 block 7; the committed create receipt read record 72 back as `never_contacted`
 before cleanup deleted it.
-
-For an uncertain create, a later complete empty list read clears the local
-pending marker and blocks without another POST; a subsequent invocation may
-retry the same plan. An existing runner with the description keeps the marker.
-The user must inspect the exact runner ID and scope in GitLab, then decide
-whether to remove that record through the GitLab UI. A lost one-time token is
-not recoverable from the record. After authorized removal, one apply clears the
-marker and a further apply can create. This is a manual recovery step, not a
-`gitlab_runner.py recover` subcommand.
 
 The suggested API mapping follows GitLab's project
 [milestones](https://docs.gitlab.com/api/milestones/),
@@ -174,7 +159,10 @@ The suggested API mapping follows GitLab's project
 contracts. The legacy registration-token `POST /runners` route is not the
 creation target.
 
-### 7. Runner registration and test job (planned)
+### 7. Runner registration and test job: delivered proof and remaining chain
+
+The installed manager and real Podman consumer are delivered as recorded above. The remaining combined proof
+below must link all six steps; the manager evidence alone does not establish it.
 
 `gitlab_runner.py create` proves that a record exists. The paired proof is a
 runner manager that uses the one-time token and a job that runs on it, and
@@ -205,10 +193,143 @@ deployment through `gitlab_runner_manager.py delete`, which composes the shared
 `DeleteRunner` callback, and the runner record through `gitlab_runner.py delete`,
 which has the APPLIED and NO_OP
 receipts. Configuration the create command does
-not accept today, such as paused, locked, run-untagged, access level, and
+not accept today, such as paused, locked, run-untagged, and
 maximum timeout, is a gap this block closes or records.
 
-## One result contract
+## Concrete Steps
+
+Working directory: repository root in the existing GitHub validation environment. Reuse its installed-package
+and GitLab action tests; successful checks exit 0. Live actions use the installed command and selected disposable
+target described in the delivery blocks, with the existing plan/apply fingerprint and independent read-back.
+
+```bash
+python tools/render_manifest.py --check
+python -W error -m pytest -q tests/python/test_gitlab_actions.py tests/python/test_gitlab_runner_manager.py
+```
+
+No new variables, jobs or gates are introduced. The following existing workflow objects supply candidate validation.
+
+| Variable Name | Type | Default / Required | Source / Scope | Description & Invariants |
+| --- | --- | --- | --- | --- |
+| `CI_SOURCE_SHA` | string | Required | `.github/workflows/validate.yml` | Exact PR head or workflow source commit |
+
+| Pipeline / Job Name | Type / Trigger | Stage / Order | File Path | Required Inputs & Artifacts |
+| --- | --- | --- | --- | --- |
+| `validate` | PR/push/manual/scheduled | Parallel | [CI][workflow] | Static/schema/unit/acceptance evidence |
+| `gate-ci-skills-endpoints` | Same | Parallel | [CI][workflow] | Candidate endpoint evidence |
+| `test-install` | Same | Parallel | [CI][workflow] | Installed-package evidence |
+| `required-result` | Same | After three jobs | [CI][workflow] | Exact-candidate evidence |
+
+| Gate ID | Gate Type / Class | Pass Condition | Fail-Closed Condition | Producer / Owner |
+| --- | --- | --- | --- | --- |
+| `ci-skills/required` | Required CI | All jobs/evidence pass | Missing/failed/invalid proof | [Result][aggregate] |
+| `validate.live_acceptance` | Acceptance | Candidate/selected receipts match | Invalid proof | [Receipt][acceptance] |
+
+## Validation and Acceptance
+
+### Gates and proof per block
+
+The GitHub `validate` workflow is the required gate; its exact-head result
+is published as the `ci-skills/required` status. Each changed block needs
+exact-head static checks, catalog/manifest/schema validation, focused unit
+tests, and installed-package smoke, all of which that workflow runs. The installed
+smoke runs all entrypoints from an unrelated directory and checks normal
+JSON/YAML, structured failures, and runtime dependencies. If Bash is added,
+Bash parse, ShellCheck, shfmt, and Bats must execute in that workflow.
+Acceptance requires tests for offline dry-run with zero API calls and
+plan/apply input binding; permission denial; terminal 401/403;
+408/429/5xx classification; malformed responses; redaction; timeout cleanup;
+read-back mismatch; and second-call no-op. Same-host create locking and
+post-timeout read-back need exact-head test evidence; cross-host create
+serialization remains a limitation.
+
+Stages 2–6 also require protected live smoke against a named disposable
+GitLab target, from a named execution host that can reach that instance. A
+sanitized receipt binds the exact skill digest, origin and
+numeric target IDs, effective source and user ID, plan digest, apply result,
+independent GET, repeated no-op, and cleanup. The repository acceptance checker,
+`tools/check_live_acceptance.py`, requires the operation receipts alongside
+the diagnostic receipt, compares each receipt's functional checksum with its
+own calculation for the candidate, and blocks on an empty or incomplete set. Mocked unit tests alone cannot accept
+stages
+2–6. No production resource is changed merely to satisfy smoke.
+
+## Idempotence and Recovery
+
+For an uncertain create, a later complete empty list read clears the local
+pending marker and blocks without another POST; a subsequent invocation may
+retry the same plan. An existing runner with the description keeps the marker.
+The user must inspect the exact runner ID and scope in GitLab, then decide
+whether to remove that record through the GitLab UI. A lost one-time token is
+not recoverable from the record. After authorized removal, one apply clears the
+marker and a further apply can create. This is a manual recovery step, not a
+`gitlab_runner.py recover` subcommand.
+
+## Artifacts and Notes
+
+### Live acceptance inputs
+
+1. **Token sink for runner creation:** closed. The live run supplied
+   `--token-out PATH` on plan and apply; `runner-create-applied.json` records
+   `sink_persisted: true` and a verified read-back of the created record.
+   Block 7 additionally records manager deployment with that token and a
+   successful job on the exact runner; see the runner-manager evidence above.
+2. **Live smoke route:** closed. The user's `~/.ci-skills/target.toml` selects
+   the GitLab instance; every stage 2–6 operation named a test project with
+   `--project` (project 123, and 124 for assignment), recorded as
+   `target_source` `user;argv:--project`; and every stage 2–6 receipt was
+   captured on one execution host from the installed skill with its exact
+   digest.
+
+## Interfaces and Dependencies
+
+### SKILL and Agent invocation and target contract
+
+The agent routes and first calls are in [SKILL.md](../../../ci-skills/SKILL.md); its generated `tools.json` is the
+command catalog. The catalog and parser must accept the same subcommands and options; `--describe` and `--help`
+work without credentials. Agents call installed executables directly; no MCP server or separate provider
+deployment is implied.
+
+Target precedence is defined in the [README](../../../README.md#target-selection). The access block supports a
+GitLab-only
+target profile and permits `gitlab.project`, `gitlab.group`, and `gitlab.runner_id` in the selected file. The
+three-authority diagnostic loader still requires all three tables. Explicit `--project`, `--group`, or `--runner-id`
+overrides its matching target field. A missing or conflicting identifier blocks. Neither the Git remote nor the `glab`
+profile supplies a target fallback. The access check resolves a project/group to a numeric ID; all later API paths use
+that ID, never a context-sensitive placeholder. Live results name the resolved origin, numeric IDs, and target source.
+
+The GitLab-only check reuses effective-source precedence: declared token
+file, named token environment variable, then the exact-host `glab` store.
+The chosen token is loaded once into a controlled child environment; a store
+credential that cannot be pinned noninteractively blocks. The live result
+records the source reference and credential digest, never the value.
+`GET /user` records the numeric identity; `GET /projects/:id` or group
+read-back verifies the exact target. Apply binds one effective credential,
+reads back the user and numeric target, then uses that session for the action.
+The offline plan does not bind a user ID or credential digest. The existing
+instance-admin and `runners/all` checks remain in the diagnostics route.
+The operation gate does not precheck each action's API permission; an action
+can still return an authorization error. Runner assignment reads the selected
+runner when applied.
+
+Mutating commands default to offline `--dry-run`: no GitLab API call, no file
+write, and no access claim. The plan prints a SHA-256 fingerprint of the
+selected target and desired input. `--apply --confirm-plan DIGEST --timeout
+DURATION` must match that fingerprint, then re-resolve the credential and
+target and read back the authenticated identity immediately before a write.
+An unverified revision is reported but is not a security binding. Apply
+rejects changed input or target. A verified no-op sends no write request.
+
+The GitLab transport writes POST/PUT JSON to a mode-0600 temporary file passed
+as `glab api --input PATH`. It pins `--hostname` and clears conflicting token
+variables. The child runs in the caller's working directory. Capture is
+bounded to 8 MiB while the child runs; failures expose a classified reason
+instead of raw provider output. Safe reads retry a bounded number of times for
+transient failures and honor a bounded `Retry-After`. Writes are sent once.
+An uncertain write is reconciled by resource read-back before another create
+can be attempted; a 401 or 403 is terminal.
+
+### One result contract
 
 Extend the existing versioned result envelope rather than define a parallel
 schema or exit-code authority. Its truly common fields are:
@@ -240,43 +361,9 @@ IDs, selected fields, digests, and sanitized error classes. A controlled
 failure emits a schema-valid JSON/YAML error envelope on stdout with a
 nonzero exit status.
 
-## Gates and proof per block
+Revision DEC-TOOLBELT-01: moved the delivery plan into the shared ExecPlan skeleton and reconciled standalone
+runner proof and selected-protection read-back without claiming the combined chain is complete.
 
-The GitHub `validate` workflow is the required gate; its exact-head result
-is published as the `ci-skills/required` status. Each changed block needs
-exact-head static checks, catalog/manifest/schema validation, focused unit
-tests, and installed-package smoke, all of which that workflow runs. The installed
-smoke runs all entrypoints from an unrelated directory and checks normal
-JSON/YAML, structured failures, and runtime dependencies. If Bash is added,
-Bash parse, ShellCheck, shfmt, and Bats must execute in that workflow.
-Acceptance requires tests for offline dry-run with zero API calls and
-plan/apply input binding; permission denial; terminal 401/403;
-408/429/5xx classification; malformed responses; redaction; timeout cleanup;
-read-back mismatch; and second-call no-op. Same-host create locking and
-post-timeout read-back need exact-head test evidence; cross-host create
-serialization remains a limitation.
-
-Stages 2–6 also require protected live smoke against a named disposable
-GitLab target, from a named execution host that can reach that instance. A
-sanitized receipt binds the exact skill digest, origin and
-numeric target IDs, effective source and user ID, plan digest, apply result,
-independent GET, repeated no-op, and cleanup. The repository acceptance checker,
-`tools/check_live_acceptance.py`, requires the operation receipts alongside
-the diagnostic receipt, compares each receipt's functional checksum with its
-own calculation for the candidate, and blocks on an empty or incomplete set. Mocked unit tests alone cannot accept
-stages
-2–6. No production resource is changed merely to satisfy smoke.
-
-## Live acceptance inputs
-
-1. **Token sink for runner creation:** closed. The live run supplied
-   `--token-out PATH` on plan and apply; `runner-create-applied.json` records
-   `sink_persisted: true` and a verified read-back of the created record.
-   Block 7 additionally records manager deployment with that token and a
-   successful job on the exact runner; see the runner-manager evidence above.
-2. **Live smoke route:** closed. The user's `~/.ci-skills/target.toml` selects
-   the GitLab instance; every stage 2–6 operation named a test project with
-   `--project` (project 123, and 124 for assignment), recorded as
-   `target_source` `user;argv:--project`; and every stage 2–6 receipt was
-   captured on one execution host from the installed skill with its exact
-   digest.
+[workflow]: ../../../.github/workflows/validate.yml
+[aggregate]: ../../../tools/ci_required_result.py
+[acceptance]: ../../../tools/check_live_acceptance.py

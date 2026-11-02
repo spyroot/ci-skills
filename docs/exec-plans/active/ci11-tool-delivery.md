@@ -13,6 +13,10 @@ commands. CI11's H1/H2 and C1–C9 map the scope; its source-script inventory re
 - [x] CI11-R1: source and existing test locations reconciled at the baseline above.
 - [x] H1/H2 help and persistence guidance, job/pipeline reads and watch, selected mutations, ISO/join and toolbox
   paths exist.
+- [x] Standalone runner-manager and a linked successful Podman job have [published proof][manager-proof];
+  selected runner protection is available through the existing `--protected` interface.
+- [ ] Deliver native installed-session lifecycle hooks through the separate [hook proposal][hooks]; this is
+  not supplied by a Git hook, a runner deployment or command discovery.
 - [ ] Reuse delivered H1/H2 and complete CI09 immediate connections plus C1 descriptive routing.
 - [ ] Deliver only missing operations in C2–C9, preserving the original dependency order.
 - [ ] Capture affected installed-capability proof for each delivery; retain full-phase proof as a separate closure
@@ -32,7 +36,9 @@ open phase decisions remain open. This reconciliation introduces no command, sch
 ## Outcomes & Retrospective
 
 Existing tests and historical receipts cover subsets. C1–C9 residual operations and full-phase proof remain open.
-The plan remains active. No remaining feature work or live validation was executed during this documentation change.
+The plan remains active. Next: finish the original CI09/C1 dependency, then only the missing C2–C9 operations.
+Native Codex/Claude lifecycle integration remains proposed and undelivered in its linked plan. Preserve delivered
+runner/job proof rather than scheduling standalone manager implementation again.
 
 ## Context and Orientation
 
@@ -138,3 +144,9 @@ kept phase requirements and status wording unchanged so reconciliation can be re
 [workflow]: ../../../.github/workflows/validate.yml
 [smoke]: ../../../inventory/ci/smoke-tests.yaml
 [aggregate]: ../../../tools/ci_required_result.py
+
+Revision DEC-CI11-02: credited published runner/job and protection support while keeping residual commands and
+native lifecycle integration open.
+
+[manager-proof]: ../../../tests/acceptance/evidence/runner-manager/README.md
+[hooks]: skill-session-hook.md

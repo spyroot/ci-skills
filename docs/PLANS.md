@@ -36,6 +36,11 @@ NON-NEGOTIABLE REQUIREMENTS:
 - Every ExecPlan must enable a complete novice to implement the feature end-to-end without prior knowledge of this repo.
 - Every ExecPlan must produce a demonstrably working behavior, not merely code changes to "meet a definition".
 - Every ExecPlan must define every term of art in plain language or do not use it.
+- Every ExecPlan that defines, modifies, or references runtime/CI variables, CI pipelines/jobs, or verification gates
+  MUST present them in `Concrete Steps` using structured Markdown tables specifying: (1) Variable name, type,
+  default/required status, and source; (2) Pipeline/job name, trigger type, stage/order, and file path; and (3) Gate ID,
+  type/class, pass condition, fail-closed condition, and owning module. Describing variables, pipelines, or gates solely
+  in prose is forbidden.
 
 Purpose and intent come first. Begin by explaining, in a few sentences, why the work matters from a user's perspective:
 what someone can do after this change that they could not do before, and how to see it working. Then guide the reader
@@ -141,74 +146,140 @@ multiple new libraries or feature areas, consider creating spikes that evaluate 
 _independently_ of one another, proving that the external library performs as expected and implements the features we
 need in isolation.
 
+## Documentation Contract
+
+- **Human-Facing Voice Only:** Never use internal agent orchestration terms
+- (`operator`, `coordinator`, `worker`, `in chat`, `inspected revision`, `this document does not authorize`) or local
+  laptop paths (`~/dev/...`) in repository documentation or ExecPlans. Use domain roles (`administrators`,
+  `maintainers`, `callers`, or the team name).
+- **Track by Artifact ID, Not Dates:** Do not stamp `Progress` checklists, `Decision Log` entries, or bottom-of-file
+  `Revision notes` with calendar dates (`YYYY-MM-DD`). Track progress and decisions using immutable Decision IDs
+  (`DEC-01`), Gate IDs (`G-17`), Milestone IDs (`CI-E2E-01`), MR numbers (`!32`), or PR commit SHAs.
+- Stamp allowed in file name, example .coordination/ read system-arhitecture contract, backup, logs, original contracts.
+
 ## Skeleton of a Good ExecPlan
 
     # <Short, action-oriented description>
 
-    This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and `Outcomes & Retrospective` must be kept up to date as work proceeds.
+    This ExecPlan is a living document. The sections `Progress`, `Surprises & Discoveries`, `Decision Log`, and
+    `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
-    If PLANS.md file is checked into the repo, reference the path to that file here from the repository root and note that this document must be maintained in accordance with PLANS.md.
+    If PLANS.md file is checked into the repo, reference the path to that file here from the repository root and
+    note that this document must be maintained in accordance with PLANS.md.
 
     ## Purpose / Big Picture
 
-    Explain in a few sentences what someone gains after this change and how they can see it working. State the user-visible behavior you will enable.
+    Explain in a few sentences what someone gains after this change and how they can see it working. State the
+    user-visible behavior you will enable.
 
     ## Progress
 
-    Use a list with checkboxes to summarize granular steps. Every stopping point must be documented here, even if it requires splitting a partially completed task into two (“done” vs. “remaining”). This section must always reflect the actual current state of the work.
+    Use a list with checkboxes to summarize granular steps. Every stopping point must be documented here, even if
+    it requires splitting a partially completed task into two (“done” vs. “remaining”). This section must always
+    reflect the actual current state of the work.
 
-    - [x] (2025-10-01 13:00Z) Example completed step.
+    - [x] (Artifact ID) Example completed step.
     - [ ] Example incomplete step.
     - [ ] Example partially completed step (completed: X; remaining: Y).
 
-    Use timestamps to measure rates of progress.
+    Use timestamps to measure rates of progress, but do not use timestamps as Artifact ID.
 
     ## Surprises & Discoveries
 
-    Document unexpected behaviors, bugs, optimizations, or insights discovered during implementation. Provide concise evidence.
+    Document unexpected behaviors, bugs, optimizations, or insights discovered during implementation.
+    Provide concise evidence.
 
     - Observation: …
       Evidence: …
 
     ## Decision Log
 
-    Record every decision made while working on the plan in the format:
+    Record every decision made while working on the plan using stable Decision IDs and artifact references
+    (NEVER use calendar dates or chat references):
 
-    - Decision: …
+    - Decision []: …
+      Status: ACCEPTED | SUPERSEDED_BY:
       Rationale: …
-      Date/Author: …
+      Governing Ref: <commit SHA, contract ID, or requirement ID>
 
     ## Outcomes & Retrospective
 
-    Summarize outcomes, gaps, and lessons learned at major milestones or at completion. Compare the result against the original purpose.
+    Summarize outcomes, gaps, and lessons learned at major milestones or at completion. Compare the result
+    against the original purpose.
 
     ## Context and Orientation
 
-    Describe the current state relevant to this task as if the reader knows nothing. Name the key files and modules by full path. Define any non-obvious term you will use. Do not refer to prior plans.
+    Describe the current state relevant to this task as if the reader knows nothing. Name the key files and
+    modules by full path. Define any non-obvious term you will use. Do not refer to prior plans.
 
     ## Plan of Work
 
-    Describe, in prose, the sequence of edits and additions. For each edit, name the file and location (function, module) and what to insert or change. Keep it concrete and minimal.
+    Describe, in prose, the sequence of edits and additions. For each edit, name the file and location
+    (function, module) and what to insert or change. Keep it concrete and minimal.
 
     ## Concrete Steps
 
-    State the exact commands to run and where to run them (working directory). When a command generates output, show a short expected transcript so the reader can compare. This section must be updated as work proceeds.
+    State the exact commands to run and where to run them (working directory). When a command generates output,
+    show a short expected transcript so the reader can compare. This section must be updated as work proceeds.
+
+    MANDATORY REQUIREMENT FOR OBJECTS, SPECS, SCHEMAS, AND REFACTORING:
+    Whenever the plan creates or modifies a data object, specification, JSON/YAML schema, or introduces a
+    refactoring, `Concrete Steps` MUST explicitly specify:
+
+    1. The exact repository-relative file path to create or edit.
+    2. The exact fields, types, constants/enums, and invariants of the object, specification, or schema.
+    3. For refactorings: the exact functions/classes being extracted, moved, or replaced, the callers to update,
+       and the pre/post verification commands proving zero behavioral regression.
+
+    USE: INTRODUCED, MODIFIED, DELETE, REFACTOR
+
+    MANDATORY TABULAR FORMAT FOR VARIABLES, CI PIPELINES, AND GATES:
+    Whenever the plan introduces, modifies, or relies on configuration/CI variables, CI pipelines/jobs, or
+    verification gates, you MUST render them in `Concrete Steps` using the exact Markdown table structures below
+    (never bury them in prose):
+
+    Gate name must short and try to capture what it does: Gate ordered and have clear timeline
+    when introduced in each phase.
+
+    1. Variables Table (exact variable name, type, default/required status, and source/scope):
+
+    | Variable Name | Type | Default / Required | Source / Scope | Description & Invariants |
+    | --- | --- | --- | --- | --- |
+    | `EXAMPLE_VAR` | `string` | Required (no default) | Protected CI Variable | Must match configured account alias |
+
+    2. CI Pipelines & Jobs Table (exact pipeline/job name, trigger/type, stage, and dependencies):
+
+    | Pipeline / Job Name | Type / Trigger | Stage / Order | File Path | Required Inputs & Artifacts |
+    | --- | --- | --- | --- | --- |
+    | `` | Manual / Protected | `` | `.gitlab/ci/dns.yml` | Emits ``, `` |
+
+    3. Verification Gates Table (exact gate ID, gate type/class, pass/fail conditions, and owning producer):
+
+    | Gate ID | Gate Type / Class | Pass Condition | Fail-Closed Condition | Producer / Owner |
+    | --- | --- | --- | --- | --- |
+    | `G-17` | `live-read-back` | ` | Missing  | `` |
 
     ## Validation and Acceptance
 
-    Describe how to start or exercise the system and what to observe. Phrase acceptance as behavior, with specific inputs and outputs. If tests are involved, say "run <project’s test command> and expect <N> passed; the new test <name> fails before the change and passes after>".
+    Describe how to start or exercise the system and what to observe. Phrase acceptance as behavior, with
+    specific inputs and outputs. If tests are involved, say "run <project’s test command> and expect <N> passed;
+    the new test <name> fails before the change and passes after>".
 
     ## Idempotence and Recovery
 
-    If steps can be repeated safely, say so. If a step is risky, provide a safe retry or rollback path. Keep the environment clean after completion.
+    If steps can be repeated safely, say so. If a step is risky, provide a safe retry or rollback path. Keep the
+    environment clean after completion.
 
     ## Artifacts and Notes
 
-    Include the most important transcripts, diffs, or snippets as indented examples. Keep them concise and focused on what proves success.
+    Include the most important transcripts, diffs, or snippets as indented examples. Keep them concise and
+    focused on what proves success.
 
     ## Interfaces and Dependencies
 
-    Be prescriptive. Name the libraries, modules, and services to use and why. Specify the types, traits/interfaces, and function signatures that must exist at the end of the milestone. Prefer stable names and paths such as `crate::module::function` or `package.submodule.Interface`. E.g.:
+    Be prescriptive. Name the libraries, modules, and services to use and why. Specify the types,
+    traits/interfaces, and function signatures that must exist at the end of the milestone. Prefer
+    stable names and paths such as `crate::module::function` or `package.submodule.Interface`. E.g.:
 
     In crates/foo/planner.rs, define:
 
