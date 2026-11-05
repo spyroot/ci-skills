@@ -21,7 +21,7 @@ the `routing` object and `origin`.
 
 ## Progress
 
-- [x] (DEC-01–DEC-09) Design accepted.
+- [x] (DEC-01–DEC-13) Design accepted. DEC-14 (Agent routing) is PROPOSED.
 - [x] (GPP-01) This ExecPlan and its index row are committed.
 - [x] (GPP-02) Table-driven regression tests are committed and fail on the base revision. Tests:
   `tests/python/test_target_profiles.py` (selection, routing, field errors, CLI rows), `conftest.py` `target_file` in
@@ -32,24 +32,28 @@ the `routing` object and `origin`.
   `test_report_human.py` 2, `test_gitlab_actions.py` 2. Fixture cascade from the routed `target_file`:
   `test_collectors.py` 34, `test_access_core.py` 15, `test_target_runtime.py` 13, `test_node_local_cli.py` 9,
   `test_node_pod.py` 7 errors, `test_cli_contract.py` 5, `test_status_cli.py` 4, `test_live_gate.py` 2.
-- [x] (GPP-03) The contract names are defined once in `core/endpoints.py`; `[gitlab_routing]` is parsed and validated.
-- [x] (GPP-04) The `--gitlab` selector joins `--gitlab-profile` on every GitLab command; the legacy path warns.
+- [x] (GPP-03) The contract names are defined once in `core/endpoints.py`; `[gitlab_routing]` is parsed and validated
+  (`a9eddd5`).
+- [x] (GPP-04) The `--gitlab` selector joins `--gitlab-profile` on every GitLab command; the legacy path warns
+  (`a9eddd5`). Evidence: run [42130263348](https://github.com/spyroot/ci-skills/actions/runs/42130263348) on
+  `e5b40eb`: `gate-ci-skills-endpoints`, `test-install` and the `validate` pytest step pass.
 - [x] (GPP-05) `routing` is in the GitLab action, `access_check` and `gitlab_mirror` JSON and in every human view
-  that receives it; the action, runner and mirror result schemas and the live-acceptance checker accept 1.1. Scope
-  limits are in Surprises.
-- [x] (GPP-06) The template, references, README and `tools.json` are updated.
+  that receives it; the action, runner and mirror result schemas and the live-acceptance checker accept 1.1
+  (`a9eddd5`, `e5b40eb`, `f474eb6`). Scope limits are in Surprises.
+- [x] (GPP-06) The template, references, README and `tools.json` are updated (`a9eddd5`, `e5b40eb`).
 - [x] (GPP-07) Both installed copies are upgraded, with AFTER evidence against the selected target. Both installs
   read back `e5b40eb` (`INSTALLATION.json`, verified). `gitlab_issue.py open-bug --project hott/test --json` from
   each install: the renamed target without `[gitlab_routing]` gives `BLOCKED gitlab_routing_required`; the issue #133
   shape (`[gitlab]` + `[gitlab.com]`) gives `DRY_RUN` on `[gitlab]` with one `gitlab_target_deprecated` event, and
   `--gitlab-profile com` reads `[gitlab.com]`. After `[gitlab_routing]` was added to the user target (backup beside
   it), no option reads `[gitlab_private]` with `routing.selected_by` `default`, and `--gitlab public` reads
-  `[gitlab_public]` with `argv:--gitlab=public`, no deprecation event.
-- [ ] (GPP-08) The candidate receipts are renewed and `validate` is green on the PR head. Blocked on two decisions:
-  the current kube context is not the cluster `authority.sh` names for the smoke GitLab, and the only producer of the
-  mirror `smoke_cleanup` record is a mutating scratch script while `.internal/INDEX.yaml` sets
-  `scratchPolicy.mutationAllowed: false`.
-- [ ] (GPP-09) Legacy removal is tracked as TD-11.
+  `[gitlab_public]` with `argv:--gitlab=public`, no deprecation event. `f474eb6` changed `access_check` and
+  `gitlab_mirror` output after this install, so both installs are upgraded again at the final head before GPP-08.
+- [ ] (GPP-08) The candidate receipts are renewed and `validate` is green on the PR head. Open: DEC-14 is PROPOSED;
+  the current kube context (`home-lab-k8s`) is not the cluster `authority.sh` names for the smoke GitLab; and the mirror
+  qualification script that writes the allocation record pins another candidate SHA and worktree and has been used
+  twice, the `.internal/INDEX.yaml` `promoteAfterUses` limit, while `scratchPolicy.mutationAllowed` is `false`.
+- [x] (GPP-09) Legacy removal is tracked as TD-11 (`docs/exec-plans/tech-debt-tracker.md`).
 
 ## Surprises & Discoveries
 
@@ -72,6 +76,12 @@ the `routing` object and `origin`.
   checker now accepts `RECEIPT_SCHEMA_VERSIONS` (`1.0`, `1.1`), so historical receipts stay valid and `access_check`
   and `gitlab_mirror` results emit `1.1` with `routing`, as GitLab action results do. Job list, pipeline watch,
   runner manager and image-build chain results do not carry `routing` yet.
+- Observation: no check runs the project-neutrality scan.
+  Evidence: `lib/bash/automation/bless.bash:19` sets `BLESS_CHECKS='whitespace json schemas yaml markdown bash_syntax
+  shell shfmt actionlint gitleaks python endpoints portability source_cycle runtime_sync'`, with no neutrality entry,
+  and no file under `.github/workflows/`, the `Makefile` or `.githooks/` mentions `check_project_neutrality.py`.
+  `python tools/check_project_neutrality.py --root . --json` reports `FAIL` on this branch for the tracked
+  `.coordination/priorties.md`, which is on `main` since `67b683e`. Out of scope here.
 - Observation: the endpoint gate's `undocumented` rule compared raw template paths with declared paths, so
   `[gitlab_private]` did not document `gitlab.url`.
   Evidence: `make bless` reported `undocumented: gitlab.url`. `tools/skillkit/endpoint_gate.py` now folds template
@@ -165,6 +175,37 @@ the `routing` object and `origin`.
   Rationale: No new reason token where an existing diagnostic already names the problem; one logging facility.
   Governing Ref: `core/target.py` `_table`; `core/logging.py`.
 
+- Decision DEC-14: The GitLab Agent for Kubernetes uses the same `[gitlab_routing]` row as runners. No target key is
+  added.
+  Status: PROPOSED
+  Rationale: One routing authority. Per GitLab instance:
+  - Agent and KAS identity: an agent belongs to the selected instance. It is registered in a configuration project of
+    that instance (`--project`). Its agentk installation runs in the cluster that
+    `[gitlab_routing].<instance>.kubernetes` names and connects to that instance's KAS, whose address is discovered
+    from the selected GitLab (CI14-M2: "Discover ... KAS prerequisites"). Agents of the private and public instance can
+    share one cluster; each has its own agent name and installation and reaches the cluster only through its own
+    instance's KAS.
+  - Runners on Kubernetes: `gitlab_runner_manager.py` and `image_build_readiness.py chain` resolve `gitlab`,
+    `kubernetes` and `harbor` with the same `--gitlab` selection. The runner registers with the selected instance,
+    runs in the routed cluster and pulls from the routed Harbor. It reaches GitLab with its own runner token, not
+    through an agent. An agent and a runner of the same instance land in the same cluster because they read the same
+    row. Today both read the single `[kubernetes]` and `[harbor]` tables, which are the only tables a row can name.
+  - What the target carries: `[gitlab_routing]` holds table names only. The agent name, the configuration project and
+    the authorized projects come from the request (`--project`, an agent-name option, a repeatable CI-access project
+    option); CI14 D3 has not settled those flags.
+  - What results carry: an Agent result would add the agent context `<configuration project path>:<agent-name>` to
+    the `routing` object. That adds an optional field to `gitlab-runner-tag.schema.json#/$defs/routing` and needs
+    approval together with CI14 D3. This change adds nothing for the Agent.
+  - How CI14 reads routing: `gitlab_agent.py` passes `GitLabSelection.from_args` to the shared resolver and reads
+    `Target.routing.kubernetes`. It adds no cluster selector of its own, so CI14 does not get a second routing
+    authority.
+  Conflict, recorded and not resolved: `docs/phases/CI14-GITLAB-CONNECTIONS.md:76` says "No new target key is
+  authorized by this phase." DEC-14 adds no target key. A later change that adds an agent key to `[gitlab_routing]`,
+  for example `gitlab_routing.<instance>.agent`, falls under that line and needs approval.
+  Governing Ref: [CI14-M2](ci14-gitlab-connections.md#ci14-m2-resolve-d2-and-deliver-the-agent-workflow);
+  `docs/phases/CI14-GITLAB-CONNECTIONS.md:66-67,76`; docs.gitlab.com `user/clusters/agent/install`,
+  `user/clusters/agent/ci_cd_workflow`, `api/cluster_agents`.
+
 ## Outcomes & Retrospective
 
 Not started.
@@ -201,6 +242,24 @@ Three commands combine GitLab with other authorities:
 These commands need to know which Kubernetes cluster and which Harbor registry belong to the selected GitLab. That is
 the routing this plan adds.
 
+The GitLab Agent for Kubernetes is the other way a GitLab project reaches a cluster. It is planned in
+[CI14-M2](ci14-gitlab-connections.md#ci14-m2-resolve-d2-and-deliver-the-agent-workflow) and not delivered. An agent
+is registered in one GitLab project, its configuration project, through the cluster agents API
+(`POST /projects/:id/cluster_agents`, as relayed from the GitLab API documentation). Its configuration file is
+`.gitlab/agents/<agent-name>/config.yaml` in that project. The `ci_access.projects` and `ci_access.groups` lists in
+that file name the projects whose CI jobs may use the agent, up to 500 each; they must share the configuration
+project's top-level group unless instance-level authorization is enabled. The cluster side, agentk, is installed with
+the `gitlab/gitlab-agent` Helm chart, given `config.token` and `config.kasAddress`; KAS is the GitLab service the agent
+connects to. A CI job in an authorized project then finds one kubeconfig context per shared agent, named
+`<path/to/configuration/project>:<agent-name>`. Sources: docs.gitlab.com `user/clusters/agent/install`,
+`user/clusters/agent/ci_cd_workflow` and `api/cluster_agents`.
+
+For ci-skills, attaching a cluster to a project would work like this. The caller names the GitLab with `--gitlab`,
+the project with `--project`, and the agent with an agent-name option. `[gitlab_routing]` names the cluster, by the
+`kubernetes` value of the selected instance's row; agentk is installed there and connects to the selected GitLab's
+KAS, whose address is read from that GitLab at run time. The projects allowed to use the agent come from the request,
+never from a default. DEC-14 records this proposal; the flag names are not settled.
+
 Live acceptance is a CI check that compares committed receipts with the code under review. A receipt is a JSON result
 a real host produced. The check is `tools/check_live_acceptance.py`, with policy in
 `inventory/ci/live-acceptance.json`. It fingerprints `ci-skills/bin`, `ci-skills/lib` and `ci-skills/schemas`. Any
@@ -209,22 +268,66 @@ copy.
 
 ## Plan of Work
 
-First we commit this ExecPlan and its row in `docs/plans/index.md`.
+### GPP-M1: plan and failing regression tests (GPP-01, GPP-02)
 
-Second, we commit the regression tests, so CI shows them failing against the unchanged code:
+Commit this ExecPlan with its row in `docs/plans/index.md`, then the regression tests alone, so CI shows them failing
+against the unchanged code. The shared fixture `target_file` in `tests/python/conftest.py` moves to the routed shape.
+`tests/python/test_target_profiles.py` becomes the selection, routing and field-error table and runs
+`gitlab_issue.py open-bug --project team/app --title t --json` against direct targets. `test_endpoints.py`,
+`test_catalog.py`, `test_report_human.py` and `test_gitlab_actions.py` gain rows for the contract, the selector, the
+human `Routing:` line and JSON Lines diagnostics. After this milestone the expected behavior exists as executable rows.
+Run `make bless`, push, and read the PR's `validate` run. Acceptance: the run fails on the new rows and on the fixture
+cascade, and on nothing else.
 
-- the shared fixture `target_file` in `tests/python/conftest.py` moves to the new shape;
-- `tests/python/test_target_profiles.py` becomes the selection and routing table;
-- a direct-target CLI table runs `gitlab_issue.py open-bug --project ... --json`.
+### GPP-M2: contract, parser and selector (GPP-03, GPP-04)
 
-Third, we implement the change. We add the constants and the `Table` instance and routing declaration to
-`core/endpoints.py`. We add a routing model to `core/target.py` and teach `_select_surfaces` to fold instance tables
-into the `gitlab` authority. We replace `gitlab_profile` with a selection value along the call chain. We add `routing`
-to results and to the human view, update the schemas, regenerate `ci-skills/tools.json`, and update the template and
-references.
+Add the constants, the instance tables and the routing table to `core/endpoints.py`; add `GitLabSelection`,
+`GitLabRoute` and `GitLabRouting` to `core/target.py`; carry `gitlab_selection` through the call chain; add
+`--gitlab` beside the deprecated `--gitlab-profile` in `core/catalog.py` and the shared parser. After this milestone
+every GitLab command reads `[gitlab_private]` or `[gitlab_public]`, rejects an invalid routing table with one exact
+reason, and reads the legacy shape with one `gitlab_target_deprecated` event. Run `ruff check .`,
+`ruff format --check .`, `python tools/render_manifest.py --check` and `make bless`, then push. Acceptance: the
+selection, routing and field-error rows of `test_target_profiles.py` pass in `validate`.
 
-Fourth, we install the candidate into both skill locations and run the AFTER commands. Fifth, we capture fresh
-candidate receipts and update the live-smoke inventory.
+### GPP-M3: routing output, schemas and documents (GPP-05, GPP-06)
+
+Emit `routing` and `schema_version` `1.1` from GitLab action, `access_check` and `gitlab_mirror` results; print the
+`Routing:` line in the human view; define the routing object once in `gitlab-runner-tag.schema.json#/$defs/routing`;
+let the live-acceptance checker accept receipt versions `1.0` and `1.1`; update the template, `references/access.md`,
+README, SKILL.md and `tools.json`. After this milestone a caller sees which GitLab, cluster and registry a command
+used. Run `python gates/gate-ci-skills-endpoints.py --base <merge-base> --json` and `make bless`, then push.
+Acceptance: `gate-ci-skills-endpoints` and the pytest step of `validate` pass on the PR head.
+
+### GPP-M4: installed copies and AFTER evidence (GPP-07)
+
+Upgrade both installed copies from the clean worktree, run the BEFORE commands again from each installed copy, add
+`[gitlab_routing]` to the user target after a backup, and run them once more. After this milestone both installs read
+the user target. Run, per install:
+
+    python tools/install_ci_skills.py --scope claude-user --upgrade --dry-run --json
+    python tools/install_ci_skills.py --scope claude-user --upgrade --apply --confirm-upgrade <fingerprint> --json
+    gitlab_issue.py open-bug --project hott/test --title "issue 133 after" --json
+    gitlab_issue.py open-bug --project hott/test --title "issue 133 after" --gitlab public --json
+
+Acceptance: `INSTALLATION.json` reads back the candidate revision; the issue #133 shape gives `DRY_RUN` with one
+deprecation event; the routed target gives `gitlab_private` without the option and `gitlab_public` with it.
+
+### GPP-M5: candidate receipts and green validate (GPP-08)
+
+Capture fresh candidate receipts from the installed final candidate: `access_check.py --json --publication --job-url
+<declared job> --ceph-namespace <declared namespace> --receipt-out tests/acceptance/candidate/access.json`, and the
+mirror `APPLIED` and `NO_OP` receipts with their `smoke_cleanup` record. Move the superseded receipts to
+`tests/acceptance/historical/pre-gitlab-private-public/`. Preconditions: DEC-14 is settled, the kube context matches
+the cluster `authority.sh` names, and the mirror qualification producer is approved. After this milestone the
+candidate receipts match the code under review. Run
+`python tools/check_live_acceptance.py --root . --no-aggregate --receipts tests/acceptance/candidate --json`.
+Acceptance: the checker reports `PASS`, and `ci-skills/required` and the `live-acceptance` deployment are green on the
+PR head.
+
+### GPP-M6: legacy removal tracked (GPP-09)
+
+Record TD-11 in `docs/exec-plans/tech-debt-tracker.md`: remove `named_profiles`, `--gitlab-profile` and the `[gitlab]`
+read in the next release. Acceptance: the TD-11 row links to DEC-05.
 
 ## Concrete Steps
 
@@ -371,7 +474,7 @@ Verification gates relied on (all existing):
 | `live-acceptance` | receipt | Receipts match the digest | Mismatch or missing operation | `check_live_acceptance.py` |
 | `endpoints` | contract docs | Paths documented and paired | Undocumented or unpaired path | `endpoint_gate.py` |
 | `portability` | static scan | No fixed deployment selector | Any hard-coded selector | `portability_gate.py` |
-| `bless` | pre-commit | Staged files pass format, lint and neutrality | Any finding | `bless.sh` |
+| `bless` | pre-commit | Staged files pass `BLESS_CHECKS` (`bless.bash:19`) | Any finding | `bless.sh` |
 
 ## Validation and Acceptance
 
