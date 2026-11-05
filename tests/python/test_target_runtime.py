@@ -119,7 +119,7 @@ def test_load_target_distinguishes_missing_from_unsupported_authorities(
     (
         ("github", "host"),
         ("github", "repository"),
-        ("gitlab", "url"),
+        ("gitlab_private", "url"),
         ("harbor", "url"),
         ("harbor", "project"),
         ("kubernetes", "context"),
@@ -159,8 +159,11 @@ def test_load_target_qualifies_required_string_diagnostics(
             lines.append(line)
     target_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+    contract = import_script_module("lib.python.core.endpoints").TARGET_CONTRACT
+    authority = contract.authority_of(table.split(".")[0])
+
     with pytest.raises(target_mod.TargetError) as error:
-        target_mod.load_target(target_file, required_surfaces=(table.split(".")[0],))
+        target_mod.load_target(target_file, required_surfaces=(authority,))
 
     assert str(error.value) == f"{table}.{key} must be a nonempty string"
 

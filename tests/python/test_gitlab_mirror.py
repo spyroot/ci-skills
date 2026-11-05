@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Final, Optional
 from unittest.mock import Mock, call, create_autospec
 
 import pytest
-from conftest import import_script_module
+from conftest import GITLAB_ROUTING_ROW, import_script_module
 
 REFS: Final = import_script_module("lib.python.core.git.refs")
 REMOTE: Final = import_script_module("lib.python.core.git.remote")
@@ -115,8 +115,9 @@ OBSERVATION_FIELDS: Final[tuple[str, ...]] = (
     "destination_refs",
 )
 PROFILE_NAME: Final[str] = "public"
-ALTERNATE_PROFILE_NAME: Final[str] = "alternate"
-PROFILE_OPTION: Final[str] = "--gitlab-profile"
+ALTERNATE_PROFILE_NAME: Final[str] = "private"
+PROFILE_OPTION: Final[str] = "--gitlab"
+PUBLIC_INSTANCE: Final[str] = "gitlab_public"
 MINIMUM_POLL_SECONDS: Final[int] = 30
 POLL_BUDGET_SECONDS: Final[int] = 3 * MINIMUM_POLL_SECONDS
 PAIR_ACTIONS_REASON: Final[str] = "mirror_pair_actions_unverified"
@@ -475,7 +476,7 @@ def test_mirror_pair_preserves_absent_before_and_accepts_fresh_plan_digest() -> 
         (
             MIRROR_NO_OP_FILE,
             ("target_source",),
-            f"{FIXTURE_CREDENTIAL_SOURCE};argv:{PROFILE_OPTION}={json.dumps(PROFILE_NAME)}",
+            f"{FIXTURE_CREDENTIAL_SOURCE};argv:{PROFILE_OPTION}={PROFILE_NAME}",
             PAIR_IDENTITY_REASON,
         ),
         (
@@ -1066,7 +1067,7 @@ def test_command_offline_emits_valid_result_without_workflow_or_authentication(
     authentication.assert_not_called()
 
 
-def test_command_forwards_named_gitlab_profile_without_binding_credentials(
+def test_command_forwards_gitlab_selection_without_binding_credentials(
     target_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Select a caller-named source authority through the actual mirror parser.
@@ -1075,11 +1076,14 @@ def test_command_forwards_named_gitlab_profile_without_binding_credentials(
     :param monkeypatch: Observe real resolution and trap offline authentication.
     :returns: None; the selected action carries the exact named profile and source.
     """
-    with target_file.open("a", encoding=BODY_ENCODING) as stream:
-        stream.write(
-            f'\n[gitlab.{PROFILE_NAME}]\nurl="https://public.{SOURCE_HOST}"\n'
-            f'project="{SOURCE_PATH}"\n'
-        )
+    body = target_file.read_text(encoding=BODY_ENCODING).replace(
+        GITLAB_ROUTING_ROW, f"{GITLAB_ROUTING_ROW}{PUBLIC_INSTANCE} = {{}}\n", 1
+    )
+    target_file.write_text(
+        f'{body}\n[{PUBLIC_INSTANCE}]\nurl="https://public.{SOURCE_HOST}"\n'
+        f'project="{SOURCE_PATH}"\n',
+        encoding=BODY_ENCODING,
+    )
     monkeypatch.setenv(TARGET_ENVIRONMENT, str(target_file))
     resolution = Mock(wraps=CLI.resolve_target)
     authentication = Mock(side_effect=AssertionError("offline mode authenticated"))
@@ -1091,10 +1095,14 @@ def test_command_forwards_named_gitlab_profile_without_binding_credentials(
 
     action = CLI.MirrorCommand(args).prepare()
 
-    assert action.target.require_gitlab().profile == PROFILE_NAME
+    assert action.target.routing == TARGET.GitLabRoute(
+        PUBLIC_INSTANCE, None, None, f"argv:{PROFILE_OPTION}={PROFILE_NAME}"
+    )
     assert action.target.require_gitlab().host == f"public.{SOURCE_HOST}"
     assert action.intent.project == SOURCE_PATH
-    assert resolution.call_args.kwargs["gitlab_profile"] == PROFILE_NAME
+    assert resolution.call_args.kwargs["gitlab_selection"] == TARGET.GitLabSelection(
+        selector=PROFILE_NAME
+    )
     authentication.assert_not_called()
 
 
@@ -1752,8 +1760,11 @@ def test_same_host_profile_alias_binds_provenance_and_confirmation_digest(
     plans: list[WORKFLOW.MirrorPlan] = []
     sources: list[str] = []
     for name in (PROFILE_NAME, ALTERNATE_PROFILE_NAME):
+        route = TARGET.GitLabRoute(
+            f"gitlab_{name}", None, None, f"argv:{PROFILE_OPTION}={name}"
+        )
         target = replace(
-            selected, gitlab=replace(selected.require_gitlab(), profile=name)
+            selected, gitlab=replace(selected.require_gitlab(), route=route)
         )
         action = CLI.MirrorAction(
             target,

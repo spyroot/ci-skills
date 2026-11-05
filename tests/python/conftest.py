@@ -26,6 +26,9 @@ SKILL_ROOT = REPO_ROOT / "ci-skills"
 SCRIPT_ROOT = SKILL_ROOT / "bin"
 LIB_ROOT = SKILL_ROOT / "lib" / "python"
 CORE_ROOT = LIB_ROOT / "core"
+# The [gitlab_routing] row of the shared target_file fixture: the private
+# GitLab instance with no paired Kubernetes or Harbor table.
+GITLAB_ROUTING_ROW = "gitlab_private = {}\n"
 
 
 if TYPE_CHECKING:
@@ -83,6 +86,9 @@ def selected_test_paths(command: str) -> tuple[str, ...]:
 def target_file(tmp_path: Path) -> Path:
     """Provide a nonsecret target declaring GitHub, GitLab, and Kubernetes.
 
+    GitLab uses the ``[gitlab_private]`` instance and its ``[gitlab_routing]``
+    row. ``GITLAB_ROUTING_ROW`` is the row line, so a test can add another row.
+
     :param tmp_path: Pytest temporary directory for this test.
     :returns: Path to a TOML target with test-only host, repository, and context.
     """
@@ -93,7 +99,11 @@ def target_file(tmp_path: Path) -> Path:
             'host = "github.example.test"\n'
             'repository = "unit/repo"\n'
             "\n"
-            "[gitlab]\n"
+            "[gitlab_routing]\n"
+            'default = "gitlab_private"\n'
+            f"{GITLAB_ROUTING_ROW}"
+            "\n"
+            "[gitlab_private]\n"
             'url = "https://gitlab.example.test"\n'
             "\n"
             "[kubernetes]\n"

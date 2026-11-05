@@ -310,6 +310,61 @@ def test_human_storage_report_includes_nested_attachments_and_controllers() -> N
     assert "deploy-selected" in text
 
 
+@pytest.mark.parametrize(
+    ("kind", "routing", "line"),
+    (
+        (
+            "gitlab_issue",
+            {
+                "gitlab": "gitlab_public",
+                "kubernetes": "kubernetes",
+                "harbor": "harbor",
+                "selected_by": "argv:--gitlab=public",
+            },
+            (
+                "Routing: gitlab=gitlab_public kubernetes=kubernetes harbor=harbor "
+                "(argv:--gitlab=public)"
+            ),
+        ),
+        (
+            "access_check",
+            {
+                "gitlab": "gitlab",
+                "kubernetes": None,
+                "harbor": None,
+                "selected_by": "legacy",
+            },
+            "Routing: gitlab=gitlab kubernetes=none harbor=none (legacy)",
+        ),
+    ),
+    ids=("routed-action", "legacy-access"),
+)
+def test_human_view_prints_the_routing_line_after_the_status(
+    kind: str, routing: JSONObject, line: str
+) -> None:
+    """Print one routing line directly under the status line.
+
+    :param kind: Result kind selecting the human renderer.
+    :param routing: Result ``routing`` object.
+    :param line: Exact expected routing line; null tables print ``none``.
+    :returns: None; assertions verify the line position and text.
+    """
+    data = {
+        "kind": kind,
+        "status": "DRY_RUN",
+        "target": "unit/repo",
+        "routing": routing,
+        "records": [],
+        "errors": [],
+    }
+
+    lines = REPORT.human(data).splitlines()
+
+    assert lines[1] == line
+    assert lines.count(line) == 1
+    assert "Routing:" not in REPORT.human({**data, "routing": None})
+
+
 def test_human_gitlab_report_includes_matching_trace_tail() -> None:
     """CI job summaries include the trace line that matched the search.
     :returns: None; assertions in the body validate the regression.

@@ -40,6 +40,21 @@ SCHEMA = json.loads(
 )
 TEMPLATE = "target.toml.template"
 UNKNOWN_AUTHORITY = "unregistered_authority"
+ROUTED_EXAMPLE: Final[str] = (
+    "[gitlab_routing]\n"
+    'default = "gitlab_private"\n'
+    'gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }\n'
+    'gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }\n'
+    "\n"
+    "[gitlab_private]\n"
+    'url = "https://gitlab.example.test"\n'
+    'token_file = "gitlab-private.token"\n'
+    "\n"
+    "[gitlab_public]\n"
+    'url = "https://gitlab.public.example.test"\n'
+    'token_file = "gitlab-public.token"\n'
+    "runner_id = 7\n"
+)
 PROFILE_EXAMPLE: Final[str] = (
     '[gitlab."public.test"]\n'
     'url = "https://public.example.test"\n'
@@ -188,6 +203,67 @@ def test_the_contract_accepts_exactly_the_keys_the_parser_accepted() -> None:
         "directory",
         "host_path",
     }
+
+
+def test_instance_tables_fold_into_the_gitlab_authority() -> None:
+    """Resolve each GitLab instance table to the one ``gitlab`` declaration.
+
+    :returns: None; assertions verify authority lookup, folding, and roles.
+    """
+    contract = ENDPOINTS.TARGET_CONTRACT
+    for table in ("gitlab", "gitlab_private", "gitlab_public"):
+        assert contract.authority_of(table) == "gitlab"
+        assert contract.declares(table, table=True)
+        assert contract.names(table) == contract.names("gitlab")
+        assert contract.canonical_path(f"{table}.token_file") == "gitlab.token_file"
+        assert contract.role(f"{table}.token_file") is ENDPOINTS.Role.ACCESS
+        assert contract.role(f"{table}.runner_id") is ENDPOINTS.Role.VALUE
+    for authority in ("github", "harbor", "kubernetes"):
+        assert contract.authority_of(authority) == authority
+    for table in ("gitlab_routing", "gitlab.com", "kubernetes.node_diagnostics", "x"):
+        assert contract.authority_of(table) is None
+    assert "gitlab_routing" not in contract.authorities
+    assert contract.unpaired() == ()
+
+
+def test_routing_table_declares_default_and_one_row_per_instance() -> None:
+    """Declare ``[gitlab_routing]`` keys as endpoint selectors, never values.
+
+    :returns: None; assertions verify every routing path and its role.
+    """
+    contract = ENDPOINTS.TARGET_CONTRACT
+    assert contract.routing_table() == "gitlab_routing"
+    assert contract.names("gitlab_routing") == {
+        "default",
+        "gitlab_private",
+        "gitlab_public",
+    }
+    assert contract.role("gitlab_routing.default") is ENDPOINTS.Role.ENDPOINT
+    for row in ("gitlab_private", "gitlab_public"):
+        assert contract.declares(f"gitlab_routing.{row}", table=True)
+        assert contract.names(f"gitlab_routing.{row}") == {"kubernetes", "harbor"}
+        for key in ("kubernetes", "harbor"):
+            path = f"gitlab_routing.{row}.{key}"
+            assert contract.role(path) is ENDPOINTS.Role.ENDPOINT
+    assert not any(path.startswith("gitlab_routing") for path in contract.value_keys())
+
+
+def test_routed_example_passes_the_endpoint_gate(repo: Path) -> None:
+    """Accept the documented routed shape, inline routing rows included.
+
+    :param repo: Existing isolated repository fixture with the real documents.
+    :returns: None; assertions verify every path is declared and the gate passes.
+    """
+    uses = GATE_LIB.TargetDocument("routed.toml", ROUTED_EXAMPLE).uses()
+    assert all(
+        ENDPOINTS.TARGET_CONTRACT.declares(use.path, table=use.is_table) for use in uses
+    )
+    _append(repo / "README.md", f"\n```toml\n{ROUTED_EXAMPLE}```\n")
+
+    code, record = _gate(repo)
+
+    assert code == 0
+    assert record["status"] == "PASS", record["findings"]
 
 
 def test_the_authorities_come_from_the_contract() -> None:
@@ -573,7 +649,7 @@ def test_a_random_active_key_fails_with_its_line(repo: Path) -> None:
     assert record["findings"] == [
         {
             "rule": "undeclared",
-            "path": "gitlab.namespace",
+            "path": "gitlab_private.namespace",
             "source": TEMPLATE,
             "line": index + 2,
             "detail": "not an endpoint or access key of the target contract",

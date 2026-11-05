@@ -23,7 +23,10 @@ the `routing` object and `origin`.
 
 - [x] (DEC-01–DEC-09) Design accepted.
 - [x] (GPP-01) This ExecPlan and its index row are committed.
-- [ ] (GPP-02) Table-driven regression tests are committed and fail on the base revision.
+- [ ] (GPP-02) Table-driven regression tests are committed and fail on the base revision. Tests:
+  `tests/python/test_target_profiles.py` (selection, routing, field errors, CLI rows), `conftest.py` `target_file` in
+  the new shape, and rows in `test_endpoints.py`, `test_catalog.py`, `test_report_human.py`, `test_target_runtime.py`
+  and `test_gitlab_mirror.py`.
 - [ ] (GPP-03) The contract names are defined once in `core/endpoints.py`; `[gitlab_routing]` is parsed and validated.
 - [ ] (GPP-04) The `--gitlab` selector replaces `--gitlab-profile` on every GitLab command; the legacy path warns.
 - [ ] (GPP-05) `routing` is in the JSON and human results; the result schemas move to 1.1.
@@ -105,6 +108,33 @@ the `routing` object and `origin`.
   Rationale: An added optional field keeps old consumers working, per `docs/phases/CI07-SCHEMA.md`. Historical
   receipts remain valid.
   Governing Ref: `docs/phases/CI07-SCHEMA.md` versioning rules.
+- Decision DEC-10: In the legacy shape, `[gitlab]` is the private instance. `--gitlab private` reads it with
+  `selected_by` `argv:--gitlab=private`; `--gitlab public` returns `gitlab_public_target_required`. Legacy routes report
+  `kubernetes` and `harbor` as `null`, because the legacy shape has no `[gitlab_routing]`.
+  Status: ACCEPTED
+  Rationale: The operator stated that `gitlab` means the private GitLab. A legacy target has no pairing to report.
+  Governing Ref: operator requirement 1, 2026-11-05; DEC-05.
+- Decision DEC-11: The call chain carries one `GitLabSelection` value (`selector` from `--gitlab`, `profile` from
+  `--gitlab-profile`) under the keyword `gitlab_selection`. `load_target` and `load_gitlab_target` keep the two string
+  keywords of the Interfaces section. `GitLabTarget.route` replaces `GitLabTarget.profile`; `Target.routing` returns it.
+  Status: ACCEPTED
+  Rationale: One keyword through the chain instead of two; the loaders keep the interface this plan declares.
+  Governing Ref: Concrete Steps, call-chain refactor.
+- Decision DEC-12: `image_build_readiness.py` keeps one parser for `probe` and `chain`, so `probe` still accepts the
+  selector option and rejects it at load with the existing `gitlab_profile_requires_gitlab_authority`. The same reason
+  covers `--gitlab` on any command whose selected authorities exclude GitLab.
+  Status: ACCEPTED
+  Rationale: Removing the option from `probe` alone needs subparsers, a CLI change outside issue #133. Rejection before
+  any provider call keeps the fail-closed behavior.
+  Governing Ref: current `core/target.py` behavior.
+- Decision DEC-13: Unknown keys in a routing row reuse the existing table diagnostics, for example
+  `gitlab_routing.gitlab_private contains unsupported fields: registry` and
+  `gitlab_routing.gitlab_private must be a TOML table`. A legacy profile error names the dotted table, for example
+  `gitlab.com.url must be a nonempty string`. The deprecation is one `gitlab_target_deprecated` event on standard
+  error, written through `core/logging.py:log_event`.
+  Status: ACCEPTED
+  Rationale: No new reason token where an existing diagnostic already names the problem; one logging facility.
+  Governing Ref: `core/target.py` `_table`; `core/logging.py`.
 
 ## Outcomes & Retrospective
 
