@@ -10,9 +10,9 @@ native IDs and the verification date before another phase reuses the asset.
 
 ## Reusable pairs
 
-The name in the first column must match on GitHub and GitLab. `dcloud` means the operator-selected `[gitlab]`
-authority. The public-service row uses named profile `[gitlab.com]`, selected with
-`--gitlab-profile com`. Provider URLs and credentials remain runtime inputs.
+The name in the first column must match on GitHub and GitLab. `dcloud` means the operator-selected `[gitlab_private]`
+target, the `[gitlab_routing]` default. The public-service row uses `[gitlab_public]`, selected with
+`--gitlab public`. Provider URLs and credentials remain runtime inputs.
 
 | Pair / purpose | GitHub allocation | GitLab allocation | State |
 | --- | --- | --- | --- |
@@ -67,7 +67,7 @@ Preserve all unallocated pre-existing repositories. General repository cleanup i
 | Authority | Runtime input | Reuse and ownership |
 | --- | --- | --- |
 | Harbor | `[harbor]` | Resolve immutable digests; preserve borrowed images and repositories |
-| GitLab | `[gitlab]` or explicitly selected named profile | Verify host, identity, project ID and permissions |
+| GitLab | `[gitlab_private]`/`[gitlab_public]`, `--gitlab` | Verify host, identity, project ID and permissions |
 | GitHub | `[github]` and existing authentication | Verify repository ID, runner routing and possible charges |
 | Kubernetes | `[kubernetes]` | Verify context/server; preserve borrowed namespaces, controllers and credentials |
 

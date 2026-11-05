@@ -94,7 +94,9 @@ cp "$CI_SKILLS_CHECKOUT/target.toml.template" ~/.ci-skills/target.toml
 $EDITOR ~/.ci-skills/target.toml
 ```
 
-Fill in the sections needed by the selected operation. GitLab-only commands can use `[gitlab]` alone.
+Fill in the sections needed by the selected operation. GitLab-only commands need `[gitlab_routing]` and one instance
+table, `[gitlab_private]` or `[gitlab_public]`; `--gitlab private|public` selects the instance and its omission reads
+`[gitlab_routing].default`. See [GitLab private and public targets](ci-skills/references/access.md#gitlab-private-and-public-targets).
 `access_check.py` checks configured providers; unrelated provider tables and tools are not required.
 `--publication` additionally requires GitHub configuration. Kubernetes commands need the selected context and exact
 API server.
@@ -488,11 +490,12 @@ repository's CI, gate, or delivery settings.
 
 ## GitLab operations
 
-For GitLab-only work, the selected target file may contain only `[gitlab]` with its exact `url`. Set `gitlab.project` or
-`gitlab.group` for the intended operation. `gitlab_job.py` selects its project from `--job-url`. The same
+For GitLab-only work, the selected target file may contain only `[gitlab_routing]` and the selected GitLab instance
+table with its exact `url`. Pass `--project` or `--group` for the intended operation, or set `project` or `group` in that
+table. `gitlab_job.py` selects its project from `--job-url`. The same
 target selection above applies. Storage, event, and Cilium diagnostics need only `[kubernetes]`; the full
 `access_check.py` checks whichever authorities the target configures; `--publication` additionally needs GitHub.
-Set `gitlab.project` in the selected target for the commands below. The
+Set `project` in the selected GitLab instance table for the commands below. The
 declared `--project` flag overrides it for one invocation.
 
 The operation access check reads back the effective GitLab identity and exact numeric target before a write:
@@ -520,7 +523,7 @@ through the GitLab UI. A lost one-time token cannot be recovered from the record
 the confirmed plan once to clear the marker and again to create. Do not remove a runner merely because its description
 matches.
 
-Group runner assignment has one extra read-only step: select `gitlab.group` in the target, then call
+Group runner assignment has one extra read-only step: set `group` in the selected GitLab instance table, then call
 `gitlab_runner.py assign --runner-id ID --live-plan --json` to read the exact project IDs. Its `PLANNED` result supplies
 the digest for `--apply --confirm-plan DIGEST`. Apply rechecks group membership and blocks before a write if it changed.
 The default offline `DRY_RUN` plan makes no API call and is not apply-ready for a group.

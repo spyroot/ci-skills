@@ -48,6 +48,7 @@ from lib.python.core.runner_options import (
 from lib.python.core.runner_scope import ScopeObservation, ScopePurpose, ScopeSource
 from lib.python.core.target import (
     GitLabOperationTarget,
+    GitLabSelection,
     TargetError,
     select_gitlab_reference,
 )
@@ -438,7 +439,7 @@ class GitLabRunnerManagerAction(WorkflowAction):
             self.args.binding,
             dry_run=self.args.dry_run,
             required_surfaces=surfaces,
-            gitlab_profile=getattr(self.args, "gitlab_profile", None),
+            gitlab_selection=GitLabSelection.from_args(self.args),
         )
         if not self.args.dry_run:
             self.target = bind_sources(self.target, revision=self.args.revision)

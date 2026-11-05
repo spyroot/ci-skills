@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["schema_version","kind","status","captured_at","errors","summary"],
   "properties": {
-    "schema_version": {"const":"1.0"},
+    "schema_version": {"enum":["1.0","1.1"]},
     "kind": {"const":"gitlab_runner"},
     "status": {"enum":["DRY_RUN","PASS","PARTIAL","BLOCKED"]},
     "captured_at": {"type":"string","format":"date-time"},
@@ -15,6 +15,7 @@
     "tested_revision": {"type":["string","null"]},
     "operation": {"const":"tag"},
     "origin": {"type":"string","pattern":"^https://"},
+    "routing": {"$ref":"gitlab-routing.schema.json"},
     "target": {
       "type": "object",
       "additionalProperties": false,

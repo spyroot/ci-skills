@@ -69,14 +69,14 @@ def _args(
     *,
     apply: bool = False,
     dry_run: bool = False,
-    gitlab_profile: Optional[str] = None,
+    gitlab: Optional[str] = None,
 ) -> Namespace:
     """Build complete manager arguments without invoking a public parser.
 
     :param action: Manager ``deploy`` or ``delete`` action.
     :param apply: Whether mutation callbacks should be composed.
     :param dry_run: Whether preparation must defer credential reads.
-    :param gitlab_profile: Default or explicitly selected named GitLab profile.
+    :param gitlab: Default or ``--gitlab`` instance selected by the caller.
     :returns: Namespace containing the manager fields used by production code.
     """
     return Namespace(
@@ -86,7 +86,8 @@ def _args(
         confirm_plan="unit-confirmation" if apply else None,
         description=RUNNER_DESCRIPTION,
         dry_run=dry_run,
-        gitlab_profile=gitlab_profile,
+        gitlab=gitlab,
+        gitlab_profile=None,
         group=None,
         image=IMAGE if action == "deploy" else None,
         kind="gitlab_runner_manager",
@@ -239,22 +240,22 @@ def test_token_binding_hashes_shared_reader_value_without_exposing_it(
 
 
 @pytest.mark.parametrize(
-    "gitlab_profile", (None, "public"), ids=("default-profile", "named-profile")
+    "gitlab_selector", (None, "public"), ids=("default-instance", "public-instance")
 )
 def test_offline_prepare_defers_provider_and_runner_token_reads(
     monkeypatch: pytest.MonkeyPatch,
-    gitlab_profile: Optional[str],
+    gitlab_selector: Optional[str],
 ) -> None:
     """Prepare an offline plan without binding providers or reading the token.
 
     :param monkeypatch: Pytest patch helper for provider and token boundaries.
-    :param gitlab_profile: Profile forwarded without binding live credentials.
+    :param gitlab_selector: ``--gitlab`` instance forwarded without binding credentials.
     :returns: None; assertions prove offline preparation is noncredentialed.
     """
     action = ACTION.GitLabRunnerManagerAction(
-        _args(dry_run=True, gitlab_profile=gitlab_profile)
+        _args(dry_run=True, gitlab=gitlab_selector)
     )
-    calls: list[tuple[bool, tuple[str, ...], Optional[str]]] = []
+    calls: list[tuple[bool, tuple[str, ...], TARGET.GitLabSelection]] = []
 
     def resolve_target(
         target: str,
@@ -262,7 +263,7 @@ def test_offline_prepare_defers_provider_and_runner_token_reads(
         *,
         dry_run: bool,
         required_surfaces: Sequence[str],
-        gitlab_profile: Optional[str],
+        gitlab_selection: TARGET.GitLabSelection,
     ) -> TARGET.Target:
         """Record offline target selection without touching a provider.
 
@@ -270,12 +271,12 @@ def test_offline_prepare_defers_provider_and_runner_token_reads(
         :param binding: Optional project binding path.
         :param dry_run: Expected offline selection mode.
         :param required_surfaces: Provider declarations required by deploy.
-        :param gitlab_profile: Exact profile received from the manager arguments.
+        :param gitlab_selection: Exact selection received from the manager arguments.
         :returns: Finite unit target.
         """
         assert target == "/unit/target.toml"
         assert binding is None
-        calls.append((dry_run, tuple(required_surfaces), gitlab_profile))
+        calls.append((dry_run, tuple(required_surfaces), gitlab_selection))
         return _target()
 
     def unexpected(*args: object, **kwargs: object) -> None:
@@ -294,7 +295,13 @@ def test_offline_prepare_defers_provider_and_runner_token_reads(
 
     action.prepare()
 
-    assert calls == [(True, ("gitlab", "kubernetes", "harbor"), gitlab_profile)]
+    assert calls == [
+        (
+            True,
+            ("gitlab", "kubernetes", "harbor"),
+            TARGET.GitLabSelection(selector=gitlab_selector),
+        )
+    ]
     assert isinstance(action.runner_token, TOKEN.DeferredRunnerToken)
     assert action.runner_token.path == Path("/unit/runner.token")
     assert action.candidate_scope == RUN_SCOPE.RunScope(RUN_ID, NAMESPACE, False)

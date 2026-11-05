@@ -23,14 +23,20 @@ the `routing` object and `origin`.
 
 - [x] (DEC-01–DEC-09) Design accepted.
 - [x] (GPP-01) This ExecPlan and its index row are committed.
-- [ ] (GPP-02) Table-driven regression tests are committed and fail on the base revision. Tests:
+- [x] (GPP-02) Table-driven regression tests are committed and fail on the base revision. Tests:
   `tests/python/test_target_profiles.py` (selection, routing, field errors, CLI rows), `conftest.py` `target_file` in
-  the new shape, and rows in `test_endpoints.py`, `test_catalog.py`, `test_report_human.py`, `test_target_runtime.py`
-  and `test_gitlab_mirror.py`.
-- [ ] (GPP-03) The contract names are defined once in `core/endpoints.py`; `[gitlab_routing]` is parsed and validated.
-- [ ] (GPP-04) The `--gitlab` selector replaces `--gitlab-profile` on every GitLab command; the legacy path warns.
-- [ ] (GPP-05) `routing` is in the JSON and human results; the result schemas move to 1.1.
-- [ ] (GPP-06) The template, references, README and `tools.json` are updated.
+  the new shape, and rows in `test_endpoints.py`, `test_catalog.py`, `test_report_human.py`, `test_target_runtime.py`,
+  `test_gitlab_mirror.py` and `test_gitlab_actions.py` (commits `66eee42`, `2ed6503`). Evidence: run
+  [42127530173](https://github.com/spyroot/ci-skills/actions/runs/42127530173) on `2ed6503`: 197 failed, 7 errors.
+  New rows: `test_target_profiles.py` 105, `test_endpoints.py` 4, `test_gitlab_mirror.py` 4, `test_catalog.py` 2,
+  `test_report_human.py` 2, `test_gitlab_actions.py` 2. Fixture cascade from the routed `target_file`:
+  `test_collectors.py` 34, `test_access_core.py` 15, `test_target_runtime.py` 13, `test_node_local_cli.py` 9,
+  `test_node_pod.py` 7 errors, `test_cli_contract.py` 5, `test_status_cli.py` 4, `test_live_gate.py` 2.
+- [x] (GPP-03) The contract names are defined once in `core/endpoints.py`; `[gitlab_routing]` is parsed and validated.
+- [x] (GPP-04) The `--gitlab` selector joins `--gitlab-profile` on every GitLab command; the legacy path warns.
+- [x] (GPP-05) `routing` is in the GitLab action JSON and every human view that receives it; the action and runner
+  result schemas accept 1.1. Scope limits are in Surprises.
+- [x] (GPP-06) The template, references, README and `tools.json` are updated.
 - [ ] (GPP-07) Both installed copies are upgraded, with AFTER evidence against the selected target.
 - [ ] (GPP-08) The candidate receipts are renewed and `validate` is green on the PR head.
 - [ ] (GPP-09) Legacy removal is tracked as TD-11.
@@ -51,6 +57,20 @@ the `routing` object and `origin`.
 - Observation: `image_build_readiness.py probe` accepts `--gitlab-profile` but rejects it at load, because `probe`
   requires only `kubernetes`.
   Evidence: `core/target.py` raises `gitlab_profile_requires_gitlab_authority`.
+- Observation: live acceptance requires receipt `schema_version` `1.0`.
+  Evidence: `tools/check_live_acceptance.py:583` reports `schema_version_unexpected` otherwise. The `access_check` and
+  `gitlab_mirror` results are the required receipts, so they stay `1.0` and carry no `routing` in this change; moving
+  them needs a change to that gate first. GitLab action results (`gitlab-action`, `gitlab-runner-tag`, `-read`,
+  `-delete` schemas) emit `1.1` with `routing`. Job list, pipeline watch, runner manager and image-build chain results
+  do not carry `routing` yet.
+- Observation: the endpoint gate's `undocumented` rule compared raw template paths with declared paths, so
+  `[gitlab_private]` did not document `gitlab.url`.
+  Evidence: `make bless` reported `undocumented: gitlab.url`. `tools/skillkit/endpoint_gate.py` now folds template
+  paths through `TargetContract.canonical_path` for that rule, as `_introduced` already did. The portability gate
+  scans `TargetContract.tables` headers and does not classify `[gitlab_routing]` values as hosts.
+- Observation: `ci-api` prints fixed wire-format objects (`PlanAPICheck`, `PlanAPI`, `ApiIdentitySelector`).
+  Evidence: `core/api_read.py`. `ci-api` takes host and token file from the selected instance and keeps the route on
+  `ApiProviderSelection.route`; its printed output is unchanged.
 - Observation: the mirror NO_OP candidate receipt must carry a `smoke_cleanup` record of kind
   `gitlab_mirror_smoke_cleanup`. No tracked tool produces that record.
   Evidence: `tools/check_live_acceptance.py` `_mirror_smoke_cleanup_verified`.

@@ -20,7 +20,7 @@ from typing import Final, Optional, TypeAlias, Union
 
 from lib.python.core.catalog import DEFAULT_AUTHORITIES, PROJECT_DIR, TARGET_FILENAME
 from lib.python.core.runtime import error_class, run_command_tail
-from lib.python.core.target import Target, TargetError, load_target
+from lib.python.core.target import GitLabSelection, Target, TargetError, load_target
 
 BINDING_ENV = "K8S_ADMIN_DIAGNOSTICS_BINDING"
 TARGET_ENV = "CI_SKILLS_TARGET"
@@ -267,13 +267,25 @@ def _source_path(
     raise TargetError("binding_source_kind_invalid")
 
 
+def _gitlab_keywords(
+    selection: Optional[GitLabSelection],
+) -> dict[str, Optional[str]]:
+    """Translate the caller's GitLab selection into the target loader keywords.
+
+    :param selection: Caller selection, or ``None`` for the routing default.
+    :returns: ``gitlab`` and ``gitlab_profile`` keywords of ``load_target``.
+    """
+    chosen = selection or GitLabSelection()
+    return {"gitlab": chosen.selector, "gitlab_profile": chosen.profile}
+
+
 def load_project_binding(
     path: Union[str, Path],
     *,
     dry_run: bool = False,
     required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES,
     optional_surfaces: tuple[str, ...] = (),
-    gitlab_profile: Optional[str] = None,
+    gitlab_selection: Optional[GitLabSelection] = None,
 ) -> Target:
     """Load a binding and select its first available kubeconfig source.
 
@@ -282,7 +294,8 @@ def load_project_binding(
     :param required_surfaces: Authority tables required from the target named by
         the binding; Kubernetes source selection is skipped if absent.
     :param optional_surfaces: Supported authorities selected when configured in the target.
-    :param gitlab_profile: Exact named profile; omission uses the flat GitLab table.
+    :param gitlab_selection: Caller's ``--gitlab`` or ``--gitlab-profile`` choice;
+        ``None`` reads the routing default.
     :returns: Target with binding provenance and the selected Kubernetes source
         when Kubernetes is selected.
     :raises TargetError: The binding, target, or source is invalid, conflicting,
@@ -310,7 +323,7 @@ def load_project_binding(
         target_path,
         required_surfaces=required_surfaces,
         optional_surfaces=optional_surfaces,
-        gitlab_profile=gitlab_profile,
+        **_gitlab_keywords(gitlab_selection),
     )
     if "kubernetes" not in target.active_surfaces:
         return replace(
@@ -363,7 +376,7 @@ def resolve_target(
     dry_run: bool = False,
     required_surfaces: tuple[str, ...] = DEFAULT_AUTHORITIES,
     optional_surfaces: tuple[str, ...] = (),
-    gitlab_profile: Optional[str] = None,
+    gitlab_selection: Optional[GitLabSelection] = None,
 ) -> Target:
     """Resolve one target or binding using the caller and environment selectors.
 
@@ -373,7 +386,8 @@ def resolve_target(
     :param dry_run: Suppress execution of a binding command source when true.
     :param required_surfaces: Authority tables the selected target must provide.
     :param optional_surfaces: Additional supported authorities selected when configured.
-    :param gitlab_profile: Exact named profile; omission uses the flat GitLab table.
+    :param gitlab_selection: Caller's ``--gitlab`` or ``--gitlab-profile`` choice;
+        ``None`` reads the routing default.
     :returns: Validated target with its selection source and binding provenance.
     :raises TargetError: Selectors conflict or the selected target, binding, or
         required authority cannot be loaded.
@@ -386,7 +400,7 @@ def resolve_target(
             selected,
             required_surfaces=required_surfaces,
             optional_surfaces=optional_surfaces,
-            gitlab_profile=gitlab_profile,
+            **_gitlab_keywords(gitlab_selection),
         )
         return replace(
             target,
@@ -400,7 +414,7 @@ def resolve_target(
             dry_run=dry_run,
             required_surfaces=required_surfaces,
             optional_surfaces=optional_surfaces,
-            gitlab_profile=gitlab_profile,
+            gitlab_selection=gitlab_selection,
         )
     if TARGET_ENV in os.environ and BINDING_ENV in os.environ:
         raise TargetError("environment_selector_conflict")
@@ -410,7 +424,7 @@ def resolve_target(
             dry_run=dry_run,
             required_surfaces=required_surfaces,
             optional_surfaces=optional_surfaces,
-            gitlab_profile=gitlab_profile,
+            gitlab_selection=gitlab_selection,
         )
     selected, source = resolve_target_file(None)
     reference = (
@@ -422,7 +436,7 @@ def resolve_target(
         selected,
         required_surfaces=required_surfaces,
         optional_surfaces=optional_surfaces,
-        gitlab_profile=gitlab_profile,
+        **_gitlab_keywords(gitlab_selection),
     )
     return replace(
         target,

@@ -111,16 +111,16 @@ class FakeAPI:
 
 
 @pytest.mark.parametrize(
-    "gitlab_profile", (None, "public"), ids=("default-profile", "named-profile")
+    "gitlab_selector", (None, "public"), ids=("default-instance", "public-instance")
 )
 def test_shared_setup_resolves_binds_and_reads_access_once(
     monkeypatch: pytest.MonkeyPatch,
-    gitlab_profile: Optional[str],
+    gitlab_selector: Optional[str],
 ) -> None:
     """Reuse one target and bound session through resolution, bind, and read.
 
     :param monkeypatch: Pytest fixture replacing each shared setup operation.
-    :param gitlab_profile: Default or named profile forwarded to target resolution.
+    :param gitlab_selector: Default or ``--gitlab`` instance forwarded to resolution.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -152,26 +152,27 @@ def test_shared_setup_resolves_binds_and_reads_access_once(
         "target": {"id": 42, "full_path": "team/repo"},
     }
     observed: MutableSequence[tuple[str, str]] = []
+    selection = TARGET.GitLabSelection(selector=gitlab_selector)
 
     def resolve(
         explicit_target: Optional[str],
         explicit_binding: Optional[str],
         *,
         dry_run: bool,
-        gitlab_profile: Optional[str],
+        gitlab_selection: Optional[TARGET.GitLabSelection],
     ) -> tuple[TARGET.GitLabOperationTarget, str]:
         """Record exact target/binding selection for the shared setup.
 
         :param explicit_target: Caller-selected target file argument.
         :param explicit_binding: Caller-selected binding file argument.
         :param dry_run: Whether setup requested a non-live target resolution.
-        :param gitlab_profile: Exact profile supplied to the shared setup.
+        :param gitlab_selection: Exact GitLab selection supplied to the shared setup.
         :returns: Fixture target and project source reference.
         """
         observed.append(
             (
                 "resolve",
-                f"{explicit_target}:{explicit_binding}:{dry_run}:{gitlab_profile}",
+                f"{explicit_target}:{explicit_binding}:{dry_run}:{gitlab_selection}",
             )
         )
         return target, "project"
@@ -241,14 +242,14 @@ def test_shared_setup_resolves_binds_and_reads_access_once(
         group=None,
         revision=REVISION,
         api_client=api,
-        gitlab_profile=gitlab_profile,
+        gitlab_selection=selection,
     )
 
     assert actual_session is session
     assert actual_receipt is receipt
     assert actual_receipt["identity"] == {"id": 17, "username": "operator"}
     assert observed == [
-        ("resolve", f"selected.toml:binding.toml:False:{gitlab_profile}"),
+        ("resolve", f"selected.toml:binding.toml:False:{selection}"),
         ("select", "True:team/repo:None"),
         ("bind", f"True:project:team/repo:project:{REVISION}"),
         ("access", "True:True"),
@@ -256,18 +257,18 @@ def test_shared_setup_resolves_binds_and_reads_access_once(
 
 
 @pytest.mark.parametrize(
-    "gitlab_profile", (None, "public"), ids=("default-profile", "named-profile")
+    "gitlab_selector", (None, "public"), ids=("default-instance", "public-instance")
 )
 def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    gitlab_profile: Optional[str],
+    gitlab_selector: Optional[str],
 ) -> None:
     """Delegate the live access CLI to shared setup without rewriting receipt.
 
     :param monkeypatch: Pytest fixture replacing shared setup.
     :param capsys: Pytest fixture capturing JSON CLI output.
-    :param gitlab_profile: Default or explicit profile selected by CLI arguments.
+    :param gitlab_selector: Default or ``--gitlab`` instance selected by CLI arguments.
 
     :returns: None; assertions in the body validate the regression.
     """
@@ -291,7 +292,7 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
         "errors": [],
     }
     observed: MutableSequence[
-        tuple[Optional[str], Optional[str], Mapping[str, Optional[str]]]
+        tuple[Optional[str], Optional[str], Mapping[str, object]]
     ] = []
 
     def setup(
@@ -301,7 +302,7 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
         project: Optional[str],
         group: Optional[str],
         revision: Optional[str],
-        gitlab_profile: Optional[str],
+        gitlab_selection: TARGET.GitLabSelection,
     ) -> tuple[BoundGitLabSession, JSONObject]:
         """Record CLI selection options and return a passing receipt.
 
@@ -310,7 +311,7 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
         :param project: Project override supplied by the command.
         :param group: Group override supplied by the command.
         :param revision: Installed skill revision supplied by the command.
-        :param gitlab_profile: Profile override supplied by the command.
+        :param gitlab_selection: GitLab selection supplied by the command.
         :returns: Bound fixture session and original access receipt.
         """
         observed.append(
@@ -321,7 +322,7 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
                     "project": project,
                     "group": group,
                     "revision": revision,
-                    "gitlab_profile": gitlab_profile,
+                    "gitlab_selection": gitlab_selection,
                 },
             )
         )
@@ -337,7 +338,7 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
             "team/repo",
             "--revision",
             REVISION,
-            *(["--gitlab-profile", gitlab_profile] if gitlab_profile else []),
+            *(["--gitlab", gitlab_selector] if gitlab_selector else []),
             "--json",
         ]
     )
@@ -353,7 +354,7 @@ def test_live_entrypoint_uses_shared_setup_and_emits_its_receipt(
                 "project": "team/repo",
                 "group": None,
                 "revision": REVISION,
-                "gitlab_profile": gitlab_profile,
+                "gitlab_selection": TARGET.GitLabSelection(selector=gitlab_selector),
             },
         )
     ]

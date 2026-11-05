@@ -40,7 +40,12 @@ from lib.python.core.catalog_types import (
     NodeDefinition,
     ReadDefinition,
 )
-from lib.python.core.endpoints import TARGET_CONTRACT
+from lib.python.core.endpoints import (
+    GITLAB_ROUTING_DEFAULT_KEY,
+    GITLAB_ROUTING_TABLE,
+    GITLAB_SELECTORS,
+    TARGET_CONTRACT,
+)
 from lib.python.core.json_types import (
     JSONValue,
     copy_json_object,
@@ -49,11 +54,23 @@ from lib.python.core.json_types import (
 )
 
 SCHEMA_VERSION = "1.0"
+# Result schemas that carry the optional `routing` object accept 1.0 and 1.1
+# (MINOR: an added optional field); their producers emit this version.
+ROUTED_RESULT_SCHEMA_VERSION: Final = "1.1"
 SKILL_NAME = "ci-skills"
 GITLAB_ACTION_SCHEMA: Final = "schemas/results/gitlab-action.schema.json"
+# `--gitlab private|public` selects one GitLab instance table. The deprecated
+# `--gitlab-profile NAME` selects a legacy [gitlab.NAME] table (TD-11).
+GITLAB_TARGET_OPTION: Final = "--gitlab"
+GITLAB_TARGET_HELP: Final = (
+    f"GitLab instance: {' or '.join(GITLAB_SELECTORS)} reads "
+    + " or ".join(f"[{table}]" for table in GITLAB_SELECTORS.values())
+    + f"; omission reads [{GITLAB_ROUTING_TABLE}].{GITLAB_ROUTING_DEFAULT_KEY}"
+)
 GITLAB_PROFILE_OPTION: Final = "--gitlab-profile"
 GITLAB_PROFILE_HELP: Final = (
-    "select one complete [gitlab.NAME] profile; omission uses [gitlab]"
+    "deprecated: select one legacy [gitlab.NAME] profile; "
+    f"use {GITLAB_TARGET_OPTION} instead"
 )
 
 # Every API command accepts these. Node diagnostics share the target protocol.
@@ -1458,7 +1475,8 @@ READ_COMMANDS: Final[Mapping[str, ReadDefinition]] = {
         "options": {
             **READ_OPTIONS,
             "--provider": "native provider: github or gitlab",
-            "--host": "provider host override; must match an explicit GitLab profile",
+            "--host": "provider host override; must match an explicitly selected GitLab",
+            GITLAB_TARGET_OPTION: GITLAB_TARGET_HELP,
             GITLAB_PROFILE_OPTION: GITLAB_PROFILE_HELP,
             "--token-file": "existing token-file reference; otherwise use shared credential resolution",
             "--endpoint": "relative GET endpoint; required by get",
@@ -1876,7 +1894,7 @@ def missing_required_options(script: str, args: Namespace) -> list[str]:
     return missing
 
 
-def supports_gitlab_profile(script: str) -> bool:
+def supports_gitlab_selection(script: str) -> bool:
     """Identify commands whose declared authority set includes GitLab.
 
     :param script: Registered API command filename.
@@ -1899,7 +1917,8 @@ def options_for(script: str) -> dict[str, str]:
     """
     entry = COMMANDS[script]
     merged = dict(UNIVERSAL_OPTIONS)
-    if supports_gitlab_profile(script):
+    if supports_gitlab_selection(script):
+        merged[GITLAB_TARGET_OPTION] = GITLAB_TARGET_HELP
         merged[GITLAB_PROFILE_OPTION] = GITLAB_PROFILE_HELP
     for capability in entry["capabilities"]:
         merged.update(CAPABILITY_OPTIONS[capability])

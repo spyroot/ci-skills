@@ -106,7 +106,7 @@ SHELL_EXPANSION: Final = re.compile(
 )
 TARGET_HEADER: Final = re.compile(
     r"^\s*\[(?:"
-    + "|".join(re.escape(authority) for authority in TARGET_CONTRACT.authorities)
+    + "|".join(re.escape(table) for table in TARGET_CONTRACT.tables)
     + r")(?:[.\]])",
     re.MULTILINE,
 )
@@ -439,6 +439,9 @@ def _field_selector(path: str) -> Optional[str]:
     if role is not Role.ENDPOINT:
         return None
     parts = TARGET_CONTRACT.path_parts(path)
+    # [gitlab_routing] names other tables of the same file, never a deployment.
+    if TARGET_CONTRACT.authority_of(parts[0]) is None:
+        return None
     field = parts[-1]
     if field == "repository":
         return "repository"

@@ -67,6 +67,7 @@ from lib.python.core.report import emit_result, plan_digest, report
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import (
     GitLabOperationTarget,
+    GitLabSelection,
     Target,
     TargetError,
     select_gitlab_reference,
@@ -539,7 +540,7 @@ class MirrorCommand:
             args.binding,
             dry_run=args.dry_run,
             required_surfaces=SURFACES,
-            gitlab_profile=args.gitlab_profile,
+            gitlab_selection=GitLabSelection.from_args(args),
         )
         selected = target.require_gitlab()
         source = args.project if args.project is not None else selected.project

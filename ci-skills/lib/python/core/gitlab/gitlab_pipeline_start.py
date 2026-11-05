@@ -48,7 +48,7 @@ from lib.python.core.json_types import (
     copy_json_object,
     json_object,
 )
-from lib.python.core.target import GitLabOperationTarget
+from lib.python.core.target import GitLabOperationTarget, GitLabSelection
 from lib.python.sys.status import DRY_RUN, PLANNED
 
 PIPELINE_KIND = "gitlab_pipeline"
@@ -134,6 +134,7 @@ def prepare_start_plan(
         target_source=source,
         body=body,
         revision=args.revision,
+        routing=target.routing,
     )
 
 
@@ -497,7 +498,7 @@ class PipelineStartWorkflow(GitLabWorkflow):
             args.target,
             args.binding,
             dry_run=self.mode == ActionMode.OFFLINE,
-            gitlab_profile=getattr(args, "gitlab_profile", None),
+            gitlab_selection=GitLabSelection.from_args(args),
         )
         self.target = target
         self.state.plan = prepare_start_plan(args, target, source)

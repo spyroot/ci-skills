@@ -28,7 +28,7 @@ from lib.python.core.api_read import (
     SelectAPI,
 )
 from lib.python.core.catalog import describe
-from lib.python.core.cli import MachineArgumentParser, add_gitlab_profile_argument
+from lib.python.core.cli import MachineArgumentParser, add_gitlab_selection_arguments
 from lib.python.core.cli_api import APIError
 from lib.python.core.executor import WorkflowExecutor
 from lib.python.core.json_types import JSONValue, json_string
@@ -36,7 +36,7 @@ from lib.python.core.logging import add_log_arguments, log_event
 from lib.python.core.read_tools import ReadExit, ReadToolError, read_failure_message
 from lib.python.core.report import render_value
 from lib.python.core.runtime import sanitize
-from lib.python.core.target import TargetError
+from lib.python.core.target import GitLabSelection, TargetError
 from lib.python.sys.status import BLOCKED, DRY_RUN, PASS, PLANNED
 
 
@@ -84,7 +84,7 @@ def build_api_parser() -> ReadArgumentParser:
     result.add_argument("action", nargs="?", choices=("check", "get"))
     result.add_argument("--provider", choices=tuple(GitProvider))
     result.add_argument("--host")
-    add_gitlab_profile_argument(result)
+    add_gitlab_selection_arguments(result)
     result.add_argument("--token-file", type=Path)
     result.add_argument("--endpoint")
     result.add_argument("--field")
@@ -226,7 +226,7 @@ def _api_callbacks(
             args.host,
             args.token_file,
             output,
-            gitlab_profile=args.gitlab_profile,
+            gitlab_selection=GitLabSelection.from_args(args),
         )
         return Callbacks(
             (SelectAPI(check), PlanAPICheck(check))
@@ -237,7 +237,7 @@ def _api_callbacks(
         raise ReadToolError("a relative GET endpoint is required", ReadExit.USAGE)
     read = ApiReadAction(
         provider=provider,
-        gitlab_profile=args.gitlab_profile,
+        gitlab_selection=GitLabSelection.from_args(args),
         endpoint=args.endpoint,
         host=args.host,
         token_file=args.token_file,

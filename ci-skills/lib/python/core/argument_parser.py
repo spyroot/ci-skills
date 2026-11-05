@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import NoReturn, Optional, TypeVar, Union, overload
 
 from lib.python.core.json_types import JSONObject
+from lib.python.core.logging import bind_log_settings
 from lib.python.core.report import emit
 from lib.python.sys.status import BLOCKED
 
@@ -52,13 +53,18 @@ class TrackedArgumentParser(argparse.ArgumentParser):
     ) -> Union[argparse.Namespace, NamespaceT]:
         """Retain the original arguments and preserve argparse's namespace contract.
 
+        The parsed namespace is bound as the invocation's diagnostic settings.
+
         :param args: Arguments to parse, or None for process arguments.
         :param namespace: Existing namespace to populate, or None for a new namespace.
         :returns: The supplied namespace instance, or a new argparse.Namespace.
         :raises SystemExit: Help was requested or arguments are invalid.
         """  # noqa: DOC502 - argparse handles help and invalid inputs by exiting.
         self.requested = tuple(sys.argv[1:] if args is None else args)
-        return super().parse_args(self.requested, namespace)
+        parsed = super().parse_args(self.requested, namespace)
+        if isinstance(parsed, argparse.Namespace):
+            bind_log_settings(parsed)
+        return parsed
 
 
 class StructuredParser(TrackedArgumentParser):

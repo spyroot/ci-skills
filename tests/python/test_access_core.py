@@ -602,12 +602,12 @@ def test_kubernetes_collectors_only_require_their_own_live_access(
     monkeypatch.setattr(
         cli,
         "resolve_project_target",
-        lambda _target, _binding, *, dry_run, required_surfaces, optional_surfaces, gitlab_profile=None: (
+        lambda _target, _binding, *, dry_run, required_surfaces, optional_surfaces, gitlab_selection=None: (
             _load_target(
                 target_file,
                 required_surfaces=required_surfaces,
                 optional_surfaces=optional_surfaces,
-                gitlab_profile=gitlab_profile,
+                gitlab_profile=gitlab_selection.profile if gitlab_selection else None,
             )
         ),
     )

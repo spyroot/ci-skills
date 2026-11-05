@@ -25,10 +25,11 @@
 #      on a runner, and the failure looks like a credential problem rather than
 #      a wiring mistake. CI declares its own target or project binding.
 #
-# This template shows all three authorities for access_check.py. A Kubernetes
-# command needs only [kubernetes]; a GitLab job needs only [gitlab]. Remove
-# unused sections when making a single-authority target. Nothing here grants
-# access; each command checks the authority it uses.
+# This template shows every authority for access_check.py. A Kubernetes
+# command needs only [kubernetes]; a GitLab job needs only [gitlab_routing] and
+# one GitLab instance table. Remove unused sections when making a
+# single-authority target. Nothing here grants access; each command checks the
+# authority it uses.
 
 [github]
 # The exact host and repository. Enterprise Server hosts work too.
@@ -46,13 +47,29 @@ repository = "owner/repository"
 # refuses rather than accepting whatever it finds.
 # required_checks = ["validate"]
 
-[gitlab]
+# GitLab. Up to two instance tables, [gitlab_private] and [gitlab_public].
+# Every GitLab command takes --gitlab private or --gitlab public; without the
+# option it reads the instance named by [gitlab_routing].default. Table names
+# use "_", never ".": TOML reads [gitlab.com] as a table "com" nested in
+# [gitlab], not as a host. The legacy [gitlab] and [gitlab.NAME] tables are
+# read for one release and print a gitlab_target_deprecated warning; a target
+# must not mix them with the tables below.
+[gitlab_routing]
+# The instance read when a command gets no --gitlab option.
+default = "gitlab_private"
+# One row per declared instance: the Kubernetes and Harbor tables that belong
+# to that GitLab. Omit a key when the instance has no paired table. Every
+# result reports the selection as its "routing" object.
+gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }
+gitlab_public = { kubernetes = "kubernetes", harbor = "harbor" }
+
+[gitlab_private]
 # The exact origin. A job URL on any other host is refused.
 url = "https://gitlab.example.com"
 
-# For GitLab-only access and actions, set the exact project or group here.
+# For GitLab-only access and actions, the caller passes --project or --group.
+# Set one here only for a target that serves a single project or group.
 # Use one selector at a time for `gitlab_access.py check`.
-# The declared --project / --group flags override that choice for one run.
 # No repository remote or glab profile supplies a fallback target.
 # project = "group/project"
 # group = "group"
@@ -63,16 +80,14 @@ url = "https://gitlab.example.com"
 # The full diagnostics access check needs an instance administrator identity.
 # The GitLab-only check proves identity and target read access; an action's
 # apply and read-back establish whether that action is authorized.
-# token_file = "/home/user/.ci-skills/credentials/gitlab.token"
+# token_file = "/home/user/.ci-skills/credentials/gitlab-private.token"
 
-# Optional named GitLab targets. --gitlab-profile public selects this table;
-# omission continues to use [gitlab]. Each selected table supplies its own URL
-# and operation-specific selectors. No fields inherit from another table/file.
-# Profile names are exact TOML keys; quote names containing dots or spaces.
-# [gitlab.public]
-# url = "https://gitlab.example.test"
-# project = "group/project"
-# token_file = "public.token"
+[gitlab_public]
+# A second GitLab, read with --gitlab public. It supplies its own fields; no
+# field is inherited from [gitlab_private]. Remove this table and its
+# [gitlab_routing] row when there is only one GitLab.
+url = "https://gitlab.public.example.com"
+# token_file = "gitlab-public.token"
 
 [kubernetes]
 # The context name and the API server it must resolve to. The server is

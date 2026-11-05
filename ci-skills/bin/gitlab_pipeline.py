@@ -52,6 +52,7 @@ from lib.python.core.report import emit, report
 from lib.python.core.runtime import sanitize
 from lib.python.core.target import (
     GitLabOperationTarget,
+    GitLabSelection,
     TargetError,
     select_gitlab_reference,
 )
@@ -195,7 +196,7 @@ def _select_target(
         args.target,
         args.binding,
         dry_run=args.dry_run,
-        gitlab_profile=getattr(args, "gitlab_profile", None),
+        gitlab_selection=GitLabSelection.from_args(args),
     )
     target_kind, reference = select_gitlab_reference(target, project=args.project)
     if target_kind != "project":

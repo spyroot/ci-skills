@@ -25,7 +25,8 @@ conda run -n ci-skills python "$CI_SKILLS_ROOT/bin/gitlab_pipeline.py" get \
   --project GROUP/PROJECT --pipeline-id 123 --json
 ```
 
-`--project` overrides `gitlab.project` from the target; it does not select credentials for another GitLab host.
+`--project` overrides `project` of the selected GitLab instance table; it does not select credentials for another
+GitLab host. `--gitlab private|public` selects the instance.
 
 ## Plan and start
 

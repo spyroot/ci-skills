@@ -14,6 +14,7 @@
     "execution_host": {"$ref": "gitlab-runner-tag.schema.json#/properties/execution_host"},
     "tested_revision": {"$ref": "gitlab-runner-tag.schema.json#/properties/tested_revision"},
     "origin": {"$ref": "gitlab-runner-tag.schema.json#/properties/origin"},
+    "routing": {"$ref": "gitlab-routing.schema.json"},
     "target": {"$ref": "gitlab-runner-tag.schema.json#/properties/target"},
     "target_file": {"$ref": "gitlab-runner-tag.schema.json#/properties/target_file"},
     "target_source": {"$ref": "gitlab-runner-tag.schema.json#/properties/target_source"},

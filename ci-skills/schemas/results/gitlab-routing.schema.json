@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spyroot/ci-skills/schemas/results/gitlab-routing.schema.json",
+  "title": "GitLab routing",
+  "description": "The GitLab table a command read and the Kubernetes and Harbor tables [gitlab_routing] pairs with it. selected_by is default, legacy, or the caller's argv option.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["gitlab", "kubernetes", "harbor", "selected_by"],
+  "properties": {
+    "gitlab": {"type": "string", "minLength": 1, "maxLength": 256},
+    "kubernetes": {"type": ["string", "null"], "minLength": 1, "maxLength": 256},
+    "harbor": {"type": ["string", "null"], "minLength": 1, "maxLength": 256},
+    "selected_by": {"type": "string", "minLength": 1, "maxLength": 512}
+  }
+}

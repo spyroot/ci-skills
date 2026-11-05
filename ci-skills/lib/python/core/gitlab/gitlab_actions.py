@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from lib.python.core.abstract.skill_action import SkillAction
+from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
 from lib.python.core.cli import output_mode, parser
 from lib.python.core.gitlab.gitlab_api import GlabAPIClient
 from lib.python.core.gitlab.gitlab_session import BoundGitLabSession
@@ -28,7 +29,7 @@ from lib.python.core.portable import write_portable_receipt
 from lib.python.core.report import emit, plan_digest
 from lib.python.core.runner_options import PROTECTION_VALUES, SingleValue
 from lib.python.core.runtime import sanitize
-from lib.python.core.target import GitLabOperationTarget
+from lib.python.core.target import GitLabOperationTarget, GitLabRoute
 from lib.python.sys.status import BLOCKED, PASS, exit_code
 
 
@@ -83,6 +84,8 @@ class ActionPlan(SkillAction):
     :param revision: Optional exact source revision bound to the action.
     :param project_ids: Optional project IDs selected for runner assignment.
     :param runner_snapshot: Optional before-state bound to runner deletion.
+    :param routing: Selected GitLab table and its pairing, or ``None`` when the
+        target was constructed without a route.
 
     .. attribute :: kind
         :type: str
@@ -148,6 +151,12 @@ class ActionPlan(SkillAction):
         :type: Optional[JSONObject]
 
         Optional before-state bound to runner deletion.
+
+    .. attribute :: routing
+        :type: Optional[GitLabRoute]
+
+        Selected GitLab table and its pairing, or ``None`` when the target was
+        constructed without a route.
     """
 
     kind: str
@@ -163,6 +172,7 @@ class ActionPlan(SkillAction):
     revision: Optional[str] = None
     project_ids: Optional[tuple[int, ...]] = None
     runner_snapshot: Optional[JSONObject] = None
+    routing: Optional[GitLabRoute] = None
 
     @property
     def digest(self) -> str:
@@ -190,6 +200,8 @@ class ActionPlan(SkillAction):
         }
         if self.kind == "gitlab_runner" and self.operation == "delete":
             data["runner_snapshot"] = self.runner_snapshot
+        if self.routing is not None:
+            data["routing"] = self.routing.as_dict()
         return plan_digest(data)
 
     def verified_target_id(
@@ -458,6 +470,7 @@ def make_plan(
         resource_id=prepared.resource_id,
         token_out=prepared.token_out,
         revision=args.revision,
+        routing=target.routing,
     )
 
 
@@ -831,14 +844,18 @@ def _result(
     """  # noqa: DOC502 - report-record validation propagates from _array
     records = _array(fields.pop("records", []), "report_records")
     errors = _array(fields.pop("errors", []), "report_errors")
+    routing: MutableMapping[str, JSONValue] = (
+        {"routing": plan.routing.as_dict()} if plan.routing is not None else {}
+    )
     return {
-        "schema_version": "1.0",
+        "schema_version": ROUTED_RESULT_SCHEMA_VERSION,
         "kind": plan.kind,
         "status": status,
         "captured_at": datetime.now(UTC).isoformat(),
         "execution_host": socket.getfqdn(),
         "tested_revision": plan.revision,
         "origin": plan.origin,
+        **routing,
         "target": {"kind": plan.target_kind, "reference": plan.target_reference},
         "target_file": plan.target_file,
         "target_source": plan.target_source,

@@ -53,7 +53,7 @@ if TYPE_CHECKING:
     from lib.python.core.kubernetes.podman_probe import PodmanProbeAction
     from lib.python.core.kubernetes.run_scope import RunScope
     from lib.python.core.runtime import CommandResult
-    from lib.python.core.target import Target
+    from lib.python.core.target import GitLabSelection, Target
 
 
 def _target(tmp_path: Path) -> Target:
@@ -1615,9 +1615,9 @@ def test_offline_plan_contacts_no_provider_and_uses_only_requested_output(
     monkeypatch.setattr(
         READINESS,
         "resolve_target",
-        lambda _target, _binding, *, dry_run, required_surfaces, gitlab_profile=None: (
+        lambda _target, _binding, *, dry_run, required_surfaces, gitlab_selection=None: (
             _target_file_result(
-                tmp_path, dry_run, required_surfaces, gitlab_profile=gitlab_profile
+                tmp_path, dry_run, required_surfaces, gitlab_selection=gitlab_selection
             )
         ),
     )
@@ -1686,19 +1686,19 @@ def _target_file_result(
     dry_run: bool,
     required_surfaces: Sequence[str],
     *,
-    gitlab_profile: Optional[str] = None,
+    gitlab_selection: Optional[GitLabSelection] = None,
 ) -> Target:
     """Validate dry-run resolution inputs and return a Kubernetes-only target.
 
     :param tmp_path: Directory used by the synthetic target.
     :param dry_run: Resolver mode selected by the command.
     :param required_surfaces: Exact provider set requested by the command.
-    :param gitlab_profile: GitLab selection, which this Kubernetes-only path omits.
+    :param gitlab_selection: GitLab selection, empty on this Kubernetes-only path.
     :returns: Kubernetes-only target.
     """
     assert dry_run is True
     assert tuple(required_surfaces) == ("kubernetes",)
-    assert gitlab_profile is None
+    assert gitlab_selection is None or not gitlab_selection.requested
     return _target(tmp_path)
 
 

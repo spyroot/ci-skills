@@ -6,13 +6,14 @@
   "type": "object",
   "required": ["schema_version","kind","status","captured_at","errors","summary"],
   "properties": {
-    "schema_version": {"const":"1.0"},
+    "schema_version": {"enum":["1.0","1.1"]},
     "kind": {"const":"gitlab_runner"},
     "status": {"enum":["DRY_RUN","PLANNED","PASS","PARTIAL","BLOCKED"]},
     "captured_at": {"type":"string","format":"date-time"},
     "execution_host": {"type":"string","minLength":1},
     "tested_revision": {"type":["string","null"]},
     "origin": {"type":"string","pattern":"^https://"},
+    "routing": {"$ref":"gitlab-routing.schema.json"},
     "target": {
       "type": "object",
       "additionalProperties": false,

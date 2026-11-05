@@ -55,35 +55,69 @@ This skill resolves; it does not provision. It creates no target file, mints no
 token and fetches no kubeconfig. Putting them there is the user's job, or
 an explicit step in the calling project's own instructions.
 
-## Named GitLab targets
+## GitLab private and public targets
 
-The target contract in `core/endpoints.py` also accepts `[gitlab.NAME]` tables.
-GitLab commands select one with `--gitlab-profile NAME`; omission keeps the flat
-`[gitlab]` default. The selected table must supply its own `url`; `project`,
-`group`, `runner_id`, and `token_file` retain their operation-specific rules.
-Missing fields never inherit from another profile or target file. An unknown,
-empty, or malformed selection blocks before provider access.
+A target declares up to two GitLab instance tables, `[gitlab_private]` and `[gitlab_public]`, and one
+`[gitlab_routing]` table. The names come from the target contract in `core/endpoints.py`
+(`GITLAB_SELECTORS`, `GITLAB_ROUTING_TABLE`). Every GitLab command takes `--gitlab private` or `--gitlab
+public`; without the option it reads the instance named by `[gitlab_routing].default`.
 
 ```toml
-[gitlab]
-url = "https://gitlab.example.test"
-project = "team/default"
+[gitlab_routing]
+default = "gitlab_private"
+gitlab_private = { kubernetes = "kubernetes", harbor = "harbor" }
+gitlab_public = { kubernetes = "kubernetes" }
 
-[gitlab.public]
+[gitlab_private]
+url = "https://gitlab.example.test"
+token_file = "gitlab-private.token"
+
+[gitlab_public]
 url = "https://gitlab.public.example.test"
-project = "team/consumer"
-token_file = "public.token"
+token_file = "gitlab-public.token"
 ```
 
-Profile names are exact immediate TOML keys. For `[gitlab."public.test"]`, pass
-`--gitlab-profile public.test`. Relative token paths stay relative to the selected
-target file. File and binding precedence is unchanged. Without `token_file`, the
-existing environment and exact-host native credential rules below still apply;
-other profiles' credentials are never borrowed. `ci-api --provider gitlab`
-accepts the same selector and rejects a conflicting `--host`. A profile selector
-on another provider, or on the Kubernetes-only build probe, is rejected.
-Reports and mutation confirmation bind the selected profile even when profiles
-share a host and project. Retained runner/resource identities stay unchanged.
+Rules, each checked before any provider request:
+
+- `[gitlab_routing]` is required when either instance table exists (`gitlab_routing_required`).
+- `default` names a declared instance table (`gitlab_routing_default_unknown`).
+- Each declared instance has exactly one row (`gitlab_routing_row_missing`), and no row names an undeclared
+  instance (`gitlab_routing_row_unknown`).
+- A row holds only `kubernetes` and `harbor`; each names a declared table of that authority
+  (`gitlab_routing_kubernetes_unknown`, `gitlab_routing_harbor_unknown`). Omit a key when the instance has
+  no paired table.
+- `--gitlab public` without `[gitlab_public]` blocks with `gitlab_public_target_required`; the same holds
+  for `private`.
+- The selected table supplies its own `url`; `project`, `group`, `runner_id`, and `token_file` keep their
+  operation-specific rules. No field is inherited from the other instance. A field error names the table
+  read, for example `gitlab_public.url must be a nonempty string`.
+
+Table names use `_`, never `.`. TOML reads `[gitlab.com]` as a table `com` nested in `[gitlab]`, not as a
+host. A dot appears only where nesting is real, as in `[kubernetes.node_diagnostics]`.
+
+Every GitLab action result carries a `routing` object (`schemas/results/gitlab-routing.schema.json`), and
+the human view prints it under the status line:
+
+```text
+Routing: gitlab=gitlab_public kubernetes=kubernetes harbor=none (argv:--gitlab=public)
+```
+
+`selected_by` is `default`, `legacy`, or the caller's option. An explicit option is also appended to
+`target_source`, so a plan confirmed for one instance does not apply to the other even when both share a
+host and project. `ci-api --provider gitlab` accepts `--gitlab`, takes the host and token file from the selected
+instance, and rejects a conflicting `--host`; its output format is unchanged. A selector on another provider, or on
+a command whose selected authorities exclude GitLab such as the build probe, is rejected.
+
+### Legacy shape, read for one release
+
+The flat `[gitlab]` table and its `[gitlab.NAME]` profiles, selected with `--gitlab-profile NAME`, are
+still read. `[gitlab]` is the private instance: `--gitlab private` reads it and `--gitlab public` blocks.
+Each load writes one `gitlab_target_deprecated` diagnostic on standard error in the selected
+`--log-format`. A target that mixes `[gitlab]` with `[gitlab_private]`, `[gitlab_public]`, or
+`[gitlab_routing]` blocks with `gitlab_target_shapes_mixed`; `--gitlab` with `--gitlab-profile` blocks with
+`gitlab_selector_conflict`. Legacy routes report `kubernetes` and `harbor` as `null`. To migrate, rename
+`[gitlab]` to `[gitlab_private]`, rename the profile to `[gitlab_public]`, and add `[gitlab_routing]`.
+Removal is tracked as TD-11 in `docs/exec-plans/tech-debt-tracker.md`.
 
 ## Effective credential sources
 
@@ -93,7 +127,7 @@ share a host and project. Retained runner/resource identities stay unchanged.
   `GH_ENTERPRISE_TOKEN` or
   `GITHUB_ENTERPRISE_TOKEN`. Otherwise, the selected host's `gh` credential
   store is used. An explicit token file clears other ambient GitHub tokens.
-- GitLab uses an explicit `gitlab.token_file`, then the effective
+- GitLab uses an explicit `token_file` of the selected instance table, then the effective
   `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable.
   Otherwise, the selected host's `glab` credential store is used.
 - Kubernetes uses the target's explicit `kubernetes.kubeconfigs` ordered,
@@ -111,7 +145,7 @@ authority, and uses the same resolved source for its data reads. It records
 source references, not token values, private keys, or raw kubeconfig contents.
 Keep credentials outside this repository and the installed skill.
 
-Relative `github.token_file` and `gitlab.token_file` paths resolve beside the
+Relative `github.token_file` and GitLab `token_file` paths resolve beside the
 selected `target.toml`, independently of the command's working directory.
 Absolute paths and paths starting with `~` remain supported.
 
@@ -123,7 +157,11 @@ host = "github.com"
 repository = "owner/repository"
 # token_file = "/home/user/.ci-skills/credentials/github.token"
 
-[gitlab]
+[gitlab_routing]
+default = "gitlab_private"
+gitlab_private = { kubernetes = "kubernetes" }
+
+[gitlab_private]
 url = "https://gitlab.example.com"
 # token_file = "/home/user/.ci-skills/credentials/gitlab.token"
 

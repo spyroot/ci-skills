@@ -50,7 +50,9 @@ remain directly callable with `--help`. Target-backed commands
 resolve only their declared authority: GitLab for a job, or Kubernetes for
 storage, events, Cilium, and Ceph. Diagnostic reports use `access` to report the
 effective source and identity. A Kubernetes-only target needs only `[kubernetes]`; a GitLab-only
-target needs only `[gitlab]`. The selected target file never inherits missing
+target needs only `[gitlab_routing]` and one instance table, `[gitlab_private]` or
+`[gitlab_public]`; `--gitlab private|public` selects it (see
+`references/access.md`). The selected target file never inherits missing
 tables from a lower tier. For a selected GitLab operation, its command also
 reads back GitLab identity and target before applying a change.
 
