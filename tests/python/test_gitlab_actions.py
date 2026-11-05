@@ -1938,22 +1938,45 @@ def test_runner_mode_errors_remain_stable_after_shared_validation(
         GITLAB_ACTION._workflow_mode(args)
 
 
+@pytest.mark.parametrize(
+    ("body", "deprecations"),
+    (
+        (
+            (
+                '[gitlab_routing]\ndefault = "gitlab_private"\ngitlab_private = {}\n'
+                '[gitlab_private]\nurl = "https://gitlab.example.test"\n'
+                'project = "unit/repo"\n'
+            ),
+            0,
+        ),
+        (
+            '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
+            1,
+        ),
+    ),
+    ids=("routed", "legacy"),
+)
 def test_action_plan_json_diagnostic_is_separate_from_machine_result(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    body: str,
+    deprecations: int,
 ) -> None:
     """Keep JSON diagnostics on stderr separate from plan JSON on stdout.
+
+    Every stderr line is one JSON diagnostic with the caller's run ID; a legacy
+    target adds exactly one ``gitlab_target_deprecated`` event in that format.
 
     :param monkeypatch: Pytest fixture selecting the target by environment.
     :param tmp_path: Directory receiving the selected project target.
     :param capsys: Pytest fixture capturing both output streams.
-
+    :param body: Routed or legacy target TOML.
+    :param deprecations: Expected count of deprecation events.
     :returns: None; assertions in the body validate the regression.
     """
     target = tmp_path / "target.toml"
-    target.write_text(
-        '[gitlab]\nurl = "https://gitlab.example.test"\nproject = "unit/repo"\n',
-        encoding="utf-8",
-    )
+    target.write_text(body, encoding="utf-8")
     monkeypatch.setenv("CI_SKILLS_TARGET", str(target))
     result = ISSUE.main(
         [
@@ -1969,9 +1992,12 @@ def test_action_plan_json_diagnostic_is_separate_from_machine_result(
     )
     emitted = capsys.readouterr()
     report = json.loads(emitted.out)
-    diagnostic = json.loads(emitted.err)
+    diagnostics = [json.loads(line) for line in emitted.err.splitlines()]
     assert result == 0
     assert report["status"] == "DRY_RUN"
-    assert diagnostic["run_id"] == "unit-run"
+    assert {diagnostic["run_id"] for diagnostic in diagnostics} == {"unit-run"}
+    events = [diagnostic["event"] for diagnostic in diagnostics]
+    assert events.count("gitlab_target_deprecated") == deprecations
+    (diagnostic,) = (item for item in diagnostics if item["event"] == "result")
     assert diagnostic["mode"] == "dry_run"
     assert diagnostic["result"] == "DRY_RUN"
