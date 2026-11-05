@@ -27,7 +27,12 @@ from lib.python.core.action_modes import (
     ActionMode,
     validate_action_mode,
 )
-from lib.python.core.catalog import COMMANDS, UNIVERSAL_OPTIONS, describe
+from lib.python.core.catalog import (
+    COMMANDS,
+    ROUTED_RESULT_SCHEMA_VERSION,
+    UNIVERSAL_OPTIONS,
+    describe,
+)
 from lib.python.core.cli import _failure, parser
 from lib.python.core.cli_api import APIError, RequestDeadline
 from lib.python.core.delivery_state import DeliveryState
@@ -621,8 +626,12 @@ class MirrorCommand:
             [],
         )
         engine = self.state.engine
+        routing = action.target.routing
+        if routing is not None:
+            output[Field.ROUTING] = routing.as_dict()
         output.update(
             {
+                Field.SCHEMA_VERSION: ROUTED_RESULT_SCHEMA_VERSION,
                 Field.STATUS: status,
                 Field.OPERATION: OPERATION,
                 Field.PLAN_DIGEST: (

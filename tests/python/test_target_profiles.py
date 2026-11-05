@@ -1054,3 +1054,34 @@ def test_open_bug_human_view_prints_the_routing_line(target_path: Path) -> None:
         "Routing: gitlab=gitlab_public kubernetes=kubernetes harbor=harbor "
         "(argv:--gitlab=public)"
     ) in result.stdout.splitlines()
+
+
+def test_access_check_dry_run_reports_routing_at_version_1_1(
+    target_path: Path,
+) -> None:
+    """Report the selected GitLab route in the access result as well.
+
+    :param target_path: Path receiving the routed target.
+    :returns: None; assertions verify the version and the routing object.
+    """
+    target_path.write_text(ROUTED_TARGET, encoding="utf-8")
+
+    result = run_script(
+        "access_check.py",
+        "--dry-run",
+        "--json",
+        "--gitlab",
+        "public",
+        env={BINDING.TARGET_ENV: str(target_path)},
+    )
+    data = parse_json_output(result)
+
+    assert result.returncode == 0, result.stderr
+    assert data["status"] == "DRY_RUN"
+    assert data["schema_version"] == "1.1"
+    assert (
+        data["routing"]
+        == _route(
+            "gitlab_public", "kubernetes", "harbor", "argv:--gitlab=public"
+        ).as_dict()
+    )

@@ -95,8 +95,8 @@ Rules, each checked before any provider request:
 Table names use `_`, never `.`. TOML reads `[gitlab.com]` as a table `com` nested in `[gitlab]`, not as a
 host. A dot appears only where nesting is real, as in `[kubernetes.node_diagnostics]`.
 
-Every GitLab action result carries a `routing` object (`schemas/results/gitlab-routing.schema.json`), and
-the human view prints it under the status line:
+GitLab action, `access_check` and `gitlab_mirror` results carry a `routing` object at `schema_version` `1.1`
+(`schemas/results/gitlab-routing.schema.json`), and the human view prints it under the status line:
 
 ```text
 Routing: gitlab=gitlab_public kubernetes=kubernetes harbor=none (argv:--gitlab=public)

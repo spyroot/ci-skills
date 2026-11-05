@@ -161,6 +161,8 @@ class AcceptanceResult(TypedDict, total=False):
 
 
 SCHEMA_VERSION: Final = "1.0"
+# Receipt versions accepted: 1.1 adds the optional GitLab `routing` object (MINOR).
+RECEIPT_SCHEMA_VERSIONS: Final = frozenset({"1.0", "1.1"})
 RECEIPT_KIND: Final = "access_check"
 GITLAB_RECEIPT_KINDS: Final = frozenset(
     {
@@ -580,7 +582,7 @@ def _check_common(
     :raises RecursionError: If caller-supplied cyclic data exceeds redaction nesting.
     """  # noqa: DOC502 - Datetime comparison and recursive redaction can fail.
     problems: MutableSequence[str] = []
-    if receipt.get("schema_version") != SCHEMA_VERSION:
+    if receipt.get("schema_version") not in RECEIPT_SCHEMA_VERSIONS:
         problems.append(f"{name}:schema_version_unexpected")
     if receipt.get("status") != "PASS":
         problems.append(f"{name}:status_not_pass")

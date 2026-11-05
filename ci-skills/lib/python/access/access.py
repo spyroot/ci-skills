@@ -15,6 +15,7 @@ from lib.python.access.github import github_access, github_publication_access
 from lib.python.access.gitlab import gitlab_access
 from lib.python.access.kubernetes import kubernetes_access
 from lib.python.core.abstract.skill_plugin_type import SkillPluginType
+from lib.python.core.catalog import ROUTED_RESULT_SCHEMA_VERSION
 from lib.python.core.json_types import (
     JSONObject,
     JSONValue,
@@ -106,12 +107,14 @@ def check_access(
         surfaces = [future.result() for future in futures]
 
     receipt: MutableMapping[str, JSONValue] = {
-        "schema_version": "1.0",
+        "schema_version": ROUTED_RESULT_SCHEMA_VERSION,
         "kind": "access_check",
         "status": PASS if all(item.status == PASS for item in surfaces) else BLOCKED,
         "publication": publication,
         "surfaces": {item.name: item.as_dict() for item in surfaces},
     }
+    if target.routing is not None:
+        receipt["routing"] = target.routing.as_dict()
     receipt.update(_bound_metadata(target))
     return receipt
 
@@ -162,11 +165,14 @@ def dry_run_access(
         }
         for name, value in _selected_targets(target).items()
     }
-    return {
-        "schema_version": "1.0",
+    receipt: MutableMapping[str, JSONValue] = {
+        "schema_version": ROUTED_RESULT_SCHEMA_VERSION,
         "kind": "access_check",
         "status": DRY_RUN,
         "publication": publication,
         "target_selection": target.target_reference,
         "surfaces": surfaces,
     }
+    if target.routing is not None:
+        receipt["routing"] = target.routing.as_dict()
+    return receipt

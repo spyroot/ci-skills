@@ -34,11 +34,21 @@ the `routing` object and `origin`.
   `test_node_pod.py` 7 errors, `test_cli_contract.py` 5, `test_status_cli.py` 4, `test_live_gate.py` 2.
 - [x] (GPP-03) The contract names are defined once in `core/endpoints.py`; `[gitlab_routing]` is parsed and validated.
 - [x] (GPP-04) The `--gitlab` selector joins `--gitlab-profile` on every GitLab command; the legacy path warns.
-- [x] (GPP-05) `routing` is in the GitLab action JSON and every human view that receives it; the action and runner
-  result schemas accept 1.1. Scope limits are in Surprises.
+- [x] (GPP-05) `routing` is in the GitLab action, `access_check` and `gitlab_mirror` JSON and in every human view
+  that receives it; the action, runner and mirror result schemas and the live-acceptance checker accept 1.1. Scope
+  limits are in Surprises.
 - [x] (GPP-06) The template, references, README and `tools.json` are updated.
-- [ ] (GPP-07) Both installed copies are upgraded, with AFTER evidence against the selected target.
-- [ ] (GPP-08) The candidate receipts are renewed and `validate` is green on the PR head.
+- [x] (GPP-07) Both installed copies are upgraded, with AFTER evidence against the selected target. Both installs
+  read back `e5b40eb` (`INSTALLATION.json`, verified). `gitlab_issue.py open-bug --project hott/test --json` from
+  each install: the renamed target without `[gitlab_routing]` gives `BLOCKED gitlab_routing_required`; the issue #133
+  shape (`[gitlab]` + `[gitlab.com]`) gives `DRY_RUN` on `[gitlab]` with one `gitlab_target_deprecated` event, and
+  `--gitlab-profile com` reads `[gitlab.com]`. After `[gitlab_routing]` was added to the user target (backup beside
+  it), no option reads `[gitlab_private]` with `routing.selected_by` `default`, and `--gitlab public` reads
+  `[gitlab_public]` with `argv:--gitlab=public`, no deprecation event.
+- [ ] (GPP-08) The candidate receipts are renewed and `validate` is green on the PR head. Blocked on two decisions:
+  the current kube context is not the cluster `authority.sh` names for the smoke GitLab, and the only producer of the
+  mirror `smoke_cleanup` record is a mutating scratch script while `.internal/INDEX.yaml` sets
+  `scratchPolicy.mutationAllowed: false`.
 - [ ] (GPP-09) Legacy removal is tracked as TD-11.
 
 ## Surprises & Discoveries
@@ -57,12 +67,11 @@ the `routing` object and `origin`.
 - Observation: `image_build_readiness.py probe` accepts `--gitlab-profile` but rejects it at load, because `probe`
   requires only `kubernetes`.
   Evidence: `core/target.py` raises `gitlab_profile_requires_gitlab_authority`.
-- Observation: live acceptance requires receipt `schema_version` `1.0`.
-  Evidence: `tools/check_live_acceptance.py:583` reports `schema_version_unexpected` otherwise. The `access_check` and
-  `gitlab_mirror` results are the required receipts, so they stay `1.0` and carry no `routing` in this change; moving
-  them needs a change to that gate first. GitLab action results (`gitlab-action`, `gitlab-runner-tag`, `-read`,
-  `-delete` schemas) emit `1.1` with `routing`. Job list, pipeline watch, runner manager and image-build chain results
-  do not carry `routing` yet.
+- Observation: live acceptance pinned receipt `schema_version` to `1.0`.
+  Evidence: `tools/check_live_acceptance.py:583` reported `schema_version_unexpected` otherwise. Per DEC-09 the
+  checker now accepts `RECEIPT_SCHEMA_VERSIONS` (`1.0`, `1.1`), so historical receipts stay valid and `access_check`
+  and `gitlab_mirror` results emit `1.1` with `routing`, as GitLab action results do. Job list, pipeline watch,
+  runner manager and image-build chain results do not carry `routing` yet.
 - Observation: the endpoint gate's `undocumented` rule compared raw template paths with declared paths, so
   `[gitlab_private]` did not document `gitlab.url`.
   Evidence: `make bless` reported `undocumented: gitlab.url`. `tools/skillkit/endpoint_gate.py` now folds template

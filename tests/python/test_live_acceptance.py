@@ -859,6 +859,31 @@ def test_setup_receipts_preserve_freshness_and_shape_checks(
     assert f"{name}:{reason}" in result["problems"]
 
 
+@pytest.mark.parametrize(
+    ("version", "accepted"),
+    (("1.0", True), ("1.1", True), ("2.0", False), (None, False)),
+    ids=("historical", "routing-minor", "unknown-major", "absent"),
+)
+def test_receipt_schema_version_accepts_the_routing_minor_version(
+    version: Optional[str], accepted: bool
+) -> None:
+    """Accept 1.0 and 1.1 receipts; 1.1 only adds the optional routing object.
+
+    :param version: ``schema_version`` written into the access receipt.
+    :param accepted: Whether the checker must accept that version.
+    :returns: None; assertions verify the exact problem reason.
+    """
+    setup = _access_setup()
+    setup["access.json"]["schema_version"] = version
+
+    result = _evaluate(setup)
+
+    problem = "access.json:schema_version_unexpected"
+    assert (problem not in result["problems"]) is accepted
+    if accepted:
+        assert result["status"] == "PASS", result["problems"]
+
+
 def test_repeat_operations_require_matching_plan_and_resource() -> None:
     """Block a no-op receipt whose plan differs from the applied receipt.
     :returns: None; assertions in the body validate the regression.

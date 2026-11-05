@@ -179,6 +179,14 @@ class Field(StrEnum):
 
         Selected target and optional named-profile provenance.
 
+    .. attribute :: SCHEMA_VERSION
+
+        Native token ``schema_version``.
+
+    .. attribute :: ROUTING
+
+        Selected GitLab table and its paired tables.
+
     .. attribute :: REASON
 
         Native token ``reason``.
@@ -224,6 +232,8 @@ class Field(StrEnum):
     TESTED_REVISION = "tested_revision"
     TARGET_SOURCE = "target_source"
     REASON = "reason"
+    SCHEMA_VERSION = "schema_version"
+    ROUTING = "routing"
 
 
 class Outcome(StrEnum):
