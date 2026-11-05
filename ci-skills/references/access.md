@@ -127,7 +127,8 @@ Removal is tracked as TD-11 in `docs/exec-plans/tech-debt-tracker.md`.
   `GH_ENTERPRISE_TOKEN` or
   `GITHUB_ENTERPRISE_TOKEN`. Otherwise, the selected host's `gh` credential
   store is used. An explicit token file clears other ambient GitHub tokens.
-- GitLab uses an explicit `token_file` of the selected instance table, then the effective
+- GitLab uses an explicit `gitlab.token_file`, the `token_file` of the selected instance table (for example
+  `gitlab_public.token_file`), then the effective
   `GITLAB_TOKEN`, `GITLAB_ACCESS_TOKEN`, or `OAUTH_TOKEN` environment variable.
   Otherwise, the selected host's `glab` credential store is used.
 - Kubernetes uses the target's explicit `kubernetes.kubeconfigs` ordered,
@@ -145,7 +146,7 @@ authority, and uses the same resolved source for its data reads. It records
 source references, not token values, private keys, or raw kubeconfig contents.
 Keep credentials outside this repository and the installed skill.
 
-Relative `github.token_file` and GitLab `token_file` paths resolve beside the
+Relative `github.token_file` and `gitlab.token_file` paths resolve beside the
 selected `target.toml`, independently of the command's working directory.
 Absolute paths and paths starting with `~` remain supported.
 

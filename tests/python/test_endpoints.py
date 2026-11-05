@@ -770,7 +770,7 @@ def test_a_value_key_new_since_the_base_fails(repo: Path) -> None:
     template.write_text(current)
     code, record = _gate(repo, "--base", "HEAD")
     assert code == 1
-    assert _rules(record) == [("value_introduced", "gitlab.runner_id")]
+    assert _rules(record) == [("value_introduced", "gitlab_private.runner_id")]
 
 
 def test_a_value_key_present_at_the_base_is_listed_not_failed(repo: Path) -> None:

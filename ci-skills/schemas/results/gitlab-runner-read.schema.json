@@ -13,7 +13,7 @@
     "execution_host": {"type":"string","minLength":1},
     "tested_revision": {"type":["string","null"]},
     "origin": {"type":"string","pattern":"^https://"},
-    "routing": {"$ref":"gitlab-routing.schema.json"},
+    "routing": {"$ref":"gitlab-runner-tag.schema.json#/$defs/routing"},
     "target": {
       "type": "object",
       "additionalProperties": false,

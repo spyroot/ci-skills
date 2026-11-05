@@ -15,7 +15,7 @@
     "tested_revision": {"type":["string","null"]},
     "operation": {"const":"tag"},
     "origin": {"type":"string","pattern":"^https://"},
-    "routing": {"$ref":"gitlab-routing.schema.json"},
+    "routing": {"$ref":"#/$defs/routing"},
     "target": {
       "type": "object",
       "additionalProperties": false,
@@ -182,6 +182,18 @@
     }
   ],
   "$defs": {
+    "routing": {
+      "description": "The GitLab table a command read and the Kubernetes and Harbor tables [gitlab_routing] pairs with it. selected_by is default, legacy, or the caller's argv option.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gitlab","kubernetes","harbor","selected_by"],
+      "properties": {
+        "gitlab": {"type":"string","minLength":1,"maxLength":256},
+        "kubernetes": {"type":["string","null"],"minLength":1,"maxLength":256},
+        "harbor": {"type":["string","null"],"minLength":1,"maxLength":256},
+        "selected_by": {"type":"string","minLength":1,"maxLength":512}
+      }
+    },
     "identity": {
       "type": "object",
       "additionalProperties": false,
